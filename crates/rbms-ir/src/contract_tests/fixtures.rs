@@ -1,6 +1,6 @@
-//! Fixtures the contract tests post to the mock server: the chart and player they address, and a
-//! fully populated score and course submission. Kept beside the tests so the request bodies the
-//! assertions read are built in one place.
+//! Fixtures the contract tests post to the mock server: the chart and player they address, a fully
+//! populated score and course submission, and the same course played with an assist. Kept beside
+//! the tests so the request bodies the assertions read are built in one place.
 
 use crate::API_VERSION;
 use crate::dto::*;
@@ -78,6 +78,14 @@ pub(super) fn course_submission() -> CourseSubmission {
         max_ex_score: 6000,
         minbp: 12,
         trophy: Some("bronzemedal".into()),
+        scratch_auto: false,
+        assist: vec![],
         extra: Default::default(),
     }
+}
+
+/// [`course_submission`] as a course with a stage played on SCRATCH AUTO and one judged wider sends
+/// it: lamp demoted, and the course-wide assist fields set.
+pub(super) fn assisted_course_submission() -> CourseSubmission {
+    CourseSubmission { clear: ClearLamp::AssistEasy, scratch_auto: true, assist: vec!["AUTO_SCRATCH".into(), "CUSTOM_JUDGE".into()], ..course_submission() }
 }

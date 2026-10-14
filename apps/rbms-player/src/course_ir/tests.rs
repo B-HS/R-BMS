@@ -4,7 +4,7 @@ use rbms_ir::{
     ServerInfo, SubmitResponse,
 };
 
-use super::{UNRELEASED_COURSE_REASON, build_course_submission, course_block_reason, submit};
+use super::{CourseAssist, UNRELEASED_COURSE_REASON, build_course_submission, course_block_reason, course_updates_score, submit};
 
 const TEST_PLAYER: &str = "gkn";
 const TEST_NOTES: u32 = 1_000;
@@ -79,7 +79,7 @@ impl ScoreServer for CourseOnlyServer {
 #[test]
 fn a_submission_carries_the_course_totals_and_every_chart() {
     let run = two_stage_run(vec![]);
-    let sub = build_course_submission(&run, TEST_PLAYER);
+    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE);
 
     assert_eq!(sub.api_version, rbms_ir::API_VERSION);
     assert_eq!(sub.course_hash, run.course.hash());
@@ -97,7 +97,7 @@ fn a_submission_carries_the_course_totals_and_every_chart() {
 
 #[test]
 fn the_judgment_breakdown_sums_every_stage() {
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
     assert_eq!(sub.judge.pgreat, 1000);
     assert_eq!(sub.judge.great, 800);
     assert_eq!(sub.judge.good, 140);
@@ -114,10 +114,10 @@ fn the_judgment_breakdown_sums_every_stage() {
 
 #[test]
 fn the_long_note_constraint_decides_the_reported_lntype() {
-    assert_eq!(build_course_submission(&two_stage_run(vec![]), TEST_PLAYER).lntype, 0, "no constraint reports the default");
-    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Ln]), TEST_PLAYER).lntype, 0);
-    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Cn]), TEST_PLAYER).lntype, 1);
-    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Hcn]), TEST_PLAYER).lntype, 2);
+    assert_eq!(build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE).lntype, 0, "no constraint reports the default");
+    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Ln]), TEST_PLAYER, CourseAssist::NONE).lntype, 0);
+    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Cn]), TEST_PLAYER, CourseAssist::NONE).lntype, 1);
+    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Hcn]), TEST_PLAYER, CourseAssist::NONE).lntype, 2);
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn a_failed_run_submits_the_failed_lamp_and_the_partial_totals() {
     run.advance(&stage(TEST_EX, 40.0, true));
     run.advance(&stage(200, 0.0, false));
 
-    let sub = build_course_submission(&run, TEST_PLAYER);
+    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE);
     assert_eq!(sub.clear, ClearLamp::Failed);
     assert_eq!(sub.ex_score, TEST_EX + 200);
     assert_eq!(sub.gauge_value, 0.0);
@@ -141,7 +141,7 @@ fn a_non_finite_gauge_is_clamped_before_it_leaves_the_client() {
     only.gauge_value = f32::NAN;
     run.advance(&only);
 
-    let sub = build_course_submission(&run, TEST_PLAYER);
+    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE);
     assert!(sub.gauge_value.is_finite(), "a NaN gauge would serialise to null and be rejected");
 }
 
@@ -165,7 +165,7 @@ fn a_course_is_submittable_only_when_every_stage_was() {
 #[test]
 fn a_server_without_a_course_endpoint_is_not_an_error() {
     let server = CourseOnlyServer { answer: || Err(IrError::Unsupported) };
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
     let response = submit(&server, &sub).expect("an IR that predates courses is not a failure");
     assert!(!response.accepted, "nothing was stored, so nothing is claimed");
     assert_eq!(response.rank, None);
@@ -174,15 +174,42 @@ fn a_server_without_a_course_endpoint_is_not_an_error() {
 #[test]
 fn a_real_submission_failure_is_reported() {
     let server = CourseOnlyServer { answer: || Err(IrError::NotConfigured) };
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
     assert!(matches!(submit(&server, &sub), Err(IrError::NotConfigured)));
 }
 
 #[test]
 fn an_accepted_submission_passes_the_response_through() {
     let server = CourseOnlyServer { answer: || Ok(SubmitResponse { accepted: true, rank: Some(3), ..Default::default() }) };
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
     let response = submit(&server, &sub).expect("the server accepted it");
     assert!(response.accepted);
     assert_eq!(response.rank, Some(3));
+}
+
+#[test]
+fn a_course_without_an_assist_states_none() {
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
+    assert!(!sub.scratch_auto && sub.assist.is_empty());
+}
+
+#[test]
+fn an_assisted_course_states_its_assists_as_a_chart_does() {
+    let scratch = CourseAssist::NONE.with_stage(false, false).with_stage(true, false);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, scratch);
+    assert!(sub.scratch_auto, "one SCRATCH AUTO stage makes it a SCRATCH AUTO course");
+    assert_eq!(sub.assist, vec![rbms_ir::mapping::AUTO_SCRATCH_FLAG.to_string()]);
+
+    let widened = scratch.with_stage(false, true);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, widened);
+    assert_eq!(sub.assist, rbms_ir::mapping::assist_flags(true, true), "both tags, once each, in the chart's order");
+}
+
+#[test]
+fn a_course_sets_a_best_by_the_single_charts_rule() {
+    let sent = [None, None];
+    assert!(course_updates_score(&sent, CourseAssist::NONE));
+    assert!(course_updates_score(&sent, CourseAssist::NONE.with_stage(true, false)), "a SCRATCH AUTO stage sets bests like any other");
+    assert!(!course_updates_score(&sent, CourseAssist::NONE.with_stage(false, true)), "a stage judged wider sets none");
+    assert!(!course_updates_score(&[None, Some("autoplay".to_string())], CourseAssist::NONE), "a stage that is not sent sets none");
 }

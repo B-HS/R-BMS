@@ -309,6 +309,8 @@ mod tests {
             max_ex_score: 6000,
             minbp: 12,
             trophy: Some("bronzemedal".into()),
+            scratch_auto: false,
+            assist: vec![],
             extra: Default::default(),
         }
     }

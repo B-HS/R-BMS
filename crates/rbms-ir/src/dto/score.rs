@@ -291,6 +291,20 @@ pub struct CourseSubmission {
     /// Course trophy the run earned, when the constraint set awards one.
     #[serde(default)]
     pub trophy: Option<String>,
+    /// Whether SCRATCH AUTO played any stage of the course: the course-wide reading of
+    /// [`PlayOptions::scratch_auto`].
+    ///
+    /// Left out of the body when no stage had it, so a course played without an assist sends the
+    /// body it always sent; a server that predates the field ignores it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scratch_auto: bool,
+    /// Every assist tag any stage of the course reported, once each and in the order the `mapping`
+    /// feature's `assist_flags` names them (`AUTO_SCRATCH`, `CUSTOM_JUDGE`): the course-wide reading of
+    /// [`PlayOptions::assist`]. The server decides ranking off the course as a whole, so which stage
+    /// had which assist is not sent. Left out of the body when empty, for the same reason as
+    /// [`CourseSubmission::scratch_auto`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assist: Vec<String>,
     #[serde(default)]
     pub extra: HashMap<String, serde_json::Value>,
 }

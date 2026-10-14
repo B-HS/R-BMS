@@ -5,7 +5,7 @@ use crate::{API_VERSION, IrError, ScoreServer};
 
 mod fixtures;
 mod folders;
-use fixtures::{chart, course_submission, player, submission};
+use fixtures::{assisted_course_submission, chart, course_submission, player, submission};
 
 const TOKEN: &str = "tok-abc";
 const AUTHORIZATION_HEADER: &str = "authorization: bearer tok-abc";
@@ -266,7 +266,24 @@ fn submit_course_sends_the_full_course_payload() {
     assert!(captured.contains(r#""max_ex_score":6000"#));
     assert!(captured.contains(r#""minbp":12"#));
     assert!(captured.contains(r#""trophy":"bronzemedal""#));
+    assert!(!captured.contains(r#""scratch_auto""#) && !captured.contains(r#""assist""#), "a course without an assist sends the body it always sent");
     assert_eq!(response.score_id.as_deref(), Some("cs_1"));
+}
+
+#[test]
+fn submit_course_states_the_assists_its_stages_were_played_with() {
+    let server = TestServer::spawn(vec![created(
+        r#"{"accepted":true,"rank":null,"previous_best":null,"message":"recorded (unranked: scratch_auto,assist)","ranked":false,"flags":["SCRATCH_AUTO","ASSIST"],"is_new_best":false,"score_id":"cs_2"}"#,
+    )]);
+    let response = server.client_with_token(TOKEN).submit_course(&assisted_course_submission()).expect("an assisted course is sent like any other");
+    let captured = server.next_request();
+    assert_eq!(request_line(&captured), "POST /courses HTTP/1.1");
+    let body: serde_json::Value = serde_json::from_str(body_of(&captured)).expect("the body is JSON");
+    assert_eq!(body["scratch_auto"], serde_json::json!(true));
+    assert_eq!(body["assist"], serde_json::json!(["AUTO_SCRATCH", "CUSTOM_JUDGE"]));
+    assert_eq!(body["clear"], serde_json::json!("AssistEasy"));
+    assert!(!response.ranked);
+    assert_eq!(response.unranked_reasons(), vec![ScoreFlag::ScratchAuto, ScoreFlag::Assist]);
 }
 
 #[test]

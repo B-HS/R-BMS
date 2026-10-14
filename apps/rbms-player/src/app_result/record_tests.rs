@@ -15,7 +15,9 @@
 //! replay, raises the lamp and the play count, and leaves the best score as it was.
 
 use std::path::PathBuf;
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rbms_config::ScoreTarget;
 use rbms_ir::{CourseSubmission, IrError, PlayerProfile, ReplayData, ServerInfo, SubmitResponse};
@@ -59,6 +61,10 @@ const HISTORY_ROWS: usize = 8;
 /// The gauge the course a test plays opens on.
 const COURSE_OPENING_GAUGE: f32 = 100.0;
 
+/// How long a test waits for the course its run finished to reach the server, which sends it from a
+/// thread of its own.
+const COURSE_SUBMIT_WAIT: Duration = Duration::from_secs(10);
+
 /// The account the signed-in runs are played under.
 const ACCOUNT_TOKEN: &str = "token-of-a-test";
 const ACCOUNT_ID: &str = "tester";
@@ -70,6 +76,8 @@ struct AcceptingServer {
     sent_for: Mutex<Vec<String>>,
     /// What each submission said of the assists it was played with: SCRATCH AUTO, and the tags.
     assists: Mutex<Vec<(bool, Vec<String>)>>,
+    /// Where each course submission is handed on, when a test listens for one.
+    courses: Mutex<Option<Sender<CourseSubmission>>>,
 }
 
 impl ScoreServer for AcceptingServer {
@@ -93,8 +101,12 @@ impl ScoreServer for AcceptingServer {
     fn rivals(&self, _player: &PlayerId) -> Result<Vec<PlayerProfile>, IrError> {
         Err(IrError::Unsupported)
     }
-    fn submit_course(&self, _sub: &CourseSubmission) -> Result<SubmitResponse, IrError> {
-        Err(IrError::Unsupported)
+    fn submit_course(&self, sub: &CourseSubmission) -> Result<SubmitResponse, IrError> {
+        let Some(courses) = self.courses.lock().expect("the course log").clone() else {
+            return Err(IrError::Unsupported);
+        };
+        let _ = courses.send(sub.clone());
+        Ok(SubmitResponse { accepted: true, ..Default::default() })
     }
     fn upload_replay(&self, _chart: &ChartId, _replay: &ReplayData) -> Result<String, IrError> {
         Err(IrError::Unsupported)
@@ -119,7 +131,9 @@ fn signed_out(tag: &str) -> AppShared {
     shared
 }
 
-/// An app with a score server set up and an account signed in, whose server is `server`.
+/// An app with a score server set up and an account signed in, whose server is `server`: the one
+/// a chart is sent to, and the one the profile list a course is sent through reuses, as
+/// [`AppShared::rebuild_server`] lays them out.
 fn signed_in(tag: &str, server: Arc<AcceptingServer>) -> AppShared {
     let mut config = Config::default();
     config.play.autoplay = false;
@@ -127,6 +141,7 @@ fn signed_in(tag: &str, server: Arc<AcceptingServer>) -> AppShared {
     config.network.player_id = ACCOUNT_ID.to_owned();
     let mut shared = crate::App::new(String::new(), config, LaunchOptions::default(), settings_in_own_folder(tag)).shared;
     shared.server = server;
+    shared.profile_servers = shared.multi_ir.build_servers_reusing(Some(shared.server.clone()));
     shared.session = AccountSession::restored(Some(ACCOUNT_TOKEN.to_owned()), Some(ACCOUNT_ID.to_owned()));
     assert!(shared.has_primary_ir_server() && shared.session.is_logged_in(), "the fixture is a player who signed in");
     shared
@@ -441,32 +456,60 @@ fn a_run_nobody_was_signed_in_to_send_is_kept_as_not_sent() {
     assert_eq!(best.map(|best| best.ex_score()), Some(summary.ex_score));
 }
 
-/// A course stage played with SCRATCH AUTO is kept and sent as a chart like any other, and keeps
-/// its course from the course board, whose submission cannot say the stage had an assist. A stage
-/// played without one holds nothing back.
-#[test]
-fn a_course_stage_played_with_scratch_auto_keeps_the_course_from_the_board() {
-    let one_stage_course = |md5: String| {
-        let course = rbms_course::Course {
-            name: "RECORDED COURSE".to_owned(),
-            charts: vec![rbms_course::CourseChart { md5, sha256: String::new(), title: "Recorded".to_owned() }],
-            ..rbms_course::Course::default()
-        };
-        rbms_course::CourseRun::new(course, COURSE_OPENING_GAUGE)
+/// A course of the recorded chart alone, which is what the course tests play.
+fn one_stage_course(md5: String) -> rbms_course::CourseRun {
+    let course = rbms_course::Course {
+        name: "RECORDED COURSE".to_owned(),
+        charts: vec![rbms_course::CourseChart { md5, sha256: String::new(), title: "Recorded".to_owned() }],
+        ..rbms_course::Course::default()
     };
-    for (scratch_auto, held_back) in [(false, false), (true, true)] {
-        let server = Arc::new(AcceptingServer::default());
-        let mut shared = signed_in(&format!("course-stage-{scratch_auto}"), server.clone());
-        shared.config.play.scratch_auto = scratch_auto;
-        shared.course_run = Some(one_stage_course(recorded_model().md5));
-        let (entered, _) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, scratch_auto));
-        assert!(matches!(entered, Transition::To(Stage::CourseResult(_))), "the one-stage course did not end on its result");
-        shared.submit_rx.take().expect("the stage was handed to the score server").recv().expect("the submission came back");
-        assert_eq!(server.sent_for.lock().expect("the submission log").len(), 1, "the stage was sent as a chart");
-        let reasons = &shared.course_stage_reasons;
-        assert_eq!(reasons.len(), 1);
-        assert_eq!(reasons[0].is_some(), held_back, "SCRATCH AUTO {scratch_auto}: {reasons:?}");
+    rbms_course::CourseRun::new(course, COURSE_OPENING_GAUGE)
+}
+
+/// Play a one-stage course of the recorded chart, signed in, through `session`, and answer the
+/// stage reasons the course kept, whether it may set a best, and the course submission the server
+/// was sent.
+fn course_played(tag: &str, scratch_auto: bool, session: impl FnOnce() -> PlaySession) -> (Vec<Option<String>>, bool, CourseSubmission) {
+    let server = Arc::new(AcceptingServer::default());
+    let (courses, sent) = channel();
+    *server.courses.lock().expect("the course log") = Some(courses);
+    let mut shared = signed_in(tag, server.clone());
+    shared.config.play.scratch_auto = scratch_auto;
+    shared.course_run = Some(one_stage_course(recorded_model().md5));
+    let (entered, _) = end_run(&mut shared, session());
+    assert!(matches!(entered, Transition::To(Stage::CourseResult(_))), "the one-stage course did not end on its result");
+    shared.submit_rx.take().expect("the stage was handed to the score server").recv().expect("the submission came back");
+    assert_eq!(server.sent_for.lock().expect("the submission log").len(), 1, "the stage was sent as a chart");
+    let course = sent.recv_timeout(COURSE_SUBMIT_WAIT).expect("the course was sent as a course");
+    let sets_best = crate::course_ir::course_updates_score(&shared.course_stage_reasons, shared.course_assist);
+    (shared.course_stage_reasons.clone(), sets_best, course)
+}
+
+/// A course stage played with SCRATCH AUTO is kept and sent as a chart like any other, and its
+/// course is sent as a course, saying so, and sets a course best the way the chart sets one (the
+/// player's decision of 2026-10-14). A course played without an assist sends what it always sent.
+#[test]
+fn a_course_with_a_scratch_auto_stage_is_sent_saying_so_and_sets_a_best() {
+    for scratch_auto in [false, true] {
+        let (reasons, sets_best, course) =
+            course_played(&format!("course-stage-{scratch_auto}"), scratch_auto, || played_by_hand(&HAND_OFFSETS_US, scratch_auto));
+        assert_eq!(reasons, [None], "SCRATCH AUTO {scratch_auto}: no stage holds the course back");
+        assert!(sets_best, "SCRATCH AUTO {scratch_auto}: the course may set a best");
+        assert_eq!(course.scratch_auto, scratch_auto);
+        let tags = if scratch_auto { vec![rbms_ir::mapping::AUTO_SCRATCH_FLAG.to_owned()] } else { Vec::new() };
+        assert_eq!(course.assist, tags, "SCRATCH AUTO {scratch_auto}");
     }
+}
+
+/// A course with a stage judged wider is sent as a course too, saying so, and like the chart sets
+/// no best.
+#[test]
+fn a_course_with_a_widened_stage_is_sent_saying_so_and_sets_no_best() {
+    let (reasons, sets_best, course) = course_played("course-widened", false, || played_widened(&HAND_OFFSETS_US));
+    assert_eq!(reasons, [None]);
+    assert!(!sets_best, "a stage judged wider keeps the course from setting a best");
+    assert!(!course.scratch_auto);
+    assert_eq!(course.assist, [rbms_ir::mapping::CUSTOM_JUDGE_FLAG.to_owned()]);
 }
 
 /// A run judged wider than the chart asks is kept whole and sent, and still sets no best: its row

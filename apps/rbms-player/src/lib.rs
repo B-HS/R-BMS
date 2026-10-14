@@ -104,7 +104,7 @@ mod window_mode;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
 pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, install_default_pack, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
-use course_ir::{UNRELEASED_COURSE_REASON, build_course_submission};
+use course_ir::{CourseAssist, UNRELEASED_COURSE_REASON, build_course_submission};
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
 use format::{
@@ -252,6 +252,7 @@ fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
     shared.course_settings_backup = Some(shared.config.play.clone());
     overrides.apply_to(&mut shared.config.play);
     shared.course_stage_reasons.clear();
+    shared.course_assist = CourseAssist::NONE;
     let set = overrides.gauge_set_for(shared.config.judge.gauge_set).unwrap_or_default();
     shared.course_overrides = Some(overrides);
     shared.course_run = Some(rbms_course::CourseRun::new(entry.course.clone(), course_start_gauge(set)));
@@ -285,6 +286,7 @@ fn end_course(shared: &mut AppShared) -> Transition {
     shared.course_run = None;
     shared.course_overrides = None;
     shared.course_stage_reasons.clear();
+    shared.course_assist = CourseAssist::NONE;
     Transition::Back
 }
 
@@ -658,6 +660,9 @@ struct AppShared {
     course_overrides: Option<CourseOverrides>,
     /// One IR block reason per finished stage, folded into the course verdict at the end.
     course_stage_reasons: Vec<Option<String>>,
+    /// The assists the finished stages were played with, taken over the course so far: what the
+    /// course submission states, and whether the course may set a best.
+    course_assist: CourseAssist,
     /// What the run that just ended left for a result screen a skin draws: every gauge's history,
     /// the note timings and the per-second judge tables, to the reference's definitions. One record
     /// for a single chart; one per finished stage, in order, while a course is being played. Kept
@@ -962,6 +967,7 @@ impl App {
                 course_run: None,
                 course_overrides: None,
                 course_stage_reasons: Vec::new(),
+                course_assist: CourseAssist::NONE,
                 run_records: Vec::new(),
                 retry_seed: None,
                 course_settings_backup: None,

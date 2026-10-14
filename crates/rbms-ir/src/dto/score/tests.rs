@@ -86,6 +86,8 @@ fn course_submission_round_trips_preserving_chart_order_and_count() {
         max_ex_score: 6000,
         minbp: 30,
         trophy: Some("goldmedal".into()),
+        scratch_auto: false,
+        assist: vec![],
         extra: HashMap::new(),
     };
     let back: CourseSubmission = serde_json::from_str(&serde_json::to_string(&cs).unwrap()).unwrap();
@@ -112,6 +114,8 @@ fn course_submission_empty_charts_round_trips() {
         max_ex_score: 0,
         minbp: 0,
         trophy: None,
+        scratch_auto: false,
+        assist: vec![],
         extra: HashMap::new(),
     };
     let back: CourseSubmission = serde_json::from_str(&serde_json::to_string(&cs).unwrap()).unwrap();
@@ -332,6 +336,8 @@ fn course_submission_carries_the_full_server_shape() {
         max_ex_score: 6000,
         minbp: 12,
         trophy: Some("bronzemedal".into()),
+        scratch_auto: false,
+        assist: vec![],
         extra: HashMap::new(),
     };
     let json = serde_json::to_string(&cs).unwrap();
@@ -355,6 +361,46 @@ fn course_submission_without_the_superset_fields_defaults_them() {
     assert_eq!(cs.max_ex_score, 0);
     assert_eq!(cs.minbp, 0);
     assert!(cs.trophy.is_none());
+    assert!(!cs.scratch_auto && cs.assist.is_empty(), "a body without the assist fields reads as a course played without one");
+}
+
+fn course_for_assist(scratch_auto: bool, assist: Vec<String>) -> CourseSubmission {
+    CourseSubmission {
+        api_version: crate::API_VERSION,
+        course_hash: "h".into(),
+        player: PlayerId { id: "p".into() },
+        clear: ClearLamp::LightAssistEasy,
+        ex_score: 1,
+        judge: JudgeBreakdown::default(),
+        max_combo: 1,
+        gauge_value: 1.0,
+        charts: vec![],
+        played_at: 0,
+        lntype: 0,
+        max_ex_score: 0,
+        minbp: 0,
+        trophy: None,
+        scratch_auto,
+        assist,
+        extra: HashMap::new(),
+    }
+}
+
+#[test]
+fn a_course_played_without_an_assist_sends_no_assist_fields() {
+    let json = serde_json::to_value(course_for_assist(false, vec![])).unwrap();
+    assert!(json.get("scratch_auto").is_none() && json.get("assist").is_none(), "got {json}");
+}
+
+#[test]
+fn an_assisted_course_states_its_assists_and_reads_them_back() {
+    let tags = vec!["AUTO_SCRATCH".to_string(), "CUSTOM_JUDGE".to_string()];
+    let json = serde_json::to_value(course_for_assist(true, tags.clone())).unwrap();
+    assert_eq!(json["scratch_auto"], json!(true));
+    assert_eq!(json["assist"], json!(["AUTO_SCRATCH", "CUSTOM_JUDGE"]));
+    let back: CourseSubmission = serde_json::from_value(json).unwrap();
+    assert!(back.scratch_auto);
+    assert_eq!(back.assist, tags);
 }
 
 fn submission_for_bounds() -> ScoreSubmission {
@@ -469,6 +515,8 @@ fn clamping_a_course_submission_applies_the_same_two_bounds() {
         max_ex_score: 0,
         minbp: 0,
         trophy: None,
+        scratch_auto: false,
+        assist: vec![],
         extra: HashMap::new(),
     };
     cs.clamp_to_server_bounds();

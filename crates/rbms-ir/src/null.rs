@@ -118,6 +118,8 @@ mod tests {
             max_ex_score: 0,
             minbp: 0,
             trophy: None,
+            scratch_auto: false,
+            assist: vec![],
             extra: HashMap::new(),
         }
     }

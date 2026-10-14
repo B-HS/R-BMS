@@ -41,7 +41,7 @@ impl CourseSkinRun {
         let records = &shared.run_records;
         let unplayed: Vec<UnplayedStage> = run.course.charts.iter().skip(records.len()).map(|chart| unplayed_stage(shared, chart)).collect();
         let mut tally = CourseTally::of(run, records, &unplayed, shared.mode);
-        tally.input.updates_score = shared.course_stage_reasons.iter().all(Option::is_none);
+        tally.input.updates_score = crate::course_ir::course_updates_score(&shared.course_stage_reasons, shared.course_assist);
         tally.input.options = PlayedOptions { random: random_option_index(shared.config.play.random), ..PlayedOptions::default() };
         CourseSkinRun {
             snapshot: ResultSnapshot::of(tally.input),

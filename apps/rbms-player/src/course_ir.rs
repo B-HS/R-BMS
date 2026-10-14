@@ -1,21 +1,18 @@
 //! Course submissions to the score server: building the submission from a finished run and folding
 //! the per-stage block reasons into one course-level verdict.
 //!
-//! A course reaches the IR only when every stage was a real interactive play with no assist: one
-//! assisted or autoplayed stage keeps the whole course out (`MusicResult.java:82`, applied per
-//! stage). A stage played with an assist is still sent as a chart like any other; the course is
-//! not, because the course submission has no field to say a stage had one. A course whose file
-//! marks it as not for release is kept out as well (`CourseResult.java:96`).
+//! A course reaches the IR only when every stage was a real interactive play: one autoplayed or
+//! watched stage keeps the whole course out (`MusicResult.java:82`, applied per stage). A stage
+//! played with an assist does not: the course is sent like any other and says which assists its
+//! stages had ([`CourseAssist`]), as a single chart's submission does, and the server decides what
+//! that costs it (the player's decision of 2026-10-14). A course whose file marks it as not for
+//! release is kept out as well (`CourseResult.java:96`).
 //!
 //! Nothing here implements a server trait: [`rbms_ir`] is the network branch's, and this module only
 //! consumes its public types.
-//!
-//! The module is complete but not yet called: the call sites named in
-//! `docs/plan/phase-g-wiring/G3-course.md` belong to the integration branch, and the allow below
-//! goes away with the first of them.
 
 use rbms_course::CourseRun;
-use rbms_ir::mapping::ir_clear;
+use rbms_ir::mapping::{assist_flags, ir_clear};
 use rbms_ir::{API_VERSION, ChartId, IrError, JudgeBreakdown, PlayerId, ScoreServer, SubmitResponse};
 use rbms_judge::clear_type_from_id;
 
@@ -28,6 +25,38 @@ pub(crate) const UNRELEASED_COURSE_REASON: &str = "unreleased course";
 /// it with the flavour the run actually played under.
 const DEFAULT_LNTYPE: i32 = 0;
 
+/// The assists the stages of a course were played with, taken over the whole course: it had SCRATCH
+/// AUTO when any stage did, and was judged wider when any stage was.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct CourseAssist {
+    /// SCRATCH AUTO played some stage's turntable notes ([`crate::app_result::scratch_auto_played`]).
+    pub(crate) scratch_auto: bool,
+    /// Some stage was judged wider than its chart asks ([`crate::judge_setup::is_custom_judge`]).
+    pub(crate) custom_judge: bool,
+}
+
+impl CourseAssist {
+    /// A course none of whose stages had an assist, which is where every course starts.
+    pub(crate) const NONE: CourseAssist = CourseAssist { scratch_auto: false, custom_judge: false };
+
+    /// The course with one more stage folded in, played with these assists.
+    pub(crate) fn with_stage(self, scratch_auto: bool, custom_judge: bool) -> CourseAssist {
+        CourseAssist { scratch_auto: self.scratch_auto || scratch_auto, custom_judge: self.custom_judge || custom_judge }
+    }
+
+    /// Whether the course may set a best, by the single chart's rule ([`crate::updates_score`]): a
+    /// SCRATCH AUTO stage costs it nothing, a stage judged wider costs it the best.
+    pub(crate) fn sets_best(self) -> bool {
+        !self.custom_judge
+    }
+}
+
+/// Whether a finished course may set the course best: every stage was one that is sent, and none
+/// was judged wider ([`CourseAssist::sets_best`]).
+pub(crate) fn course_updates_score(stage_reasons: &[Option<String>], assist: CourseAssist) -> bool {
+    course_block_reason(stage_reasons).is_none() && assist.sets_best()
+}
+
 /// Turn a finished course run into the submission the score server takes.
 ///
 /// The judgment breakdown carries what a course accumulates — the six judge counts, the empty
@@ -36,7 +65,10 @@ const DEFAULT_LNTYPE: i32 = 0;
 ///
 /// `lntype` is read off the course's own long-note constraint; a course that states none reports
 /// [`DEFAULT_LNTYPE`] and the caller overwrites it with what the run used.
-pub(crate) fn build_course_submission(run: &CourseRun, player: &str) -> rbms_ir::dto::CourseSubmission {
+///
+/// `assist` is what the stages were played with, stated the way a single chart's submission states
+/// it: SCRATCH AUTO, and the assist tags ([`assist_flags`]). A course with none sends neither field.
+pub(crate) fn build_course_submission(run: &CourseRun, player: &str, assist: CourseAssist) -> rbms_ir::dto::CourseSubmission {
     let totals = run.totals;
     let counts = totals.counts;
     let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
@@ -67,6 +99,8 @@ pub(crate) fn build_course_submission(run: &CourseRun, player: &str) -> rbms_ir:
         max_ex_score: totals.max_ex,
         minbp: totals.min_bp(),
         trophy: run.trophy().map(|t| t.name.clone()),
+        scratch_auto: assist.scratch_auto,
+        assist: assist_flags(assist.scratch_auto, assist.custom_judge),
         extra: Default::default(),
     };
     sub.clamp_to_server_bounds();

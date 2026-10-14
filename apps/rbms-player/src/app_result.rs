@@ -301,7 +301,8 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     }
     keep_run_record(shared, record);
     if shared.course_run.is_some() {
-        return advance_course(shared, &summary, standing_combo, block_reason.or(course_assist_reason(scratch_auto, custom_judge)), lamp);
+        shared.course_assist = shared.course_assist.with_stage(scratch_auto, custom_judge);
+        return advance_course(shared, &summary, standing_combo, block_reason, lamp);
     }
     let paced_by = run_target(shared, &chart.md5, summary.total_notes, standing_best_ex);
     let target = TargetView { name: paced_by.name, ex: paced_by.ex };
@@ -427,21 +428,6 @@ pub(crate) fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
     })
 }
 
-/// Why a stage played with an assist keeps its course from the score server, or `None` for a stage
-/// played without one.
-///
-/// The stage itself is kept and sent like any chart ([`enter_result`]); the course is not, because
-/// a course submission states no assist (`rbms_ir::dto::CourseSubmission`), and a course with a
-/// SCRATCH AUTO stage, or one judged wider, would reach the course board as one played whole. It
-/// also sets no course best, the course result reading the same reasons, as before the player's
-/// decision of 2026-10-14, which named single charts.
-fn course_assist_reason(scratch_auto: bool, custom_judge: bool) -> Option<&'static str> {
-    if custom_judge {
-        return Some("judge window widened");
-    }
-    scratch_auto.then_some("scratch assist")
-}
-
 /// Fold the stage that just ended into the course and go wherever it says: the next stage, or the
 /// course result screen.
 fn advance_course(
@@ -477,6 +463,10 @@ fn advance_course(
 }
 
 /// The course is over: submit it if every stage was submittable, then show the course result.
+///
+/// A stage played with an assist does not keep the course back: the submission states the assists
+/// the stages had ([`crate::course_ir::CourseAssist`]), as a single chart's does, and the course
+/// result reads from the same fold whether the course may set a best.
 fn finish_course(shared: &mut AppShared) -> Transition {
     let Some(run) = shared.course_run.as_ref() else {
         return Transition::Back;
@@ -489,7 +479,7 @@ fn finish_course(shared: &mut AppShared) -> Transition {
         Some(reason) => println!("course not submitted: {reason}"),
         None if !shared.sends_to_primary_ir_server() => {}
         None => {
-            let sub = build_course_submission(run, &submission_player_id(&shared.session, &shared.config.network.player_id));
+            let sub = build_course_submission(run, &submission_player_id(&shared.session, &shared.config.network.player_id), shared.course_assist);
             let server = shared.course_ir_server();
             std::thread::spawn(move || {
                 let _ = crate::course_ir::submit(server.as_ref(), &sub);
