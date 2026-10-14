@@ -1,10 +1,16 @@
-export const NAV_ITEMS = [
-    { href: '/', label: '대시보드', icon: 'gauge' },
-    { href: '/search', label: '차트 검색', icon: 'search' },
-    { href: '/leaderboards', label: '리더보드', icon: 'trophy' },
-    { href: '/tables', label: '난이도표', icon: 'layers' },
-    { href: '/settings', label: '설정', icon: 'settings' },
-    { href: '/guide', label: '연동 가이드', icon: 'book' },
-] as const
+import { BookOpen, FolderHeart, House, Layers, Search, Trophy, type LucideIcon } from 'lucide-react'
 
-export type NavItem = (typeof NAV_ITEMS)[number]
+export type NavItem = {
+    href: string
+    label: string
+    icon: LucideIcon
+}
+
+export const NAV_ITEMS: readonly NavItem[] = [
+    { href: '/', label: '홈', icon: House },
+    { href: '/search', label: '차트 검색', icon: Search },
+    { href: '/leaderboards', label: '순위', icon: Trophy },
+    { href: '/guide', label: '가이드', icon: BookOpen },
+    { href: '/folders', label: '내 폴더', icon: FolderHeart },
+    { href: '/tables', label: '난이도표', icon: Layers },
+]

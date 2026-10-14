@@ -1,13 +1,15 @@
+import { NextResponse, connection } from 'next/server'
 import { compose } from '@server/compose'
-import { accountSchema, loginSchema, tokenIssueSchema } from '@server/dto/auth'
-import { irRaw } from '@server/lib/api-response'
+import { getAuth } from '@server/lib/auth'
+import { accountSchema, loginSchema, sessionLoginSchema, sessionRegisterSchema, tokenIssueSchema } from '@server/dto/auth'
+import { irRaw, successResponse } from '@server/lib/api-response'
 import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { parseJsonBody } from '@server/lib/parse-request'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { withBearerOrSession } from '@server/lib/with-api-token'
 import { withSession } from '@server/lib/with-session'
-import { RATE_LIMIT, consumeRateLimit, getClientIp } from '@server/lib/with-rate-limit'
+import { RATE_LIMIT, consumeRateLimit, getClientIp, withRateLimit } from '@server/lib/with-rate-limit'
 
 const CREATED_STATUS = 201
 
@@ -43,8 +45,28 @@ export const createLoginRoute = () =>
         return applySessionCookies(irRaw({ token: result.token, player: { id: result.loginId }, name: result.name }), result.headers)
     })
 
+const toSessionUserBody = (user: { id: string; loginId: string; name: string; role: string }) =>
+    successResponse({ user: { id: user.id, login_id: user.loginId, name: user.name, role: user.role } })
+
+export const createSessionLoginRoute = () =>
+    withErrorHandling(async (request: Request) => {
+        guardAuthRateLimit(request, 'auth-login')
+        const body = await parseJsonBody(request, sessionLoginSchema)
+        const result = await compose().authService.loginSession({ loginId: body.id, password: body.password })
+        return applySessionCookies(NextResponse.json(toSessionUserBody(result.user)), result.headers)
+    })
+
+export const createSessionRegisterRoute = () =>
+    withErrorHandling(async (request: Request) => {
+        guardAuthRateLimit(request, 'auth-register')
+        const body = await parseJsonBody(request, sessionRegisterSchema)
+        const result = await compose().authService.registerSession({ loginId: body.id, password: body.password, email: body.email, name: body.name })
+        return applySessionCookies(NextResponse.json(toSessionUserBody(result.user), { status: CREATED_STATUS }), result.headers)
+    })
+
 export const createMeRoute = () =>
     withErrorHandling(async (request: Request, context: unknown) => {
+        await connection()
         const { authService, playerService } = compose()
         return withBearerOrSession({
             resolveApiTokenUser: authService.resolveApiTokenUser,
@@ -66,3 +88,22 @@ export const createTokenRoute = () =>
             return irRaw({ token, created_at: Date.now() })
         })(request, context)
     })
+
+const AUTH_BASE_PATH = '/api/auth'
+const TRAILING_SLASHES = /\/+$/
+
+export const ALLOWED_AUTH_HANDLER_ROUTES = ['GET /get-session', 'POST /sign-out'] as const
+
+export const isAllowedAuthHandlerRoute = (method: string, pathname: string) =>
+    (ALLOWED_AUTH_HANDLER_ROUTES as readonly string[]).includes(`${method} ${pathname.replace(AUTH_BASE_PATH, '').replace(TRAILING_SLASHES, '')}`)
+
+export const createAuthHandlerRoute = (resolveHandler: () => (request: Request) => Promise<Response> = () => getAuth().handler) =>
+    withErrorHandling(
+        withRateLimit(
+            'auth-handler',
+            RATE_LIMIT.PUBLIC_READ,
+        )(async (request: Request) => {
+            if (!isAllowedAuthHandlerRoute(request.method, new URL(request.url).pathname)) throw createAppError(ERROR_CODE.NOT_FOUND)
+            return resolveHandler()(request)
+        }),
+    )

@@ -121,3 +121,10 @@ macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silico
 4. 게시된 아카이브의 체크섬과 실제 설치·실행을 확인합니다.
 
 이 체크리스트 전에는 `dev` CI만 배포 전 검증 근거입니다.
+
+## 6. 웹 (`web/`) CI 와 배포
+
+- `.github/workflows/web.yml`: `web/**` 또는 이 파일이 바뀐 `dev`·`prod` 푸시와 PR 에서 Ubuntu 한 잡이 `bun install --frozen-lockfile` → `bun run typecheck`(`next typegen && tsc --noEmit`) → `bun run lint` → `bun run test` → `bun run format:check` → `bun run build` 를 돈다. **빌드에는 환경 변수를 주지 않는다**(DB·시크릿 없이 성공해야 한다). 제한 시간 15분. Bun 은 `web/package.json` 의 `packageManager`(`bun@1.4.0`)를 따른다.
+- `ci.yml`(Rust 3 OS 빌드)의 두 트리거(push, pull_request)에는 `paths-ignore: ["web/**"]` 가 있어, `web/` 만 바뀐 푸시와 PR 에서는 Rust 빌드를 건너뛰고 이 워크플로만 돈다(웨이브 17B-1 통합에서 추가. 변경이 `web/` 밖의 파일을 하나라도 포함하면 `ci.yml` 도 돈다). GitHub API 로 읽어 보니 `dev` 브랜치에 보호 규칙과 ruleset 이 없어, 필수 체크가 대기 상태로 남는 문제는 지금 없다. 나중에 브랜치 보호에서 `test` 나 `verify` 를 필수 체크로 삼으면, 경로 필터 때문에 해당 경로를 건드리지 않은 PR 에서 그 체크가 실행되지 않아 대기 상태로 남는다(GitHub 의 알려진 동작).
+- 배포는 Vercel 이 한다(Production Branch `dev`, Root Directory `web`). `web/vercel.json` 의 `ignoreCommand` 가 프로덕션이 아닌 빌드와 `web/` 이 바뀌지 않은 푸시를 건너뛴다. 운영 DB 마이그레이션은 **배포보다 먼저** 사용자가 적용한다. 설정값, 환경 변수, 순서, 기준선 절차는 `docs/web/architecture.md` 3-2 와 6-2 가 정본이다.
+- 웹 CI 는 릴리스(`release.yml`)와 무관하다. 앱 릴리스 태그·`prod` 푸시가 웹을 배포하지 않는다(웹은 `dev` 푸시 기준).

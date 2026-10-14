@@ -8,20 +8,24 @@ import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { MetaBadge } from '@features/badge/meta-badge'
 import { Button } from '@shared/ui/button'
-import { authClient } from '@shared/lib/auth-client'
+import { LOGIN_PATH } from '@shared/constants/auth-route'
+import { useSessionLogout } from '@entities/auth.query'
 import type { SessionUser } from '@entities/auth.type'
 
 const FIELD_CLASS = 'flex items-center justify-between gap-4 py-1'
 
 export const ProfilePanel: FC<{ user: SessionUser }> = ({ user }) => {
     const router = useRouter()
+    const logout = useSessionLogout()
 
-    const signOut = async () => {
-        await authClient.signOut()
-        toast.success('로그아웃했습니다.')
-        router.replace('/login')
-        router.refresh()
-    }
+    const handleSignOut = () =>
+        logout.mutate(undefined, {
+            onSuccess: () => {
+                toast.success('로그아웃했습니다.')
+                router.replace(LOGIN_PATH)
+                router.refresh()
+            },
+        })
 
     return (
         <PanelCard
@@ -33,7 +37,7 @@ export const ProfilePanel: FC<{ user: SessionUser }> = ({ user }) => {
                             빌드 관리
                         </Link>
                     )}
-                    <Button variant='ghost' size='sm' onClick={signOut}>
+                    <Button variant='ghost' size='sm' disabled={logout.isPending} onClick={handleSignOut}>
                         로그아웃
                     </Button>
                 </div>
@@ -59,7 +63,7 @@ export const ProfilePanel: FC<{ user: SessionUser }> = ({ user }) => {
                     </dd>
                 </div>
             </dl>
-            <PanelFootnote>플레이어 ID 는 네이티브 클라이언트의 `--player` 값과 동일합니다.</PanelFootnote>
+            <PanelFootnote>플레이어 ID 는 R-BMS 의 PLAYER ID 값과 같습니다.</PanelFootnote>
         </PanelCard>
     )
 }

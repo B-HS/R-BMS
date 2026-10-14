@@ -234,6 +234,49 @@
 ### `POST /api/tables` (admin) — 표 등록/갱신
 > 클라이언트(rbms)는 기존 난이도표(`tables.ron`, header.json/data.json)도 직접 fetch하지만, IR 표는 **서버가 큐레이션한 표·코스**를 추가로 제공.
 
+### 7.1 서버가 번들한 표와 표준 BMS 표 형식 (웨이브 17B-1)
+
+DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)을 정적으로 싣는 표가 있다. 지금은 `insane1`(発狂BMS難易度表, 1,035곡, 레벨 26개) 하나이고 모든 곡이 `md5` 만 가진다. 사본이며 원본은 `https://darksabun.club/table/archive/insane1/` 이다(`header.json` 의 `mirror_of`).
+
+| 경로 | 응답 | 인증 |
+|---|---|---|
+| `GET /tables/{id}/header.json` | 표준 header. `{ name, symbol, data_url(요청 origin 의 절대 주소), level_order, last_update, original_url, mirror_of }`. 봉투 없음 | 없음 |
+| `GET /tables/{id}/data.json` | 표준 body 배열(스냅샷 그대로: `md5 level title artist url url_diff name_diff comment lr2_bmsid`). `ETag`, `If-None-Match` 304 | 없음 |
+| `GET /api/fe/tables` | `[{ id, name, symbol, entry_count, level_count, last_update, original_url, source, levels:[{level,count}], standard_paths }]`(봉투) | 없음 |
+| `GET /api/fe/tables/{id}` | `{ table, levels:[{ level, entries:[{ md5, level, title, artist, url, url_diff, name_diff, comment }] }] }`(약 380KB, 공개 캐시 `s-maxage=3600`) | 없음 |
+| `GET /api/fe/tables/{id}/entries?q=&level=&page=&limit=` | 제목·아티스트·md5 앞 6자 이상으로 검색. `limit` 최대 100. 쪽 나누기 포함 | 없음 |
+| `GET /api/fe/tables/{id}/records` | `{ table_id, records:{ "<md5>": { clear, ex_score, minbp, max_combo, total_notes, played_at } } }` — 내 곡별 최고 기록(기록 있는 곡만, `chart.md5` 로 맞춤). `no-store` | 세션 |
+
+`/tables/{id}` 의 사람이 보는 페이지(`<meta name="bmstable" content="/tables/{id}/header.json">`)는 화면 웨이브가 만든다. 클라이언트(`rbms-table`)는 header 의 `data_url` 을 header 의 최종 주소 기준으로 풀고, 이 header 는 절대 주소를 내므로 끝 슬래시(운영은 `/x/` 를 308 로 `/x` 로 뗀다)에 영향받지 않는다. 정본 등록 주소는 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음).
+
+### 7.2 내 폴더 (웹에서 편집, R-BMS 는 읽기만)
+
+사용자당 폴더 최대 50개, 폴더당 2,000곡, 사용자 전체 20,000곡, 이름 1~64자(NFC·앞뒤 공백 제거·제어 문자 불가), 설명 255자, 메모 100자. 곡의 식별자는 `md5`(소문자 16진 32자), `sha256` 은 알 때만. 폴더 id 는 `uf_` + 16진 30자.
+
+편집(세션만, 봉투. 경로에 사용자 id 가 없고 남의 폴더 id 는 404 `IR_FOLDER_NOT_FOUND`):
+
+| 메서드 | 경로 | 비고 |
+|---|---|---|
+| GET / POST | `/api/fe/me/folders` | 목록(`FolderSummary[]`) / 만들기(201) |
+| PUT | `/api/fe/me/folders/order` | `{ folder_ids }` — 지금 폴더와 같은 집합이어야 한다(아니면 400) |
+| GET / PATCH / DELETE | `/api/fe/me/folders/{folderId}` | 상세(`items` 포함) / `{ name?, description? }` / 204 |
+| POST | `/api/fe/me/folders/{folderId}/items` | `{ items:[{ md5, sha256?, title?, artist?, note? }] }` 최대 500. 이미 든 곡은 `skipped` |
+| PUT | `/api/fe/me/folders/{folderId}/items` | **통째로 바꾸기**(명시 저장): `{ items:[…순서대로], base_updated_at? }`. `base_updated_at` 이 서버 `updated_at` 과 다르면 409 `IR_FOLDER_CONFLICT`(쓰지 않음) |
+| POST | `/api/fe/me/folders/{folderId}/items/remove` | `{ md5s }` |
+| PUT | `/api/fe/me/folders/{folderId}/items/order` | `{ md5s }` — 같은 집합이어야 한다 |
+| PATCH | `/api/fe/me/folders/{folderId}/items/{md5}` | `{ note }` |
+| POST | `/api/fe/me/folders/{folderId}/import` | `{ table_id, levels? }` — 번들 표에서 서버가 곡을 읽어 넣는다 |
+| GET | `/api/fe/me/folders/containing/{md5}` | 그 곡이 든 내 폴더 id 배열 |
+
+응답의 `FolderSummary` = `{ id, name, description, is_public, position, item_count, updated_at(unix ms) }`, `ItemChange` = `{ added, removed, skipped, item_count, updated_at }`. 곡의 제목·아티스트 사본은 서버가 정한다(차트 행 → 표 → 요청 순으로 빈 값을 건너뜀, 제어 문자 제거, 200자). 한도를 넘으면 아무것도 넣지 않고 409 `IR_FOLDER_LIMIT_EXCEEDED`(`details` 는 비프로덕션에서만), 같은 이름은 409 `IR_FOLDER_NAME_TAKEN`. `is_public` 은 항상 `false`(공개 동작은 아직 없다).
+
+클라이언트 읽기(Bearer 또는 세션, 본인만. 다른 playerId 는 403. 봉투 없음, `Cache-Control: private, no-store`):
+
+- `GET /api/players/{playerId}/folders` → `{ "folders": [ FolderSummary… ] }`(`position` 순서)
+- `GET /api/players/{playerId}/folders/{folderId}` → `FolderSummary` + `"items": [ { md5, sha256, title, artist, note }… ]`(`position` 순서, `sha256` 은 모르면 `""`)
+
+`GET /api/health` 의 `capabilities.folders` 가 `true` 다(없으면 false 로 읽힌다).
+
 ---
 
 ## 8. replays — 리플레이 서버 저장 (rbms 추가, **µs 정밀**)
@@ -321,6 +364,8 @@
 
 - `GET /api/fe/charts/search`, `/api/fe/charts/[hash]/leaderboard`, `/api/fe/activity/recent`, `/api/fe/leaderboards/players`, `/api/fe/players/[playerId]/{recent,stats}`, `/api/fe/stats/summary`.
 - `GET /api/fe/me/settings`, `GET|POST /api/fe/tokens`, `DELETE /api/fe/tokens/[tokenId]`은 세션 사용자 전용입니다.
+- `POST /api/fe/auth/login` `{ id, password }` 는 웹 로그인입니다. `/api/auth/login` 과 같은 자격 확인을 하고 세션 쿠키만 세팅합니다(API 토큰을 만들지 않음). 응답 `{ success:true, data:{ user:{ id, login_id, name, role } } }`, 실패 401 `UNAUTHORIZED`, 5/min/IP(`/api/auth/login` 과 같은 버킷).
+- `POST /api/fe/auth/register` `{ id, email, password, name? }` 는 웹 가입입니다. `/api/auth/register` 와 같은 검사(아이디 형식·예약어, 중복은 409 `IR_ACCOUNT_EXISTS`)를 하고 세션 쿠키만 세팅합니다. 응답은 로그인과 같은 꼴이고 201 입니다.
 - 웹 인증은 better-auth catch-all 및 IR 호환 `/api/auth/{register,login,me,token}` 경로를 사용합니다. OAuth 제공자는 이 저장소에서 구성하지 않았습니다.
 
 ---

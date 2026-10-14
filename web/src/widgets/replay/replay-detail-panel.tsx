@@ -6,24 +6,40 @@ import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { MetaBadge } from '@features/badge/meta-badge'
 import { LoadErrorState } from '@features/state/load-error-state'
-import { PanelSkeleton } from '@features/state/panel-skeleton'
-import { PageHeading } from '@features/shell/page-heading'
+import { NotFoundNotice } from '@features/state/not-found-notice'
+import { ShellPage } from '@widgets/shell/shell-page'
+import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 import { MAX_RENDERED_REPLAY_EVENTS, ReplayWaterfall } from '@widgets/replay/replay-waterfall'
+import { ApiError } from '@shared/lib/fetch'
 import { formatCount, formatHash } from '@shared/lib/format'
 import { useReplayDetail } from '@entities/replay.query'
 
+const PAGE_TITLE = '리플레이'
+const NOT_FOUND_STATUS = 404
 const MICROSECONDS_PER_SECOND = 1_000_000
 const META_ROW_CLASS = 'flex items-center justify-between gap-4 py-1'
 
 export const ReplayDetailPanel: FC<{ replayId: string }> = ({ replayId }) => {
-    const { data, isLoading, isError } = useReplayDetail(replayId)
+    const { data, isLoading, isError, error, isFetching, refetch } = useReplayDetail(replayId)
 
-    if (isLoading) return <PanelSkeleton height='page' />
-    if (isError || !data) return <LoadErrorState title='리플레이를 불러오지 못했습니다' />
+    if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+
+    if (error instanceof ApiError && error.status === NOT_FOUND_STATUS)
+        return (
+            <ShellPage title={PAGE_TITLE}>
+                <NotFoundNotice title='없는 리플레이입니다' description='지워졌거나 올라온 적이 없는 리플레이입니다.' />
+            </ShellPage>
+        )
+
+    if (isError || !data)
+        return (
+            <ShellPage title={PAGE_TITLE}>
+                <LoadErrorState title='리플레이를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+            </ShellPage>
+        )
 
     return (
-        <>
-            <PageHeading>리플레이 {data.id}</PageHeading>
+        <ShellPage title={PAGE_TITLE} description={data.id}>
             <PanelCard title='리플레이' contentClassName='flex flex-col gap-2'>
                 <div className='flex flex-wrap gap-1'>
                     <MetaBadge>{data.mode}</MetaBadge>
@@ -70,6 +86,6 @@ export const ReplayDetailPanel: FC<{ replayId: string }> = ({ replayId }) => {
                         ` 전체 ${formatCount(data.events.length)}건 중 앞 ${formatCount(MAX_RENDERED_REPLAY_EVENTS)}건만 그립니다.`}
                 </PanelFootnote>
             </PanelCard>
-        </>
+        </ShellPage>
     )
 }

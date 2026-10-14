@@ -11,6 +11,7 @@ import { TableSkeleton } from '@features/state/table-skeleton'
 import { ConfirmAction } from '@features/dialog/confirm-action'
 import { FormDialog } from '@features/dialog/form-dialog'
 import { Button } from '@shared/ui/button'
+import { CopyButton } from '@shared/ui/copy-button'
 import { Field, FieldDescription, FieldLabel } from '@shared/ui/field'
 import { Input } from '@shared/ui/input'
 import { formatDateTime } from '@shared/lib/format'
@@ -25,7 +26,7 @@ export const TokenPanel: FC = () => {
     const [revokeTarget, setRevokeTarget] = useState<ApiTokenRow | null>(null)
     const [issuedToken, setIssuedToken] = useState('')
 
-    const { data, isLoading, isError } = useApiTokenList()
+    const { data, isLoading, isError, isFetching, refetch } = useApiTokenList()
     const issue = useIssueApiToken()
     const revoke = useRevokeApiToken()
 
@@ -90,18 +91,32 @@ export const TokenPanel: FC = () => {
                 }
                 contentClassName='flex flex-col gap-2'>
                 {issuedToken && (
-                    <div className='bg-muted flex flex-col gap-1 p-2'>
-                        <p className='text-xs font-medium'>발급된 토큰 (한 번만 표시됩니다)</p>
+                    <div className='border-border flex flex-col gap-2 border p-2'>
+                        <p className='text-xs font-medium'>발급된 토큰</p>
                         <code className='font-mono text-xs break-all'>{issuedToken}</code>
-                        <Button variant='ghost' size='sm' className='self-start' onClick={() => setIssuedToken('')}>
-                            숨기기
-                        </Button>
+                        <p className='text-warning text-xs'>이 상자를 닫으면 다시 볼 수 없습니다. 지금 복사해 두세요.</p>
+                        <div className='flex gap-1'>
+                            <CopyButton value={issuedToken} label='토큰 복사' showLabel />
+                            <Button variant='ghost' size='sm' onClick={() => setIssuedToken('')}>
+                                닫기
+                            </Button>
+                        </div>
                     </div>
                 )}
                 {isLoading && <TableSkeleton rows={3} />}
-                {!isLoading && isError && <LoadErrorState title='토큰 목록을 불러오지 못했습니다' />}
+                {!isLoading && isError && (
+                    <LoadErrorState title='토큰 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+                )}
                 {!isLoading && !isError && rows.length === 0 && (
-                    <EmptyState title='발급한 토큰이 없습니다' description='네이티브 클라이언트 연동에 토큰이 필요합니다.' />
+                    <EmptyState
+                        title='발급한 토큰이 없습니다'
+                        description='다른 도구에서 R-BMS 서버에 접속할 때 토큰이 필요합니다.'
+                        action={
+                            <Button variant='outline' size='sm' onClick={() => setIssueOpen(true)}>
+                                토큰 발급
+                            </Button>
+                        }
+                    />
                 )}
                 {!isLoading && !isError && rows.length > 0 && (
                     <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption='발급한 API 토큰 목록' />

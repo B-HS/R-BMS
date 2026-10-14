@@ -1,3 +1,4 @@
+import { connection } from 'next/server'
 import { compose } from '@server/compose'
 import { SETTING_MAX_BYTES, settingPutSchema, type SettingPutOutput } from '@server/dto/setting'
 import { irRaw, successResponse } from '@server/lib/api-response'
@@ -51,6 +52,7 @@ export const createSettingPutRoute = () =>
 
 export const createMySettingsRoute = () =>
     withErrorHandling(async (request: Request, context: unknown) => {
+        await connection()
         const { authService, settingService } = compose()
         return withSession({ resolveSessionUser: authService.resolveSessionUser })(async (_authedRequest, _authedContext, user) =>
             irRaw(successResponse({ keys: await settingService.listKeys(user.id) })),

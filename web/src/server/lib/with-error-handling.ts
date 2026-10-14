@@ -1,3 +1,4 @@
+import { unstable_rethrow } from 'next/navigation'
 import { NextResponse } from 'next/server'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { ERROR_MESSAGE } from '@server/lib/error-message'
@@ -15,6 +16,7 @@ export const withErrorHandling =
             if (isAppError(error)) {
                 return NextResponse.json(errorResponse(error.code, error.message, error.details), { status: error.statusCode })
             }
+            unstable_rethrow(error)
             console.error(error)
             return NextResponse.json(errorResponse(ERROR_CODE.INTERNAL_ERROR, ERROR_MESSAGE.INTERNAL_ERROR), { status: 500 })
         }

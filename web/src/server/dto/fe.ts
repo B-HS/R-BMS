@@ -6,7 +6,16 @@ const MAX_FEED_LIMIT = 100
 const DEFAULT_FEED_LIMIT = 20
 
 export const CHART_SEARCH_SORTS = ['title', 'level', 'notes', 'recent'] as const
-export const PLAYER_SORTS = ['rank_points', 'total_plays'] as const
+export const PLAYER_SORTS = ['cleared', 'played', 'plays'] as const
+
+export type PlayerSort = (typeof PLAYER_SORTS)[number]
+
+const LEGACY_PLAYER_SORTS = { rank_points: 'cleared', total_plays: 'plays' } as const satisfies Record<string, PlayerSort>
+
+const playerSortSchema = z.union([
+    z.enum(PLAYER_SORTS),
+    z.enum(['rank_points', 'total_plays']).transform((legacy): PlayerSort => LEGACY_PLAYER_SORTS[legacy]),
+])
 
 export const chartSearchQuerySchema = z.object({
     q: z.string().max(255).optional(),
@@ -22,7 +31,7 @@ export const feedQuerySchema = z.object({
 })
 
 export const playerLeaderboardQuerySchema = z.object({
-    sort: z.enum(PLAYER_SORTS).default('rank_points'),
+    sort: playerSortSchema.default('cleared'),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT),
 })

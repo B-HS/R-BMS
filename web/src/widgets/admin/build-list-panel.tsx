@@ -27,7 +27,7 @@ export const BuildListPanel: FC = () => {
     const [open, setOpen] = useState(false)
     const [draft, setDraft] = useState(EMPTY_BUILD)
 
-    const { data, isLoading, isError } = useClientBuildList()
+    const { data, isLoading, isError, isFetching, refetch } = useClientBuildList()
     const registerBuild = useRegisterClientBuild()
 
     const rows = data ?? []
@@ -90,7 +90,9 @@ export const BuildListPanel: FC = () => {
                 }
                 contentClassName='flex flex-col gap-2'>
                 {isLoading && <TableSkeleton />}
-                {!isLoading && isError && <LoadErrorState title='빌드 목록을 불러오지 못했습니다' />}
+                {!isLoading && isError && (
+                    <LoadErrorState title='빌드 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+                )}
                 {!isLoading && !isError && rows.length === 0 && <EmptyState title='등록된 빌드가 없습니다' />}
                 {!isLoading && !isError && rows.length > 0 && (
                     <DataTable

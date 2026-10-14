@@ -6,6 +6,10 @@ export const RATE_LIMIT = {
     SCORE_SUBMIT: { limit: 60, windowMs: 60_000 },
     REPLAY_UPLOAD: { limit: 10, windowMs: 60_000 },
     PUBLIC_READ: { limit: 120, windowMs: 60_000 },
+    FOLDER_WRITE: { limit: 60, windowMs: 60_000 },
+    FOLDER_IMPORT: { limit: 10, windowMs: 60_000 },
+    FOLDER_READ: { limit: 120, windowMs: 60_000 },
+    TABLE_RECORDS: { limit: 30, windowMs: 60_000 },
 } as const
 
 const MAX_BUCKETS = 5000
@@ -48,3 +52,8 @@ export const withRateLimit =
         if (!allowed) throw createAppError(ERROR_CODE.RATE_LIMITED)
         return handler(request, context)
     }
+
+export const enforceUserRateLimit = (scope: string, userId: string, config: { limit: number; windowMs: number }) => {
+    const { allowed } = consumeRateLimit(`${scope}:${userId}`, config.limit, config.windowMs)
+    if (!allowed) throw createAppError(ERROR_CODE.RATE_LIMITED)
+}

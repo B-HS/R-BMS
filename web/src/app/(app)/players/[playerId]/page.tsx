@@ -1,9 +1,26 @@
 import { Suspense } from 'react'
-import { PanelSkeleton } from '@features/state/panel-skeleton'
+import type { Metadata } from 'next'
+import { playerQueryOptions } from '@entities/player.query'
+import { buildPageMetadata } from '@shared/lib/metadata'
+import { getQueryClient } from '@shared/utils/get-query-client'
 import { PlayerDetailContent } from '@widgets/player/player-detail-content'
+import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 
-const PlayerDetailPage = ({ params }: { params: Promise<{ playerId: string }> }) => (
-    <Suspense fallback={<PanelSkeleton height='page' />}>
+export const generateMetadata = async ({ params }: PageProps<'/players/[playerId]'>): Promise<Metadata> => {
+    const { playerId } = await params
+    const player = await getQueryClient()
+        .fetchQuery(playerQueryOptions(playerId))
+        .catch(() => null)
+    if (!player) return buildPageMetadata({ title: '플레이어', index: false })
+    return buildPageMetadata({
+        title: player.name,
+        description: `${player.name} (@${player.id}) 의 R-BMS 기록과 램프 분포.`,
+        path: `/players/${encodeURIComponent(player.id)}`,
+    })
+}
+
+const PlayerDetailPage = ({ params }: PageProps<'/players/[playerId]'>) => (
+    <Suspense fallback={<ShellPageLoading title='플레이어' />}>
         <PlayerDetailContent params={params} />
     </Suspense>
 )

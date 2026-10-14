@@ -1,10 +1,10 @@
 import { compose } from '@server/compose'
-import { chartLookupQuerySchema, chartUpsertSchema } from '@server/dto/chart'
+import { CHART_UPSERT_MAX_BYTES, chartLookupQuerySchema, chartUpsertSchema } from '@server/dto/chart'
 import { bestQuerySchema, rankingQuerySchema } from '@server/dto/score'
 import { irRaw } from '@server/lib/api-response'
 import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
-import { parseJsonBody, parseSearchParams } from '@server/lib/parse-request'
+import { parseLimitedJsonBody, parseSearchParams } from '@server/lib/parse-request'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { withApiToken } from '@server/lib/with-api-token'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
@@ -36,7 +36,7 @@ export const createChartUpsertRoute = () =>
     withErrorHandling(async (request: Request, context: unknown) => {
         const { authService, chartService } = compose()
         return withApiToken({ resolveApiTokenUser: authService.resolveApiTokenUser })(async (authedRequest) => {
-            const body = await parseJsonBody(authedRequest, chartUpsertSchema)
+            const body = await parseLimitedJsonBody(authedRequest, chartUpsertSchema, CHART_UPSERT_MAX_BYTES)
             const row = await chartService.upsertFromMeta(body.chart)
             if (!row) throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND)
             revalidateOnChartUpsert({ sha256: row.sha256, md5: row.md5 })

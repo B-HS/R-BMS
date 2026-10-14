@@ -194,6 +194,7 @@ export const getStatsSummaryCached = async () => {
 
 export const revalidateOnReplayUpload = (params: { chartSha256: string; loginId: string | null; scoreId?: string | null }) => {
     revalidateTag(CACHE_TAG_EXT.chartReplays(params.chartSha256), CACHE_PROFILE.ranking)
+    revalidateTag(CACHE_TAG.chartRanking(params.chartSha256), CACHE_PROFILE.ranking)
     if (params.scoreId) revalidateTag(CACHE_TAG.score(params.scoreId), CACHE_PROFILE.ranking)
     if (params.loginId) revalidateTag(CACHE_TAG.playerRecent(params.loginId), CACHE_PROFILE.player)
 }

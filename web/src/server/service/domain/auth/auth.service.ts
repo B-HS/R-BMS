@@ -32,6 +32,8 @@ export type AuthProvider = {
     getSessionUser: (headers: Headers) => Promise<unknown>
 }
 
+type SignUpParams = { loginId: string; password: string; email: string; name: string | null }
+
 export type AuthServiceDeps = {
     db: AuthServiceDb
     provider: AuthProvider
@@ -56,32 +58,52 @@ export const createAuthService = (deps: AuthServiceDeps) => {
         return plain
     }
 
+    const signUp = async (params: SignUpParams) => {
+        const duplicate = await deps.db.findUserByLoginId(params.loginId)
+        if (duplicate) throw createAppError(ERROR_CODE.IR_ACCOUNT_EXISTS)
+        const name = params.name ?? params.loginId
+        const result = await deps.provider
+            .signUpEmail({ email: params.email, password: params.password, name, loginId: params.loginId })
+            .catch(() => {
+                throw createAppError(ERROR_CODE.IR_ACCOUNT_EXISTS)
+            })
+        const parsed = signUpResultSchema.safeParse({ user: result.user })
+        if (!parsed.success) throw createAppError(ERROR_CODE.INTERNAL_ERROR)
+        return { user: parsed.data.user, name, headers: result.headers }
+    }
+
+    const signInByLoginId = async (params: { loginId: string; password: string }) => {
+        const user = await deps.db.findUserByLoginId(params.loginId)
+        if (!user) throw createAppError(ERROR_CODE.UNAUTHORIZED)
+        const result = await deps.provider.signInEmail({ email: user.email, password: params.password }).catch(() => {
+            throw createAppError(ERROR_CODE.UNAUTHORIZED)
+        })
+        return { user, headers: result.headers }
+    }
+
     return {
         issueToken,
 
-        register: async (params: { loginId: string; password: string; email: string; name: string | null }) => {
-            const duplicate = await deps.db.findUserByLoginId(params.loginId)
-            if (duplicate) throw createAppError(ERROR_CODE.IR_ACCOUNT_EXISTS)
-            const name = params.name ?? params.loginId
-            const result = await deps.provider
-                .signUpEmail({ email: params.email, password: params.password, name, loginId: params.loginId })
-                .catch(() => {
-                    throw createAppError(ERROR_CODE.IR_ACCOUNT_EXISTS)
-                })
-            const parsed = signUpResultSchema.safeParse({ user: result.user })
-            if (!parsed.success) throw createAppError(ERROR_CODE.INTERNAL_ERROR)
-            const token = await issueToken(parsed.data.user.id, 'register')
-            return { token, loginId: params.loginId, name, headers: result.headers }
+        register: async (params: SignUpParams) => {
+            const { user, name, headers } = await signUp(params)
+            const token = await issueToken(user.id, 'register')
+            return { token, loginId: params.loginId, name, headers }
+        },
+
+        registerSession: async (params: SignUpParams) => {
+            const { user, name, headers } = await signUp(params)
+            return { user: { id: user.id, loginId: params.loginId, name, role: user.role ?? DEFAULT_ROLE }, headers }
         },
 
         login: async (params: { loginId: string; password: string }) => {
-            const found = await deps.db.findUserByLoginId(params.loginId)
-            if (!found) throw createAppError(ERROR_CODE.UNAUTHORIZED)
-            const result = await deps.provider.signInEmail({ email: found.email, password: params.password }).catch(() => {
-                throw createAppError(ERROR_CODE.UNAUTHORIZED)
-            })
-            const token = await issueToken(found.id, 'login')
-            return { token, loginId: found.loginId, name: found.name, headers: result.headers }
+            const { user, headers } = await signInByLoginId(params)
+            const token = await issueToken(user.id, 'login')
+            return { token, loginId: user.loginId, name: user.name, headers }
+        },
+
+        loginSession: async (params: { loginId: string; password: string }) => {
+            const { user, headers } = await signInByLoginId(params)
+            return { user: { id: user.id, loginId: user.loginId, name: user.name, role: user.role }, headers }
         },
 
         rotateToken: async (userId: string, label: string) => {

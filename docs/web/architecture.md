@@ -116,9 +116,30 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 | GET | `/api/fe/players/[playerId]/recent` | 플레이어 최근 플레이(차트 조인) | 없음 | `player-recent:{id}` |
 | GET | `/api/fe/players/[playerId]/stats` | 플레이어 통계(램프 분포·레벨별 EX·플레이수) | 없음 | `player-stats:{id}` |
 | GET | `/api/fe/stats/summary` | 서버 통계(차트/플레이어/제출 수) | 없음 | `stats-summary` |
+| POST | `/api/fe/auth/login` | 웹 로그인(`{ id, password }` → 세션 쿠키만 세팅하고 `{ user: { id, login_id, name, role } }`. API 토큰은 만들지 않음. 5/min/IP, 게임용 `/api/auth/login` 과 같은 버킷) | 없음 | — |
+| POST | `/api/fe/auth/register` | 웹 가입(`{ id, email, password, name? }` → 201, 세션 쿠키만 세팅하고 `{ user }`. API 토큰은 만들지 않음. 5/min/IP, `/api/auth/register` 와 같은 버킷) | 없음 | — |
 | GET/POST | `/api/fe/tokens` | 내 API 토큰 목록 / 발급 | 세션 | 없음 |
 | DELETE | `/api/fe/tokens/[tokenId]` | 토큰 폐기 | 세션·본인 | — |
 | GET | `/api/fe/me/settings` | 내 설정 blob 키 목록 | 세션 | 없음 |
+| GET | `/api/fe/tables` | 번들된 표 목록(요약) | 없음 | 정적(배포 단위) |
+| GET | `/api/fe/tables/[tableId]` | 표 머리·출처·레벨별 곡 전체 | 없음 | 정적(배포 단위) |
+| GET | `/api/fe/tables/[tableId]/entries` | 표 안의 곡 검색(q·level·page·limit) | 없음 | 정적(배포 단위) |
+| GET | `/api/fe/tables/[tableId]/records` | 내 곡별 최고 기록(`chart.md5` 로 맞춤) | 세션 | 없음 |
+| GET/POST | `/api/fe/me/folders` | 내 폴더 목록 / 만들기 | 세션 | 없음 |
+| PUT | `/api/fe/me/folders/order` | 폴더 순서 바꾸기 | 세션 | 없음 |
+| GET | `/api/fe/me/folders/containing/[md5]` | 그 곡이 든 내 폴더 id 목록 | 세션 | 없음 |
+| GET/PATCH/DELETE | `/api/fe/me/folders/[folderId]` | 폴더 상세(곡 포함) / 이름·설명 / 삭제 | 세션·본인 | 없음 |
+| POST/PUT | `/api/fe/me/folders/[folderId]/items` | 곡 넣기(최대 500) / 곡 목록 통째로 바꾸기(저장 한 번, `base_updated_at` 충돌 검사) | 세션·본인 | 없음 |
+| POST | `/api/fe/me/folders/[folderId]/items/remove` | 곡 빼기 | 세션·본인 | 없음 |
+| PUT | `/api/fe/me/folders/[folderId]/items/order` | 곡 순서 바꾸기(지금 집합과 같아야 함) | 세션·본인 | 없음 |
+| PATCH | `/api/fe/me/folders/[folderId]/items/[md5]` | 곡 메모 고치기 | 세션·본인 | 없음 |
+| POST | `/api/fe/me/folders/[folderId]/import` | 표에서 가져오기(`table_id`, `levels?`) | 세션·본인 | 없음 |
+
+네이티브 클라이언트가 읽는 폴더 경로(봉투 없음, Bearer 또는 세션, 본인만, 캐시하지 않음): `GET /api/players/[playerId]/folders`(`{ folders: [...] }`)와 `GET /api/players/[playerId]/folders/[folderId]`(폴더 하나와 `items`). 응답 필드는 `docs/plan/2026-10-14-web-user-folders.md` §7.2 와 같고 `GET /api/health` 의 `capabilities.folders` 가 `true` 다. API 토큰으로는 **읽기만** 되고 편집(`/api/fe/me/folders…`)은 세션만 받는다.
+
+표준 BMS 표 형식(루트 `src/app/tables/[tableId]/`, 봉투 없음, 무인증, `Access-Control-Allow-Origin: *`): `GET /tables/insane1/header.json`(`data_url` 은 **요청 origin 의 절대 주소**, `mirror_of` 로 원본 보관본을 밝힘)과 `GET /tables/insane1/data.json`(스냅샷 배열 그대로. `ETag` 와 304 지원, `Cache-Control: public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400`). 자료는 `web/data/tables/<id>/{header,data,source}.json` 을 **정적 import** 해서 쓰므로 DB 도 파일 추적 설정(`outputFileTracingIncludes`)도 필요 없다(서버 번들에 실린다). 표를 더하려면 폴더를 만들고 `table-snapshot.data.ts` 의 `RAW_SNAPSHOTS` 에 한 줄을 더한다. 사람이 보는 페이지(`/tables/insane1`, `bmstable` 메타는 `/tables/insane1/header.json` 루트 상대 경로)는 화면 웨이브의 몫이다.
+
+내 기록 조회(`/records`)는 표의 md5 전부(1,035개)를 `IN` 한 번으로 묻고, 기록이 있는 곡만 `{ md5: { clear, ex_score, minbp, max_combo, total_notes, played_at } }` 로 돌려준다(최대 약 150KB). 표 상세는 약 380KB(gzip 전)이고 공개 캐시(`s-maxage=3600`)다. `GET /api/fe/leaderboards/players` 는 `rank_points` 를 쓰지 않는다: `sort` 는 `cleared`(클리어한 차트 수, 기본)·`played`(플레이한 차트 수)·`plays`(제출 수)이고 옛 값 `rank_points`·`total_plays` 는 각각 `cleared`·`plays` 로 받는다. 항목에 `cleared_charts`·`played_charts` 가 더해진다(클리어 = `chart_best.clear >= Easy`).
 
 ### 1-4. 인증 방식 요약 표
 
@@ -220,7 +241,7 @@ Route Handler (app/api/**/route.ts)
 | 영역 | 소유 | 파일 |
 |---|---|---|
 | `user` · `session` · `account` · `verification` | **better-auth**(Drizzle adapter, `provider: 'mysql'`) | `npx @better-auth/cli generate` 산출 → `src/server/db/auth-schema.ts` |
-| 도메인 전부(`chart` `score` `chart_best` `replay` `api_token` `rival` `setting_blob` `course*` `difficulty_table` `table_*` `client_build` `submission_audit`) | **Drizzle 수기** | `src/server/db/schema.ts` (= `docs/backend/data-model.md` 그대로) |
+| 도메인 전부(`chart` `score` `chart_best` `replay` `api_token` `rival` `setting_blob` `course*` `difficulty_table` `table_*` `client_build` `submission_audit` `user_folder` `user_folder_item`) | **Drizzle 수기** | `src/server/db/schema.ts` (= `docs/backend/data-model.md` 그대로) |
 
 - contract-freeze D-2 결정 유지. 도메인 FK 는 `user.id` 참조.
 - `user` 의 IR 확장 필드(`rank`·`rank_points`·`total_plays`·`allow_guest_merge`·`extra`)는 better-auth `user.additionalFields` 로 선언해 어댑터가 같은 테이블에 들고 있게 한다. **가정**: data-model.md 의 `user.id varchar(64)` = 로그인 id 를 그대로 better-auth PK 로 쓴다(better-auth 기본은 생성 id). 어긋나면 §7 오픈 질문 참조.
@@ -229,8 +250,13 @@ Route Handler (app/api/**/route.ts)
 ### 3-2. 마이그레이션 운영
 
 - `drizzle.config.ts`: `schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect: 'mysql'`, `out: './drizzle'`.
-- 흐름: `bunx @better-auth/cli generate` → `bunx drizzle-kit generate` → `bunx drizzle-kit migrate`. 산출 파일은 **커밋**한다.
+- 흐름: `bunx @better-auth/cli generate` → `bun run db:generate` → `bun run db:migrate`. 산출 파일(`drizzle/*.sql` 과 **`drizzle/meta/`**)은 **커밋**한다. `meta/` 가 없으면 `db:migrate` 는 `Can't find meta/_journal.json` 으로 멈추고 `db:generate` 는 21개 테이블 전체를 다시 만든다(2026-10-14 까지 `.gitignore` 가 `/drizzle/meta` 를 막고 있었다. 이제 풀었다).
 - **`drizzle-kit push` 금지**(운영 DB 히스토리 유실). 로컬 실험도 generate/migrate 로 통일.
+- 현재 파일: `0000_smooth_cerebro`(21 테이블, 운영에 이미 적용됨) → `0001_user_folders`(`user_folder`, `user_folder_item` 과 FK 둘, 인덱스 셋).
+- **저널 `when` 의 규칙**: 설치된 drizzle-orm 0.45.2 의 마이그레이터(`mysql-core/dialect.js` 의 `migrate`)는 `__drizzle_migrations` 에서 `created_at` 이 가장 큰 행 하나만 읽고, 저널 항목의 `when` 이 그 값보다 **큰** 항목만 실행한다(해시는 비교하지 않는다. `drizzle-kit migrate` 는 `drizzle-orm/mysql2/migrator` 를 그대로 부른다). 그래서 복원한 `0000` 의 `when` 은 운영에 적용된 값(2026-09-09 근처)보다 작은 **2026-09-01 00:00 UTC(`1788220800000`)** 로 두었다. 운영에서 `0000` 은 건너뛰고 `0001`(`when` = 생성 시각)만 실행된다. 새 마이그레이션은 `db:generate` 가 현재 시각으로 `when` 을 붙이므로 항상 더 크다.
+- **운영 DB 의 상태 확인**: `bun scripts/db-migration-status.ts`(환경 변수의 DB 로 접속, 읽기 전용 쿼리만. 해시 앞 8자·`created_at`·파일별 적용 여부·새 테이블의 존재만 출력하고 접속 정보와 자료는 출력하지 않는다). 종료 코드 0 = 최신, 1 = 할 일이 있음(마이그레이션 대기 또는 기준선 필요), 2 = 접속 실패.
+- **운영이 `push` 로 만들어져 `__drizzle_migrations` 가 없다면(기준선 절차)**: `db:migrate` 를 먼저 돌리면 `0000` 의 `CREATE TABLE` 이 "이미 있음" 으로 실패한다. 상태 스크립트가 이 경우를 알려 주면 ① `bun scripts/db-migration-status.ts --baseline-sql` 의 출력(`__drizzle_migrations` 테이블 생성과 `0000` 의 해시·`when` 한 행 삽입)을 DB 에 한 번 적용하고 ② 상태를 다시 확인한 뒤 ③ `bun run db:migrate` 를 돌린다. 이 절차는 로컬 MySQL 에서 `0000` 을 직접 적용해 만든 push 상태의 DB 로 확인했다.
+- **적용 순서**: 마이그레이션을 **먼저** 운영 DB 에 적용하고 **그 다음** 웹을 배포한다. 새 테이블을 쓰는 코드가 먼저 나가면 폴더 경로가 500 을 낸다. 마이그레이션은 빌드에 포함하지 않는다(`DATABASE_URL` 은 사용자 PC 의 환경에만 준다).
 - 인덱스 우선 적용: `chart(uniq md5)`, `score uniq(user_id, chart_sha256, played_at)`(멱등), `score idx(chart_sha256, ranked, clear, ex_score)`, `chart_best PK(chart_sha256, user_id)`, `score idx(client_build_sha256)`.
 - 커넥션: `mysql2/promise` 풀 싱글톤(`src/server/db/index.ts`). Vercel Fluid Compute 특성상 인스턴스당 풀이 살아있으므로 `connectionLimit` 은 작게(**가정: 5**) 잡고 `enableKeepAlive: true`.
 
@@ -268,7 +294,11 @@ Route Handler (app/api/**/route.ts)
 | `POST /api/auth/login` · `/register` | 5/min/IP |
 | `POST /api/scores` | 60/min/token |
 | `POST /api/charts/[hash]/replays` | 10/min/token |
-| `/api/fe/*` 공개 읽기 | 120/min/IP |
+| `/api/fe/*` 공개 읽기, `/api/auth/get-session`·`sign-out` | 120/min/IP |
+| 폴더 편집(만들기·고치기·지우기·순서·곡 넣고 빼기) | 60/min/사용자 |
+| 폴더에 표 가져오기 | 10/min/사용자 |
+| 폴더 읽기(웹·클라이언트) | 120/min/사용자 |
+| 표의 내 기록 조회 | 30/min/사용자 |
 
 - 구현: `withRateLimit(key, limit, windowMs)`. **v1 은 인스턴스 로컬 카운터(LRU)** — Vercel 멀티 인스턴스에서는 best-effort. 로그인/가입만 DB 카운터(`submission_audit` 와 별개의 경량 테이블 또는 better-auth 내장 rateLimit)로 보강한다. 전역 정확성이 필요해지면 Upstash Redis 도입(§7 오픈 질문).
 - 본문 크기: `POST /api/scores` 256KB(`content-length` 헤더 + 실제 스트림 바이트 수 둘 다 검사), 리플레이 `REPLAY_MAX_BYTES`(기본 4MB) 초과 시 `413 IR_PAYLOAD_TOO_LARGE`.
@@ -278,6 +308,11 @@ Route Handler (app/api/**/route.ts)
 - 비밀번호는 better-auth 위임. 토큰은 해시 저장. 시크릿은 `getEnv()` 경유만.
 - CORS: 같은 오리진(Next 단독 서버)이라 FE 용 CORS 불필요. 네이티브 클라는 브라우저가 아니라 CORS 무관. 따라서 **CORS 미들웨어를 두지 않는다**(api-spec §10 대비 이탈 — 단독 서버 구조의 결과). 외부 오리진 요구가 생기면 `ALLOWED_ORIGINS` 로 추가.
 - 제출 검증: 토큰 user.id == body `player.id`(guest 제외), `played_at` 합리 범위(서버시각 ±7일), `chart.sha256` 형식(소문자 16진수 64자), judge 합계 ≤ `total_notes` 일관성(`empty_poor` 제외, `total_notes=0` 인 구버전 제출은 예외).
+- **보안 헤더**(`next.config.ts` 의 `headers`, 전 경로): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`(카메라·마이크·위치·결제·USB 끔). **CSP 는 프로덕션 빌드에만** 붙인다(`default-src 'self'`, `script-src`·`style-src` 에 `'unsafe-inline'`(Next 의 인라인 부트스트랩과 next-themes 스크립트가 nonce 없이 쓰임), `img-src 'self' data: blob:`, `font-src 'self' data:`, `connect-src 'self'`, `object-src 'none'`, `base-uri`·`form-action 'self'`, `frame-ancestors 'none'`). 지금 쓰는 자원은 전부 같은 출처라 깨지는 것이 없음을 프로덕션 빌드로 띄워 홈·검색·로그인에서 콘솔 위반 0건으로 확인했다. 외부 이미지·분석 스크립트를 더하면 CSP 도 함께 고친다. HSTS 는 Vercel 이 붙이는 값을 그대로 쓴다(`includeSubDomains`·`preload` 는 켜지 않았다).
+- **`/api/auth/[...all]`**: better-auth 의 기본 엔드포인트가 앱의 가입 검증과 레이트리밋을 우회하지 못하도록 **`GET /get-session` 과 `POST /sign-out` 만** 넘기고 나머지는 404 로 막는다(`route/auth.ts` 의 `ALLOWED_AUTH_HANDLER_ROUTES`). 가입·로그인은 앱의 `/api/auth/register`·`/login`(서버 측 `auth.api` 호출)만 쓴다. 필요한 경로가 늘면 그 배열에 더한다.
+- **가입 id**: 서버가 `^[a-zA-Z0-9_-]+$`(1~64자)와 예약어 `guest`(대소문자 무시) 거부를 검사한다. 로그인 스키마는 형식을 묻지 않는다(이미 있는 계정이 들어올 수 있도록).
+- **`POST /api/charts`**: 본문 64KB, 문자열은 DB 열 길이(제목류 255, `mode` 16, `url` 512), `extra` 16KB 상한. 이미 있는 차트는 **빈 필드만 채우고 값이 있는 필드를 덮어쓰지 않는다**(토큰 하나로 메타를 망가뜨릴 수 없다). `POST /api/courses/meta` 는 admin 세션만 받는다.
+- **`withErrorHandling`** 은 Next 의 내부 신호(`notFound`·`redirect`·프리렌더 중단)를 `unstable_rethrow` 로 다시 던져 삼키지 않는다.
 - `dangerouslySetInnerHTML` 사용처 없음(모든 텍스트는 React 자동 이스케이프). 차트 제목 등 외부 유래 문자열도 텍스트로만 렌더.
 
 ---
@@ -347,6 +382,8 @@ Route Handler (app/api/**/route.ts)
 | `/replays/[id]` | `replayQueryOptions(id)` | — |
 | `/settings` | 없음(전부 세션 의존) | 전 영역 |
 
+- 서버 prefetch 는 현재 **자기 공개 URL 로 HTTP fetch** 한다(6-1 의 `NEXT_PUBLIC_APP_URL` 항목에 위험과 보류 사유).
+- **차트 제목 보강(결정 M8)**: 제출이 만든 차트 행의 제목·아티스트가 비어 있어도, 그 `md5` 가 번들된 표에 있으면 **읽을 때** 표의 제목·아티스트로 채워 응답한다(DB 는 고치지 않는다 — 운영 DB 작업이 필요 없고 배포만으로 적용되며 표가 갱신되면 함께 바뀐다). 적용 범위: `GET /api/charts/[hash]`, FE 차트 리더보드의 `chart`, 차트 검색 결과, 홈·플레이어의 활동 항목. 차트 검색은 표 제목에 맞는 `md5`(최대 200개)를 `OR chart.md5 IN (…)` 으로 함께 묻는다. 레벨은 표의 레벨과 BMS `#PLAYLEVEL` 의 뜻이 달라 채우지 않는다. 앞으로는 클라이언트가 `POST /api/scores` 의 `chart.title`·`chart.artist`·`chart.level`(모두 선택, 긴 값은 자르고 이상한 값은 비움 — 제출을 막지 않는다)로 메타를 함께 올리면 공란인 행만 채운다. `read-cache` 의 `use cache` 항목은 `days` 단위라 배포 직후 옛 값이 남을 수 있다(태그 `chart:{hash}` 무효화나 만료로 갱신).
 - 서버에서는 **요청마다 `new QueryClient()`**. 클라이언트는 싱글톤(`get-query-client.ts`), `gcTime >= staleTime`(기본 `staleTime 60s`, `gcTime 10m`).
 - **빌드 시 DB 미접속 보장**: `cacheComponents` 가 켜지면 `'use cache'` 함수는 프리렌더 중 실행될 수 있다. 따라서 **DB 를 읽는 모든 페이지 영역은 `<Suspense>` 로 감싼다**(정적 셸만 프리렌더). `generateStaticParams` 를 쓰지 않고, `next build` 는 셸만 생성한다. 이 규칙은 §8 검증 게이트에서 확인한다.
 
@@ -374,6 +411,8 @@ Route Handler (app/api/**/route.ts)
 - zod `safeParse`. `DATABASE_URL` 또는 `DB_HOST`/`DB_USER`/`DB_NAME` 조합은 `resolveDatabaseUrl()` 이 판정하고, 실제 접속이 필요한 시점(`getRequiredDatabaseUrl()`)에만 throw 한다 — 빌드 시 DB 미접속 보장(§5-4)을 위해 모듈 로드 시점에 던지지 않는다.
 - **빈 문자열(`KEY=`)은 미설정으로 취급**한다(`.env` 스캐폴드가 빈 값을 담고 있어도 기본값이 적용된다).
 - `process.env` 직접 접근은 `env.ts` 안으로 한정. `NEXT_PUBLIC_*` 에는 시크릿을 넣지 않는다.
+- **환경 변수가 전혀 없어도 `bun run build` 가 성공한다**(CI 의 웹 잡이 그렇게 돈다). 요청 시점 API 를 쓰는 라우트가 빌드 중에도 실행되므로 `connection()`(또는 `request` 접근)이 `compose()` 보다 앞서야 한다(`/api/auth/me`, `/api/fe/me/settings` 에 적용). `withErrorHandling` 이 프리렌더 중단 신호를 다시 던지므로 빌드 로그에 오류 블록이 남지 않는다. 새 세션 라우트를 만들 때도 같은 순서를 지킨다.
+- `NEXT_PUBLIC_APP_URL` 은 **빌드 시점에 번들(서버와 클라이언트 모두)에 박힌다**. 서버 컴포넌트의 prefetch(`shared/lib/fetch.ts` 의 `resolveOrigin`)가 이 값으로 자기 공개 주소에 HTTP 로 다시 요청한다. 서버 쪽 호출은 Preview 에서 운영 데이터를 읽을 수 있고 `/api/fe/*` 의 IP 당 120/분 제한을 SSR 이 공유할 수 있다. 서비스 계층(`read-cache.ts` 의 `*Cached` 함수)을 직접 부르는 방식으로 바꾸려면 모든 `*-content.tsx` 와 `entities/*.query.ts` 를 고쳐야 하므로(프런트 소유) 이번 서버 웨이브에서는 구조를 유지하고 여기에 기록한다. Preview 배포는 `ignoreCommand` 로 만들지 않으므로(6-2) 운영 한 곳의 문제다.
 - `REPLAY_STORAGE=blob`은 compose가 즉시 실패시켜 잘못된 운영 구성을 드러냅니다. Vercel Blob 구현과 토큰 검증은 후속입니다.
 
 ### 6-2. Vercel
@@ -381,8 +420,50 @@ Route Handler (app/api/**/route.ts)
 - 런타임 **Node.js**(mysql2 필요, Edge 불가). Cache Components 도 Edge 미지원.
 - 리전 **`icn1`**(서울) — DB 위치가 결정되면 그 리전에 맞춘다(**가정**).
 - 도메인 `bms.hyuns.uk`. 클라 안내 문구는 `--server https://bms.hyuns.uk/api`.
-- 빌드 명령 `bun run build`, 설치 `bun install`. `drizzle-kit migrate` 는 **빌드에 포함하지 않는다**(빌드 시 DB 미접속 원칙). 마이그레이션은 별도 수동/CI 스텝.
-- `next.config.ts`는 `reactCompiler: true`, `cacheComponents: true`, `serverExternalPackages: ['mysql2']`를 모두 설정했습니다.
+- 빌드 명령 `bun run build`, 설치 `bun install`. `drizzle-kit migrate` 는 **빌드에 포함하지 않는다**(빌드 시 DB 미접속 원칙). 마이그레이션은 별도 수동/CI 스텝(3-2).
+- `next.config.ts`는 `reactCompiler: true`, `cacheComponents: true`, `serverExternalPackages: ['mysql2']`, 보안 헤더를 설정했습니다.
+- **응답 크기 한도**: Vercel Functions 의 요청·응답 본문은 최대 4.5MB(`FUNCTION_PAYLOAD_TOO_LARGE`, 공식 문서 `functions/limitations` 2026-08-24 판). 폴더 하나(2,000곡)의 최악 응답은 제목·아티스트·메모가 전부 4바이트 문자로 꽉 찬 경우 약 3.9MB 로 한도 안이지만 여유가 작다. 실제 폴더는 곡당 약 140바이트(약 280KB)다. 표 상세는 약 380KB, 표준 표 `data.json` 은 약 400KB.
+
+#### 배포 설정(결정 U5·M10)
+
+| 항목 | 값 |
+|---|---|
+| Git 연결 | `B-HS/R-BMS` |
+| Root Directory | `web` |
+| Production Branch | `dev` |
+| Preview | 만들지 않는다. `web/vercel.json` 의 `ignoreCommand` 가 프로덕션이 아닌 빌드를 건너뛴다 |
+| 변경 없는 푸시 | 같은 `ignoreCommand` 가 `web/` 이 바뀌지 않은 푸시(Rust·docs)를 건너뛴다 |
+| 시스템 환경 변수 | "Enable access to System Environment Variables" 를 켠다(`VERCEL_GIT_COMMIT_SHA` 가 `/api/version` 의 `commit` 을 채운다) |
+
+`ignoreCommand`(공식 문서: 종료 코드 0 = 빌드 건너뜀, 1 이상 = 빌드, `VERCEL_ENV` 는 빌드·런타임에 있고 `VERCEL_GIT_PREVIOUS_SHA` 는 Ignored Build Step 이 지정된 경우에만 빌드 시점에 노출되며 브랜치의 첫 배포에서는 빈 값, 명령은 Root Directory 에서 실행):
+
+```
+if [ "$VERCEL_ENV" != "production" ]; then exit 0; fi; git diff --quiet "$VERCEL_GIT_PREVIOUS_SHA" HEAD -- . || exit 1
+```
+
+로컬에서 `sh -c` 로 확인한 값: `VERCEL_ENV=preview` 0(건너뜀), 프로덕션이고 마지막 성공 SHA 가 `HEAD` 면 0, `web/` 이 바뀐 구간 1, 빈 SHA·없는 SHA(첫 배포, 얕은 클론 밖)는 `git diff` 가 128 을 내 `|| exit 1` 로 1(빌드). Vercel 위에서의 실제 동작(환경 변수 노출 시점)은 푸시로만 확인되므로 **확인하지 못함**. 건너뛴 빌드는 `CANCELED` 배포로 기록되고 빌드 슬롯은 쓴다. 내장 "Skip deployment" 토글은 JS workspace 가 있는 모노레포용이라 이 저장소(Cargo)에서는 쓸 수 없다.
+
+#### 환경 변수(값은 Vercel 에서만 입력. 저장소에 두지 않는다)
+
+| 키 | Production | 비고 |
+|---|---|---|
+| `DATABASE_URL`(또는 `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME`) | 필수 | 둘 중 하나 |
+| `BETTER_AUTH_SECRET` | 필수 | 32바이트 이상 무작위. 비우면 안 된다(코드상 선택이라 조용히 잘못 동작한다) |
+| `BETTER_AUTH_URL` | `https://bms.hyuns.uk` | 생략하면 `http://localhost:3000` |
+| `NEXT_PUBLIC_APP_URL` | `https://bms.hyuns.uk` | **빌드 시점에 박힌다**(6-1). 바꾸면 재배포 |
+| `ALLOW_GUEST` | `false`(결정 M11, 기본값) | 비로그인 판은 클라이언트에 로컬 저장 |
+| `REPLAY_MAX_BYTES` `REQUIRE_BUILD_HASH` `REPLAY_STORAGE` | 선택 | `REPLAY_STORAGE=blob` 은 미구현 |
+| `SERVER_VERSION` `SERVER_COMMIT` | 선택 | 비우면 `VERCEL_GIT_COMMIT_SHA` 앞 7자 |
+
+#### 사용자가 하는 일의 순서
+
+1. (한 번) Vercel 프로젝트에 위 연결·Root Directory·Production Branch·시스템 환경 변수를 확인하고 환경 변수를 입력한다. 이미 CLI 업로드로 배포한 프로젝트라면 Git 연결부터 한다(`/api/version` 의 `commit` 이 `null` 이면 Git 연동 배포가 아니다).
+2. 운영 DB 에 대해 `DATABASE_URL=… bun scripts/db-migration-status.ts` 로 상태를 본다(3-2).
+3. 상태가 "기준선 필요" 면 `--baseline-sql` 의 SQL 을 한 번 적용한다.
+4. `DATABASE_URL=… bun run db:migrate` 로 `0001` 을 적용하고, 상태가 "최신" 인지 다시 본다.
+5. 그 다음 `dev` 에 푸시해 배포한다. `curl https://bms.hyuns.uk/api/version` 의 `commit` 과 `curl -I https://bms.hyuns.uk/tables/insane1/header.json` 으로 확인한다.
+
+CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(`--frozen-lockfile`)·typecheck·lint·test·format:check·환경 변수 없는 build 를 돈다(`docs/ci-release.md` 6절).
 
 ---
 

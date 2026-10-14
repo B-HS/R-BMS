@@ -1,10 +1,11 @@
-import { and, asc, count, desc, eq, gte, inArray, like, or } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, like, or, sql } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { apiToken, chart, chartBest, score } from '@server/db/schema'
-import { createFeService, type ActivityRow } from '@server/service/domain/fe/fe.service'
+import { MIN_CLEAR_LAMP_ID } from '@server/dto/common'
+import { createFeService, type ActivityRow, type LeaderboardRow } from '@server/service/domain/fe/fe.service'
+import type { TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toChartRow } from '@server/compose/chart-row'
-import type { PlayerRow } from '@server/service/domain/player/player.service'
 import type { ScoreRankingRow } from '@server/service/domain/score/score.service'
 
 const activitySelection = {
@@ -50,19 +51,53 @@ const CHART_SEARCH_ORDER = {
     recent: [desc(chart.createdAt)],
 } as const
 
-export const composeFe = (db: Database) => {
-    const countPlaysFor = async (userIds: string[]) => {
-        if (userIds.length === 0) return new Map<string, number>()
-        const rows = await db.select({ userId: score.userId, value: count() }).from(score).where(inArray(score.userId, userIds)).groupBy(score.userId)
-        return new Map(rows.map((row) => [row.userId ?? '', row.value]))
-    }
+const LIKE_WILDCARDS = /[\\%_]/g
+
+const escapeLike = (value: string) => value.replace(LIKE_WILDCARDS, (character) => `\\${character}`)
+
+export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup; searchTableMd5s: (query: string) => string[] }) => {
+    const playStats = db
+        .select({ userId: score.userId, plays: count().as('plays') })
+        .from(score)
+        .where(isNotNull(score.userId))
+        .groupBy(score.userId)
+        .as('play_stats')
+
+    const bestStats = db
+        .select({
+            userId: chartBest.userId,
+            playedCharts: count().as('played_charts'),
+            clearedCharts: sql<string>`sum(case when ${chartBest.clear} >= ${MIN_CLEAR_LAMP_ID} then 1 else 0 end)`.as('cleared_charts'),
+        })
+        .from(chartBest)
+        .groupBy(chartBest.userId)
+        .as('best_stats')
+
+    const leaderboardPlays = sql`coalesce(${playStats.plays}, 0)`.mapWith(Number)
+    const leaderboardCleared = sql`coalesce(${bestStats.clearedCharts}, 0)`.mapWith(Number)
+    const leaderboardPlayed = sql`coalesce(${bestStats.playedCharts}, 0)`.mapWith(Number)
+
+    const LEADERBOARD_ORDER = {
+        cleared: [desc(leaderboardCleared), desc(leaderboardPlayed)],
+        played: [desc(leaderboardPlayed), desc(leaderboardCleared)],
+        plays: [desc(leaderboardPlays), desc(leaderboardCleared)],
+    } as const
 
     const feService = createFeService({
+        lookupTableText: deps.lookupTableText,
+        searchTableMd5s: deps.searchTableMd5s,
         db: {
-            searchCharts: async (query) => {
-                const keyword = query.q ? `%${query.q}%` : null
+            searchCharts: async (query, { extraMd5s }) => {
+                const keyword = query.q ? `%${escapeLike(query.q)}%` : null
                 const where = and(
-                    keyword ? or(like(chart.title, keyword), like(chart.artist, keyword), like(chart.genre, keyword)) : undefined,
+                    keyword
+                        ? or(
+                              like(chart.title, keyword),
+                              like(chart.artist, keyword),
+                              like(chart.genre, keyword),
+                              extraMd5s.length > 0 ? inArray(chart.md5, extraMd5s) : undefined,
+                          )
+                        : undefined,
                     query.mode ? eq(chart.mode, query.mode) : undefined,
                     query.level === undefined ? undefined : eq(chart.level, query.level),
                 )
@@ -101,7 +136,7 @@ export const composeFe = (db: Database) => {
                 return rows.map(toActivityRow)
             },
 
-            listPlayerLeaderboard: async (query) => {
+            listPlayerLeaderboard: async (query): Promise<{ rows: LeaderboardRow[]; total: number }> => {
                 const rows = await db
                     .select({
                         id: user.id,
@@ -111,17 +146,18 @@ export const composeFe = (db: Database) => {
                         rankPoints: user.rankPoints,
                         totalPlays: user.totalPlays,
                         role: user.role,
+                        plays: leaderboardPlays,
+                        clearedCharts: leaderboardCleared,
+                        playedCharts: leaderboardPlayed,
                     })
                     .from(user)
-                    .orderBy(query.sort === 'total_plays' ? desc(user.totalPlays) : desc(user.rankPoints), asc(user.loginId))
+                    .leftJoin(playStats, eq(playStats.userId, user.id))
+                    .leftJoin(bestStats, eq(bestStats.userId, user.id))
+                    .orderBy(...LEADERBOARD_ORDER[query.sort], asc(user.loginId))
                     .limit(query.limit)
                     .offset((query.page - 1) * query.limit)
-                const plays = await countPlaysFor(rows.map((row: PlayerRow) => row.id))
                 const [total] = await db.select({ value: count() }).from(user)
-                return {
-                    rows: rows.map((row: PlayerRow) => ({ ...row, plays: plays.get(row.id) ?? 0 })),
-                    total: total?.value ?? 0,
-                }
+                return { rows, total: total?.value ?? 0 }
             },
 
             countLampsByUser: async (userId) => {

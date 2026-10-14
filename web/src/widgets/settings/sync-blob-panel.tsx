@@ -16,7 +16,7 @@ import type { SettingBlobKey } from '@entities/setting.type'
 export const SyncBlobPanel: FC<{ playerId: string }> = ({ playerId }) => {
     const [selectedKey, setSelectedKey] = useState('')
 
-    const { data, isLoading, isError } = useSettingKeyList()
+    const { data, isLoading, isError, isFetching, refetch } = useSettingKeyList()
     const blob = useSettingBlob(playerId, selectedKey)
 
     const rows = data ?? []
@@ -43,7 +43,9 @@ export const SyncBlobPanel: FC<{ playerId: string }> = ({ playerId }) => {
         <>
             <PanelCard title='동기화 blob' contentClassName='flex flex-col gap-2'>
                 {isLoading && <TableSkeleton rows={3} />}
-                {!isLoading && isError && <LoadErrorState title='설정 목록을 불러오지 못했습니다' />}
+                {!isLoading && isError && (
+                    <LoadErrorState title='설정 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+                )}
                 {!isLoading && !isError && rows.length === 0 && (
                     <EmptyState title='동기화된 설정이 없습니다' description='클라이언트에서 설정을 업로드하면 여기에 표시됩니다.' />
                 )}
@@ -72,7 +74,9 @@ export const SyncBlobPanel: FC<{ playerId: string }> = ({ playerId }) => {
                     }
                     contentClassName='flex flex-col gap-2'>
                     {blob.isLoading && <TableSkeleton rows={5} />}
-                    {!blob.isLoading && blob.isError && <LoadErrorState title='설정 내용을 불러오지 못했습니다' />}
+                    {!blob.isLoading && blob.isError && (
+                        <LoadErrorState title='설정 내용을 불러오지 못했습니다' isRetrying={blob.isFetching} onRetry={() => void blob.refetch()} />
+                    )}
                     {!blob.isLoading && !blob.isError && blob.data && (
                         <pre className='bg-muted max-h-96 overflow-auto p-2 font-mono text-xs whitespace-pre'>{blob.data.content}</pre>
                     )}

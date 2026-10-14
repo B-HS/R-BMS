@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@shared/ui/table'
 import { cn } from '@shared/lib/cn'
 
+const HIDE_BELOW_CLASS = { sm: 'hidden sm:table-cell', md: 'hidden md:table-cell', lg: 'hidden lg:table-cell' }
+
 export type DataTableColumn<TRow> = {
     key: string
     label: string
@@ -9,6 +11,7 @@ export type DataTableColumn<TRow> = {
     align?: 'left' | 'right'
     flex?: boolean
     mono?: boolean
+    hideBelow?: keyof typeof HIDE_BELOW_CLASS
     cell: (row: TRow, index: number) => ReactNode
 }
 
@@ -29,7 +32,11 @@ export const DataTable = <TRow,>({ columns, rows, rowKey, rowMuted, caption }: D
                     <TableHead
                         key={column.key}
                         style={column.width ? { width: `${column.width}px` } : undefined}
-                        className={cn('text-muted-foreground h-auto p-2 font-medium', column.align === 'right' && 'text-right tabular-nums')}>
+                        className={cn(
+                            'text-muted-foreground h-auto p-2 font-medium',
+                            column.align === 'right' && 'text-right tabular-nums',
+                            column.hideBelow && HIDE_BELOW_CLASS[column.hideBelow],
+                        )}>
                         {column.label}
                     </TableHead>
                 ))}
@@ -45,6 +52,7 @@ export const DataTable = <TRow,>({ columns, rows, rowKey, rowMuted, caption }: D
                                 column.align === 'right' && 'text-right tabular-nums',
                                 column.mono && 'font-mono',
                                 column.flex && 'max-w-0 overflow-hidden text-ellipsis',
+                                column.hideBelow && HIDE_BELOW_CLASS[column.hideBelow],
                             )}>
                             {column.cell(row, index)}
                         </TableCell>

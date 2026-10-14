@@ -28,4 +28,7 @@ export type ActivityRow = {
     chart: ActivityChartRef
 }
 
-export type PlayerLeaderboardRow = PlayerProfile
+export type PlayerLeaderboardRow = PlayerProfile & {
+    cleared_charts: number
+    played_charts: number
+}

@@ -13,7 +13,7 @@ export const PanelCard: FC<PanelCardProps> = ({ title, action, children, content
     <Card size='sm' className={cn('bg-card ring-0', className)}>
         {title && (
             <CardHeader className='flex flex-wrap items-center justify-between gap-2'>
-                <h2 className='text-card-foreground text-sm font-medium'>{title}</h2>
+                <h2 className='text-card-foreground text-sm font-semibold'>{title}</h2>
                 {action && <CardAction className='row-start-auto self-auto'>{action}</CardAction>}
             </CardHeader>
         )}

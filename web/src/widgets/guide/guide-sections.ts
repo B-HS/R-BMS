@@ -15,7 +15,7 @@ export type GuideSection = {
 }
 
 export const GUIDE_INTRO =
-    'rbms 플레이어는 게임 안에서 IR 연동을 전부 끝낼 수 있습니다. 곡 선택 화면에서 Tab 을 눌러 SETTINGS 를 열고 NETWORK 탭으로 이동하면 서버 주소, 계정, 동기화, 라이벌을 모두 설정할 수 있습니다.'
+    'R-BMS 플레이어는 게임 안에서 IR 연동을 전부 끝낼 수 있습니다. 곡 선택 화면에서 Tab 을 눌러 SETTINGS 를 열고 NETWORK 탭으로 이동하면 서버 주소, 계정, 동기화, 라이벌을 모두 설정할 수 있습니다.'
 
 export const GUIDE_SECTIONS: GuideSection[] = [
     {

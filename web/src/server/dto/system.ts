@@ -8,6 +8,7 @@ export const serverCapabilitiesSchema = z.object({
     replays: z.boolean().default(false),
     tables: z.boolean().default(false),
     settings_sync: z.boolean().default(false),
+    folders: z.boolean().default(false),
     accounts: z.boolean().default(false),
     lr2ir_compat: z.boolean().default(false),
 })

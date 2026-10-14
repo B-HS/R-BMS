@@ -2,59 +2,53 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
-import { PanelCard } from '@features/shell/panel-card'
-import { PanelFootnote } from '@features/shell/panel-footnote'
-import { DataTable, type DataTableColumn } from '@features/table/data-table'
-import { LampBadge } from '@features/badge/lamp-badge'
-import { EmptyState } from '@features/state/empty-state'
-import { LoadErrorState } from '@features/state/load-error-state'
-import { TableSkeleton } from '@features/state/table-skeleton'
+import { DashboardPanel } from '@features/dashboard/dashboard-panel'
+import { DashboardPanelEmpty } from '@features/dashboard/dashboard-panel-empty'
+import { DashboardPanelError } from '@features/dashboard/dashboard-panel-error'
+import { DashboardPanelLoading } from '@features/dashboard/dashboard-panel-loading'
+import { ScoreRow } from '@features/score/score-row'
 import { useActivityRecent } from '@entities/stats.query'
-import type { ActivityRow } from '@entities/stats.type'
-import { formatCount, formatDateTime } from '@shared/lib/format'
+import { DASHBOARD_FULL_PANEL_CLASS_NAME } from '@shared/constants/dashboard'
+import { formatChartTitle } from '@shared/lib/format'
+import { Button } from '@shared/ui/button'
 
 const RECENT_LIMIT = 20
 
-const COLUMNS: DataTableColumn<ActivityRow>[] = [
-    { key: 'played_at', label: '시각', width: 160, mono: true, cell: (row) => formatDateTime(row.played_at) },
-    {
-        key: 'player',
-        label: '플레이어',
-        width: 112,
-        cell: (row) => (
-            <Link href={`/players/${row.player.id}`} className='hover:underline'>
-                {row.player_name}
-            </Link>
-        ),
-    },
-    {
-        key: 'title',
-        label: '차트',
-        flex: true,
-        cell: (row) => (
-            <Link href={`/charts/${row.chart.sha256}`} className='hover:underline'>
-                {row.chart.title}
-            </Link>
-        ),
-    },
-    { key: 'level', label: '레벨', width: 64, align: 'right', cell: (row) => row.chart.level ?? '—' },
-    { key: 'clear', label: '램프', width: 128, cell: (row) => <LampBadge clear={row.clear} /> },
-    { key: 'ex_score', label: 'EX', width: 96, align: 'right', cell: (row) => formatCount(row.ex_score) },
-    { key: 'minbp', label: 'BP', width: 64, align: 'right', cell: (row) => formatCount(row.minbp) },
-]
-
 export const RecentActivityPanel: FC = () => {
-    const { data, isLoading, isError } = useActivityRecent({ limit: RECENT_LIMIT })
+    const { data, isLoading, isError, isFetching, refetch } = useActivityRecent({ limit: RECENT_LIMIT })
+    const rows = data ?? []
 
     return (
-        <PanelCard title='최근 활동' contentClassName='flex flex-col gap-2'>
-            {isLoading && <TableSkeleton />}
-            {!isLoading && isError && <LoadErrorState title='최근 활동을 불러오지 못했습니다' />}
-            {!isLoading && !isError && (data?.length ?? 0) === 0 && <EmptyState title='최근 제출이 없습니다' />}
-            {!isLoading && !isError && (data?.length ?? 0) > 0 && (
-                <DataTable columns={COLUMNS} rows={data ?? []} rowKey={(row) => row.score_id} caption='최근 제출 목록' />
+        <DashboardPanel title='최근 활동' className={DASHBOARD_FULL_PANEL_CLASS_NAME} bodyClassName='px-0 pb-0'>
+            {isLoading && <DashboardPanelLoading label='최근 활동 불러오는 중' className='px-3 pb-3' />}
+            {!isLoading && isError && (
+                <DashboardPanelError message='최근 활동을 불러오지 못했습니다.' isRetrying={isFetching} onRetry={() => void refetch()} />
             )}
-            <PanelFootnote>최근 활동에는 ranked 제출만 표시됩니다.</PanelFootnote>
-        </PanelCard>
+            {!isLoading && !isError && rows.length === 0 && (
+                <DashboardPanelEmpty message='아직 올라온 기록이 없습니다.'>
+                    <Button asChild variant='outline' size='xs'>
+                        <Link href='/guide'>가이드 보기</Link>
+                    </Button>
+                </DashboardPanelEmpty>
+            )}
+            {!isLoading && !isError && rows.length > 0 && (
+                <ul aria-label='최근 제출 목록' className='border-border flex flex-col border-t'>
+                    {rows.map((row) => (
+                        <ScoreRow
+                            key={row.score_id}
+                            href={`/charts/${row.chart.sha256}`}
+                            title={formatChartTitle(row.chart)}
+                            subtitle={row.player_name}
+                            subtitleHref={`/players/${encodeURIComponent(row.player.id)}`}
+                            lamp={row.clear}
+                            exScore={row.ex_score}
+                            minBp={row.minbp}
+                            playedAt={row.played_at}
+                        />
+                    ))}
+                </ul>
+            )}
+            <p className='text-muted-foreground px-3 py-2 text-xs'>순위에 반영되는 제출만 표시됩니다.</p>
+        </DashboardPanel>
     )
 }

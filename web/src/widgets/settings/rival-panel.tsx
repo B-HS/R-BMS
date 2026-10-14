@@ -18,7 +18,7 @@ import type { PlayerProfile } from '@entities/player.type'
 export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
     const [draft, setDraft] = useState('')
 
-    const { data, isLoading, isError } = useRivalList(playerId)
+    const { data, isLoading, isError, isFetching, refetch } = useRivalList(playerId)
     const save = useSaveRivals(playerId)
 
     const rows = data ?? []
@@ -59,7 +59,6 @@ export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
         },
         { key: 'id', label: 'ID', width: 128, mono: true, cell: (row) => row.id },
         { key: 'total_plays', label: '플레이', width: 96, align: 'right', cell: (row) => formatCount(row.total_plays) },
-        { key: 'rank_points', label: '랭크 포인트', width: 112, align: 'right', cell: (row) => row.rank_points.toFixed(2) },
         {
             key: 'action',
             label: '',
@@ -96,7 +95,9 @@ export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
                 </Button>
             </div>
             {isLoading && <TableSkeleton rows={3} />}
-            {!isLoading && isError && <LoadErrorState title='라이벌 목록을 불러오지 못했습니다' />}
+            {!isLoading && isError && (
+                <LoadErrorState title='라이벌 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+            )}
             {!isLoading && !isError && rows.length === 0 && <EmptyState title='등록한 라이벌이 없습니다' />}
             {!isLoading && !isError && rows.length > 0 && <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption='라이벌 목록' />}
             <PanelFootnote>라이벌은 클라이언트 랭킹 조회에서 `rival_of` 필터로 쓰입니다.</PanelFootnote>

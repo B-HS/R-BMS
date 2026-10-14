@@ -15,6 +15,7 @@
 | courses / tables | `/api/courses/**`, `/api/tables/**` | 코스 결과·메타·ranking/best 및 난이도표 조회/관리 구현 |
 | FE | `/api/fe/**`, `(app)` 페이지 | 검색, 리더보드, 활동, 통계, 토큰, settings, replay viewer 조회 경로 구현 |
 | admin | `/api/admin/builds` | 클라이언트 빌드 allowlist 조회/등록 구현 |
+| folders / tables(번들) | `/api/fe/me/folders/**`, `/api/players/[playerId]/folders/**`, `/api/fe/tables/**`, `/tables/[tableId]/{header,data}.json` | 사용자 폴더(웹 편집·클라이언트 읽기), 번들 표의 표준 형식·검색·내 기록 구현 (웨이브 17B-1) |
 
 ## 현재 제약과 후속
 

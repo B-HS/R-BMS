@@ -25,3 +25,10 @@ export const formatDateTime = (epochMs: number) => {
 
 export const formatPercent = (numerator: number, denominator: number) =>
     denominator === 0 ? '0.00%' : `${((numerator / denominator) * 100).toFixed(2)}%`
+
+const EX_SCORE_PER_NOTE = 2
+
+export const getMaxExScore = (totalNotes: number) => totalNotes * EX_SCORE_PER_NOTE
+
+/** Falls back to a hash preview so a chart without uploaded metadata never renders as an empty link. */
+export const formatChartTitle = (chart: { title: string; sha256: string }) => chart.title.trim() || `제목 미등록 ${formatHash(chart.sha256)}`

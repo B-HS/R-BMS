@@ -1,5 +1,5 @@
-import { clearLampFromId } from '@server/dto/common'
-import { toChartMeta, type ChartRow } from '@server/service/domain/chart/chart.service'
+import { MIN_CLEAR_LAMP_ID, clearLampFromId } from '@server/dto/common'
+import { fillBlankText, toChartMeta, type ChartRow, type TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toPlayerProfile, type PlayerRow } from '@server/service/domain/player/player.service'
 import type { ChartSearchQuery, PlayerLeaderboardQuery } from '@server/dto/fe'
 
@@ -24,6 +24,8 @@ export type LampCountRow = {
     count: number
 }
 
+export type LeaderboardRow = PlayerRow & { plays: number; clearedCharts: number; playedCharts: number }
+
 export type TokenRow = {
     id: string
     label: string
@@ -32,17 +34,17 @@ export type TokenRow = {
 }
 
 export type FeServiceDb = {
-    searchCharts: (query: ChartSearchQuery) => Promise<{ rows: ChartRow[]; total: number }>
+    searchCharts: (query: ChartSearchQuery, options: { extraMd5s: string[] }) => Promise<{ rows: ChartRow[]; total: number }>
     listRecentActivity: (limit: number) => Promise<ActivityRow[]>
     listPlayerRecent: (params: { userId: string; limit: number }) => Promise<ActivityRow[]>
-    listPlayerLeaderboard: (query: PlayerLeaderboardQuery) => Promise<{ rows: (PlayerRow & { plays: number })[]; total: number }>
+    listPlayerLeaderboard: (query: PlayerLeaderboardQuery) => Promise<{ rows: LeaderboardRow[]; total: number }>
     countLampsByUser: (userId: string) => Promise<LampCountRow[]>
     summarise: () => Promise<{ charts: number; players: number; scores: number }>
     listTokens: (userId: string) => Promise<TokenRow[]>
     deleteToken: (params: { userId: string; tokenId: string }) => Promise<boolean>
 }
 
-export const toActivityItem = (row: ActivityRow) => ({
+const buildActivityItem = (row: ActivityRow) => ({
     score_id: row.scoreId,
     player: { id: row.loginId ?? '' },
     player_name: row.playerName ?? '',
@@ -54,28 +56,41 @@ export const toActivityItem = (row: ActivityRow) => ({
     chart: { md5: row.chartMd5 ?? '', sha256: row.chartSha256, title: row.title, artist: row.artist, level: row.level },
 })
 
+export const toActivityItem = (row: ActivityRow, lookupTableText?: TableTextLookup) => {
+    const text = fillBlankText({ md5: row.chartMd5 ?? '', title: row.title, artist: row.artist }, lookupTableText)
+    return buildActivityItem({ ...row, title: text.title, artist: text.artist })
+}
+
 export const toLampDistribution = (rows: LampCountRow[]) => rows.map((row) => ({ clear: clearLampFromId(row.clear), count: row.count }))
 
-export const createFeService = (deps: { db: FeServiceDb }) => ({
+export const toLeaderboardItem = (row: LeaderboardRow) => ({
+    ...toPlayerProfile(row, row.plays),
+    cleared_charts: row.clearedCharts,
+    played_charts: row.playedCharts,
+})
+
+export const createFeService = (deps: { db: FeServiceDb; lookupTableText?: TableTextLookup; searchTableMd5s?: (query: string) => string[] }) => ({
     searchCharts: async (query: ChartSearchQuery) => {
-        const { rows, total } = await deps.db.searchCharts(query)
-        return { items: rows.map(toChartMeta), total }
+        const extraMd5s = query.q && deps.searchTableMd5s ? deps.searchTableMd5s(query.q) : []
+        const { rows, total } = await deps.db.searchCharts(query, { extraMd5s })
+        return { items: rows.map((row) => fillBlankText(toChartMeta(row), deps.lookupTableText)), total }
     },
 
-    recentActivity: async (limit: number) => (await deps.db.listRecentActivity(limit)).map(toActivityItem),
+    recentActivity: async (limit: number) => (await deps.db.listRecentActivity(limit)).map((row) => toActivityItem(row, deps.lookupTableText)),
 
-    playerRecent: async (params: { userId: string; limit: number }) => (await deps.db.listPlayerRecent(params)).map(toActivityItem),
+    playerRecent: async (params: { userId: string; limit: number }) =>
+        (await deps.db.listPlayerRecent(params)).map((row) => toActivityItem(row, deps.lookupTableText)),
 
     playerLeaderboard: async (query: PlayerLeaderboardQuery) => {
         const { rows, total } = await deps.db.listPlayerLeaderboard(query)
-        return { items: rows.map((row) => toPlayerProfile(row, row.plays)), total }
+        return { items: rows.map(toLeaderboardItem), total }
     },
 
     playerStats: async (params: { userId: string; totalPlays: number }) => {
         const lamps = await deps.db.countLampsByUser(params.userId)
         return {
             total_plays: params.totalPlays,
-            cleared: lamps.filter((row) => row.clear >= 4).reduce((sum, row) => sum + row.count, 0),
+            cleared: lamps.filter((row) => row.clear >= MIN_CLEAR_LAMP_ID).reduce((sum, row) => sum + row.count, 0),
             lamps: toLampDistribution(lamps),
         }
     },

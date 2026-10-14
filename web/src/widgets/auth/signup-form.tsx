@@ -40,8 +40,8 @@ export const SignupForm: FC = () => {
         register.mutate(
             { id: values.id, password: values.password, email: values.email, name: values.name },
             {
-                onSuccess: (result) => {
-                    toast.success(`${result.name} 님으로 가입했습니다.`)
+                onSuccess: (user) => {
+                    toast.success(`${user.name} 님으로 가입했습니다.`)
                     router.replace('/settings')
                     router.refresh()
                 },
@@ -52,11 +52,7 @@ export const SignupForm: FC = () => {
     const errors = form.formState.errors
 
     return (
-        <form onSubmit={submit} className='flex w-full max-w-sm flex-col gap-4' noValidate>
-            <div className='flex flex-col gap-1'>
-                <h1 className='text-xl font-extrabold tracking-tight'>가입</h1>
-                <p className='text-muted-foreground text-sm'>rbms IR 계정을 만듭니다. 아이디는 IR 플레이어 ID 로 사용됩니다.</p>
-            </div>
+        <form onSubmit={submit} className='flex flex-col gap-4' noValidate>
             <Field data-invalid={errors.id ? true : undefined}>
                 <FieldLabel htmlFor='signup-id'>아이디</FieldLabel>
                 <Input id='signup-id' autoComplete='username' aria-invalid={errors.id ? true : undefined} {...form.register('id')} />
@@ -100,16 +96,19 @@ export const SignupForm: FC = () => {
                 />
                 {errors.passwordConfirm && <FieldError errors={[errors.passwordConfirm]} />}
             </Field>
-            <Button type='submit' disabled={form.formState.isSubmitting || register.isPending}>
-                가입
-            </Button>
-            <p className='text-muted-foreground text-xs'>
-                이미 계정이 있다면{' '}
-                <Link href='/login' className='underline'>
-                    로그인
-                </Link>
-                하세요.
-            </p>
+            {register.isError && (
+                <p role='alert' className='text-destructive text-xs'>
+                    {register.error.message}
+                </p>
+            )}
+            <div className='flex flex-col gap-1'>
+                <Button type='submit' className='w-full' disabled={form.formState.isSubmitting || register.isPending}>
+                    가입
+                </Button>
+                <Button asChild variant='ghost' className='w-full'>
+                    <Link href='/login'>이미 계정이 있으신가요? 로그인</Link>
+                </Button>
+            </div>
         </form>
     )
 }

@@ -20,6 +20,7 @@ export type ScoreRankingRow = {
     lntype: number
     option: number
     totalNotes: number
+    replayId?: string | null
     judge: JudgeBreakdownInput | null
 }
 
@@ -162,7 +163,7 @@ export const toScoreRecord = (row: ScoreRankingRow, rank: number | null): ScoreR
     option: row.option,
     total_notes: row.totalNotes,
     judge: row.judge,
-    extra: {},
+    extra: row.replayId ? { replay_id: row.replayId } : {},
 })
 
 export const isPlayedAtPlausible = (playedAt: number, now: number) => playedAt - now <= PLAYED_AT_FUTURE_TOLERANCE_MS

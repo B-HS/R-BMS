@@ -1,4 +1,4 @@
-import { getEnv } from '@server/lib/env'
+import { getEnv, type Env } from '@server/lib/env'
 import type { ServerCapabilitiesOutput, ServerInfoOutput } from '@server/dto/system'
 
 const COMMIT_SHORT_LENGTH = 7
@@ -16,22 +16,20 @@ export const SERVER_CAPABILITIES: ServerCapabilitiesOutput = {
     replays: true,
     tables: true,
     settings_sync: true,
+    folders: true,
     accounts: true,
     lr2ir_compat: false,
 }
 
-export const getServerInfo = (): ServerInfoOutput => ({
+export const getServerInfo = (env: Env = getEnv()): ServerInfoOutput => ({
     name: SERVER_NAME,
-    version: getEnv().SERVER_VERSION ?? SERVER_VERSION,
+    version: env.SERVER_VERSION ?? SERVER_VERSION,
     ir_compat: IR_COMPAT,
     capabilities: SERVER_CAPABILITIES,
 })
 
-export const getVersionInfo = () => {
-    const env = getEnv()
-    return {
-        api_version: IR_API_VERSION,
-        server: env.SERVER_VERSION ?? SERVER_VERSION,
-        commit: env.SERVER_COMMIT ?? env.VERCEL_GIT_COMMIT_SHA?.slice(0, COMMIT_SHORT_LENGTH) ?? null,
-    }
-}
+export const getVersionInfo = (env: Env = getEnv()) => ({
+    api_version: IR_API_VERSION,
+    server: env.SERVER_VERSION ?? SERVER_VERSION,
+    commit: env.SERVER_COMMIT ?? env.VERCEL_GIT_COMMIT_SHA?.slice(0, COMMIT_SHORT_LENGTH) ?? null,
+})

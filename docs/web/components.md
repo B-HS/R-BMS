@@ -9,31 +9,18 @@
 
 ## 1. Surface 배치
 
-design.md §1-2의 두 Surface는 시각 토큰을 분리한다. 단일 `globals.css` 안에서 라우트 그룹의 `data-surface` 스코프로 그 경계를 적용한다.
+design.md §1-2 대로 Surface 는 하나다(2026-10-14, T1). 모든 화면이 루트 `app/layout.tsx` 의 `AppShell` 안에 있고, `data-surface` 속성과 `[data-surface='public']` 델타는 지웠다. 라우트 그룹 `(app)`·`(public)` 은 폴더 정리용으로만 남아 있고 레이아웃 파일은 없다.
 
-| Surface | 라우트 그룹 | 화면 | radius | 그림자 | 배경 티어 | `--warning` |
-|---|---|---|---|---|---|---|
-| **A — 앱** | `(app)` | 홈·검색·차트·플레이어·리더보드·표·코스·리플레이·설정·관리 | `0rem` | none(오버레이만) | 3(sidebar/body/card) | 있음 |
-| **B — 공개** | `(public)` | 로그인·가입·가이드 | `0.375rem` | `0 0 7px` 글로우 | 1(`oklch(1 0 0)`) | 없음 |
-
-### 1-1. 토큰 스코프 — `data-surface` 속성 방식
-
-**결정: CSS 파일 분리가 아니라 루트 `data-surface` 속성으로 스코프한다.**
-
-- 이유: Next App Router 는 하나의 `<html>` 문서에서 라우트 그룹만 바꾸므로, 별도 스타일시트 두 벌을 로드/언로드할 수 없다. 반면 design.md 의 두 토큰 세트는 **같은 이름의 변수에 다른 값**을 넣는 관계라 CSS 변수 스코프로 완전히 재현된다.
-- 구조:
-  - `src/app/globals.css` 에 `@import 'tailwindcss'` + `@custom-variant dark (&:is(.dark *, [data-theme='dark'] *))` + design.md **§16-1 블록 전체**를 `:root` 에 그대로 이식(Surface A 가 기본).
-  - 이어서 design.md **§16-2 의 델타만** `[data-surface='public']` 선택자로 재정의(`--radius`, `--shadow-*`, 배경 1티어, `--warning` 제거는 값 미사용으로 대체).
-  - `(app)/layout.tsx` 는 `data-surface="app"`, `(public)/layout.tsx` 는 `data-surface="public"` 를 각 그룹 최상위 `div` 에 부여.
-- `@theme` 의 `--color-*` 는 Tailwind 유틸리티를 생성하고, 실제 값은 `:root` / `[data-surface]` 의 CSS 변수를 따르므로 유틸리티 클래스(`bg-card` 등)는 두 Surface 에서 그대로 동작한다.
-- **§16-1 의 radius 규칙 필수**: 네 파생 radius 를 전부 `var(--radius)` 에 핀한다. `calc(var(--radius) - 4px)` 는 `--radius: 0rem` 에서 `-4px` 가 되어 CSS 가 깨진다(design.md §6-3).
+| 화면 | radius | 그림자 | 배경 티어 |
+|---|---|---|---|
+| 전부(홈·검색·순위·차트·플레이어·표·코스·리플레이·설정·관리·로그인·가입·가이드·404) | `0rem` | none(오버레이만) | 3(sidebar/body/card) |
 
 ### 1-2. 다크모드
 
 - 메커니즘: 루트에 `.dark` 클래스. `[data-theme='dark']` 는 interop 별칭(§16-1 `@custom-variant`).
-- 테마 적용은 `Providers`의 `next-themes` `ThemeProvider`가 담당합니다. 설정은 `attribute={['class', 'data-theme']}`, `defaultTheme='system'`, `enableSystem`, `storageKey='rbms-theme'`입니다.
+- 테마 적용은 `Providers`의 `next-themes` `ThemeProvider`가 담당합니다. 설정은 `attribute={['class', 'data-theme']}`, `defaultTheme='dark'`, `enableSystem={false}`, `disableTransitionOnChange`, `storageKey='rbms-theme'`입니다. 기본은 다크이고 사이드바 바닥의 버튼으로 라이트를 고릅니다(T2).
 - next-themes가 자체 주입하는 pre-paint 처리를 사용합니다. `app/layout.tsx`에 수기 인라인 스크립트를 추가하지 않습니다.
-- `Toaster`와 `TooltipProvider`는 같은 `ThemeProvider` 하위에 있어 모든 Surface가 같은 테마 상태를 사용합니다.
+- `AppToaster`(`shared/providers/app-toaster.tsx`)와 `TooltipProvider`는 같은 `ThemeProvider` 하위에 있어 모든 Surface가 같은 테마 상태를 사용합니다.
 
 ---
 
@@ -95,7 +82,7 @@ design.md §10 의 13개 주 아키타입 중 채택분. 전부 `features/`(순�
 
 | 컴포넌트 | 사용 화면 | design.md 근거 | 커스텀 |
 |---|---|---|---|
-| `sidebar` | `(app)` 좌측 레일 | §8-1, §10-11 | 적용 — 우측 border 제거(변형 특이성), 항목 h-9, 트리거 size-8 |
+| `sidebar` | 셸 좌측 사이드바 | §8-1, §10-11 | 적용(2026-10-14, iidx-rank 수정본을 옮김: 안쪽 스크롤 `ScrollContainer`, 문구 한국어) — 우측 border 제거, 항목 h-9, 트리거 size-8 |
 | `card` | 모든 Panel Card | §10-1 | 적용 — border 0 · radius 0 · py-3/px-3, 제목 `h2` |
 | `table` | 랭킹·검색·최근기록·토큰 | §10-3 | 소폭(우측정렬 `tabular-nums`) |
 | `button` | 전역 | §14 | 없음 |
@@ -106,7 +93,7 @@ design.md §10 의 13개 주 아키타입 중 채택분. 전부 `features/`(순�
 | `separator` | 레일·패널 내부 구분 | §6-4 | 없음 |
 | `scroll-area` | 콘텐츠 컬럼·필터 패널 | §8-1 | 없음 |
 | `tooltip` | 판정 약어(EPG/LGR…) 설명 | §10-13 | 없음. **native `title=` 금지** |
-| `sonner` | 제출·토큰 발급 토스트 | §13, §14 | 적용 — 루트 `ThemeProvider` 하위 `Toaster`가 테마를 공유 |
+| `sonner` | 제출·토큰 발급 토스트 | §13, §14 | 적용 — shadcn `sonner.tsx` 는 지우고 `shared/providers/app-toaster.tsx` 가 오른쪽 아래·반경 0·왼쪽 4px 선으로 대체 |
 | `sheet` | 모바일 사이드바 | §8-1 | 없음(288px) |
 | `select` | 정렬·모드 선택 | §11-F | 없음 |
 | `tabs` | `/settings`, 신호/메트릭 탭 | §11-D | 없음 |
@@ -142,21 +129,25 @@ design.md §10 의 13개 주 아키타입 중 채택분. 전부 `features/`(순�
 
 design.md §10-5 는 상태 배지의 **시맨틱 색 시스템**을 규정한다. BMS 도메인 값을 여기에 배정한다.
 
-### 5-1. ClearLamp(11종) → 배지 시맨틱
+### 5-1. ClearLamp(11종) → 스킨 색 토큰 (2026-10-14 변경, T3)
 
-| 램프 | 의미 | 토큰 |
-|---|---|---|
-| `Max` · `Perfect` | 최상 | `--color-chart-1`(전용 강조) |
-| `FullCombo` | 최상 | `--color-chart-2` |
-| `ExHard` | 상 | `--color-chart-3` |
-| `Hard` | 상 | `--color-chart-4` |
-| `Normal` | 중 | `--color-chart-5` |
-| `Easy` | 중 | `--color-muted-foreground` 계열 outline |
-| `LightAssistEasy` · `AssistEasy` | 어시스트 | outline + muted (unranked 뉘앙스) |
-| `Failed` | 실패 | `--color-destructive` |
-| `NoPlay` | 없음 | muted outline |
+램프는 배지가 아니라 "견본 + 이름"(`features/lamp/lamp-label.tsx`), 행 왼쪽 5px 띠(`features/lamp/lamp-strip.tsx`), 누적 막대(`features/lamp/lamp-stack-bar.tsx`)로 그린다. 색은 기본 스킨 `theme.lua` 값이며 `shared/constants/clear-lamp.ts` 의 `LAMP_BACKGROUND` 가 키 → `var(--rbms-lamp-…)` 를 준다. 글자는 항상 `text-foreground`.
 
-> **가정**: chart-1~5 는 원래 시리즈 색이지 상태 색이 아니다. 램프가 11단계라 semantic 5종(success/warning/destructive/info/muted)으로는 부족해 시리즈 팔레트를 상태 인코딩에 전용한다. 다크에서는 §4-4의 재바인딩 뒤에도 명도 대비를 확인한다. 색만으로 구분하지 않도록 **배지 텍스트에 램프명을 항상 표기**한다(§7-4 접근성).
+| 램프 | 표시 이름 | 토큰 | 값 |
+|---|---|---|---|
+| `NoPlay` | NO PLAY | `--rbms-lamp-noplay` | `#444444` |
+| `Failed` | FAILED | `--rbms-lamp-failed` | `#ff0000` |
+| `AssistEasy` | ASSIST | `--rbms-lamp-assist` | `#ff63fd` |
+| `LightAssistEasy` | L-ASSIST | `--rbms-lamp-light-assist` | `#6563ff` |
+| `Easy` | EASY | `--rbms-lamp-easy` | `#00ff24` |
+| `Normal` | CLEAR | `--rbms-lamp-normal` | `#ffbb00` |
+| `Hard` | HARD | `--rbms-lamp-hard` | `#dfdfdf` |
+| `ExHard` | EX HARD | `--rbms-lamp-exhard` | `#ff6e6e` |
+| `FullCombo` | FULL COMBO | `--rbms-lamp-fullcombo` | `#00dfff` |
+| `Perfect` | PERFECT | `--rbms-lamp-perfect` | `#f499f2` |
+| `Max` | MAX | `--rbms-lamp-max` | `#eaf300` |
+
+판정(`--rbms-judge-pgreat|great|good|bad|poor`), FAST/SLOW(`--rbms-timing-fast|slow`), 난이도 0~5(`--rbms-difficulty-unknown|beginner|normal|hyper|another|insane`)도 같은 출처의 값으로 `:root` 에 있다. 랭크는 `shared/lib/dj-rank.ts` 의 `getDjRank(ex, maxEx)`(앱 27단계와 같은 이름)와 `getDjRankClassName`(색 없이 굵기·명도)으로 쓴다.
 
 ### 5-2. ranked / flags
 
@@ -180,9 +171,9 @@ design.md §10-5 는 상태 배지의 **시맨틱 색 시스템**을 규정한�
 
 1. `border-radius: 0` (Surface A). 파생 radius 4단계 전부 `var(--radius)` 에 핀. `calc(var(--radius) - Npx)` 금지.
 2. 표면에 border·shadow 없음. 블록 분리는 `--color-background` 위 **1px gap** 하나로만. gap 은 부모가 단독 생성(자식이 `pt-px` 를 더하면 1px 틀어짐).
-3. 폰트 두께는 **400 / 500 / 600 / 800** 넷뿐. `font-bold`(700) 금지.
-4. 색은 `var(--color-*)` 만. hex·rgb·hsl·Tailwind 팔레트 유틸리티(`neutral-800`, `black/50`) 금지.
-5. 콘텐츠 인셋 12px 양축. 모든 페이지 블록은 Panel Card.
+3. 폰트 두께는 **400 / 500 / 600** 셋뿐. `font-bold`(700)·`font-extrabold`(800) 금지(T7).
+4. 색은 `var(--color-*)` 와 도메인 색 `var(--rbms-*)` 만(T11). hex·rgb·hsl·Tailwind 팔레트 유틸리티(`neutral-800`, `black/50`) 금지.
+5. 콘텐츠 인셋 12px 양축. 데이터 화면(목록·난이도표·검색·순위)은 카드 없이 본문에 가득 채우고, Panel Card·`DashboardPanel` 은 대시보드 패널과 상세 블록에만 쓴다(T5).
 6. 모션: opacity 0.18s, 바 폭 0.24s, `cubic-bezier(0.4,0,0.2,1)`. 그 외 무애니메이션. **차트는 애니메이션하지 않는다.**
 7. 로딩은 스켈레톤. 버튼의 "로딩"은 disabled.
 8. `.dark` 와 `[data-theme='dark']` 둘 다 지원.
@@ -193,7 +184,7 @@ design.md §10-5 는 상태 배지의 **시맨틱 색 시스템**을 규정한�
 
 ```
 /#[0-9a-fA-F]{3,8}|rgb\(|hsl\(/          → 0건 (globals.css 팔레트 주석 제외)
-/rounded-(?!none)|shadow-(?!none)|font-bold/ → 0건 (Surface B 카드 제외)
+/rounded-(?!none)|shadow-(?!none)|font-bold|font-extrabold/ → 0건 (shadcn `shared/ui` 생성물 제외)
 ```
 
 ---
@@ -206,3 +197,27 @@ design.md §7-4의 랜드마크·텍스트 이중 인코딩은 현재 컴포넌�
 - 콘텐츠 컬럼에 **`<main>`**, 좌측 레일에 **`<nav>`**, 우측 필터 패널에 `<aside>` 를 붙여 랜드마크를 채운다.
 - 램프·ranked 는 색 + 텍스트 이중 인코딩(§5-1).
 - 리플레이 워터폴은 `role="img"` + `aria-label` 요약. 세부 이벤트 키보드 내비게이션은 아직 지원하지 않습니다.
+
+## 8. 1차 골격의 공통 컴포넌트 (2026-10-14, 웨이브 17B-1)
+
+다음 웨이브의 난이도표·폴더 화면은 아래 계약 위에 올린다. 상세 props 는 각 파일의 타입이 정본이다.
+
+| 이름 | 경로 | 용도 |
+|---|---|---|
+| `AppShell` | `widgets/shell/app-shell.tsx` | 루트 레이아웃이 감싸는 2열 셸, 사이드바 슬롯 제공 |
+| `ShellPage` | `widgets/shell/shell-page.tsx` | 페이지 틀: `section.rbms-page` + `ShellPageHeader` + `ScrollContainer` |
+| `ShellPageHeader` | `widgets/shell/shell-page-header.tsx` | 48px 머리(`title`, `description?`, `actions?`) |
+| `ShellPageLoading` | `widgets/shell/shell-page-loading.tsx` | 제목이 정해진 로딩 틀 |
+| `ShellSidebarPortal` | `widgets/shell/shell-sidebar-portal.tsx` | 사이드바 메뉴 아래 슬롯에 패널을 꽂음 |
+| `ScrollContainer` | `shared/ui/scroll-container.tsx` | 데스크톱 내부 스크롤 + 3px 표시 막대 |
+| `DashboardPanel` 과 `-Empty`·`-Error`·`-Loading` | `features/dashboard/` | 36px 머리 패널과 패널 안 상태 |
+| `EmptyState`, `LoadErrorState`, `NotFoundNotice`, `RowListSkeleton`, `PanelSkeleton`, `TableSkeleton` | `features/state/` | 화면·구역 단위 빈·오류·404·로딩 |
+| `FilterBar`, `FilterField` | `features/filter/` | 머리 아래 필터 줄 |
+| `FormDialog`, `ConfirmAction` | `features/dialog/` | 폼 대화상자(`size: 'md' \| 'lg'`), 확인 대화상자 |
+| `LampSwatch`, `LampLabel`, `LampStrip`, `LampStackBar`, `LampDistribution` | `features/lamp/` | 램프 표현 |
+| `ScoreRow` | `features/score/score-row.tsx` | 램프 띠가 있는 2줄 기록 행 |
+| `SettingsSection` | `features/shell/settings-section.tsx` | 설정 구역 틀 |
+| `CopyButton` | `shared/ui/copy-button.tsx` | 복사 + 토스트 |
+| `buildPageMetadata` | `shared/lib/metadata.ts` | 페이지 metadata(`index: false` 로 noindex) |
+| `fetchQueryOrNotFound` | `shared/lib/fetch-query-or-not-found.ts` | 서버 프리페치 404 → `notFound()` |
+

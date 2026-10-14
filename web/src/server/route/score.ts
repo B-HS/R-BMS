@@ -11,7 +11,7 @@ import { resolveOptionalApiTokenUser } from '@server/lib/with-api-token'
 import { parseBearerToken } from '@server/lib/token'
 import { RATE_LIMIT, consumeRateLimit, getClientIp } from '@server/lib/with-rate-limit'
 import { GUEST_PLAYER_ID, isJudgeCountConsistent, isPlayedAtPlausible } from '@server/service/domain/score/score.service'
-import { getScoreCached, revalidateOnScoreSubmit } from '@server/service/read-cache'
+import { getScoreCached, revalidateOnChartUpsert, revalidateOnScoreSubmit } from '@server/service/read-cache'
 
 const SUBMISSION_MAX_BYTES = 256 * 1024
 const CREATED_STATUS = 201
@@ -80,7 +80,9 @@ export const createSubmitScoreRoute = () =>
         const resolved = await chartService.ensureFromSubmission({
             md5: input.chart.md5,
             sha256: input.chart.sha256,
-            title: '',
+            title: input.chart.title,
+            artist: input.chart.artist,
+            level: input.chart.level,
             mode: input.mode,
             notes: input.total_notes,
             lntype: input.options.lntype,
@@ -103,6 +105,7 @@ export const createSubmitScoreRoute = () =>
         })
 
         revalidateOnScoreSubmit({ sha256: resolved.sha256, md5: resolved.md5, loginId: user?.loginId ?? null })
+        if (resolved.changed) revalidateOnChartUpsert({ sha256: resolved.sha256, md5: resolved.md5 })
 
         return irRaw(result.response, result.duplicated ? 200 : CREATED_STATUS)
     })

@@ -9,6 +9,8 @@ import { createAuthService } from '@server/service/domain/auth/auth.service'
 import { createChartService } from '@server/service/domain/chart/chart.service'
 import { createPlayerService } from '@server/service/domain/player/player.service'
 import { createScoreService, type ScoreRankingRow } from '@server/service/domain/score/score.service'
+import { findSnapshotTextByMd5, getSnapshotTables } from '@server/service/domain/table-snapshot/table-snapshot.data'
+import { searchMd5sInTables } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import { resolveBuildTrust } from '@server/service/shared/integrity/build-allowlist'
 import { toChartRow } from '@server/compose/chart-row'
 import { composeAdmin } from '@server/compose/admin'
@@ -17,7 +19,9 @@ import { composeFe } from '@server/compose/fe'
 import { composeReplay } from '@server/compose/replay'
 import { composeRival } from '@server/compose/rival'
 import { composeSetting } from '@server/compose/setting'
+import { composeFolder } from '@server/compose/folder'
 import { composeTable } from '@server/compose/table'
+import { composeTableSnapshot } from '@server/compose/table-snapshot'
 import type { JudgeBreakdownInput } from '@server/dto/common'
 
 type JudgeColumns = {
@@ -110,6 +114,7 @@ const rankingSelection = {
     lntype: score.lntype,
     option: score.option,
     totalNotes: score.notes,
+    replayId: score.replayId,
     ...judgeSelection,
 }
 
@@ -125,6 +130,7 @@ type RankingSelectionRow = JudgeColumns & {
     lntype: number
     option: number
     totalNotes: number
+    replayId: string | null
 }
 
 const toRankingRow = (row: RankingSelectionRow): ScoreRankingRow => ({
@@ -139,6 +145,7 @@ const toRankingRow = (row: RankingSelectionRow): ScoreRankingRow => ({
     lntype: row.lntype,
     option: row.option,
     totalNotes: row.totalNotes,
+    replayId: row.replayId,
     judge: toJudgeBreakdown(row),
 })
 
@@ -146,6 +153,7 @@ const composeAll = () => {
     const db = getDb()
 
     const chartService = createChartService({
+        lookupTableText: findSnapshotTextByMd5,
         db: {
             findBySha256: async (sha256) => {
                 const [row] = await db.select().from(chart).where(eq(chart.sha256, sha256)).limit(1)
@@ -358,6 +366,7 @@ const composeAll = () => {
     }
 
     const { courseService } = composeCourse(db)
+    const tableSnapshot = composeTableSnapshot(db)
 
     return {
         chartService,
@@ -369,8 +378,13 @@ const composeAll = () => {
         ...composeSetting(db),
         ...composeRival(db),
         ...composeAdmin(db),
-        ...composeFe(db),
+        ...composeFe(db, {
+            lookupTableText: findSnapshotTextByMd5,
+            searchTableMd5s: (query) => searchMd5sInTables(getSnapshotTables(), query),
+        }),
         ...composeTable(db, courseService),
+        ...tableSnapshot,
+        ...composeFolder(db, { tableSnapshotService: tableSnapshot.tableSnapshotService, lookupTableText: findSnapshotTextByMd5 }),
         resolveBuildTrust: (sha256: string | null) => resolveBuildTrust(buildAllowlist, sha256),
     }
 }

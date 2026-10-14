@@ -7,6 +7,7 @@ import { ERROR_CODE } from '@server/lib/error-code'
 import { parseJsonBody, parseSearchParams } from '@server/lib/parse-request'
 import { parseBearerToken } from '@server/lib/token'
 import { withApiToken } from '@server/lib/with-api-token'
+import { withAdmin } from '@server/lib/with-session'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { isPlayedAtPlausible } from '@server/service/domain/score/score.service'
 import {
@@ -53,9 +54,8 @@ export const createCourseScoreSubmitRoute = submitCourse
 
 export const createCourseMetaUpsertRoute = () =>
     withErrorHandling(async (request: Request, context: unknown) => {
-        if (!parseBearerToken(request)) throw createAppError(ERROR_CODE.UNAUTHORIZED)
         const { authService, courseService } = compose()
-        return withApiToken({ resolveApiTokenUser: authService.resolveApiTokenUser })(async (authedRequest) => {
+        return withAdmin({ resolveSessionUser: authService.resolveSessionUser })(async (authedRequest) => {
             const input = await parseJsonBody(authedRequest, courseMetaUpsertSchema)
             const meta = await courseService.upsertMeta(input)
             if (!meta) throw createAppError(ERROR_CODE.IR_COURSE_NOT_FOUND, { courseHash: input.course_hash })

@@ -30,6 +30,8 @@ export const clearLampToId = (lamp: ClearLamp) => CLEAR_LAMPS.indexOf(lamp)
 
 export const clearLampFromId = (id: number) => CLEAR_LAMPS[id] ?? CLEAR_LAMPS[0]
 
+export const MIN_CLEAR_LAMP_ID = clearLampToId('Easy')
+
 export const gaugeTypeToId = (gauge: GaugeType) => GAUGE_TYPES.indexOf(gauge)
 
 export const gaugeTypeFromId = (id: number) => GAUGE_TYPES[id] ?? GAUGE_TYPES[0]

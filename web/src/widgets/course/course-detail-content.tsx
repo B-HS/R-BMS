@@ -1,6 +1,7 @@
 import { dehydrate, HydrationBoundary } from '@tanstack/react-query'
 import { CourseDetailPanel } from '@widgets/course/course-detail-panel'
 import { courseMetaQueryOptions, courseRankingQueryOptions } from '@entities/course.query'
+import { fetchQueryOrNotFound } from '@shared/lib/fetch-query-or-not-found'
 import { getQueryClient } from '@shared/utils/get-query-client'
 
 const RANKING_PARAMS = { limit: 50 }
@@ -10,7 +11,7 @@ export const CourseDetailContent = async ({ params }: { params: Promise<{ course
 
     const queryClient = getQueryClient()
     await Promise.all([
-        queryClient.prefetchQuery(courseMetaQueryOptions(courseHash)),
+        fetchQueryOrNotFound(queryClient, courseMetaQueryOptions(courseHash)),
         queryClient.prefetchQuery(courseRankingQueryOptions(courseHash, RANKING_PARAMS)),
     ])
 

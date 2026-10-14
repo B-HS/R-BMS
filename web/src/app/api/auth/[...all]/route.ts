@@ -1,5 +1,7 @@
-import { getAuth } from '@server/lib/auth'
+import { createAuthHandlerRoute } from '@server/route/auth'
 
-export const GET = (request: Request) => getAuth().handler(request)
+const handler = createAuthHandlerRoute()
 
-export const POST = (request: Request) => getAuth().handler(request)
+export const GET = handler
+
+export const POST = handler

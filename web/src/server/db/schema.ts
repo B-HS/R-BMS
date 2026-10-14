@@ -363,3 +363,45 @@ export const submissionAudit = mysqlTable(
     },
     (table) => [index('submission_audit_build_idx').on(table.clientBuildSha256), index('submission_audit_created_idx').on(table.createdAt)],
 )
+
+export const userFolder = mysqlTable(
+    'user_folder',
+    {
+        id: varchar('id', { length: 36 }).primaryKey(),
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        name: varchar('name', { length: 64 }).notNull(),
+        description: varchar('description', { length: 255 }).default('').notNull(),
+        isPublic: boolean('is_public').default(false).notNull(),
+        position: int('position').default(0).notNull(),
+        itemCount: int('item_count').default(0).notNull(),
+        createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+        updatedAt: bigint('updated_at', { mode: 'number' }).default(0).notNull(),
+    },
+    (table) => [
+        uniqueIndex('user_folder_owner_name_uniq').on(table.userId, table.name),
+        index('user_folder_owner_position_idx').on(table.userId, table.position),
+    ],
+)
+
+export const userFolderItem = mysqlTable(
+    'user_folder_item',
+    {
+        folderId: varchar('folder_id', { length: 36 })
+            .notNull()
+            .references(() => userFolder.id, { onDelete: 'cascade' }),
+        md5: char('md5', { length: 32 }).notNull(),
+        sha256: char('sha256', { length: 64 }),
+        title: varchar('title', { length: 200 }).default('').notNull(),
+        artist: varchar('artist', { length: 200 }).default('').notNull(),
+        note: varchar('note', { length: 100 }).default('').notNull(),
+        position: int('position').default(0).notNull(),
+        createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+    },
+    (table) => [
+        primaryKey({ columns: [table.folderId, table.md5] }),
+        index('user_folder_item_position_idx').on(table.folderId, table.position),
+        index('user_folder_item_md5_idx').on(table.md5),
+    ],
+)

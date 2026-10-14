@@ -3,9 +3,28 @@ import { chartIdSchema, clearLampSchema, extraSchema, judgeBreakdownSchema, play
 
 export const API_VERSION = 1
 
+const CHART_TEXT_MAX = 255
+const CHART_LEVEL_MAX = 1000
+
+const lenientText = z
+    .string()
+    .nullish()
+    .transform((value) => [...(value ?? '').trim()].slice(0, CHART_TEXT_MAX).join(''))
+
+const lenientLevel = z
+    .number()
+    .nullish()
+    .transform((value) => (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= CHART_LEVEL_MAX ? value : null))
+
+export const submissionChartSchema = chartIdSchema.extend({
+    title: lenientText,
+    artist: lenientText,
+    level: lenientLevel,
+})
+
 export const scoreSubmissionSchema = z.object({
     api_version: z.number().int().min(1).default(API_VERSION),
-    chart: chartIdSchema,
+    chart: submissionChartSchema,
     player: playerIdSchema,
     mode: z.string().default(''),
     clear: clearLampSchema,

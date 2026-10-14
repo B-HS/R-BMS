@@ -17,15 +17,29 @@ export type ClearLamp = (typeof CLEAR_LAMPS)[number]
 export const CLEAR_LAMP_LABEL: Record<ClearLamp, string> = {
     NoPlay: 'NO PLAY',
     Failed: 'FAILED',
-    AssistEasy: 'ASSIST EASY',
-    LightAssistEasy: 'L-ASSIST EASY',
+    AssistEasy: 'ASSIST',
+    LightAssistEasy: 'L-ASSIST',
     Easy: 'EASY',
-    Normal: 'NORMAL',
+    Normal: 'CLEAR',
     Hard: 'HARD',
     ExHard: 'EX HARD',
     FullCombo: 'FULL COMBO',
     Perfect: 'PERFECT',
     Max: 'MAX',
+}
+
+export const LAMP_BACKGROUND: Record<ClearLamp, string> = {
+    NoPlay: 'var(--rbms-lamp-noplay)',
+    Failed: 'var(--rbms-lamp-failed)',
+    AssistEasy: 'var(--rbms-lamp-assist)',
+    LightAssistEasy: 'var(--rbms-lamp-light-assist)',
+    Easy: 'var(--rbms-lamp-easy)',
+    Normal: 'var(--rbms-lamp-normal)',
+    Hard: 'var(--rbms-lamp-hard)',
+    ExHard: 'var(--rbms-lamp-exhard)',
+    FullCombo: 'var(--rbms-lamp-fullcombo)',
+    Perfect: 'var(--rbms-lamp-perfect)',
+    Max: 'var(--rbms-lamp-max)',
 }
 
 export const SUBMISSION_FLAGS = [

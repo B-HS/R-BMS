@@ -1,6 +1,6 @@
 import { dehydrate, HydrationBoundary } from '@tanstack/react-query'
-import { StatsSummaryPanel } from '@widgets/home/stats-summary-panel'
 import { RecentActivityPanel } from '@widgets/home/recent-activity-panel'
+import { StatsSummaryPanel } from '@widgets/home/stats-summary-panel'
 import { activityRecentQueryOptions, statsSummaryQueryOptions } from '@entities/stats.query'
 import { getQueryClient } from '@shared/utils/get-query-client'
 

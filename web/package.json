@@ -6,7 +6,7 @@
         "dev": "next dev",
         "build": "next build",
         "start": "next start",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "next typegen && tsc --noEmit",
         "lint": "eslint",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
@@ -14,6 +14,7 @@
         "verify": "bun run typecheck && bun run lint && bun run test",
         "db:generate": "drizzle-kit generate",
         "db:migrate": "drizzle-kit migrate",
+        "db:status": "bun scripts/db-migration-status.ts",
         "auth:generate": "bunx @better-auth/cli generate --config src/server/lib/auth.ts --output src/server/db/auth-schema.ts"
     },
     "dependencies": {

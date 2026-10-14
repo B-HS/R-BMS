@@ -220,3 +220,20 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - 코드 주석 금지(영어 JSDoc 만). 이모지 금지. `any`/`enum` 금지. `useCallback`/`useMemo` 금지.
 - barrel(`index.ts`) 금지. FSD 역방향 import 금지. `@server/*` 를 클라이언트 레이어에서 import 금지.
 - 커밋은 사용자 지시가 있을 때만.
+
+---
+
+## 웨이브 17B-1 (U2) — 서버: 마이그레이션, 사용자 폴더, 표 제공, 고장 수리 (2026-10-14)
+
+근거: `docs/acknowledge/2026-10-14-web-decisions.md`(M1~M11), `docs/web/2026-10-14-audit.md`, `docs/plan/2026-10-14-web-user-folders.md`. 구현은 `docs/web/architecture.md`(1-3, 3-2, 4-5, 5-4, 6)와 `docs/backend/api-spec.md` 7.1~7.2 에 적었다.
+
+- [x] drizzle `meta/` 복원(`.gitignore` 해제, 0000 의 `when` = 2026-09-01), `0001_user_folders` 생성, `scripts/db-migration-status.ts` 와 기준선 SQL
+- [x] 사용자 폴더 API(편집 13개 + 클라이언트 읽기 2개), 한도·이름 검증·순서·표에서 가져오기·rate limit·에러 코드 4개(`IR_FOLDER_NOT_FOUND`/`NAME_TAKEN`/`LIMIT_EXCEEDED`/`CONFLICT`)
+- [x] 표 제공: 표준 형식 `header.json`/`data.json`, FE 표 API 4개, 내 기록 일괄 조회, 차트 제목 읽기 보강(M8)
+- [x] 점검 고장: 가입 id 서버 검증, `POST /api/charts` 덮어쓰기·상한, `POST /api/courses/meta` admin, `/api/auth/[...all]` 허용 경로만, `unstable_rethrow`, 리더보드 실제 값 정렬(M9), 순위의 `replay_id`, 보안 헤더, 점수 제출의 차트 메타 수용(M8), 환경 변수 없는 빌드의 오류 로그
+- [x] 배포: `web/vercel.json` `ignoreCommand`, `.github/workflows/web.yml`, 문서
+- [ ] 서버 컴포넌트의 자기 URL fetch 를 서비스 직접 호출로(프런트 소유 — 모든 `*-content.tsx`, `entities/*.query.ts`, `shared/lib/fetch.ts`)
+- [x] `.github/workflows/ci.yml` 에 `paths-ignore: ["web/**"]`(web 만 바뀐 푸시에서 Rust 3 OS 빌드가 도는 낭비) — 웨이브 17B-1 통합에서 추가
+- [x] Q2~Q6 의 답이 정해졌다(`docs/acknowledge/2026-10-14-web-decisions.md` 3절): 발광 표는 카드 격자, 폴더는 v1 비공개, 운영 DB 마이그레이션은 사용자가 로컬에서 실행
+- [x] 웹 로그인·가입은 세션 전용 `POST /api/fe/auth/login`·`/api/fe/auth/register`(API 토큰을 만들지 않음). 게임용 `/api/auth/login`·`/register` 는 토큰을 발급한 채로 둔다
+- [ ] 지속형 rate limit(Upstash 등), 운영 시험 데이터 정리(Q6 답 A: 사용자가 지움)

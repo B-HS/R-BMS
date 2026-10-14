@@ -3,15 +3,20 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { PanelCard } from '@features/shell/panel-card'
-import { PageHeading } from '@features/shell/page-heading'
 import { MetaBadge } from '@features/badge/meta-badge'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
 import { EmptyState } from '@features/state/empty-state'
 import { LoadErrorState } from '@features/state/load-error-state'
-import { PanelSkeleton } from '@features/state/panel-skeleton'
+import { NotFoundNotice } from '@features/state/not-found-notice'
+import { ShellPage } from '@widgets/shell/shell-page'
+import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
+import { ApiError } from '@shared/lib/fetch'
 import { formatCount, formatHash } from '@shared/lib/format'
 import { useTableDetail } from '@entities/table.query'
 import type { TableChartRef } from '@entities/table.type'
+
+const PAGE_TITLE = '난이도표'
+const NOT_FOUND_STATUS = 404
 
 const COLUMNS: DataTableColumn<TableChartRef>[] = [
     {
@@ -29,14 +34,31 @@ const COLUMNS: DataTableColumn<TableChartRef>[] = [
 ]
 
 export const TableDetailPanel: FC<{ tableId: string }> = ({ tableId }) => {
-    const { data, isLoading, isError } = useTableDetail(tableId)
+    const { data, isLoading, isError, error, isFetching, refetch } = useTableDetail(tableId)
 
-    if (isLoading) return <PanelSkeleton height='page' />
-    if (isError || !data) return <LoadErrorState title='표를 불러오지 못했습니다' />
+    if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+
+    if (error instanceof ApiError && error.status === NOT_FOUND_STATUS)
+        return (
+            <ShellPage title={PAGE_TITLE}>
+                <NotFoundNotice
+                    title='없는 난이도표입니다'
+                    description='이 주소로 등록된 표가 없습니다.'
+                    actionHref='/tables'
+                    actionLabel='난이도표 목록'
+                />
+            </ShellPage>
+        )
+
+    if (isError || !data)
+        return (
+            <ShellPage title={PAGE_TITLE}>
+                <LoadErrorState title='표를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+            </ShellPage>
+        )
 
     return (
-        <>
-            <PageHeading>{data.name}</PageHeading>
+        <ShellPage title={data.name} description={`폴더 ${formatCount(data.folders.length)}개 · 코스 ${formatCount(data.courses.length)}개`}>
             <PanelCard title='난이도표' contentClassName='flex flex-col gap-2'>
                 <p className='text-muted-foreground text-xs'>
                     폴더 {formatCount(data.folders.length)}개 · 코스 {formatCount(data.courses.length)}개
@@ -57,6 +79,6 @@ export const TableDetailPanel: FC<{ tableId: string }> = ({ tableId }) => {
                     <DataTable columns={COLUMNS} rows={folder.charts} rowKey={(row) => row.sha256} caption={`${folder.name} 폴더의 차트`} />
                 </PanelCard>
             ))}
-        </>
+        </ShellPage>
     )
 }
