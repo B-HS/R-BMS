@@ -19,7 +19,7 @@ use super::super::object::{Body, SkinObject};
 use super::super::{FrameData, SkinFrame, SkinViewport};
 use super::{
     BgaBody, BgaEvent, BgaExpand, BgaFrame, BgaLook, BgaPick, BgaPicture, BgaPlayhead, BgaPrepared, BgaShow, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS,
-    MISS_LAYER_NONE, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas,
+    MISS_LAYER_NONE, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas, texture_bytes_of, uploaded_ahead,
 };
 use crate::ctx::with_render_ctx;
 use crate::{Color, CpuCanvas, QuadParams, Rect, Renderer, TextureId};
@@ -394,6 +394,48 @@ fn a_large_picture_is_handed_over_from_its_own_pixels() {
     assert_eq!(target.handed, vec![large.as_ptr() as usize], "the picture's pixels were copied before they were uploaded");
 }
 
+/// A picture exactly as large as the 256 x 256 canvas is that canvas already, to the byte: as it is,
+/// it is handed over from its own pixels and nothing is painted for it, ahead or when it is shown.
+/// Keyed out as a layer it is still painted, since that changes its pixels.
+#[test]
+fn a_picture_as_large_as_its_canvas_is_handed_over_from_its_own_pixels() {
+    let side = SMALL_PICTURE_EDGE;
+    let rgba = halves(side, side, BLACK, RED);
+    let bare = picture(&rgba, side, side, 1);
+    assert!(on_small_canvas(&bare).is_some_and(|(canvas, _)| canvas == rgba), "the canvas is not the picture's own pixels");
+    assert!(BgaPrepared::paint(&bare, BgaLook::Plain).is_none(), "a picture as large as its canvas was painted onto a copy of it");
+    assert!(BgaPrepared::paint(&bare, BgaLook::Keyed).is_some(), "the layer of a picture as large as its canvas was not painted");
+
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    textures.frame(&mut target, BgaPick::Playing { base: Some(0), layer: None }, BgaExpand::Full, |_| Some(bare));
+    let chart = BgaPlayhead::new(vec![event(0, 0, -1)]);
+    let mut ahead = BgaTextures::default();
+    ahead.preload(&mut target, &chart, |_| Some(picture(&rgba, side, side, 2)), usize::MAX);
+    assert_eq!(target.handed, vec![rgba.as_ptr() as usize; 2], "the picture's pixels were copied before they were uploaded");
+}
+
+/// Uploading ahead answers which pictures, in which look, it now holds, and nothing past its
+/// allowance: what was painted ahead for those is not needed again while they are held.
+#[test]
+fn uploading_ahead_names_the_looks_it_now_holds() {
+    let pixels = swapping_pictures();
+    let found =
+        |number: i32| pixels.get(usize::try_from(number).ok()?).map(|rgba| picture(rgba, LARGE_SIDE, LARGE_SIDE, 400 + u64::from(number.unsigned_abs())));
+    let chart = swapping_chart();
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    let held = textures.preload(&mut target, &chart, found, usize::MAX);
+    let expected = vec![(0, BgaLook::Plain), (2, BgaLook::Keyed), (1, BgaLook::Plain), (3, BgaLook::Keyed), (0, BgaLook::Keyed)];
+    assert_eq!(held, expected, "the looks uploaded ahead are not the ones named");
+    assert_eq!(textures.preload(&mut target, &chart, found, usize::MAX), Vec::new(), "a call that uploads nothing named a look");
+
+    let one = (LARGE_SIDE * LARGE_SIDE) as usize * 4;
+    let mut capped = BgaTextures::default();
+    let held = capped.preload_under(&mut target, &chart, found, usize::MAX, one * 2);
+    assert_eq!(held, expected[..2].to_vec(), "a look past the allowance was named");
+}
+
 /// A background that changes pictures many times a second paints each one into the canvas its role
 /// already has, whether it is put on a 256 x 256 canvas, keyed out as a layer, or both.
 #[test]
@@ -505,7 +547,7 @@ fn a_picture_uploaded_ahead_looks_as_one_painted_when_it_is_shown() {
 fn pixels_painted_ahead_are_handed_over_without_painting_them_again() {
     let rgba = halves(LARGE_SIDE, LARGE_SIDE, BLACK, RED);
     let bare = picture(&rgba, LARGE_SIDE, LARGE_SIDE, 1);
-    let prepared = BgaPrepared { plain: None, keyed: BgaPrepared::paint(&bare, BgaLook::Keyed) };
+    let prepared = BgaPrepared { keyed: BgaPrepared::paint(&bare, BgaLook::Keyed), ..BgaPrepared::default() };
     let keyed = prepared.keyed.as_deref().expect("a layer is painted keyed out");
     let mut expected = rgba.clone();
     key_out_black(&mut expected);
@@ -566,6 +608,56 @@ fn a_picture_that_arrives_late_is_uploaded_by_the_next_call() {
     assert_eq!(target.registered, 3, "pictures 0 and 1 as they are and 0 keyed out");
     textures.preload(&mut target, &chart, decoded(4), usize::MAX);
     assert_eq!(target.registered, 5, "the layers decoded since were not taken");
+}
+
+/// The plan of what is uploaded ahead takes the chart's looks in the order it first shows them, each
+/// that fits in what is left, and skips one whose size is not known or that does not fit without
+/// keeping the room from the ones after it. A texture costs the 256 x 256 canvas for a small picture
+/// and the picture's own size otherwise.
+#[test]
+fn the_plan_holds_the_looks_that_fit_in_the_order_the_chart_shows_them() {
+    let canvas = texture_bytes_of(SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE);
+    assert_eq!(texture_bytes_of(1, 1), canvas, "a small picture does not cost its canvas");
+    assert_eq!(texture_bytes_of(LARGE_SIDE, 1), LARGE_SIDE as usize * 4, "a large picture does not cost its own size");
+    let too_large = canvas * 2 + 1;
+    let plan = uploaded_ahead([Some(canvas), None, Some(too_large), Some(canvas), Some(canvas)], canvas * 3);
+    assert_eq!(plan, vec![true, false, false, true, true], "the plan is not the looks that fit in order");
+    assert_eq!(uploaded_ahead([Some(canvas); 2], canvas * 2 - 1), vec![true, false], "a look past the allowance was held");
+}
+
+/// A picture that carries the chart's plan is uploaded ahead in the looks the plan names and no
+/// other, whatever order the pictures arrive in: a later picture that arrives first does not take
+/// the place the plan gave an earlier one, and a look the plan left out is not uploaded even with
+/// room to spare, since the decode painted it instead.
+#[test]
+fn uploading_ahead_holds_the_looks_the_plan_names_whatever_order_the_pictures_arrive_in() {
+    let pixels = swapping_pictures();
+    let chart = swapping_chart();
+    let one = (LARGE_SIDE * LARGE_SIDE) as usize * 4;
+    let costs = chart.first_looks().iter().map(|_| Some(one)).collect::<Vec<_>>();
+    let planned = uploaded_ahead(costs, one * 2);
+    let mut ahead: HashMap<i32, Vec<BgaLook>> = (0..4).map(|number| (number, Vec::new())).collect();
+    for ((number, look), held) in chart.first_looks().into_iter().zip(planned) {
+        if held {
+            ahead.entry(number).or_default().push(look);
+        }
+    }
+    let prepared: Vec<BgaPrepared> = (0..4).map(|number| BgaPrepared { ahead: Some(ahead[&number].clone()), ..BgaPrepared::default() }).collect();
+    let arrived = |from: usize| {
+        let (pixels, prepared) = (&pixels, &prepared);
+        move |number: i32| {
+            let index = usize::try_from(number).ok().filter(|index| *index >= from)?;
+            Some(BgaPicture { prepared: Some(&prepared[index]), ..picture(&pixels[index], LARGE_SIDE, LARGE_SIDE, 500 + u64::from(number.unsigned_abs())) })
+        }
+    };
+
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    let early = textures.preload_under(&mut target, &chart, arrived(1), usize::MAX, one * 2);
+    assert_eq!(early, vec![(2, BgaLook::Keyed)], "a picture the plan gave no place took the place of one still being decoded");
+    let late = textures.preload_under(&mut target, &chart, arrived(0), usize::MAX, usize::MAX);
+    assert_eq!(late, vec![(0, BgaLook::Plain)], "the looks uploaded ahead are not the ones the plan names");
+    assert_eq!(textures.resident_bytes(), one * 2, "looks the plan left out were uploaded ahead");
 }
 
 /// The pictures a chart shows, by look, in the order it first shows them.

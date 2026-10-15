@@ -5,9 +5,10 @@
 //!
 //! The rows themselves — their groups, labels, kinds and ranges — are described once in
 //! `rbms_config::SETTINGS`. This file only adds what the configuration document cannot know: the
-//! live account, the password held in memory, a skin forced on the command line, and which screens
-//! a skin is set to draw, which is what decides whether a row only the built-in screens read is
-//! annotated. The device list the AUDIO DEVICE row cycles through comes from
+//! live account, the password held in memory, a skin forced on the command line, the controller's
+//! debounce, which the key config file holds (PAD DEBOUNCE, [`AppShared::set_pad_debounce`]), and
+//! which screens a skin is set to draw, which is what decides whether a row only the built-in
+//! screens read is annotated. The device list the AUDIO DEVICE row cycles through comes from
 //! [`rbms_audio::output_device_names`], which owns the one thread the audio host may be questioned
 //! from.
 //!
@@ -128,6 +129,7 @@ impl AppShared {
             SettingId::SkinPack => self.skins.pack_value(&self.config),
             SettingId::SkinDocument => self.skins.document_value(&self.config),
             SettingId::SkinInfo => self.skins.info(&self.config),
+            SettingId::PadDebounce => self.setting_number(id).map_or_else(String::new, |number| number.spec.text(number.steps)),
             _ => display_value(&self.config, id),
         };
         (label, value)
@@ -226,8 +228,13 @@ impl AppShared {
     }
 
     /// The number one row of the settings table holds, or `None` for a row that holds none: how it
-    /// is counted, the step it stands on, and the step a fresh configuration has it on.
+    /// is counted, the step it stands on, and the step a fresh configuration has it on. PAD DEBOUNCE
+    /// is read out of the key config.
     pub(crate) fn setting_number(&self, id: SettingId) -> Option<NumberValue> {
+        if id == SettingId::PadDebounce {
+            let shipped = i64::from(crate::gamepad::DEFAULT_DEBOUNCE_MS);
+            return Some(NumberValue::of(number_spec(id)?, i64::from(self.keyconfig.pad.effective_debounce_ms()), shipped));
+        }
         Some(NumberValue::of(number_spec(id)?, number_steps(&self.config, id)?, shipped_number_steps(id)?))
     }
 
@@ -244,9 +251,28 @@ impl AppShared {
     /// whether what is stored moved.
     pub(crate) fn set_row_number(&mut self, row: SettingRow, steps: i64) -> bool {
         match row {
+            SettingRow::Fixed(SettingId::PadDebounce) => self.set_pad_debounce(steps),
             SettingRow::Fixed(id) => set_number_steps(&mut self.config, id, steps) == AdjustOutcome::Changed,
             SettingRow::Skin(row) => self.skins.set_number(&mut self.config, row, steps),
         }
+    }
+
+    /// Put PAD DEBOUNCE on `steps` milliseconds, held to the row's two ends, and report whether it
+    /// moved. It is the key config's (`pad.debounce_ms`), so the key config file is written at once,
+    /// as the key editor writes it; the controller reads the new window from its next poll.
+    pub(crate) fn set_pad_debounce(&mut self, steps: i64) -> bool {
+        let Some(spec) = number_spec(SettingId::PadDebounce) else {
+            return false;
+        };
+        let Ok(window_ms) = u32::try_from(spec.clamp(steps)) else {
+            return false;
+        };
+        if self.keyconfig.pad.debounce_ms == window_ms {
+            return false;
+        }
+        self.keyconfig.pad.debounce_ms = window_ms;
+        self.keyconfig.save(&self.keyconfig_path);
+        true
     }
 
     /// What is said beside one row of the settings screen, or `None` for a row shown bare.
@@ -392,6 +418,7 @@ mod tests {
         (SettingId::Bga, "BGA", "ON"),
         (SettingId::KeyConfig, "KEY CONFIG", ">"),
         (SettingId::KeyDebounce, "KEY DEBOUNCE", "16 MS"),
+        (SettingId::PadDebounce, "PAD DEBOUNCE", "16 MS"),
         (SettingId::JudgeAlgorithm, "JUDGE ALGORITHM", "COMBO"),
         (SettingId::JudgeWidthKeyPGreat, "JUDGE WIDTH KEY PG", "100%"),
         (SettingId::JudgeWidthKeyGreat, "JUDGE WIDTH KEY GR", "100%"),
@@ -478,6 +505,30 @@ mod tests {
         for (id, label, value) in SHIPPED_ROWS {
             assert_eq!(shared.setting_line(id), (label, value.to_string()), "{id:?}");
         }
+    }
+
+    /// PAD DEBOUNCE is the key config's `pad.debounce_ms`: the row writes the key config file, which
+    /// the next start reads it back out of, held to the row's two ends, and the settings document
+    /// is left as it was.
+    #[test]
+    fn pad_debounce_is_kept_in_the_key_config_file_and_read_back_from_it() {
+        let dir = std::env::temp_dir().join(format!("rbms-settings-ui-pad-debounce-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let open = || crate::App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron")).shared;
+        let mut shared = open();
+        assert_eq!(shared.setting_line(SettingId::PadDebounce).1, "16 MS");
+        assert!(shared.set_row_number(SettingRow::Fixed(SettingId::PadDebounce), 40));
+        assert!(!shared.set_row_number(SettingRow::Fixed(SettingId::PadDebounce), 40), "a row put where it is has not moved");
+        assert_eq!(shared.config, Config::default(), "the settings document does not hold the controller's window");
+        assert_eq!(crate::keyconfig::KeyConfig::load(&dir.join("keyconfig.ron")).pad.debounce_ms, 40);
+
+        let reopened = open();
+        assert_eq!(reopened.setting_line(SettingId::PadDebounce).1, "40 MS");
+        assert_eq!(reopened.changed_rows(SettingTab::Input), 1, "the row is marked as changed");
+
+        assert!(shared.set_row_number(SettingRow::Fixed(SettingId::PadDebounce), 500));
+        assert_eq!(shared.keyconfig.pad.debounce_ms, rbms_config::PAD_DEBOUNCE_MAX_MS, "held to the row's upper end");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

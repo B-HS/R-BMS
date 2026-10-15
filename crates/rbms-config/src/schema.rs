@@ -179,6 +179,23 @@ pub const KEY_DEBOUNCE_STEP_MS: u32 = 1;
 /// (`gamepad::DEFAULT_DEBOUNCE_MS`) all ship 16 ms.
 pub const DEFAULT_KEY_DEBOUNCE_MS: u32 = 16;
 
+/// Shortest window the PAD DEBOUNCE row can hold, which is none: every change of a button is played.
+/// The key config file holds the value (`pad.debounce_ms`), and the controller layer holds a value
+/// written there by hand to this row's two ends.
+pub const PAD_DEBOUNCE_MIN_MS: u32 = 0;
+
+/// Longest window the PAD DEBOUNCE row can hold, the reference's own bound for a controller
+/// (`PlayModeConfig.java:148`).
+pub const PAD_DEBOUNCE_MAX_MS: u32 = 100;
+
+/// One left/right step on the PAD DEBOUNCE row, the same as on the KEY DEBOUNCE row.
+pub const PAD_DEBOUNCE_STEP_MS: u32 = 1;
+
+/// The window a fresh install holds a controller button down for after it is pressed: LR2's
+/// `inputinterval` (`LR2_configsave.cpp:970`) and the reference's controller
+/// (`BMControllerInputProcessor.java:61`) both ship 16 ms.
+pub const DEFAULT_PAD_DEBOUNCE_MS: u32 = 16;
+
 /// Lowest judge offset the JUDGE OFFSET row can hold: the notes drawn this far behind the song.
 pub const JUDGE_OFFSET_MIN_MS: i32 = -200;
 

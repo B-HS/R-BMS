@@ -25,8 +25,8 @@ use rbms_config::{
 use rbms_ir::ChartId;
 use rbms_ir::mapping::{LIGHT_ASSIST, NO_ASSIST, assist_flags, assist_level, combo_breaks, ir_clear, ir_gauge, ir_random};
 use rbms_ir::{
-    API_VERSION, AuthResponse, IrError, JudgeBreakdown, PlayOptions, PlayerId, PlayerProfile, ReplayData, ScoreServer, ScoreSubmission, SettingsBlob,
-    SettingsPutResult, SubmitOutcome,
+    API_VERSION, IrError, JudgeBreakdown, PlayOptions, PlayerId, PlayerProfile, ReplayData, ScoreServer, ScoreSubmission, SettingsBlob, SettingsPutResult,
+    SubmitOutcome,
 };
 use rbms_judge::gauge::{AssistLevel, assist_downgrade};
 use rbms_judge::{ClearType, clear_type_from_id, clear_type_id};
@@ -57,6 +57,7 @@ mod app_play;
 mod app_ranking;
 mod app_result;
 mod assets;
+mod command_line;
 mod course_ir;
 mod course_ui;
 mod dialog;
@@ -64,6 +65,7 @@ mod favorites;
 mod format;
 mod gamepad;
 mod gpu;
+mod input_debounce;
 mod ir_ext;
 mod ir_outcome;
 mod ir_panel;
@@ -119,10 +121,10 @@ use ir_ext::{MultiIr, ProfileResult, spawn_submit_all, submit_summary};
 use ir_outcome::{IR_RESULT_LINE_H, IR_RESULT_SCALE, IR_RESULT_X, IR_RESULT_Y, IrStatus, ir_line_color};
 use ir_ranking::{RANKING_CACHE_CAPACITY, RankingCache, RankingFetch};
 use ir_ranking_view::render_ranking_panel;
-use ir_session::{AccountSession, AuthAction};
+use ir_session::AccountSession;
 use ir_sync::SyncLock;
 use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};
-use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
+use keyconfig::{ControlAction, KeyConfig, key_name};
 use notify::{Level, notify};
 use play_sink::PlayAudioSink;
 use pointer::{HeldButtons, PointerInput, is_tracked};
@@ -256,8 +258,8 @@ fn course_start_gauge(set: rbms_judge::gauge_tables::GaugeSetId) -> f32 {
     rbms_judge::builtin_gauge_tables().get(set.data_key()).map_or(0.0, |table| table.at(rbms_judge::gauge::GaugeIndex::Class).init)
 }
 
-/// Begin a course: rewrite the play settings the constraints narrow, remember the originals, and
-/// hand the first stage to LOADING.
+/// Begin a course: rewrite the play settings the constraints narrow, remember the originals the
+/// course puts back when it ends ([`end_course`]), and hand the first stage to LOADING.
 ///
 /// A course still standing from before is ended first, as one left between two stages is
 /// ([`crate::app_result::abandon_course`]): what was played of it by hand is kept and sent as a
@@ -297,12 +299,15 @@ fn load_course_stage(shared: &mut AppShared) -> Transition {
     Transition::To(if opens_the_course { shared.decided_song_stage(index) } else { Stage::Loading(LoadingState::song(index)) })
 }
 
-/// Put the player's own settings back and forget the run. Called on the course result screen's way
-/// out and on an abandoned course alike; what is kept of an abandoned course is kept before it
-/// ([`crate::app_result::abandon_course`]).
+/// Put back the player's own settings the course narrowed and forget the run. Called on the course
+/// result screen's way out and on an abandoned course alike; what is kept of an abandoned course is
+/// kept before it ([`crate::app_result::abandon_course`]).
+///
+/// Only what the constraints narrowed is put back ([`CourseOverrides::put_back_into`]): a hi-speed or
+/// lane shade the player set during a course without NO SPEED stays theirs.
 fn end_course(shared: &mut AppShared) -> Transition {
-    if let Some(play) = shared.course_settings_backup.take() {
-        shared.config.play = play;
+    if let (Some(own), Some(overrides)) = (shared.course_settings_backup.take(), shared.course_overrides.as_ref()) {
+        overrides.put_back_into(&own, &mut shared.config.play);
     }
     shared.course_run = None;
     shared.course_overrides = None;
@@ -727,7 +732,8 @@ struct AppShared {
     /// the run a skin's result screen was asked to run again as it was. The load that follows
     /// takes it, so it shapes that one run.
     retry_seed: Option<u64>,
-    /// The play settings as they stood before the course rewrote them, put back when it ends.
+    /// The play settings as they stood before the course rewrote them. The ones its constraints
+    /// narrowed are put back from these when it ends and are what a save made during it writes.
     course_settings_backup: Option<rbms_config::PlayOptions>,
     /// The player's own SCRATCH AUTO, gauge and lane arrangement while a watched replay has the
     /// settings hold the ones it was recorded with: written to the settings file in their place and
@@ -790,7 +796,9 @@ struct AppShared {
     net_status: String,
     /// Validate a restored token with `whoami` on the first frame.
     startup_whoami: bool,
-    auth_rx: Option<(AuthAction, Receiver<Result<AuthResponse, IrError>>)>,
+    /// The login or register in flight. Letting go of it revokes the token it was answered with,
+    /// unless the answer was taken ([`app_network::AuthInFlight`]).
+    auth_rx: Option<app_network::AuthInFlight>,
     whoami_rx: Option<Receiver<Result<String, IrError>>>,
     sync_upload_rx: Option<Receiver<Result<SettingsPutResult, IrError>>>,
     sync_download_rx: Option<Receiver<Result<SettingsBlob, IrError>>>,
@@ -1520,9 +1528,15 @@ impl App {
     /// about to end, and the records sync of the next start sends what was kept. Called before the
     /// save thread is waited for, so the replay and every file this keeps are on disk before the
     /// process ends.
+    ///
+    /// A run on the play screen also has the settings written first, whatever is kept of it, as
+    /// Escape writes them: the hi-speed and lane shades its keys moved and the offset AUTO ADJUST
+    /// moved are the ones the next start plays on. Nowhere else is anything written on the way out,
+    /// so a settings file this build could not read stays as it is ([`run`]).
     fn keep_what_quitting_cuts_short(&mut self) {
         match &mut self.stage {
             Stage::Play(state) => {
+                self.shared.save_settings();
                 let ended = state.has_ended();
                 crate::app_result::keep_run_cut_short_by_quitting(state, ended, &mut self.shared);
             }
@@ -1575,7 +1589,18 @@ fn config_dir_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ff
 /// rather than overwriting settings it cannot read. A configuration that was read is given the
 /// difficulty tables every player is given and has not had yet ([`tablesrc::seed_default_tables`]).
 pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
-    let settings_path = config_dir().join("settings.ron");
+    run_in(args, &config_dir())
+}
+
+/// [`run`] with the settings kept in `config_dir`. The command line is read first: `--help`,
+/// `--version` and a refused command line are answered there, before anything in `config_dir`, the
+/// databases or the network is touched ([`command_line`]).
+fn run_in(args: impl Iterator<Item = String>, config_dir: &Path) -> ExitCode {
+    let command_line = match command_line::read(args) {
+        Ok(command_line) => command_line,
+        Err(answer) => return answer.give(),
+    };
+    let settings_path = config_dir.join("settings.ron");
     let mut config = match rbms_config::load(&settings_path) {
         Ok(outcome) => {
             let mut config = outcome.config;
@@ -1611,54 +1636,7 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         controllers: true,
         ..LaunchOptions::default()
     };
-    let mut chart: Option<String> = None;
-    let mut args = args.skip(1);
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--interactive" => config.play.autoplay = false,
-            "--auto" => config.play.autoplay = true,
-            "--sc-left" => config.play.scratch_left = true,
-            "--sc-auto" => config.play.scratch_auto = true,
-            "--lift" => {
-                if let Some(v) = args.next().and_then(|v| v.parse::<f32>().ok()) {
-                    config.play.lift = v.clamp(rbms_config::LANE_SHADE_MIN, rbms_config::LANE_SHADE_MAX);
-                }
-            }
-            "--hispeed" => {
-                if let Some(v) = args.next().and_then(|v| v.parse::<f64>().ok()) {
-                    config.play.hispeed = v.clamp(rbms_config::HISPEED_MIN, rbms_config::HISPEED_MAX);
-                }
-            }
-            "--gauge" => {
-                if let Some(name) = args.next() {
-                    config.play.gauge = gauge_from_name(&name);
-                }
-            }
-            "--skin" => launch.skin_path = args.next(),
-            "--font" => config.display.font_path = args.next(),
-            "--server" => config.network.server_url = args.next(),
-            "--table" => launch.table_url = args.next(),
-            "--keyconfig" => launch.keyconfig_path = args.next(),
-            "--replay" => launch.replay_path = args.next(),
-            "--timing-csv" => launch.timing_csv = args.next(),
-            "--player" => {
-                if let Some(id) = args.next() {
-                    config.network.player_id = id;
-                }
-            }
-            "--keys" => {
-                if let Some(spec) = args.next() {
-                    let parsed: Vec<(KeyCode, usize)> = spec.split(',').enumerate().filter_map(|(i, n)| key_from_name(n.trim()).map(|k| (k, i))).collect();
-                    if !parsed.is_empty() {
-                        launch.keys_override = Some(parsed);
-                    }
-                }
-            }
-            other if is_system_launch_arg(other) => {}
-            other if chart.is_none() && !other.starts_with("--") => chart = Some(other.to_string()),
-            _ => {}
-        }
-    }
+    let chart = command_line.apply(&mut config, &mut launch);
     let remembered =
         config.library.songs_folder.clone().filter(|s| !s.trim().is_empty()).or_else(|| std::env::var("RBMS_SONGS").ok().filter(|s| !s.trim().is_empty()));
     let chart = match chart {

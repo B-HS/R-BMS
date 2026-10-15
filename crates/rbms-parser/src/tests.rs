@@ -440,6 +440,38 @@ fn total_reads_the_java_double_forms() {
 }
 
 #[test]
+fn total_trims_only_what_java_string_trim_trims() {
+    for (line, total) in [(&b"#TOTAL 300\x1a\r\n"[..], Some(300.0)), (b"#TOTAL 300\0\r\n", Some(300.0)), (b"#TOTAL 300\x1a", Some(300.0))] {
+        assert_eq!(parse(line).headers.total, total, "{line:?}");
+    }
+    for tail in ["\u{3000}", "\u{a0}"] {
+        let s = parse(format!("#TOTAL 200\r\n#TOTAL 300{tail}\r\n").as_bytes());
+        assert_eq!(s.headers.total, Some(200.0), "a line ending in {tail:?} is one Double.parseDouble cannot read");
+    }
+}
+
+#[test]
+fn total_passes_over_one_character_after_its_name_like_the_reference() {
+    for (line, total) in [("#TOTAL:300", Some(300.0)), ("#TOTALS 300", Some(300.0)), ("#total\t300", Some(300.0)), ("#TOTAL\u{3000}300", Some(300.0))] {
+        assert_eq!(parse(format!("{line}\r\n").as_bytes()).headers.total, total, "{line}");
+    }
+    let s = parse("#TOTAL 200\r\n#TOTAL\u{1F600}300\r\n".as_bytes());
+    assert_eq!(s.headers.total, Some(200.0), "Java leaves half of a supplementary character in front of the number");
+}
+
+#[test]
+fn a_lone_carriage_return_ends_a_line_like_buffered_reader_read_line() {
+    let lone_cr = parse(b"#TITLE a\r#TOTAL 300\r#BPM 150\r#00111:0101\r");
+    let crlf = parse(b"#TITLE a\r\n#TOTAL 300\r\n#BPM 150\r\n#00111:0101\r\n");
+    assert_eq!(lone_cr.headers.title, "a");
+    assert_eq!(lone_cr.headers.total, Some(300.0));
+    assert_eq!(lone_cr.headers.init_bpm, 150.0);
+    assert_eq!(lone_cr.measures[&1].channels.len(), 1);
+    assert_eq!(lone_cr.measures[&1].channels[0].objects.len(), crlf.measures[&1].channels[0].objects.len());
+    assert_eq!(parse(b"#BASE 62\r#WAVzz a.wav\r").wav.get(&parse_pair(b'z', b'z', 62)).map(String::as_str), Some("a.wav"));
+}
+
+#[test]
 fn header_lnobj_parsed_with_base() {
     let s = parse(b"#LNOBJ ZZ\r\n");
     assert_eq!(s.headers.lnobj, Some(35 * 36 + 35));

@@ -5,7 +5,8 @@
 //! Rows are named rather than numbered. Adding one is a single entry in [`SETTINGS`]; nothing else
 //! has to be renumbered, and the screen never has to know which position a row happens to occupy.
 //! Rows the running program owns rather than the document — a live account, a password held only in
-//! memory, a skin forced on the command line — are marked [`SettingDescriptor::host_value`], and
+//! memory, a skin forced on the command line, the controller's debounce the key config file holds —
+//! are marked [`SettingDescriptor::host_value`], and
 //! the value returned here is what the document alone can say about them.
 
 use rbms_chart::shuffle::NoteOption;
@@ -29,12 +30,13 @@ use crate::judge::{
 use crate::number::NumberSpec;
 use crate::options;
 use crate::schema::{
-    Config, DEFAULT_PLAYER_ID, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, HISPEED_STEP_MAX, HISPEED_STEP_MIN, HISPEED_STEP_STEP, JUDGE_OFFSET_MAX_MS,
-    JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_STEP_MS, JUDGE_RATE_MAX_PERCENT, JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, JUDGE_TEXT_Y_MAX, JUDGE_TEXT_Y_MIN,
-    JUDGE_TEXT_Y_STEP, KEY_DEBOUNCE_MAX_MS, KEY_DEBOUNCE_MIN_MS, KEY_DEBOUNCE_STEP_MS, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN,
+    Config, DEFAULT_PAD_DEBOUNCE_MS, DEFAULT_PLAYER_ID, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, HISPEED_STEP_MAX, HISPEED_STEP_MIN, HISPEED_STEP_STEP,
+    JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_STEP_MS, JUDGE_RATE_MAX_PERCENT, JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, JUDGE_TEXT_Y_MAX,
+    JUDGE_TEXT_Y_MIN, JUDGE_TEXT_Y_STEP, KEY_DEBOUNCE_MAX_MS, KEY_DEBOUNCE_MIN_MS, KEY_DEBOUNCE_STEP_MS, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN,
     LANE_SHADE_FINE_STEP_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, LN_MARGIN_STEP_PERCENT,
-    PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX, PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS,
-    TARGET_RATE_MAX_PERCENT, TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
+    PAD_DEBOUNCE_MAX_MS, PAD_DEBOUNCE_MIN_MS, PAD_DEBOUNCE_STEP_MS, PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX,
+    PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TARGET_RATE_MAX_PERCENT, TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART,
+    TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
 use crate::speed::{GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, duration_of_green, duration_stepped_by_green, green_of_duration};
@@ -188,6 +190,7 @@ pub enum SettingId {
     Bga,
     KeyConfig,
     KeyDebounce,
+    PadDebounce,
     JudgeAlgorithm,
     JudgeWidthKeyPGreat,
     JudgeWidthKeyGreat,
@@ -263,7 +266,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 91;
+pub const SETTING_COUNT: usize = 92;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -287,6 +290,7 @@ impl SettingId {
         SettingId::Bga,
         SettingId::KeyConfig,
         SettingId::KeyDebounce,
+        SettingId::PadDebounce,
         SettingId::JudgeAlgorithm,
         SettingId::JudgeWidthKeyPGreat,
         SettingId::JudgeWidthKeyGreat,
@@ -473,7 +477,7 @@ pub struct SettingDescriptor {
     pub kind: SettingKind,
     pub help: &'static str,
     /// The running program owns this row's value: it reads a live session, a secret held only in
-    /// memory, or an override that came from the command line. [`display_value`] answers with what
+    /// memory, an override that came from the command line, or another file the program keeps. [`display_value`] answers with what
     /// the document alone can say, and the program replaces it.
     pub host_value: bool,
     /// Whether the row is shown at all for this configuration.
@@ -780,6 +784,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "KEY DEBOUNCE",
         SettingKind::IntRange { min: KEY_DEBOUNCE_MIN_MS as i32, max: KEY_DEBOUNCE_MAX_MS as i32, step: KEY_DEBOUNCE_STEP_MS as i32, unit: MILLISECOND_UNIT },
         "How long a lane key is held after it goes down, so a chattering switch plays as one press",
+    ),
+    host_row(
+        SettingId::PadDebounce,
+        SettingTab::Input,
+        "PAD DEBOUNCE",
+        SettingKind::IntRange { min: PAD_DEBOUNCE_MIN_MS as i32, max: PAD_DEBOUNCE_MAX_MS as i32, step: PAD_DEBOUNCE_STEP_MS as i32, unit: MILLISECOND_UNIT },
+        "How long a controller button is held after it goes down, so a chattering switch plays as one press",
     ),
     row(
         SettingId::ServerUrl,
@@ -1099,6 +1110,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::PreviewVolume => shade_value(config.library.preview_volume, id),
         SettingId::PreviewFade => format!("{}{}", config.library.preview_fade_ms, unit_of(id)),
         SettingId::KeyDebounce => format!("{}{}", config.play.key_debounce_ms, unit_of(id)),
+        SettingId::PadDebounce => format!("{DEFAULT_PAD_DEBOUNCE_MS}{}", unit_of(id)),
         SettingId::ServerUrl => optional_text(config.network.server_url.as_deref()),
         SettingId::PlayerId => config.network.player_id.clone(),
         SettingId::Account => config.network.ir_login_id.clone().unwrap_or_else(|| DEFAULT_PLAYER_ID.to_string()),
@@ -1381,7 +1393,8 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         | SettingId::Rivals
         | SettingId::IrProfiles
         | SettingId::SoundFolder
-        | SettingId::AudioDevice => AdjustOutcome::Action(id),
+        | SettingId::AudioDevice
+        | SettingId::PadDebounce => AdjustOutcome::Action(id),
     }
 }
 
@@ -1496,6 +1509,7 @@ pub fn number_spec(id: SettingId) -> Option<NumberSpec> {
         ),
         SettingId::PreviewFade => NumberSpec::whole(i64::from(PREVIEW_FADE_MIN_MS), i64::from(PREVIEW_FADE_MAX_MS), MILLISECOND_UNIT),
         SettingId::KeyDebounce => NumberSpec::whole(i64::from(KEY_DEBOUNCE_MIN_MS), i64::from(KEY_DEBOUNCE_MAX_MS), MILLISECOND_UNIT),
+        SettingId::PadDebounce => NumberSpec::whole(i64::from(PAD_DEBOUNCE_MIN_MS), i64::from(PAD_DEBOUNCE_MAX_MS), MILLISECOND_UNIT),
         SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume => NumberSpec::whole(
             counted(f64::from(AUDIO_VOLUME_MIN_GAIN), PERCENT_STEPS_PER_ONE),
             counted(f64::from(AUDIO_VOLUME_MAX_GAIN), PERCENT_STEPS_PER_ONE),
@@ -1509,7 +1523,9 @@ pub fn number_spec(id: SettingId) -> Option<NumberSpec> {
 
 /// The step one row that holds a number stands on, held to the row's two ends, or `None` for a row
 /// that holds none. A value between two steps -- one a settings file was written with by hand, or
-/// a cover moved by its fine step during a run -- reads as the nearer.
+/// a cover moved by its fine step during a run -- reads as the nearer. A row the running program
+/// owns ([`SettingDescriptor::host_value`]) has its number outside the document, and reads `None`
+/// here: the program counts it in the steps [`number_spec`] gives it.
 pub fn number_steps(config: &Config, id: SettingId) -> Option<i64> {
     let spec = number_spec(id)?;
     let steps = match id {
@@ -1528,6 +1544,7 @@ pub fn number_steps(config: &Config, id: SettingId) -> Option<i64> {
         SettingId::PreviewVolume => counted(f64::from(config.library.preview_volume), PERCENT_STEPS_PER_ONE),
         SettingId::PreviewFade => i64::from(config.library.preview_fade_ms),
         SettingId::KeyDebounce => i64::from(config.play.key_debounce_ms),
+        SettingId::PadDebounce => return None,
         SettingId::MasterVolume => i64::from(volume_percent(config.audio.master)),
         SettingId::KeyVolume => i64::from(volume_percent(config.audio.key)),
         SettingId::BgmVolume => i64::from(volume_percent(config.audio.bg)),
@@ -1843,6 +1860,9 @@ mod tests {
                 SettingKind::Percent { min, max, .. } => (f64::from(min), f64::from(max)),
                 _ => continue,
             };
+            if descriptor(id).host_value {
+                continue;
+            }
             for direction in [1, -1] {
                 let mut config = Config::default();
                 for _ in 0..STRESS_STEPS {
@@ -1879,7 +1899,9 @@ mod tests {
     #[test]
     fn a_ranged_row_at_the_end_of_its_range_reports_no_change() {
         for id in SettingId::ALL {
-            if !matches!(descriptor(id).kind, SettingKind::IntRange { .. } | SettingKind::FloatRange { .. } | SettingKind::Percent { .. }) {
+            if descriptor(id).host_value
+                || !matches!(descriptor(id).kind, SettingKind::IntRange { .. } | SettingKind::FloatRange { .. } | SettingKind::Percent { .. })
+            {
                 continue;
             }
             let mut config = Config::default();
@@ -1901,7 +1923,7 @@ mod tests {
     #[test]
     fn the_rows_the_program_owns_are_the_ones_it_reads_outside_the_document() {
         let owned: Vec<SettingId> = SettingId::ALL.into_iter().filter(|&id| descriptor(id).host_value).collect();
-        assert_eq!(owned, vec![SettingId::Skin, SettingId::SkinPack, SettingId::SkinInfo, SettingId::Account, SettingId::Password]);
+        assert_eq!(owned, vec![SettingId::PadDebounce, SettingId::Skin, SettingId::SkinPack, SettingId::SkinInfo, SettingId::Account, SettingId::Password]);
     }
 
     #[test]
@@ -1923,6 +1945,7 @@ mod tests {
             actions,
             vec![
                 SettingId::KeyConfig,
+                SettingId::PadDebounce,
                 SettingId::Skin,
                 SettingId::SkinPack,
                 SettingId::SkinDocument,
@@ -2094,6 +2117,7 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::PreviewVolume), "85%");
         assert_eq!(display_value(&config, SettingId::PreviewFade), "200 MS");
         assert_eq!(display_value(&config, SettingId::KeyDebounce), "16 MS");
+        assert_eq!(display_value(&config, SettingId::PadDebounce), "16 MS", "what the key config file holds is the program's to read");
         assert_eq!(display_value(&config, SettingId::Random), "OFF");
         assert_eq!(display_value(&config, SettingId::Gauge), "NORMAL");
         assert_eq!(display_value(&config, SettingId::Lift), "0.0%");
@@ -2230,7 +2254,7 @@ mod tests {
             ]
         );
         assert_eq!(tab_rows(SettingTab::Select, &config), vec![SettingId::Sort, SettingId::FavoriteOnly, SettingId::PreviewVolume, SettingId::PreviewFade]);
-        assert_eq!(tab_rows(SettingTab::Input, &config), vec![SettingId::ScratchSide, SettingId::KeyConfig, SettingId::KeyDebounce]);
+        assert_eq!(tab_rows(SettingTab::Input, &config), vec![SettingId::ScratchSide, SettingId::KeyConfig, SettingId::KeyDebounce, SettingId::PadDebounce]);
         assert_eq!(
             tab_rows(SettingTab::Network, &config),
             vec![
@@ -2275,7 +2299,7 @@ mod tests {
 
     /// Every row that holds a number, with the smallest change it can hold as it is shown and the
     /// two ends of the row as they are shown.
-    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 25] = [
+    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 26] = [
         (SettingId::GreenNumber, "1", "1", "6000"),
         (SettingId::HiSpeed, "0.01", "0.01", "20.00"),
         (SettingId::HiSpeedStep, "0.01", "0.01", "1.00"),
@@ -2297,6 +2321,7 @@ mod tests {
         (SettingId::PreviewVolume, "1%", "0%", "100%"),
         (SettingId::PreviewFade, "1 MS", "0 MS", "1000 MS"),
         (SettingId::KeyDebounce, "1 MS", "0 MS", "100 MS"),
+        (SettingId::PadDebounce, "1 MS", "0 MS", "100 MS"),
         (SettingId::MasterVolume, "1%", "0%", "100%"),
         (SettingId::KeyVolume, "1%", "0%", "100%"),
         (SettingId::BgmVolume, "1%", "0%", "100%"),
@@ -2312,7 +2337,7 @@ mod tests {
         for row in SETTINGS {
             let ranged = matches!(row.kind, SettingKind::IntRange { .. } | SettingKind::FloatRange { .. } | SettingKind::Percent { .. });
             assert_eq!(number_spec(row.id).is_some(), ranged, "{:?} is a {:?}", row.id, row.kind);
-            assert_eq!(number_steps(&Config::default(), row.id).is_some(), ranged, "{:?}", row.id);
+            assert_eq!(number_steps(&Config::default(), row.id).is_some(), ranged && !row.host_value, "{:?}", row.id);
         }
         let listed: Vec<SettingId> = NUMBER_ROWS.iter().map(|(id, ..)| *id).chain([VOICES_ROW]).collect();
         for row in SETTINGS {
@@ -2336,7 +2361,7 @@ mod tests {
     /// it is the step: nothing is lost between the count and the field it is stored in.
     #[test]
     fn every_step_of_every_number_row_is_stored_and_read_back() {
-        for id in NUMBER_ROWS.iter().map(|(id, ..)| *id).chain([VOICES_ROW]) {
+        for id in NUMBER_ROWS.iter().map(|(id, ..)| *id).chain([VOICES_ROW]).filter(|id| !descriptor(*id).host_value) {
             let spec = number_spec(id).expect("the row holds a number");
             let mut config = Config::default();
             for steps in spec.min..=spec.max {

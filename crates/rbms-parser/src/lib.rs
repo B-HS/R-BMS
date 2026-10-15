@@ -150,7 +150,7 @@ pub fn parse_with(bytes: &[u8], opts: ParseOptions) -> BmsSource {
         sha256,
     };
 
-    for raw in text.lines() {
+    for raw in reference_lines(&text) {
         let l = raw.trim();
         if let Some(p) = l.get(..5)
             && p.eq_ignore_ascii_case("#BASE")
@@ -162,7 +162,7 @@ pub fn parse_with(bytes: &[u8], opts: ParseOptions) -> BmsSource {
 
     let mut ctrl = control::Control::new(opts.random_seed);
 
-    for raw in text.lines() {
+    for raw in reference_lines(&text) {
         let line = raw.trim();
         if !line.starts_with('#') {
             continue;
@@ -174,14 +174,47 @@ pub fn parse_with(bytes: &[u8], opts: ParseOptions) -> BmsSource {
         if !ctrl.active() {
             continue;
         }
+        let line_with_untrimmed_end = raw.trim_start();
         if is_data_line(body) {
             parse_data_line(&mut src, body);
+        } else if line_with_untrimmed_end.get(..TOTAL_COMMAND.len()).is_some_and(|name| name.eq_ignore_ascii_case(TOTAL_COMMAND)) {
+            if let Some(total) =
+                reference_total_argument(&line_with_untrimmed_end[TOTAL_COMMAND.len()..]).and_then(parse_java_double).filter(|total| *total > 0.0)
+            {
+                src.headers.total = Some(total);
+            }
         } else {
             parse_header_line(&mut src, body);
         }
     }
 
     src
+}
+
+/// `#TOTAL`, which the reference matches as a prefix of the line rather than as a whole word.
+const TOTAL_COMMAND: &str = "#TOTAL";
+
+/// The lines of `text` as the reference's `BufferedReader.readLine` ends them: at `\n`, at `\r` and
+/// at `\r\n`. A `\r\n` also yields an empty piece between the two, which every caller passes over
+/// like any other line without `#`.
+fn reference_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.split(['\n', '\r'])
+}
+
+/// The argument of a `#TOTAL` line, given what follows the name, as the reference's `CommandWord`
+/// dispatch cuts it: one character after the name is passed over whatever it is (so `#TOTAL:300`
+/// and `#TOTALS 300` read 300), and the rest is trimmed the way Java's `String.trim` does, of
+/// characters up to U+0020 only. A trailing `0x1A` or NUL is trimmed; a trailing ideographic or
+/// no-break space is not, and leaves a number Java cannot read.
+///
+/// Java counts that one character in UTF-16 units, so a character outside the Basic Multilingual
+/// Plane leaves half of itself in front of the number, which no number parse accepts.
+fn reference_total_argument(after_name: &str) -> Option<&str> {
+    let mut rest = after_name.chars();
+    if rest.next()?.len_utf16() != 1 {
+        return None;
+    }
+    Some(rest.as_str().trim_matches(|c: char| c <= ' '))
 }
 
 fn is_data_line(body: &str) -> bool {
@@ -256,11 +289,6 @@ fn parse_header_line(src: &mut BmsSource, body: &str) {
         "PLAYER" => h.player = rest.parse().unwrap_or(1),
         "RANK" => h.rank = rest.parse().unwrap_or(3),
         "DEFEXRANK" => h.defexrank = rest.parse::<f64>().ok().filter(|v| v.is_finite()),
-        "TOTAL" => {
-            if let Some(total) = parse_java_double(rest).filter(|total| *total > 0.0) {
-                h.total = Some(total);
-            }
-        }
         "VOLWAV" => h.volwav = rest.parse().unwrap_or(VOLWAV_DEFAULT_PERCENT),
         "DIFFICULTY" => h.difficulty = rest.parse().unwrap_or(0),
         "BPM" => h.init_bpm = rest.parse().unwrap_or(130.0),

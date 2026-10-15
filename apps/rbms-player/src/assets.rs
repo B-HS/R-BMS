@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::SystemTime;
 
-use rbms_render::skin_render::frame::{BgaLook, BgaPicture, BgaPlayhead, BgaPrepared};
+use rbms_render::skin_render::frame::{BgaLook, BgaPicture, BgaPlayhead, BgaPrepared, RESIDENT_BYTES, texture_bytes_of, uploaded_ahead};
 use rbms_render::{SkinConfig, SkinImage};
 use rbms_video::{VideoDecoder, VideoError};
 use sha2::{Digest, Sha256};
@@ -152,11 +152,27 @@ where
     let total = jobs.len();
     let (tx, rx) = std::sync::mpsc::channel();
     let progress = Arc::new(AtomicUsize::new(0));
+    fan_out(jobs, cancel, decode, tx, progress.clone());
+    (rx, progress, total)
+}
+
+/// How many workers a decode is fanned across on this machine.
+fn decode_threads() -> usize {
+    std::thread::available_parallelism().map(|c| c.get().min(DECODE_THREADS_MAX)).unwrap_or(DECODE_THREADS_FALLBACK).max(1)
+}
+
+/// [`spawn_decode`]'s workers, sending to `tx` and counting into `progress`.
+fn fan_out<I, J, T>(jobs: Vec<(I, J)>, cancel: Arc<AtomicBool>, decode: fn(&J) -> Option<T>, tx: Sender<(I, T)>, progress: Arc<AtomicUsize>)
+where
+    I: Send + 'static,
+    J: Send + 'static,
+    T: Send + 'static,
+{
+    let total = jobs.len();
     if total == 0 {
-        return (rx, progress, 0);
+        return;
     }
-    let nthreads = std::thread::available_parallelism().map(|c| c.get().min(DECODE_THREADS_MAX)).unwrap_or(DECODE_THREADS_FALLBACK).max(1);
-    let chunk = total.div_ceil(nthreads).max(1);
+    let chunk = total.div_ceil(decode_threads()).max(1);
     let mut chunks: Vec<Vec<(I, J)>> = Vec::new();
     for job in jobs {
         match chunks.last_mut() {
@@ -180,7 +196,6 @@ where
             }
         });
     }
-    (rx, progress, total)
 }
 
 /// Decode one keysound file.
@@ -215,8 +230,10 @@ pub(crate) struct DecodedImage {
     /// This decode's own number, which a draw target uses to tell one frame from the next.
     pub(crate) generation: u64,
     /// The pixels a skin's `bga` object hands the renderer for each look the chart shows the image
-    /// in, painted by the decode's worker so a frame does not paint them. Empty for an image that is
-    /// not one of a chart's background pictures, or past [`PREPARED_BGA_BYTES`].
+    /// in, painted by the decode's worker so a frame does not paint them, and which of those looks
+    /// the chart's plan uploads ahead of play instead ([`plan_uploads_ahead`]). Empty for an image
+    /// that is not one of a chart's background pictures, for a look past [`PREPARED_BGA_BYTES`], for
+    /// a look uploaded ahead, and for a look that needs no painting.
     pub(crate) prepared: BgaPrepared,
 }
 
@@ -336,13 +353,16 @@ pub(crate) fn spawn_skin_asset_decode(requests: Vec<SkinAssetRequest>, cancel: A
 }
 
 /// One of a chart's background pictures as its decode is handed it: the file, the looks a skin's
-/// `bga` object shows it in, which the worker paints ahead, and what is left of
-/// [`PREPARED_BGA_BYTES`] for the chart's decodes between them.
+/// `bga` object shows it in, which the worker paints ahead unless they are uploaded ahead of play,
+/// and what is left of [`PREPARED_BGA_BYTES`] for the chart's decodes between them.
 #[derive(Debug, Clone)]
 pub(crate) struct BgaJob {
     pub(crate) path: PathBuf,
     pub(crate) looks: Vec<BgaLook>,
     pub(crate) room: Arc<AtomicUsize>,
+    /// The looks the chart's plan uploads ahead of play ([`plan_uploads_ahead`]), which the worker
+    /// leaves unpainted. `None` until a plan is made, and for a chart no plan is made for.
+    pub(crate) ahead: Option<Vec<BgaLook>>,
 }
 
 /// Resolve every referenced background image in a chart's `bgamap` to decode jobs (empty names
@@ -364,7 +384,7 @@ pub(crate) fn bga_jobs(bgamap: &[String], dir: &Path, shown: Option<&BgaPlayhead
         .filter_map(|(id, name)| {
             let path = resolve_bga_file(dir, name)?;
             let id = id as i32;
-            Some((id, BgaJob { path, looks: looks.remove(&id).unwrap_or_default(), room: room.clone() }))
+            Some((id, BgaJob { path, looks: looks.remove(&id).unwrap_or_default(), room: room.clone(), ahead: None }))
         })
         .collect()
 }
@@ -372,18 +392,85 @@ pub(crate) fn bga_jobs(bgamap: &[String], dir: &Path, shown: Option<&BgaPlayhead
 /// Fan background-image decode out over the worker pool. A chart can reference hundreds of images
 /// and each is decoded and painted for the looks it is shown in on the way in, which is seconds of
 /// work the frame loop cannot spend.
-pub(crate) fn spawn_bga_decode(jobs: Vec<(i32, BgaJob)>, cancel: Arc<AtomicBool>) -> DecodePool<i32, DecodedImage> {
-    spawn_decode(jobs, cancel, decode_bga_job)
+///
+/// `first_looks` is every picture and look a skin's `bga` object shows, in the order the chart
+/// first shows them ([`BgaPlayhead::first_looks`]), or `None` for a screen with no such object.
+/// With it, the decode first plans which looks are uploaded ahead of play and which are painted
+/// ([`plan_uploads_ahead`]), off the frame thread like the decode itself.
+pub(crate) fn spawn_bga_decode(jobs: Vec<(i32, BgaJob)>, first_looks: Option<Vec<(i32, BgaLook)>>, cancel: Arc<AtomicBool>) -> DecodePool<i32, DecodedImage> {
+    let total = jobs.len();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let progress = Arc::new(AtomicUsize::new(0));
+    if total == 0 {
+        return (rx, progress, 0);
+    }
+    let workers = progress.clone();
+    std::thread::spawn(move || {
+        let jobs = match first_looks {
+            Some(first_looks) => plan_uploads_ahead(jobs, &first_looks, RESIDENT_BYTES, &cancel),
+            None => jobs,
+        };
+        fan_out(jobs, cancel, decode_bga_job, tx, workers);
+    });
+    (rx, progress, total)
 }
 
-/// Decode one of a chart's background pictures and paint it in each look it is shown in, for as
-/// long as the chart's decodes have room for the pixels.
+/// Decides, before any picture is decoded, which of the looks in `first_looks` are uploaded ahead
+/// of play and so not painted ahead: the same looks the upload ahead holds under `allowance`
+/// ([`uploaded_ahead`]), costed from each picture's size as its file gives it, read across the
+/// workers. Every job is given the plan, as the looks of its own picture it names.
+///
+/// Knowing the plan before the decodes start is what keeps the two allowances apart. A worker that
+/// painted whatever it reached first would paint looks the upload ahead then holds as textures too,
+/// spending the room painting has on pixels that are held twice, and leaving the looks that are
+/// not uploaded ahead, which are the ones it is for, unpainted.
+fn plan_uploads_ahead(mut jobs: Vec<(i32, BgaJob)>, first_looks: &[(i32, BgaLook)], allowance: usize, cancel: &AtomicBool) -> Vec<(i32, BgaJob)> {
+    let index: HashMap<i32, usize> = jobs.iter().enumerate().map(|(at, (number, _))| (*number, at)).collect();
+    let shown: Vec<usize> = jobs.iter().enumerate().filter(|(_, (_, job))| !job.looks.is_empty()).map(|(at, _)| at).collect();
+    let mut sizes: HashMap<usize, (u32, u32)> = HashMap::new();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = shown
+            .chunks(shown.len().div_ceil(decode_threads()).max(1))
+            .map(|part| {
+                let jobs = &jobs;
+                scope.spawn(move || {
+                    part.iter()
+                        .take_while(|_| !cancel.load(Ordering::Relaxed))
+                        .filter_map(|at| bga_file_size(&jobs[*at].1.path).map(|size| (*at, size)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        sizes.extend(workers.into_iter().filter_map(|worker| worker.join().ok()).flatten());
+    });
+    let costs = first_looks.iter().map(|(number, _)| index.get(number).and_then(|at| sizes.get(at)).map(|(width, height)| texture_bytes_of(*width, *height)));
+    let mut ahead: Vec<Vec<BgaLook>> = vec![Vec::new(); jobs.len()];
+    for ((number, look), held) in first_looks.iter().zip(uploaded_ahead(costs, allowance)) {
+        if let Some(at) = index.get(number).filter(|_| held) {
+            ahead[*at].push(*look);
+        }
+    }
+    for ((_, job), looks) in jobs.iter_mut().zip(ahead) {
+        job.ahead = Some(looks);
+    }
+    jobs
+}
+
+/// The size of the picture in a background image file, read from its header alone: `None` for a
+/// file that would not decode by its contents ([`decode_bga_file`]).
+fn bga_file_size(path: &Path) -> Option<(u32, u32)> {
+    let file = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    image::ImageReader::new(file).with_guessed_format().ok()?.into_dimensions().ok()
+}
+
+/// Decode one of a chart's background pictures and paint it in each look it is shown in that is not
+/// uploaded ahead of play, for as long as the chart's decodes have room for the pixels.
 fn decode_bga_job(job: &BgaJob) -> Option<DecodedImage> {
     let mut image = decode_bga_file(&job.path)?;
-    let mut prepared = BgaPrepared::default();
+    let mut prepared = BgaPrepared { ahead: job.ahead.clone(), ..BgaPrepared::default() };
     let picture = bga_picture(&image);
     let cost = picture.texture_bytes();
-    for look in &job.looks {
+    for look in job.looks.iter().filter(|look| !job.ahead.as_ref().is_some_and(|ahead| ahead.contains(look))) {
         if job.room.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(cost)).is_err() {
             break;
         }
@@ -445,7 +532,7 @@ mod tests {
 
     /// The decode job of a picture no skin shows, which paints nothing ahead.
     fn unshown(path: &Path) -> BgaJob {
-        BgaJob { path: path.to_path_buf(), looks: Vec::new(), room: Arc::new(AtomicUsize::new(PREPARED_BGA_BYTES)) }
+        BgaJob { path: path.to_path_buf(), looks: Vec::new(), room: Arc::new(AtomicUsize::new(PREPARED_BGA_BYTES)), ahead: None }
     }
 
     fn temp_dir(tag: &str) -> PathBuf {
@@ -530,13 +617,93 @@ mod tests {
         image::RgbaImage::from_pixel(300, 300, image::Rgba([1, 2, 3, 255])).save(&path).expect("write the fixture");
         let one = 300 * 300 * 4;
         let room = Arc::new(AtomicUsize::new(one + one / 2));
-        let job = BgaJob { path, looks: vec![BgaLook::Keyed], room: room.clone() };
+        let job = BgaJob { path, looks: vec![BgaLook::Keyed], room: room.clone(), ahead: None };
         assert!(decode_bga_job(&job).expect("the fixture decodes").prepared.keyed.is_some(), "the first layer had room");
         assert!(decode_bga_job(&job).expect("the fixture decodes").prepared.keyed.is_none(), "a layer past the room was painted");
         assert_eq!(room.load(Ordering::Relaxed), one / 2, "room was taken for a layer that was not painted");
         let plain = BgaJob { looks: vec![BgaLook::Plain], ..job };
         assert_eq!(decode_bga_job(&plain).expect("the fixture decodes").prepared, BgaPrepared::default(), "a large picture shown as it is was painted");
         assert_eq!(room.load(Ordering::Relaxed), one / 2, "room was kept for a picture that needed no painting");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A picture exactly as large as its 256 x 256 canvas, shown as it is, is that canvas already:
+    /// nothing is painted for it and it takes none of the room, which stays for the pictures that
+    /// need painting. Keyed out as a layer it is painted, and takes room for it.
+    #[test]
+    fn a_picture_as_large_as_its_canvas_is_not_painted_as_it_is_and_takes_no_room() {
+        use rbms_render::skin_render::frame::SMALL_PICTURE_EDGE;
+        let dir = temp_dir("bga-canvas-sized");
+        let path = dir.join("frame.png");
+        image::RgbaImage::from_pixel(SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE, image::Rgba([1, 2, 3, 255])).save(&path).expect("write the fixture");
+        let one = (SMALL_PICTURE_EDGE * SMALL_PICTURE_EDGE * 4) as usize;
+        let room = Arc::new(AtomicUsize::new(one * 2));
+        let plain = BgaJob { path, looks: vec![BgaLook::Plain], room: room.clone(), ahead: None };
+        for _ in 0..3 {
+            assert!(decode_bga_job(&plain).expect("the fixture decodes").prepared == BgaPrepared::default(), "a picture as large as its canvas was painted");
+        }
+        assert_eq!(room.load(Ordering::Relaxed), one * 2, "room was taken for a picture that needed no painting");
+        let keyed = BgaJob { looks: vec![BgaLook::Keyed], ..plain };
+        assert!(decode_bga_job(&keyed).expect("the fixture decodes").prepared.keyed.is_some(), "the layer was not painted");
+        assert_eq!(room.load(Ordering::Relaxed), one, "the layer took no room");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The looks a chart's background is held in as textures from before it plays are planned before
+    /// any picture is decoded, from the pictures' sizes, in the order the chart first shows them; the
+    /// decode leaves those unpainted and takes none of the room for them, which goes to the looks
+    /// that are not uploaded ahead. A picture the chart does not show is in no plan.
+    #[test]
+    fn a_look_uploaded_ahead_of_play_is_not_painted_and_leaves_the_room_to_the_others() {
+        use rbms_render::skin_render::frame::{BgaEvent, SMALL_PICTURE_EDGE, texture_bytes_of};
+        const SMALL: u32 = 100;
+        const LARGE: u32 = 300;
+        let dir = temp_dir("bga-plan");
+        image::RgbaImage::from_pixel(SMALL, SMALL, image::Rgba([1, 2, 3, 255])).save(dir.join("small.png")).expect("write the fixture");
+        image::RgbaImage::from_pixel(LARGE, LARGE, image::Rgba([4, 5, 6, 255])).save(dir.join("large.png")).expect("write the fixture");
+        let names = vec!["small.png".to_string(), "small.png".to_string(), "large.png".to_string(), "small.png".to_string()];
+        let event = |time_ms: i64, base: i32, layer: i32| BgaEvent { time_ms, base, layer, miss: None };
+        let shown = BgaPlayhead::new(vec![event(0, 0, 2), event(10, 1, -1), event(20, 2, -1), event(30, 0, -1)]);
+        let canvas = texture_bytes_of(SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE);
+        let large = texture_bytes_of(LARGE, LARGE);
+
+        let jobs = plan_uploads_ahead(bga_jobs(&names, &dir, Some(&shown)), &shown.first_looks(), canvas + large, &AtomicBool::new(false));
+        let ahead: Vec<Option<Vec<BgaLook>>> = jobs.iter().map(|(_, job)| job.ahead.clone()).collect();
+        assert_eq!(
+            ahead,
+            vec![Some(vec![BgaLook::Plain]), Some(Vec::new()), Some(vec![BgaLook::Keyed]), Some(Vec::new())],
+            "the plan is not the looks that fit in the order the chart first shows them"
+        );
+        let room = jobs[0].1.room.clone();
+        let decoded: Vec<DecodedImage> = jobs.iter().map(|(_, job)| decode_bga_job(job).expect("the fixture decodes")).collect();
+        assert_eq!(
+            (decoded[0].prepared.plain.as_ref(), decoded[0].prepared.ahead.as_deref()),
+            (None, Some(&[BgaLook::Plain][..])),
+            "a look uploaded ahead was painted"
+        );
+        assert!(decoded[1].prepared.plain.is_some(), "a look past the plan was not painted");
+        assert_eq!((decoded[2].prepared.keyed.as_ref(), decoded[2].prepared.plain.as_ref()), (None, None), "a layer uploaded ahead was painted");
+        assert_eq!(decoded[3].prepared, BgaPrepared { ahead: Some(Vec::new()), ..BgaPrepared::default() }, "a picture the chart never shows was painted");
+        assert_eq!(room.load(Ordering::Relaxed), PREPARED_BGA_BYTES - canvas, "the room went to looks uploaded ahead");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The decode a play screen starts makes the plan itself, before it decodes: a chart whose
+    /// pictures all fit is held in textures from before it plays, and nothing is painted for it.
+    #[test]
+    fn the_decode_plans_the_uploads_ahead_before_it_paints() {
+        use rbms_render::skin_render::frame::BgaEvent;
+        const SMALL: u32 = 100;
+        let dir = temp_dir("bga-plan-spawn");
+        image::RgbaImage::from_pixel(SMALL, SMALL, image::Rgba([7, 8, 9, 255])).save(dir.join("small.png")).expect("write the fixture");
+        let shown = BgaPlayhead::new(vec![BgaEvent { time_ms: 0, base: 0, layer: 1, miss: None }]);
+        let jobs = bga_jobs(&["small.png".to_string(), "small.png".to_string()], &dir, Some(&shown));
+        let (rx, _, total) = spawn_bga_decode(jobs, Some(shown.first_looks()), Arc::new(AtomicBool::new(false)));
+        let mut decoded: Vec<(i32, DecodedImage)> = rx.iter().take(total).collect();
+        decoded.sort_by_key(|(number, _)| *number);
+        let prepared: Vec<BgaPrepared> = decoded.into_iter().map(|(_, image)| image.prepared).collect();
+        let planned = |look| BgaPrepared { ahead: Some(vec![look]), ..BgaPrepared::default() };
+        assert_eq!(prepared, vec![planned(BgaLook::Plain), planned(BgaLook::Keyed)], "a picture held as a texture ahead of play was painted too");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -584,7 +751,7 @@ mod tests {
 
     #[test]
     fn a_chart_with_no_images_starts_no_workers_and_is_done_at_once() {
-        let (_rx, progress, total) = spawn_bga_decode(Vec::new(), Arc::new(AtomicBool::new(false)));
+        let (_rx, progress, total) = spawn_bga_decode(Vec::new(), None, Arc::new(AtomicBool::new(false)));
         assert_eq!(total, 0);
         assert_eq!(progress.load(Ordering::Relaxed), 0);
     }
@@ -596,7 +763,7 @@ mod tests {
         let dir = temp_dir("bga-broken");
         let path = dir.join("broken.png");
         std::fs::write(&path, b"not really a png").expect("write the fixture");
-        let (rx, progress, total) = spawn_bga_decode(vec![(0, unshown(&path))], Arc::new(AtomicBool::new(false)));
+        let (rx, progress, total) = spawn_bga_decode(vec![(0, unshown(&path))], None, Arc::new(AtomicBool::new(false)));
         assert_eq!(total, 1);
         while progress.load(Ordering::Relaxed) < total {
             std::hint::spin_loop();
@@ -612,7 +779,7 @@ mod tests {
         std::fs::write(&path, b"not really a png").expect("write the fixture");
         let cancel = Arc::new(AtomicBool::new(true));
         let jobs: Vec<(i32, BgaJob)> = (0..64).map(|id| (id, unshown(&path))).collect();
-        let (_rx, progress, total) = spawn_bga_decode(jobs, cancel);
+        let (_rx, progress, total) = spawn_bga_decode(jobs, None, cancel);
         assert_eq!(total, 64);
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert!(progress.load(Ordering::Relaxed) < total, "a flag set before the pool started should stop it early");

@@ -456,3 +456,36 @@ fn the_argument_finder_adds_when_it_opens_the_app_is_not_a_chart() {
     assert!(!super::is_system_launch_arg("--auto"));
     assert!(!super::is_system_launch_arg("-psn"));
 }
+
+/// A settings folder of a command-line test's own, which nothing the test runs may create.
+fn settings_folder_left_alone(tag: &str) -> std::path::PathBuf {
+    let folder = std::env::temp_dir().join(format!("rbms-command-line-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    folder
+}
+
+/// The command line `rbms-player <args>`, pointed at a server nothing answers on.
+fn command_line(args: &[&str]) -> impl Iterator<Item = String> {
+    ["rbms-player", "--server", "http://127.0.0.1:9"].iter().chain(args).map(|arg| (*arg).to_owned()).collect::<Vec<_>>().into_iter()
+}
+
+/// Asking for the usage or the version prints it and ends there: no settings are read or written,
+/// no skin is installed, no window is opened and no server is asked anything.
+#[test]
+fn asking_for_the_usage_or_the_version_answers_without_starting_the_app() {
+    for (tag, ask) in [("help", "--help"), ("h", "-h"), ("version", "--version")] {
+        let folder = settings_folder_left_alone(tag);
+        let code = super::run_in(command_line(&[ask]), &folder);
+        assert_eq!(format!("{code:?}"), format!("{:?}", std::process::ExitCode::SUCCESS), "{ask} did not end in success");
+        assert!(!folder.exists(), "{ask} touched the settings folder");
+    }
+}
+
+/// An option this build does not know is refused the same way, before anything is read or written.
+#[test]
+fn an_unknown_option_is_refused_without_starting_the_app() {
+    let folder = settings_folder_left_alone("unknown");
+    let code = super::run_in(command_line(&["/songs", "--no-such-option"]), &folder);
+    assert_eq!(format!("{code:?}"), format!("{:?}", std::process::ExitCode::from(super::command_line::USAGE_EXIT_CODE)));
+    assert!(!folder.exists(), "an unknown option touched the settings folder");
+}

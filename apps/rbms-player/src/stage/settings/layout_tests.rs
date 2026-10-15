@@ -79,7 +79,7 @@ fn resettable_rows() -> Vec<(SettingTab, SettingId)> {
 fn change(screen: &mut Screen, id: SettingId) {
     if let Some(spec) = number_spec(id) {
         let shipped = screen.steps_of(id);
-        rbms_config::set_number_steps(&mut screen.app.shared.config, id, if shipped == spec.max { spec.min } else { spec.max });
+        screen.app.shared.set_row_number(SettingRow::Fixed(id), if shipped == spec.max { spec.min } else { spec.max });
     } else if id == SettingId::Font {
         screen.app.shared.config.display.font_path = Some("/fonts/a-face-of-the-test.ttf".to_string());
     } else if id == SettingId::SoundFolder {

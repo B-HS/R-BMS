@@ -7,7 +7,7 @@
 #![allow(clippy::wildcard_imports)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, SendError, TryRecvError};
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
 use rbms_config::{OFF_VALUE, ON_VALUE, SettingId};
@@ -83,28 +83,67 @@ fn revoke_token_in_background(server: Arc<dyn ScoreServer>) {
     });
 }
 
-/// Run one login or register on a thread of its own and hand its answer to the receiver.
+/// What a login or register answers.
+type AuthAnswer = Result<AuthResponse, IrError>;
+
+/// A login or register on its way: which one it is, where its answer arrives, and what becomes of a
+/// token the server issues for it when the app lets go of it before taking the answer.
 ///
-/// When nobody takes the answer any more -- the request was let go of because the account or the
-/// server changed while it ran -- a token the server issued for it is known to nobody on this
-/// machine, so it is handed to `revoke_unclaimed` rather than left valid on the server.
-fn spawn_auth(
-    server: Arc<dyn ScoreServer>,
-    action: AuthAction,
-    request: AuthRequest,
-    revoke_unclaimed: impl FnOnce(String) + Send + 'static,
-) -> Receiver<Result<AuthResponse, IrError>> {
+/// Letting go of it ([`Drop`]), because the account or the server changed while it ran, hands the
+/// answer over to a thread of its own. That thread waits for the answer, whether it is already
+/// waiting in the channel or still on its way, and hands a token it carries to the revoke: a token
+/// the server issued is never left valid with nobody on this machine holding it. An answer the app
+/// took is the app's, and nothing of it is revoked.
+pub(crate) struct AuthInFlight {
+    pub(crate) action: AuthAction,
+    answer: Option<Receiver<AuthAnswer>>,
+    revoke_unclaimed: Option<Box<dyn FnOnce(String) + Send>>,
+}
+
+impl AuthInFlight {
+    /// A request whose answer arrives on `answer`, and whose token goes to `revoke_unclaimed` if the
+    /// app lets go of it untaken.
+    pub(crate) fn new(action: AuthAction, answer: Receiver<AuthAnswer>, revoke_unclaimed: impl FnOnce(String) + Send + 'static) -> AuthInFlight {
+        AuthInFlight { action, answer: Some(answer), revoke_unclaimed: Some(Box::new(revoke_unclaimed)) }
+    }
+
+    /// The answer, once it has arrived. An answer taken here is the app's from then on.
+    fn try_take(&mut self) -> Result<AuthAnswer, TryRecvError> {
+        let taken = self.answer.as_ref().map_or(Err(TryRecvError::Disconnected), Receiver::try_recv);
+        if !matches!(taken, Err(TryRecvError::Empty)) {
+            self.answer = None;
+        }
+        taken
+    }
+}
+
+impl Drop for AuthInFlight {
+    fn drop(&mut self) {
+        let (Some(answer), Some(revoke_unclaimed)) = (self.answer.take(), self.revoke_unclaimed.take()) else {
+            return;
+        };
+        std::thread::spawn(move || {
+            if let Ok(Ok(response)) = answer.recv() {
+                revoke_unclaimed(response.token);
+            }
+        });
+    }
+}
+
+/// Run one login or register on a thread of its own.
+///
+/// Its answer always has a taker: the app, or the thread the app hands it over to when it lets go of
+/// the request ([`AuthInFlight`]), which revokes a token nobody on this machine holds.
+fn spawn_auth(server: Arc<dyn ScoreServer>, action: AuthAction, request: AuthRequest, revoke_unclaimed: impl FnOnce(String) + Send + 'static) -> AuthInFlight {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        if let Err(SendError(Ok(response))) = tx.send(run_auth(server.as_ref(), action, &request)) {
-            revoke_unclaimed(response.token);
-        }
+        let _ = tx.send(run_auth(server.as_ref(), action, &request));
     });
-    rx
+    AuthInFlight::new(action, rx, revoke_unclaimed)
 }
 
 /// Tell the server at `server_url` to refuse `token`, a token it issued for a login or register this
-/// machine let go of. Runs on the auth worker's own thread.
+/// machine let go of. Runs on the thread the answer was handed over to ([`AuthInFlight`]).
 fn revoke_unclaimed_token(server_url: Option<String>, token: String) {
     let Some(url) = server_url else {
         return;
@@ -161,7 +200,7 @@ impl AppShared {
     /// A login or register in flight is let go of too: its answer would sign the player in to an
     /// account they have just left, or to the server they have just left, and save its token. The
     /// session goes back to what it was before the request, and a token the server issued for it is
-    /// revoked by the worker that receives it ([`spawn_auth`]).
+    /// revoked, whether its answer is already waiting or still on its way ([`AuthInFlight`]).
     fn drop_account_requests(&mut self) {
         let in_flight =
             [self.sync_upload_rx.is_some(), self.sync_base_rx.is_some(), self.sync_download_rx.is_some(), self.rivals_rx.is_some(), self.auth_rx.is_some()];
@@ -276,7 +315,7 @@ impl AppShared {
         self.session.begin(action);
         self.net_status = action.pending_text().to_string();
         let server_url = self.config.network.server_url.clone();
-        self.auth_rx = Some((action, spawn_auth(self.server.clone(), action, request, move |token| revoke_unclaimed_token(server_url, token))));
+        self.auth_rx = Some(spawn_auth(self.server.clone(), action, request, move |token| revoke_unclaimed_token(server_url, token)));
     }
 
     /// Drop the session and rebuild the server without credentials.
@@ -428,10 +467,11 @@ impl AppShared {
     }
 
     fn poll_auth(&mut self) {
-        let Some((action, rx)) = self.auth_rx.take() else {
+        let Some(mut in_flight) = self.auth_rx.take() else {
             return;
         };
-        match rx.try_recv() {
+        let action = in_flight.action;
+        match in_flight.try_take() {
             Ok(result) => {
                 let succeeded = result.is_ok();
                 let account_before = self.session.login_id().map(str::to_string);
@@ -453,7 +493,7 @@ impl AppShared {
                     self.start_record_sync(crate::record_sync::SyncScope::All);
                 }
             }
-            Err(TryRecvError::Empty) => self.auth_rx = Some((action, rx)),
+            Err(TryRecvError::Empty) => self.auth_rx = Some(in_flight),
             Err(TryRecvError::Disconnected) => {
                 self.session.finish(action, Err(IrError::Network("auth worker stopped".into())));
                 self.net_status = self.session.status_text();

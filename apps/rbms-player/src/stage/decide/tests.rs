@@ -360,13 +360,15 @@ fn with_a_decide_skin_a_picked_chart_opens_the_decide_scene() {
 const COURSE_NAME: &str = "Fixture Course";
 
 /// Begin a course of two stages, both the one chart in the library, the way the browser begins one:
-/// the player's own play settings are put aside and the ones in effect are changed.
+/// the player's own play settings are put aside and the ones its NO SPEED constraint narrows are
+/// changed.
 fn begin_course(app: &mut App) -> rbms_config::PlayOptions {
     let entry = &app.shared.library.songs()[0];
     let stage = CourseChart { md5: entry.md5.clone(), sha256: String::new(), title: entry.title.clone() };
     let course = Course { name: COURSE_NAME.into(), charts: vec![stage.clone(), stage], ..Course::default() };
     let own = app.shared.config.play.clone();
     app.shared.course_settings_backup = Some(own.clone());
+    app.shared.course_overrides = Some(crate::course_ui::CourseOverrides { speed_locked: true, ..crate::course_ui::CourseOverrides::default() });
     app.shared.config.play.constant_speed = !own.constant_speed;
     app.shared.course_run = Some(CourseRun::new(course, 0.0));
     own

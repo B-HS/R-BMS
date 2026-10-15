@@ -142,10 +142,11 @@ struct NumberRows {
 const NO_KEY: &str = "-";
 
 /// Whether a row's number is stored when a drag of its slider ends rather than as the slider moves:
-/// the count of voices reaches the output stream only by opening it again, which a slider must not
-/// do at every place it passes.
+/// the count of voices reaches the output stream only by opening it again, and PAD DEBOUNCE is
+/// stored by writing the key config file, neither of which a slider must do at every place it
+/// passes.
 fn applies_when_released(id: SettingId) -> bool {
-    id == SettingId::AudioPolyphony
+    matches!(id, SettingId::AudioPolyphony | SettingId::PadDebounce)
 }
 
 impl SettingsState {

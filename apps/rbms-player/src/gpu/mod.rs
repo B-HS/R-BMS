@@ -20,11 +20,11 @@ mod flush_tests;
 #[cfg(test)]
 mod pixel_tests;
 mod present;
+mod registry;
 
 #[cfg(test)]
 pub(crate) use background::background_upload_needed;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -34,6 +34,7 @@ use rbms_render::{
     BlendFactor, BlendMode, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, QuadParams, Rect, Renderer, TexelRect, TextureFilter,
     TextureId,
 };
+use registry::{NO_TEXTURE, TextureSlots};
 use winit::window::Window;
 
 use crate::notify::{Level, notify};
@@ -387,8 +388,7 @@ pub(crate) struct Gpu {
     distance_field_cap: usize,
     nearest_sampler: wgpu::Sampler,
     linear_sampler: wgpu::Sampler,
-    textures: Vec<Option<GpuTexture>>,
-    texture_keys: HashMap<String, TextureId>,
+    textures: TextureSlots<GpuTexture>,
     draw: DrawList,
     clear_color: Color,
     letterbox: bool,
@@ -727,8 +727,7 @@ impl Gpu {
             distance_field_pipelines,
             distance_field_instances,
             distance_field_cap: INITIAL_DISTANCE_FIELD_CAPACITY,
-            textures: Vec::new(),
-            texture_keys: HashMap::new(),
+            textures: TextureSlots::default(),
             draw: DrawList::default(),
             clear_color: Color::BLACK,
             letterbox,
@@ -1019,7 +1018,7 @@ impl Gpu {
                 rp.set_vertex_buffer(0, self.instances.slice(..));
             }
             BatchKind::Textured { tex, blend, filter } => {
-                let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
+                let Some(texture) = self.textures.get(tex) else {
                     return;
                 };
                 rp.set_pipeline(&self.textured_pipelines[blend_index(blend)]);
@@ -1027,7 +1026,7 @@ impl Gpu {
                 rp.set_vertex_buffer(0, self.textured_instances.slice(..));
             }
             BatchKind::DistanceField { tex, blend } => {
-                let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
+                let Some(texture) = self.textures.get(tex) else {
                     return;
                 };
                 rp.set_pipeline(&self.distance_field_pipelines[blend_index(blend)]);
@@ -1132,24 +1131,29 @@ impl Gpu {
     /// key that is refused again keeps its slot and stays quiet, because a refused image offered on
     /// every frame would otherwise report itself sixty times a second.
     fn refuse_texture(&mut self, key: &str, width: u32, height: u32) -> TextureId {
-        let known = self.texture_keys.get(key).copied().filter(|id| (id.0 as usize) < self.textures.len());
-        let already_refused = known.is_some_and(|id| self.textures[id.0 as usize].is_none());
+        let known = self.textures.keyed(key);
+        let already_refused = known.is_some_and(|id| self.textures.get(id).is_none());
         if !already_refused {
             let limit = self.max_texture_size;
             notify(Level::Warn, format!("texture {key} is {width}x{height}, past the {limit} pixels this graphics adapter holds; it will not be drawn"));
         }
         match known {
             Some(id) => {
-                self.textures[id.0 as usize] = None;
+                self.textures.set(id, None);
                 id
             }
-            None => {
-                let id = TextureId(self.textures.len() as u32);
-                self.textures.push(None);
-                self.texture_keys.insert(key.to_string(), id);
-                id
-            }
+            None => self.insert_texture(key, None),
         }
+    }
+
+    /// Registers `texture` under `key`, which has no handle yet, and says so once when the registry
+    /// has no slot left to put it in.
+    fn insert_texture(&mut self, key: &str, texture: Option<GpuTexture>) -> TextureId {
+        let id = self.textures.insert(key, texture);
+        if id == NO_TEXTURE {
+            notify(Level::Warn, format!("texture {key} was not registered: every texture slot is held; it will not be drawn"));
+        }
+        id
     }
 }
 
@@ -1179,8 +1183,8 @@ impl Renderer for Gpu {
         if !texture_fits(width, height, self.max_texture_size) {
             return self.refuse_texture(key, width, height);
         }
-        if let Some(&id) = self.texture_keys.get(key)
-            && let Some(Some(existing)) = self.textures.get(id.0 as usize)
+        if let Some(id) = self.textures.keyed(key)
+            && let Some(existing) = self.textures.get(id)
             && existing.width == width
             && existing.height == height
         {
@@ -1189,22 +1193,17 @@ impl Renderer for Gpu {
         }
         let created = self.create_texture(width, height);
         self.upload(&created.texture, rgba, width, height);
-        match self.texture_keys.get(key).copied() {
-            Some(id) if (id.0 as usize) < self.textures.len() => {
-                self.textures[id.0 as usize] = Some(created);
+        match self.textures.keyed(key) {
+            Some(id) => {
+                self.textures.set(id, Some(created));
                 id
             }
-            _ => {
-                let id = TextureId(self.textures.len() as u32);
-                self.textures.push(Some(created));
-                self.texture_keys.insert(key.to_string(), id);
-                id
-            }
+            None => self.insert_texture(key, Some(created)),
         }
     }
 
     fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
-        let Some(Some(existing)) = self.textures.get(tex.0 as usize) else {
+        let Some(existing) = self.textures.get(tex) else {
             return false;
         };
         let whole = (existing.width as usize) * (existing.height as usize) * batch::BYTES_PER_PIXEL as usize;
@@ -1216,10 +1215,7 @@ impl Renderer for Gpu {
     }
 
     fn release_texture(&mut self, tex: TextureId) {
-        if let Some(slot) = self.textures.get_mut(tex.0 as usize) {
-            *slot = None;
-        }
-        self.texture_keys.retain(|_, id| *id != tex);
+        self.textures.release(tex);
         if self.background.is_some_and(|(id, _)| id == tex) {
             self.background = None;
         }
@@ -1230,7 +1226,7 @@ impl Renderer for Gpu {
     }
 
     fn texture_size(&self, tex: TextureId) -> Option<(u32, u32)> {
-        self.textures.get(tex.0 as usize).and_then(|t| t.as_ref()).map(|t| (t.width, t.height))
+        self.textures.get(tex).map(|t| (t.width, t.height))
     }
 
     fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
@@ -1502,5 +1498,54 @@ mod tests {
         assert!(texture_fits(6400, 1200, LIMIT));
         assert!(!texture_fits(LIMIT + 1, 1, LIMIT), "one pixel too wide is too wide however short it is");
         assert!(!texture_fits(1, LIMIT + 1, LIMIT));
+    }
+
+    /// The pictures a chart's background uploads ahead of play are let go when the screen is done
+    /// with them, and the next chart's take the handles' slots again rather than adding to them:
+    /// however many charts are played, the registry holds no more slots than the most a chart
+    /// needed. A handle let go of names nothing, even once its slot holds another texture.
+    #[test]
+    fn the_slots_of_textures_let_go_of_are_taken_again_and_their_old_handles_name_nothing() {
+        use rbms_render::skin_render::frame::{BgaEvent, BgaExpand, BgaPick, BgaPicture, BgaPlayhead, BgaShow, BgaTextures, SMALL_PICTURE_EDGE};
+        const PICTURES: i32 = 50;
+        const CHARTS: u64 = 10;
+        let Some(mut gpu) = Gpu::offscreen_if_available(SHAPE.0, SHAPE.1, SHAPE) else {
+            return;
+        };
+        let side = SMALL_PICTURE_EDGE;
+        let rgba = vec![7u8; (side * side * 4) as usize];
+        let chart = BgaPlayhead::new((0..PICTURES).map(|number| BgaEvent { time_ms: i64::from(number), base: number, layer: -1, miss: None }).collect());
+        let mut textures = BgaTextures::default();
+        let mut slots_after_first = None;
+        let mut let_go = Vec::new();
+        for played in 0..CHARTS {
+            let generation = |number: i32| played * 1000 + u64::from(number.unsigned_abs());
+            let held = textures.preload(
+                &mut gpu,
+                &chart,
+                |number| Some(BgaPicture { generation: generation(number), width: side, height: side, rgba: &rgba, prepared: None }),
+                usize::MAX,
+            );
+            assert_eq!(held.len(), PICTURES as usize, "chart {played} did not upload every picture ahead");
+            let frame = textures.frame(&mut gpu, BgaPick::Playing { base: Some(0), layer: None }, BgaExpand::Full, |number| {
+                Some(BgaPicture { generation: generation(number), width: side, height: side, rgba: &rgba, prepared: None })
+            });
+            let BgaShow::Playing { base: Some(shown), .. } = frame.show else {
+                panic!("chart {played} showed {:?}", frame.show);
+            };
+            for old in &let_go {
+                assert_eq!(gpu.texture_size(*old), None, "a handle let go of after an earlier chart names a texture of chart {played}");
+            }
+            textures.release(&mut gpu);
+            let_go.push(shown);
+            let slots = slot_count(&gpu);
+            let first = *slots_after_first.get_or_insert(slots);
+            assert_eq!(slots, first, "chart {played} added slots to the registry");
+        }
+    }
+
+    /// How many slots the texture registry holds, live or not.
+    fn slot_count(gpu: &Gpu) -> usize {
+        gpu.textures.slot_count()
     }
 }

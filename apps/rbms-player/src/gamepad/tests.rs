@@ -769,3 +769,67 @@ fn a_stamped_change_is_placed_on_the_controller_clock_by_its_age() {
     assert_eq!(stamped_instant_us(wall_now + Duration::from_millis(7), wall_now, now_us, i64::MIN), now_us, "a stamp ahead of the wall clock is now");
     assert_eq!(stamped_instant_us(wall_now - Duration::from_millis(7), wall_now, now_us, MS * 95), MS * 95, "and none goes before the last one");
 }
+
+/// The point of LR2's debounce over the reference's lock: a press is never late. One button hit
+/// again and again -- thirty-second notes at 200 BPM, 37.5 ms apart, each held 30 ms -- is played
+/// at every press, though each comes less than PAD DEBOUNCE after the release before it. The lock
+/// held each press back to 16 ms after the release, 8.5 ms after the note.
+#[test]
+fn a_button_hit_again_and_again_is_played_where_every_press_came() {
+    let cfg = PadConfig { debounce_ms: DEFAULT_DEBOUNCE_MS, ..cfg_with_lane(0, PadBinding::Button(BUTTON)) };
+    let gap_us = 37_500;
+    let held_us = 30 * MS;
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    let mut played = Vec::new();
+    for hit in 0..4 {
+        let pressed_us = gap_us * hit;
+        let changes = [(pressed_us, button_change(true)), (pressed_us + held_us, button_change(false))];
+        played.extend(mapper.resolve_changes(&changes, pressed_us + held_us + MS, &cfg, seven_key(), &mut snapshot));
+    }
+    let expected: Vec<(PadEvent, i64)> = (0..4).flat_map(|hit| [(lane_zero(true), gap_us * hit), (lane_zero(false), gap_us * hit + held_us)]).collect();
+    assert_eq!(played, expected);
+}
+
+/// A button held past PAD DEBOUNCE whose contact drops for a moment: the release is played where it
+/// came, and the contact closing again within one of LR2's polls is the switch bouncing, not a
+/// press. The lane stays let go of until the button is let go of and pressed again.
+#[test]
+fn a_button_that_bounces_open_while_held_is_let_go_of_and_not_pressed_again() {
+    let cfg = PadConfig { debounce_ms: DEFAULT_DEBOUNCE_MS, ..cfg_with_lane(0, PadBinding::Button(BUTTON)) };
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    let changes = [(0, button_change(true)), (50 * MS, button_change(false)), (51 * MS, button_change(true))];
+    assert_eq!(mapper.resolve_changes(&changes, 100 * MS, &cfg, seven_key(), &mut snapshot), [(lane_zero(true), 0), (lane_zero(false), 50 * MS)]);
+    assert!(mapper.held(&cfg, seven_key()).is_empty(), "the bounce does not hold the lane");
+    let changes = [(120 * MS, button_change(false)), (150 * MS, button_change(true))];
+    assert_eq!(mapper.resolve_changes(&changes, 160 * MS, &cfg, seven_key(), &mut snapshot), [(lane_zero(true), 150 * MS)], "a real press after it is one");
+}
+
+/// A bounce as the button closes, inside PAD DEBOUNCE of the press, is one press held throughout.
+#[test]
+fn a_button_that_bounces_as_it_closes_is_one_press_held_throughout() {
+    let cfg = PadConfig { debounce_ms: DEFAULT_DEBOUNCE_MS, ..cfg_with_lane(0, PadBinding::Button(BUTTON)) };
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    let changes =
+        [(0, button_change(true)), (MS, button_change(false)), (2 * MS, button_change(true)), (3 * MS, button_change(false)), (4 * MS, button_change(true))];
+    assert_eq!(mapper.resolve_changes(&changes, 40 * MS, &cfg, seven_key(), &mut snapshot), [(lane_zero(true), 0)]);
+    assert_eq!(mapper.held(&cfg, seven_key()), [lane_zero(true)]);
+}
+
+/// An axis held by its turntable algorithm and then read as two keys -- the algorithm switched off
+/// in the key editor -- is let go of on the next reading, as it was when one gate served both: a
+/// lane is never left held by a reading nobody makes any more.
+#[test]
+fn a_turntable_switched_to_two_keys_lets_go_of_the_lane_it_held() {
+    let mut cfg = PadConfig { analog_mode: AnalogMode::V1, analog_threshold: 8, ..cfg_with_lane(SCRATCH_LANE, PadBinding::AnalogScratch { axis: AXIS }) };
+    let mut mapper = PadMapper::new();
+    mapper.resolve(0, &cfg, seven_key(), &snapshot_axis(0.0));
+    assert_eq!(mapper.resolve(MS, &cfg, seven_key(), &snapshot_axis(TICK_MAX_SIZE * 2.0)).len(), 1);
+
+    cfg.analog_mode = AnalogMode::Off;
+    let events = mapper.resolve(MS * 2, &cfg, seven_key(), &snapshot_axis(0.0));
+    assert_eq!(events, [PadEvent::Lane { lane: SCRATCH_LANE, dir: ScratchDir::Forward, press: false }]);
+    assert!(mapper.held(&cfg, seven_key()).is_empty());
+}

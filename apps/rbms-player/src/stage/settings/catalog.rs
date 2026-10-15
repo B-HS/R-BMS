@@ -51,7 +51,8 @@ const DISPLAY_SECTIONS: &[Section] = &[
     Section { heading: "DIAGNOSTICS", rows: &[SettingId::DebugMode] },
 ];
 
-const INPUT_SECTIONS: &[Section] = &[Section { heading: "CONTROLS", rows: &[SettingId::ScratchSide, SettingId::KeyConfig, SettingId::KeyDebounce] }];
+const INPUT_SECTIONS: &[Section] =
+    &[Section { heading: "CONTROLS", rows: &[SettingId::ScratchSide, SettingId::KeyConfig, SettingId::KeyDebounce, SettingId::PadDebounce] }];
 
 const NETWORK_SECTIONS: &[Section] = &[
     Section {
@@ -209,6 +210,9 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         SettingId::KeyConfig => "Opens the key editor, where every key and controller button the player reads is listed and can be changed.",
         SettingId::KeyDebounce => {
             "How long a lane key of the keyboard is held after it goes down while a chart is played, so a switch that chatters plays as one press, the way LR2 does. A press is always played the instant it comes; a release inside the window is played when the window ends, if the key is still up then. 0 MS plays every change. A controller keeps its own window."
+        }
+        SettingId::PadDebounce => {
+            "How long a controller button is held after it goes down, on every screen, so a switch that chatters reads as one press, the way LR2 does. A press counts at once; a release inside the window counts when it ends, if still up. A turntable is deaf that long after each change. 0 MS reads every change. Kept in the key config."
         }
         SettingId::ServerUrl => "The address of the score server. Left empty the player stays offline and nothing is sent.",
         SettingId::PlayerId => {

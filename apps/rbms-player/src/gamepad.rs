@@ -6,9 +6,15 @@
 //!
 //! Three things separate a controller from a keyboard, and each is answered here:
 //!
-//! * **Bounce.** A microswitch reports a burst of changes for one press. The reference
-//!   implementation deafens an element for 16 ms after every accepted change
-//!   (`BMControllerInputProcessor.java:61,136`) and so does [`ButtonGate`].
+//! * **Bounce.** A microswitch reports a burst of changes for one press. A button and a two-key
+//!   axis direction are debounced the way LR2 debounces every key and button
+//!   ([`crate::input_debounce`], the same gate the keyboard's lane keys go through): a press is
+//!   never late, a release inside PAD DEBOUNCE of its press waits for the window to end. A
+//!   turntable direction keeps the reference implementation's lock, which deafens it for the
+//!   window after every accepted change (`BMControllerInputProcessor.java:61,136`,
+//!   [`PadMapper::read_turntables`]), because the turntable algorithms count the readings that lock
+//!   lets through. Both read and write the same state of the element, so an axis that turns from
+//!   a turntable into two keys, or back, when the algorithm is switched carries what it held.
 //! * **Axes that are keys.** A cheap scratch is two directions of one axis, each held once the
 //!   axis passes a deadzone. That is [`PadBinding::Axis`].
 //! * **Axes that spin.** A turntable reports an absolute position that wraps, and needs the state
@@ -42,18 +48,19 @@ use rbms_model::Mode;
 use rbms_play::ScratchDir;
 use serde::{Deserialize, Serialize};
 
+use crate::input_debounce::{Lr2Debounce, ReportedAt};
 use crate::keyconfig::{Bindable, ControlAction, Shortcut, mode_config_key};
 use crate::notify::{Level, notify};
 
 pub use analog::*;
 
-/// How long an element is deaf after an accepted change. Reference implementation
-/// `BMControllerInputProcessor.java:61`.
-pub const DEFAULT_DEBOUNCE_MS: u32 = 16;
+/// PAD DEBOUNCE as shipped: how long after a press a release waits, and how long a turntable
+/// direction is deaf after an accepted change ([`rbms_config::DEFAULT_PAD_DEBOUNCE_MS`]).
+pub const DEFAULT_DEBOUNCE_MS: u32 = rbms_config::DEFAULT_PAD_DEBOUNCE_MS;
 
-/// What the debounce window is clamped to on load. Reference implementation
-/// `PlayModeConfig.java:148`.
-pub const DEBOUNCE_MS_RANGE: RangeInclusive<u32> = 0..=100;
+/// What the debounce window is clamped to on load: the two ends of the PAD DEBOUNCE row, the
+/// reference's own bound (`PlayModeConfig.java:148`).
+pub const DEBOUNCE_MS_RANGE: RangeInclusive<u32> = rbms_config::PAD_DEBOUNCE_MIN_MS..=rbms_config::PAD_DEBOUNCE_MAX_MS;
 
 /// How far a two-key scratch axis travels before its direction counts as held. The reference
 /// compares against a fixed 0.9 (`BMControllerInputProcessor.java:232-237`); rbms makes it a
@@ -67,8 +74,6 @@ pub const AXIS_DEADZONE_RANGE: RangeInclusive<f32> = 0.05..=0.95;
 /// How far an axis must travel before the key editor offers it as a binding, kept well clear of
 /// the resting jitter of a stick.
 const CAPTURE_AXIS_THRESHOLD: f32 = 0.5;
-
-const US_PER_MS: i64 = 1_000;
 
 /// A button every controller layout names the same way, whatever event code the platform gives it.
 ///
@@ -441,39 +446,6 @@ impl PadChange {
     }
 }
 
-/// One element's accepted state and when it last changed.
-#[derive(Clone, Copy, Debug)]
-struct ButtonGate {
-    pressed: bool,
-    changed_us: i64,
-}
-
-impl ButtonGate {
-    fn new() -> ButtonGate {
-        ButtonGate { pressed: false, changed_us: i64::MIN }
-    }
-
-    /// Whether the debounce window has elapsed. Reference implementation
-    /// `BMControllerInputProcessor.java:136`, inequality included.
-    fn is_open(&self, now_us: i64, debounce_ms: u32) -> bool {
-        now_us >= self.opens_at(debounce_ms)
-    }
-
-    /// The first instant the debounce window has elapsed at.
-    fn opens_at(&self, debounce_ms: u32) -> i64 {
-        self.changed_us.saturating_add(i64::from(debounce_ms) * US_PER_MS)
-    }
-
-    fn set(&mut self, pressed: bool, now_us: i64) -> bool {
-        if self.pressed == pressed {
-            return false;
-        }
-        self.pressed = pressed;
-        self.changed_us = now_us;
-        true
-    }
-}
-
 /// The raw value of every element the device last reported.
 #[derive(Clone, Debug, Default)]
 pub struct PadSnapshot {
@@ -523,7 +495,10 @@ impl PadSnapshot {
 /// that spans frames.
 #[derive(Debug, Default)]
 pub struct PadMapper {
-    gates: BTreeMap<PadElement, ButtonGate>,
+    /// What every element was last handed over as. A button and a two-key axis direction are
+    /// offered to it as LR2 debounces a key; a turntable direction is handed over by the
+    /// reference's lock ([`PadMapper::read_turntables`]).
+    gates: BTreeMap<PadElement, Lr2Debounce<i64>>,
     analog: BTreeMap<u32, AnalogScratch>,
     analog_shape: Option<(AnalogMode, u32)>,
     /// Where each turntable stood when its travel was last counted.
@@ -538,9 +513,10 @@ impl PadMapper {
         PadMapper::default()
     }
 
-    /// Resolve one frame from a snapshot alone: every element the config listens to read at
-    /// `now_us`, at most once and only when its debounce window is open — which is also what keeps
-    /// a turntable's idle counter advancing at the same rate the reference advances it. The frame
+    /// Resolve one frame from a snapshot alone, at `now_us`: every release the debounce kept out
+    /// and has let through by then, then every button and two-key axis direction that changed, then
+    /// every turntable direction, read only when its window is open — which is also what keeps a
+    /// turntable's idle counter advancing at the same rate the reference advances it. The frame
     /// loop resolves change by change instead ([`PadMapper::resolve_changes`]); this is what the
     /// tests of the element rules drive.
     #[cfg(test)]
@@ -551,18 +527,24 @@ impl PadMapper {
         self.retune(cfg, mode);
         self.count_turn(snapshot);
         let plan = cfg.plan(mode);
-        self.read_elements(now_us, cfg, &plan, snapshot, |_, _| true)
+        let mut opened = Vec::new();
+        self.take_opened(now_us, cfg, &plan, &mut opened);
+        let mut events: Vec<PadEvent> = opened.into_iter().map(|(event, _)| event).collect();
+        events.extend(self.read_keys(now_us, cfg, &plan, snapshot));
+        events.extend(self.read_turntables(now_us, cfg, &plan, snapshot));
+        events
     }
 
     /// Resolve one poll of raw changes, each at the instant on the controller clock it happened at,
     /// into the events they make, each with its own instant, earliest first. `snapshot` is brought
     /// up to date on the way.
     ///
-    /// A button or two-key axis direction is read change by change: a change the debounce window
-    /// keeps out is taken the instant the window opens, if the element still reads that way then,
-    /// and one a later change undid before that is never taken at all, which is what the window is
-    /// for. A press and its release inside one poll are therefore both played. A turntable is read
-    /// once, at `now_us`, after every change has been taken in.
+    /// A button or two-key axis direction is read change by change, as LR2 reads a key: a press is
+    /// taken the instant it came, a release inside the debounce window after its press is taken the
+    /// instant the window ends if the element still reads up then, and not at all if it was pressed
+    /// again before, and a press within one of LR2's polls of a release taken is the switch
+    /// bouncing and is not taken. A press and its release inside one poll are therefore both
+    /// played. A turntable is read once, at `now_us`, after every change has been taken in.
     pub fn resolve_changes(
         &mut self,
         changes: &[(i64, PadChange)],
@@ -579,14 +561,14 @@ impl PadMapper {
         let plan = cfg.plan(mode);
         let mut events = Vec::new();
         for &(at_us, change) in changes {
-            self.take_opened(at_us, cfg, &plan, snapshot, &mut events);
+            self.take_opened(at_us, cfg, &plan, &mut events);
             change.apply(snapshot);
-            let keys = self.read_elements(at_us, cfg, &plan, snapshot, |mapper, element| !mapper.is_turntable(element));
+            let keys = self.read_keys(at_us, cfg, &plan, snapshot);
             events.extend(keys.into_iter().map(|event| (event, at_us)));
         }
-        self.take_opened(now_us, cfg, &plan, snapshot, &mut events);
+        self.take_opened(now_us, cfg, &plan, &mut events);
         self.count_turn(snapshot);
-        let turntables = self.read_elements(now_us, cfg, &plan, snapshot, |mapper, element| mapper.is_turntable(element));
+        let turntables = self.read_turntables(now_us, cfg, &plan, snapshot);
         events.extend(turntables.into_iter().map(|event| (event, now_us)));
         events
     }
@@ -596,61 +578,68 @@ impl PadMapper {
         matches!(element, PadElement::AxisDir { axis, .. } if self.analog.contains_key(&axis))
     }
 
-    /// Read every element of `plan` that `wanted` keeps, at `at_us`: each at most once, and only
-    /// while its debounce window is open. What changed is handed back as the plan's events, in plan
-    /// order.
-    fn read_elements(
-        &mut self,
-        at_us: i64,
-        cfg: &PadConfig,
-        plan: &[(PadElement, PadTarget)],
-        snapshot: &PadSnapshot,
-        wanted: impl Fn(&PadMapper, PadElement) -> bool,
-    ) -> Vec<PadEvent> {
-        let debounce = cfg.effective_debounce_ms();
-        let deadzone = cfg.effective_axis_deadzone();
+    /// The distinct elements of `plan` that `wanted` keeps, in plan order.
+    fn elements(&self, plan: &[(PadElement, PadTarget)], wanted: impl Fn(&PadMapper, PadElement) -> bool) -> Vec<PadElement> {
         let mut order: Vec<PadElement> = Vec::new();
         for (element, _) in plan {
             if !order.contains(element) && wanted(self, *element) {
                 order.push(*element);
             }
         }
+        order
+    }
+
+    /// Offer every button and two-key axis direction of `plan` to its debounce at `at_us`, as it
+    /// reads in `snapshot`. What is taken is handed back as the plan's events, in plan order.
+    fn read_keys(&mut self, at_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], snapshot: &PadSnapshot) -> Vec<PadEvent> {
+        let window = Duration::from_millis(u64::from(cfg.effective_debounce_ms()));
+        let deadzone = cfg.effective_axis_deadzone();
         let mut fired: BTreeMap<PadElement, bool> = BTreeMap::new();
-        for element in order {
-            if !self.gates.get(&element).is_none_or(|gate| gate.is_open(at_us, debounce)) {
-                continue;
-            }
+        for element in self.elements(plan, |mapper, element| !mapper.is_turntable(element)) {
             let raw = self.read(element, deadzone, snapshot);
-            if self.gates.entry(element).or_insert_with(ButtonGate::new).set(raw, at_us) {
+            if self.gates.entry(element).or_default().offer(raw, at_us, window) {
                 fired.insert(element, raw);
             }
         }
         plan.iter().filter_map(|(element, target)| target.event(*fired.get(element)?)).collect()
     }
 
-    /// Take every key change the debounce window kept out and has opened for by `until_us`, at the
-    /// instant it opened, earliest first.
-    fn take_opened(&mut self, until_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], snapshot: &PadSnapshot, events: &mut Vec<(PadEvent, i64)>) {
-        let debounce = cfg.effective_debounce_ms();
+    /// Read every turntable direction of `plan` at `at_us`: each at most once, and only once the
+    /// window has passed since its last accepted change, either way -- the reference
+    /// implementation's lock (`BMControllerInputProcessor.java:136`, inequality included), whose
+    /// readings the turntable algorithms count. What changed is handed back as the plan's events,
+    /// in plan order.
+    fn read_turntables(&mut self, at_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], snapshot: &PadSnapshot) -> Vec<PadEvent> {
+        let window = Duration::from_millis(u64::from(cfg.effective_debounce_ms()));
         let deadzone = cfg.effective_axis_deadzone();
-        let mut opened: Vec<(i64, PadElement, bool)> = Vec::new();
-        for (element, _) in plan {
-            if self.is_turntable(*element) || opened.iter().any(|(_, seen, _)| seen == element) {
+        let mut fired: BTreeMap<PadElement, bool> = BTreeMap::new();
+        for element in self.elements(plan, |mapper, element| mapper.is_turntable(element)) {
+            if self.gates.get(&element).and_then(Lr2Debounce::last_handed_at).is_some_and(|changed_us| at_us < changed_us.after(window)) {
                 continue;
             }
-            let raw = self.read(*element, deadzone, snapshot);
-            let Some(gate) = self.gates.get(element).filter(|gate| gate.pressed != raw) else { continue };
-            let opens_us = gate.opens_at(debounce);
-            if opens_us <= until_us {
-                opened.push((opens_us, *element, raw));
+            let raw = self.read(element, deadzone, snapshot);
+            if self.gates.entry(element).or_default().hand_over(raw, at_us) {
+                fired.insert(element, raw);
             }
         }
-        opened.sort_by_key(|(opens_us, _, _)| *opens_us);
-        for (opens_us, element, raw) in opened {
-            if self.gates.entry(element).or_insert_with(ButtonGate::new).set(raw, opens_us) {
-                events
-                    .extend(plan.iter().filter(|(planned, _)| *planned == element).filter_map(|(_, target)| target.event(raw)).map(|event| (event, opens_us)));
+        plan.iter().filter_map(|(element, target)| target.event(*fired.get(element)?)).collect()
+    }
+
+    /// Take every release of a button or two-key axis direction the debounce kept out and has let
+    /// through by `until_us`, at the instant its window ended, earliest first.
+    fn take_opened(&mut self, until_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], events: &mut Vec<(PadEvent, i64)>) {
+        let window = Duration::from_millis(u64::from(cfg.effective_debounce_ms()));
+        let mut opened: Vec<(i64, PadElement)> = self
+            .elements(plan, |mapper, element| !mapper.is_turntable(element))
+            .into_iter()
+            .filter_map(|element| Some((self.gates.get(&element)?.release_opened_by(until_us, window)?, element)))
+            .collect();
+        opened.sort_by_key(|(opens_us, _)| *opens_us);
+        for (opens_us, element) in opened {
+            if let Some(gate) = self.gates.get_mut(&element) {
+                gate.hand_over(false, opens_us);
             }
+            events.extend(plan.iter().filter(|(planned, _)| *planned == element).filter_map(|(_, target)| target.event(false)).map(|event| (event, opens_us)));
         }
     }
 
@@ -663,7 +652,7 @@ impl PadMapper {
         }
         let mut held = Vec::new();
         for (element, target) in cfg.plan(mode) {
-            if !self.gates.get(&element).is_some_and(|gate| gate.pressed) {
+            if !self.gates.get(&element).is_some_and(Lr2Debounce::handed) {
                 continue;
             }
             let event = match target {

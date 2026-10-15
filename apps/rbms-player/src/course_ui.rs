@@ -338,6 +338,28 @@ impl CourseOverrides {
         }
     }
 
+    /// Put the player's own value back into `play`, from `own` as the settings stood before the
+    /// course began, of every setting [`CourseOverrides::apply_to`] narrowed, and of nothing else:
+    /// the arrangement when the course is a grade course, the hi-speed and the lane shades when it
+    /// holds NO SPEED. What the course left to the player stays as the player set it during the
+    /// course, as the reference applies a course's constraints to the run alone and, short of NO
+    /// SPEED, saves the hi-speed and lane shades the player set (`BMSPlayer.saveConfig`, 831-847).
+    pub(crate) fn put_back_into(&self, own: &PlayOptions, play: &mut PlayOptions) {
+        if self.random != RandomLock::Free {
+            play.random = own.random;
+        }
+        if self.speed_locked {
+            play.hispeed = own.hispeed;
+            play.constant_speed = own.constant_speed;
+            play.cover = own.cover;
+            play.lift = own.lift;
+            play.hidden = own.hidden;
+            play.enable_cover = own.enable_cover;
+            play.enable_lift = own.enable_lift;
+            play.enable_hidden = own.enable_hidden;
+        }
+    }
+
     /// Whether the hi-speed and lane-shade keys do anything during this course
     /// (`BMSPlayer.java:419-423` disables the control).
     pub(crate) fn accepts_speed_input(&self) -> bool {

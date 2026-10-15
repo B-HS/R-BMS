@@ -750,7 +750,7 @@ fn a_successful_login_starts_the_records_sync() {
     let (tx, rx) = std::sync::mpsc::channel();
     let response = rbms_ir::AuthResponse { token: ACCOUNT_TOKEN.into(), player: PlayerId { id: ACCOUNT_ID.into() }, name: ACCOUNT_ID.into() };
     tx.send(Ok(response)).expect("the auth receiver is open");
-    shared.auth_rx = Some((crate::ir_session::AuthAction::Login, rx));
+    shared.auth_rx = Some(crate::app_network::AuthInFlight::new(crate::ir_session::AuthAction::Login, rx, |_| {}));
     shared.poll_network();
     assert!(shared.record_sync.is_some(), "signing in starts the sync");
     poll_to_the_end(&mut shared);

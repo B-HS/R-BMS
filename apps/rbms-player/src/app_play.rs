@@ -91,7 +91,9 @@ impl AppShared {
     /// A course's constraints are the course's, as the reference applies them to the run alone
     /// (`BMSPlayer`) and never to the configuration: a file saved mid-course holds what the player set,
     /// so a course left by quitting, or a crash in one, never leaves the next start on the course's
-    /// options.
+    /// options. What the course left to the player is saved as the player set it during the course,
+    /// as the reference saves the hi-speed and lane shades of a course without NO SPEED
+    /// ([`crate::course_ui::CourseOverrides::put_back_into`]).
     pub(crate) fn settings_to_save(&self) -> std::borrow::Cow<'_, Config> {
         if self.own_play_options.is_none() && self.course_settings_backup.is_none() {
             return std::borrow::Cow::Borrowed(&self.config);
@@ -100,8 +102,8 @@ impl AppShared {
         if let Some(own) = self.own_play_options {
             own.put_into(&mut config.play);
         }
-        if let Some(play) = &self.course_settings_backup {
-            config.play = play.clone();
+        if let (Some(own), Some(overrides)) = (&self.course_settings_backup, &self.course_overrides) {
+            overrides.put_back_into(own, &mut config.play);
         }
         std::borrow::Cow::Owned(config)
     }
@@ -524,7 +526,8 @@ impl AppShared {
             let total = jobs.len();
             if total > 0 {
                 println!("decoding {total} BGA images...");
-                let (rx, progress, _) = spawn_bga_decode(jobs, bga_cancel.clone());
+                let (rx, progress, _) =
+                    spawn_bga_decode(jobs, shown.as_ref().map(rbms_render::skin_render::frame::BgaPlayhead::first_looks), bga_cancel.clone());
                 bga = Some(BgaLoad { rx, progress, cancel: bga_cancel, total });
             }
         }

@@ -38,7 +38,7 @@ const NUMBER_ROWS: [(SettingTab, &[SettingId]); 5] = [
         ],
     ),
     (SettingTab::Display, &[SettingId::JudgeTextY]),
-    (SettingTab::Input, &[SettingId::KeyDebounce]),
+    (SettingTab::Input, &[SettingId::KeyDebounce, SettingId::PadDebounce]),
     (SettingTab::Audio, &[SettingId::MasterVolume, SettingId::KeyVolume, SettingId::BgmVolume, SettingId::SystemVolume, SettingId::AudioPolyphony]),
     (SettingTab::Select, &[SettingId::PreviewVolume, SettingId::PreviewFade]),
 ];
@@ -64,6 +64,7 @@ pub(super) fn bare_app(tag: &str) -> App {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("the fixture folder is writable");
     app.shared.settings_path = root.join("settings.ron");
+    app.shared.keyconfig_path = root.join("keyconfig.ron");
     app.shared.config.skin = rbms_config::SkinOptions::default();
     app.shared.skins = SkinLibrary::new(&app.shared.settings_path, &app.shared.config);
     app
@@ -164,9 +165,9 @@ impl Screen {
         middle(row_number(self.row_of(id)))
     }
 
-    /// The step one row that holds a number stands on in the configuration.
+    /// The step one row that holds a number stands on, wherever the program keeps it.
     pub(super) fn steps_of(&self, id: SettingId) -> i64 {
-        number_steps(&self.app.shared.config, id).unwrap_or_else(|| panic!("{id:?} holds no number"))
+        self.app.shared.setting_number(id).map(|number| number.steps).unwrap_or_else(|| panic!("{id:?} holds no number"))
     }
 
     /// What the row reads as the screen draws it.
@@ -236,7 +237,7 @@ fn a_key_moves_every_number_row_by_its_smallest_change_and_ten_with_shift() {
             let spec = number_spec(id).expect("the row holds a number");
             let shipped = screen.steps_of(id);
             let middle = (spec.min + spec.max) / 2;
-            rbms_config::set_number_steps(&mut screen.app.shared.config, id, middle);
+            screen.app.shared.set_row_number(SettingRow::Fixed(id), middle);
             screen.focus(id);
             screen.key(KeyCode::ArrowRight);
             assert_eq!(screen.steps_of(id), middle + 1, "{id:?}: one press is not the smallest change");
@@ -247,11 +248,11 @@ fn a_key_moves_every_number_row_by_its_smallest_change_and_ten_with_shift() {
             screen.shifted(KeyCode::ArrowLeft);
             assert_eq!(screen.steps_of(id), middle, "{id:?}: the way back is not the way there");
 
-            rbms_config::set_number_steps(&mut screen.app.shared.config, id, spec.max - NEAR_THE_END);
+            screen.app.shared.set_row_number(SettingRow::Fixed(id), spec.max - NEAR_THE_END);
             screen.shifted(KeyCode::ArrowRight);
             screen.key(KeyCode::ArrowRight);
             assert_eq!(screen.steps_of(id), spec.max, "{id:?} did not stop at its upper end");
-            rbms_config::set_number_steps(&mut screen.app.shared.config, id, spec.min + NEAR_THE_END);
+            screen.app.shared.set_row_number(SettingRow::Fixed(id), spec.min + NEAR_THE_END);
             screen.shifted(KeyCode::ArrowLeft);
             screen.key(KeyCode::ArrowLeft);
             assert_eq!(screen.steps_of(id), spec.min, "{id:?} did not stop at its lower end");
@@ -521,7 +522,7 @@ fn a_press_on_the_knob_takes_hold_of_it_and_leaves_the_row_where_it_was() {
         for id in ids.iter().copied() {
             let spec = number_spec(id).expect("the row holds a number");
             for steps in [spec.min, (spec.min * 2 + spec.max) / 3, spec.max] {
-                rbms_config::set_number_steps(&mut screen.app.shared.config, id, steps);
+                screen.app.shared.set_row_number(SettingRow::Fixed(id), steps);
                 screen.state.dirty = true;
                 screen.focus(id);
                 let slider = screen.slider_of(id);

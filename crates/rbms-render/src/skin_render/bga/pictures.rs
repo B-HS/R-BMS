@@ -6,7 +6,8 @@
 //!
 //! - A picture no longer than 256 pixels on its longer side is put on a 256 x 256 canvas of
 //!   transparent black, centred across and flush with the top (`BGImageProcessor.convert`). Fitted
-//!   into a rectangle afterwards, it keeps that square's shape and the empty space around it.
+//!   into a rectangle afterwards, it keeps that square's shape and the empty space around it. A
+//!   picture exactly 256 x 256 is that canvas already, to the byte, so it is not copied onto one.
 //! - A layer is drawn through a shader that turns every pixel whose red, green and blue are all
 //!   zero into a transparent one (`layer.frag`). Doing that to the texels is the same thing as long
 //!   as the layer is sampled unfiltered, which it is.
@@ -19,17 +20,24 @@
 //! handing it to the renderer costs most of a millisecond, which a frame that judges keys cannot
 //! spend. So that work is done before the chart plays, as far as memory allows:
 //!
-//! - The pixels each look hands the renderer are painted when the picture is decoded, on the
-//!   decode's own worker ([`BgaPrepared`]).
 //! - Before the chart plays, [`BgaTextures::preload`] uploads every picture the chart shows, in each
 //!   look it is shown in, as a texture of its own, until [`RESIDENT_BYTES`] are held. A frame that
 //!   shows one of those hands the renderer nothing.
+//! - The looks past that allowance have the pixels they hand the renderer painted when the picture
+//!   is decoded, on the decode's own worker ([`BgaPrepared`]), so the frame that shows one only
+//!   uploads it.
 //!
-//! A picture past either allowance is painted, when nothing painted it ahead, and uploaded the frame
-//! it is first shown in, into the canvas and the texture its role keeps, which asks the allocator
-//! for nothing. The pixels are the same whichever way they got there.
+//! The two are one plan, made before any picture is decoded from the pictures' sizes as their files
+//! give them ([`uploaded_ahead`]): a look that is to be uploaded ahead is not painted on the worker,
+//! since the texture shows it from then on and holding its pixels twice is memory spent on nothing,
+//! and the room painting has goes to the looks that are not. The upload ahead paints those looks
+//! itself, before the chart plays.
+//!
+//! A picture past both allowances is painted and uploaded the frame it is first shown in, into the
+//! canvas and the texture its role keeps, which asks the allocator for nothing. The pixels are the
+//! same whichever way they got there.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::{BgaExpand, BgaFrame, BgaPick, BgaPlayhead, BgaShow};
 use crate::{Renderer, TextureId};
@@ -101,16 +109,22 @@ impl BgaPicture<'_> {
         self.width.max(self.height) <= SMALL_PICTURE_EDGE
     }
 
+    /// Whether the picture as it is takes painting to hand over: a small picture that is not already
+    /// the size of its canvas. One exactly 256 x 256 lands across nothing and covers every row, so
+    /// its canvas is its own pixels.
+    fn needs_canvas(&self) -> bool {
+        self.is_small() && (self.width, self.height) != (SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE)
+    }
+
     /// The size of the texture either look of the picture is: the 256 x 256 canvas for a small
     /// picture, and the picture's own size otherwise.
     fn texture_size(&self) -> (u32, u32) {
-        if self.is_small() { (SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE) } else { (self.width, self.height) }
+        texture_size_of(self.width, self.height)
     }
 
     /// Bytes either look of the picture hands the renderer.
     pub fn texture_bytes(&self) -> usize {
-        let (width, height) = self.texture_size();
-        width as usize * height as usize * RGBA_BYTES
+        texture_bytes_of(self.width, self.height)
     }
 
     /// The pixels `look` hands the renderer when nothing has to be painted for them now: the ones
@@ -124,19 +138,54 @@ impl BgaPicture<'_> {
         if let Some(pixels) = painted.filter(|pixels| pixels.len() == self.texture_bytes()) {
             return Some(pixels);
         }
-        (look == BgaLook::Plain && !self.is_small()).then_some(self.rgba)
+        (look == BgaLook::Plain && !self.needs_canvas()).then_some(self.rgba)
     }
 }
 
+/// The size of the texture either look of a `width` x `height` picture is: the 256 x 256 canvas for
+/// a small picture, and the picture's own size otherwise.
+fn texture_size_of(width: u32, height: u32) -> (u32, u32) {
+    if width.max(height) <= SMALL_PICTURE_EDGE { (SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE) } else { (width, height) }
+}
+
+/// Bytes either look of a `width` x `height` picture hands the renderer, which is what holding it as
+/// a texture costs: known from the picture's size alone, before its pixels are.
+pub fn texture_bytes_of(width: u32, height: u32) -> usize {
+    let (width, height) = texture_size_of(width, height);
+    width as usize * height as usize * RGBA_BYTES
+}
+
+/// Which of a chart's looks [`BgaTextures::preload`] holds as textures, given what each costs
+/// ([`texture_bytes_of`]) in the order the chart first shows them ([`BgaPlayhead::first_looks`]),
+/// or `None` for one whose size is not known: each that fits in what `allowance` has left after
+/// the ones before it. A look that does not fit leaves the room to the ones after it.
+pub fn uploaded_ahead(costs: impl IntoIterator<Item = Option<usize>>, allowance: usize) -> Vec<bool> {
+    let mut held = 0;
+    costs
+        .into_iter()
+        .map(|cost| {
+            let fits = cost.is_some_and(|cost| held + cost <= allowance);
+            held += cost.filter(|_| fits).unwrap_or(0);
+            fits
+        })
+        .collect()
+}
+
 /// A picture's pixels as each look hands them to the renderer, painted once, off the frame thread,
-/// when the picture is decoded. A look that is the picture as it is, or that nothing painted, is
-/// `None`, and the frame that shows it paints it then.
+/// when the picture is decoded. A look that is the picture as it is, that is uploaded ahead of play,
+/// or that nothing painted, is `None`, and whatever shows it paints it then.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BgaPrepared {
-    /// The plain look of a small picture: the picture on its 256 x 256 canvas.
+    /// The plain look of a small picture smaller than its canvas: the picture on its 256 x 256
+    /// canvas.
     pub plain: Option<Vec<u8>>,
     /// The keyed look: on its canvas when the picture is small, with its black keyed out.
     pub keyed: Option<Vec<u8>>,
+    /// The looks of the picture the chart's plan holds as textures from before the chart plays
+    /// ([`uploaded_ahead`]), which were not painted: [`BgaTextures::preload`] uploads these and no
+    /// other look of the picture. `None` when no plan was made, and the upload ahead keeps to its
+    /// allowance in the order the chart shows its pictures, as far as they are decoded.
+    pub ahead: Option<Vec<BgaLook>>,
 }
 
 impl BgaPrepared {
@@ -144,7 +193,7 @@ impl BgaPrepared {
     /// picture's own and nothing need be painted, or when the picture's pixels are not as many as
     /// its size says.
     pub fn paint(picture: &BgaPicture<'_>, look: BgaLook) -> Option<Vec<u8>> {
-        if !picture.is_whole() || (look == BgaLook::Plain && !picture.is_small()) {
+        if !picture.is_whole() || (look == BgaLook::Plain && !picture.needs_canvas()) {
             return None;
         }
         let mut canvas = Vec::new();
@@ -322,11 +371,24 @@ impl BgaTextures {
     /// [`RESIDENT_BYTES`] between them; one that would pass that is left to be uploaded when it is
     /// shown.
     ///
+    /// A picture whose decode carries the chart's plan ([`BgaPrepared::ahead`]) is uploaded in the
+    /// looks the plan names and no other, which keeps the textures to the looks nothing was painted
+    /// for whichever order the pictures are decoded in.
+    ///
     /// One call uploads at most `bytes`, though always at least one picture when one is left, so
     /// the frames before play share the work between them. A picture `picture` does not have yet,
     /// because it is still being decoded, is taken by a later call.
-    pub fn preload<'a, R: Renderer>(&mut self, r: &mut R, playhead: &BgaPlayhead, picture: impl Fn(i32) -> Option<BgaPicture<'a>>, bytes: usize) {
-        self.preload_within(r, playhead, picture, bytes, RESIDENT_BYTES);
+    ///
+    /// Answers the picture numbers and looks this call left held as textures, in the order it
+    /// uploaded them.
+    pub fn preload<'a, R: Renderer>(
+        &mut self,
+        r: &mut R,
+        playhead: &BgaPlayhead,
+        picture: impl Fn(i32) -> Option<BgaPicture<'a>>,
+        bytes: usize,
+    ) -> Vec<(i32, BgaLook)> {
+        self.preload_within(r, playhead, picture, bytes, RESIDENT_BYTES)
     }
 
     /// [`BgaTextures::preload`] with the pictures held to `allowance` bytes between them.
@@ -337,12 +399,10 @@ impl BgaTextures {
         picture: impl Fn(i32) -> Option<BgaPicture<'a>>,
         bytes: usize,
         allowance: usize,
-    ) {
+    ) -> Vec<(i32, BgaLook)> {
         let BgaTextures { resident, resident_bytes, pending, .. } = self;
-        let pending = pending.get_or_insert_with(|| {
-            let mut seen = HashSet::new();
-            playhead.looks().filter(|named| seen.insert(*named)).collect()
-        });
+        let mut held = Vec::new();
+        let pending = pending.get_or_insert_with(|| playhead.first_looks());
         let mut uploaded = 0;
         let mut canvas = Vec::new();
         pending.retain(|&(number, look)| {
@@ -354,7 +414,8 @@ impl BgaTextures {
             };
             let entry = (picture.generation, look);
             let cost = picture.texture_bytes();
-            if resident.contains_key(&entry) || *resident_bytes + cost > allowance {
+            let unplanned = picture.prepared.and_then(|prepared| prepared.ahead.as_ref()).is_some_and(|ahead| !ahead.contains(&look));
+            if resident.contains_key(&entry) || unplanned || *resident_bytes + cost > allowance {
                 return false;
             }
             let (width, height) = picture.texture_size();
@@ -369,10 +430,12 @@ impl BgaTextures {
             resident.insert(entry, tex);
             if r.texture_size(tex).is_some() {
                 *resident_bytes += cost;
+                held.push((number, look));
             }
             uploaded += cost;
             false
         });
+        held
     }
 
     /// Hands every texture back to the renderer, for a screen that is done with its background.
@@ -410,7 +473,7 @@ impl BgaTextures {
         picture: impl Fn(i32) -> Option<BgaPicture<'a>>,
         bytes: usize,
         allowance: usize,
-    ) {
-        self.preload_within(r, playhead, picture, bytes, allowance);
+    ) -> Vec<(i32, BgaLook)> {
+        self.preload_within(r, playhead, picture, bytes, allowance)
     }
 }

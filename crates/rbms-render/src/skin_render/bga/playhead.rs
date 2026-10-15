@@ -11,6 +11,8 @@
 //! The miss layer starts when the game tells the playhead a miss happened, shows for as long as the
 //! player's miss layer duration says, and is chosen by how far through that time the clock is.
 
+use std::collections::HashSet;
+
 use rbms_model::TimeLine;
 
 use super::BgaLook;
@@ -169,6 +171,13 @@ impl BgaPlayhead {
             let miss = event.miss.iter().flatten().filter(|number| **number >= 0).map(|number| (*number, BgaLook::Plain));
             base.into_iter().chain(layer).chain(miss)
         })
+    }
+
+    /// [`BgaPlayhead::looks`] with each picture and look named once, where the chart first shows
+    /// it: the order the pictures are uploaded ahead of play in, and given their places there in.
+    pub fn first_looks(&self) -> Vec<(i32, BgaLook)> {
+        let mut seen = HashSet::new();
+        self.looks().filter(|named| seen.insert(*named)).collect()
     }
 
     /// What the background shows now (`drawBGA`).

@@ -246,3 +246,40 @@ fn a_lane_hit_in_quick_succession_is_played_where_every_press_came() {
     assert_eq!(presses, times, "every press is played dead on its note");
     assert_eq!(state.session.judge().counts[rbms_judge::Judge::PerfectGreat as usize], 4, "and judged so");
 }
+
+/// The same lane hit four times on one controller button, in thirty-second notes at 200 BPM, is
+/// played where every press came, dead on each note: PAD DEBOUNCE, like KEY DEBOUNCE, never makes a
+/// press late, though each press follows the release before it by less than the window.
+#[test]
+fn a_controller_button_hit_in_quick_succession_is_played_where_every_press_came() {
+    let mut app = app_on("input-time-pad-rapid", Config::default());
+    let mut state = run_of(RAPID_CHART, SessionOptions::default());
+    let times = note_times(&state);
+    let epoch = a_while_ago();
+    song_reads_at(&mut app, epoch, times[0]);
+    let mut cfg = PadConfig::default();
+    cfg.set_lane(Mode::BEAT_7K, FIRST_LANE, Some(PadBinding::Button(BUTTON)));
+    let held_us = RAPID_HELD_FOR.as_micros() as i64;
+    assert!(
+        times.windows(2).all(|pair| pair[1] - pair[0] - held_us < i64::from(cfg.effective_debounce_ms()) * US_PER_MS),
+        "each press follows a release by less than the window"
+    );
+
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    for note_us in &times {
+        let pressed_us = note_us - times[0];
+        let changes = [
+            (pressed_us, PadChange::Button { code: BUTTON, standard: None, pressed: true }),
+            (pressed_us + held_us, PadChange::Button { code: BUTTON, standard: None, pressed: false }),
+        ];
+        for (event, at_us) in mapper.resolve_changes(&changes, pressed_us + held_us, &cfg, Mode::BEAT_7K, &mut snapshot) {
+            let at = epoch + Duration::from_micros(at_us as u64);
+            state.handle_pad(&mut FrameCtx { shared: &mut app.shared, now: at, dt: 0.0 }, event);
+        }
+    }
+
+    let presses: Vec<i64> = state.session.recorded_events().iter().filter(|event| event.press).map(|event| event.t).collect();
+    assert_eq!(presses, times, "every press is played dead on its note");
+    assert_eq!(state.session.judge().counts[rbms_judge::Judge::PerfectGreat as usize], 4, "and judged so");
+}

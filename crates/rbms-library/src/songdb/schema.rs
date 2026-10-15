@@ -23,7 +23,12 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// number is not above zero, or that Java's `Double.parseDouble` cannot read, leaves the value an
 /// earlier line set, and a trailing `d` or `f` is read past. That changes the stored `total` and
 /// density of the charts written that way, and nothing else.
-pub const PARSER_VERSION: u32 = 4;
+/// Generation 5 ends a line at a lone carriage return as the reference's `BufferedReader.readLine`
+/// does, so a chart saved with old Mac line ends is read line by line instead of as one long title
+/// with no notes, and cuts a `#TOTAL` line as the reference's `CommandWord` dispatch does (one
+/// character after the name passed over, Java's `String.trim`). That changes every stored column
+/// of the charts with lone carriage returns and the `total` of the few written the other way.
+pub const PARSER_VERSION: u32 = 5;
 
 /// Connection settings every open applies: the write-ahead log so a scan writing in one connection
 /// does not block the browser reading in another, and the foreign keys that make `song_detail`

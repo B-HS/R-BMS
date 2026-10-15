@@ -136,7 +136,7 @@ impl Fixture {
         let (tx, rx) = channel();
         tx.send(Ok(AuthResponse { token: format!("token-of-{account}"), player: PlayerId { id: account.into() }, name: account.into() })).expect("the answer");
         self.shared.session.begin(AuthAction::Login);
-        self.shared.auth_rx = Some((AuthAction::Login, rx));
+        self.shared.auth_rx = Some(AuthInFlight::new(AuthAction::Login, rx, |_| {}));
         self.shared.poll_auth();
     }
 
@@ -347,7 +347,7 @@ fn rebuilding_the_server_lets_go_of_every_request_made_as_the_account() {
     f.shared.sync_download_rx = Some(download_rx);
     let (_auth_tx, auth_rx) = channel();
     f.shared.session.begin(AuthAction::Login);
-    f.shared.auth_rx = Some((AuthAction::Login, auth_rx));
+    f.shared.auth_rx = Some(AuthInFlight::new(AuthAction::Login, auth_rx, |_| {}));
 
     f.shared.rebuild_server();
 
@@ -435,6 +435,44 @@ fn a_token_issued_for_a_login_nobody_takes_any_more_is_handed_over_to_be_revoked
     assert_eq!(revoked.recv_timeout(CALL_WAIT).expect("the unclaimed token was left valid"), format!("token-of-{ACCOUNT}"));
 }
 
+/// How long a test gives a login the double answers at once to put its answer in the channel.
+const ANSWER_SETTLE: Duration = Duration::from_millis(200);
+
+/// A login answered between two frames, whose answer is let go of before a frame takes it, still has
+/// its token revoked: the token is known to nobody on this machine.
+#[test]
+fn a_token_already_waiting_when_the_login_is_let_go_of_is_revoked() {
+    let server = Arc::new(AccountDouble::default());
+    let (revoked_tx, revoked) = channel();
+    let answer = spawn_auth(server.clone(), AuthAction::Login, auth_request(AuthAction::Login, ACCOUNT, "hunter2hunter2", ""), move |token| {
+        revoked_tx.send(token).expect("the test listens");
+    });
+    server.wait_for("login", 1);
+    std::thread::sleep(ANSWER_SETTLE);
+
+    drop(answer);
+
+    assert_eq!(revoked.recv_timeout(CALL_WAIT).expect("the waiting token was left valid"), format!("token-of-{ACCOUNT}"));
+}
+
+/// LOGOUT pressed after a login answered but before a frame took the answer revokes the token the
+/// answer carries, as the session it would have signed in is gone.
+#[test]
+fn logging_out_before_a_waiting_login_answer_is_taken_revokes_its_token() {
+    let mut f = a_guest_logging_in("logout-before-answer-taken");
+    let (answer_tx, answer) = channel();
+    let token = format!("token-of-{ACCOUNT}");
+    answer_tx.send(Ok(AuthResponse { token: token.clone(), player: PlayerId { id: ACCOUNT.into() }, name: ACCOUNT.into() })).expect("the answer");
+    let (revoked_tx, revoked) = channel();
+    f.shared.session.begin(AuthAction::Login);
+    f.shared.auth_rx = Some(AuthInFlight::new(AuthAction::Login, answer, move |token| revoked_tx.send(token).expect("the test listens")));
+
+    f.shared.finish_logout();
+
+    assert_eq!(revoked.recv_timeout(CALL_WAIT).expect("the waiting token was left valid"), token);
+    assert!(!f.shared.session.is_logged_in(), "the answer let go of signed the player in");
+}
+
 #[test]
 fn a_token_the_app_takes_is_not_revoked() {
     let server = Arc::new(AccountDouble::default());
@@ -442,6 +480,15 @@ fn a_token_the_app_takes_is_not_revoked() {
     let answer = spawn_auth(server, AuthAction::Login, auth_request(AuthAction::Login, ACCOUNT, "hunter2hunter2", ""), move |token| {
         revoked_tx.send(token).expect("the test listens");
     });
-    assert!(answer.recv_timeout(CALL_WAIT).expect("the login answers").is_ok());
-    assert!(revoked.recv_timeout(CALL_POLL).is_err(), "a token the app holds was revoked");
+    let mut answer = answer;
+    let deadline = Instant::now() + CALL_WAIT;
+    let taken = loop {
+        match answer.try_take() {
+            Err(TryRecvError::Empty) if Instant::now() < deadline => std::thread::sleep(CALL_POLL),
+            taken => break taken,
+        }
+    };
+    assert!(matches!(taken, Ok(Ok(_))), "the login did not answer");
+    drop(answer);
+    assert!(revoked.recv_timeout(ANSWER_SETTLE).is_err(), "a token the app holds was revoked");
 }

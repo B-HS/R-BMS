@@ -96,7 +96,7 @@ fn a_replay_still_being_written_when_its_run_is_sent_is_uploaded_once_it_lands()
 }
 
 /// The player's own play settings, and the course of the recorded chart twice over standing on its
-/// second stage with the first cleared, its constraints having narrowed them.
+/// second stage with the first cleared, its NO SPEED constraint having narrowed them.
 fn on_the_second_stage_of_a_course(shared: &mut AppShared) -> (rbms_config::PlayOptions, rbms_play::PlaySummary) {
     let own = shared.config.play.clone();
     let model = recorded_model();
@@ -118,6 +118,7 @@ fn on_the_second_stage_of_a_course(shared: &mut AppShared) -> (rbms_config::Play
     shared.course_run = Some(run);
     shared.course_stage_reasons = vec![None];
     shared.course_settings_backup = Some(own.clone());
+    shared.course_overrides = Some(crate::course_ui::CourseOverrides { speed_locked: true, ..crate::course_ui::CourseOverrides::default() });
     shared.config.play.hispeed = NARROWED_HISPEED;
     (own, first)
 }
@@ -293,6 +294,130 @@ fn quitting_in_the_middle_of_a_course_keeps_a_failed_course_and_sends_nothing() 
     assert_eq!(course.judge.pgreat, first.counts[0] + left.counts[0], "both stages are folded into the course");
     assert!(sent.recv_timeout(NOTHING_SENT_WAIT).is_err(), "the course was sent as the process ends");
 }
+
+/// The hi-speed a run is given on the play screen, standing in for every play setting its keys move.
+const HISPEED_SET_IN_PLAY: f64 = 3.5;
+
+/// The judge offset AUTO ADJUST moves a run to.
+const OFFSET_ADJUSTED_IN_PLAY_MS: i32 = 17;
+
+/// Write the settings file as it stands, then change the hi-speed and the judge offset in memory
+/// only, as the play screen's keys and AUTO ADJUST do. Returns the hi-speed the file held.
+fn settings_changed_in_play(shared: &mut AppShared) -> f64 {
+    let before = shared.config.play.hispeed;
+    assert!((before - HISPEED_SET_IN_PLAY).abs() > f64::EPSILON, "the fixture changes the hi-speed");
+    shared.save_settings();
+    shared.finish_saves();
+    shared.config.play.hispeed = HISPEED_SET_IN_PLAY;
+    shared.config.judge.offset_ms = OFFSET_ADJUSTED_IN_PLAY_MS;
+    before
+}
+
+/// Whether the settings file holds the hi-speed and judge offset [`settings_changed_in_play`] set.
+fn holds_the_settings_changed_in_play(shared: &AppShared) -> bool {
+    let on_disk = rbms_config::load(&shared.settings_path).expect("the settings file reads").config;
+    (on_disk.play.hispeed - HISPEED_SET_IN_PLAY).abs() < f64::EPSILON && on_disk.judge.offset_ms == OFFSET_ADJUSTED_IN_PLAY_MS
+}
+
+/// The app told to quit in the middle of a run keeps the play settings changed in it, as Escape
+/// keeps them: the hi-speed set with the play screen's keys and the offset AUTO ADJUST moved are the
+/// ones the next start plays on.
+#[test]
+fn quitting_in_the_middle_of_a_run_keeps_the_settings_changed_in_it() {
+    let model = recorded_model();
+    let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_AT_US);
+    let (mut app, _, _) = playing("quit-keeps-settings", session);
+    settings_changed_in_play(&mut app.shared);
+
+    app.keep_what_quitting_cuts_short();
+    app.shared.finish_saves();
+
+    assert!(holds_the_settings_changed_in_play(&app.shared), "the settings changed in the run were lost on the way out");
+}
+
+/// A run nothing is kept of keeps the settings changed in it all the same when the app quits, as
+/// Escape keeps them before it asks whether the run is kept.
+#[test]
+fn quitting_in_the_middle_of_an_autoplay_keeps_the_settings_changed_in_it() {
+    let model = recorded_model();
+    let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_AT_US);
+    let (mut app, _, _) = playing("quit-autoplay-keeps-settings", session);
+    app.shared.config.play.autoplay = true;
+    settings_changed_in_play(&mut app.shared);
+
+    app.keep_what_quitting_cuts_short();
+    app.shared.finish_saves();
+
+    assert!(holds_the_settings_changed_in_play(&app.shared), "the settings changed in the run were lost on the way out");
+}
+
+/// Quitting anywhere but the play screen writes no settings: a settings file this build could not
+/// read is left as it is rather than overwritten with the defaults the run fell back to.
+#[test]
+fn quitting_outside_a_run_leaves_the_settings_file_alone() {
+    let (mut app, _, _) = playing("quit-outside-run", played_by_hand(&HAND_OFFSETS_US, false));
+    app.stage = Stage::Loading(LoadingState::song(0));
+    let unreadable = "written by a newer build";
+    std::fs::write(&app.shared.settings_path, unreadable).expect("the settings file is writable");
+
+    app.keep_what_quitting_cuts_short();
+    app.shared.finish_saves();
+
+    assert_eq!(std::fs::read_to_string(&app.shared.settings_path).expect("the settings file reads"), unreadable);
+}
+
+/// Stand on the first stage of the recorded chart's course under `constraints`, as the browser
+/// begins one: the player's own play settings put aside and the ones the constraints narrow
+/// rewritten.
+fn standing_in_a_course(shared: &mut AppShared, constraints: Vec<rbms_course::CourseConstraint>) {
+    let mut run = two_stage_course(recorded_model().md5);
+    run.course.constraints = constraints;
+    let overrides = crate::course_ui::CourseOverrides::of(&run.course);
+    shared.course_settings_backup = Some(shared.config.play.clone());
+    overrides.apply_to(&mut shared.config.play);
+    shared.course_overrides = Some(overrides);
+    shared.course_run = Some(run);
+}
+
+/// A course with no NO SPEED constraint leaves the hi-speed and the lane shades to the player, as
+/// the reference saves them after every stage of such a course (`BMSPlayer.saveConfig`): what the
+/// player sets during it is in the settings file while it runs and is still theirs once it ends.
+#[test]
+fn the_speed_set_during_a_course_that_does_not_lock_it_is_kept() {
+    let mut shared = signed_out("course-speed-kept");
+    standing_in_a_course(&mut shared, Vec::new());
+    assert!(shared.course_overrides.as_ref().is_some_and(crate::course_ui::CourseOverrides::accepts_speed_input), "the fixture course locks no speed");
+    shared.config.play.hispeed = HISPEED_SET_IN_PLAY;
+    shared.config.play.cover = NARROWED_COVER;
+
+    shared.save_settings();
+    shared.finish_saves();
+    let on_disk = rbms_config::load(&shared.settings_path).expect("the settings file reads").config;
+    assert!((on_disk.play.hispeed - HISPEED_SET_IN_PLAY).abs() < f64::EPSILON, "the hi-speed set during the course was not saved");
+    assert!((on_disk.play.cover - NARROWED_COVER).abs() < f32::EPSILON, "the lane cover set during the course was not saved");
+
+    crate::end_course(&mut shared);
+    assert!((shared.config.play.hispeed - HISPEED_SET_IN_PLAY).abs() < f64::EPSILON, "the hi-speed set during the course was put back");
+    assert!((shared.config.play.cover - NARROWED_COVER).abs() < f32::EPSILON, "the lane cover set during the course was put back");
+}
+
+/// A course that holds the arrangement to OFF puts back the player's own arrangement when it ends,
+/// whatever it left of the speed to the player.
+#[test]
+fn a_course_that_locks_the_arrangement_puts_back_only_the_arrangement() {
+    let mut shared = signed_out("course-random-back");
+    shared.config.play.random = rbms_chart::shuffle::NoteOption::Mirror;
+    standing_in_a_course(&mut shared, vec![rbms_course::CourseConstraint::Class]);
+    assert_eq!(shared.config.play.random, rbms_chart::shuffle::NoteOption::Off, "the course plays as written");
+    shared.config.play.hispeed = HISPEED_SET_IN_PLAY;
+
+    crate::end_course(&mut shared);
+    assert_eq!(shared.config.play.random, rbms_chart::shuffle::NoteOption::Mirror, "the player's arrangement was not put back");
+    assert!((shared.config.play.hispeed - HISPEED_SET_IN_PLAY).abs() < f64::EPSILON, "the hi-speed set during the course was put back");
+}
+
+/// The lane cover a player sets during a course, standing in for every lane shade.
+const NARROWED_COVER: f32 = 0.25;
 
 /// Quitting on the LOADING screen between two stages of a course keeps the course as played so far.
 #[test]
