@@ -29,6 +29,13 @@
       "when": 1791999623784,
       "tag": "0003_replay_user_quota",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1792027422523,
+      "tag": "0004_course_score_judge_totals",
+      "breakpoints": true
     }
   ]
 }

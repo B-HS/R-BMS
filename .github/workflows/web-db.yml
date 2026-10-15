@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts'
+        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays'
         type: choice
-        options: [status, migrate, cleanup-count, cleanup-delete]
+        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair]
         default: status
 
 permissions:
@@ -71,3 +71,12 @@ jobs:
       - name: Count again
         if: inputs.action == 'cleanup-delete'
         run: bun scripts/run-sql.ts cleanup-test-accounts.count.sql
+      - name: Count the chart notes
+        if: inputs.action == 'chart-notes-count' || inputs.action == 'chart-notes-repair'
+        run: bun scripts/run-sql.ts chart-notes.count.sql
+      - name: Repair the chart notes
+        if: inputs.action == 'chart-notes-repair'
+        run: bun scripts/run-sql.ts chart-notes.repair.sql
+      - name: Count the chart notes again
+        if: inputs.action == 'chart-notes-repair'
+        run: bun scripts/run-sql.ts chart-notes.count.sql
