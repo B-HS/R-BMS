@@ -293,6 +293,12 @@ impl Player {
         self.judge.set_longnote_margin_rate(rate_percent);
     }
 
+    /// Judge the chart as played at `percent` of its own speed, in the player's own time
+    /// ([`JudgeEngine::set_playback_rate`]).
+    pub fn set_playback_rate(&mut self, percent: i32) {
+        self.judge.set_playback_rate(percent);
+    }
+
     /// Which note a press takes when several are in range (`JudgeAlgorithm.java:17-37`).
     pub fn set_algorithm(&mut self, algorithm: JudgeAlgorithm) {
         self.judge.set_algorithm(algorithm);

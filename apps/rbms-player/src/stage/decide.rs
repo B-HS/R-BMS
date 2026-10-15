@@ -286,7 +286,7 @@ impl DecideState {
         shared.practice_requested = false;
         shared.release_practice_chart();
         if shared.course_run.is_some() {
-            return crate::end_course(shared);
+            return crate::app_result::abandon_course(shared, crate::app_result::Sending::Now);
         }
         Transition::Back
     }

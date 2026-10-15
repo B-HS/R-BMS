@@ -85,16 +85,25 @@ impl AppShared {
     }
 
     /// The settings as the settings file is to hold them: the ones in force, with the player's own
-    /// options in place of the ones a replay is being watched with.
+    /// options in place of the ones a replay is being watched with, and the player's own play
+    /// settings in place of the ones a course's constraints narrowed them to.
+    ///
+    /// A course's constraints are the course's, as the reference applies them to the run alone
+    /// (`BMSPlayer`) and never to the configuration: a file saved mid-course holds what the player set,
+    /// so a course left by quitting, or a crash in one, never leaves the next start on the course's
+    /// options.
     pub(crate) fn settings_to_save(&self) -> std::borrow::Cow<'_, Config> {
-        match self.own_play_options {
-            Some(own) => {
-                let mut config = self.config.clone();
-                own.put_into(&mut config.play);
-                std::borrow::Cow::Owned(config)
-            }
-            None => std::borrow::Cow::Borrowed(&self.config),
+        if self.own_play_options.is_none() && self.course_settings_backup.is_none() {
+            return std::borrow::Cow::Borrowed(&self.config);
         }
+        let mut config = self.config.clone();
+        if let Some(own) = self.own_play_options {
+            own.put_into(&mut config.play);
+        }
+        if let Some(play) = &self.course_settings_backup {
+            config.play = play.clone();
+        }
+        std::borrow::Cow::Owned(config)
     }
 }
 
@@ -510,7 +519,8 @@ impl AppShared {
             self.has_play_scene().then(|| mode_skin_type(mode).and_then(|screen| self.skins.document(screen)).is_none_or(|skin| skin.def.bga.is_some()));
         let built_in_slot = skin_places_bga.is_none() && self.skin.bga.is_some();
         if crate::assets::wants_bga_pictures(self.config.display.bga, skin_places_bga, built_in_slot) {
-            let jobs = bga_jobs(&model.bgamap, &dir);
+            let shown = (skin_places_bga == Some(true)).then(|| rbms_render::skin_render::frame::BgaPlayhead::of_chart(&model.timelines));
+            let jobs = bga_jobs(&model.bgamap, &dir, shown.as_ref());
             let total = jobs.len();
             if total > 0 {
                 println!("decoding {total} BGA images...");

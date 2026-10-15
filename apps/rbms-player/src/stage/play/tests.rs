@@ -204,6 +204,59 @@ fn a_practice_slice_uses_absolute_chart_time_for_clock_schedule_and_end() {
     assert!(state.run_is_over(45_000_000));
 }
 
+/// The whole of the fixture chart as one practice slice, at `freq` percent of its speed.
+fn whole_chart_slice(freq: i32) -> crate::practice::PracticeSession {
+    const CHART_MS: i32 = 60_000;
+    let mut panel = crate::practice::PracticePanel::new("md5".to_string(), Mode::BEAT_7K, CHART_MS, None, 300.0);
+    panel.property.start_ms = 0;
+    panel.property.end_ms = CHART_MS;
+    panel.property.freq = freq;
+    panel.start()
+}
+
+/// A slice played at half speed is judged in the player's own time, as the reference judges the
+/// chart it retimed (`BMSModelUtils.changeFrequency`): 30 ms late is a GREAT, as it is at full
+/// speed, not the PGREAT the 15 ms of the chart it covers would be.
+#[test]
+fn a_practice_slice_at_half_speed_judges_in_the_players_own_time() {
+    const HALF_SPEED: i32 = 50;
+    const REAL_LATE_US: i64 = 30_000;
+    let mut state = play_state();
+    state.set_practice(whole_chart_slice(HALF_SPEED));
+    let clock = state.practice_clock();
+    let note_us = note_times(&state)[0];
+    let pressed_us = clock.chart_time_us(clock.engine_time_us(note_us) + REAL_LATE_US);
+    let judged = state.session.press(0, pressed_us, &mut rbms_play::NullSink).expect("the press is in range");
+    assert_eq!(judged.judge, rbms_judge::Judge::Great);
+    assert_eq!(judged.delta_us, -REAL_LATE_US, "the timing reported is the player's");
+}
+
+/// A practice slice keeps its gauge: one on HARD that empties goes on being judged to the slice's
+/// end rather than standing still with the slice running, whatever GAUGE AUTO SHIFT says for a play.
+#[test]
+fn a_practice_slice_whose_gauge_empties_keeps_judging() {
+    const NEARLY_EMPTY: f32 = 1.0;
+    let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
+    let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "t.bms"));
+    let options = SessionOptions {
+        gauge: rbms_judge::GaugeKind::Hard,
+        initial_gauge: Some((rbms_judge::gauge::GaugeIndex::Hard, NEARLY_EMPTY)),
+        ..SessionOptions::default()
+    };
+    let mut state = PlayState::new(PlaySession::new(model, options), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+    assert_eq!(state.session.judge_setup().gauge_auto_shift, rbms_judge::gauge::GaugeAutoShift::None, "the setting that fails a play");
+    state.set_practice(whole_chart_slice(100));
+    let [first_us, second_us, ..] = note_times(&state)[..] else {
+        panic!("the fixture chart has two notes");
+    };
+    state.session.tick(SessionClock::at(second_us - LATE_BY_US), &mut NullSink);
+    assert_eq!(state.session.judge().gauge.value(), 0.0, "the first note went by and emptied the gauge at {first_us}");
+    assert!(!state.session.is_failed(), "a locked gauge does not fail the slice");
+    let judged = state.session.press(0, second_us, &mut NullSink).expect("the second note is still judged");
+    assert_eq!(judged.judge, rbms_judge::Judge::PerfectGreat);
+    assert!(!state.run_is_over(second_us), "the slice runs to its own end");
+}
+
 #[test]
 fn a_press_is_recorded_for_the_replay_even_with_no_output_device() {
     let mut app = app();

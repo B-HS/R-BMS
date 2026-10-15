@@ -10,7 +10,7 @@ use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::{GaugeAutoShift, GaugeIndex};
 use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
-use rbms_judge::matcher::ScratchDir;
+use rbms_judge::matcher::{ScratchDir, UNMODIFIED_PLAYBACK_PERCENT};
 use rbms_judge::windows::JudgeWindowRule;
 use rbms_judge::{ClearType, GaugeKind, Judge, JudgeEngine, JudgeResult};
 use rbms_model::{Model, TimeLine};
@@ -32,6 +32,12 @@ const PLAY_TAIL_US: i64 = 2_000_000;
 
 /// How many judged inputs the analysis overlay keeps.
 const TIMING_MARK_CAPACITY: usize = 16;
+
+/// Inputs the recording makes room for, per judged object of the chart, when a run played by hand
+/// starts: the press and the release that take the object, and as many again for presses that hit
+/// nothing. A run inside that never grows the recording, and so never moves it, in the middle of
+/// play, where growing it on a long chart is a copy of a megabyte or more on the input that does it.
+const RECORDED_INPUTS_PER_NOTE: usize = 4;
 
 /// Slowest and fastest analysis playback rates, and the step the controls move by.
 pub const ANALYSIS_RATE_MIN: f64 = 0.25;
@@ -264,6 +270,8 @@ struct Setup {
     seed: u64,
     initial_gauge: Option<(GaugeIndex, f32)>,
     initial_combo: u32,
+    /// The rate the chart is played at, in percent ([`PlaySession::set_playback_rate`]).
+    playback_percent: i32,
 }
 
 /// The replay being reproduced and how far into it the run has got.
@@ -619,8 +627,13 @@ impl PlaySession {
             seed: options.seed,
             initial_gauge: options.initial_gauge,
             initial_combo: options.initial_combo,
+            playback_percent: UNMODIFIED_PLAYBACK_PERCENT,
         };
         let player = build_player(model, &setup);
+        let recorded_inputs = match options.autoplay || options.replay.is_some() {
+            true => 0,
+            false => RECORDED_INPUTS_PER_NOTE * player.judge().total_notes() as usize,
+        };
         PlaySession {
             player,
             setup,
@@ -632,7 +645,7 @@ impl PlaySession {
                 judged_off_by_us: i64::from(replay.offset_ms) * US_PER_MS,
                 offset_steps: replay.judge.offset_steps,
             }),
-            recording: Vec::new(),
+            recording: Vec::with_capacity(recorded_inputs),
             adjusted_inputs: 0,
             analysis: AnalysisState::new(options.analysis),
             marks: TimingMarks::default(),
@@ -874,6 +887,16 @@ impl PlaySession {
         apply_setup(&mut self.player, &self.setup);
     }
 
+    /// Judge this run as a chart played at `percent` of its own speed, a practice slice's
+    /// FREQUENCY: the session is still driven on the chart's clock, and the judge keeps every window,
+    /// margin and tick at its length of the player's own time and reports every timing in it, as the
+    /// reference does by retiming the chart (`BMSModelUtils.changeFrequency`). Call it before the
+    /// first [`tick`](Self::tick); an analysis [`seek`](Self::seek) rebuilds against it too.
+    pub fn set_playback_rate(&mut self, percent: i32) {
+        self.setup.playback_percent = percent;
+        self.player.set_playback_rate(percent);
+    }
+
     /// How this run is judged.
     pub fn judge_setup(&self) -> JudgeSetup {
         self.setup.judge
@@ -946,7 +969,9 @@ impl PlaySession {
     }
 
     /// Whether the gauge emptied under a shift mode that does not rescue the play
-    /// (`BMSPlayer.java:653-661`). The session keeps judging; ending the run is the caller's.
+    /// (`BMSPlayer.java:653-661`). From that instant the session judges nothing more: it takes no
+    /// input and settles no more time, as the reference stops judging in `STATE_FAILED`. Ending the
+    /// run is the caller's.
     pub fn is_failed(&self) -> bool {
         self.player.failed()
     }
@@ -1168,6 +1193,7 @@ fn apply_setup(player: &mut Player, setup: &Setup) {
     player.set_judge_window_rates(setup.judge.judge_rate_key, setup.judge.judge_rate_scratch);
     player.set_longnote_margin_rate(setup.judge.longnote_margin_rate);
     player.set_algorithm(setup.judge.algorithm);
+    player.set_playback_rate(setup.playback_percent);
     player.set_gauge_auto_shift(setup.judge.gauge_auto_shift);
     player.set_bottom_shiftable_gauge(setup.judge.bottom_shiftable_gauge);
     if let Some((index, gauge_value)) = setup.initial_gauge {
@@ -2200,5 +2226,44 @@ mod tests {
         assert_eq!(inst.judge_dist().iter().sum::<u32>(), 0);
         session.seek(at + 1);
         assert_eq!(session.instrumentation().judge_dist().iter().sum::<u32>(), measured, "scrubbing past the input measures it again, once");
+    }
+    /// A run played by hand with a 空POOR beside every note it hits records four inputs a note, and
+    /// the room made when the run started covers them: the recording is never grown, and so never
+    /// moved, in the middle of play.
+    #[test]
+    fn a_run_played_by_hand_never_grows_its_recording() {
+        const MEASURES: usize = 200;
+        const SLOTS: usize = 8;
+        const KEY_CHANNELS: [u8; 7] = [11, 12, 13, 14, 15, 18, 19];
+        const RELEASE_AFTER_US: i64 = 10_000;
+        const EMPTY_POOR_AFTER_US: i64 = 20_000;
+        let mut bms = String::from("#BPM 120\r\n#WAV01 a.wav\r\n");
+        for measure in 0..MEASURES {
+            for slot in 0..SLOTS {
+                let channel = KEY_CHANNELS[(measure * SLOTS + slot) % KEY_CHANNELS.len()];
+                let objects: String = (0..SLOTS).map(|at| if at == slot { "01" } else { "00" }).collect();
+                bms.push_str(&format!("#{:03}{channel}:{objects}\r\n", measure + 1));
+            }
+        }
+        let chart = model(bms.as_bytes());
+        let mut hits: Vec<(i64, usize)> = chart
+            .timelines
+            .iter()
+            .flat_map(|tl| tl.notes.iter().enumerate().filter_map(move |(lane, note)| note.as_ref().map(|_| (tl.time_us, lane))))
+            .collect();
+        hits.sort();
+        let mut session = PlaySession::new(chart, SessionOptions::default());
+        let (recording, capacity) = (session.recorded_events().as_ptr(), session.recording.capacity());
+        for &(at, lane) in &hits {
+            session.press(lane, at, &mut NullSink);
+            session.release(lane, at + RELEASE_AFTER_US);
+            session.press(lane, at + EMPTY_POOR_AFTER_US, &mut NullSink);
+            session.release(lane, at + EMPTY_POOR_AFTER_US + RELEASE_AFTER_US);
+        }
+        assert_eq!(hits.len(), MEASURES * SLOTS);
+        assert_eq!(session.judge().empty_poor as usize, hits.len(), "every second press reached only the 空POOR band");
+        assert_eq!(session.recorded_events().len(), RECORDED_INPUTS_PER_NOTE * hits.len());
+        assert_eq!(session.recording.capacity(), capacity, "the recording was grown during the run");
+        assert_eq!(session.recorded_events().as_ptr(), recording, "the recording was moved during the run");
     }
 }

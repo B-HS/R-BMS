@@ -16,6 +16,8 @@
 mod background;
 mod batch;
 #[cfg(test)]
+mod flush_tests;
+#[cfg(test)]
 mod pixel_tests;
 mod present;
 
@@ -24,9 +26,10 @@ pub(crate) use background::background_upload_needed;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use batch::{Batch, BatchKind, ColoredInstance, DistanceFieldInstance, DrawList, TexturedInstance, scissor_rect, whole_image};
-use present::Presenter;
+use present::{Presenter, Settled};
 use rbms_render::{
     BlendFactor, BlendMode, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, QuadParams, Rect, Renderer, TexelRect, TextureFilter,
     TextureId,
@@ -198,6 +201,13 @@ fn blend_state(mode: BlendMode) -> wgpu::BlendState {
     let f = mode.factors();
     let component = |src, dst| wgpu::BlendComponent { src_factor: wgpu_factor(src), dst_factor: wgpu_factor(dst), operation: wgpu::BlendOperation::Add };
     wgpu::BlendState { color: component(f.src_color, f.dst_color), alpha: component(f.src_alpha, f.dst_alpha) }
+}
+
+/// Send the queue's waiting texture and buffer writes to the GPU with no commands of their own, so
+/// their staging copies are let go once it has run them (wgpu's `Queue::write_buffer_with` advice).
+/// Never while an image is being asked for: the submission would wait on the acquire.
+fn submit_pending_writes(queue: &wgpu::Queue) {
+    queue.submit([]);
 }
 
 /// One registered texture and the bind groups that read it, one per sampler.
@@ -448,7 +458,9 @@ impl Gpu {
     ///
     /// The image the first frame is drawn into is asked for at once. `wake` is called, from the
     /// presenter's thread, each time an image asked for has come: the event loop is to call
-    /// [`Gpu::frame_ready`] then, and draw a frame if it says so.
+    /// [`Gpu::frame_ready`] then, and draw a frame if it says so. While a window that cannot be shown
+    /// holds asking back, the event loop wakes itself at [`Gpu::held_until`] and calls
+    /// [`Gpu::resume_if_due`].
     pub(crate) fn new(window: Arc<Window>, shape: (u32, u32), letterbox: bool, wake: impl Fn() + Send + 'static) -> Result<Gpu, GpuError> {
         let size = window.inner_size();
         let instance = instance();
@@ -763,7 +775,8 @@ impl Gpu {
     /// thread if it has. Never waits: until it has come there is no frame to draw, and the event
     /// loop goes back to waiting for the window. An image that could not be had -- the window is
     /// hidden, or the surface has to be reconfigured -- has come too: the frame is run and draws
-    /// nowhere, as it always did. A target with no window always has one.
+    /// nowhere, as it always did, so a run goes on while its window is not shown. A target with no
+    /// window always has one.
     ///
     /// An image that comes while the surface waits to be reconfigured ([`Gpu::resize`]) is let go
     /// of, the surface reconfigured and the next image asked for: no frame yet.
@@ -786,6 +799,35 @@ impl Gpu {
         }
     }
 
+    /// When the event loop is to wake and ask for the next image, while a window that cannot be
+    /// shown holds asking back; `None` while it does not, when the loop waits for the window and the
+    /// presenter alone.
+    pub(crate) fn held_until(&self) -> Option<Instant> {
+        match &self.target {
+            Target::Window { presenter, .. } => presenter.held_until(),
+            #[cfg(test)]
+            Target::Offscreen { .. } => None,
+        }
+    }
+
+    /// Ask for the next image if asking was held back until `now` or before.
+    pub(crate) fn resume_if_due(&mut self, now: Instant) {
+        match &mut self.target {
+            Target::Window { presenter, .. } => presenter.resume_if_due(now),
+            #[cfg(test)]
+            Target::Offscreen { .. } => {}
+        }
+    }
+
+    /// Ask for the next image at once if asking is held back, for a window that can be shown again.
+    pub(crate) fn resume(&mut self) {
+        match &mut self.target {
+            Target::Window { presenter, .. } => presenter.resume(),
+            #[cfg(test)]
+            Target::Offscreen { .. } => {}
+        }
+    }
+
     /// Work out where the next frame lands, and tell the shaders if that changed the size of the
     /// space it is drawn in. Called between frames only: see [`Gpu::set_letterbox`].
     fn settle(&mut self) {
@@ -800,15 +842,29 @@ impl Gpu {
     /// thread to be shown, and ask for the next. None of it waits for the display. A target with no
     /// window is read with [`Gpu::capture`] instead, and this does nothing for it.
     ///
-    /// An image that could not be had reconfigures the surface, as a failed acquire always did, and
-    /// one a resize let go of draws nothing; either way the next is asked for.
+    /// An image that could not be had because the surface no longer fits reconfigures it, and one a
+    /// resize let go of draws nothing; either way the next is asked for. One that could not be had
+    /// because the window cannot be shown leaves the surface alone and holds the next ask back a
+    /// while ([`Presenter::settle`]), which the event loop waits out ([`Gpu::held_until`]).
+    ///
+    /// A frame that had an answer and draws nothing still hands the queue the image and buffer
+    /// writes made for it ([`submit_pending_writes`]), before the next image is asked for: the
+    /// queue keeps each write's staging copy until a submission carries it, so a run left playing
+    /// in a hidden window would otherwise pile up every movie frame it uploaded. A frame with no
+    /// answer leaves its writes to the next frame drawn, as an image may be being asked for, and a
+    /// submission then would wait on the acquire.
     pub(crate) fn render(&mut self) {
         let frame = match &mut self.target {
-            Target::Window { surface, config, presenter, acquired, .. } => match acquired.take() {
-                Some(wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t)) => t,
-                Some(_) => {
+            Target::Window { surface, config, presenter, acquired, .. } => match acquired.take().map(|answer| presenter.settle(answer, Instant::now())) {
+                Some(Settled::Draw(t)) => t,
+                Some(Settled::Reconfigure) => {
                     surface.configure(&self.device, config);
+                    submit_pending_writes(&self.queue);
                     presenter.request();
+                    return;
+                }
+                Some(Settled::Held) => {
+                    submit_pending_writes(&self.queue);
                     return;
                 }
                 None => {
@@ -817,7 +873,10 @@ impl Gpu {
                 }
             },
             #[cfg(test)]
-            Target::Offscreen { .. } => return,
+            Target::Offscreen { .. } => {
+                submit_pending_writes(&self.queue);
+                return;
+            }
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.format), ..Default::default() });
         let commands = self.encode(&view);

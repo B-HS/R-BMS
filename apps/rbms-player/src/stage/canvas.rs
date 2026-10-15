@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use rbms_render::skin_render::frame::{BgaExpand, BgaFrame, BgaPick, BgaTextures};
+use rbms_render::skin_render::frame::{BgaExpand, BgaFrame, BgaPick, BgaPlayhead, BgaTextures};
 use rbms_render::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, ScaledRenderer, TexelRect, TextureId, scale_between, scale_rect};
 #[cfg(test)]
 use rbms_render::{CpuCanvas, TextureFilter};
@@ -24,6 +24,11 @@ use crate::{CH, CW, DecodedImage};
 /// The size the built-in screens and the system overlays are laid out for, whatever size the target
 /// they end up on is.
 pub(crate) const UI_SIZE: (u32, u32) = (CW, CH);
+
+/// Bytes of a chart's background pictures one frame before play uploads ahead ([`Canvas::preload_bga`]):
+/// a few large pictures, about a millisecond of handing pixels to the renderer, so the frames before
+/// play keep their pace while a chart of dozens of large pictures is uploaded in under a second.
+const BGA_PRELOAD_BYTES_PER_FRAME: usize = 8 * 1024 * 1024;
 
 /// Registration key the headless target holds its background image under, matching the window
 /// target's own key so both refresh one texture rather than accumulating one per frame.
@@ -260,6 +265,13 @@ impl<'a> Canvas<'a> {
     /// reference does ([`BgaTextures`]). A picture number the chart has no image for shows as none.
     pub(crate) fn bga_frame(&mut self, textures: &mut BgaTextures, pick: BgaPick, expand: BgaExpand, pictures: &HashMap<i32, DecodedImage>) -> BgaFrame {
         textures.frame(&mut self.native(), pick, expand, |number| pictures.get(&number).map(bga_picture))
+    }
+
+    /// Uploads a share of the pictures the chart behind `playhead` will show, as textures of their
+    /// own in `textures`, for a frame before the chart plays: the frames that play then hand the
+    /// target none of them ([`BgaTextures::preload`]).
+    pub(crate) fn preload_bga(&mut self, textures: &mut BgaTextures, playhead: &BgaPlayhead, pictures: &HashMap<i32, DecodedImage>) {
+        textures.preload(&mut self.native(), playhead, |number| pictures.get(&number).map(bga_picture), BGA_PRELOAD_BYTES_PER_FRAME);
     }
 
     /// Hands the textures [`Canvas::bga_frame`] made back to the target, for a screen that is done

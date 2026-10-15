@@ -300,8 +300,25 @@ impl AppShared {
     /// not answer, or one finished signed out, is sent by a later records sync, exactly as it was
     /// first sent, until the server holds it.
     pub(crate) fn keep_and_send_course(&mut self, sub: CourseSubmission) {
+        let kept = self.keep_course(&sub);
+        if !self.sends_to_primary_ir_server() {
+            return;
+        }
+        let main_is_synced = self.multi_ir.primary_server().is_some() && self.multi_ir.primary_server() == self.multi_ir.legacy_index();
+        let kept = kept.filter(|_| main_is_synced).zip(self.record_sync_target()).map(|(id, (server, login_id))| (id, server, login_id));
+        let server = self.course_ir_server();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(server.submit_course(&sub));
+        });
+        self.course_submits.push(CourseSubmit { rx, kept });
+    }
+
+    /// Keep a finished course in the score database for a records sync to send, and answer the row
+    /// it was kept as. A course the database cannot take is reported and not kept.
+    pub(crate) fn keep_course(&mut self, sub: &CourseSubmission) -> Option<i64> {
         let played_as = self.session.is_logged_in().then(|| self.session.login_id()).flatten().map(str::to_string);
-        let kept = match (sub.to_json(), self.scoredb.as_mut()) {
+        match (sub.to_json(), self.scoredb.as_mut()) {
             (Some(body), Some(db)) => match db.put_course(&sub.course_hash, sub.played_at, &body, played_as.as_deref()) {
                 Ok(id) => Some(id),
                 Err(e) => {
@@ -317,18 +334,7 @@ impl AppShared {
                 notify(Level::Error, "course not kept: score database not open");
                 None
             }
-        };
-        if !self.sends_to_primary_ir_server() {
-            return;
         }
-        let main_is_synced = self.multi_ir.primary_server().is_some() && self.multi_ir.primary_server() == self.multi_ir.legacy_index();
-        let kept = kept.filter(|_| main_is_synced).zip(self.record_sync_target()).map(|(id, (server, login_id))| (id, server, login_id));
-        let server = self.course_ir_server();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(server.submit_course(&sub));
-        });
-        self.course_submits.push(CourseSubmit { rx, kept });
     }
 
     /// Take the answers of the courses sent since the last frame: write each down against its kept

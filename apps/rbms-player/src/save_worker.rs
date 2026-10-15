@@ -180,6 +180,17 @@ impl SaveWorker {
         });
     }
 
+    /// A receiver answered once every write handed over so far is done, for a thread other than
+    /// the frame thread to wait on: the records sync waits on it before it reads a replay a run has
+    /// just kept, and the frame thread waits on nothing. `None` when there is nothing to wait for,
+    /// the writes being done as they are handed over or the thread being gone.
+    pub(crate) fn settled(&self) -> Option<Receiver<()>> {
+        let tx = self.tx.as_ref()?;
+        let (ack, done) = mpsc::channel();
+        tx.send(Message::Flush(ack)).ok()?;
+        Some(done)
+    }
+
     /// Wait until every write handed over so far is done.
     pub(crate) fn flush(&self) {
         if let Some(tx) = &self.tx {

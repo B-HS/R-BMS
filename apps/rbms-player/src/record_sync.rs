@@ -151,6 +151,9 @@ pub(crate) struct SyncJob {
     pub(crate) replays: Vec<SyncCandidate>,
     pub(crate) upload_replays: bool,
     pub(crate) replay_dir: PathBuf,
+    /// Answered once the save thread has written everything it was handed before the sync began
+    /// ([`crate::save_worker::SaveWorker::settled`]); `None` when nothing is waiting to be written.
+    pub(crate) saves_settled: Option<Receiver<()>>,
     /// The library's facts of every chart a play to send was made on, keyed by lower-case MD5.
     pub(crate) charts: HashMap<String, ChartFacts>,
     pub(crate) pacing: SyncPacing,
@@ -279,6 +282,8 @@ pub(crate) struct SyncPlan {
     pub(crate) client_build: String,
     pub(crate) upload_replays: bool,
     pub(crate) replay_dir: PathBuf,
+    /// Answered once the save thread has written everything it was handed before the sync began.
+    pub(crate) saves_settled: Option<Receiver<()>>,
     pub(crate) pacing: SyncPacing,
 }
 
@@ -294,6 +299,8 @@ pub(crate) fn spawn_planned_sync(
 ) -> Receiver<SyncEvent> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
+        let mut plan = plan;
+        let saves_settled = plan.saves_settled.take();
         let stop = match pick(server.as_ref(), &plan, &tx) {
             Ok((scores, courses, replays)) => match facts_from(&charts, &cancel, plan.pacing.cancel_check) {
                 Some(charts) => {
@@ -304,6 +311,7 @@ pub(crate) fn spawn_planned_sync(
                         replays,
                         upload_replays: plan.upload_replays,
                         replay_dir: plan.replay_dir.clone(),
+                        saves_settled,
                         charts,
                         pacing: plan.pacing,
                     };
@@ -451,7 +459,7 @@ const UNREADABLE_COURSE_REASON: &str = "kept course body unreadable";
 /// ends the sync at the next play or within [`SyncPacing::cancel_check`] of a wait; a request
 /// already on the wire is let finish. Returns why the sync stopped, if it did.
 fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, tx: &Sender<SyncEvent>) -> Option<SyncStop> {
-    let SyncJob { login_id, scores, courses, mut replays, upload_replays, replay_dir, charts, pacing } = job;
+    let SyncJob { login_id, scores, courses, mut replays, upload_replays, replay_dir, saves_settled, charts, pacing } = job;
     let _ = tx.send(SyncEvent::Started { scores: scores.len(), courses: courses.len(), replays: replays.len() });
     let mut pacer = Pacer { last_start: None, cancel, check: pacing.cancel_check };
     let mut transient_in_a_row = 0;
@@ -532,6 +540,15 @@ fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, 
     if !upload_replays {
         return None;
     }
+    if !replays.is_empty()
+        && let Some(settled) = &saves_settled
+    {
+        match saves_landed(settled, &pacer) {
+            SavesLanded::Yes => {}
+            SavesLanded::NotYet => return None,
+            SavesLanded::Cancelled => return Some(SyncStop::Cancelled),
+        }
+    }
     let _ = tx.send(SyncEvent::Replays { total: replays.len() });
     transient_in_a_row = 0;
     for candidate in replays {
@@ -592,6 +609,44 @@ fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, 
         }
     }
     None
+}
+
+/// How long the replay stage of a sync waits for the save thread to write the replays it was handed
+/// before the sync began. Writing one takes milliseconds; a thread still busy after this is held up
+/// by something the sync cannot wait out, and the replays are left for a later sync.
+const REPLAY_SAVES_WAIT: Duration = Duration::from_secs(10);
+
+/// Whether the writes handed to the save thread before a sync began have landed.
+enum SavesLanded {
+    Yes,
+    /// Not within [`REPLAY_SAVES_WAIT`].
+    NotYet,
+    Cancelled,
+}
+
+/// Wait for the save thread to answer `settled`, looking at the cancel flag as it goes.
+///
+/// A run left with Escape or started again is sent by a sync of its own as soon as it is kept, while
+/// its replay is still being written on the save thread. Read before then, the file is not there, and
+/// a replay that is not there is one the sync marks missing for good. So the replay stage waits for
+/// the writes handed over before the sync began; when they do not land in time, no replay is read,
+/// and every one picked stays pending for the next sync. A save thread that is gone has nothing more
+/// to write.
+fn saves_landed(settled: &Receiver<()>, pacer: &Pacer<'_>) -> SavesLanded {
+    let until = Instant::now() + REPLAY_SAVES_WAIT;
+    loop {
+        if pacer.cancelled() {
+            return SavesLanded::Cancelled;
+        }
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return SavesLanded::NotYet;
+        }
+        match settled.recv_timeout(left.min(pacer.check)) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => return SavesLanded::Yes,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+    }
 }
 
 /// What a play or replay left unsent by a rate limit is said to have hit.
@@ -1077,6 +1132,7 @@ impl AppShared {
             client_build: self.client_build(),
             upload_replays: self.config.network.auto_upload_replay,
             replay_dir: self.replay_dir.clone(),
+            saves_settled: self.saves.settled(),
             pacing: self.record_sync_pacing,
         };
         let cancel = Arc::new(AtomicBool::new(false));

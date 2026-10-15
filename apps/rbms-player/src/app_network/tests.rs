@@ -4,11 +4,12 @@
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use rbms_ir::{
-    AuthResponse, ChartId, CourseSubmission, PlayerProfile, ReplayData, ScoreRecord, ScoreSubmission, ServerInfo, SettingsPutResult, SubmitResponse,
+    AuthRequest, AuthResponse, ChartId, CourseSubmission, PlayerProfile, ReplayData, ScoreRecord, ScoreSubmission, ServerInfo, SettingsPutResult,
+    SubmitResponse,
 };
 
 use super::*;
@@ -30,6 +31,8 @@ const CALL_POLL: Duration = Duration::from_millis(2);
 struct AccountDouble {
     calls: Mutex<Vec<(&'static str, String)>>,
     unreachable: AtomicBool,
+    /// Held by a login until the test lets it answer; a login with no gate answers at once.
+    login_gate: Mutex<Option<Receiver<()>>>,
 }
 
 impl AccountDouble {
@@ -91,6 +94,14 @@ impl ScoreServer for AccountDouble {
     fn put_rivals(&self, player: &PlayerId, _rivals: &[String]) -> Result<Vec<PlayerProfile>, IrError> {
         self.note("put_rivals", &player.id);
         Ok(Vec::new())
+    }
+    fn login(&self, req: &AuthRequest) -> Result<AuthResponse, IrError> {
+        let gate = self.login_gate.lock().expect("the gate").take();
+        if let Some(gate) = gate {
+            let _ = gate.recv();
+        }
+        self.note("login", &req.id);
+        Ok(AuthResponse { token: format!("token-of-{}", req.id), player: PlayerId { id: req.id.clone() }, name: req.id.clone() })
     }
     fn revoke_current_token(&self) -> Result<(), IrError> {
         self.note("revoke_current_token", "");
@@ -334,6 +345,9 @@ fn rebuilding_the_server_lets_go_of_every_request_made_as_the_account() {
     f.shared.sync_upload_rx = Some(upload_rx);
     f.shared.sync_base_rx = Some(base_rx);
     f.shared.sync_download_rx = Some(download_rx);
+    let (_auth_tx, auth_rx) = channel();
+    f.shared.session.begin(AuthAction::Login);
+    f.shared.auth_rx = Some((AuthAction::Login, auth_rx));
 
     f.shared.rebuild_server();
 
@@ -342,7 +356,92 @@ fn rebuilding_the_server_lets_go_of_every_request_made_as_the_account() {
             && f.shared.rivals_rx.is_none()
             && f.shared.sync_upload_rx.is_none()
             && f.shared.sync_base_rx.is_none()
-            && f.shared.sync_download_rx.is_none(),
+            && f.shared.sync_download_rx.is_none()
+            && f.shared.auth_rx.is_none(),
         "a request made to the old server or with the old token was kept"
     );
+    assert!(!f.shared.session.is_busy(), "the session stayed waiting for a login that was let go of");
+}
+
+/// A guest pressing LOGIN on the NETWORK tab, with the password typed.
+fn a_guest_logging_in(tag: &str) -> Fixture {
+    let mut f = Fixture::signed_in(tag);
+    f.shared.session = AccountSession::restored(None, None);
+    f.shared.config.network.player_id = ACCOUNT.into();
+    f.shared.password = "hunter2hunter2".into();
+    f
+}
+
+/// Run frames until the login the double answered is taken, or give up after [`CALL_WAIT`].
+fn poll_until_the_login_is_answered(f: &mut Fixture) {
+    f.server.wait_for("login", 1);
+    let deadline = Instant::now() + CALL_WAIT;
+    while f.shared.auth_rx.is_some() && Instant::now() < deadline {
+        f.shared.poll_network();
+        std::thread::sleep(CALL_POLL);
+    }
+}
+
+#[test]
+fn a_login_answered_after_the_player_logged_out_does_not_sign_them_back_in() {
+    let mut f = a_guest_logging_in("logout-during-login");
+    let (release, gate) = channel();
+    *f.server.login_gate.lock().expect("the gate") = Some(gate);
+    f.shared.start_auth(AuthAction::Login);
+    assert!(f.shared.session.is_busy(), "the login is in flight");
+
+    f.shared.finish_logout();
+    release.send(()).expect("the login is waiting");
+    poll_until_the_login_is_answered(&mut f);
+
+    assert!(!f.shared.session.is_logged_in(), "the late answer signed the player back in after the logout");
+    assert_eq!(f.shared.config.network.player_id, GUEST_PLAYER_ID);
+    assert_eq!(f.shared.config.network.ir_token, None, "the token of the late answer was saved");
+    assert!(f.shared.record_sync.is_none(), "a records sync started as the account the player left");
+    assert_eq!(f.shared.session.status_text(), GUEST_PLAYER_ID);
+}
+
+#[test]
+fn changing_the_server_during_a_login_lets_it_go_and_lets_the_next_one_start() {
+    let mut f = a_guest_logging_in("server-change-during-login");
+    let (_release, gate) = channel();
+    *f.server.login_gate.lock().expect("the gate") = Some(gate);
+    f.shared.start_auth(AuthAction::Login);
+
+    f.shared.rebuild_server();
+
+    assert!(f.shared.auth_rx.is_none(), "the answer of the old server's login would still be taken");
+    assert!(!f.shared.session.is_busy(), "LOGIN stays refused until a restart");
+    assert_eq!(f.shared.net_status, ACCOUNT_REQUESTS_DROPPED);
+    f.shared.server = f.server.clone();
+    f.shared.password = "hunter2hunter2".into();
+    f.shared.start_auth(AuthAction::Login);
+    assert!(f.shared.auth_rx.is_some(), "a new LOGIN did not start");
+}
+
+#[test]
+fn a_token_issued_for_a_login_nobody_takes_any_more_is_handed_over_to_be_revoked() {
+    let server = Arc::new(AccountDouble::default());
+    let (release, gate) = channel();
+    *server.login_gate.lock().expect("the gate") = Some(gate);
+    let (revoked_tx, revoked) = channel();
+    let answer = spawn_auth(server.clone(), AuthAction::Login, auth_request(AuthAction::Login, ACCOUNT, "hunter2hunter2", ""), move |token| {
+        revoked_tx.send(token).expect("the test listens");
+    });
+
+    drop(answer);
+    release.send(()).expect("the login is waiting");
+
+    assert_eq!(revoked.recv_timeout(CALL_WAIT).expect("the unclaimed token was left valid"), format!("token-of-{ACCOUNT}"));
+}
+
+#[test]
+fn a_token_the_app_takes_is_not_revoked() {
+    let server = Arc::new(AccountDouble::default());
+    let (revoked_tx, revoked) = channel();
+    let answer = spawn_auth(server, AuthAction::Login, auth_request(AuthAction::Login, ACCOUNT, "hunter2hunter2", ""), move |token| {
+        revoked_tx.send(token).expect("the test listens");
+    });
+    assert!(answer.recv_timeout(CALL_WAIT).expect("the login answers").is_ok());
+    assert!(revoked.recv_timeout(CALL_POLL).is_err(), "a token the app holds was revoked");
 }

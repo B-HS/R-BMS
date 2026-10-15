@@ -641,6 +641,23 @@ fn starting_a_slice_hands_over_the_range_in_microseconds_with_the_gauge_locked()
     assert!(session.gauge_locked, "an emptied gauge must not cut a practice slice short");
 }
 
+/// The gauge lock is what turns the one auto-shift that ends a run on an emptied gauge into one
+/// that plays on; every other mode already plays on and is the player's to keep.
+#[test]
+fn a_locked_gauge_plays_on_where_the_setting_would_fail_the_run() {
+    let mut panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.0);
+    let mut session = panel.start();
+    for configured in GaugeAutoShift::ALL {
+        let expected = match configured {
+            GaugeAutoShift::None => GaugeAutoShift::Continue,
+            other => other,
+        };
+        assert_eq!(session.gauge_shift(configured), expected, "{configured:?}");
+    }
+    session.gauge_locked = false;
+    assert_eq!(session.gauge_shift(GaugeAutoShift::None), GaugeAutoShift::None, "an unlocked gauge is the player's setting");
+}
+
 #[test]
 fn an_unset_total_is_handed_over_as_the_charts_own() {
     let mut panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.0);

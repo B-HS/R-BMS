@@ -7,11 +7,11 @@
 #![allow(clippy::wildcard_imports)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{Receiver, SendError, TryRecvError};
 use std::time::Duration;
 
 use rbms_config::{OFF_VALUE, ON_VALUE, SettingId};
-use rbms_ir::{IrError, NullScoreServer, PlayerId, ScoreServer, spawn_query};
+use rbms_ir::{AuthRequest, AuthResponse, IrError, NullScoreServer, PlayerId, ScoreServer, spawn_query};
 
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID, auth_request, run_auth, run_revoke};
@@ -83,6 +83,46 @@ fn revoke_token_in_background(server: Arc<dyn ScoreServer>) {
     });
 }
 
+/// Run one login or register on a thread of its own and hand its answer to the receiver.
+///
+/// When nobody takes the answer any more -- the request was let go of because the account or the
+/// server changed while it ran -- a token the server issued for it is known to nobody on this
+/// machine, so it is handed to `revoke_unclaimed` rather than left valid on the server.
+fn spawn_auth(
+    server: Arc<dyn ScoreServer>,
+    action: AuthAction,
+    request: AuthRequest,
+    revoke_unclaimed: impl FnOnce(String) + Send + 'static,
+) -> Receiver<Result<AuthResponse, IrError>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        if let Err(SendError(Ok(response))) = tx.send(run_auth(server.as_ref(), action, &request)) {
+            revoke_unclaimed(response.token);
+        }
+    });
+    rx
+}
+
+/// Tell the server at `server_url` to refuse `token`, a token it issued for a login or register this
+/// machine let go of. Runs on the auth worker's own thread.
+fn revoke_unclaimed_token(server_url: Option<String>, token: String) {
+    let Some(url) = server_url else {
+        return;
+    };
+    match rbms_ir::HttpScoreServer::try_new(url, Some(token)) {
+        Ok(server) => {
+            if let Err(error) = run_revoke(&server) {
+                notify(Level::Warn, format!("{UNCLAIMED_TOKEN_NOT_REVOKED}: {}", crate::ir_outcome::short_error(&error)));
+            }
+        }
+        Err(error) => notify(Level::Warn, format!("{UNCLAIMED_TOKEN_NOT_REVOKED}: {error}")),
+    }
+}
+
+/// What the message bus says when a token issued for a login or register this machine let go of
+/// could not be revoked.
+const UNCLAIMED_TOKEN_NOT_REVOKED: &str = "a login that was let go of left its token valid on the server (delete it on the web site)";
+
 /// Wall-clock milliseconds since the epoch, the stamp the sync blob is versioned by.
 fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default()
@@ -117,8 +157,16 @@ impl AppShared {
     /// settings sync calls and the rival list -- so an answer that comes late is never applied to
     /// the account that is signed in by then. The worker threads run to their end and their answers
     /// are dropped with the receivers.
+    ///
+    /// A login or register in flight is let go of too: its answer would sign the player in to an
+    /// account they have just left, or to the server they have just left, and save its token. The
+    /// session goes back to what it was before the request, and a token the server issued for it is
+    /// revoked by the worker that receives it ([`spawn_auth`]).
     fn drop_account_requests(&mut self) {
-        let in_flight = [self.sync_upload_rx.is_some(), self.sync_base_rx.is_some(), self.sync_download_rx.is_some(), self.rivals_rx.is_some()];
+        let in_flight =
+            [self.sync_upload_rx.is_some(), self.sync_base_rx.is_some(), self.sync_download_rx.is_some(), self.rivals_rx.is_some(), self.auth_rx.is_some()];
+        self.auth_rx = None;
+        self.session.abandon();
         self.whoami_rx = None;
         self.rivals_rx = None;
         self.sync_upload_rx = None;
@@ -227,7 +275,8 @@ impl AppShared {
         self.password.clear();
         self.session.begin(action);
         self.net_status = action.pending_text().to_string();
-        self.auth_rx = Some((action, spawn_query(self.server.clone(), move |server| run_auth(server, action, &request))));
+        let server_url = self.config.network.server_url.clone();
+        self.auth_rx = Some((action, spawn_auth(self.server.clone(), action, request, move |token| revoke_unclaimed_token(server_url, token))));
     }
 
     /// Drop the session and rebuild the server without credentials.

@@ -466,6 +466,80 @@ pub(crate) fn record_left_run(state: &PlayState, shared: &mut AppShared) -> Reco
     recorded
 }
 
+/// When what is kept with no screen to report on is sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Sending {
+    /// Now, as a records sync of the run and a course submission of its own.
+    Now,
+    /// By the records sync of the next start, the app being about to quit: a request started now
+    /// would end with the process, and what it left unanswered would be sent twice.
+    NextStart,
+}
+
+/// What the message bus says of a course ended before its last stage, once it is kept.
+pub(crate) const ABANDONED_COURSE_KEPT: &str = "course ended before its last stage kept as FAILED";
+
+/// End the course being played between two stages, keeping what was played of it.
+///
+/// The course stands on a stage not yet played: the LOADING or decide screen of it was left with
+/// Escape, its chart could not be read or is not in the library, or the app is quitting. A course
+/// with a stage played by hand behind it is kept and sent as a FAILED course of the stages it
+/// played, as a course left part-way with Escape is ([`leave_course`]); the stage it stood on is not
+/// played and adds nothing. A course with nothing played yet, one the engine plays or one watched as
+/// a replay keeps nothing, and a course already over has been kept already. Either way the course
+/// ends here, so the next chart played is played as a chart of its own.
+pub(crate) fn abandon_course(shared: &mut AppShared, sending: Sending) -> Transition {
+    let played_by_hand = !shared.run_plays_itself() && shared.replay.is_none();
+    let failed_here = shared.course_run.as_mut().filter(|run| played_by_hand && run.index > 0 && !run.is_finished()).map(|run| {
+        run.failed_at = Some(run.index);
+        run.clear = rbms_course::CLEAR_FAILED;
+    });
+    if failed_here.is_some() {
+        keep_finished_course(shared, sending);
+        notify(Level::Info, ABANDONED_COURSE_KEPT);
+    }
+    crate::end_course(shared)
+}
+
+/// What the message bus says of the run on screen when the app quit, once it is kept.
+pub(crate) const QUIT_RUN_KEPT: &str = "run cut short by quitting kept; it is sent on the next start";
+
+/// Keep the run on screen as the app quits, as Escape would have kept it ([`PlayState::has_ended`]
+/// says which way, `ended`), but with nothing sent: the records sync of the next start sends it.
+///
+/// A run with nothing left to play is kept as the result screen keeps it; one left part-way is a
+/// FAILED run whose every note not reached was let pass. A course stage folds into the course,
+/// which is kept: as it stands when that was its last stage or the stage failed, and as a FAILED
+/// course otherwise, the stages after it not being played. Nothing is kept of a run the engine
+/// played, a replay being watched or practice.
+pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, shared: &mut AppShared) {
+    if state.practice.is_some() || !crate::stage::play::keeps_a_left_run(shared) {
+        if shared.course_run.is_some() {
+            crate::end_course(shared);
+        }
+        return;
+    }
+    let summary = if ended { state.session.summary() } else { state.session.summary().left_unfinished() };
+    let recorded = record_run(state, shared, &summary, state.session.record().avg_duration_us);
+    notify(Level::Info, QUIT_RUN_KEPT);
+    if shared.course_run.is_none() {
+        return;
+    }
+    shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
+    let carried = CarriedCombo { standing: state.session.standing_combo(), longest: state.session.standing_max_combo() };
+    let course_lamp = course_lamp(shared, &state.session);
+    match fold_course_stage(shared, &summary, carried, recorded.block_reason, course_lamp) {
+        Some(rbms_course::CourseStep::Next) => {
+            abandon_course(shared, Sending::NextStart);
+        }
+        Some(rbms_course::CourseStep::Cleared | rbms_course::CourseStep::Failed) => {
+            keep_finished_course(shared, Sending::NextStart);
+            crate::end_course(shared);
+        }
+        None => {}
+    }
+}
+
 /// What the message bus says of a course left part-way, once its stages and the course are kept.
 pub(crate) const LEFT_COURSE_KEPT: &str = "course left part-way kept as FAILED";
 
@@ -487,7 +561,7 @@ pub(crate) fn leave_course(state: &PlayState, shared: &mut AppShared) -> Transit
     let carried = CarriedCombo { standing: state.session.standing_combo(), longest: state.session.standing_max_combo() };
     let course_lamp = course_lamp(shared, &state.session);
     if fold_course_stage(shared, &summary, carried, recorded.block_reason, course_lamp).is_some() {
-        keep_finished_course(shared);
+        keep_finished_course(shared, Sending::Now);
         notify(Level::Info, LEFT_COURSE_KEPT);
     }
     crate::end_course(shared)
@@ -705,13 +779,13 @@ fn finish_course(shared: &mut AppShared) -> Transition {
         return Transition::Back;
     };
     let state = CourseResultState::of(run, shared);
-    keep_finished_course(shared);
+    keep_finished_course(shared, Sending::Now);
     Transition::To(Stage::CourseResult(Box::new(state)))
 }
 
 /// Keep and send the course that is over, cleared or failed, when every stage was submittable and
-/// the course is marked for release ([`AppShared::keep_and_send_course`]).
-fn keep_finished_course(shared: &mut AppShared) {
+/// the course is marked for release ([`AppShared::keep_and_send_course`]); sent when `sending` says.
+fn keep_finished_course(shared: &mut AppShared, sending: Sending) {
     let Some(run) = shared.course_run.as_ref() else {
         return;
     };
@@ -726,8 +800,12 @@ fn keep_finished_course(shared: &mut AppShared) {
         }
         None => Some(build_course_submission(run, &submission_player_id(&shared.session), shared.course_assist)),
     };
-    if let Some(sub) = submission {
-        shared.keep_and_send_course(sub);
+    match (submission, sending) {
+        (Some(sub), Sending::Now) => shared.keep_and_send_course(sub),
+        (Some(sub), Sending::NextStart) => {
+            shared.keep_course(&sub);
+        }
+        (None, _) => {}
     }
 }
 

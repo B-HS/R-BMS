@@ -31,11 +31,20 @@
 //! A worker that panics wakes the event loop on its way out, so the failure reaches the event loop
 //! at once, as a panic on it ([`Presenter::take`], [`Presenter::request`]), rather than leaving a
 //! window that never draws again.
+//!
+//! A window that cannot be shown -- hidden, minimised, on another space, under another window --
+//! has no image to give, and on some backends says so at once (wgpu-hal 29.0.4 Metal
+//! `surface.rs:150-152`). Asking again at once would run frames as fast as the processor allows on
+//! a window nobody sees. Such an answer holds the next ask back for [`HIDDEN_FRAME_INTERVAL`]
+//! ([`Presenter::settle`]), or until the window is shown again ([`Presenter::resume`]), and leaves
+//! the surface as it is: it is not out of date, only not shown (wgpu 29.0.4
+//! `surface_texture.rs:66-69`). Frames still run while it is held back, one an interval, so a run
+//! goes on being judged and ends when its chart does.
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::notify::{Level, notify};
 
@@ -46,6 +55,41 @@ const PRESENT_THREAD: &str = "rbms-present";
 /// `FRAME_TIMEOUT_MS`): as long as an app shutting down waits for the worker to let go of the
 /// surface ([`Presenter::stop`]).
 pub(crate) const STOP_PATIENCE: Duration = Duration::from_secs(1);
+
+/// How many frames a second run while the window cannot be shown: a display's usual refresh, so a
+/// run that is not seen is still judged and its sounds still booked as often as a seen one at that
+/// refresh, at a small part of the processor a frame loop with no wait in it takes.
+const HIDDEN_FRAMES_PER_SECOND: u64 = 60;
+
+/// Nanoseconds in a second.
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
+
+/// How long the next image is not asked for after the window said it cannot be shown
+/// ([`Presenter::settle`]).
+pub(crate) const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_nanos(NANOS_PER_SECOND / HIDDEN_FRAMES_PER_SECOND);
+
+/// Why asking for an image gave none, as far as what to do next goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NoImage {
+    /// The window cannot be shown just now, or the display did not answer in time: nothing is
+    /// wrong with the surface, and asking again at once would only get the same answer.
+    Hidden,
+    /// The surface no longer matches the window, was lost, or failed to give an image: it is
+    /// reconfigured before the next image is asked for.
+    Reconfigure,
+}
+
+/// What a frame does with the answer it took ([`Presenter::settle`]).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Settled<F> {
+    /// Draw into this image.
+    Draw(F),
+    /// Reconfigure the surface, then ask for the next image.
+    Reconfigure,
+    /// Draw nothing and ask for nothing: the next image is asked for once asking is no longer held
+    /// back ([`Presenter::held_until`]).
+    Held,
+}
 
 /// A surface the images of frames come from and go back to.
 pub(crate) trait Swapchain: Send + Sync + 'static {
@@ -59,6 +103,9 @@ pub(crate) trait Swapchain: Send + Sync + 'static {
 
     /// Show an image whose drawing has been submitted.
     fn present(&self, frame: Self::Frame);
+
+    /// The image an answer brought, or why it brought none.
+    fn image(acquired: Self::Acquired) -> Result<Self::Frame, NoImage>;
 }
 
 impl Swapchain for wgpu::Surface<'static> {
@@ -71,6 +118,17 @@ impl Swapchain for wgpu::Surface<'static> {
 
     fn present(&self, frame: wgpu::SurfaceTexture) {
         frame.present();
+    }
+
+    /// wgpu's own advice for each answer (`surface_texture.rs:51-87`): an occluded window and a
+    /// display that timed out are skipped and tried again later, and only a surface that is out of
+    /// date or lost, or an acquire that failed validation, is configured again.
+    fn image(acquired: wgpu::CurrentSurfaceTexture) -> Result<wgpu::SurfaceTexture, NoImage> {
+        match acquired {
+            wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Ok(frame),
+            wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => Err(NoImage::Hidden),
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Validation => Err(NoImage::Reconfigure),
+        }
     }
 }
 
@@ -105,6 +163,8 @@ pub(crate) struct Presenter<S: Swapchain> {
     done: Receiver<()>,
     /// Whether an image has been asked for and not yet taken.
     asked: bool,
+    /// When the next image is asked for, while a window that cannot be shown holds asking back.
+    held_until: Option<Instant>,
 }
 
 impl<S: Swapchain> Presenter<S> {
@@ -131,7 +191,7 @@ impl<S: Swapchain> Presenter<S> {
                 }
             }
         })?;
-        Ok(Presenter { jobs, acquired, done, asked: false })
+        Ok(Presenter { jobs, acquired, done, asked: false, held_until: None })
     }
 
     /// Ask for the next image, unless one is already asked for and not taken. Returns at once.
@@ -140,6 +200,7 @@ impl<S: Swapchain> Presenter<S> {
     ///
     /// As [`Presenter::take`].
     pub(crate) fn request(&mut self) {
+        self.held_until = None;
         if self.asked {
             return;
         }
@@ -175,6 +236,40 @@ impl<S: Swapchain> Presenter<S> {
         }
     }
 
+    /// What a frame does with `answer`, the one it took: the image to draw into, or a surface to
+    /// reconfigure before the next image is asked for. A window that cannot be shown holds the next
+    /// ask back until a [`HIDDEN_FRAME_INTERVAL`] past `now`, and the frame draws nothing.
+    pub(crate) fn settle(&mut self, answer: S::Acquired, now: Instant) -> Settled<S::Frame> {
+        match S::image(answer) {
+            Ok(frame) => Settled::Draw(frame),
+            Err(NoImage::Reconfigure) => Settled::Reconfigure,
+            Err(NoImage::Hidden) => {
+                self.held_until = Some(now + HIDDEN_FRAME_INTERVAL);
+                Settled::Held
+            }
+        }
+    }
+
+    /// When the next image is to be asked for, while a window that cannot be shown holds asking
+    /// back: the event loop wakes then ([`Presenter::resume_if_due`]).
+    pub(crate) fn held_until(&self) -> Option<Instant> {
+        self.held_until
+    }
+
+    /// Ask for the next image if asking was held back until `now` or before.
+    pub(crate) fn resume_if_due(&mut self, now: Instant) {
+        if self.held_until.is_some_and(|until| until <= now) {
+            self.request();
+        }
+    }
+
+    /// Ask for the next image now if asking is held back: the window can be shown again.
+    pub(crate) fn resume(&mut self) {
+        if self.held_until.is_some() {
+            self.request();
+        }
+    }
+
     /// Have the worker show `frame`, whose drawing has been submitted. Returns at once.
     pub(crate) fn present(&self, frame: S::Frame) {
         self.jobs.send(Job::Present(frame)).ok();
@@ -188,6 +283,7 @@ impl<S: Swapchain> Presenter<S> {
     pub(crate) fn stop(&mut self, patience: Duration) {
         self.jobs.send(Job::Stop).ok();
         self.asked = false;
+        self.held_until = None;
         if let Err(RecvTimeoutError::Timeout) = self.done.recv_timeout(patience) {
             notify(Level::Warn, format!("the {PRESENT_THREAD} thread did not finish within {patience:?} of the app closing"));
         }
@@ -227,6 +323,10 @@ mod tests {
 
         fn present(&self, frame: u32) {
             self.shown.send(frame).ok();
+        }
+
+        fn image(acquired: u32) -> Result<u32, NoImage> {
+            Ok(acquired)
         }
     }
 
@@ -360,6 +460,10 @@ mod tests {
         fn present(&self, _: u32) {
             panic!("the display broke");
         }
+
+        fn image(acquired: u32) -> Result<u32, NoImage> {
+            Ok(acquired)
+        }
     }
 
     /// A worker that panics wakes the event loop on its way out, and the next thing the event loop
@@ -393,5 +497,117 @@ mod tests {
         });
         done.recv_timeout(PATIENCE).expect("the presenter was dropped with an image still asked for");
         drop(rig.vblank);
+    }
+
+    /// A window that cannot be shown: every image asked for is refused at once, as Metal refuses
+    /// one for a hidden window, and each ask is noted with the instant it came.
+    #[derive(Default)]
+    struct HiddenDisplay {
+        asked_at: Mutex<Vec<Instant>>,
+    }
+
+    impl Swapchain for HiddenDisplay {
+        type Acquired = Result<u32, NoImage>;
+        type Frame = u32;
+
+        fn acquire(&self) -> Result<u32, NoImage> {
+            self.asked_at.lock().expect("the display's lock").push(Instant::now());
+            Err(NoImage::Hidden)
+        }
+
+        fn present(&self, _: u32) {}
+
+        fn image(acquired: Result<u32, NoImage>) -> Result<u32, NoImage> {
+            acquired
+        }
+    }
+
+    /// How many asks the hidden-window test watches.
+    const HIDDEN_ASKS: usize = 4;
+
+    /// A hidden window that refuses every image at once is asked once a hidden frame interval, and
+    /// its surface is never reconfigured for it: the event loop's side of each frame, as the app
+    /// runs it, is to wait until it is woken or asking is due again, settle what it took, and
+    /// reconfigure only when told to. Asking again the moment a refusal came, which is what a
+    /// refusal once did, asks thousands of times in the time this one asks a few.
+    #[test]
+    fn a_window_that_cannot_be_shown_is_asked_once_a_hidden_frame_and_never_reconfigured() {
+        let display = Arc::new(HiddenDisplay::default());
+        let (wake, woken) = mpsc::channel();
+        let mut presenter = Presenter::start(display.clone(), move || {
+            wake.send(()).ok();
+        })
+        .expect("the worker starts");
+        presenter.request();
+        let mut reconfigured = 0;
+        let mut held = 0;
+        let started = Instant::now();
+        while display.asked_at.lock().expect("the display's lock").len() < HIDDEN_ASKS {
+            assert!(started.elapsed() < PATIENCE, "the hidden window stopped being asked");
+            let wait = presenter.held_until().map_or(PATIENCE, |until| until.saturating_duration_since(Instant::now()));
+            woken.recv_timeout(wait).ok();
+            presenter.resume_if_due(Instant::now());
+            if let Some(answer) = presenter.take() {
+                match presenter.settle(answer, Instant::now()) {
+                    Settled::Draw(_) => panic!("a hidden window gave an image"),
+                    Settled::Reconfigure => {
+                        reconfigured += 1;
+                        presenter.request();
+                    }
+                    Settled::Held => held += 1,
+                }
+            }
+        }
+        let asked_at = display.asked_at.lock().expect("the display's lock").clone();
+        assert_eq!(reconfigured, 0, "a surface that was only hidden was reconfigured");
+        assert!(held >= HIDDEN_ASKS - 1, "the refusals did not hold asking back");
+        for pair in asked_at.windows(2) {
+            assert!(pair[1] - pair[0] >= HIDDEN_FRAME_INTERVAL, "the hidden window was asked again {:?} after it refused", pair[1] - pair[0]);
+        }
+    }
+
+    /// A window shown again is asked for an image at once, without waiting out the interval, and a
+    /// request made for any other reason -- a resize -- ends the hold as well.
+    #[test]
+    fn a_window_shown_again_is_asked_at_once() {
+        let display = Arc::new(HiddenDisplay::default());
+        let (wake, woken) = mpsc::channel();
+        let mut presenter = Presenter::start(display.clone(), move || {
+            wake.send(()).ok();
+        })
+        .expect("the worker starts");
+        presenter.request();
+        woken.recv_timeout(PATIENCE).expect("the refusal woke the event loop");
+        let answer = presenter.take().expect("the refusal came");
+        let refused_at = Instant::now();
+        assert_eq!(presenter.settle(answer, refused_at), Settled::Held);
+        assert_eq!(presenter.held_until(), Some(refused_at + HIDDEN_FRAME_INTERVAL));
+        presenter.resume_if_due(refused_at);
+        assert!(!presenter.waiting(), "asking was not held back");
+
+        presenter.resume();
+        assert!(presenter.waiting() && presenter.held_until().is_none(), "a window shown again was not asked at once");
+        woken.recv_timeout(PATIENCE).expect("the second refusal woke the event loop");
+        let answer = presenter.take().expect("the second refusal came");
+        assert_eq!(presenter.settle(answer, Instant::now()), Settled::Held);
+        presenter.request();
+        assert!(presenter.held_until().is_none(), "a request left asking held back");
+    }
+
+    /// wgpu's answers sorted the way wgpu says to handle them: a hidden window and a display that
+    /// timed out are skipped, never reconfigured, and only a surface that no longer fits is.
+    #[test]
+    fn only_a_surface_that_no_longer_fits_is_reconfigured() {
+        use wgpu::CurrentSurfaceTexture::{Lost, Occluded, Outdated, Timeout, Validation};
+        for (answer, expected) in [
+            (Occluded, NoImage::Hidden),
+            (Timeout, NoImage::Hidden),
+            (Outdated, NoImage::Reconfigure),
+            (Lost, NoImage::Reconfigure),
+            (Validation, NoImage::Reconfigure),
+        ] {
+            let label = format!("{answer:?}");
+            assert_eq!(<wgpu::Surface<'static> as Swapchain>::image(answer).err(), Some(expected), "{label}");
+        }
     }
 }

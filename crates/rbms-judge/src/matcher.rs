@@ -42,6 +42,57 @@ const HCN_HELD_END_CODE: usize = Judge::Good as usize;
 /// (`JudgeManager.java:398, 648, 651`).
 const MICROS_PER_MILLI: i64 = 1_000;
 
+/// Playback rate, in percent, of a chart played at its own speed.
+pub const UNMODIFIED_PLAYBACK_PERCENT: i32 = 100;
+
+/// Slowest playback rate the engine takes, in percent. A rate of nothing would stand the chart still.
+const MIN_PLAYBACK_PERCENT: i32 = 1;
+
+/// How much faster or slower than its own speed a chart is played, as the engine converts between
+/// the chart's clock it is driven on and the player's own time it judges in.
+///
+/// The reference plays a practice slice at another FREQUENCY by retiming the chart itself
+/// (`BMSModelUtils.changeFrequency`, `BMSPlayer.java:554-558`) and judges the retimed chart with
+/// windows of the same length (`JudgeManager` knows no frequency), so every window, margin and tick
+/// is a length of the player's time. Driven on the chart's clock, the engine stretches each of them
+/// onto that clock and reads each timing back off it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PlaybackRate {
+    percent: i64,
+}
+
+impl PlaybackRate {
+    const UNMODIFIED: PlaybackRate = PlaybackRate { percent: UNMODIFIED_PLAYBACK_PERCENT as i64 };
+
+    fn new(percent: i32) -> PlaybackRate {
+        PlaybackRate { percent: i64::from(percent.max(MIN_PLAYBACK_PERCENT)) }
+    }
+
+    /// How much of the chart's clock goes by in `real_us` of the player's time.
+    fn chart_span_us(self, real_us: i64) -> i64 {
+        scale_span_us(real_us, self.percent, i64::from(UNMODIFIED_PLAYBACK_PERCENT))
+    }
+
+    /// How much of the player's time `chart_us` of the chart's clock takes.
+    fn real_span_us(self, chart_us: i64) -> i64 {
+        scale_span_us(chart_us, i64::from(UNMODIFIED_PLAYBACK_PERCENT), self.percent)
+    }
+
+    /// `windows`, which are lengths of the player's time, as lengths of the chart's clock.
+    fn chart_windows(self, windows: JudgeWindows) -> JudgeWindows {
+        if self == PlaybackRate::UNMODIFIED {
+            return windows;
+        }
+        let pair = |(late, early): (i64, i64)| (self.chart_span_us(late), self.chart_span_us(early));
+        JudgeWindows { pg: pair(windows.pg), gr: pair(windows.gr), gd: pair(windows.gd), bd: pair(windows.bd), ms: windows.ms.map(pair) }
+    }
+}
+
+fn scale_span_us(span_us: i64, numerator: i64, denominator: i64) -> i64 {
+    let scaled = i128::from(span_us) * i128::from(numerator) / i128::from(denominator);
+    scaled.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+}
+
 fn judge_of_code(code: usize) -> Option<Judge> {
     JUDGE_BY_CODE.get(code).copied()
 }
@@ -227,9 +278,20 @@ fn count_notes(lanes: &[Lane]) -> u32 {
 }
 
 /// Note objects in `lanes`, whatever they are judged as: a head, and an end for a long note. A run
-/// judges each of them at most once.
+/// resolves each of them at most once.
 fn count_objects(lanes: &[Lane]) -> usize {
     lanes.iter().flat_map(|lane| lane.notes.iter()).map(|note| 1 + usize::from(note.end_us.is_some())).sum()
+}
+
+/// Judgments the engine makes room for, per note object, when it is built: the one that resolves the
+/// object, and one 空POOR. A 空POOR leaves its note where it was (`judgeVanish[5]` is false in every
+/// mode), so a run may take any number of them; one for each object is more than a run played by
+/// hand makes.
+const JUDGMENT_ROOM_PER_OBJECT: usize = 2;
+
+/// Room for the judgments of a run over `lanes` ([`JUDGMENT_ROOM_PER_OBJECT`]).
+fn judgment_room(lanes: &[Lane]) -> usize {
+    JUDGMENT_ROOM_PER_OBJECT * count_objects(lanes)
 }
 
 /// Stateful note-matching engine with LN support: per-lane time-sorted notes, a moving
@@ -270,6 +332,8 @@ pub struct JudgeEngine {
     ln_mode: LnMode,
     gauge_set: GaugeSetId,
     gauge_total: f64,
+    /// How fast the chart is played against its own speed ([`JudgeEngine::set_playback_rate`]).
+    playback: PlaybackRate,
     /// The instant the clock has been settled up to: every time-driven judgment due at or before it
     /// has been made, and a hell-charge tick balance has run up to it. The reference's
     /// `prevmtime` (`JudgeManager.java:100`), kept per event rather than per frame.
@@ -320,9 +384,10 @@ pub struct JudgeEngine {
     /// Every note whose marks may have changed since the engine was built, oldest first, once for
     /// each time. Nothing in the engine reads it back.
     ///
-    /// Both lists are made room for a judgment of every note object when the engine is built, and
-    /// [`JudgeEngine::set_ln_mode`] makes room again past the notes it names here, so a run that
-    /// judges each object once never grows them, and moves them, in the middle of play.
+    /// Both lists are made room for a judgment of every note object and a 空POOR for each when the
+    /// engine is built ([`JUDGMENT_ROOM_PER_OBJECT`]), and [`JudgeEngine::set_ln_mode`] makes room
+    /// again past the notes it names here, so a run inside that never grows them, and moves them, in
+    /// the middle of play.
     touched: Vec<NoteAt>,
 }
 
@@ -365,7 +430,7 @@ impl JudgeEngine {
             })
             .collect();
         let total_notes = count_notes(&lanes);
-        let objects = count_objects(&lanes);
+        let room = judgment_room(&lanes);
         let gauge_set = GaugeSetId::default();
         let gauge_total = DEFAULT_GAUGE_TOTAL;
         let gauge = GrooveGauge::new(gauge_set, GaugeKind::Normal, gauge_total, total_notes as usize);
@@ -389,6 +454,7 @@ impl JudgeEngine {
             ln_mode: LnMode::default(),
             gauge_set,
             gauge_total,
+            playback: PlaybackRate::UNMODIFIED,
             settled_us: i64::MIN,
             gauge_shift: None,
             failed_at_us: None,
@@ -411,8 +477,8 @@ impl JudgeEngine {
             timing_count: 0,
             total_notes,
             pass_notes: 0,
-            judged: Vec::with_capacity(objects),
-            touched: Vec::with_capacity(objects),
+            judged: Vec::with_capacity(room),
+            touched: Vec::with_capacity(room),
         }
     }
 
@@ -503,19 +569,28 @@ impl JudgeEngine {
         self.scratch_lane.get(lane).copied().unwrap_or(false)
     }
 
+    /// The note table `lane` is judged against, on the chart's clock.
     fn note_window(&self, lane: usize) -> JudgeWindows {
-        if self.is_scratch(lane) { self.scratch_windows } else { self.windows }
+        self.playback.chart_windows(if self.is_scratch(lane) { self.scratch_windows } else { self.windows })
     }
 
+    /// The long-note end table `lane` is judged against, on the chart's clock.
     fn ln_window(&self, lane: usize) -> JudgeWindows {
-        if self.is_scratch(lane) { self.ln_scratch_end } else { self.ln_end }
+        self.playback.chart_windows(if self.is_scratch(lane) { self.ln_scratch_end } else { self.ln_end })
     }
 
     /// Release grace for a held long note (`JudgeProperty.longnoteMargin` scaled by the user's
     /// long-note margin rate; the scratch table's margin is not user-scalable in the reference implementation,
-    /// `JudgeManager.java:186-188`).
+    /// `JudgeManager.java:186-188`), on the chart's clock.
     fn ln_margin(&self, lane: usize) -> i64 {
-        if self.is_scratch(lane) { self.prop.longscratch_margin } else { self.prop.longnote_margin * self.longnote_margin_rate.max(0) as i64 / 100 }
+        let margin_us =
+            if self.is_scratch(lane) { self.prop.longscratch_margin } else { self.prop.longnote_margin * self.longnote_margin_rate.max(0) as i64 / 100 };
+        self.playback.chart_span_us(margin_us)
+    }
+
+    /// The span between hell-charge gauge ticks (`JudgeManager.java:81`), on the chart's clock.
+    fn hcn_tick_us(&self) -> i64 {
+        self.playback.chart_span_us(HCN_GAUGE_TICK_US)
     }
 
     /// Rebuild the nine gauges for the current table, chart total and note count, keeping whichever
@@ -590,7 +665,7 @@ impl JudgeEngine {
         self.ln_mode = mode;
         let resolved = mode.resolve();
         let flavoured = self.lanes.iter().flat_map(|lane| lane.notes.iter()).filter(|note| note.chart_ln == Some(LnKind::Undefined)).count();
-        self.touched.reserve(flavoured + count_objects(&self.lanes));
+        self.touched.reserve(flavoured + judgment_room(&self.lanes));
         for (lane, notes) in self.lanes.iter_mut().enumerate() {
             for (index, note) in notes.notes.iter_mut().enumerate() {
                 if note.chart_ln == Some(LnKind::Undefined) {
@@ -612,6 +687,20 @@ impl JudgeEngine {
     /// `PlayerConfig.longnoteMarginRate`.
     pub fn set_longnote_margin_rate(&mut self, rate_percent: i32) {
         self.longnote_margin_rate = rate_percent;
+    }
+
+    /// Judge a chart that is played at `percent` of its own speed, a practice slice's FREQUENCY, in
+    /// the player's own time while the engine is still driven on the chart's clock: every window, the
+    /// long-note margin, the candidate gate and the hell-charge tick keep their length of the
+    /// player's time, and every timing a judgment reports is in the player's time. A rate below 1%
+    /// is taken as 1%. Call it before play begins.
+    pub fn set_playback_rate(&mut self, percent: i32) {
+        self.playback = PlaybackRate::new(percent);
+    }
+
+    /// The rate the chart is played at, in percent ([`set_playback_rate`](Self::set_playback_rate)).
+    pub fn playback_rate(&self) -> i32 {
+        self.playback.percent as i32
     }
 
     /// Mark the run as one that plays itself. Autoplay is driven through [`auto_press`](Self::auto_press)
@@ -761,12 +850,12 @@ impl JudgeEngine {
         let note_type = if self.is_scratch(lane) { NoteType::Scratch } else { NoteType::Note };
         let algorithm = self.algorithm;
         let miss_once = self.prop.miss_condition == MissCondition::One;
-        let (gate_late, gate_early) = self.gate;
+        let (gate_late, gate_early) = (self.playback.chart_span_us(self.gate.0), self.playback.chart_span_us(self.gate.1));
         let l = &self.lanes[lane];
 
         let mut chosen: Option<usize> = None;
         let mut code = 0usize;
-        let floor_us = press_us + gate_late - REMARK_SLACK_US;
+        let floor_us = press_us + gate_late - self.playback.chart_span_us(REMARK_SLACK_US);
         let mut i = l.cursor;
         while i > 0 && l.notes[i - 1].head_us >= floor_us {
             i -= 1;
@@ -842,7 +931,7 @@ impl JudgeEngine {
             }
             self.update_micro(lane, idx, judge, delta_us, false, vanish);
         }
-        Some(JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us, counted })
+        Some(JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us: self.playback.real_span_us(delta_us), counted })
     }
 
     /// The autoplay hit on the note whose head sits at `at_us` (`JudgeManager.java:251-271`). The
@@ -1008,7 +1097,7 @@ impl JudgeEngine {
     fn confirm_hold(&mut self, lane: usize, idx: usize, judge: Judge, delta_us: i64, on_end: bool) -> JudgeResult {
         self.finish_hold(lane, idx, judge, on_end);
         self.update_micro(lane, idx, judge, delta_us, on_end, CONSUMES_THE_NOTE);
-        JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us, counted: true }
+        JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us: self.playback.real_span_us(delta_us), counted: true }
     }
 
     fn finish_hold(&mut self, lane: usize, idx: usize, judge: Judge, on_end: bool) {
@@ -1094,7 +1183,8 @@ impl JudgeEngine {
             }
             if let Some(direction) = self.hell_charge_direction(lane) {
                 let balance_us = self.holds[lane].passing_us;
-                let to_tick_us = if direction { HCN_GAUGE_TICK_US - balance_us } else { balance_us + HCN_GAUGE_TICK_US };
+                let tick_us = self.hcn_tick_us();
+                let to_tick_us = if direction { tick_us - balance_us } else { balance_us + tick_us };
                 consider(self.settled_us.saturating_add(to_tick_us).saturating_add(1));
             }
             if let Some(idx) = self.holds[lane].note
@@ -1167,6 +1257,7 @@ impl JudgeEngine {
     /// every instant a tick falls due and at every instant the note or the key changes, so the
     /// ticks are the same however the time was cut up. The reference pays at most one per frame.
     fn run_hell_charges(&mut self, to_us: i64) {
+        let tick_us = self.hcn_tick_us();
         for lane in 0..self.lanes.len() {
             let Some(increasing) = self.hell_charge_direction(lane) else {
                 continue;
@@ -1175,15 +1266,15 @@ impl JudgeEngine {
             self.holds[lane].increasing = increasing;
             if increasing {
                 self.holds[lane].passing_us += step_us;
-                while self.holds[lane].passing_us > HCN_GAUGE_TICK_US {
+                while self.holds[lane].passing_us > tick_us {
                     self.gauge.update_with_rate(Judge::Great, HCN_GAUGE_TICK_RATE);
-                    self.holds[lane].passing_us -= HCN_GAUGE_TICK_US;
+                    self.holds[lane].passing_us -= tick_us;
                 }
             } else {
                 self.holds[lane].passing_us -= step_us;
-                while self.holds[lane].passing_us < -HCN_GAUGE_TICK_US {
+                while self.holds[lane].passing_us < -tick_us {
                     self.gauge.update_with_rate(Judge::Bad, HCN_GAUGE_TICK_RATE);
-                    self.holds[lane].passing_us += HCN_GAUGE_TICK_US;
+                    self.holds[lane].passing_us += tick_us;
                 }
             }
         }
@@ -1294,7 +1385,11 @@ impl JudgeEngine {
     /// only a vanishing judgment advances `passnotes`. Under [`MissCondition::One`] a 見逃し POOR on
     /// a note that already survived a judgment is consumed but not counted, which is what stops a
     /// pop'n BAD from tallying twice.
+    ///
+    /// `delta_us` is on the chart's clock; what the note keeps and the tallies take is the same
+    /// timing in the player's time.
     fn update_micro(&mut self, lane: usize, idx: usize, judge: Judge, delta_us: i64, on_end: bool, vanish: bool) {
+        let delta_us = self.playback.real_span_us(delta_us);
         self.touched.push(NoteAt { lane, index: idx });
         let note = &mut self.lanes[lane].notes[idx];
         if vanish {

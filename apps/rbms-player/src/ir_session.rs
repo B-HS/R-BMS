@@ -106,6 +106,15 @@ impl AccountSession {
         self.state = AccountState::Busy(action);
     }
 
+    /// Give up on the credential exchange in flight without its answer: the session goes back to
+    /// what it was before [`AccountSession::begin`], signed in when a token is held and a guest
+    /// otherwise. Anything but a pending exchange is left as it is.
+    pub(crate) fn abandon(&mut self) {
+        if self.is_busy() {
+            self.state = if self.token.is_some() { AccountState::LoggedIn } else { AccountState::Guest };
+        }
+    }
+
     /// Fold a finished exchange back in. Returns `true` when the stored token changed, which is the
     /// caller's signal to rebuild the score server with the new credentials.
     pub(crate) fn finish(&mut self, action: AuthAction, result: Result<AuthResponse, IrError>) -> bool {

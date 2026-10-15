@@ -32,7 +32,7 @@ const UPDATE_HINT: &str = "if the change is meant, run `RBMS_UPDATE_CONTRACT=1 c
      `bun test tests/dto/client-requests.test.ts` in web/, and commit the files with the change";
 
 /// Every file the contract folder holds, one per test below.
-const CONTRACT_FILES: [&str; 14] = [
+const CONTRACT_FILES: [&str; 15] = [
     "course-normal",
     "course-scratch-auto",
     "replay-long",
@@ -42,6 +42,7 @@ const CONTRACT_FILES: [&str; 14] = [
     "score-autoplay",
     "score-empty-poor-exceeds-poor",
     "score-failed",
+    "score-max-with-empty-poor",
     "score-normal",
     "score-scratch-auto",
     "score-sync-resend",
@@ -204,6 +205,18 @@ fn loaded(shared: &AppShared, mut model: rbms_model::Model, course: Option<(f32,
 fn played(shared: &AppShared, model: rbms_model::Model, offsets_us: &[Option<i64>]) -> PlaySession {
     let (session, laid_out) = loaded(shared, model, None);
     replay_inputs(session, &inputs_by_hand(&laid_out, offsets_us, shared.config.play.scratch_auto))
+}
+
+/// A press and release of each key note's own key [`EARLY_PRESS_US`] ahead of it: inside the 空POOR
+/// band, so each is a 空POOR and leaves the note to be hit.
+fn early_presses_before_every_key_note(laid_out: &rbms_model::Model) -> Vec<Input> {
+    laid_out
+        .timelines
+        .iter()
+        .flat_map(|line| line.notes.iter().enumerate().filter(|(_, note)| note.is_some()).map(move |(lane, _)| (line.time_us, lane)))
+        .filter(|(_, lane)| !laid_out.mode.is_scratch(*lane))
+        .flat_map(|(time_us, lane)| [(time_us - EARLY_PRESS_US, lane, true), (time_us - EARLY_PRESS_US + KEY_HELD_US, lane, false)])
+        .collect()
 }
 
 /// Hand `session` to the app as a run of the chart called `name` that has just ended.
@@ -468,14 +481,7 @@ fn a_run_with_more_empty_poor_than_poor() {
     let mut shared = signed_in_to(&server, "empty-poor");
     let (session, laid_out) = loaded(&shared, contract_model(), None);
     let mut inputs = inputs_by_hand(&laid_out, &ONE_IN_EIGHT_MISSED_US, false);
-    let early: Vec<_> = laid_out
-        .timelines
-        .iter()
-        .flat_map(|line| line.notes.iter().enumerate().filter(|(_, note)| note.is_some()).map(move |(lane, _)| (line.time_us, lane)))
-        .filter(|(_, lane)| !laid_out.mode.is_scratch(*lane))
-        .flat_map(|(time_us, lane)| [(time_us - EARLY_PRESS_US, lane, true), (time_us - EARLY_PRESS_US + KEY_HELD_US, lane, false)])
-        .collect();
-    inputs.extend(early);
+    inputs.extend(early_presses_before_every_key_note(&laid_out));
     inputs.sort_unstable();
     let session = replay_inputs(session, &inputs);
     let summary = session.summary();
@@ -483,6 +489,25 @@ fn a_run_with_more_empty_poor_than_poor() {
     assert!(summary.clear_lamp.is_cleared() && summary.total_judged == summary.total_notes, "the fixture run is played to its end and clears: {summary:?}");
     let (score, _) = sent_from_the_result_screen(&mut shared, &server, session);
     check_contract("score-empty-poor-exceeds-poor", &score.body);
+}
+
+/// A MAX run with 空POOR: every note on its time and every key note hunted for early, inside the
+/// 空POOR band. A 空POOR takes no note and breaks no streak (`BMSPlayer.java:868`), so the lamp
+/// stands, and the server's lamp check has to let it through.
+#[test]
+fn a_max_run_with_empty_poor() {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, "max-empty-poor");
+    let (session, laid_out) = loaded(&shared, contract_model(), None);
+    let mut inputs = inputs_by_hand(&laid_out, &ON_TIME_US, false);
+    inputs.extend(early_presses_before_every_key_note(&laid_out));
+    inputs.sort_unstable();
+    let session = replay_inputs(session, &inputs);
+    let summary = session.summary();
+    assert!(summary.counts[5] > 0, "the fixture has 空POOR: {:?}", summary.counts);
+    assert_eq!(summary.clear_lamp, rbms_judge::ClearType::Max, "the fixture run is a MAX: {summary:?}");
+    let (score, _) = sent_from_the_result_screen(&mut shared, &server, session);
+    check_contract("score-max-with-empty-poor", &score.body);
 }
 
 /// A run left by Escape part-way, which no result screen sends: a records sync of that run alone

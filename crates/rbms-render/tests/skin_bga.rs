@@ -158,7 +158,7 @@ fn the_chart_decides_what_the_documents_background_shows_from_before_play_to_the
         head.start_miss(missed_at_ms, DEFAULT_MISS_LAYER_DURATION_MS);
         let frame = textures.frame(canvas, head.pick(), BgaExpand::Full, |number| {
             let rgba = pictures.get(usize::try_from(number).ok()?)?;
-            Some(BgaPicture { generation: u64::from(number.unsigned_abs()), width: PICTURE.0, height: PICTURE.1, rgba })
+            Some(BgaPicture { generation: u64::from(number.unsigned_abs()), width: PICTURE.0, height: PICTURE.1, rgba, prepared: None })
         });
         draw_document("chart", &two_placements(), canvas, frame);
         pixel(canvas, 300, 300)

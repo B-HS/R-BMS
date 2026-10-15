@@ -49,6 +49,9 @@ pub(crate) struct SyncPayload {
 /// that same path: on another machine the keys name files that are not there, and a screen pointed
 /// at one would fall back to the built-in drawing with a read failure. The screen the tab was last
 /// left on goes with them, being nothing but where this machine's cursor stood.
+///
+/// The system sound folder is a folder picked on this machine's disk too. Taken onto another one, it
+/// names a folder that is not there and every system sound there falls silent.
 fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.network.ir_token = local.network.ir_token.clone();
     incoming.network.ir_login_id = local.network.ir_login_id.clone();
@@ -61,6 +64,7 @@ fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.library.tables = local.library.tables.clone();
     incoming.library.seeded_default_tables = local.library.seeded_default_tables.clone();
     incoming.display.font_path = local.display.font_path.clone();
+    incoming.audio.sound_folder = local.audio.sound_folder.clone();
     incoming.skin = local.skin.clone();
     incoming
 }
@@ -270,6 +274,11 @@ mod tests {
     const REMOTE_SKIN_FOLDER: &str = "/their/skins";
     const REMOTE_DOCUMENT: &str = "/their/skins/theirs/select.luaskin";
 
+    /// The system sound folder picked on this machine, and the one picked on the machine that
+    /// uploaded the account's copy.
+    const LOCAL_SOUND_FOLDER: &str = "/local/sounds";
+    const REMOTE_SOUND_FOLDER: &str = "/their/sounds";
+
     /// The option id this machine chose for [`STORED_PROPERTY`] in a document of its own.
     const LOCAL_PROPERTY_OPTION: i32 = 912;
 
@@ -288,6 +297,7 @@ mod tests {
         c.library.tables = vec![TableSource { name: "mine".into(), location: "/local/table.json".into() }];
         c.library.seeded_default_tables = vec![rbms_config::INSANE_TABLE_ID.into()];
         c.display.font_path = Some("/local/font.ttf".into());
+        c.audio.sound_folder = Some(LOCAL_SOUND_FOLDER.into());
         c.skin.pack = Some("/local/skins/pack".into());
         c.skin.folder = Some(LOCAL_SKIN_FOLDER.into());
         c.skin.screen = SKIN_TYPE_RESULT;
@@ -341,6 +351,7 @@ mod tests {
         assert!(sanitised.library.tables.is_empty());
         assert!(sanitised.library.seeded_default_tables.is_empty(), "the tables given on this machine go with its table list");
         assert_eq!(sanitised.display.font_path, None);
+        assert_eq!(sanitised.audio.sound_folder, None, "the system sound folder is a folder on this machine's disk");
         assert_eq!(sanitised.skin.pack, None, "the skin pack is a folder on this machine's disk");
         assert_eq!(sanitised.skin.folder, None, "the skin folder is a folder on this machine's disk");
         assert_eq!(sanitised.skin.document(SKIN_TYPE_MUSIC_SELECT), None, "a screen's document is a path on this machine's disk");
@@ -356,6 +367,7 @@ mod tests {
         assert!(!blob.content.contains("/local/table.json"));
         assert!(!blob.content.contains("/local/skins/pack"), "the serialised blob cannot leak the skin pack folder");
         assert!(!blob.content.contains(LOCAL_SKIN_FOLDER), "the serialised blob cannot leak the skin folder or a document under it");
+        assert!(!blob.content.contains(LOCAL_SOUND_FOLDER), "the serialised blob cannot leak the system sound folder");
     }
 
     /// The extra server profiles a machine holds, each with the token issued by its server.
@@ -401,6 +413,30 @@ mod tests {
         assert_eq!(fields, CREDENTIAL_FIELDS_KEPT_LOCAL, "a new credential field must be added to `keep_local` and to this list");
     }
 
+    /// Words that name a place on this machine's disk in a field of the configuration, and the fields
+    /// that carry one today (`ir_profiles` only by the letters of "profiles"). Every one of them is
+    /// kept on this machine by `keep_local`, either alone or with the list or section it sits in (the
+    /// table list, the skin menu). A field this build gains that names a place on
+    /// disk fails the test below until `keep_local` keeps it and it is added to this list.
+    const PATH_WORDS: [&str; 5] = ["folder", "path", "dir", "location", "file"];
+    const PATH_FIELDS_KEPT_LOCAL: [&str; 7] = ["folder", "folders", "font_path", "ir_profiles", "location", "songs_folder", "sound_folder"];
+
+    #[test]
+    fn a_field_of_the_configuration_that_names_a_place_on_disk_is_one_the_upload_blanks() {
+        let mut config = Config::default();
+        config.library.tables.push(TableSource { name: String::new(), location: String::new() });
+        config.network.ir_profiles.push(rbms_config::IrProfile::default());
+        let text = ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::default()).unwrap();
+        let mut fields: Vec<&str> = text
+            .lines()
+            .filter_map(|line| line.trim().split_once(':').map(|(name, _)| name.trim()))
+            .filter(|name| PATH_WORDS.iter().any(|word| name.contains(word)))
+            .collect();
+        fields.sort_unstable();
+        fields.dedup();
+        assert_eq!(fields, PATH_FIELDS_KEPT_LOCAL, "a new field naming a place on disk must be added to `keep_local` and to this list");
+    }
+
     #[test]
     fn a_download_keeps_the_extra_profiles_and_their_tokens_this_machine_holds() {
         let mut local = local_settings();
@@ -442,6 +478,7 @@ mod tests {
         remote.library.folders = vec!["/their/songs".into()];
         remote.library.tables = vec![TableSource { name: "theirs".into(), location: "/their/table.json".into() }];
         remote.display.font_path = Some("/their/font.ttf".into());
+        remote.audio.sound_folder = Some(REMOTE_SOUND_FOLDER.into());
         remote.skin = remote_skin_settings().skin;
         remote.library.seeded_default_tables = vec!["given-elsewhere".into()];
         let fresh_machine = merge_downloaded(&Config::default(), remote.clone());
@@ -460,6 +497,13 @@ mod tests {
         assert_eq!(merged.library.tables.len(), 1);
         assert_eq!(merged.library.tables[0].location, "/local/table.json");
         assert_eq!(merged.display.font_path.as_deref(), Some("/local/font.ttf"));
+        assert_eq!(merged.audio.sound_folder.as_deref(), Some(LOCAL_SOUND_FOLDER), "a downloaded sound folder replaced this machine's");
+        let fresh_machine_sounds = merge_downloaded(&Config::default(), {
+            let mut theirs = Config::default();
+            theirs.audio.sound_folder = Some(REMOTE_SOUND_FOLDER.into());
+            theirs
+        });
+        assert_eq!(fresh_machine_sounds.audio.sound_folder, None, "a machine on the bundled sounds took another machine's folder");
         assert_eq!(merged.skin.pack.as_deref(), Some("/local/skins/pack"), "a downloaded pack folder does not replace this machine's");
         assert_eq!(merged.skin.folder.as_deref(), Some(LOCAL_SKIN_FOLDER), "a downloaded skin folder does not replace this machine's");
         assert_eq!(merged.skin.document(SKIN_TYPE_MUSIC_SELECT), Some(LOCAL_DOCUMENT), "a screen was pointed at another machine's file");

@@ -246,8 +246,8 @@ pub(crate) struct PlayState {
     /// The best EX score the player had on the chart when that target was settled, which is what
     /// a skin's play screen holds the run against beside the target.
     best_score: u32,
-    /// The practice slice this run is, when it is one. Its presence is the gauge lock: the run ends
-    /// at the slice's end time rather than at the last note, and an emptied gauge does not stop it.
+    /// The practice slice this run is, when it is one. The run ends at the slice's end time rather
+    /// than at the last note, and an emptied gauge does not stop it ([`PlayState::set_practice`]).
     pub(crate) practice: Option<crate::practice::PracticeSession>,
     /// The states a skin's play screen runs through, when a skin draws this run. `None` is the run
     /// as it is without a skin: it starts the moment the screen is up and ends the moment it is
@@ -370,9 +370,18 @@ impl PlayState {
         self.bga.len()
     }
 
-    /// Mark this run as a practice slice, which is what locks the gauge and ends it on the slice's
-    /// own end time.
+    /// Mark this run as a practice slice, which ends it on the slice's own end time, and judge it
+    /// the way the slice is played: in the player's own time at the slice's FREQUENCY, and under a
+    /// locked gauge, which keeps the judge going once the gauge empties rather than stopping it with
+    /// the slice still running. Call it before the first frame.
     pub(crate) fn set_practice(&mut self, practice: crate::practice::PracticeSession) {
+        self.session.set_playback_rate(practice.freq_percent);
+        let mut judge = self.session.judge_setup();
+        let shift = practice.gauge_shift(judge.gauge_auto_shift);
+        if shift != judge.gauge_auto_shift {
+            judge.gauge_auto_shift = shift;
+            self.session.set_judge_setup(judge);
+        }
         self.practice = Some(practice);
     }
 
@@ -622,7 +631,7 @@ impl PlayState {
         if self.practice.is_some() {
             return Transition::Back;
         }
-        if self.session.all_notes_resolved() || self.scene.as_ref().is_some_and(PlayScene::is_closing) {
+        if self.has_ended() {
             return enter_result(self, ctx.shared);
         }
         if ctx.shared.course_run.is_some() {
@@ -632,6 +641,12 @@ impl PlayState {
             crate::app_result::record_left_run(self, ctx.shared);
         }
         ctx.shared.leave_play()
+    }
+
+    /// Whether the run has nothing left to play: every note has gone by, or it is closing, failed
+    /// or finished. Leaving such a run ends it on its result rather than as a run left part-way.
+    pub(crate) fn has_ended(&self) -> bool {
+        self.session.all_notes_resolved() || self.scene.as_ref().is_some_and(PlayScene::is_closing)
     }
 
     /// Handle an analysis-mode playback key (only while a replay analysis is active): pause/resume,
@@ -1009,6 +1024,9 @@ impl PlayState {
     /// (`BGAProcessor.java:337-340`).
     ///
     /// A run no scene is run over hands the object the one picture the screen always handed it.
+    ///
+    /// Until the chart plays, each frame also uploads a share of the pictures the chart will show
+    /// ([`Canvas::preload_bga`]), so the frames that judge keys hand the renderer none of them.
     fn background_frame(&mut self, shared: &AppShared, canvas: &mut Canvas<'_>, single: Option<TextureId>) -> BgaFrame {
         if self.scene.is_none() {
             return BgaFrame::of(single);
@@ -1017,7 +1035,11 @@ impl PlayState {
             canvas.release_bga_textures(&mut self.background_textures);
             return BgaFrame::blank(BgaExpand::default());
         }
-        let played_ms = if shared.skin_timers.is_on(timer_id::PLAY) { whole_ms(self.played_chart_us(shared)) } else { BEFORE_PLAY_MS };
+        let playing = shared.skin_timers.is_on(timer_id::PLAY);
+        if !playing {
+            canvas.preload_bga(&mut self.background_textures, &self.background, &self.bga);
+        }
+        let played_ms = if playing { whole_ms(self.played_chart_us(shared)) } else { BEFORE_PLAY_MS };
         self.background.prepare(played_ms);
         canvas.bga_frame(&mut self.background_textures, self.background.pick(), BgaExpand::default(), &self.bga)
     }
@@ -1408,6 +1430,9 @@ impl StageHandler for PlayState {
         }
         if self.practice.is_some() {
             ctx.shared.restore_practice_images(&mut self.bga);
+        }
+        if let Some(gpu) = ctx.shared.gpu.as_mut() {
+            self.background_textures.release(gpu);
         }
     }
 

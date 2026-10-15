@@ -13,6 +13,8 @@
 
 use rbms_model::TimeLine;
 
+use super::BgaLook;
+
 /// What `BGAProcessor` keeps for the picture or layer that is showing and for a chart that has
 /// none: `playingbgaid = -1`.
 const NO_PICTURE: i32 = -1;
@@ -155,6 +157,18 @@ impl BgaPlayhead {
     pub fn start_miss(&mut self, at_ms: i64, duration_ms: i64) {
         self.missed_at_ms = at_ms;
         self.miss_duration_ms = duration_ms;
+    }
+
+    /// Every picture the chart shows and the look it shows it in, in the order the chart first shows
+    /// them: its own picture and a miss layer's as they are, a layer keyed out. A picture shown more
+    /// than once is named each time.
+    pub fn looks(&self) -> impl Iterator<Item = (i32, BgaLook)> + '_ {
+        self.events.iter().flat_map(|event| {
+            let base = (event.base >= 0).then_some((event.base, BgaLook::Plain));
+            let layer = (event.layer >= 0).then_some((event.layer, BgaLook::Keyed));
+            let miss = event.miss.iter().flatten().filter(|number| **number >= 0).map(|number| (*number, BgaLook::Plain));
+            base.into_iter().chain(layer).chain(miss)
+        })
     }
 
     /// What the background shows now (`drawBGA`).

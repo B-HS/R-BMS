@@ -28,6 +28,7 @@ use crate::app_play::OwnPlayOptions;
 use crate::ir_session::AccountSession;
 
 mod contract_requests;
+mod left_behind;
 
 /// A seven-key chart of two measures of eighth notes on the first key with one turntable note among
 /// them, and a last note on the seventh key.

@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::{NO_UNIT, NumberSpec};
-use rbms_judge::gauge::GaugeIndex;
+use rbms_judge::gauge::{GaugeAutoShift, GaugeIndex};
 use rbms_judge::gauge_tables::{GaugeSetId, element_of};
 use rbms_model::{Mode, Model};
 use serde::{Deserialize, Serialize};
@@ -492,11 +492,22 @@ pub(crate) struct PracticeSession {
     /// Shuffle the chart is laid out with.
     pub(crate) option: NoteOption,
     /// Whether an emptied gauge leaves the run running. Always true — that is what makes it
-    /// practice rather than a play.
+    /// practice rather than a play. [`PracticeSession::gauge_shift`] is where it is kept.
     pub(crate) gauge_locked: bool,
 }
 
 impl PracticeSession {
+    /// The gauge auto-shift the slice is judged under, given the one the player set. A locked gauge
+    /// turns [`GaugeAutoShift::None`], the one mode that ends a run when the gauge empties, into
+    /// [`GaugeAutoShift::Continue`], so an emptied gauge leaves the slice judged to its end. Every
+    /// other mode already plays on, and is left as the player set it.
+    pub(crate) fn gauge_shift(&self, configured: GaugeAutoShift) -> GaugeAutoShift {
+        match (self.gauge_locked, configured) {
+            (true, GaugeAutoShift::None) => GaugeAutoShift::Continue,
+            _ => configured,
+        }
+    }
+
     /// Whether the slice is over at this song time, which is the practice run's own end condition:
     /// it stops here rather than at the last note.
     pub(crate) fn is_past_end(&self, song_us: i64) -> bool {

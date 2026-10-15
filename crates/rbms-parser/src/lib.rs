@@ -67,6 +67,9 @@ pub struct Headers {
     pub play_level: String,
     pub rank: i32,
     pub defexrank: Option<f64>,
+    /// `#TOTAL`: the last such line whose number is above zero, as the reference's
+    /// `CommandWord.TOTAL` keeps it. A line it cannot read, or one at zero or below, is passed over
+    /// and leaves whatever an earlier line set.
     pub total: Option<f64>,
     /// `#VOLWAV` as authored, in percent. Absent or unparsable headers keep
     /// [`VOLWAV_DEFAULT_PERCENT`], which converts to unity gain.
@@ -253,7 +256,11 @@ fn parse_header_line(src: &mut BmsSource, body: &str) {
         "PLAYER" => h.player = rest.parse().unwrap_or(1),
         "RANK" => h.rank = rest.parse().unwrap_or(3),
         "DEFEXRANK" => h.defexrank = rest.parse::<f64>().ok().filter(|v| v.is_finite()),
-        "TOTAL" => h.total = rest.parse().ok(),
+        "TOTAL" => {
+            if let Some(total) = parse_java_double(rest).filter(|total| *total > 0.0) {
+                h.total = Some(total);
+            }
+        }
         "VOLWAV" => h.volwav = rest.parse().unwrap_or(VOLWAV_DEFAULT_PERCENT),
         "DIFFICULTY" => h.difficulty = rest.parse().unwrap_or(0),
         "BPM" => h.init_bpm = rest.parse().unwrap_or(130.0),
@@ -295,6 +302,28 @@ fn parse_header_line(src: &mut BmsSource, body: &str) {
             }
         }
     }
+}
+
+/// A number as Java's `Double.parseDouble` reads it, for the headers the reference reads that way.
+///
+/// Both take a sign, decimal digits with a point and an exponent. Java also takes one trailing type
+/// letter (`d`, `D`, `f`, `F`) and spells its specials `Infinity` and `NaN`, where Rust takes no
+/// letter and spells them `inf`, `infinity` and `nan` in any case. Java's hexadecimal form is not
+/// read.
+fn parse_java_double(text: &str) -> Option<f64> {
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let negative = text.starts_with('-');
+    match unsigned {
+        "Infinity" => return Some(if negative { f64::NEG_INFINITY } else { f64::INFINITY }),
+        "NaN" => return Some(f64::NAN),
+        _ => {}
+    }
+    let digits = unsigned.strip_suffix(['d', 'D', 'f', 'F']).unwrap_or(unsigned);
+    if !digits.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'+' | b'-')) {
+        return None;
+    }
+    let signed_len = text.len() - unsigned.len() + digits.len();
+    text[..signed_len].parse().ok()
 }
 
 fn hex(bytes: &[u8]) -> String {

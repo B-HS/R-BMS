@@ -6,6 +6,8 @@
 //! the size of the rectangle the object is placed in, so a document pixel is a screen pixel, and the
 //! ground is a grey nothing here draws in, so a pixel the object left alone is plain to see.
 
+use std::collections::HashMap;
+
 use rbms_model::{Mode, TimeLine};
 use rbms_skin::dst::{DestinationTrack, Keyframe, SkinColor, SkinOffset, SkinRect};
 use rbms_skin::loader::StretchKind;
@@ -16,8 +18,8 @@ use super::super::draw::draw_object;
 use super::super::object::{Body, SkinObject};
 use super::super::{FrameData, SkinFrame, SkinViewport};
 use super::{
-    BgaBody, BgaEvent, BgaExpand, BgaFrame, BgaPick, BgaPicture, BgaPlayhead, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS, MISS_LAYER_NONE, SMALL_PICTURE_EDGE,
-    key_out_black, on_small_canvas,
+    BgaBody, BgaEvent, BgaExpand, BgaFrame, BgaLook, BgaPick, BgaPicture, BgaPlayhead, BgaPrepared, BgaShow, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS,
+    MISS_LAYER_NONE, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas,
 };
 use crate::ctx::with_render_ctx;
 use crate::{Color, CpuCanvas, QuadParams, Rect, Renderer, TextureId};
@@ -54,7 +56,7 @@ fn halves(width: u32, height: u32, left: [u8; 4], right: [u8; 4]) -> Vec<u8> {
 
 /// A decode of `rgba`, numbered `generation`.
 fn picture(rgba: &[u8], width: u32, height: u32, generation: u64) -> BgaPicture<'_> {
-    BgaPicture { generation, width, height, rgba }
+    BgaPicture { generation, width, height, rgba, prepared: None }
 }
 
 /// The destination of a `bga` object: one rectangle held still, in white of the given opacity, with
@@ -302,11 +304,13 @@ struct Counting {
     registered: usize,
     /// Where the pixels of each picture it was handed lay.
     handed: Vec<usize>,
+    /// What each texture was last handed, and at what size.
+    kept: HashMap<TextureId, (Vec<u8>, (u32, u32))>,
 }
 
 impl Counting {
     fn new() -> Counting {
-        Counting { canvas: CpuCanvas::new(8, 8), registered: 0, handed: Vec::new() }
+        Counting { canvas: CpuCanvas::new(8, 8), registered: 0, handed: Vec::new(), kept: HashMap::new() }
     }
 }
 
@@ -326,7 +330,9 @@ impl Renderer for Counting {
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.registered += 1;
         self.handed.push(rgba.as_ptr() as usize);
-        self.canvas.register_texture(key, rgba, width, height)
+        let tex = self.canvas.register_texture(key, rgba, width, height);
+        self.kept.insert(tex, (rgba.to_vec(), (width, height)));
+        tex
     }
 
     fn release_texture(&mut self, tex: TextureId) {
@@ -415,6 +421,159 @@ fn a_picture_change_paints_into_the_canvas_the_role_already_has() {
     show(&mut textures, 2, 0);
     show(&mut textures, 1, 3);
     assert_eq!(textures.canvases(), grown, "a layer past 256 pixels grows its role's canvas once, and pictures after it reuse that");
+}
+
+/// The side of the pictures the uploaded-ahead tests show: past 256, so a picture is its own size.
+const LARGE_SIDE: u32 = 300;
+
+/// A chart whose own picture swaps between 0 and 1 and whose layer swaps between 2 and 3, and which
+/// shows picture 0 as a layer too.
+fn swapping_chart() -> BgaPlayhead {
+    BgaPlayhead::new(vec![event(0, 0, 2), event(10, 1, 3), event(20, 0, 2), event(30, 1, 0)])
+}
+
+/// The four pictures of [`swapping_chart`], each a colour of its own with a black left half.
+fn swapping_pictures() -> Vec<Vec<u8>> {
+    [RED, GREEN, BLUE, [255, 255, 0, 255]].into_iter().map(|colour| halves(LARGE_SIDE, LARGE_SIDE, BLACK, colour)).collect()
+}
+
+/// A chart that swaps its pictures back and forth hands the renderer each picture once per look
+/// before play, and nothing at all while it plays: every swap shows a texture uploaded ahead.
+#[test]
+fn pictures_uploaded_ahead_of_play_are_shown_without_handing_the_renderer_anything() {
+    let pixels = swapping_pictures();
+    let found =
+        |number: i32| pixels.get(usize::try_from(number).ok()?).map(|rgba| picture(rgba, LARGE_SIDE, LARGE_SIDE, 100 + u64::from(number.unsigned_abs())));
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    let chart = swapping_chart();
+
+    textures.preload(&mut target, &chart, found, usize::MAX);
+    assert_eq!(target.registered, 5, "pictures 0 and 1 as they are, 2, 3 and 0 keyed out, once each");
+    let before_play = target.registered;
+
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        for (base, layer) in [(0, 2), (1, 3), (0, 2), (1, 0)] {
+            let frame = textures.frame(&mut target, BgaPick::Playing { base: Some(base), layer: Some(layer) }, BgaExpand::Full, found);
+            seen.push(frame.show);
+        }
+    }
+    assert_eq!(target.registered, before_play, "a swap during play handed the renderer a picture");
+    let BgaShow::Playing { base: Some(plain_zero), .. } = seen[0] else {
+        panic!("picture 0 was not shown: {:?}", seen[0]);
+    };
+    let BgaShow::Playing { layer: Some(keyed_zero), .. } = seen[3] else {
+        panic!("picture 0 was not shown as a layer: {:?}", seen[3]);
+    };
+    assert_ne!(plain_zero, keyed_zero, "picture 0 as it is and keyed out share a texture");
+}
+
+/// A picture uploaded ahead of play is the same pixels as the one a frame paints when it is shown:
+/// on its canvas when it is small, keyed out as a layer, as it is otherwise.
+#[test]
+fn a_picture_uploaded_ahead_looks_as_one_painted_when_it_is_shown() {
+    let small = halves(100, 50, BLACK, RED);
+    let large = halves(LARGE_SIDE, LARGE_SIDE, BLACK, GREEN);
+    let pictures = [picture(&small, 100, 50, 1), picture(&large, LARGE_SIDE, LARGE_SIDE, 2)];
+    let found = |number: i32| pictures.get(usize::try_from(number).ok()?).copied();
+    let chart = BgaPlayhead::new(vec![event(0, 0, 1), event(10, 1, 0)]);
+    let pick = |base, layer| BgaPick::Playing { base: Some(base), layer: Some(layer) };
+
+    let mut ahead = Counting::new();
+    let mut uploaded = BgaTextures::default();
+    uploaded.preload(&mut ahead, &chart, found, usize::MAX);
+    let mut when_shown = Counting::new();
+    let mut painted = BgaTextures::default();
+    for (base, layer) in [(0, 1), (1, 0)] {
+        let BgaShow::Playing { base: Some(a_base), layer: Some(a_layer) } = uploaded.frame(&mut ahead, pick(base, layer), BgaExpand::Full, found).show else {
+            panic!("the pictures uploaded ahead were not shown");
+        };
+        let BgaShow::Playing { base: Some(p_base), layer: Some(p_layer) } = painted.frame(&mut when_shown, pick(base, layer), BgaExpand::Full, found).show
+        else {
+            panic!("the pictures painted when shown were not shown");
+        };
+        for (a, p) in [(a_base, p_base), (a_layer, p_layer)] {
+            assert_eq!(ahead.kept.get(&a), when_shown.kept.get(&p), "picture {base} or {layer} came out other pixels or another size");
+        }
+    }
+}
+
+/// The pixels a decode painted ahead are what the renderer is handed, as they are: the frame that
+/// shows the picture paints nothing of its own.
+#[test]
+fn pixels_painted_ahead_are_handed_over_without_painting_them_again() {
+    let rgba = halves(LARGE_SIDE, LARGE_SIDE, BLACK, RED);
+    let bare = picture(&rgba, LARGE_SIDE, LARGE_SIDE, 1);
+    let prepared = BgaPrepared { plain: None, keyed: BgaPrepared::paint(&bare, BgaLook::Keyed) };
+    let keyed = prepared.keyed.as_deref().expect("a layer is painted keyed out");
+    let mut expected = rgba.clone();
+    key_out_black(&mut expected);
+    assert_eq!(keyed, expected.as_slice(), "the keyed look painted ahead is not the picture keyed out");
+    assert_eq!(BgaPrepared::paint(&bare, BgaLook::Plain), None, "a large picture shown as it is was painted");
+
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    let ready = BgaPicture { prepared: Some(&prepared), ..bare };
+    textures.frame(&mut target, BgaPick::Playing { base: Some(0), layer: Some(0) }, BgaExpand::Full, |_| Some(ready));
+    assert_eq!(target.handed, vec![rgba.as_ptr() as usize, keyed.as_ptr() as usize], "the frame painted a picture that was painted ahead");
+}
+
+/// Pictures uploaded ahead stop at the allowance, the next one that fits is still taken, and one
+/// call uploads no more than it is given, though always one picture.
+#[test]
+fn uploading_ahead_keeps_to_its_allowance_and_shares_the_work_between_calls() {
+    let pixels = swapping_pictures();
+    let found =
+        |number: i32| pixels.get(usize::try_from(number).ok()?).map(|rgba| picture(rgba, LARGE_SIDE, LARGE_SIDE, 200 + u64::from(number.unsigned_abs())));
+    let one = (LARGE_SIDE * LARGE_SIDE) as usize * 4;
+    let chart = swapping_chart();
+
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    textures.preload_under(&mut target, &chart, found, 0, usize::MAX);
+    assert_eq!(target.registered, 1, "a call given nothing still uploads one picture");
+    textures.preload_under(&mut target, &chart, found, one + 1, usize::MAX);
+    assert_eq!(target.registered, 3, "a call given a picture and a byte more uploads two");
+
+    let mut capped = BgaTextures::default();
+    let mut target = Counting::new();
+    capped.preload_under(&mut target, &chart, found, usize::MAX, one * 2);
+    assert_eq!((target.registered, capped.resident_bytes()), (2, one * 2), "pictures past the allowance were uploaded ahead");
+    let shown = capped.frame(&mut target, BgaPick::Playing { base: Some(1), layer: Some(3) }, BgaExpand::Full, found);
+    assert!(matches!(shown.show, BgaShow::Playing { base: Some(_), layer: Some(_) }), "a picture past the allowance was not shown");
+    assert_eq!(target.registered, 4, "a picture past the allowance is uploaded when it is shown");
+
+    capped.release(&mut target);
+    assert_eq!(capped.resident_bytes(), 0, "letting go of the textures kept the pictures uploaded ahead");
+}
+
+/// A picture still being decoded is taken by a later call, once it is there.
+#[test]
+fn a_picture_that_arrives_late_is_uploaded_by_the_next_call() {
+    let pixels = swapping_pictures();
+    let chart = swapping_chart();
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    let decoded = |count: usize| {
+        let pixels = &pixels;
+        move |number: i32| {
+            let index = usize::try_from(number).ok().filter(|index| *index < count)?;
+            Some(picture(&pixels[index], LARGE_SIDE, LARGE_SIDE, 300 + u64::from(number.unsigned_abs())))
+        }
+    };
+    textures.preload(&mut target, &chart, decoded(2), usize::MAX);
+    assert_eq!(target.registered, 3, "pictures 0 and 1 as they are and 0 keyed out");
+    textures.preload(&mut target, &chart, decoded(4), usize::MAX);
+    assert_eq!(target.registered, 5, "the layers decoded since were not taken");
+}
+
+/// The pictures a chart shows, by look, in the order it first shows them.
+#[test]
+fn the_playhead_names_every_picture_the_chart_shows_and_how() {
+    let chart = BgaPlayhead::new(vec![event(0, 4, -1), event(10, -2, 7), miss_event(20, &[MISS_LAYER_NONE, 9]), event(30, 4, 4)]);
+    let looks: Vec<(i32, BgaLook)> = chart.looks().collect();
+    assert_eq!(looks, vec![(4, BgaLook::Plain), (7, BgaLook::Keyed), (9, BgaLook::Plain), (4, BgaLook::Plain), (4, BgaLook::Keyed)]);
 }
 
 #[test]

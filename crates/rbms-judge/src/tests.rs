@@ -1786,6 +1786,35 @@ fn a_run_that_judges_every_note_once_never_grows_the_engines_lists() {
     assert_eq!(e.touched().as_ptr(), touched, "the list of touched notes was grown during the run");
 }
 
+/// A run played by hand that takes a 空POOR beside every note it hits: each 空POOR is a counted
+/// judgment that leaves its note where it was, so the lists hold twice as many entries as the chart
+/// has objects. The room made when the engine was built covers that, so neither list is grown in
+/// the middle of play.
+#[test]
+fn a_run_with_an_empty_poor_beside_every_note_never_grows_the_engines_lists() {
+    use rbms_model::{Mode, NoteKind};
+    const NOTES: i64 = 3_000;
+    const STEP_US: i64 = 50_000;
+    const LANES: i64 = 7;
+    const RELEASE_AFTER_US: i64 = 5_000;
+    const EMPTY_POOR_AFTER_US: i64 = 20_000;
+    let notes: Vec<(usize, i64, NoteKind)> = (0..NOTES).map(|i| ((i % LANES) as usize, 1_000_000 + i * STEP_US, NoteKind::Normal)).collect();
+    let mut e = JudgeEngine::from_model_for_mode(&lane_model(Mode::BEAT_7K, notes));
+    let (judged, touched) = (e.judged().as_ptr(), e.touched().as_ptr());
+    for i in 0..NOTES {
+        let (lane, at_us) = ((i % LANES) as usize, 1_000_000 + i * STEP_US);
+        e.press(lane, at_us);
+        e.release(lane, at_us + RELEASE_AFTER_US);
+        e.press(lane, at_us + EMPTY_POOR_AFTER_US);
+        e.release(lane, at_us + EMPTY_POOR_AFTER_US + RELEASE_AFTER_US);
+    }
+    e.update(1_000_000 + NOTES * STEP_US + 1_000_000);
+    assert_eq!(e.empty_poor as i64, NOTES, "every second press reached only the 空POOR band");
+    assert_eq!(e.judged().len() as i64, 2 * NOTES);
+    assert_eq!(e.judged().as_ptr(), judged, "the list of judgments was grown during the run");
+    assert_eq!(e.touched().as_ptr(), touched, "the list of touched notes was grown during the run");
+}
+
 /// A chart whose long notes state no flavour, played as charge notes, judges each head and each end
 /// once, and the long note mode named every one of those notes as touched before play began: the
 /// lists still have room for every judgment of the run, so neither is grown in the middle of it.
@@ -1812,4 +1841,84 @@ fn undefined_long_notes_played_as_charge_notes_never_grow_the_engines_lists() {
         assert_eq!(e.judged().as_ptr(), judged, "{mode:?}: the list of judgments was grown during the run");
         assert_eq!(e.touched().as_ptr(), touched, "{mode:?}: the list of touched notes was grown during the run");
     }
+}
+
+/// Playback rates of a practice slice at half and at twice the chart's own speed, in percent.
+const HALF_SPEED_PERCENT: i32 = 50;
+const DOUBLE_SPEED_PERCENT: i32 = 200;
+
+/// The chart time an input lands at when it comes `real_late_us` of the player's time after a note
+/// at `note_us`, on a slice that starts at the chart's beginning and plays at `percent`.
+fn chart_us_of_late_input(note_us: i64, real_late_us: i64, percent: i32) -> i64 {
+    note_us + real_late_us * i64::from(percent) / i64::from(matcher::UNMODIFIED_PLAYBACK_PERCENT)
+}
+
+/// A practice slice played at another FREQUENCY is judged in the player's own time, as the
+/// reference judges the chart it retimed (`BMSModelUtils.changeFrequency`, `BMSPlayer.java:554-558`):
+/// 30 ms late is a GREAT at half speed as at full speed, and 10 ms late is a PGREAT at twice the speed,
+/// and the timing the judgment reports is the 30 ms or 10 ms the player was out by.
+#[test]
+fn a_slice_played_at_another_frequency_is_judged_in_the_players_own_time() {
+    const NOTE_US: i64 = 1_000_000;
+    for (percent, real_late_us, judge) in
+        [(HALF_SPEED_PERCENT, 30_000, Judge::Great), (DOUBLE_SPEED_PERCENT, 10_000, Judge::PerfectGreat), (DOUBLE_SPEED_PERCENT, 100_000, Judge::Good)]
+    {
+        let mut e = JudgeEngine::new(vec![vec![NOTE_US]], JudgeWindows::SEVENKEY_NOTE);
+        e.set_playback_rate(percent);
+        let r = e.press(0, chart_us_of_late_input(NOTE_US, real_late_us, percent)).expect("the press is in range");
+        assert_eq!(r.judge, judge, "{real_late_us}us late at {percent}%");
+        assert_eq!(r.delta_us, -real_late_us, "{percent}%: the reported timing is the player's");
+        assert_eq!(e.judged()[0].delta_us, -real_late_us, "{percent}%: the counted judgment keeps the player's timing");
+    }
+}
+
+/// A note goes by unhit once the BAD-late bound of the player's time is past, not of the chart's.
+#[test]
+fn a_slice_played_at_half_speed_misses_a_note_on_the_players_bad_bound() {
+    const NOTE_US: i64 = 1_000_000;
+    let bad_late_us = -JudgeWindows::SEVENKEY_NOTE.bd.0;
+    let mut e = JudgeEngine::new(vec![vec![NOTE_US]], JudgeWindows::SEVENKEY_NOTE);
+    e.set_playback_rate(HALF_SPEED_PERCENT);
+    e.update(chart_us_of_late_input(NOTE_US, bad_late_us, HALF_SPEED_PERCENT));
+    assert_eq!(e.counts[Judge::Poor as usize], 0, "the bound itself is still in range");
+    e.update(chart_us_of_late_input(NOTE_US, bad_late_us, HALF_SPEED_PERCENT) + 1);
+    assert_eq!(e.counts[Judge::Poor as usize], 1, "one microsecond of chart past it is 見逃し POOR");
+}
+
+/// A long-note margin is a length of the player's time: the PMS 200 ms margin is 100 ms of the
+/// chart at half speed.
+#[test]
+fn a_slice_played_at_half_speed_keeps_the_long_note_margin_in_the_players_time() {
+    use rbms_model::Mode;
+    const RELEASE_US: i64 = 200_000;
+    let mut e = JudgeEngine::from_pairs(vec![vec![(100_000, Some(600_000))]], JudgeWindows::SEVENKEY_NOTE);
+    e.apply_mode(&Mode::POPN_9K, 100);
+    e.set_playback_rate(HALF_SPEED_PERCENT);
+    e.press(0, 100_000).unwrap();
+    assert!(e.release(0, RELEASE_US).is_none(), "released far outside the end window, so the judgment is deferred");
+    let margin_us = JudgeProperty::PMS.longnote_margin;
+    let chart_margin_us = chart_us_of_late_input(0, margin_us, HALF_SPEED_PERCENT);
+    e.update(RELEASE_US + chart_margin_us - 1);
+    assert_eq!(e.total_judged(), 0, "the margin of the player's time has not gone by");
+    e.update(RELEASE_US + chart_margin_us);
+    assert_eq!(e.total_judged(), 1, "committed once the release plus the margin of the player's time is reached");
+}
+
+/// A hell-charge note held at half speed pays a tick for every 200 ms of the player's time, which
+/// is every 100 ms of the chart.
+#[test]
+fn a_hell_charge_note_held_at_half_speed_ticks_on_the_players_time() {
+    const HEAD_US: i64 = 1_000_000;
+    const TICKS: i64 = 8;
+    let tick_chart_us = chart_us_of_late_input(0, ln::HCN_GAUGE_TICK_US, HALF_SPEED_PERCENT);
+    let mut e = hcn_engine(HEAD_US, 3_000_000);
+    e.set_playback_rate(HALF_SPEED_PERCENT);
+    e.press(0, HEAD_US).unwrap();
+    e.update(HEAD_US + TICKS * tick_chart_us + 1);
+    let mut expected = hcn_expected_gauge();
+    expected.update(Judge::PerfectGreat);
+    for _ in 0..TICKS {
+        expected.update_with_rate(Judge::Great, ln::HCN_GAUGE_TICK_RATE);
+    }
+    assert_eq!(e.gauge.value(), expected.value(), "{TICKS} ticks of 200 ms of the player's time");
 }

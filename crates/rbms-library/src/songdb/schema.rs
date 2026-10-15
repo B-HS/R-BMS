@@ -19,7 +19,11 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// Generation 3 settles long notes the way the reference decoder does: a normal note inside a long
 /// note's body leaves the lane, and a long-note head the chart never closes is dropped. That changes
 /// the stored `notes`, `long_notes` and density of the charts that have either, and nothing else.
-pub const PARSER_VERSION: u32 = 3;
+/// Generation 4 reads `#TOTAL` the way the reference's `CommandWord.TOTAL` does: a line whose
+/// number is not above zero, or that Java's `Double.parseDouble` cannot read, leaves the value an
+/// earlier line set, and a trailing `d` or `f` is read past. That changes the stored `total` and
+/// density of the charts written that way, and nothing else.
+pub const PARSER_VERSION: u32 = 4;
 
 /// Connection settings every open applies: the write-ahead log so a scan writing in one connection
 /// does not block the browser reading in another, and the foreign keys that make `song_detail`

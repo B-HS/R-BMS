@@ -463,21 +463,33 @@ impl LoadingState {
 
     /// Perform the queued chart load (one frame after the LOADING screen is shown) then wait on
     /// what it named — `load()` starts the decodes and hands back the parsed chart.
+    ///
+    /// A course stage whose chart cannot be read ends the course there, as leaving it does.
     fn finish_song(shared: &mut AppShared, index: usize) -> Transition {
         let Some(entry) = shared.library.songs().get(index) else {
-            return Transition::Back;
+            return Self::give_up_on_the_chart(shared);
         };
         shared.chart_path = entry.path.to_string_lossy().to_string();
         match shared.load() {
             Some(loaded) => Transition::To(shared.enter_loaded_chart(loaded)),
-            None => Transition::Back,
+            None => Self::give_up_on_the_chart(shared),
         }
+    }
+
+    /// Go back without the chart this screen was loading. A course standing on it ends, keeping what
+    /// was played of it ([`crate::app_result::abandon_course`]): left standing, it would take the next
+    /// chart the player picks as its next stage.
+    fn give_up_on_the_chart(shared: &mut AppShared) -> Transition {
+        if shared.course_run.is_some() {
+            return crate::app_result::abandon_course(shared, crate::app_result::Sending::Now);
+        }
+        Transition::Back
     }
 
     /// Cancel back to Select rather than exit: during the initial background scan `songs` is still
     /// empty, and routing through the usual exit would quit on the empty library — surprising
     /// mid-load. Any half-loaded play state is dropped with this screen, and every worker this
-    /// screen started is told to stop.
+    /// screen started is told to stop. A course loading its next stage ends with it.
     ///
     /// The table match is not something to cancel. The walk it follows is finished, the match
     /// itself reads a few files and is over in a moment, and leaving in the middle of it would throw
@@ -494,7 +506,7 @@ impl LoadingState {
         shared.select_view = SelectView::Root;
         shared.sel = 0;
         shared.rebuild_select_items();
-        Transition::Back
+        Self::give_up_on_the_chart(shared)
     }
 
     /// Whether the chart queued here is about to be shown by a skin's play screen, whose own loading

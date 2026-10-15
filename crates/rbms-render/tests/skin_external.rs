@@ -1198,7 +1198,7 @@ fn chart_background(canvas: &mut CpuCanvas, play_ms: i64) -> BgaFrame {
     let (width, height) = BGA_PICTURE;
     BgaTextures::default().frame(canvas, head.pick(), BgaExpand::default(), |number| {
         let rgba = pictures.get(usize::try_from(number).ok()?)?;
-        Some(BgaPicture { generation: u64::from(number.unsigned_abs()), width, height, rgba })
+        Some(BgaPicture { generation: u64::from(number.unsigned_abs()), width, height, rgba, prepared: None })
     })
 }
 

@@ -236,6 +236,56 @@ fn with_backgrounds_off_a_skins_background_is_black_from_first_to_last() {
     assert_eq!(shown(&mut app, &mut pixels), BgaShow::Blank, "while the chart plays");
 }
 
+/// A seven-key chart whose picture swaps between 1 and 2 every second, with 2 as a layer over the
+/// first, and its pictures' side: past 256, so each is its own size.
+const SWAPPING_CHART: &[u8] = b"#PLAYER 1\n#BPM 120\n#WAV01 a.wav\n#BMP01 a.bmp\n#BMP02 b.bmp\n#00004:0102\n#00007:02\n#00104:0102\n#00818:01\n";
+const SWAPPING_SIDE: u32 = 300;
+const SWAP_MS: i64 = 1_000;
+
+/// The pictures a chart swaps between are uploaded while it waits to play, each in the look it is
+/// shown in, so every swap while it plays shows a texture that is already there: picture 1 and 2
+/// are two textures, and picture 1 shown again is the texture it was the first time.
+#[test]
+fn the_pictures_a_chart_swaps_between_are_uploaded_before_it_plays() {
+    let mut app = app_with_play_skin("bga-ahead");
+    let mut pixels = canvas();
+    app.shared.config.display.bga = true;
+    let mut swapping = run_of(SWAPPING_CHART, SessionOptions { autoplay: true, ..SessionOptions::default() });
+    let flat = |shade: u8| (0..SWAPPING_SIDE * SWAPPING_SIDE).flat_map(|_| [shade, shade, shade, 255]).collect();
+    swapping.bga = std::collections::HashMap::from([
+        (1, crate::DecodedImage::for_test(flat(10), SWAPPING_SIDE, SWAPPING_SIDE)),
+        (2, crate::DecodedImage::for_test(flat(20), SWAPPING_SIDE, SWAPPING_SIDE)),
+    ]);
+    app.shared.config.play.autoplay = true;
+    started(&mut app, &mut pixels, swapping);
+    let shown = |app: &mut App, pixels: &mut HeadlessCanvas, millis: i64| {
+        stay_after(app, pixels, millis);
+        let (state, shared) = play_and_shared(app);
+        let pick = state.background.pick();
+        (pick, state.background_frame(shared, &mut Canvas::Headless(pixels), None).show)
+    };
+
+    let (first_pick, first) = shown(&mut app, &mut pixels, SLACK_MS);
+    let (second_pick, second) = shown(&mut app, &mut pixels, SWAP_MS);
+    let (again_pick, again) = shown(&mut app, &mut pixels, SWAP_MS);
+    assert_eq!(
+        (first_pick, second_pick, again_pick),
+        (
+            BgaPick::Playing { base: Some(1), layer: Some(2) },
+            BgaPick::Playing { base: Some(2), layer: Some(2) },
+            BgaPick::Playing { base: Some(1), layer: Some(2) },
+        )
+    );
+    let (BgaShow::Playing { base: Some(one), layer: Some(layer) }, BgaShow::Playing { base: Some(two), .. }, BgaShow::Playing { base: Some(one_again), .. }) =
+        (first, second, again)
+    else {
+        panic!("the chart's pictures were not shown: {first:?} {second:?} {again:?}");
+    };
+    assert_ne!(one, two, "the two pictures were swapped through one texture, uploaded at each swap");
+    assert_eq!(one, one_again, "picture 1 shown again was uploaded again");
+    assert_ne!(layer, two, "picture 2 as a layer and as it is share a texture");
+}
+
 /// A jump of a replay under analysis starts the background over as a chart that is yet to play, so
 /// a picture the chart put up at its very start is back on the frame after the jump.
 #[test]

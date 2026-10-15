@@ -258,7 +258,15 @@ fn course_start_gauge(set: rbms_judge::gauge_tables::GaugeSetId) -> f32 {
 
 /// Begin a course: rewrite the play settings the constraints narrow, remember the originals, and
 /// hand the first stage to LOADING.
+///
+/// A course still standing from before is ended first, as one left between two stages is
+/// ([`crate::app_result::abandon_course`]): what was played of it by hand is kept and sent as a
+/// FAILED course, and the settings it narrowed are put back before they are taken as the player's
+/// own.
 fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
+    if shared.course_run.is_some() || shared.course_settings_backup.is_some() {
+        crate::app_result::abandon_course(shared, crate::app_result::Sending::Now);
+    }
     let overrides = CourseOverrides::of(&entry.course);
     shared.course_settings_backup = Some(shared.config.play.clone());
     overrides.apply_to(&mut shared.config.play);
@@ -274,14 +282,15 @@ fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
 ///
 /// The first stage is a chart picked in the browser like any other, so it goes through the decide
 /// scene when a skin draws one. The stages after it follow straight on from a result screen, as the
-/// reference's do (`MusicResult.render`).
+/// reference's do (`MusicResult.render`). A stage the library does not hold ends the course there,
+/// keeping what was played of it ([`crate::app_result::abandon_course`]).
 fn load_course_stage(shared: &mut AppShared) -> Transition {
     let Some(chart) = shared.course_run.as_ref().and_then(|run| run.current_chart()).cloned() else {
         return end_course(shared);
     };
     let Some(index) = library_index(&shared.library, &chart) else {
         notify(Level::Warn, format!("course stage not in the library: {}", chart.title));
-        return end_course(shared);
+        return crate::app_result::abandon_course(shared, crate::app_result::Sending::Now);
     };
     shared.release_play_audio();
     let opens_the_course = shared.course_run.as_ref().is_some_and(|run| run.index == 0);
@@ -289,7 +298,8 @@ fn load_course_stage(shared: &mut AppShared) -> Transition {
 }
 
 /// Put the player's own settings back and forget the run. Called on the course result screen's way
-/// out and on an abandoned course alike.
+/// out and on an abandoned course alike; what is kept of an abandoned course is kept before it
+/// ([`crate::app_result::abandon_course`]).
 fn end_course(shared: &mut AppShared) -> Transition {
     if let Some(play) = shared.course_settings_backup.take() {
         shared.config.play = play;
@@ -1417,6 +1427,18 @@ impl ApplicationHandler<FrameReady> for App {
         self.frame_if_ready(event_loop);
     }
 
+    /// Before the loop waits again: ask for the next image if a window that cannot be shown held
+    /// asking back until now, and otherwise wake the loop when it is due ([`Gpu::held_until`]), so
+    /// frames go on while the window is hidden, one a hidden frame interval, rather than either
+    /// stopping or running as fast as a hidden window refuses images.
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let held_until = self.shared.gpu.as_mut().and_then(|gpu| {
+            gpu.resume_if_due(Instant::now());
+            gpu.held_until()
+        });
+        event_loop.set_control_flow(held_until.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
+    }
+
     /// Translate one winit event into what the current screen understands. A moved cursor is mapped
     /// onto the fixed 1280x720 space the built-in screens are laid out in, which is drawn across
     /// the viewport the frame lands in. The left, right and middle buttons, a drag with any of them held
@@ -1472,15 +1494,43 @@ impl ApplicationHandler<FrameReady> for App {
                 self.apply(transition, event_loop);
             }
             WindowEvent::RedrawRequested => self.frame_if_ready(event_loop),
+            WindowEvent::Occluded(false) => {
+                if let Some(gpu) = self.shared.gpu.as_mut() {
+                    gpu.resume();
+                }
+            }
             _ => {}
         }
     }
 
-    /// Finish every write handed to the save thread. Quit in the macOS menu or the Dock ends the
-    /// process from inside the event loop, right after this, so [`run`] never gets back from the
-    /// loop to wait for them.
+    /// Keep what the player was playing when the app was told to quit, then finish every write handed
+    /// to the save thread. Quit in the macOS menu or the Dock ends the process from inside the event
+    /// loop, right after this, so [`run`] never gets back from the loop to wait for them.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.keep_what_quitting_cuts_short();
         self.shared.finish_saves();
+    }
+}
+
+impl App {
+    /// Keep the run, or the course, the player was in when the app was told to quit: closing the
+    /// window, Quit in the menu or the Dock. It is kept as Escape keeps it (the player's decision of
+    /// 2026-10-15, "no record goes unsaved"): a run played by hand left part-way is a FAILED run, a
+    /// course is a FAILED course with every stage it played. Nothing is sent from here: the process is
+    /// about to end, and the records sync of the next start sends what was kept. Called before the
+    /// save thread is waited for, so the replay and every file this keeps are on disk before the
+    /// process ends.
+    fn keep_what_quitting_cuts_short(&mut self) {
+        match &mut self.stage {
+            Stage::Play(state) => {
+                let ended = state.has_ended();
+                crate::app_result::keep_run_cut_short_by_quitting(state, ended, &mut self.shared);
+            }
+            _ if self.shared.course_run.is_some() => {
+                crate::app_result::abandon_course(&mut self.shared, crate::app_result::Sending::NextStart);
+            }
+            _ => {}
+        }
     }
 }
 

@@ -410,6 +410,36 @@ fn header_total_valid_is_some() {
 }
 
 #[test]
+fn a_later_total_the_reference_rejects_keeps_the_earlier_one() {
+    for later in ["3OO", "0", "-5", "nan", "inf", "Infinityd"] {
+        let s = parse(format!("#TOTAL 300\r\n#TOTAL {later}\r\n").as_bytes());
+        assert_eq!(s.headers.total, Some(300.0), "#TOTAL {later} is a warning in CommandWord.TOTAL and leaves the earlier value");
+    }
+}
+
+#[test]
+fn a_total_at_or_below_zero_is_none() {
+    for total in ["0", "-5", "NaN", "-Infinity"] {
+        let s = parse(format!("#TOTAL {total}\r\n").as_bytes());
+        assert_eq!(s.headers.total, None, "#TOTAL {total}");
+    }
+}
+
+#[test]
+fn a_later_valid_total_replaces_an_earlier_one() {
+    let s = parse(b"#TOTAL 300\r\n#TOTAL 250\r\n");
+    assert_eq!(s.headers.total, Some(250.0));
+}
+
+#[test]
+fn total_reads_the_java_double_forms() {
+    for (text, total) in [("200d", 200.0), ("200F", 200.0), ("+1.5e2", 150.0), (".5", 0.5), ("Infinity", f64::INFINITY)] {
+        let s = parse(format!("#TOTAL {text}\r\n").as_bytes());
+        assert_eq!(s.headers.total, Some(total), "#TOTAL {text}");
+    }
+}
+
+#[test]
 fn header_lnobj_parsed_with_base() {
     let s = parse(b"#LNOBJ ZZ\r\n");
     assert_eq!(s.headers.lnobj, Some(35 * 36 + 35));

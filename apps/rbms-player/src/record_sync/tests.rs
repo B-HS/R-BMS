@@ -181,6 +181,7 @@ fn job(scores: Vec<SyncCandidate>) -> SyncJob {
         replays: Vec::new(),
         upload_replays: true,
         replay_dir: std::env::temp_dir(),
+        saves_settled: None,
         charts: HashMap::new(),
         pacing: NO_PACING,
     }
