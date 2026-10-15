@@ -12,7 +12,6 @@ export const snapshotHeaderSchema = z.object({
     data_url: z.string().min(1),
     level_order: z.array(z.string()),
     last_update: z.string().default(''),
-    original_url: z.string().default(''),
 })
 
 export const snapshotEntrySchema = z.object({
@@ -54,10 +53,6 @@ export const tableEntryOutputSchema = z.object({
     level: z.string(),
     title: z.string(),
     artist: z.string(),
-    url: z.string(),
-    url_diff: z.string(),
-    name_diff: z.string(),
-    comment: z.string(),
 })
 
 export const tableSummaryOutputSchema = z.object({

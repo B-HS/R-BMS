@@ -51,10 +51,6 @@ export const toTableEntry = (entry: SnapshotEntry): TableEntryOutput => ({
     level: entry.level,
     title: entry.title,
     artist: entry.artist,
-    url: entry.url,
-    url_diff: entry.url_diff,
-    name_diff: entry.name_diff,
-    comment: entry.comment,
 })
 
 export const summariseTable = (table: SnapshotTable): TableSummaryOutput => {

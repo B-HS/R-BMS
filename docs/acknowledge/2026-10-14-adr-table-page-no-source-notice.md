@@ -34,3 +34,13 @@
 - 공개 응답에서도 지운다: 표준 `header.json` 의 `original_url`·`mirror_of`, 화면용 표 요약 API 의 `original_url`·`source`. `web/data/tables/insane1/source.json`(스냅샷을 다시 받는 스크립트의 입력)은 서빙하지 않으므로 저장소에 둔다.
 - 위 "결정"의 "오른쪽 정보 패널의 출처 항목 … 그대로 둔다"를 이 절이 대체한다.
 
+## 추가 결정 2(2026-10-15): 곡별 데이터의 외부 주소도 지운다
+
+사용자 원문: "흠.. 결국 해당 페이지가 원천이 되는거니까 B인가 ?", "B가 맞겠다 어차피 해당 난이도표는 거의 9년동안 갱신되지않았고 갱신될 예정도 없어".
+
+- 스냅샷 스크립트(`web/scripts/snapshot-table.ts`)가 정규화 단계에서 `header.json` 의 `original_url` 을 빼고, 곡마다 `url`·`url_diff`·`name_diff`·`comment` 를 빈 문자열로 두고, 다른 글자 필드(artist 9건)에서 웹 주소를 뗀다. 다시 받아도(`--check`) 같은 결과다.
+- 바뀐 값: url 1,033, url_diff 825, name_diff 782, comment 792, artist 9. md5·level·title·lr2_bmsid 는 그대로.
+- 화면: 곡 상세의 "받는 곳"(본편·차분 링크)과 표의 코멘트를 지운다. 표 항목 API 에서도 그 필드를 뺀다. 표준 `data.json` 은 키를 남기되 값은 비어 있다(BMS 표 형식 호환).
+- R-BMS 클라이언트는 이 파일을 실행 파일에 내장하므로(`apps/rbms-player/src/tablesrc/seed.rs`) 다음 빌드부터 같은 데이터다.
+- 기각: 곡 제작자 사이트 링크만 남기기(D) — 사용자가 이 페이지를 원천으로 삼기로 함.
+

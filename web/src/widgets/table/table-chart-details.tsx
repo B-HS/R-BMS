@@ -4,7 +4,6 @@ import type { FC } from 'react'
 import Link from 'next/link'
 import { Trophy } from 'lucide-react'
 import { TableChartRecord } from '@features/table/table-chart-record'
-import { TableExternalLink } from '@features/table/table-external-link'
 import { AddToFolderMenu } from '@widgets/folder/add-to-folder-menu'
 import { useChartLeaderboard } from '@entities/chart.query'
 import type { TableSnapshotEntry, TableSnapshotRecord } from '@entities/table-snapshot.type'
@@ -25,23 +24,8 @@ type TableChartDetailsProps = {
     loginHref: string
 }
 
-const WEB_URL_PATTERN = /^https?:\/\//i
-
-const toWebUrl = (value: string) => {
-    if (!WEB_URL_PATTERN.test(value)) return null
-    try {
-        return new URL(value).href
-    } catch {
-        return null
-    }
-}
-
 export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, record, isSignedIn, isRecordPending, loginHref }) => {
     const { data: leaderboard, isPending: isChartPending, isError: isChartError } = useChartLeaderboard(entry.md5, { include_scratch_auto: false })
-    const bodyUrl = toWebUrl(entry.url)
-    const diffUrl = toWebUrl(entry.url_diff)
-    const isSameLink = bodyUrl !== null && bodyUrl === diffUrl
-    const diffLabel = entry.name_diff && !WEB_URL_PATTERN.test(entry.name_diff) ? `차분: ${entry.name_diff}` : '차분'
     const serverChart = leaderboard?.chart ?? null
 
     return (
@@ -55,21 +39,6 @@ export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, r
                 <DialogDescription className='text-xs wrap-anywhere'>{entry.artist || '아티스트 정보 없음'}</DialogDescription>
             </DialogHeader>
             <ScrollContainer variant='always' className='flex flex-col gap-4 p-4'>
-                <section aria-label='받는 곳' className='flex flex-col gap-2'>
-                    <div className='flex flex-wrap gap-1'>
-                        {bodyUrl && <TableExternalLink href={bodyUrl} label={isSameLink ? '본편 · 차분' : '본편'} appearance='button' />}
-                        {diffUrl && !isSameLink && <TableExternalLink href={diffUrl} label={diffLabel} appearance='button' />}
-                        {!bodyUrl && !diffUrl && <p className='text-muted-foreground text-xs'>표에 받는 곳이 적혀 있지 않습니다.</p>}
-                    </div>
-                    {(bodyUrl || diffUrl) && (
-                        <p className='text-muted-foreground text-2xs'>원작자의 주소로 잇습니다. 오래된 주소는 열리지 않을 수 있습니다.</p>
-                    )}
-                </section>
-                {entry.comment && (
-                    <section aria-label='표의 코멘트' className='text-muted-foreground border-l-2 pl-2 text-xs leading-5 wrap-anywhere'>
-                        {entry.comment}
-                    </section>
-                )}
                 <section aria-label='내 최고 기록' className='flex flex-col gap-1.5'>
                     <h3 className='rbms-micro-label'>내 최고 기록</h3>
                     <TableChartRecord record={record} isSignedIn={isSignedIn} isPending={isRecordPending} loginHref={loginHref} />

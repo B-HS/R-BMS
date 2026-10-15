@@ -17,6 +17,9 @@ const HTML_COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g
 const ATTRIBUTE_PATTERN = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g
 const BMSTABLE_META_NAME = 'bmstable'
 const EXIT_CODE = { SAME: 0, DIFFERENT: 1, FAILED: 2 } as const
+const HEADER_FIELDS_DROPPED = ['original_url'] as const
+const ENTRY_FIELDS_EMPTIED = ['url', 'url_diff', 'name_diff', 'comment'] as const
+const WEB_ADDRESS_PATTERN = /\s*[/／]?\s*(?:https?:\/\/|www\.)\S*/gi
 
 type Fetched = {
     requestedUrl: string
@@ -103,9 +106,26 @@ const pageHeaderOrBody = (bytes: Uint8Array) => SHAPE_BY_FIRST_CHARACTER[decodeU
 
 const levelsOf = (entries: unknown[]) => new Set(entries.map((entry) => objectSchema.safeParse(entry).data?.level)).size
 
-const normalizeHeader = (header: Record<string, unknown>) => `${JSON.stringify(header, null, HEADER_JSON_INDENT)}\n`
+const withoutWebAddresses = (value: unknown) => (typeof value === 'string' ? value.replace(WEB_ADDRESS_PATTERN, '').trim() : value)
 
-const normalizeData = (entries: unknown[]) => (entries.length === 0 ? '[]\n' : `[\n${entries.map((entry) => JSON.stringify(entry)).join(',\n')}\n]\n`)
+const stripHeader = (header: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(header).filter(([key]) => !(HEADER_FIELDS_DROPPED as readonly string[]).includes(key)))
+
+const stripEntry = (entry: unknown) => {
+    const fields = objectSchema.safeParse(entry).data
+    if (!fields) return entry
+    return Object.fromEntries(
+        Object.entries(fields).map(([key, value]) => [
+            key,
+            (ENTRY_FIELDS_EMPTIED as readonly string[]).includes(key) ? '' : withoutWebAddresses(value),
+        ]),
+    )
+}
+
+const normalizeHeader = (header: Record<string, unknown>) => `${JSON.stringify(stripHeader(header), null, HEADER_JSON_INDENT)}\n`
+
+const normalizeData = (entries: unknown[]) =>
+    entries.length === 0 ? '[]\n' : `[\n${entries.map((entry) => JSON.stringify(stripEntry(entry))).join(',\n')}\n]\n`
 
 const collect = async (tableUrl: string): Promise<Snapshot> => {
     const first = await get(tableUrl)
@@ -176,7 +196,8 @@ const sourceJsonOf = (snapshot: Snapshot, fetchedAt: string, tableUrl: string, o
                 normalization: [
                     'UTF-8 without BOM, LF line endings, a single trailing newline',
                     'header.json: JSON.stringify with 2-space indent, key order kept',
-                    'data.json: one entry per line, entry order and key order kept, no value changed',
+                    'header.json: original_url is dropped',
+                    'data.json: one entry per line, entry order and key order kept; url, url_diff, name_diff and comment are emptied and web addresses are removed from the other text fields, so the table carries no other site',
                     'the page html is not stored: Cloudflare injects a per-request script, so its hash changes on every request',
                 ],
             },
