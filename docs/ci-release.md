@@ -16,7 +16,7 @@
 | web | `.github/workflows/web.yml` | `web/**` 나 `contract/**` 가 바뀐 `dev`·`prod` 푸시와 PR | 웹 typecheck, lint, test, format, build, MySQL 통합 테스트 | 6절 |
 | release | `.github/workflows/release.yml` | 수동 실행(실제로 쓰는 경로), `prod` 푸시, `v*.*.*` 태그 푸시 | 버전·태그, macOS 앱 번들과 dmg(서명·공증), Windows zip, draft Release | 2절 |
 | signing-check | `.github/workflows/signing-check.yml` | 수동 | 서명·공증 시크릿의 꼴과 로그인 점검(빌드 없음) | 3.2절 |
-| web-db | `.github/workflows/web-db.yml` | 수동 | 운영 DB 의 상태 확인, 마이그레이션, 시험 계정 정리 | 6.1절 |
+| web-db | `.github/workflows/web-db.yml` | 수동 | 운영 DB 의 상태 확인, 마이그레이션, 시험 계정 정리, 차트 노트 수 점검·복구·되돌리기 | 6.1절 |
 
 ## 1. CI (`.github/workflows/ci.yml`)
 
@@ -183,6 +183,10 @@
 | `migrate` | 상태 → `bun run db:migrate`(`drizzle-kit migrate`) → 상태. 적용 전 상태는 종료 코드 1(대기 중이 정상)을 허용하고 2(접속 실패)에서 멈춥니다. 적용 뒤 상태가 최신이 아니면(종료 코드 1 이나 2) 잡이 실패합니다 |
 | `cleanup-count` | `bun scripts/run-sql.ts cleanup-test-accounts.count.sql`: 시험 계정 다섯 개와 그 자료의 개수를 셉니다 |
 | `cleanup-delete` | 세기 → `cleanup-test-accounts.delete.sql`(한 트랜잭션) → 다시 세기 |
+| `chart-notes-count` | `chart-notes.count.sql`: 받아들인 판과 다른 `chart.notes`, 복구가 바꿀 행, 백업 표 유무 등을 셉니다 |
+| `chart-notes-repair` | 세기 → `chart-notes.repair.sql`(바꿀 행을 `chart_notes_backup` 에 담고 바꿈. 표가 있으면 멈춤) → 다시 세기 |
+| `chart-notes-restore` | 세기 → `chart-notes.restore.sql`(복구 뒤 다시 바뀌지 않은 행만 옛 값으로) → 다시 세기 |
+| `chart-notes-drop-backup` | 세기 → `chart-notes.drop-backup.sql`(`chart_notes_backup` 삭제. 복구를 다시 돌리려면 먼저) → 다시 세기 |
 
 - 실행 이력(2026-10-14): `status` run 38548385742(0000 만 기록, 0001·0002 대기) → `migrate` 38548459519(`__drizzle_migrations` 3행, 최신) → `cleanup-count` 38548532538(계정 5, score 7, chart_best 3, replay 5, submission_audit 13, rival 1, setting_blob 3, api_token 11, session 10, account 5, 다른 사용자의 score 3) → `cleanup-delete` 38549827633(사용자 승인, 대상 전부 0, 다른 사용자의 score 3 그대로). 현재 운영 DB 는 마이그레이션 `0000_smooth_cerebro`, `0001_user_folders`, `0002_scratch_auto_bests` 가 적용됐습니다.
 - 순서: 새 마이그레이션이 있는 변경은 `migrate` 를 **먼저** 돌리고 그 다음 웹을 배포합니다. 새 테이블을 쓰는 코드가 먼저 나가면 해당 경로가 500 을 냅니다.
@@ -194,7 +198,7 @@
 | 파일 | 하는 일 | 쓰는 곳 |
 | --- | --- | --- |
 | `db-migration-status.ts` | 마이그레이션 파일(`drizzle/meta/_journal.json`)과 DB 의 `__drizzle_migrations` 를 비교해 파일별 적용 여부, 새 테이블 존재, 결과를 출력(접속 정보는 출력하지 않음). 종료 코드 0 = 최신, 1 = 할 일(대기 마이그레이션 또는 기준선 필요), 2 = 접속 실패. `--baseline-sql` 은 `push` 로 만든 DB 를 기준선으로 채택하는 SQL 을 출력 | `bun run db:status`, `web-db` |
-| `run-sql.ts` | `web/scripts/` 아래의 `.sql` 파일 하나를 여러 문장으로 실행하고 SELECT 는 행 수와 열 이름(`target`·`row_count` 개수 표만 내용까지), 그 밖의 문장은 영향 행 수를 출력. 그 밖의 경로는 거절(종료 코드 2) | `web-db` 의 cleanup 동작 |
+| `run-sql.ts` | `web/scripts/` 아래의 `.sql` 파일 하나를 여러 문장으로 실행하고 SELECT 는 행 수와 열 이름(`target`·`row_count` 개수 표만 내용까지), 그 밖의 문장은 영향 행 수를 출력. 그 밖의 경로는 거절(종료 코드 2) | `web-db` 의 cleanup·chart-notes 동작 |
 | `cleanup-test-accounts.count.sql`, `cleanup-test-accounts.delete.sql` | 시험 계정 다섯 개와 딸린 자료를 세고 지움. `session`·`account`·`api_token`·`user_folder`·`user_folder_item` 은 `user` 삭제 시 외래 키가 연쇄 삭제하고, `score.user_id` 는 `set null` 이라 SQL 이 `score` 를 직접 지움 | `web-db` |
 | `snapshot-table.ts` | `bun scripts/snapshot-table.ts <표 주소> <출력 폴더> [--check]`: 난이도표 원본에서 `header.json`·`data.json`·`source.json` 을 받아 저장하거나(발광 표는 `web/data/tables/insane1/`) `--check` 로 저장본과 일치를 봄(종료 코드 0 = 같음, 1 = 다름, 2 = 실패) | 수동 |
 

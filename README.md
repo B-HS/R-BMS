@@ -65,7 +65,7 @@ Settings, key config, difficulty tables (the list in `settings.ron`, and the sav
 
 Every start installs the default skin pack under `~/.config/rbms/skin/rbms-default/` (the equivalent settings folder on Windows) from a copy built into the binary; see [Skins](#skins).
 
-Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-left` `--sc-auto` `--keys Z,S,X,...` `--skin file.ron` (a built-in play-field layout; the play screens are then drawn by the built-in field instead of a skin) `--font file.ttf` `--table URL` `--keyconfig path.ron` `--replay file.ron` `--server URL` `--player ID`. The `-psn_...` argument macOS adds when Finder opens the app is ignored; it is not a chart path.
+Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-left` `--sc-auto` `--keys Z,S,X,...` `--skin file.ron` (a built-in play-field layout; the play screens are then drawn by the built-in field instead of a skin) `--font file.ttf` `--table URL` `--keyconfig path.ron` `--replay file.ron` `--timing-csv file` `--server URL` `--player ID`. `--help` (`-h`) prints these and `--version` the version, and both end there without starting the player or touching the settings; an unknown option, or one missing its value, is refused the same way with exit code 2. The `-psn_...` argument macOS adds when Finder opens the app is ignored; it is not a chart path.
 
 ## Skins
 

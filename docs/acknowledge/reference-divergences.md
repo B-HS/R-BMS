@@ -235,6 +235,7 @@
 | 코스 도중 Esc | 남은 노트가 없으면 정상 판정으로 코스가 이어진다. 있으면 그 스테이지를 FAILED 곡 기록으로, 코스를 끝낸 스테이지와 함께 FAILED 코스 기록으로 저장·전송하고 선곡으로 나간다 | `stopPlay` 가 FAILED 로 결과를 거쳐 코스 결과로 간다. 남은 곡의 노트를 BP 에 더한다(`MusicResult.java:183-196`) | 결과 화면은 거치지 않는다. 아직 치지 않은 스테이지의 노트는 코스 BP 에 더하지 않는다(테스트 부채) |
 | 리플레이 | 나간 시점까지의 입력으로 저장한다. 재생하면 곡 끝까지 가며 남은 노트는 見逃し POOR 가 되지만 게이지는 기록과 다르게 끝날 수 있다 | 같다(나간 시점까지) | 알려진 한계 |
 | 플레이 중 앱 종료(창 닫기·Cmd+Q·메뉴 Quit·Dock, S19 2차 REC2-2) | Esc 와 같은 규칙으로 판과 코스를 남긴다(`App::keep_what_quitting_cuts_short`). 끄는 중에는 보내지 않고 다음 실행의 기록 동기화가 보낸다 | `MainController.dispose` 는 설정 저장과 자원 해제만 하고 진행 중인 판을 저장하지 않는다(`MainController.java:590-612`) | 사용자 정책 "사람이 친 판은 실패·포기·종료 포함 전부 저장·전송" |
+| 플레이 중 앱 종료 때의 설정 (S19 3차 R3-REC-1) | 판을 남기기 전에 Esc 처럼 설정을 저장한다. 그 판에서 키로 바꾼 하이스피드·커버·리프트·히든과 AUTO ADJUST 가 옮긴 판정 오프셋이 남는다. 플레이 화면이 아닌 곳에서 끌 때는 쓰지 않는다(읽지 못한 설정 파일을 기본값으로 덮지 않기 위해) | `dispose` 의 `saveConfig` 가 판정 오프셋(`JudgeManager.java:701` 이 플레이어 설정에 바로 쓴다)은 저장한다. 하이스피드·커버·리프트·히든은 `LaneRenderer` 가 `PlayConfig` 사본(`LaneRenderer.java:90`)을 바꾸고 판이 끝나는 길의 `BMSPlayer.saveConfig` 만 되돌려 쓰므로 곡 도중 창을 닫으면 잃는다 | 오프셋은 원본과 같다. 하이스피드·셰이드는 원본과 달리 남긴다: 같은 판을 Esc 로 나가면 남는 값이 종료로는 사라지는 rbms 안의 불일치를 없앤 것이다 |
 | 코스 스테이지 사이에서 나감(LOADING 의 Esc, 결정 화면에서 나감, 스테이지 차트를 못 읽음·라이브러리에 없음, 앞 코스가 남은 채 새 코스 시작, S19 2차 REC2-1·리뷰 5) | 코스를 끝내고, 친 스테이지가 있으면 FAILED 코스로 남겨 보낸다(`app_result::abandon_course`). 서 있던 스테이지는 아무것도 더하지 않는다 | 스테이지 로딩은 `BMSPlayer` 안이라 Esc 는 `stopPlay` 로 코스 결과를 거친다 | 결정 9 의 코스 도중 포기와 같은 취급. 전에는 코스가 끝나지 않아 다음 단일 곡이 그 코스에 접혔다 |
 
 ## 플레이 수리 — 오토플레이·일반 롱노트 집계·포커스 (2026-10-15, S19)
@@ -287,8 +288,9 @@
 | 게이지 자동 전환(GAS)·FAILED | 프레임마다 판정 뒤에 한 번(`BMSPlayer.java:638-672`) | 게이지가 바뀐 모든 순간 뒤에. NONE 에서 게이지가 비면 그 순간부터 판정하지 않는다 |
 | 게이지 이력(0.5초) | 경계를 지난 첫 프레임의 값, 프레임당 최대 하나(`BMSPlayer.java:628-633`) | 경계 순간의 값. 실패 시각도 게이지가 빈 순간 |
 | 컨트롤러 입력 | 입력 스레드가 약 1 kHz 로 훑는다(`MainController.java:357-372`) | gilrs 가 이벤트마다 찍은 시각. 한 폴링 안의 누름·뗌이 모두 판정되고, 디바운스는 이벤트 시각 사이로 잰다. 아날로그 턴테이블은 폴링마다 한 번 읽는다. gilrs 의 Windows 백엔드는 8~10 ms 로 폴링해 그만큼 양자화된다 |
+| 컨트롤러 디바운스 | 원소마다 받아들인 변화 뒤 16 ms 동안 그 원소를 읽지 않는다(`BMControllerInputProcessor.java:61,136`, 양방향 잠금). 뗀 직후 창 안의 재누름은 창 끝까지 늦는다 | PAD DEBOUNCE(키 설정 파일의 `pad.debounce_ms`, 기본 16 ms, 0~100, SETTINGS INPUT 탭). 버튼·두 키 축 방향은 키보드와 같은 LR2 `inputinterval` 상태 기계(`input_debounce.rs`)다: 누름은 늘 즉시, 누른 뒤 창 안의 뗌만 창 끝까지 미루고, 넘긴 뗌 뒤 2 ms 안의 누름은 튐. 아날로그 턴테이블 방향만 원본의 양방향 잠금을 그대로 둔다(턴테이블 알고리즘이 잠금이 통과시킨 읽기 횟수를 센다). 패드는 한 곳에서 읽어 메뉴 입력에도 같은 디바운스가 걸린다(뗌 뒤 2~16 ms 튀는 버튼은 메뉴에서 두 번 눌릴 수 있다, 테스트 부채 3.71) |
 | 키보드 입력 시각 | 1 kHz 폴링 스레드가 읽은 순간의 시각. 단 키 상태는 LWJGL2 키 버퍼가 렌더 루프(`Display.processMessages`)에서만 갱신되어 렌더 루프 주기(기본 240 fps, 약 4.2 ms)로 양자화된다(조사의 추정) | 이벤트 루프가 키를 받은 순간. present 대기는 전용 스레드(`gpu/present.rs`)가 하고 이벤트 루프는 프레임 사이에 창 말고는 기다리지 않으므로, 키는 OS 가 넘긴 즉시 받힌다(LR2 가 vblank 대기 동안 입력을 폴링하는 것과 같은 원리). 렌더 주기로 양자화되지 않는다. 이벤트 루프가 프레임을 갱신·그리는 CPU 시간은 남는다. winit 의 키 이벤트에는 하드웨어 시각이 없다([키보드 시각 ADR](2026-10-15-adr-keyboard-input-timing.md)) |
-| 키보드 디바운스 | `KeyboardConfig.duration` 16 ms(0..100), 레인 키만, 1 ms 폴링으로 레벨을 다시 읽는다(`KeyBoardInputProcesseor.java:99-146`). 런처의 한 값이 키보드와 컨트롤러에 같이 들어간다 | KEY DEBOUNCE(`play.key_debounce_ms`, 기본 16 ms, 0~100, SETTINGS INPUT 탭). 뜻은 원본이 아니라 LR2 `inputinterval`(`En_input.cpp:276-292`)이다: 누름은 늘 즉시 받고, 누른 뒤 창 안의 뗌만 창 끝까지 미루며(그때도 떼어져 있으면 창 끝 시각으로), 넘긴 뗌 뒤 2 ms(LR2 의 폴링 간격) 안의 누름은 튐으로 버린다. 원본은 뗀 직후 창 안의 재누름을 창 끝까지 늦춰, 같은 레인 고밀도 연타에서 누름이 SLOW 로 밀린다. 이벤트 시각으로 잰다. 판의 레인 입력에만 걸고 메뉴에는 걸지 않는다. 컨트롤러는 키 설정 파일의 `pad.debounce_ms` 를 따로 둔다 |
+| 키보드 디바운스 | `KeyboardConfig.duration` 16 ms(0..100), 레인 키만, 1 ms 폴링으로 레벨을 다시 읽는다(`KeyBoardInputProcesseor.java:99-146`). 런처의 한 값이 키보드와 컨트롤러에 같이 들어간다 | KEY DEBOUNCE(`play.key_debounce_ms`, 기본 16 ms, 0~100, SETTINGS INPUT 탭). 뜻은 원본이 아니라 LR2 `inputinterval`(`En_input.cpp:276-292`)이다: 누름은 늘 즉시 받고, 누른 뒤 창 안의 뗌만 창 끝까지 미루며(그때도 떼어져 있으면 창 끝 시각으로), 넘긴 뗌 뒤 2 ms(LR2 의 폴링 간격) 안의 누름은 튐으로 버린다. 원본은 뗀 직후 창 안의 재누름을 창 끝까지 늦춰, 같은 레인 고밀도 연타에서 누름이 SLOW 로 밀린다. 이벤트 시각으로 잰다. 판의 레인 입력에만 걸고 메뉴에는 걸지 않는다. 컨트롤러는 키 설정 파일의 `pad.debounce_ms`(PAD DEBOUNCE)를 따로 두고, 같은 상태 기계를 쓴다(위 행) |
 
 ## 기록의 원본 정의 — avgjudge·BP·콤보·풀콤·TOTAL (2026-10-15, S19)
 
@@ -319,6 +321,8 @@
 |---|---|---|---|
 | 연습 판에서 게이지가 빔(GAUGE AUTO SHIFT NONE, HARD 이상·CLASS 계열) | 위 "입력 시각 판정"의 실패 즉시 판정 정지 뒤로 엔진이 멈춰, 구간은 끝까지 흐르는데 판정·놓친 노트·게이지·콤보가 사망 순간에 굳었다(키음·빔은 났다). `PracticeSession::gauge_locked` 는 테스트만 읽었다 | `STATE_FAILED` 를 거쳐 연습 패널로 돌아간다(`BMSPlayer.java:638-672, 735-737`) | 게이지 잠금이 NONE 을 CONTINUE 로 바꿔 구간 끝까지 판정한다(`PracticeSession::gauge_shift`, `PlayState::set_practice`). 다른 GAUGE AUTO SHIFT 는 설정대로다 |
 | 연습 FREQUENCY 의 판정 폭 | 엔진이 차트 시각으로 판정해 판정 창·LN 마진·후보 게이트·見逃し 경계·HCN 틱의 실제 시간 폭이 재생 속도에 비례했다(50% 에서 실제 30 ms 늦음이 PGREAT, 200% 에서 10 ms 늦음이 GREAT). 판정이 보고하는 타이밍(FAST/SLOW 값, 자동 오프셋 조정, 노트의 play time)도 차트 시각이었다 | 차트를 재배치하고(`BMSModelUtils.changeFrequency`, `BMSPlayer.java:554-558`) `JudgeManager` 는 같은 창으로 실제 재생 시간에서 판정한다 | 엔진은 여전히 차트 시계로 돌고, `JudgeEngine::set_playback_rate` 가 모든 창·마진·게이트·틱을 그 시계의 길이로 늘이며 보고하는 타이밍은 실제 시간으로 되돌린다. 화면·소리·BGA 의 시간 축(`PracticeClock`)은 그대로다 |
+| `#TOTAL` 줄의 명령어 분리와 trim (3차 감사 PARSE3-1) | 첫 유니코드 공백에서 명령어를 잘라 `#TOTAL:300`·`#TOTALS 300` 을 못 읽었다. 값은 유니코드 trim 이라 줄 끝 0x1A·NUL 이 남아 못 읽고(기본 TOTAL), 줄 끝 전각 공백·NBSP 는 지워 읽었다 | `matchesReserveWord` 가 `#TOTAL` 을 접두사로(대소문자 무시) 맞추고, 그 뒤 한 글자를 무엇이든 건너뛴 나머지를 Java `String.trim`(U+0020 이하만)으로 다듬는다(`BMSDecoder` 2257-2311, 1674-1720) | 같다(`TOTAL_COMMAND`, `reference_total_argument`). 줄 앞 공백은 아래 "줄 앞 공백" 행대로 지금도 받아들인다. 코퍼스 11,874 줄 중 해당 0 건. `PARSER_VERSION` 5 |
+| 줄 끝 (3차 감사 검증자 추가 1) | `str::lines` 라 `\n`·`\r\n` 만 줄 끝이었다. 단독 `\r`(옛 Mac) 차트는 통째로 한 줄이 되어 제목이 길어지고 노트·TOTAL 이 모두 사라졌다 | `BufferedReader.readLine`: `\n`·`\r`·`\r\n` 모두 줄 끝 | 같다(`reference_lines`). 코퍼스 0 건. `PARSER_VERSION` 5 가 곡 DB 를 다시 읽는다 |
 | `#TOTAL` 줄이 여럿 | 줄마다 덮어써 뒤의 숫자 아닌 값·0 이하 값이 앞의 유효한 값을 지웠다(기본 TOTAL 로 떨어짐). `200d`·`200f` 는 못 읽고, Rust 표기 `inf`·`nan` 을 읽었다(`nan` 은 NaN TOTAL 이 됐다) | `CommandWord.TOTAL`: `Double.parseDouble` 이 읽고 0 보다 클 때만 설정, 아니면 경고만 하고 앞 값을 둔다 | 같다(`rbms-parser` 의 `parse_java_double`). 곡 DB 는 `PARSER_VERSION` 4 가 다음 스캔을 전체 재스캔으로 만든다 |
 
 **아직 원본과 다른 점:**
@@ -328,4 +332,6 @@
 | 연습 판의 게이지 사망 | 구간 끝까지 판정한다 | 연습 패널로 돌아간다 | 연습은 구간 끝까지 치는 것이 목적이라는 기존 설계(게이지 잠금, `docs/plan/phase-g-wiring/G4-practice.md`). 2차 감사 검증자 권고. **사용자 결정 대기**(S19 2차 리뷰 2): 판정 규칙은 같지만 판의 흐름이 원본과 다르다. A 원본대로 `is_failed` 면 연습 패널로 돌아간다(`run_is_over`·장면 사실 `failed` 수정) / B 지금처럼 잠금을 유지하고 ADR 로 남긴다 |
 | 연습 FREQUENCY 의 반올림 | 창 길이를 차트 시계 µs 로 내림 | 노트 시각을 µs 로 내림(`(long)(time / freq)`) | 1 µs 안의 차이 |
 | `#TOTAL` 의 16진 표기(`0x1p8`) | 읽지 않는다 | 읽는다 | 쓰는 차트를 보지 못했다 |
+| 줄 앞 공백 (3차 감사 검증자 추가 2) | 줄 전체를 유니코드 trim 한 뒤 보므로 ` #TOTAL 300`·` #00111:0101` 처럼 공백으로 시작하는 `#` 줄도 읽는다 | 줄 앞 trim 이 없어 `charAt(0)=='#'` 가 아닌 줄은 버린다(오프셋 661-669) | 헤더·데이터 줄 전체에 걸쳐 노트 수가 바뀔 수 있어 따로 다룬다. 코퍼스 0 건(`^[ \t\x0b\x0c]+#[0-9A-Za-z]`). 테스트 부채 |
+| 다른 헤더의 trim | `#TOTAL` 말고는 줄 끝을 유니코드 trim 한다(줄 끝 전각 공백·NBSP 를 지운다) | Java `String.trim`(U+0020 이하만) | `#TOTAL` 만 이번에 맞췄다. 제목·파일 이름의 줄 끝 전각 공백은 보지 못했다 |
 

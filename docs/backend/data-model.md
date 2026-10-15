@@ -70,7 +70,7 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 | option | int | 노트옵션 비트필드(레퍼런스 구현) |
 | random | varchar(16) · random_p2 varchar(16) null · scratch_left bool · scratch_auto bool |
 | seed | bigint | 셔플 시드(참고용). 안전 정수(±2^53 미만)가 아닌 값은 서버가 0 으로 저장한다(`seedSchema`) |
-| hispeed | double · constant bool · green_number int null |
+| hispeed | double · constant bool · green_number int null(반올림한 값이 INT 밖이면 null, S19 3차) |
 | lift | float · lane_cover float |
 | assist int · judge_rate int default 100 · offset_ms int default 0 · auto_offset bool |
 | total_override | double default 0 | 0=차트값, >0=오버라이드(게이지 난이도 영향) |

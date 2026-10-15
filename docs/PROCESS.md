@@ -65,6 +65,9 @@ S19-2b 결과(2026-10-15, Workflow `wf_da2e2873-f73`): 커밋 `794361b`(rbms-pre
 2차 감사(Workflow `wf_32dc80f0-053`): 확인 17건(수리가 만든 결함: 서버 total_notes 영구 상한, Esc 리플레이 Missing 경합, 연습 게이지 사망 판정 정지). 3차 수정 Workflow `wf_5cbb07fa-653` 진행.
 사용자 결정(2026-10-15, THR2-1 A): rbms-present 스레드가 wgpu-hal Metal acquire 안에서 메인 스레드 전용 AppKit API(NSView.window, NSWindow.occlusionState)를 읽는 위반은 구조를 유지하고 ADR·QA 에 알려진 위험으로 기록, 상류 이슈 https://github.com/gfx-rs/wgpu/issues/10627 (2026-10-15 등록). 키보드 ADR 과 QA(Main Thread Checker 실행 절차) 반영은 3차 수정 뒤.
 3차 수정(Workflow `wf_5cbb07fa-653`) 결과: 커밋 `0e7be91`(마이그레이션 0004·chart-notes 동작, 운영 적용 run 38673724720), `e7890fc`(웹), `4cc72d0`(클라이언트), `082c8fb`(문서). CI 3 OS·웹 통과, 운영 `082c8fb`. 운영 chart-notes 점검(run 38673771025): 어긋난 notes 0, 복구 대상 0(복구 SQL 미실행), 점수 없는 차트 행 3, 누적 거절 39. 오토플레이 만점: 727 차트 예외 0, SSD 전체 11,336 차트 중 airTKkill·airTkill 2곡만 FAILED(차트의 #TOTAL 1.1·1 — 원본도 FAILED, 결함 아님). THR2-1 은 ADR keyboard-input-timing 남은 한계 6 과 QA K8 에 기록.
+사용자 결정(2026-10-15, "둘 다 추천대로"): KEY DEBOUNCE 기본 16 ms 확정. 컨트롤러 디바운스도 LR2 방식(누름은 항상 그 순간, 누른 뒤 창 안의 뗌만 미룸)으로 바꾼다 — 3차 감사 수정과 함께 구현(ADR keyboard-input-timing 의 "확인받을 것" 해소).
+사용자 요청(2026-10-15, 원문): "다만 debounce 값은 나중에 오버조이가면 더 바뀔수도있으니 settings에서 바꿀수있게끔넣어두면좋을듯한데" — 컨트롤러 디바운스(keyconfig.ron 의 pad.debounce_ms)를 설정 화면 INPUT 탭에서 바꿀 수 있게 한다(키보드 KEY DEBOUNCE 는 이미 있음). 3차 감사 수정과 함께.
+사고(2026-10-15 12:15~12:17): 3차 감사 에이전트가 개발 빌드(afa1e2f 작업 트리)를 실제 HOME 으로 `--help` 실행(앱이 그 인자를 처리하지 않아 정상 실행). 시작 기록 동기화가 사용자 계정으로 운영 서버에 판 49개를 보냄(모두 accepted, 리플레이 6 업로드·43 대기, 옛 세대 2 SCRATCH AUTO 37판은 설계대로 미전송). settings.ron 재작성, songdb 전체 재스캔(PARSER_VERSION 4), scoredb 의 ir_sync 기록, user-folders 갱신. 사용자 결정(원문): "A 나중에 테스트할떄 참조가능할수도있으니 뭐" — 49개 기록은 운영에 그대로 둔다. 재발 방지: 모든 에이전트 지시에 scratch HOME·닿지 않는 서버만 허용, 앱의 --help/--version 처리(4차 수정).
 - [ ] S19-3. 2차 감사(새 결함이 없을 때까지 반복).
 - [ ] S19-4. 성능 계측 결과와 기준 충족 기록(`docs/quality-assurance/`).
 - [ ] S19-5. 리뷰, 게이트, 커밋·푸시, CI(떠는 테스트가 없는지 반복 실행 포함), 웹 배포 확인.
