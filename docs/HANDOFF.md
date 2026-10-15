@@ -1,6 +1,6 @@
 # HANDOFF — 2026-10-14 세션 스냅샷
 
-최종 갱신 2026-10-14 · 대응 커밋 `fb29d24`(release: v0.1.3) + 인수인계 문서 작업 트리. 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-10-11-handoff-snapshot.md`(웨이브 8C 시점), 그 앞 `docs/history/2026-10-09-handoff-snapshot.md`.
+최종 갱신 2026-10-15 · 대응 커밋 `51f3a1e` + v0.1.4 draft. 이 문서는 항상 덮어쓴다. 이번 세션의 상세는 `docs/PROCESS.md` S18·S19, 결정은 `docs/acknowledge/README.md`.
 
 복기 신뢰도: 2026-10-09 ~ 10-12(웨이브 1~13)는 대화가 두 번 압축되어 압축 요약·커밋·문서로 복기했다(중간). 2026-10-12 ~ 10-14(웨이브 14~20, 릴리스, 웹 배포, 인수인계)는 원문 기준(높음). 사실이 의심되면 이 문서보다 코드와 `git log` 를 믿는다.
 
@@ -11,7 +11,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 ## 2. 현재 목표
 
 - 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹(순위, 발광 난이도표, 내 폴더). 사용자는 "새 세션에서 더 이상 구현하거나 버그가 없도록" 남은 일을 정확히 끝내길 원한다.
-- 현재 마일스톤: 클라이언트 `v0.1.3` draft 게시 직전, 웹 운영 배포 완료. 남은 것은 (1) 사용자의 실기 확인과 게시, (2) 문서 점검에서 나온 웹 KNOWN ISSUE 수리, (3) 실제 창 QA. 이번 400 사고 같은 계약 결함을 막는 교차 테스트와 작은 코드 수리는 S18(`docs/PROCESS.md`)에서 했다.
+- 현재 마일스톤(2026-10-15): 클라이언트 `v0.1.4` draft 게시 직전(점검·노트 끝, 게시는 사용자), 웹 운영 배포 `51f3a1e` 이후 최신. S18(空POOR 400·기록 동기화·계약 교차 테스트)과 S19(잠재 버그 전수 감사 4회와 수리, 입력 시각 판정, 렉 최적화, 앱 아이콘, 발광 표의 다른 사이트 흔적 제거)를 끝냈다. 남은 것은 (1) 사용자의 v0.1.4 실기 확인과 게시, (2) 실제 창 QA(K1~K8 포함), (3) 웹 2차.
 - 직전 작업: 점수 제출이 모든 판에서 `400 VALIDATION_ERROR` 로 거절되던 버그(시드 1.79e18 > 2^53)를 클라이언트·서버 양쪽에서 고치고(`7095ef7`), 웹 재배포, `v0.1.3` 릴리스(run 38563811699, 서명·공증·티켓 확인 완료, draft 본문 작성), 그리고 이 인수인계 문서 작업(문서 4묶음 점검, ADR 15건, test-debt, bug 기록).
 
 ## 3. 완료 / 진행 중 / 미착수
@@ -37,8 +37,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ### 3.2 진행 중
 
-- 클라이언트 `v0.1.3` 게시 대기. draft 는 준비 완료(dmg·앱 `stapler validate` 통과, Gatekeeper `accepted, source=Notarized Developer ID`, `syspolicy_check` 통과, `CFBundleShortVersionString` 0.1.3, SHA-256 일치, 본문은 v0.1.0 대비 릴리스 노트). 다음 한 줄: 사용자가 v0.1.3 으로 한 판 쳐서 결과 화면에 `IR: RANK #n` 이 나오는지 확인 → 사용자가 GitHub Releases 에서 Publish.
-- 이 인수인계 문서 작업(작업 트리, 커밋 전). 바뀐 문서 목록은 `git status`. 커밋은 사용자 요청 시.
+- 클라이언트 `v0.1.4` 게시 대기(release run 38696475211, 점검 결과는 `docs/ci-release.md` 2.3). 다음 한 줄: 사용자가 v0.1.4 로 한 판 쳐서 결과 화면의 `IR:` 줄과 기록 동기화(`SYNC RECORDS NOW`)를 확인 → GitHub Releases 에서 Publish.
 
 ### 3.3 미착수(우선순위는 8절)
 
@@ -86,12 +85,10 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 6. 미해결 질문 / 사용자 확인 필요
 
-1. `v0.1.3` 으로 한 판 쳐서 결과 화면에 `IR: RANK #n` 이 나오는지(운영 서버 실제 저장 확인). 그 뒤 게시.
-2. 게시되지 않은 `v0.1.0` draft 를 지울지(산출물이 맨 실행 파일이라 게시하면 Gatekeeper 에 막힐 것으로 예상). 태그 v0.1.0~v0.1.3 은 남아 있다.
-3. (해소) 중도 포기(Esc, 칠 노트가 남음)한 판은 사용자 결정(2026-10-14)으로 저장·전송한다: 결과 화면 없이 FAILED, 남은 노트는 見逃し POOR(`apps/rbms-player/src/stage/play/mod.rs` 의 `leave_run`, `docs/play-options.md` 10.2).
-4. 메인이 정한 정책의 확인: 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외, SCRATCH AUTO 램프는 LIGHT ASSIST 유지.
-5. 웹 rate limit 의 지속형 저장소(Vercel Firewall 규칙 / Upstash / 지금대로) — 사용자 결정.
-6. `user.rank_points`(항상 0) — 산식을 정할지, 응답에서 뺄지.
+1. `v0.1.4` 로 한 판 쳐서 `IR: RANK #n`, 기록 동기화, 키 입력 체감(JUDGE OFFSET 재조정), PAD DEBOUNCE 를 확인한 뒤 게시.
+2. 웹 rate limit 의 지속형 저장소(Vercel Firewall 규칙 / Upstash / 지금대로) — 사용자 결정.
+3. `user.rank_points`(항상 0) — 산식을 정할지, 응답에서 뺄지.
+4. 알려진 위험: wgpu Metal 의 메인 스레드 위반(gfx-rs/wgpu#10627, `bug` 라벨, 사용자 결정으로 유지). wgpu 를 올릴 때 확인.
 
 ## 7. 환경 & 전제
 
@@ -107,21 +104,11 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 8. 다음 세션 TODO(우선순위)
 
-1. 사용자 확인 받기(6절 1~2, 4~6). Esc 포기 판 저장(6절 3)은 사용자 결정으로 구현했다.
-2. (완료, S18-4) 계약 교차 테스트: `contract/client-requests/*.json` 14개, Rust 테스트 `apps/rbms-player/src/app_result/record_tests/contract_requests.rs`, 웹 테스트 `web/tests/dto/client-requests.test.ts`, `web.yml` 의 MySQL `db` 잡(`RBMS_DB_E2E=1`). 설계와 남은 것(반대 방향 계약 3.12)은 `docs/quality-assurance/2026-10-14-test-debt.md`.
-3. (완료, S18-3) 작은 코드 수리 여섯 건: `web-db.yml` status 종료 코드, `verify-notary-credentials.sh` 의 `read -rs`, `verify-signing-cert.sh` 의 `-v`, `release.yml` 의 `concurrency`, `scoredb_store.rs` 모듈 문서, `web/scripts/run-sql.ts` 의 개수만 출력. 내용은 `docs/ci-release.md` 6.1~6.2절.
-4. 웹 KNOWN ISSUE(`docs/web/2026-10-14-audit.md` 해소 현황 표, `docs/web/tasks.md`):
-   - 없는 차트·플레이어·코스·리플레이 주소가 HTTP 200(404 화면 + noindex) → 존재 확인을 Suspense 밖에서 하고 `notFound()`(`web/src/shared/lib/fetch-query-or-not-found.ts`, `web/src/widgets/{chart,player,course,replay}/*-content.tsx`).
-   - 서버 컴포넌트가 자기 공개 URL 로 HTTP fetch(`web/src/shared/lib/fetch.ts` resolveOrigin) → read-cache 함수 직접 호출.
-   - 가입 실패가 모두 409(`web/src/server/service/domain/auth/auth.service.ts` signUp) → 중복만 409.
-   - 운영 필수 환경 변수가 optional(`web/src/server/lib/env.ts`) → production 첫 사용 시 필수 검증.
-   - 릴리스 CI 가 client_build 를 등록 못 함(`web/src/server/route/admin.ts` + `release.yml`) → 토큰 경로 또는 절차 문서화(지금 `UNKNOWN_BUILD` 는 순위를 막지 않는 표지).
-   - 폴더 저장이 두 요청(`web/src/server/route/folder.ts`) → 한 요청.
-   - `web/package.json` 의 쓰지 않는 `msw` 제거.
-   - 2^53 이상 시드의 옛 리플레이는 시드 0 으로 저장되어 재현이 다를 수 있음(옛 빌드는 게시된 적 없음, 영향 작음).
-5. 클라이언트 한계: 설정 화면 컨트롤러 조작(`apps/rbms-player/src/stage/settings.rs` 에 `handle_pad`), 게임 안 IR 순위 패널의 SCRATCH AUTO 토글, 턴테이블 노트만 있는 차트의 SCRATCH AUTO 자동 종료, 초록 노트를 그림 모양으로(`apps/rbms-player/src/gpu`).
-6. 실제 창 QA: `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` 맨 위 "먼저 확인할 것" 8개 → 116개 표. 사용자가 실제로 쳐 보며 확인하는 일이라 결과를 받아 고친다.
-7. 웹 2차(`docs/web/tasks.md`), 앱 아이콘, Windows 서명(사용자가 원할 때), `docs/PROCESS.md` 의 "보존 이력" 블록 정리.
+1. 사용자 확인(6절 1). 실기에서 나온 문제를 고친다.
+2. 실제 창 QA: `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` 맨 위 "먼저 확인할 것" 8개, 3.18 의 K1~K8(키 입력·화면 대기 스레드·Main Thread Checker), 116개 표.
+3. 테스트 부채 `docs/quality-assurance/2026-10-14-test-debt.md` 3.x 의 남은 항목(반대 방향 계약 3.12, 장치 섞기 3.55, 같은 판 동시 중복 제출 3.72, CLI 읽기 명령 부작용 3.73, 표 업로드 중복 키 3.74 등).
+4. 클라이언트 한계: 설정 화면 컨트롤러 조작, 게임 안 IR 순위 패널의 SCRATCH AUTO 토글, 턴테이블 노트만 있는 차트의 자동 종료, 초록 노트를 그림 모양으로.
+5. 웹 2차(`docs/web/tasks.md`), Windows 서명(사용자가 원할 때), `docs/PROCESS.md` 의 "보존 이력" 블록 정리.
 
 ## 9. 문서 지도
 

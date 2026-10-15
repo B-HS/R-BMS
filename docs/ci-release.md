@@ -93,9 +93,10 @@
 | `v0.1.0` | `00b91b1`(처음 `ef75bbc` 에 만들었다가 웨이브 15 이후 커밋으로 한 번 옮김, 사용자 승인) | 태그 push. run 38222704409 실패(툴체인에 타깃 없음, 2026-10-12) → run 38253353651 시도 1·2 실패(인증서 값에 `.` 이 섞임, base64 해독 실패) → 시도 3 통과(2026-10-13 18:31~18:50 UTC) | `rbms-macos-universal.tar.gz`(맨 실행 파일), `rbms-windows-x64.zip`, sha256 둘 | Developer ID 서명과 공증 `status: Accepted` 로 draft 생성. **게시된 적 없고 draft 가 남아 있음.** 산출물이 맨 실행 파일이라 v0.1.1 과 같은 Gatekeeper 차단이 예상된다. 지울지는 사용자 미결정 |
 | `v0.1.1` | `cdd27a6` | 수동 실행 run 38550449246(2026-10-14) | tar.gz(맨 실행 파일), zip | 공증 통과. 사용자가 Chrome 으로 받은 실행 파일이 "Apple could not verify" 로 막힘(공증 티켓 없음). draft 삭제, 태그는 남음 |
 | `v0.1.2` | `c3937f4` | 수동 실행 run 38559305840(2026-10-14) | `R-BMS-macos-universal.dmg`, zip, sha256 둘 | 앱 번들 + dmg 로 앱·dmg 모두 티켓 부착. dmg SHA-256 일치, `stapler validate` 통과(dmg 와 앱), Gatekeeper `accepted, source=Notarized Developer ID`, `syspolicy_check distribution` 통과, 버전 0.1.2, `x86_64 arm64`, zip SHA-256 일치. 그러나 실제 판의 점수 제출이 전부 400(큰 시드, `docs/bug/2026-10-14-score-submit-400-large-seed.md`) → draft 삭제, 태그는 남음 |
-| `v0.1.3` | 아직 없음 | `7095ef7`(시드 수정)의 Rust CI(run 38562057725)가 통과해 수동 실행만 남음. 이 문서 작성 시점에는 실행 전 | dmg, zip | 2.2절의 점검 뒤 draft 노트를 쓰고 게시는 사용자 |
+| `v0.1.3` | `fb29d24` | 수동 실행 run 38563811699(2026-10-14) | dmg, zip, sha256 둘 | 점검 통과, draft 작성. 그 뒤 空POOR 400·기록 손실이 발견되어 게시하지 않고 v0.1.4 로 넘어감(사용자 결정 2026-10-14: draft 는 지우지 않고 둠) |
+| `v0.1.4` | 버전 커밋(release 워크플로) ← `51f3a1e` | 수동 실행 run 38696475211(2026-10-15) | dmg, zip, sha256 둘 | 메인이 내려받아 확인: SHA-256 일치(둘), dmg·앱 `stapler validate`, Gatekeeper `accepted, source=Notarized Developer ID`(dmg·앱), `codesign --verify --deep --strict`, `syspolicy_check distribution` 통과, `CFBundleShortVersionString` 0.1.4, `CFBundleIconFile` R-BMS(`R-BMS.icns`), `x86_64 arm64`, `rbms-player --version` = 0.1.4, Windows exe 리소스 `RT_ICON` 7·`RT_GROUP_ICON` 1. draft 본문은 v0.1.0 대비 릴리스 노트(다른 사이트 이름 0). 게시는 사용자 |
 
-`Cargo.toml` 의 workspace 버전은 가장 최근 릴리스 커밋의 값(지금 0.1.2)입니다. 원격 태그는 `v0.1.0`·`v0.1.1`·`v0.1.2` 입니다.
+`Cargo.toml` 의 workspace 버전은 가장 최근 릴리스 커밋의 값(지금 0.1.4)입니다. 원격 태그는 `v0.1.0`~`v0.1.4` 입니다.
 
 ## 3. 서명·공증과 보안 경계
 
@@ -157,8 +158,8 @@
 
 릴리스마다 2.2절의 순서를 따릅니다(CI 확인 → 필요하면 `signing-check` → 수동 실행 → `git pull`·`git fetch --tags` → 산출물 점검 → 노트 → 사용자 게시). 남은 일은 다음과 같습니다.
 
-1. v0.1.3 수동 실행과 점검, draft 노트(게시는 사용자).
-2. `v0.1.0` draft 의 처리(맨 실행 파일 산출물이라 게시하지 않는 쪽을 권하며, 지울지는 사용자 결정).
+1. v0.1.4 게시(사용자). draft 는 점검과 노트까지 끝남.
+2. `v0.1.0`·`v0.1.3` draft 는 사용자 결정으로 그대로 둔다(게시하지 않음).
 3. Windows 코드 서명(사용자: 나중에)과 Windows 실제 실행 확인.
 4. (해소 2026-10-15) 앱 아이콘: `assets/icon/`(생성 스크립트 `assets/icon/tools/generate-icon.py`, `--check`), macOS `R-BMS.icns`, Windows `rbms.ico`(리소스로 링크).
 

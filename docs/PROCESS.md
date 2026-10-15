@@ -45,9 +45,9 @@
 - [x] S18-3. 작은 수리 5건: `web-db.yml` status 종료 코드, `verify-notary-credentials.sh` `read -rs`, `verify-signing-cert.sh` `-v`, `release.yml` concurrency, `web/scripts/run-sql.ts` 개수만 출력.
 - [x] S18-4. 계약 교차 테스트: Rust 가 실제 판 경로로 만든 요청 본문(일반, 실패, SCRATCH AUTO, 空POOR>POOR, 넓힌 판정, 14K, 코스, 리플레이, 동기화 재제출)을 `contract/client-requests/*.json` 으로 뽑고 웹 테스트가 서버 스키마와 라우트 검사로 통과시킴. `web.yml` 에 MySQL 서비스 + `RBMS_DB_E2E=1`.
 결과(Workflow `wf_c8406f6e-8d8`, 8 에이전트: 설계 ∥ 작은 수리 → 서버 ∥ 클라이언트 → 계약 → 리뷰(발견 9건, 8건 수정·1건 부채) → 게이트). 게이트: fmt·clippy 통과, `cargo test --workspace` 5,758 통과·0 실패·ignored 6, 웹 verify 521 통과·skip 11, format, build, 스킨 덤프 `--strict`, 생성 이미지 `--check`. 커밋 `865643f`(서버), `258596c`(CI·스크립트), `5f4a9a2`(클라이언트), `e9aebae`(계약 테스트). 같은 날 사용자 지시로 발광 표 페이지의 출처·삭제 요청 문구 제거(`4a0872d`, 운영 반영 확인).
-- [ ] S18-5. 리뷰, 게이트, 커밋·푸시, 3 OS·웹 CI, 웹 배포 확인(운영 `/api/version`), 필요 시 운영 DB 마이그레이션(web-db).
-- [ ] S18-6. v0.1.4 릴리스 draft — 사용자 결정(2026-10-14)으로 S19 고도화까지 넣어 한 번에 낸다(S19-6).
-- [ ] S18-7. 문서 갱신: ADR(판정 수 검사, 기록 동기화, Esc 포기 판), bug 기록, test-debt, HANDOFF, play-options, api-spec, README.
+- [x] S18-5. 리뷰, 게이트, 커밋·푸시, 3 OS·웹 CI, 웹 배포 확인(운영 `/api/version`), 필요 시 운영 DB 마이그레이션(web-db).
+- [x] S18-6. v0.1.4 릴리스 draft — 사용자 결정(2026-10-14)으로 S19 고도화까지 넣어 한 번에 낸다(S19-6).
+- [x] S18-7. 문서 갱신: ADR(판정 수 검사, 기록 동기화, Esc 포기 판), bug 기록, test-debt, HANDOFF, play-options, api-spec, README.
 
 ### S19. 잠재 버그 전수 수리와 고도화·최적화 (2026-10-14)
 
@@ -69,11 +69,14 @@ S19-2b 결과(2026-10-15, Workflow `wf_da2e2873-f73`): 커밋 `794361b`(rbms-pre
 사용자 요청(2026-10-15, 원문): "다만 debounce 값은 나중에 오버조이가면 더 바뀔수도있으니 settings에서 바꿀수있게끔넣어두면좋을듯한데" — 컨트롤러 디바운스(keyconfig.ron 의 pad.debounce_ms)를 설정 화면 INPUT 탭에서 바꿀 수 있게 한다(키보드 KEY DEBOUNCE 는 이미 있음). 3차 감사 수정과 함께.
 사고(2026-10-15 12:15~12:17): 3차 감사 에이전트가 개발 빌드(afa1e2f 작업 트리)를 실제 HOME 으로 `--help` 실행(앱이 그 인자를 처리하지 않아 정상 실행). 시작 기록 동기화가 사용자 계정으로 운영 서버에 판 49개를 보냄(모두 accepted, 리플레이 6 업로드·43 대기, 옛 세대 2 SCRATCH AUTO 37판은 설계대로 미전송). settings.ron 재작성, songdb 전체 재스캔(PARSER_VERSION 4), scoredb 의 ir_sync 기록, user-folders 갱신. 사용자 결정(원문): "A 나중에 테스트할떄 참조가능할수도있으니 뭐" — 49개 기록은 운영에 그대로 둔다. 재발 방지: 모든 에이전트 지시에 scratch HOME·닿지 않는 서버만 허용, 앱의 --help/--version 처리(4차 수정).
 사용자 결정(2026-10-15, "둘다 A"): (1) BGA 상주 텍스처 상한 256 MiB 유지(YATA 1,144 → 1,504 MB, 플레이 p99 0.14 ms 우선). (2) 아날로그 턴테이블 디바운스는 원본 양방향 잠금 유지(버튼·키 축만 LR2 방식). 4차 수정 커밋 1676c57·ec00a0d, 마지막 확인 라운드 Workflow `wf_54da5aca-a31`(웹 DB 교착·write-races 테스트 수정 + 4차 수정분 확인 감사).
-- [ ] S19-3. 2차 감사(새 결함이 없을 때까지 반복).
-- [ ] S19-4. 성능 계측 결과와 기준 충족 기록(`docs/quality-assurance/`).
-- [ ] S19-5. 리뷰, 게이트, 커밋·푸시, CI(떠는 테스트가 없는지 반복 실행 포함), 웹 배포 확인.
-- [ ] S19-6. v0.1.4 릴리스 draft(산출물 확인, 본문 사실 확인). 게시는 사용자.
-- [ ] S19-7. 문서(HANDOFF, test-debt, ADR, 실제 창 확인 목록).
+- [x] S19-3. 2차 감사(새 결함이 없을 때까지 반복).
+- [x] S19-4. 성능 계측 결과와 기준 충족 기록(`docs/quality-assurance/`).
+- [x] S19-5. 리뷰, 게이트, 커밋·푸시, CI(떠는 테스트가 없는지 반복 실행 포함), 웹 배포 확인.
+- [x] S19-6. v0.1.4 릴리스 draft(산출물 확인, 본문 사실 확인). 게시는 사용자.
+- [x] S19-7. 문서(HANDOFF, test-debt, ADR, 실제 창 확인 목록).
+
+S19 마무리(2026-10-15): 마지막 확인 라운드 Workflow `wf_54da5aca-a31`(웹 교착 재시도 + 확인 감사 minor 5건), 수리 `wf_1d0668c7-469`. 커밋 `9e2cc0e`(웹), `c81eda1`(클라이언트), `51f3a1e`(문서). CI 3 OS·웹(MySQL 포함) 통과, 운영 `51f3a1e`. 게이트: Rust 6,024 통과·0 실패, 떠는 테스트 반복 0 실패, 오토플레이 만점(727·11,336 차트, 예외는 #TOTAL 1·1.1 인 airTKkill·airTkill 뿐), 웹 653 + DB 57×10. 같은 기간 발광 표의 다른 사이트 흔적 제거(`ea34002`, `4fda17c` 다운로드 링크까지 지웠다가 사용자 정정으로 `dd5518e` 에서 복구 — 메모·artist 주소·original_url 만 제거).
+v0.1.4 릴리스(run 38696475211): 메인이 산출물 점검(서명·공증·티켓·Gatekeeper·syspolicy_check·버전·아이콘·SHA-256·Windows exe 아이콘 리소스), draft 본문 작성. 게시는 사용자.
 
 다음 세션: `docs/HANDOFF.md` 8절의 순서(사용자 확인 → 계약 교차 테스트 → 작은 코드 수리 → 웹 KNOWN ISSUE → 클라이언트 한계 → 실제 창 QA → 웹 2차).
 
