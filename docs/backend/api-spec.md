@@ -76,12 +76,12 @@
 
 ### `POST /api/auth/register`
 ```jsonc
-// req  (accountSchema) id: ^[a-zA-Z0-9_-]+$ 1~64자, "guest"(대소문자 무시) 예약. password 8~128자. email 필수(유효한 주소). name 선택
+// req  (accountSchema) id: ^[a-zA-Z0-9_-]+$ 1~64자, "guest"(대소문자 무시) 예약. password 8~128자. email 필수(유효한 주소, 255자 이하 = user.email 열). name 선택(1~64자, 웹 가입 화면과 같은 상한)
 { "api_version":1, "id":"alice", "password":"…", "email":"alice@example.com", "name":"Alice" }
 // 201 → AuthResponse (authResponseSchema). token 은 새로 발급한 api_token 이고 세션 쿠키도 함께 세팅된다
 { "token":"<bearer>", "player": { "id":"alice" }, "name":"Alice" }
 // 409 IR_ACCOUNT_EXISTS — 아이디나 이메일이 이미 있을 때만(better-auth 의 USER_ALREADY_EXISTS*, 또는 사용자 생성 실패 직후 같은 아이디가 생겨 있을 때)
-// 400 VALIDATION_ERROR — 아이디 형식·예약어, 비밀번호 길이(8~128), 이메일 형식 (details.field)
+// 400 VALIDATION_ERROR — 아이디 형식·예약어, 비밀번호 길이(8~128), 이메일 형식·길이(255), 이름 길이(64) (details.field). 이메일·이름 상한은 S19 4차 검증자 추가: 전에는 255자를 넘는 이메일이 DB 에서 막혀 500 이었다
 // 500 INTERNAL_ERROR — 그 밖의 모든 실패(DB 끊김, BETTER_AUTH_SECRET 누락 등). 409 로 바뀌지 않고 서버 로그에 원인이 남는다
 ```
 요청에 `Authorization: Bearer <이전 토큰>` 이 실려 있고 가입이 성공하면 그 이전 토큰은 같은 응답 안에서 폐기된다(아래 로그인과 같다).
@@ -222,11 +222,13 @@
 - **`chart.title`·`chart.artist`·`chart.level`**(모두 선택, 결정 M8): 서버가 만든 차트 행의 제목·아티스트·레벨이 비어 있을 때만 채운다. 값이 이상하면 제출을 막지 않고 버린다(문자열은 앞뒤 공백을 떼고 255자로 자름, `level` 은 0~1000 정수만). `GET /api/charts/{hash}` 등은 그 `md5` 가 번들 표에 있으면 읽을 때 표의 제목·아티스트로 빈 값을 채워 응답한다(DB 는 고치지 않음).
 - **`seed`**(최상위, 선택): 클라이언트는 `u64` 로 보내고 예전 빌드는 시계의 나노초(2^53 초과)를 보냈다. 서버는 `Number.isSafeInteger` 가 아닌 값을 거절하지 않고 **0 으로 저장**한다(`seedSchema`, `web/src/server/dto/common.ts`. 리플레이 업로드의 `seed` 도 같다). 시드는 참고용이라 순위·무결성 판정에 쓰지 않는다. 이 규칙이 없던 d733a8f 이전 서버는 큰 시드의 제출을 400 으로 거절했다(v0.1.2 점수 제출 400 사고. 근거 [../acknowledge/2026-10-14-adr-layout-seed-range.md](../acknowledge/2026-10-14-adr-layout-seed-range.md)).
 - **멱등**: 같은 사용자·같은 차트(sha256)에서 `played_at` 이 **같은 초**(`floor(played_at / 1000)` 이 같음)인 재전송은 기존 score_id 를 돌려주고 새로 만들지 않는다. 응답은 200, `message: "duplicate submission ignored"`(상수 `DUPLICATE_SUBMISSION_MESSAGE`. 클라이언트가 이 문자열로 "이미 있음"을 센다), `is_new_best: false`, `previous_best: null`. 초 단위로 넓힌 이유: 로컬 기록(`scorelog.date`)의 시각은 초 단위라, 리플레이 파일이 없는 옛 판을 다시 보내면 `played_at` 이 원래 밀리초와 다르다. 한 판은 1초보다 길어서 같은 사용자·차트의 서로 다른 두 판이 같은 초에 끝날 수 없다. 조회는 `score_idempotent_uniq(user_id, chart_sha256, played_at)` 의 범위 탐색이라 새 색인이 없고, 유일 색인은 그대로라 정확히 같은 밀리초의 동시 삽입은 DB 가 막는다. guest 제출은 멱등 조회를 하지 않는다.
+- **재전송의 최고 기록 복구**(S19 4차 R4-WEB-2): 점수 행 저장(`insertScore`, autocommit)과 최고 기록 갱신은 따로 커밋된다. 그 사이가 실패하면(잠금 재시도 소진, 연결 끊김, 함수 종료) 첫 요청은 500 이고 점수만 남는다. 클라이언트는 5xx 를 일시 오류로 보고 다시 보내는데, 멱등 응답은 전에는 최고 기록을 건드리지 않아 그 판이 `chart_best` 에 영영 오르지 않았다. 지금은 멱등 응답 경로가 **저장된 판**의 램프·EX·BP·최대 콤보·`scratch_auto`·`ranked` 로 같은 조건부 갱신(`upsertChartBestIfBetter`)을 한 번 부른다(저장된 판이 ranked 일 때만). 갱신은 더 좋을 때만 바꾸므로 되풀이해도 결과가 같고, 이미 반영된 판이나 그 뒤의 더 좋은 판은 그대로다. 응답의 `rank` 는 그 갱신 뒤에, 저장된 판의 값과 칸(일반/SCRATCH AUTO)으로 센다(저장된 판이 unranked 면 `null`). `is_new_best: false`·`previous_best: null` 은 그대로다. 코스(`course_best`, `upsertCourseBestIfBetter`)도 같고, 코스의 멱등 응답도 이제 `rank` 를 센다(전에는 늘 `null`).
 - **DB 열 범위**(S19 3차 수리, R3-WEB-1): 저장하는 값은 모두 DB 열 안이어야 한다. 넘으면 스키마 검증이 400 `VALIDATION_ERROR` 로 거절하고 `submission_audit` 에 `accepted=false` 로 남긴다. 거절은 차트 행을 만들기 전에 끝나므로, 거절된 본문은 어떤 행도 남기지 않는다(이전 서버는 범위 밖 값을 DB 가 막아 500 이었고, 처음 보는 차트면 점수 없는 차트 행이 먼저 남았다). 정상 클라이언트는 이 범위에 닿지 않는다.
   - INT 열(부호 있는 32비트, `INT_COLUMN_MAX = 2147483647`, `web/src/server/dto/common.ts`): 판정 수 전부(`pgreat`~`miss`, `epg`~`lms`, `fast`·`slow`·`combobreak`·`empty_poor`)와 `ex_score`·`max_ex_score`·`max_combo`·`total_notes`·`passnotes`·`minbp` 는 0 이상 그 이하, `options.lntype`·`options.judge_rate`·`options.offset_ms` 는 -2147483648 이상 그 이하. 코스 제출과 `POST /api/charts`(`level`·`lntype`·`judge`·`minbpm`·`maxbpm`·`notes`, 이제 아래쪽도)도 같다.
   - 서버가 셈해 저장하는 EX(PGREAT × 2 + GREAT)와 BP(BAD + POOR + 空POOR)도 INT 열 안이어야 한다(무결성 검사 6, `field: "judge"`). 필드마다 범위 안이어도 PGREAT 15억이면 EX 30억이 되고, pop'n 의 BAD 와 空POOR 는 노트 수에 묶이지 않는다.
   - FLOAT 열(`FLOAT_COLUMN_MAX = 3.402823466e38`): `gauge_value`, `options.lift`, `options.lane_cover`. `options.green_number` 는 반올림한 값이 INT 열 밖이면 거절하지 않고 `null` 로 저장한다(참고값).
   - `extra` 는 DB JSON 열의 깊이 100 안이어야 한다(스칼라나 빈 배열·객체가 한 단계. 모든 `extra` 스키마 공통). 키와 문자열에 짝 없는 UTF-16 서로게이트(`"\ud800"`)가 있으면 400 이다(MySQL JSON 이 받지 않아, 거절하지 않으면 500 이 나고 처음 보는 차트면 차트 행이 먼저 남았다. `fitsJsonColumn`). JSON 열에 들어가는 코스의 `assist` 태그, 코스 메타의 `constraint`·`trophy[].name` 도 같다(`jsonTextSchema`).
+  - `extra` 의 객체 키는 UTF-8 로 65535 바이트(`JSON_KEY_MAX_BYTES`) 이하여야 한다(중첩 객체의 키 포함, 모든 `extra` 스키마 공통). 넘으면 400 이다(S19 4차 R4-WEB-1: MySQL 이 `ER_JSON_KEY_TOO_BIG`(3151)로 받지 않아 500 이었고, 처음 보는 차트면 차트 행이 먼저 남았다). 한도는 글자 수가 아니라 바이트라, 3바이트 글자 키는 21845자까지다.
   - 글자는 거절하지 않고 열 길이(코드 포인트)로 잘라 저장한다: `mode` 16(차트 행에도 같은 값), `options.input_device` 32, `judge_algorithm` 16, `rule` 16, `skin` 64, `client` 64, `client_platform` 32. `client_build_sha256` 은 64자 이하의 소문자 16진수(빈 값과 `null` 허용, 아니면 400), `replay_id` 는 36자 이하(아니면 400)다.
 - **본문 무결성 검사**(순서대로 첫 실패만 400 `VALIDATION_ERROR`, `details: { field, reason }`, 거절은 `submission_audit` 에 `accepted=false` 로 남는다). **본문만 본다**(S19 2차 수리, R2-ACC-1·2): 서버의 `chart.notes` 는 그 차트를 처음 제출한 본문(또는 일반 사용자 토큰의 `POST /api/charts`)이 정한 값이라 신뢰할 수 없으므로 어떤 상한에도 쓰지 않는다. 한 사용자의 제출이 다른 사용자의 제출을 거절시킬 수 없다. 판정 수는 모든 검사에서 같은 값으로 읽는다: 각 단계(PG·GR·GD·BD·POOR·MISS)의 early/late 합(`epg+lpg` 등)이 0 이 아니면 그 합, 0 이면 합계 필드(`pgreat` 등)다(`effectiveJudgeCounts`, EX·BP 유도와 같은 읽기). 그래서 합계 필드를 0 으로 두고 분리 필드만 키운 본문도 노트 수에 묶인다.
   1. `ex_score` 가 0 이 아니면 판정에서 유도한 값(PGREAT × 2 + GREAT)과 같아야 한다(`field: "ex_score"`). 0 이면 서버가 유도한다.
@@ -261,6 +263,7 @@
 
 ### `POST /api/courses` (Bearer) — 코스 결과 제출(네이티브 클라이언트 계약)
 ### `POST /api/courses/meta` (admin) — 코스 메타 업서트
+> **열 범위**(S19 4차 R4-WEB-3): `name` 255자(UTF-16 단위) 이하, `lntype` INT 범위, 넘으면 400(전에는 DB 가 막아 500). 관리자가 쓴 메타라 점수 본문의 참고 글자처럼 자르지 않고 `POST /api/charts` 처럼 거절한다. `POST /api/tables` 의 `courses[]` 도 같은 스키마다.
 ### `POST /api/courses/{course_hash}/scores` (Bearer) — 코스 결과 제출 별칭
 ```jsonc
 // CourseSubmission (judge는 §5와 동일 구조)
@@ -302,6 +305,7 @@
 ```
 ### `GET /api/tables/{id}` → `TableData`
 ### `POST /api/tables` (admin) — 표 등록/갱신
+> **열 범위**(S19 4차 검증자 추가): `name` 255자, `url` 512자, `folders[].name` 255자 이하, 넘으면 400(전에는 500). 폴더는 `<표 id>#<위치>` 로 저장되므로(`folderIdFor`, `table_folder.id` varchar(64)), 표 id 와 마지막 폴더 위치로 만든 id 가 64자를 넘으면 `field: "folders"` 400 이다(예: 표 id 64자면 폴더를 둘 수 없고, 62자면 폴더 10개까지).
 > 클라이언트(rbms)는 기존 난이도표(`tables.ron`, header.json/data.json)도 직접 fetch하지만, IR 표는 **서버가 큐레이션한 표·코스**를 추가로 제공.
 
 ### 7.1 서버가 번들한 표와 표준 BMS 표 형식 (웨이브 17B-1)
@@ -479,7 +483,7 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 - 응답: `serverInfoSchema`·`authResponseSchema`·`playerProfileSchema`·`chartMetaSchema`·`scoreRecordSchema`·`submitResponseSchema`·`courseMetaSchema`·`tableDataSchema`·`settingBlobSchema`·`settingBlobResponseSchema`·`folderSummarySchema`·`folderDetailSchema`·`table*OutputSchema`(`dto/table-snapshot.ts`). 리플레이 목록 항목에는 별도 zod 스키마가 없다(서비스가 만든 객체를 그대로 돌려준다).
 - 핵심 공유 스키마:
   - `judgeBreakdownSchema`(early/late epg…lms + 합계 미러 + empty_poor + avgjudge). 판정 수는 `countColumnSchema`(0~INT 열 상한).
-  - 열 범위 스키마(S19 3차): `intColumnSchema`·`countColumnSchema`·`floatColumnSchema`·`columnTextSchema(길이)`(자름)·`buildHashSchema`, 상수 `INT_COLUMN_MAX`·`INT_COLUMN_MIN`·`FLOAT_COLUMN_MAX`·`JSON_COLUMN_DEPTH_MAX`.
+  - 열 범위 스키마(S19 3차): `intColumnSchema`·`countColumnSchema`·`floatColumnSchema`·`columnTextSchema(길이)`(자름)·`buildHashSchema`, 상수 `INT_COLUMN_MAX`·`INT_COLUMN_MIN`·`FLOAT_COLUMN_MAX`·`JSON_COLUMN_DEPTH_MAX`·`JSON_KEY_MAX_BYTES`(S19 4차).
   - `playOptionsSchema`(**플레이 전체 옵션** — gauge·random·random_p2·option·seed·hispeed·constant·lift·lane_cover·judge_rate·offset_ms·auto_offset·total_override·autoplay·scratch_left·scratch_auto·assist·input_device·judge_algorithm·rule·skin·lntype).
   - 무결성: 점수·코스 제출의 `client_build_sha256`·`client_platform` 은 선택(`nullish`)이고 없으면 `UNKNOWN_BUILD` 표지가 붙는다. `client_build_sha256` 은 64자 이하 소문자 16진수(`buildHashSchema`), `client_platform` 은 32자로 자른다. 리플레이 업로드의 `client_build_sha256` 은 있으면 64자다. 대부분의 스키마에 `extra: z.record(z.string(), z.unknown()).default({})`.
   - 공용 시드: `seedSchema`(안전 정수가 아니면 0).
