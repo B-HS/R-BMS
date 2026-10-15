@@ -164,6 +164,21 @@ pub const PREVIEW_FADE_STEP_MS: u32 = 50;
 /// Hover-preview fade a fresh install holds.
 pub const DEFAULT_PREVIEW_FADE_MS: u32 = 200;
 
+/// Shortest window the KEY DEBOUNCE row can hold, which is none: every change of a key is played.
+pub const KEY_DEBOUNCE_MIN_MS: u32 = 0;
+
+/// Longest window the KEY DEBOUNCE row can hold, the reference's own bound for it
+/// (`PlayModeConfig.java:118`).
+pub const KEY_DEBOUNCE_MAX_MS: u32 = 100;
+
+/// One left/right step on the KEY DEBOUNCE row.
+pub const KEY_DEBOUNCE_STEP_MS: u32 = 1;
+
+/// The window a fresh install holds a lane key down for after it is pressed: the reference's
+/// keyboard (`PlayModeConfig.java:270`), LR2's `inputinterval` and the controller here
+/// (`gamepad::DEFAULT_DEBOUNCE_MS`) all ship 16 ms.
+pub const DEFAULT_KEY_DEBOUNCE_MS: u32 = 16;
+
 /// Lowest judge offset the JUDGE OFFSET row can hold: the notes drawn this far behind the song.
 pub const JUDGE_OFFSET_MIN_MS: i32 = -200;
 
@@ -480,6 +495,7 @@ impl Config {
         self.display.judge_text_y = self.display.judge_text_y.clamp(JUDGE_TEXT_Y_MIN, JUDGE_TEXT_Y_MAX);
         self.library.preview_volume = self.library.preview_volume.clamp(PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_MAX);
         self.library.preview_fade_ms = self.library.preview_fade_ms.clamp(PREVIEW_FADE_MIN_MS, PREVIEW_FADE_MAX_MS);
+        self.play.key_debounce_ms = self.play.key_debounce_ms.clamp(KEY_DEBOUNCE_MIN_MS, KEY_DEBOUNCE_MAX_MS);
         self.judge.sanitise();
         self.display.skin = if self.display.skin.trim().is_empty() { DEFAULT_SKIN.to_string() } else { self.display.skin.to_ascii_uppercase() };
         self.audio.sanitise();
@@ -537,6 +553,11 @@ pub struct PlayOptions {
     pub lanecover_step_fine: f32,
     pub scratch_left: bool,
     pub scratch_auto: bool,
+    /// KEY DEBOUNCE: how long, in milliseconds, a lane key of the keyboard is held down after a press
+    /// of it was played, as LR2's `inputinterval` holds a key. A press is played the instant it
+    /// comes; a release inside the window is played the instant the window ends, if the key still
+    /// reads up then. 0 plays every change.
+    pub key_debounce_ms: u32,
     pub total_override: f64,
     pub auto_replay: bool,
     /// What an Escape during a run has to be before it abandons the run.
@@ -567,6 +588,7 @@ impl Default for PlayOptions {
             lanecover_step_fine: DEFAULT_LANE_SHADE_FINE_STEP,
             scratch_left: false,
             scratch_auto: false,
+            key_debounce_ms: DEFAULT_KEY_DEBOUNCE_MS,
             total_override: TOTAL_FROM_CHART,
             auto_replay: true,
             play_escape: PlayEscape::default(),

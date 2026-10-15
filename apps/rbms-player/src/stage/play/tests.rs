@@ -212,8 +212,9 @@ fn a_press_is_recorded_for_the_replay_even_with_no_output_device() {
 
     let mut state = play_state();
     let now = std::time::Instant::now();
+    let let_go = now + Duration::from_millis(u64::from(app.shared.config.play.key_debounce_ms));
     state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, key(lane_key, true));
-    state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, key(lane_key, false));
+    state.handle_key(&mut FrameCtx { shared: &mut app.shared, now: let_go, dt: 0.0 }, key(lane_key, false));
 
     let events = state.session.recorded_events();
     assert_eq!(events.len(), 2, "a run with no device still records what was played: {events:?}");
@@ -248,6 +249,7 @@ fn losing_focus_releases_every_held_lane() {
     stage.handle_key(&mut ctx, key(lane_key, true));
     assert_eq!(ctx.shared.held_key_codes(), [lane_key], "the lane's key is down");
 
+    ctx.now = at + Duration::from_millis(u64::from(ctx.shared.config.play.key_debounce_ms));
     let transitions = stage.release_keys_lost_with_focus(&mut ctx);
     assert!(transitions.iter().all(|t| matches!(t, Transition::Stay)), "letting go of a key leaves nothing");
     assert!(ctx.shared.held_key_codes().is_empty(), "every key reads as let go");
@@ -260,6 +262,39 @@ fn losing_focus_releases_every_held_lane() {
     let counts = play.session.judge().counts;
     assert_eq!(counts.iter().sum::<u32>(), 1, "the note is judged once");
     assert_eq!(counts[rbms_judge::Judge::PerfectGreat as usize], 0, "a note let go of a second early is not held to its end: {counts:?}");
+}
+
+/// Focus lost a moment after a key went down: the release it stands in for comes inside KEY
+/// DEBOUNCE's window after the press, so it is kept out like any such release, and the next frame
+/// plays it where the window ended. The key reads as let go of at once.
+#[test]
+fn losing_focus_inside_the_debounce_window_lets_go_where_the_window_ends() {
+    let mut app = app();
+    let lane_key = app.shared.active_keys.first().map(|(code, _)| *code).expect("the default key config binds lane 0");
+    let state = state_of(LONG_NOTE_CHART);
+    let head_us = note_times(&state)[0];
+    let mut stage = Stage::Play(Box::new(state));
+
+    let at = Instant::now();
+    app.shared.stop_clocks_at(at);
+    app.shared.clock = at.checked_sub(Duration::from_micros(head_us as u64)).expect("the process has been up for longer than the head's time");
+    let window = Duration::from_millis(u64::from(app.shared.config.play.key_debounce_ms));
+    let mut ctx = FrameCtx { shared: &mut app.shared, now: at, dt: 0.0 };
+    stage.handle_key(&mut ctx, key(lane_key, true));
+
+    ctx.now = at + window / 2;
+    stage.release_keys_lost_with_focus(&mut ctx);
+    assert!(ctx.shared.held_key_codes().is_empty(), "every key reads as let go");
+    let presses = |stage: &Stage| match stage {
+        Stage::Play(play) => play.session.recorded_events().iter().map(|event| (event.t, event.press)).collect::<Vec<_>>(),
+        _ => unreachable!("the stage was built as a play screen"),
+    };
+    assert_eq!(presses(&stage), [(head_us, true)], "the release waits for the window");
+
+    ctx.now = at + window * 2;
+    stage.update(&mut ctx);
+    let window_us = window.as_micros() as i64;
+    assert_eq!(presses(&stage), [(head_us, true), (head_us + window_us, false)], "the next frame plays it where the window ended");
 }
 
 /// A run whose gauge is empty under GAUGE AUTO SHIFT = NONE is over: the reference moves to

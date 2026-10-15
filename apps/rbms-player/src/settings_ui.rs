@@ -391,6 +391,7 @@ mod tests {
         (SettingId::JudgeOffset, "JUDGE OFFSET", "+0 MS"),
         (SettingId::Bga, "BGA", "ON"),
         (SettingId::KeyConfig, "KEY CONFIG", ">"),
+        (SettingId::KeyDebounce, "KEY DEBOUNCE", "16 MS"),
         (SettingId::JudgeAlgorithm, "JUDGE ALGORITHM", "COMBO"),
         (SettingId::JudgeWidthKeyPGreat, "JUDGE WIDTH KEY PG", "100%"),
         (SettingId::JudgeWidthKeyGreat, "JUDGE WIDTH KEY GR", "100%"),

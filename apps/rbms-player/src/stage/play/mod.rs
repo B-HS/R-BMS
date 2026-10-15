@@ -47,6 +47,7 @@ mod field;
 mod hold_tests;
 #[cfg(test)]
 mod input_time_tests;
+mod key_gate;
 mod scene;
 #[cfg(test)]
 mod screen_tests;
@@ -265,6 +266,8 @@ pub(crate) struct PlayState {
     /// Which of those presses the run was handed, so a key that went down before the chart began
     /// playing is not handed to the run as a release with no press behind it.
     sent: Vec<(bool, bool)>,
+    /// The keyboard's lane keys, debounced by KEY DEBOUNCE before a lane hears of them.
+    key_gates: key_gate::KeyGates,
     /// Where the chart's background stands, as a skin's `bga` object shows it: the picture, the
     /// layer over it and the miss layer, walked as the play timer passes the chart's events.
     background: BgaPlayhead,
@@ -333,6 +336,7 @@ impl PlayState {
             controls: HeldControls::default(),
             held: Vec::new(),
             sent: Vec::new(),
+            key_gates: key_gate::KeyGates::default(),
             background,
             background_textures: BgaTextures::default(),
             stagefile: None,
@@ -689,14 +693,31 @@ impl PlayState {
     /// Without an output stream the press still goes through the session, into a sink that drops
     /// it. The session is what records the replay, so skipping the call would leave a run with
     /// releases but no presses — a replay that cannot be played back.
+    ///
+    /// A lane key goes through KEY DEBOUNCE first ([`key_gate`]): a press is played where it came,
+    /// a release inside the window after the press is kept out and played by
+    /// [`PlayState::take_opened_keys`] when the window ends, and a press within one of LR2's polls of
+    /// a release is the switch bouncing and is not played.
     fn lane_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>, at: Instant) {
         let Some((lane, dir)) = shared.lane_input_for(key.code) else {
             return;
         };
-        if key.pressed {
-            self.lane_input(shared, lane, dir, true, at);
-        } else if key.released {
-            self.lane_input(shared, lane, dir, false, at);
+        if !key.pressed && !key.released {
+            return;
+        }
+        if self.key_gates.offer(key.code, key.pressed, at, shared.config.play.key_debounce_ms) {
+            self.lane_input(shared, lane, dir, key.pressed, at);
+        }
+    }
+
+    /// Play every lane key release KEY DEBOUNCE kept out and whose window has ended by `until`, each
+    /// at the instant its window ended. Whatever hands the run an input or a frame at `until` calls
+    /// this first, so the run takes its inputs in the order of their instants.
+    fn take_opened_keys(&mut self, shared: &mut AppShared, until: Instant) {
+        for (code, at) in self.key_gates.take_opened(until, shared.config.play.key_debounce_ms) {
+            if let Some((lane, dir)) = shared.lane_input_for(code) {
+                self.lane_input(shared, lane, dir, false, at);
+            }
         }
     }
 
@@ -1391,6 +1412,7 @@ impl StageHandler for PlayState {
     }
 
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
+        self.take_opened_keys(ctx.shared, ctx.now);
         self.hold_green_number(ctx.shared);
         self.repeat_held_keys(ctx.shared, ctx.now);
         if self.scene.is_some() {
@@ -1411,6 +1433,7 @@ impl StageHandler for PlayState {
     /// press gate here. The frame loop hands each event over with `ctx.now` set to the instant the
     /// controller layer stamped it with, which is what a lane is judged at.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
+        self.take_opened_keys(ctx.shared, ctx.now);
         match event {
             crate::gamepad::PadEvent::Lane { lane, dir, press } => self.lane_input(ctx.shared, lane, dir, press, ctx.now),
             crate::gamepad::PadEvent::Control(action) => self.in_play_control(ctx.shared, action),
@@ -1434,6 +1457,7 @@ impl StageHandler for PlayState {
     /// rather than discarding the run; otherwise it abandons the chart, in the way the ESCAPE
     /// setting asks for. A run a scene is run over has its own rules ([`PlayState::scene_escape`]).
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        self.take_opened_keys(ctx.shared, ctx.now);
         if key.code == KeyCode::Escape {
             if self.scene.is_some() {
                 return self.scene_escape(ctx, &key);

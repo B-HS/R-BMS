@@ -31,10 +31,10 @@ use crate::options;
 use crate::schema::{
     Config, DEFAULT_PLAYER_ID, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, HISPEED_STEP_MAX, HISPEED_STEP_MIN, HISPEED_STEP_STEP, JUDGE_OFFSET_MAX_MS,
     JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_STEP_MS, JUDGE_RATE_MAX_PERCENT, JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, JUDGE_TEXT_Y_MAX, JUDGE_TEXT_Y_MIN,
-    JUDGE_TEXT_Y_STEP, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN, LANE_SHADE_FINE_STEP_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP,
-    LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, LN_MARGIN_STEP_PERCENT, PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX,
-    PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TARGET_RATE_MAX_PERCENT, TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART,
-    TOTAL_STEP, skin_screen_label,
+    JUDGE_TEXT_Y_STEP, KEY_DEBOUNCE_MAX_MS, KEY_DEBOUNCE_MIN_MS, KEY_DEBOUNCE_STEP_MS, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN,
+    LANE_SHADE_FINE_STEP_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, LN_MARGIN_STEP_PERCENT,
+    PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX, PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS,
+    TARGET_RATE_MAX_PERCENT, TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
 use crate::speed::{GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, duration_of_green, duration_stepped_by_green, green_of_duration};
@@ -187,6 +187,7 @@ pub enum SettingId {
     JudgeOffset,
     Bga,
     KeyConfig,
+    KeyDebounce,
     JudgeAlgorithm,
     JudgeWidthKeyPGreat,
     JudgeWidthKeyGreat,
@@ -262,7 +263,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 90;
+pub const SETTING_COUNT: usize = 91;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -285,6 +286,7 @@ impl SettingId {
         SettingId::JudgeOffset,
         SettingId::Bga,
         SettingId::KeyConfig,
+        SettingId::KeyDebounce,
         SettingId::JudgeAlgorithm,
         SettingId::JudgeWidthKeyPGreat,
         SettingId::JudgeWidthKeyGreat,
@@ -773,6 +775,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     .unread_by_skins(SCRATCH_SCREENS, SKIN_OPTION_NOTE),
     row(SettingId::KeyConfig, SettingTab::Input, "KEY CONFIG", SettingKind::Action, "Open the key editor"),
     row(
+        SettingId::KeyDebounce,
+        SettingTab::Input,
+        "KEY DEBOUNCE",
+        SettingKind::IntRange { min: KEY_DEBOUNCE_MIN_MS as i32, max: KEY_DEBOUNCE_MAX_MS as i32, step: KEY_DEBOUNCE_STEP_MS as i32, unit: MILLISECOND_UNIT },
+        "How long a lane key is held after it goes down, so a chattering switch plays as one press",
+    ),
+    row(
         SettingId::ServerUrl,
         SettingTab::Network,
         "SERVER URL",
@@ -1089,6 +1098,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::FavoriteOnly => on_off(config.library.favorite_only),
         SettingId::PreviewVolume => shade_value(config.library.preview_volume, id),
         SettingId::PreviewFade => format!("{}{}", config.library.preview_fade_ms, unit_of(id)),
+        SettingId::KeyDebounce => format!("{}{}", config.play.key_debounce_ms, unit_of(id)),
         SettingId::ServerUrl => optional_text(config.network.server_url.as_deref()),
         SettingId::PlayerId => config.network.player_id.clone(),
         SettingId::Account => config.network.ir_login_id.clone().unwrap_or_else(|| DEFAULT_PLAYER_ID.to_string()),
@@ -1305,6 +1315,11 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
             let next = moved.clamp(PREVIEW_FADE_MIN_MS as i32, PREVIEW_FADE_MAX_MS as i32) as u32;
             store(&mut config.library.preview_fade_ms, next)
         }
+        SettingId::KeyDebounce => {
+            let moved = config.play.key_debounce_ms as i32 + delta * KEY_DEBOUNCE_STEP_MS as i32;
+            let next = moved.clamp(KEY_DEBOUNCE_MIN_MS as i32, KEY_DEBOUNCE_MAX_MS as i32) as u32;
+            store(&mut config.play.key_debounce_ms, next)
+        }
         SettingId::SyncSettings => toggle(&mut config.network.sync_settings),
         SettingId::AutoUploadReplay => toggle(&mut config.network.auto_upload_replay),
         SettingId::GuideSe => toggle(&mut config.audio.guide_se),
@@ -1480,6 +1495,7 @@ pub fn number_spec(id: SettingId) -> Option<NumberSpec> {
             PERCENT_UNIT,
         ),
         SettingId::PreviewFade => NumberSpec::whole(i64::from(PREVIEW_FADE_MIN_MS), i64::from(PREVIEW_FADE_MAX_MS), MILLISECOND_UNIT),
+        SettingId::KeyDebounce => NumberSpec::whole(i64::from(KEY_DEBOUNCE_MIN_MS), i64::from(KEY_DEBOUNCE_MAX_MS), MILLISECOND_UNIT),
         SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume => NumberSpec::whole(
             counted(f64::from(AUDIO_VOLUME_MIN_GAIN), PERCENT_STEPS_PER_ONE),
             counted(f64::from(AUDIO_VOLUME_MAX_GAIN), PERCENT_STEPS_PER_ONE),
@@ -1511,6 +1527,7 @@ pub fn number_steps(config: &Config, id: SettingId) -> Option<i64> {
         SettingId::JudgeTextY => counted(f64::from(config.display.judge_text_y), PERCENT_STEPS_PER_ONE),
         SettingId::PreviewVolume => counted(f64::from(config.library.preview_volume), PERCENT_STEPS_PER_ONE),
         SettingId::PreviewFade => i64::from(config.library.preview_fade_ms),
+        SettingId::KeyDebounce => i64::from(config.play.key_debounce_ms),
         SettingId::MasterVolume => i64::from(volume_percent(config.audio.master)),
         SettingId::KeyVolume => i64::from(volume_percent(config.audio.key)),
         SettingId::BgmVolume => i64::from(volume_percent(config.audio.bg)),
@@ -1552,6 +1569,7 @@ pub fn set_number_steps(config: &mut Config, id: SettingId, steps: i64) -> Adjus
         SettingId::JudgeTextY => store(&mut config.display.judge_text_y, share_of(steps, PERCENT_STEPS_PER_ONE)),
         SettingId::PreviewVolume => store(&mut config.library.preview_volume, share_of(steps, PERCENT_STEPS_PER_ONE)),
         SettingId::PreviewFade => store(&mut config.library.preview_fade_ms, steps as u32),
+        SettingId::KeyDebounce => store(&mut config.play.key_debounce_ms, steps as u32),
         SettingId::MasterVolume => store(&mut config.audio.master, share_of(steps, PERCENT_STEPS_PER_ONE)),
         SettingId::KeyVolume => store(&mut config.audio.key, share_of(steps, PERCENT_STEPS_PER_ONE)),
         SettingId::BgmVolume => store(&mut config.audio.bg, share_of(steps, PERCENT_STEPS_PER_ONE)),
@@ -1807,6 +1825,7 @@ mod tests {
             SettingId::JudgeTextY => f64::from(config.display.judge_text_y),
             SettingId::PreviewVolume => f64::from(config.library.preview_volume),
             SettingId::PreviewFade => f64::from(config.library.preview_fade_ms),
+            SettingId::KeyDebounce => f64::from(config.play.key_debounce_ms),
             SettingId::MasterVolume => f64::from(config.audio.master),
             SettingId::KeyVolume => f64::from(config.audio.key),
             SettingId::BgmVolume => f64::from(config.audio.bg),
@@ -2074,6 +2093,7 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::Sort), "DEFAULT");
         assert_eq!(display_value(&config, SettingId::PreviewVolume), "85%");
         assert_eq!(display_value(&config, SettingId::PreviewFade), "200 MS");
+        assert_eq!(display_value(&config, SettingId::KeyDebounce), "16 MS");
         assert_eq!(display_value(&config, SettingId::Random), "OFF");
         assert_eq!(display_value(&config, SettingId::Gauge), "NORMAL");
         assert_eq!(display_value(&config, SettingId::Lift), "0.0%");
@@ -2210,7 +2230,7 @@ mod tests {
             ]
         );
         assert_eq!(tab_rows(SettingTab::Select, &config), vec![SettingId::Sort, SettingId::FavoriteOnly, SettingId::PreviewVolume, SettingId::PreviewFade]);
-        assert_eq!(tab_rows(SettingTab::Input, &config), vec![SettingId::ScratchSide, SettingId::KeyConfig]);
+        assert_eq!(tab_rows(SettingTab::Input, &config), vec![SettingId::ScratchSide, SettingId::KeyConfig, SettingId::KeyDebounce]);
         assert_eq!(
             tab_rows(SettingTab::Network, &config),
             vec![
@@ -2255,7 +2275,7 @@ mod tests {
 
     /// Every row that holds a number, with the smallest change it can hold as it is shown and the
     /// two ends of the row as they are shown.
-    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 24] = [
+    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 25] = [
         (SettingId::GreenNumber, "1", "1", "6000"),
         (SettingId::HiSpeed, "0.01", "0.01", "20.00"),
         (SettingId::HiSpeedStep, "0.01", "0.01", "1.00"),
@@ -2276,6 +2296,7 @@ mod tests {
         (SettingId::JudgeTextY, "1%", "0%", "100%"),
         (SettingId::PreviewVolume, "1%", "0%", "100%"),
         (SettingId::PreviewFade, "1 MS", "0 MS", "1000 MS"),
+        (SettingId::KeyDebounce, "1 MS", "0 MS", "100 MS"),
         (SettingId::MasterVolume, "1%", "0%", "100%"),
         (SettingId::KeyVolume, "1%", "0%", "100%"),
         (SettingId::BgmVolume, "1%", "0%", "100%"),

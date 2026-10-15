@@ -23,7 +23,7 @@ const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 pub(super) const DRAWN_SIZES: [(u32, u32); 2] = [(CW, CH), (1920, 1080)];
 
 /// Every row of the screen that holds a number, by the tab it is on.
-const NUMBER_ROWS: [(SettingTab, &[SettingId]); 4] = [
+const NUMBER_ROWS: [(SettingTab, &[SettingId]); 5] = [
     (
         SettingTab::Judge,
         &[
@@ -38,6 +38,7 @@ const NUMBER_ROWS: [(SettingTab, &[SettingId]); 4] = [
         ],
     ),
     (SettingTab::Display, &[SettingId::JudgeTextY]),
+    (SettingTab::Input, &[SettingId::KeyDebounce]),
     (SettingTab::Audio, &[SettingId::MasterVolume, SettingId::KeyVolume, SettingId::BgmVolume, SettingId::SystemVolume, SettingId::AudioPolyphony]),
     (SettingTab::Select, &[SettingId::PreviewVolume, SettingId::PreviewFade]),
 ];

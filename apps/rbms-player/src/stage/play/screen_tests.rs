@@ -719,9 +719,13 @@ fn escape_on_a_chart_with_nothing_left_to_hit_fades_out_to_the_result() {
 
 /// A key pressed before the chart plays lights the skin's key beam and is never handed to the run,
 /// so the replay holds neither it nor its release. Once the chart plays, a press is the run's.
+///
+/// The keys here reach the screen microseconds apart, so KEY DEBOUNCE is off: what is asserted is
+/// which keys the run takes, not how close together they may come.
 #[test]
 fn a_key_pressed_before_the_chart_plays_is_not_part_of_the_run() {
     let mut app = app_with_play_skin("keys");
+    app.shared.config.play.key_debounce_ms = 0;
     let mut pixels = canvas();
     let lane_key = app.shared.active_keys.iter().find(|(_, lane)| *lane == 0).map(|(code, _)| *code).expect("the first lane has a key");
     enter(&mut app, unplayed());

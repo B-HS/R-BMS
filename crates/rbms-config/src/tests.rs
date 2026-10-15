@@ -266,6 +266,7 @@ fn ron_round_trip_preserves_every_field() {
     c.play.lift = 0.15;
     c.play.cover = 0.4;
     c.play.scratch_left = true;
+    c.play.key_debounce_ms = 5;
     c.play.scratch_auto = true;
     c.play.autoplay = false;
     c.play.random = NoteOption::Mirror;
@@ -508,6 +509,7 @@ fn the_new_ranged_values_are_pulled_back_into_their_rows_ranges() {
     c.display.judge_text_y = 8.0;
     c.library.preview_volume = -1.0;
     c.library.preview_fade_ms = 99_999;
+    c.play.key_debounce_ms = 99_999;
     c.sanitise();
     assert!((c.play.hispeed_step - HISPEED_STEP_MAX).abs() < 1e-9);
     assert!((c.play.hidden - LANE_SHADE_MIN).abs() < 1e-9);
@@ -515,6 +517,7 @@ fn the_new_ranged_values_are_pulled_back_into_their_rows_ranges() {
     assert!((c.display.judge_text_y - JUDGE_TEXT_Y_MAX).abs() < 1e-9);
     assert!((c.library.preview_volume - PREVIEW_VOLUME_MIN).abs() < 1e-6);
     assert_eq!(c.library.preview_fade_ms, PREVIEW_FADE_MAX_MS);
+    assert_eq!(c.play.key_debounce_ms, KEY_DEBOUNCE_MAX_MS);
 }
 
 #[test]

@@ -379,13 +379,21 @@ pub(super) fn song_at(app: &mut App, at_us: i64) {
     app.shared.song_us_last.set(at_us);
 }
 
+/// The instant the keys of these tests count from, so two of them reach the screen as far apart as
+/// the song times they land at: KEY DEBOUNCE measures the instants, not the song.
+fn keys_start() -> Instant {
+    static STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *STARTED.get_or_init(Instant::now)
+}
+
 /// Press and let go of the first lane's key through the screen, the press landing at `at_us`.
 fn strike(state: &mut PlayState, app: &mut App, at_us: i64) {
     let lane_key = app.shared.active_keys.iter().find(|(_, lane)| *lane == FIRST_LANE).map(|(code, _)| *code).expect("the first lane has a key");
     let mut send = |app: &mut App, at_us: i64, pressed: bool| {
         song_at(app, at_us);
         let key = KeyInput { code: lane_key, pressed, released: !pressed, text: None };
-        state.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, key);
+        let now = keys_start() + Duration::from_micros(u64::try_from(at_us).expect("the keys of these tests land after the song starts"));
+        state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, key);
     };
     send(app, at_us, true);
     send(app, at_us + HELD_FOR_US, false);

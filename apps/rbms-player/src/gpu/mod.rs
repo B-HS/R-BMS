@@ -17,6 +17,7 @@ mod background;
 mod batch;
 #[cfg(test)]
 mod pixel_tests;
+mod present;
 
 #[cfg(test)]
 pub(crate) use background::background_upload_needed;
@@ -25,6 +26,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use batch::{Batch, BatchKind, ColoredInstance, DistanceFieldInstance, DrawList, TexturedInstance, scissor_rect, whole_image};
+use present::Presenter;
 use rbms_render::{
     BlendFactor, BlendMode, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, QuadParams, Rect, Renderer, TexelRect, TextureFilter,
     TextureId,
@@ -238,38 +240,44 @@ pub(crate) const REQUIRE_GPU_ENV: &str = "RBMS_REQUIRE_GPU";
 
 /// Where a finished frame goes.
 enum Target {
-    /// A window's surface, presented as each frame completes.
-    Window { window: Arc<Window>, surface: wgpu::Surface<'static>, config: wgpu::SurfaceConfiguration },
+    /// A window's surface, presented as each frame completes. Its images are waited for and shown
+    /// on the presenter's thread ([`present`]); `acquired` is the one the next frame is drawn into,
+    /// once the event loop has taken it, and `reconfigure` is whether the surface is to be
+    /// reconfigured as soon as the image being asked for has come ([`Gpu::resize`]).
+    Window {
+        window: Arc<Window>,
+        surface: Arc<wgpu::Surface<'static>>,
+        config: wgpu::SurfaceConfiguration,
+        presenter: Presenter<wgpu::Surface<'static>>,
+        acquired: Option<wgpu::CurrentSurfaceTexture>,
+        reconfigure: bool,
+    },
     /// A texture nothing shows, read back by [`Gpu::capture`].
     #[cfg(test)]
     Offscreen { texture: wgpu::Texture },
 }
 
 impl Target {
+    /// Tell the windowing system a frame is about to be shown, have the presenter's thread show
+    /// `frame`, whose drawing has been submitted, and ask it for the next image.
+    fn present(&mut self, frame: wgpu::SurfaceTexture) {
+        match self {
+            Target::Window { window, presenter, .. } => {
+                window.pre_present_notify();
+                presenter.present(frame);
+                presenter.request();
+            }
+            #[cfg(test)]
+            Target::Offscreen { .. } => drop(frame),
+        }
+    }
+
     /// The target's size in its own pixels.
     fn size(&self) -> (u32, u32) {
         match self {
             Target::Window { config, .. } => (config.width, config.height),
             #[cfg(test)]
             Target::Offscreen { texture } => (texture.width(), texture.height()),
-        }
-    }
-
-    /// Ask for another frame, where there is anything to ask.
-    fn request_redraw(&self) {
-        match self {
-            Target::Window { window, .. } => window.request_redraw(),
-            #[cfg(test)]
-            Target::Offscreen { .. } => {}
-        }
-    }
-
-    /// Tell the windowing system a frame is about to be presented, where there is one to tell.
-    fn pre_present_notify(&self) {
-        match self {
-            Target::Window { window, .. } => window.pre_present_notify(),
-            #[cfg(test)]
-            Target::Offscreen { .. } => {}
         }
     }
 }
@@ -395,6 +403,8 @@ pub(crate) enum GpuError {
     NoAdapter,
     #[error("the graphics adapter refused a device: {0}")]
     NoDevice(#[from] wgpu::RequestDeviceError),
+    #[error("cannot start the thread frames are presented on: {0}")]
+    Presenter(#[from] std::io::Error),
     #[cfg(test)]
     #[error("this target is shown, not read back")]
     NotOffscreen,
@@ -435,10 +445,14 @@ impl Gpu {
     /// frame keeps, and `letterbox` is whether the first frame is fitted to them: the choice
     /// [`Gpu::set_letterbox`] makes for the frames after it, made here for the one before any of
     /// them, so a window that opens fitted is never shown stretched first.
-    pub(crate) fn new(window: Arc<Window>, shape: (u32, u32), letterbox: bool) -> Result<Gpu, GpuError> {
+    ///
+    /// The image the first frame is drawn into is asked for at once. `wake` is called, from the
+    /// presenter's thread, each time an image asked for has come: the event loop is to call
+    /// [`Gpu::frame_ready`] then, and draw a frame if it says so.
+    pub(crate) fn new(window: Arc<Window>, shape: (u32, u32), letterbox: bool, wake: impl Fn() + Send + 'static) -> Result<Gpu, GpuError> {
         let size = window.inner_size();
         let instance = instance();
-        let surface = instance.create_surface(window.clone())?;
+        let surface = Arc::new(instance.create_surface(window.clone())?);
         let adapter = request_adapter(&instance, Some(&surface))?;
         let (device, queue) = request_device(&adapter)?;
 
@@ -456,7 +470,16 @@ impl Gpu {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
-        Ok(Gpu::assemble(device, queue, formats.render, Target::Window { window, surface, config }, shape, letterbox))
+        let mut presenter = Presenter::start(surface.clone(), wake)?;
+        presenter.request();
+        Ok(Gpu::assemble(
+            device,
+            queue,
+            formats.render,
+            Target::Window { window, surface, config, presenter, acquired: None, reconfigure: false },
+            shape,
+            letterbox,
+        ))
     }
 
     /// Bring the backend up with no window: frames are drawn into a `width` x `height` texture and
@@ -722,9 +745,45 @@ impl Gpu {
         self.letterbox = on;
     }
 
-    /// Ask the window for another frame. A target with no window has nobody to ask.
-    pub(crate) fn request_redraw(&self) {
-        self.target.request_redraw();
+    /// Stop the presenter's thread as the app shuts down, waiting a bounded while for it to let go of
+    /// the surface ([`Presenter::stop`]), so the surface and the window it shows on are let go of last
+    /// here, on the event loop's thread. Nothing is drawn after this.
+    pub(crate) fn stop_presenting(&mut self) {
+        match &mut self.target {
+            Target::Window { presenter, acquired, .. } => {
+                *acquired = None;
+                presenter.stop(present::STOP_PATIENCE);
+            }
+            #[cfg(test)]
+            Target::Offscreen { .. } => {}
+        }
+    }
+
+    /// Whether the image the next frame is drawn into has come, taking it from the presenter's
+    /// thread if it has. Never waits: until it has come there is no frame to draw, and the event
+    /// loop goes back to waiting for the window. An image that could not be had -- the window is
+    /// hidden, or the surface has to be reconfigured -- has come too: the frame is run and draws
+    /// nowhere, as it always did. A target with no window always has one.
+    ///
+    /// An image that comes while the surface waits to be reconfigured ([`Gpu::resize`]) is let go
+    /// of, the surface reconfigured and the next image asked for: no frame yet.
+    pub(crate) fn frame_ready(&mut self) -> bool {
+        match &mut self.target {
+            Target::Window { surface, config, presenter, acquired, reconfigure, .. } => {
+                if acquired.is_none() {
+                    *acquired = presenter.take();
+                }
+                if *reconfigure && acquired.is_some() {
+                    *acquired = None;
+                    *reconfigure = false;
+                    surface.configure(&self.device, config);
+                    presenter.request();
+                }
+                acquired.is_some()
+            }
+            #[cfg(test)]
+            Target::Offscreen { .. } => true,
+        }
     }
 
     /// Work out where the next frame lands, and tell the shaders if that changed the size of the
@@ -737,14 +796,23 @@ impl Gpu {
         self.viewport = viewport;
     }
 
-    /// Present the queued frame on the window. A target with no window is read with
-    /// [`Gpu::capture`] instead, and this does nothing for it.
+    /// Draw the queued frame into the image [`Gpu::frame_ready`] took, hand it to the presenter's
+    /// thread to be shown, and ask for the next. None of it waits for the display. A target with no
+    /// window is read with [`Gpu::capture`] instead, and this does nothing for it.
+    ///
+    /// An image that could not be had reconfigures the surface, as a failed acquire always did, and
+    /// one a resize let go of draws nothing; either way the next is asked for.
     pub(crate) fn render(&mut self) {
-        let frame = match &self.target {
-            Target::Window { surface, config, .. } => match surface.get_current_texture() {
-                wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-                _ => {
+        let frame = match &mut self.target {
+            Target::Window { surface, config, presenter, acquired, .. } => match acquired.take() {
+                Some(wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t)) => t,
+                Some(_) => {
                     surface.configure(&self.device, config);
+                    presenter.request();
+                    return;
+                }
+                None => {
+                    presenter.request();
                     return;
                 }
             },
@@ -754,8 +822,7 @@ impl Gpu {
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.format), ..Default::default() });
         let commands = self.encode(&view);
         self.queue.submit([commands.finish()]);
-        self.target.pre_present_notify();
-        frame.present();
+        self.target.present(frame);
         self.settle();
     }
 
@@ -972,15 +1039,27 @@ impl Gpu {
         position_in_viewport(x, y, self.viewport, space)
     }
 
+    /// Reconfigure the surface for a window now `w` x `h`. A surface may not have an image out while
+    /// it is reconfigured, so the one the next frame was to be drawn into is let go of. One still
+    /// being asked for is not waited for: the surface is reconfigured once it has come
+    /// ([`Gpu::frame_ready`]), so the event loop never waits for the display, which may hold the
+    /// image a whole refresh, or for good on a window that is not shown.
     pub(crate) fn resize(&mut self, w: u32, h: u32) {
         if w == 0 || h == 0 {
             return;
         }
         match &mut self.target {
-            Target::Window { surface, config, .. } => {
+            Target::Window { surface, config, presenter, acquired, reconfigure, .. } => {
                 config.width = w;
                 config.height = h;
-                surface.configure(&self.device, config);
+                *acquired = None;
+                if presenter.waiting() {
+                    *reconfigure = true;
+                } else {
+                    *reconfigure = false;
+                    surface.configure(&self.device, config);
+                    presenter.request();
+                }
             }
             #[cfg(test)]
             Target::Offscreen { .. } => return,

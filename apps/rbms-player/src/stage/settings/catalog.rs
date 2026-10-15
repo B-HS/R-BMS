@@ -51,7 +51,7 @@ const DISPLAY_SECTIONS: &[Section] = &[
     Section { heading: "DIAGNOSTICS", rows: &[SettingId::DebugMode] },
 ];
 
-const INPUT_SECTIONS: &[Section] = &[Section { heading: "CONTROLS", rows: &[SettingId::ScratchSide, SettingId::KeyConfig] }];
+const INPUT_SECTIONS: &[Section] = &[Section { heading: "CONTROLS", rows: &[SettingId::ScratchSide, SettingId::KeyConfig, SettingId::KeyDebounce] }];
 
 const NETWORK_SECTIONS: &[Section] = &[
     Section {
@@ -207,6 +207,9 @@ pub(crate) fn description(id: SettingId) -> &'static str {
             "The side of the built-in note field the scratch lane is on. A screen drawn by a skin follows the skin's own SCRATCH SIDE option in the PLAY menu."
         }
         SettingId::KeyConfig => "Opens the key editor, where every key and controller button the player reads is listed and can be changed.",
+        SettingId::KeyDebounce => {
+            "How long a lane key of the keyboard is held after it goes down while a chart is played, so a switch that chatters plays as one press, the way LR2 does. A press is always played the instant it comes; a release inside the window is played when the window ends, if the key is still up then. 0 MS plays every change. A controller keeps its own window."
+        }
         SettingId::ServerUrl => "The address of the score server. Left empty the player stays offline and nothing is sent.",
         SettingId::PlayerId => {
             "The id LOGIN and REGISTER sign in with. While signed in, scores and settings go to the account the token belongs to. Empty is guest, and LOGOUT puts it back to guest."

@@ -46,7 +46,7 @@ use rbms_store::{Replay, ReplayJudge, SCORE_LN_MODE_FROM_CHART, ScoreBook, Score
 use sha2::{Digest, Sha256};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::WindowId;
 
@@ -622,7 +622,19 @@ struct App {
     startup_error: Option<String>,
     /// The open window and the DISPLAY rows it was last brought to; `None` until the window exists.
     window: Option<AppWindow>,
+    /// What the GPU backend wakes the event loop with when the image the next frame is drawn into
+    /// has come. Set by [`run`] before the loop starts; `None` in a test, which has no loop.
+    frame_waker: Option<EventLoopProxy<FrameReady>>,
 }
+
+/// The event the event loop is woken with from the presenter's thread: the image the next frame is
+/// drawn into has come ([`Gpu::frame_ready`]).
+///
+/// Frames are driven by it rather than by `RedrawRequested`, so that between frames the event loop
+/// waits on nothing but the window and the presenter: a key reaches it while the display is still
+/// being waited for, and is judged at the instant it came in.
+#[derive(Debug, Clone, Copy)]
+struct FrameReady;
 
 /// A screen parked under the one opened over it, with the skin scene it was in, so that coming back
 /// finds its timers and its clock where it left them.
@@ -1004,6 +1016,7 @@ impl App {
             launch_chart,
             startup_error: None,
             window: None,
+            frame_waker: None,
             shared: AppShared {
                 chart_path,
                 config,
@@ -1342,6 +1355,14 @@ impl App {
         self.apply(transition, event_loop);
     }
 
+    /// Run a frame if the image it is drawn into has come ([`Gpu::frame_ready`]). Called whenever the
+    /// presenter's thread wakes the event loop, and on a `RedrawRequested` the system asks for.
+    fn frame_if_ready(&mut self, event_loop: &ActiveEventLoop) {
+        if self.shared.gpu.as_mut().is_some_and(Gpu::frame_ready) {
+            self.frame(event_loop);
+        }
+    }
+
     /// Record why the app cannot start and ask the event loop to wind down. [`run`] turns this into
     /// a message and a failing exit code, so a machine that cannot open a window or find a usable
     /// graphics adapter is told so rather than shown a panic.
@@ -1351,19 +1372,28 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<FrameReady> for App {
     /// Bring up the window and the GPU backend, then load a chart or replay named on the command
     /// line: the keysound-loading bar is shown, or play starts at once when there is nothing to
     /// decode. A failed load exits.
+    ///
+    /// The first frame is drawn once the backend has the image for it and wakes the loop
+    /// ([`FrameReady`]); every frame after it is drawn the same way.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.shared.gpu.is_some() {
             return;
         }
+        let Some(waker) = self.frame_waker.clone() else {
+            return self.fail_startup(event_loop, "the event loop has no way to be woken for a frame".to_string());
+        };
         let window = match event_loop.create_window(window_attributes(&self.shared.config.display)) {
             Ok(window) => Arc::new(window),
             Err(e) => return self.fail_startup(event_loop, format!("cannot open a window: {e}")),
         };
-        match Gpu::new(window.clone(), stage::canvas::UI_SIZE, self.shared.config.display.fits_screen_shape()) {
+        let wake = move || {
+            waker.send_event(FrameReady).ok();
+        };
+        match Gpu::new(window.clone(), stage::canvas::UI_SIZE, self.shared.config.display.fits_screen_shape(), wake) {
             Ok(gpu) => self.shared.gpu = Some(gpu),
             Err(e) => return self.fail_startup(event_loop, e.to_string()),
         }
@@ -1377,19 +1407,27 @@ impl ApplicationHandler for App {
                     let next = self.shared.enter_loaded_chart(loaded);
                     self.apply(Transition::To(next), event_loop);
                 }
-                None => {
-                    event_loop.exit();
-                    return;
-                }
+                None => event_loop.exit(),
             }
         }
-        window.request_redraw();
+    }
+
+    /// The image the next frame is drawn into has come.
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, _: FrameReady) {
+        self.frame_if_ready(event_loop);
     }
 
     /// Translate one winit event into what the current screen understands. A moved cursor is mapped
     /// onto the fixed 1280x720 space the built-in screens are laid out in, which is drawn across
     /// the viewport the frame lands in. The left, right and middle buttons, a drag with any of them held
     /// and the wheel all reach the screen; a screen that has no use for one ignores it.
+    ///
+    /// A key is handed to the screen with the instant it is taken in, which is the instant it is
+    /// judged at. Nothing this loop runs between frames waits for the display -- the image a frame
+    /// is drawn into is waited for on the presenter's thread, which wakes the loop with
+    /// [`FrameReady`] -- so a key comes in while the display is still being waited for, and the
+    /// instant it is taken in is the instant the window had it, short of a frame the loop is busy
+    /// drawing.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -1433,12 +1471,7 @@ impl ApplicationHandler for App {
                 let transition = self.stage.handle_key(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 }, key);
                 self.apply(transition, event_loop);
             }
-            WindowEvent::RedrawRequested => {
-                self.frame(event_loop);
-                if let Some(gpu) = self.shared.gpu.as_ref() {
-                    gpu.request_redraw();
-                }
-            }
+            WindowEvent::RedrawRequested => self.frame_if_ready(event_loop),
             _ => {}
         }
     }
@@ -1599,16 +1632,20 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
 
     load_theme(&settings_path);
 
-    let event_loop = match EventLoop::new() {
+    let event_loop = match EventLoop::<FrameReady>::with_user_event().build() {
         Ok(el) => el,
         Err(e) => {
             notify(Level::Error, format!("cannot open a window: {e}"));
             return ExitCode::FAILURE;
         }
     };
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(chart, config, launch, settings_path);
+    app.frame_waker = Some(event_loop.create_proxy());
     let ran = event_loop.run_app(&mut app);
+    if let Some(gpu) = app.shared.gpu.as_mut() {
+        gpu.stop_presenting();
+    }
     app.shared.finish_saves();
     if let Err(e) = ran {
         notify(Level::Error, format!("the window event loop stopped: {e}"));
