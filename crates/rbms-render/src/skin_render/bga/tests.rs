@@ -18,8 +18,8 @@ use super::super::draw::draw_object;
 use super::super::object::{Body, SkinObject};
 use super::super::{FrameData, SkinFrame, SkinViewport};
 use super::{
-    BgaBody, BgaEvent, BgaExpand, BgaFrame, BgaLook, BgaPick, BgaPicture, BgaPlayhead, BgaPrepared, BgaShow, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS,
-    MISS_LAYER_NONE, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas, texture_bytes_of, uploaded_ahead,
+    BgaBody, BgaEvent, BgaExpand, BgaFrame, BgaLook, BgaPick, BgaPicture, BgaPlayhead, BgaPreloadOrder, BgaPrepared, BgaShow, BgaTextures,
+    DEFAULT_MISS_LAYER_DURATION_MS, MISS_LAYER_NONE, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas, texture_bytes_of, uploaded_ahead,
 };
 use crate::ctx::with_render_ctx;
 use crate::{Color, CpuCanvas, QuadParams, Rect, Renderer, TextureId};
@@ -625,6 +625,75 @@ fn the_plan_holds_the_looks_that_fit_in_the_order_the_chart_shows_them() {
     assert_eq!(uploaded_ahead([Some(canvas); 2], canvas * 2 - 1), vec![true, false], "a look past the allowance was held");
 }
 
+/// What the decodes of `count` pictures of [`LARGE_SIDE`] carry when `chart`'s plan is made under
+/// `allowance`: each picture's own looks the plan names, nothing painted.
+fn planned_decodes(chart: &BgaPlayhead, count: usize, allowance: usize) -> Vec<BgaPrepared> {
+    let one = texture_bytes_of(LARGE_SIDE, LARGE_SIDE);
+    let looks = chart.first_looks();
+    let planned = uploaded_ahead(looks.iter().map(|_| Some(one)), allowance);
+    let mut ahead = vec![Vec::new(); count];
+    for ((number, look), held) in looks.into_iter().zip(planned) {
+        if let Some(looks) = usize::try_from(number).ok().and_then(|index| ahead.get_mut(index)).filter(|_| held) {
+            looks.push(look);
+        }
+    }
+    ahead.into_iter().map(|looks| BgaPrepared { ahead: Some(looks), ..BgaPrepared::default() }).collect()
+}
+
+/// A part of the chart played on its own, as a practice slice is, is uploaded ahead in its own
+/// order, not in the whole chart's plan: a picture the plan left out only because the chart's
+/// earlier ones filled the allowance is held when the part has room for it, and the frame that
+/// then shows it hands the renderer nothing. The same part under the plan holds none of them.
+#[test]
+fn a_part_of_the_chart_is_uploaded_ahead_in_its_own_order_past_the_whole_charts_plan() {
+    let pixels: Vec<Vec<u8>> = (0..4).map(|_| flat(LARGE_SIDE, LARGE_SIDE, RED)).collect();
+    let whole = BgaPlayhead::new(vec![event(0, 0, -1), event(10, 1, -1), event(20, 2, -1), event(30, 3, -1)]);
+    let one = texture_bytes_of(LARGE_SIDE, LARGE_SIDE);
+    let prepared = planned_decodes(&whole, pixels.len(), one * 2);
+    let found = |number: i32| {
+        let index = usize::try_from(number).ok()?;
+        Some(BgaPicture { prepared: Some(&prepared[index]), ..picture(&pixels[index], LARGE_SIDE, LARGE_SIDE, 900 + u64::from(number.unsigned_abs())) })
+    };
+    let part = BgaPlayhead::new(vec![event(0, 2, -1), event(10, 3, -1)]);
+
+    let mut target = Counting::new();
+    let mut under_plan = BgaTextures::default();
+    assert_eq!(under_plan.preload_under(&mut target, &part, found, usize::MAX, one * 2), Vec::new(), "the plan is the whole chart's");
+
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    textures.set_order(BgaPreloadOrder::Part);
+    let held = textures.preload_under(&mut target, &part, found, usize::MAX, one * 2);
+    assert_eq!(held, vec![(2, BgaLook::Plain), (3, BgaLook::Plain)], "the part's pictures were left to be uploaded as they are shown");
+    let before_play = target.registered;
+    for number in [2, 3] {
+        textures.frame(&mut target, BgaPick::Playing { base: Some(number), layer: None }, BgaExpand::Full, found);
+    }
+    assert_eq!(target.registered, before_play, "a frame of the part handed the renderer a picture");
+}
+
+/// A part of the chart with more than it has room for holds the looks the plan names before the
+/// others, whatever order it shows them in: nothing was painted for those, and every frame that
+/// showed one would paint it.
+#[test]
+fn a_part_of_the_chart_holds_the_looks_the_plan_names_before_the_others() {
+    let pixels: Vec<Vec<u8>> = (0..3).map(|_| flat(LARGE_SIDE, LARGE_SIDE, RED)).collect();
+    let whole = BgaPlayhead::new(vec![event(0, 0, -1), event(10, 1, -1), event(20, 2, -1)]);
+    let one = texture_bytes_of(LARGE_SIDE, LARGE_SIDE);
+    let prepared = planned_decodes(&whole, pixels.len(), one * 2);
+    let found = |number: i32| {
+        let index = usize::try_from(number).ok()?;
+        Some(BgaPicture { prepared: Some(&prepared[index]), ..picture(&pixels[index], LARGE_SIDE, LARGE_SIDE, 950 + u64::from(number.unsigned_abs())) })
+    };
+    let part = BgaPlayhead::new(vec![event(0, 2, -1), event(10, 1, -1)]);
+
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    textures.set_order(BgaPreloadOrder::Part);
+    let held = textures.preload_under(&mut target, &part, found, usize::MAX, one);
+    assert_eq!(held, vec![(1, BgaLook::Plain)], "a look the decode painted took the room of one the plan left unpainted");
+}
+
 /// A picture that carries the chart's plan is uploaded ahead in the looks the plan names and no
 /// other, whatever order the pictures arrive in: a later picture that arrives first does not take
 /// the place the plan gave an earlier one, and a look the plan left out is not uploaded even with
@@ -634,15 +703,7 @@ fn uploading_ahead_holds_the_looks_the_plan_names_whatever_order_the_pictures_ar
     let pixels = swapping_pictures();
     let chart = swapping_chart();
     let one = (LARGE_SIDE * LARGE_SIDE) as usize * 4;
-    let costs = chart.first_looks().iter().map(|_| Some(one)).collect::<Vec<_>>();
-    let planned = uploaded_ahead(costs, one * 2);
-    let mut ahead: HashMap<i32, Vec<BgaLook>> = (0..4).map(|number| (number, Vec::new())).collect();
-    for ((number, look), held) in chart.first_looks().into_iter().zip(planned) {
-        if held {
-            ahead.entry(number).or_default().push(look);
-        }
-    }
-    let prepared: Vec<BgaPrepared> = (0..4).map(|number| BgaPrepared { ahead: Some(ahead[&number].clone()), ..BgaPrepared::default() }).collect();
+    let prepared = planned_decodes(&chart, pixels.len(), one * 2);
     let arrived = |from: usize| {
         let (pixels, prepared) = (&pixels, &prepared);
         move |number: i32| {

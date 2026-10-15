@@ -33,6 +33,11 @@
 //! and the room painting has goes to the looks that are not. The upload ahead paints those looks
 //! itself, before the chart plays.
 //!
+//! The plan is the whole chart's. A part of it played on its own, such as a practice slice, may
+//! show only looks the plan left out because the chart's earlier ones filled the allowance, so its
+//! upload ahead takes its own order ([`BgaPreloadOrder::Part`]): the looks the plan names first,
+//! since nothing was painted for them, then the rest while there is room.
+//!
 //! A picture past both allowances is painted and uploaded the frame it is first shown in, into the
 //! canvas and the texture its role keeps, which asks the allocator for nothing. The pixels are the
 //! same whichever way they got there.
@@ -183,7 +188,8 @@ pub struct BgaPrepared {
     pub keyed: Option<Vec<u8>>,
     /// The looks of the picture the chart's plan holds as textures from before the chart plays
     /// ([`uploaded_ahead`]), which were not painted: [`BgaTextures::preload`] uploads these and no
-    /// other look of the picture. `None` when no plan was made, and the upload ahead keeps to its
+    /// other look of the picture for the chart the plan was made for, and these first for a part of
+    /// it ([`BgaPreloadOrder::Part`]). `None` when no plan was made, and the upload ahead keeps to its
     /// allowance in the order the chart shows its pictures, as far as they are decoded.
     pub ahead: Option<Vec<BgaLook>>,
 }
@@ -314,6 +320,21 @@ impl Slot {
     }
 }
 
+/// Which order [`BgaTextures::preload`] takes a chart's looks in, which is a question of whether the
+/// playhead it is handed is the chart the decodes planned for ([`BgaPrepared::ahead`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BgaPreloadOrder {
+    /// The plan's: the playhead is the chart the plan was made for, so the looks it names are
+    /// uploaded and no others, whichever order the pictures are decoded in.
+    #[default]
+    Planned,
+    /// The playhead's own: it shows a part of the chart the plan was made for, such as a practice
+    /// slice, whose looks the plan may have left out only because others of the chart came before
+    /// them. The looks of the part the plan names come first, since nothing was painted for them,
+    /// and the rest follow in the order the part shows them while room is left.
+    Part,
+}
+
 /// The textures a chart's background draws from: its own picture, the layer over it and the miss
 /// layer, and the pictures uploaded ahead of play.
 #[derive(Debug, Default)]
@@ -330,6 +351,14 @@ pub struct BgaTextures {
     /// each look, that has not been uploaded ahead or found past the allowance. Made on the first
     /// call, so the frames after it walk the chart's pictures rather than all its events.
     pending: Option<Vec<(i32, BgaLook)>>,
+    /// The order `pending` is made in.
+    order: BgaPreloadOrder,
+}
+
+/// Whether the chart's plan, as `picture`'s decode carries it, names `look`: `None` for a decode
+/// that carries no plan.
+fn planned(picture: &BgaPicture<'_>, look: BgaLook) -> Option<bool> {
+    picture.prepared.and_then(|prepared| prepared.ahead.as_ref()).map(|ahead| ahead.contains(&look))
 }
 
 /// The texture that shows `look` of `picture`: the one uploaded ahead of play when there is one, and
@@ -373,7 +402,8 @@ impl BgaTextures {
     ///
     /// A picture whose decode carries the chart's plan ([`BgaPrepared::ahead`]) is uploaded in the
     /// looks the plan names and no other, which keeps the textures to the looks nothing was painted
-    /// for whichever order the pictures are decoded in.
+    /// for whichever order the pictures are decoded in. That holds for the chart the plan was made
+    /// for; textures set to [`BgaPreloadOrder::Part`] take a part of it in its own order instead.
     ///
     /// One call uploads at most `bytes`, though always at least one picture when one is left, so
     /// the frames before play share the work between them. A picture `picture` does not have yet,
@@ -400,9 +430,18 @@ impl BgaTextures {
         bytes: usize,
         allowance: usize,
     ) -> Vec<(i32, BgaLook)> {
-        let BgaTextures { resident, resident_bytes, pending, .. } = self;
+        let BgaTextures { resident, resident_bytes, pending, order, .. } = self;
+        let follows_plan = *order == BgaPreloadOrder::Planned;
         let mut held = Vec::new();
-        let pending = pending.get_or_insert_with(|| playhead.first_looks());
+        let pending = pending.get_or_insert_with(|| {
+            let looks = playhead.first_looks();
+            if follows_plan {
+                return looks;
+            }
+            let (first, rest): (Vec<_>, Vec<_>) =
+                looks.into_iter().partition(|&(number, look)| picture(number).and_then(|picture| planned(&picture, look)) == Some(true));
+            first.into_iter().chain(rest).collect()
+        });
         let mut uploaded = 0;
         let mut canvas = Vec::new();
         pending.retain(|&(number, look)| {
@@ -414,7 +453,7 @@ impl BgaTextures {
             };
             let entry = (picture.generation, look);
             let cost = picture.texture_bytes();
-            let unplanned = picture.prepared.and_then(|prepared| prepared.ahead.as_ref()).is_some_and(|ahead| !ahead.contains(&look));
+            let unplanned = follows_plan && planned(&picture, look) == Some(false);
             if resident.contains_key(&entry) || unplanned || *resident_bytes + cost > allowance {
                 return false;
             }
@@ -436,6 +475,15 @@ impl BgaTextures {
             false
         });
         held
+    }
+
+    /// Sets the order [`BgaTextures::preload`] takes the chart's looks in from its next call, for a
+    /// playhead that is or is not the chart the decodes planned for. What it already holds stays.
+    pub fn set_order(&mut self, order: BgaPreloadOrder) {
+        if self.order != order {
+            self.order = order;
+            self.pending = None;
+        }
     }
 
     /// Hands every texture back to the renderer, for a screen that is done with its background.

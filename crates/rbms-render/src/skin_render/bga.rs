@@ -38,7 +38,8 @@ use super::draw::Placement;
 use crate::{QuadParams, Rect, Renderer, TextureFilter, TextureId, UvRect};
 
 pub use pictures::{
-    BgaLook, BgaPicture, BgaPrepared, BgaTextures, RESIDENT_BYTES, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas, texture_bytes_of, uploaded_ahead,
+    BgaLook, BgaPicture, BgaPreloadOrder, BgaPrepared, BgaTextures, RESIDENT_BYTES, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas, texture_bytes_of,
+    uploaded_ahead,
 };
 pub use playhead::{BgaEvent, BgaPick, BgaPlayhead, DEFAULT_MISS_LAYER_DURATION_MS, MISS_LAYER_NONE};
 

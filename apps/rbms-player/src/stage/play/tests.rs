@@ -214,6 +214,48 @@ fn whole_chart_slice(freq: i32) -> crate::practice::PracticeSession {
     panel.start()
 }
 
+/// A chart that shows pictures 1 and 2 behind it, one after the other.
+const BGA_CHART: &str = "#PLAYER 1\n#TITLE t\n#BPM 120\n#BMP01 one.png\n#BMP02 two.png\n#00104:0102\n#00111:0100\n";
+
+/// The side of [`BGA_CHART`]'s pictures: past 256 pixels, so each is a texture of its own size.
+const BGA_SIDE: u32 = 300;
+
+/// [`BGA_CHART`] with its pictures decoded under a plan that left every look of them out, as the
+/// whole chart's plan does when the pictures before a practice slice fill its allowance.
+fn bga_state_left_out_of_the_plan() -> PlayState {
+    let src = rbms_parser::parse_with(BGA_CHART.as_bytes(), Default::default());
+    let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "t.bms"));
+    let left_out = || {
+        let mut image = crate::DecodedImage::for_test(vec![u8::MAX; (BGA_SIDE * BGA_SIDE) as usize * rbms_render::BYTES_PER_PIXEL], BGA_SIDE, BGA_SIDE);
+        image.prepared.ahead = Some(Vec::new());
+        image
+    };
+    let images = std::collections::HashMap::from([(1, left_out()), (2, left_out())]);
+    PlayState::new(PlaySession::new(model, SessionOptions::default()), images, 0, SCORE_LN_MODE_FROM_CHART.to_string())
+}
+
+/// The pictures a frame before play uploads ahead of it for `state`'s background, with room for all.
+fn preload_background(state: &mut PlayState) -> Vec<(i32, rbms_render::skin_render::frame::BgaLook)> {
+    let mut pixels = crate::stage::HeadlessCanvas::new(1, 1);
+    let PlayState { background_textures, background, bga, .. } = state;
+    background_textures.preload(&mut pixels, background, |number| bga.get(&number).map(crate::assets::bga_picture), usize::MAX)
+}
+
+/// A practice slice uploads its pictures ahead of play in its own order: the plan their decodes
+/// carry is the whole chart's, which may have left the slice's pictures out only because the
+/// chart's earlier ones filled the allowance. A run of the whole chart keeps to the plan.
+#[test]
+fn a_practice_slice_uploads_its_background_ahead_past_the_whole_charts_plan() {
+    const FULL_SPEED: i32 = 100;
+    use rbms_render::skin_render::frame::BgaLook;
+    let mut run = bga_state_left_out_of_the_plan();
+    assert_eq!(preload_background(&mut run), Vec::new(), "a run of the whole chart uploaded a look its plan left out");
+
+    let mut slice = bga_state_left_out_of_the_plan();
+    slice.set_practice(whole_chart_slice(FULL_SPEED));
+    assert_eq!(preload_background(&mut slice), vec![(1, BgaLook::Plain), (2, BgaLook::Plain)], "the slice's pictures were left for its frames to upload");
+}
+
 /// A slice played at half speed is judged in the player's own time, as the reference judges the
 /// chart it retimed (`BMSModelUtils.changeFrequency`): 30 ms late is a GREAT, as it is at full
 /// speed, not the PGREAT the 15 ms of the chart it covers would be.

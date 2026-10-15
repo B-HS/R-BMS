@@ -11,7 +11,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use rbms_config::{Config, ConfigError, LoadOutcome, SettingTab, descriptor, display_value, tab_rows};
+use rbms_config::{Config, ConfigError, LoadOutcome, SettingId, SettingTab, descriptor, display_value, tab_rows};
 use rbms_library::songdb::{SongRow, mode_from_id};
 use rbms_store::{ScoreBook, ScoreRecord};
 
@@ -29,6 +29,10 @@ const EXIT_USAGE: u8 = 2;
 
 /// What the groups of rows the play menu lists are printed under, before each group's own name.
 const PLAY_MENU_HEADING: &str = "PLAY";
+
+/// What PAD DEBOUNCE is printed as: its value is kept in the player's key config file, not in the
+/// settings document this command reads, so the document has no number to show for it.
+const KEY_CONFIG_VALUE: &str = "(in keyconfig.ron)";
 
 fn main() -> ExitCode {
     run(std::env::args())
@@ -214,9 +218,19 @@ fn tab_heading(tab: SettingTab) -> String {
     if SettingTab::PLAY_MENU.contains(&tab) { format!("{PLAY_MENU_HEADING} {}", tab.label()) } else { tab.label().to_string() }
 }
 
-/// Every settings row of one tab as `label = value`, read straight out of the document.
+/// Every settings row of one tab as `label = value`, read straight out of the document. A row whose
+/// value another file keeps names that file instead of a number the document cannot vouch for.
 fn tab_lines(config: &Config, tab: SettingTab) -> Vec<String> {
-    tab_rows(tab, config).into_iter().map(|id| format!("  {:<22} {}", descriptor(id).label, display_value(config, id))).collect()
+    tab_rows(tab, config)
+        .into_iter()
+        .map(|id| {
+            let value = match id {
+                SettingId::PadDebounce => KEY_CONFIG_VALUE.to_string(),
+                _ => display_value(config, id),
+            };
+            format!("  {:<22} {value}", descriptor(id).label)
+        })
+        .collect()
 }
 
 fn config_command(path: &Path) -> ExitCode {
@@ -386,6 +400,16 @@ mod tests {
         }
         let offered: usize = SettingTab::ALL.iter().map(|tab| rbms_config::tab_rows(*tab, &config).len()).sum();
         assert_eq!(rows, offered, "every row the settings table offers is printed exactly once");
+    }
+
+    /// PAD DEBOUNCE is the key config's, not the settings document's: the INPUT group names the file
+    /// it is kept in rather than printing the shipped number as though the document held it.
+    #[test]
+    fn pad_debounce_names_the_key_config_rather_than_a_number() {
+        let pad = descriptor(SettingId::PadDebounce).label;
+        let lines = tab_lines(&Config::default(), SettingTab::Input);
+        let line = lines.iter().find(|line| line.trim_start().starts_with(pad)).expect("the INPUT group prints PAD DEBOUNCE");
+        assert!(line.ends_with(KEY_CONFIG_VALUE), "PAD DEBOUNCE printed a value the document does not hold: {line}");
     }
 
     /// Every group is printed under a heading of its own, the play menu's under that menu's name.

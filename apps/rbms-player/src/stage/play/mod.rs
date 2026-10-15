@@ -80,7 +80,7 @@ use field::FieldChart;
 use rbms_config::FixHiSpeed;
 use rbms_render::playfield::LaneShade;
 use rbms_render::skin_render::frame::{
-    BgaExpand, BgaPlayhead, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS, GaugeScale, LaneNotes, first_lane_rect, lane_offsets,
+    BgaExpand, BgaPlayhead, BgaPreloadOrder, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS, GaugeScale, LaneNotes, first_lane_rect, lane_offsets,
 };
 use rbms_render::skin_render::graphs::{NoteDistribution, PlayCursor};
 use rbms_render::{
@@ -373,7 +373,9 @@ impl PlayState {
     /// Mark this run as a practice slice, which ends it on the slice's own end time, and judge it
     /// the way the slice is played: in the player's own time at the slice's FREQUENCY, and under a
     /// locked gauge, which keeps the judge going once the gauge empties rather than stopping it with
-    /// the slice still running. Call it before the first frame.
+    /// the slice still running. Its background is uploaded ahead in the slice's own order, since the
+    /// plan its pictures' decodes carry was made for the whole chart ([`BgaPreloadOrder::Part`]).
+    /// Call it before the first frame.
     pub(crate) fn set_practice(&mut self, practice: crate::practice::PracticeSession) {
         self.session.set_playback_rate(practice.freq_percent);
         let mut judge = self.session.judge_setup();
@@ -382,6 +384,7 @@ impl PlayState {
             judge.gauge_auto_shift = shift;
             self.session.set_judge_setup(judge);
         }
+        self.background_textures.set_order(BgaPreloadOrder::Part);
         self.practice = Some(practice);
     }
 

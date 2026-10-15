@@ -28,8 +28,8 @@ use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 pub use super::bga::{
-    BgaEvent, BgaExpand, BgaFrame, BgaLook, BgaPick, BgaPicture, BgaPlayhead, BgaPrepared, BgaShow, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS,
-    MISS_LAYER_NONE, RESIDENT_BYTES, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas, texture_bytes_of, uploaded_ahead,
+    BgaEvent, BgaExpand, BgaFrame, BgaLook, BgaPick, BgaPicture, BgaPlayhead, BgaPreloadOrder, BgaPrepared, BgaShow, BgaTextures,
+    DEFAULT_MISS_LAYER_DURATION_MS, MISS_LAYER_NONE, RESIDENT_BYTES, SMALL_PICTURE_EDGE, key_out_black, on_small_canvas, texture_bytes_of, uploaded_ahead,
 };
 pub use super::gauge::{GAUGE_TYPES, GaugeFrame, GaugeScale};
 use super::graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
