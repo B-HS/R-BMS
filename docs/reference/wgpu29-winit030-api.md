@@ -20,6 +20,7 @@
 - `surface.get_capabilities(&adapter) -> SurfaceCapabilities { formats, present_modes, alpha_modes }`.
 - `surface.configure(&device, &SurfaceConfiguration{ usage: TextureUsages::RENDER_ATTACHMENT, format, width, height, present_mode, alpha_mode, view_formats, desired_maximum_frame_latency })`.
 - `surface.get_current_texture() -> CurrentSurfaceTexture` (**enum, Result 아님**): `Success(SurfaceTexture) | Suboptimal(SurfaceTexture) | Timeout | Occluded | Outdated | Lost | Validation`. `SurfaceTexture { texture: Texture }` + `.present()`.
+  - 처리 규칙(`surface_texture.rs:51-87` 문서): `Timeout`·`Occluded` 는 그 프레임을 건너뛰고 나중에(가림이 풀리면) 다시 요청한다. `configure` 는 `Outdated`(와 `Lost` 의 재생성 뒤)에만 한다. Metal 은 보이지 않는 창에 `Occluded` 를 바로 돌려주므로(wgpu-hal `metal/surface.rs:150-152`) 곧바로 다시 요청하면 바쁜 루프가 된다. 이 앱은 `HIDDEN_FRAME_INTERVAL` 동안 요청을 미루고 `WindowEvent::Occluded(false)` 에서 바로 요청한다(`gpu/present.rs`).
 - 텍스처 업로드/카피 타입은 wgpu 24+에서 **개명**: `ImageCopyTexture→TexelCopyTextureInfo`, `ImageDataLayout→TexelCopyBufferLayout` (구현 시 wgpu-types에서 정확명 재확인).
 
 ## rbms-player 계획 (텍스처 블릿 방식)

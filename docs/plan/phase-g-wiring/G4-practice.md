@@ -188,6 +188,10 @@ fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto:
   마지막 노트가 아니라 END TIME 에서 끝난다. `rbms-play` 쪽 `failed` 는 래치만 할 뿐 판정을 멈추지 않으므로
   (`crates/rbms-play/src/lib.rs` `run_gauge_auto_shift`) 이 분기만으로 충분하다.
   `PracticeSession.gauge_locked` 는 항상 `true` 이며, 이 분기가 그 계약을 지킨다는 표식이다.
+- **2026-10-15 정정(S19 2차 감사 PLAY2-1)**: 위 전제("`failed` 는 래치만 하고 판정을 멈추지 않는다")는 S19 에서
+  깨졌다. 엔진이 게이지가 빈 순간부터 입력과 시간 정산을 멈추므로(`JudgeEngine::failed`), 이 분기만으로는 연습 판이
+  판정 없이 흘렀다. 지금은 `PlayState::set_practice` 가 `PracticeSession::gauge_shift` 로 GAUGE AUTO SHIFT NONE 을
+  CONTINUE 로 바꿔, `gauge_locked` 가 실제로 판정을 끝까지 잇게 한다.
 - **근거**: 스펙 §6.2 "게이지 락", §11 행 9.
 
 ## 7. 슬라이스 종료 후 패널 복귀 + 저장

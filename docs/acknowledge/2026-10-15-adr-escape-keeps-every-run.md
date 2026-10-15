@@ -15,6 +15,9 @@
 3. 제외는 사람이 치지 않은 판(오토플레이, 리플레이 보기, 연습)과 옛 세대 2 SCRATCH AUTO 판뿐이다.
 4. 서버는 이미 FAILED 코스를 받는다. 순위·최고 기록 정책은 단일 곡 실패 판과 같다(ranked, 램프 → EX → BP 순서의 최고 기록 경쟁). 서버 코드는 바꾸지 않았고 테스트로 확인했다.
 
+5. **앱 종료로 끝난 판(S19 2차 REC2-2, 2026-10-15 추가).** 플레이 중 창 닫기·Cmd+Q·메뉴 Quit·Dock 종료는 Esc 와 같은 규칙으로 판과 코스를 남긴다. 사용자 정책 "사람이 친 판은 실패·포기·종료 포함 전부 저장·전송"에 따른다. 끄는 중에는 네트워크로 보내지 않고, 다음 실행의 기록 동기화가 보낸다(끝나는 프로세스와 함께 끊긴 요청이 같은 판을 두 번 보내게 하지 않는다). 코스의 스테이지 사이(LOADING·결정 화면)에서 꺼도 친 스테이지까지의 FAILED 코스가 남는다. 강제 종료(kill -9·정전·크래시)는 남길 수 없다.
+6. **코스 스테이지 사이에서 나감(S19 2차 REC2-1).** 다음 스테이지의 LOADING 에서 Esc, 결정 화면에서 나감, 스테이지 차트를 못 읽거나 라이브러리에 없으면 코스가 그 자리에서 끝난다. 친 스테이지가 있으면 FAILED 코스로 남겨 보낸다. 서 있던 스테이지는 치지 않았으므로 아무것도 더하지 않는다.
+
 ## 이유
 
 - 사용자 원칙 "서버로 저장되지 않는 기록따윈 없어"([모든 판 저장·전송 ADR](2026-10-14-adr-save-and-send-every-played-run.md)).
@@ -35,6 +38,7 @@
 - 서버: `web/tests/service/course.test.ts`(FAILED 코스 저장·순위·최고 기록 경쟁).
 - 이 ADR 은 [Esc 포기 판 ADR](2026-10-14-adr-abandoned-run-saved.md) 의 결정 2·3 을 대체한다.
 - 테스트: `app_result/record_tests.rs` `leaving_before_any_note_is_judged_keeps_a_failed_run`, `leaving_mid_course_keeps_the_stage_and_a_failed_course`, `leaving_a_course_stage_with_no_note_left_ends_it_as_played`.
+- 결정 5·6: `apps/rbms-player/src/lib.rs`(`App::keep_what_quitting_cuts_short`, `exiting`), `app_result.rs`(`keep_run_cut_short_by_quitting`, `abandon_course`, `Sending`), `stage/loading.rs`(`give_up_on_the_chart`), `stage/decide.rs`(`abandon`), 테스트 `app_result/record_tests/left_behind.rs`.
 
 ## 날짜와 사용자 원문
 

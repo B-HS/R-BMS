@@ -61,6 +61,9 @@
 남은 것(사용자에게 보고): 키보드 입력 시각은 아직 처리 시각(winit 이벤트에 시각이 없고 present 대기 뒤에 들어옴, test-debt 3.53), 코스 램프 규칙을 원본으로 바꾼 것(결정 5 범위 밖, 승인 필요), LN 이 키 채터에 약해짐, 컨트롤러 판정이 평균 약 8 ms 빨라짐(JUDGE OFFSET 재조정 안내), airTKkill 류 오토플레이 Failed(TOTAL 낮음 추정, 미확인).
 사용자 결정(2026-10-15): (1) 코스 램프는 원본 규칙(MusicResult.java:402-428) 유지. (3) 키보드에도 짧은 디바운스(설정 가능)로 채터를 막는다. (2) 원문 "2번은 beatmania iidx, lunatic rave 2(lr2)등에서 쓰이는방법으로 제대로 정확하게 구현해" — 키보드 판정 시각을 IIDX·LR2 의 입력 처리 방식을 조사해 그대로 정확히 구현한다(S19-2b).
 - [ ] S19-2b. 입력 처리 방식 조사(IIDX·LR2·beatoraja) → 키보드 입력 시각 구현 → 키보드 디바운스 → 리뷰·게이트.
+S19-2b 결과(2026-10-15, Workflow `wf_da2e2873-f73`): 커밋 `794361b`(rbms-present 스레드, LR2 방식 레인 키 디바운스 16 ms), `a13f6ce`(문서). CI 3 OS·웹 통과.
+2차 감사(Workflow `wf_32dc80f0-053`): 확인 17건(수리가 만든 결함: 서버 total_notes 영구 상한, Esc 리플레이 Missing 경합, 연습 게이지 사망 판정 정지). 3차 수정 Workflow `wf_5cbb07fa-653` 진행.
+사용자 결정(2026-10-15, THR2-1 A): rbms-present 스레드가 wgpu-hal Metal acquire 안에서 메인 스레드 전용 AppKit API(NSView.window, NSWindow.occlusionState)를 읽는 위반은 구조를 유지하고 ADR·QA 에 알려진 위험으로 기록, 상류 이슈 https://github.com/gfx-rs/wgpu/issues/10627 (2026-10-15 등록). 키보드 ADR 과 QA(Main Thread Checker 실행 절차) 반영은 3차 수정 뒤.
 - [ ] S19-3. 2차 감사(새 결함이 없을 때까지 반복).
 - [ ] S19-4. 성능 계측 결과와 기준 충족 기록(`docs/quality-assurance/`).
 - [ ] S19-5. 리뷰, 게이트, 커밋·푸시, CI(떠는 테스트가 없는지 반복 실행 포함), 웹 배포 확인.
