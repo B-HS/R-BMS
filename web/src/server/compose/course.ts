@@ -4,6 +4,7 @@ import { user } from '@server/db/auth-schema'
 import { chart, course, courseBest, courseChart, courseScore, rival } from '@server/db/schema'
 import { newId } from '@server/lib/token'
 import { createCourseService } from '@server/service/domain/course/course.service'
+import { effectiveJudgeCounts } from '@server/service/domain/score/best-policy'
 import type { ScoreRankedRow, ScoreRankingRow } from '@server/service/domain/score/score.service'
 import { courseBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
 
@@ -29,6 +30,16 @@ const courseRankingSelection = {
     lpr: courseScore.lpr,
     ems: courseScore.ems,
     lms: courseScore.lms,
+    pgreat: courseScore.pgreat,
+    great: courseScore.great,
+    good: courseScore.good,
+    bad: courseScore.bad,
+    poor: courseScore.poor,
+    miss: courseScore.miss,
+    fast: courseScore.fast,
+    slow: courseScore.slow,
+    combobreak: courseScore.combobreak,
+    emptyPoor: courseScore.emptyPoor,
 }
 
 type CourseRankingSelectionRow = {
@@ -53,6 +64,16 @@ type CourseRankingSelectionRow = {
     lpr: number
     ems: number
     lms: number
+    pgreat: number
+    great: number
+    good: number
+    bad: number
+    poor: number
+    miss: number
+    fast: number
+    slow: number
+    combobreak: number
+    emptyPoor: number
 }
 
 const toCourseRankingRow = (row: CourseRankingSelectionRow): ScoreRankingRow => ({
@@ -69,15 +90,10 @@ const toCourseRankingRow = (row: CourseRankingSelectionRow): ScoreRankingRow => 
     totalNotes: 0,
     scratchAuto: row.scratchAuto,
     judge: {
-        pgreat: row.epg + row.lpg,
-        great: row.egr + row.lgr,
-        good: row.egd + row.lgd,
-        bad: row.ebd + row.lbd,
-        poor: row.epr + row.lpr,
-        miss: row.ems + row.lms,
-        fast: 0,
-        slow: 0,
-        combobreak: 0,
+        ...effectiveJudgeCounts(row),
+        fast: row.fast,
+        slow: row.slow,
+        combobreak: row.combobreak,
         epg: row.epg,
         lpg: row.lpg,
         egr: row.egr,
@@ -91,7 +107,7 @@ const toCourseRankingRow = (row: CourseRankingSelectionRow): ScoreRankingRow => 
         ems: row.ems,
         lms: row.lms,
         avgjudge: 0,
-        empty_poor: 0,
+        empty_poor: row.emptyPoor,
     },
 })
 

@@ -7,7 +7,7 @@ import { replayUploadSchema } from '@server/dto/replay'
 import { API_VERSION, scoreSubmissionSchema } from '@server/dto/score'
 import { SETTING_MAX_BYTES, settingPutSchema } from '@server/dto/setting'
 import { parseEnv } from '@server/lib/env'
-import { createCourseService, findCourseIntegrityFailure } from '@server/service/domain/course/course.service'
+import { createCourseService, findCourseIntegrityFailure, type CourseScoreInsertRow } from '@server/service/domain/course/course.service'
 import { createReplayService, type ReplayInsertRow } from '@server/service/domain/replay/replay.service'
 import { BUILD_TRUST } from '@server/service/domain/score/ranked-policy'
 import {
@@ -123,8 +123,9 @@ const createScoreStub = () => {
     return { inserted, service }
 }
 
-const createCourseStub = (charts: { md5: string; sha256: string }[]) =>
-    createCourseService({
+const createCourseStub = (charts: { md5: string; sha256: string }[]) => {
+    const inserted: CourseScoreInsertRow[] = []
+    const service = createCourseService({
         newId: (prefix) => `${prefix}contract`,
         db: {
             findCourse: async () => null,
@@ -132,7 +133,9 @@ const createCourseStub = (charts: { md5: string; sha256: string }[]) =>
             upsertCourse: async () => undefined,
             replaceCourseCharts: async () => undefined,
             findCourseScoreIdByIdempotency: async () => null,
-            insertCourseScore: async () => undefined,
+            insertCourseScore: async (row) => {
+                inserted.push(row)
+            },
             getCourseBest: async () => null,
             upsertCourseBestIfBetter: async () => true,
             countBetterCourseBests: async () => 0,
@@ -141,6 +144,8 @@ const createCourseStub = (charts: { md5: string; sha256: string }[]) =>
             getRivalUserIds: async () => [],
         },
     })
+    return { inserted, service }
+}
 
 const createReplayStub = () => {
     const stored: ReplayInsertRow[] = []
@@ -230,7 +235,7 @@ describe.each(filesOf('score'))('%s — 점수 제출 라우트와 서비스', (
         expect(isSha256Hash(input.chart.sha256)).toBe(true)
         expect(isMd5Hash(input.chart.md5)).toBe(true)
         expect(isJudgeCountConsistent(input.judge, input.total_notes, input.mode)).toBe(true)
-        expect(findSubmissionIntegrityFailure(input, input.total_notes)).toBeNull()
+        expect(findSubmissionIntegrityFailure(input)).toBeNull()
     })
 
     test('시드가 0 으로 바뀌지 않고 그대로 저장된다', async () => {
@@ -269,17 +274,25 @@ describe.each(filesOf('course'))('%s — 코스 제출 라우트와 서비스', 
         expect(isPlayedAtPlausible(input.played_at, Date.now())).toBe(true)
         expect(isSha256Hash(input.course_hash)).toBe(true)
         expect(input.charts.filter((chart) => !isMd5Hash(chart.md5) || !isSha256Hash(chart.sha256))).toEqual([])
-        expect(findCourseIntegrityFailure(input, 0)).toBeNull()
+        expect(findCourseIntegrityFailure(input)).toBeNull()
     })
 
-    test('서비스가 거절 없이 받는다', async () => {
-        const result = await createCourseStub(input.charts).submit({
+    test('서비스가 거절 없이 받고 보낸 판정 합계를 그대로 저장한다', async () => {
+        const { inserted, service } = createCourseStub(input.charts)
+        const result = await service.submit({
             input,
             user: { id: CONTRACT_USER_ID, loginId: input.player.id },
             buildTrust: BUILD_TRUST.TRUSTED,
             requireTrustedBuild: false,
         })
         expect(result.response.accepted).toBe(true)
+        expect(inserted[0]).toMatchObject({
+            pgreat: input.judge.pgreat,
+            great: input.judge.great,
+            poor: input.judge.poor,
+            fast: input.judge.fast,
+            maxExScore: input.max_ex_score,
+        })
     })
 })
 

@@ -1,6 +1,13 @@
-import { clearLampFromId, clearLampToId, gaugeTypeToId, type JudgeBreakdownInput } from '@server/dto/common'
+import { clearLampFromId, clearLampToId, gaugeTypeToId, type ClearLamp, type JudgeBreakdownInput } from '@server/dto/common'
 import type { ScoreRecordOutput, ScoreSubmissionInput, SubmitResponseOutput } from '@server/dto/score'
-import { deriveExScore, deriveMinbp, isBetterBest } from '@server/service/domain/score/best-policy'
+import {
+    deriveExScore,
+    deriveMinbp,
+    effectiveJudgeCounts,
+    EX_PER_PGREAT,
+    isBetterBest,
+    type EffectiveJudgeCounts,
+} from '@server/service/domain/score/best-policy'
 import { BUILD_TRUST, rankedPolicy, submissionMessage, type BuildTrust, type ScoreFlag } from '@server/service/domain/score/ranked-policy'
 
 export const GUEST_PLAYER_ID = 'guest'
@@ -9,7 +16,6 @@ const PLAYED_AT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000
 const USER_AGENT_MAX_LENGTH = 255
 const IDEMPOTENCY_WINDOW_MS = 1000
 const JUDGE_BAD_KEEPS_NOTE_MODES: ReadonlySet<string> = new Set(['POPN_9K'])
-export const LONG_NOTE_COUNT_MAX_FACTOR = 2
 
 export const DUPLICATE_SUBMISSION_MESSAGE = 'duplicate submission ignored'
 
@@ -193,14 +199,25 @@ export const isPlayedAtPlausible = (playedAt: number, now: number) => playedAt -
 const normalizeMode = (mode: string) => mode.trim().toUpperCase().replaceAll('-', '_')
 
 /**
- * Counts only the judgements that consume a note: PGREAT, GREAT, GOOD, BAD and POOR (a missed note).
- * An empty POOR (`miss` on the wire) consumes nothing, and in POPN_9K a BAD does not consume the note either.
+ * Whether a BAD takes its note in `mode`. In POPN_9K it leaves the note to be judged again (`JudgeProperty.PMS`
+ * `judgeVanish`); every other mode consumes it.
  */
-export const judgedNoteCount = (judge: JudgeBreakdownInput, mode: string) =>
-    judge.pgreat + judge.great + judge.good + (JUDGE_BAD_KEEPS_NOTE_MODES.has(normalizeMode(mode)) ? 0 : judge.bad) + judge.poor
+export const badTakesNote = (mode: string) => !JUDGE_BAD_KEEPS_NOTE_MODES.has(normalizeMode(mode))
 
-export const isJudgeCountConsistent = (judge: JudgeBreakdownInput, totalNotes: number, mode: string) =>
-    totalNotes === 0 || judgedNoteCount(judge, mode) <= totalNotes
+/**
+ * Counts only the judgements that consume a note: PGREAT, GREAT, GOOD, BAD when `badTakesItsNote`, and POOR (a missed note).
+ * An empty POOR (`miss` on the wire) consumes nothing.
+ */
+export const countNotesTaken = (counts: EffectiveJudgeCounts, badTakesItsNote: boolean) =>
+    counts.pgreat + counts.great + counts.good + (badTakesItsNote ? counts.bad : 0) + counts.poor
+
+export const judgedNoteCount = (judge: JudgeBreakdownInput, mode: string) => countNotesTaken(effectiveJudgeCounts(judge), badTakesNote(mode))
+
+/**
+ * The judgements that took a note are no more than the notes the body says the chart has. A body that says 0 notes took
+ * none: every client that sends judge counts sends the chart's note count with them.
+ */
+export const isJudgeCountConsistent = (judge: JudgeBreakdownInput, totalNotes: number, mode: string) => judgedNoteCount(judge, mode) <= totalNotes
 
 /**
  * A claimed EX score has to be the one the judge counts add up to (two per PGREAT, one per GREAT). Zero means the client
@@ -208,34 +225,47 @@ export const isJudgeCountConsistent = (judge: JudgeBreakdownInput, totalNotes: n
  */
 export const isExScoreConsistent = (judge: JudgeBreakdownInput, exScore: number) => exScore === 0 || exScore === deriveExScore(judge)
 
-/**
- * A note count that is not above what the chart is known to hold. Long note modes count an end note as well, so a mode
- * that counts both ends of every long note reaches twice the plain count and no more.
- */
-export const isTotalNotesPlausible = (totalNotes: number, knownChartNotes: number) =>
-    knownChartNotes <= 0 || totalNotes <= knownChartNotes * LONG_NOTE_COUNT_MAX_FACTOR
+/** A best EX the body claims is no more than two per note it says the chart has. Zero means the client sent none. */
+export const isMaxExScoreConsistent = (maxExScore: number, totalNotes: number) => maxExScore === 0 || maxExScore <= totalNotes * EX_PER_PGREAT
 
 /**
- * The note count the judge counts are held against: the client's own, or, when it sent none, what the server knows of the
- * chart. Zero means nothing is known and the judge counts can not be held to any bound.
+ * A BP the body claims counts at least every BAD, POOR and empty POOR it judged; a run the gauge ended adds the notes it
+ * never reached on top. Zero means the client sent none, and the server derives it from the counts.
  */
-export const effectiveTotalNotes = (totalNotes: number, knownChartNotes: number) => (totalNotes > 0 ? totalNotes : Math.max(knownChartNotes, 0))
+export const isMinbpConsistent = (judge: JudgeBreakdownInput, minbp: number) => minbp === 0 || minbp >= deriveMinbp(judge)
+
+const FULL_COMBO_LAMPS: ReadonlySet<ClearLamp> = new Set(['FullCombo', 'Perfect', 'Max'])
+
+/**
+ * Whether the lamp can stand on these counts by the reference rule (`BMSPlayer.java:868`). A full combo has every note it
+ * took inside one streak, so it has no POOR and, where a BAD takes its note, no BAD. PERFECT has no GOOD, and MAX no GREAT
+ * either. An empty POOR (`miss`) takes no note and can come before the first note, so it never rules a lamp out, and nor
+ * does a pop'n BAD for the same reason. Lamps below FULL COMBO are the gauge's and are not checked.
+ */
+export const isClearLampConsistent = (clear: ClearLamp, judge: JudgeBreakdownInput, mode: string) => {
+    if (!FULL_COMBO_LAMPS.has(clear)) return true
+    const counts = effectiveJudgeCounts(judge)
+    if (counts.poor > 0 || (badTakesNote(mode) && counts.bad > 0)) return false
+    if (clear === 'FullCombo') return true
+    if (counts.good > 0) return false
+    return clear === 'Perfect' || counts.great === 0
+}
 
 export type SubmissionIntegrityFailure = { field: string; reason: string }
 
 /**
- * The first reason a score body can not be what a real play sends, or null. `knownChartNotes` is what the server holds for
- * the chart, 0 when it holds nothing.
+ * The first reason a score body can not be what a real play sends, or null. Only the body is read: the chart row the
+ * server keeps was written by whoever submitted the chart first, so its note count bounds nothing.
  */
 export const findSubmissionIntegrityFailure = (
-    input: Pick<ScoreSubmissionInput, 'judge' | 'total_notes' | 'ex_score' | 'mode'>,
-    knownChartNotes: number,
+    input: Pick<ScoreSubmissionInput, 'judge' | 'total_notes' | 'ex_score' | 'max_ex_score' | 'minbp' | 'clear' | 'mode'>,
 ): SubmissionIntegrityFailure | null => {
     if (!isExScoreConsistent(input.judge, input.ex_score)) return { field: 'ex_score', reason: 'ex_score does not match the judge counts' }
-    if (!isTotalNotesPlausible(input.total_notes, knownChartNotes))
-        return { field: 'total_notes', reason: 'total_notes exceeds what the chart holds' }
-    const total = effectiveTotalNotes(input.total_notes, knownChartNotes)
-    if (!isJudgeCountConsistent(input.judge, total, input.mode)) return { field: 'judge', reason: 'judge count exceeds total_notes' }
+    if (!isJudgeCountConsistent(input.judge, input.total_notes, input.mode)) return { field: 'judge', reason: 'judge count exceeds total_notes' }
+    if (!isMaxExScoreConsistent(input.max_ex_score, input.total_notes)) return { field: 'max_ex_score', reason: 'max_ex_score exceeds two per note' }
+    if (!isMinbpConsistent(input.judge, input.minbp)) return { field: 'minbp', reason: 'minbp is below the BAD, POOR and empty POOR count' }
+    if (!isClearLampConsistent(input.clear, input.judge, input.mode))
+        return { field: 'clear', reason: 'clear lamp is not reachable with these judge counts' }
     return null
 }
 

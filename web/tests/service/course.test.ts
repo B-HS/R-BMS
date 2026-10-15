@@ -247,23 +247,66 @@ describe('courseService.submit 의 경합과 빌드 정책 (IR-1, IR-4)', () => 
 
 describe('findCourseIntegrityFailure', () => {
     const judge = { pgreat: 600, great: 100, good: 0, bad: 0, poor: 0, miss: 0, fast: 0, slow: 0, combobreak: 0 }
-    const parsed = (overrides: Record<string, unknown>) => submission({ judge, ex_score: 1300, ...overrides })
+    const parsed = (overrides: Record<string, unknown>) => submission({ judge, ex_score: 1300, max_ex_score: 1400, minbp: 0, ...overrides })
 
-    test('판정이 만든 EX 와 같으면 통과한다', () => {
-        expect(findCourseIntegrityFailure(parsed({}), 0)).toBeNull()
+    test('판정이 만든 EX 와 같고 노트 수 안이면 통과한다', () => {
+        expect(findCourseIntegrityFailure(parsed({}))).toBeNull()
     })
 
     test('EX 가 판정과 어긋나면 ex_score 로 거절한다', () => {
-        expect(findCourseIntegrityFailure(parsed({ ex_score: 2147483647 }), 0)).toEqual({
+        expect(findCourseIntegrityFailure(parsed({ ex_score: 2147483647 }))).toEqual({
             field: 'ex_score',
             reason: 'ex_score does not match the judge counts',
         })
     })
 
-    test('코스의 알려진 노트 수의 두 배를 넘는 판정은 거절하고 모르면 가두지 않는다', () => {
-        expect(findCourseIntegrityFailure(parsed({}), 350)).toBeNull()
-        expect(findCourseIntegrityFailure(parsed({}), 349)).toEqual({ field: 'judge', reason: 'judge count exceeds the notes of the course' })
-        expect(findCourseIntegrityFailure(parsed({}), 0)).toBeNull()
+    test('노트를 가져간 판정은 본문의 max_ex_score(노트당 2)를 넘을 수 없다 — 차트 목록을 비워도 마찬가지다 (R2-ACC-1)', () => {
+        expect(findCourseIntegrityFailure(parsed({ max_ex_score: 1399 }))).toEqual({
+            field: 'judge',
+            reason: 'judge count exceeds the notes of the course',
+        })
+        const forged = submission({ judge: { ...judge, pgreat: 1_000_000, great: 0 }, ex_score: 2_000_000, charts: [] })
+        expect(findCourseIntegrityFailure(forged)).toEqual({ field: 'judge', reason: 'judge count exceeds the notes of the course' })
+    })
+
+    test("코스 본문은 모드를 모르므로 노트를 남기는 pop'n BAD 는 세지 않는다", () => {
+        expect(findCourseIntegrityFailure(parsed({ judge: { ...judge, bad: 50 }, minbp: 50 }))).toBeNull()
+    })
+
+    test('minbp 는 0 이거나 BAD+POOR+空POOR 이상이다', () => {
+        const judged = { ...judge, pgreat: 500, poor: 100 }
+        expect(findCourseIntegrityFailure(parsed({ judge: judged, ex_score: 1100, minbp: 1 }))).toEqual({
+            field: 'minbp',
+            reason: 'minbp is below the BAD, POOR and empty POOR count',
+        })
+        expect(findCourseIntegrityFailure(parsed({ judge: judged, ex_score: 1100, minbp: 100 }))).toBeNull()
+    })
+
+    test('0.1.0 이 보내는 마지막 곡의 램프는 코스 판정과 맞지 않아도 받는다', () => {
+        expect(findCourseIntegrityFailure(parsed({ judge: { ...judge, poor: 5 }, max_ex_score: 1410, clear: 'Max', minbp: 5 }))).toBeNull()
+    })
+})
+
+describe('코스 판정 합계 저장 (R2-ACC-3)', () => {
+    test('클라이언트가 보낸 합계·FAST/SLOW·콤보 끊김·空POOR·최대 EX 를 그대로 저장한다', async () => {
+        const { service, inserted } = createService()
+        const judge = { pgreat: 56, great: 3, good: 1, bad: 1, poor: 2, miss: 4, fast: 40, slow: 20, combobreak: 3, empty_poor: 4 }
+        await service.submit({ input: submission({ judge, ex_score: 115, max_ex_score: 126, minbp: 7 }), user: USER, ...TRUSTED })
+        expect(inserted[0]).toMatchObject({
+            pgreat: 56,
+            great: 3,
+            good: 1,
+            bad: 1,
+            poor: 2,
+            miss: 4,
+            fast: 40,
+            slow: 20,
+            combobreak: 3,
+            emptyPoor: 4,
+            maxExScore: 126,
+            epg: 0,
+            lpg: 0,
+        })
     })
 })
 

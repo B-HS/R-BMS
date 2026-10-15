@@ -1,7 +1,7 @@
 import { clearLampToId } from '@server/dto/common'
 import type { CourseMetaInput, CourseSubmissionInput } from '@server/dto/course'
 import type { SubmitResponseOutput } from '@server/dto/score'
-import { deriveExScore, deriveMinbp, isBetterBest } from '@server/service/domain/score/best-policy'
+import { deriveExScore, deriveMinbp, effectiveJudgeCounts, EX_PER_PGREAT, isBetterBest } from '@server/service/domain/score/best-policy'
 import {
     assistFlags,
     buildTrustFlags,
@@ -13,9 +13,9 @@ import {
     type ScoreFlag,
 } from '@server/service/domain/score/ranked-policy'
 import {
+    countNotesTaken,
     isExScoreConsistent,
-    isJudgeCountConsistent,
-    LONG_NOTE_COUNT_MAX_FACTOR,
+    isMinbpConsistent,
     toScoreRecord,
     type BestScope,
     type ScoreRankedRow,
@@ -55,7 +55,18 @@ export type CourseScoreInsertRow = {
     lpr: number
     ems: number
     lms: number
+    pgreat: number
+    great: number
+    good: number
+    bad: number
+    poor: number
+    miss: number
+    fast: number
+    slow: number
+    combobreak: number
+    emptyPoor: number
     exScore: number
+    maxExScore: number
     maxCombo: number
     gaugeValue: number
     minbp: number
@@ -116,19 +127,25 @@ export const toCourseMeta = (row: CourseRow, charts: CourseChartRow[]): CourseMe
     extra: (row.extra as Record<string, unknown>) ?? {},
 })
 
-const COURSE_JUDGE_MODE = ''
+/**
+ * A course runs charts of any mode and its body names none, so a BAD is never counted as taking a note: a pop'n BAD
+ * leaves its note to be judged again.
+ */
+const COURSE_BAD_TAKES_NOTE = false
 
 /**
- * The first reason a course body can not be what a real run sends, or null. `knownCourseNotes` is the sum of the notes the
- * server holds for every chart of the course, 0 when any of them is unknown, which leaves the judge counts without a bound.
+ * The first reason a course body can not be what a real run sends, or null. Only the body is read: the judgements that
+ * took a note are held to the best EX the body claims (two per note), because the chart rows the server keeps were
+ * written by whoever submitted those charts first and bound nothing. The lamp is not checked: a course of 0.1.0 sends
+ * its last stage's own lamp, which says nothing of the course's counts.
  */
 export const findCourseIntegrityFailure = (
-    input: Pick<CourseSubmissionInput, 'judge' | 'ex_score'>,
-    knownCourseNotes: number,
+    input: Pick<CourseSubmissionInput, 'judge' | 'ex_score' | 'max_ex_score' | 'minbp'>,
 ): SubmissionIntegrityFailure | null => {
     if (!isExScoreConsistent(input.judge, input.ex_score)) return { field: 'ex_score', reason: 'ex_score does not match the judge counts' }
-    if (!isJudgeCountConsistent(input.judge, knownCourseNotes * LONG_NOTE_COUNT_MAX_FACTOR, COURSE_JUDGE_MODE))
+    if (countNotesTaken(effectiveJudgeCounts(input.judge), COURSE_BAD_TAKES_NOTE) * EX_PER_PGREAT > input.max_ex_score)
         return { field: 'judge', reason: 'judge count exceeds the notes of the course' }
+    if (!isMinbpConsistent(input.judge, input.minbp)) return { field: 'minbp', reason: 'minbp is below the BAD, POOR and empty POOR count' }
     return null
 }
 
@@ -160,7 +177,18 @@ export const buildCourseScoreRow = (params: {
         lpr: input.judge.lpr,
         ems: input.judge.ems,
         lms: input.judge.lms,
+        pgreat: input.judge.pgreat,
+        great: input.judge.great,
+        good: input.judge.good,
+        bad: input.judge.bad,
+        poor: input.judge.poor,
+        miss: input.judge.miss,
+        fast: input.judge.fast,
+        slow: input.judge.slow,
+        combobreak: input.judge.combobreak,
+        emptyPoor: input.judge.empty_poor,
         exScore: params.exScore,
+        maxExScore: input.max_ex_score,
         maxCombo: input.max_combo,
         gaugeValue: input.gauge_value,
         minbp: params.minbp,

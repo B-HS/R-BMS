@@ -68,8 +68,7 @@ export const createSubmitScoreRoute = () =>
             await auditRejection('chart-hash')
             throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'chart.sha256' })
         }
-        const unknownChartNotes = 0
-        const claimFailure = findSubmissionIntegrityFailure(input, unknownChartNotes)
+        const claimFailure = findSubmissionIntegrityFailure(input)
         if (claimFailure) {
             await auditRejection('integrity')
             throw createAppError(ERROR_CODE.VALIDATION_ERROR, claimFailure)
@@ -92,11 +91,6 @@ export const createSubmitScoreRoute = () =>
         if (!resolved) {
             await auditRejection('chart-unknown')
             throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND)
-        }
-        const chartFailure = findSubmissionIntegrityFailure(input, resolved.notes)
-        if (chartFailure) {
-            await auditRejection('integrity')
-            throw createAppError(ERROR_CODE.VALIDATION_ERROR, chartFailure)
         }
 
         const buildTrust = await resolveBuildTrust(input.client_build_sha256 ?? null)

@@ -58,42 +58,42 @@ describe('chartService.ensureFromSubmission 의 메타 채우기', () => {
 
     test('새 차트는 보낸 제목, 아티스트, 레벨로 만든다', async () => {
         const { service, rows } = createService()
-        expect(await service.ensureFromSubmission(params)).toEqual({ sha256: SHA, md5: MD5, changed: true, notes: 500 })
+        expect(await service.ensureFromSubmission(params)).toEqual({ sha256: SHA, md5: MD5, changed: true })
         expect(rows.get(SHA)).toMatchObject({ title: 'Sent Title', artist: 'Sent Artist', level: 12, notes: 500 })
     })
 
     test('공란인 행만 채우고 값이 있는 필드는 건드리지 않는다', async () => {
         const { service, rows } = createService([blankRow({ title: 'Existing Title', artist: '', level: 7 })])
         const result = await service.ensureFromSubmission(params)
-        expect(result).toEqual({ sha256: SHA, md5: MD5, changed: true, notes: 0 })
+        expect(result).toEqual({ sha256: SHA, md5: MD5, changed: true })
         expect(rows.get(SHA)).toMatchObject({ title: 'Existing Title', artist: 'Sent Artist', level: 7 })
     })
 
     test('이미 다 찬 행은 쓰지 않는다', async () => {
         const { service, rows } = createService([blankRow({ title: 'T', artist: 'A', level: 3 })])
         const before = rows.get(SHA)
-        expect(await service.ensureFromSubmission(params)).toEqual({ sha256: SHA, md5: MD5, changed: false, notes: 0 })
+        expect(await service.ensureFromSubmission(params)).toEqual({ sha256: SHA, md5: MD5, changed: false })
         expect(rows.get(SHA)).toBe(before)
     })
 
     test('메타 없이 보낸 옛 클라이언트의 요청도 그대로 통과한다', async () => {
         const { service, rows } = createService()
         const legacy = await service.ensureFromSubmission({ md5: MD5, sha256: SHA, title: '', mode: '7K', notes: 10, lntype: 0 })
-        expect(legacy).toEqual({ sha256: SHA, md5: MD5, changed: true, notes: 10 })
+        expect(legacy).toEqual({ sha256: SHA, md5: MD5, changed: true })
         expect(rows.get(SHA)).toMatchObject({ title: '', artist: '', level: null })
     })
 
     test('md5 가 비어 있던 행은 md5 도 채운다', async () => {
         const { service, rows } = createService([blankRow({ md5: null })])
         const result = await service.ensureFromSubmission({ ...params, title: '', artist: '', level: null })
-        expect(result).toEqual({ sha256: SHA, md5: MD5, changed: true, notes: 0 })
+        expect(result).toEqual({ sha256: SHA, md5: MD5, changed: true })
         expect(rows.get(SHA)?.md5).toBe(MD5)
     })
 
-    test('이미 있는 차트는 처음 보고된 노트 수를 그대로 돌려준다', async () => {
-        const { service } = createService([blankRow({ title: 'T', artist: 'A', level: 3, notes: 812 })])
-        const result = await service.ensureFromSubmission({ ...params, notes: 999999 })
-        expect(result?.notes).toBe(812)
+    test('이미 있는 차트의 노트 수는 다음 제출이 바꾸지 않는다', async () => {
+        const { service, rows } = createService([blankRow({ title: 'T', artist: 'A', level: 3, notes: 812 })])
+        await service.ensureFromSubmission({ ...params, notes: 999999 })
+        expect(rows.get(SHA)?.notes).toBe(812)
     })
 
     test('sha256 도 기존 행도 없으면 null 이다', async () => {

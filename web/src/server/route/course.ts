@@ -1,5 +1,5 @@
 import { compose } from '@server/compose'
-import { COURSE_SUBMISSION_MAX_BYTES, courseMetaUpsertSchema, courseSubmissionSchema, type CourseSubmissionInput } from '@server/dto/course'
+import { COURSE_SUBMISSION_MAX_BYTES, courseMetaUpsertSchema, courseSubmissionSchema } from '@server/dto/course'
 import { bestQuerySchema, rankingQuerySchema } from '@server/dto/score'
 import { irRaw } from '@server/lib/api-response'
 import { getEnv } from '@server/lib/env'
@@ -11,7 +11,6 @@ import { withApiToken } from '@server/lib/with-api-token'
 import { withAdmin } from '@server/lib/with-session'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { RATE_LIMIT, enforceUserRateLimit, getClientIp } from '@server/lib/with-rate-limit'
-import type { ChartService } from '@server/service/domain/chart/chart.service'
 import { findCourseIntegrityFailure } from '@server/service/domain/course/course.service'
 import { isPlayedAtPlausible } from '@server/service/domain/score/score.service'
 import { readCourseMeta, readCourseRanking } from '@server/service/public-reads'
@@ -26,16 +25,10 @@ const SUPPORTED_API_VERSION = 1
 
 export const resolvePathCourseHash = async (context: OptionalCourseContext) => (context?.params ? ((await context.params).courseHash ?? null) : null)
 
-export const sumKnownCourseNotes = async (charts: CourseSubmissionInput['charts'], findChart: ChartService['findByHash']) => {
-    const rows = await Promise.all(charts.map((chart) => findChart(chart.sha256 || chart.md5)))
-    if (rows.length === 0 || rows.some((row) => row === null || row.notes <= 0)) return 0
-    return rows.reduce((sum, row) => sum + (row?.notes ?? 0), 0)
-}
-
 const submitCourse = () =>
     withErrorHandling(async (request: Request, context: OptionalCourseContext) => {
         if (!parseBearerToken(request)) throw createAppError(ERROR_CODE.UNAUTHORIZED)
-        const { authService, chartService, courseService, scoreService, resolveBuildTrust } = compose()
+        const { authService, courseService, scoreService, resolveBuildTrust } = compose()
         return withApiToken({ resolveApiTokenUser: authService.resolveApiTokenUser })(
             async (authedRequest, authedContext: OptionalCourseContext, user) => {
                 enforceUserRateLimit('course-submit', user.id, RATE_LIMIT.SCORE_SUBMIT)
@@ -72,7 +65,7 @@ const submitCourse = () =>
                     await reject(createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'played_at' }))
                 if (env.REQUIRE_BUILD_HASH && !input.client_build_sha256)
                     await reject(createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'client_build_sha256' }))
-                const integrityFailure = findCourseIntegrityFailure(input, await sumKnownCourseNotes(input.charts, chartService.findByHash))
+                const integrityFailure = findCourseIntegrityFailure(input)
                 if (integrityFailure) await reject(createAppError(ERROR_CODE.VALIDATION_ERROR, integrityFailure))
 
                 const result = await courseService.submit({

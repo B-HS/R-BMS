@@ -49,6 +49,7 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 | url / appendurl | varchar(512) null |
 | extra | json · created_at/updated_at |
 - 인덱스: `PK(sha256)`, `uniq(md5)`. 제출 시 둘 중 있는 키로 upsert, 다른 키 backfill.
+- `notes` 는 그 차트를 처음 제출한 본문의 `total_notes`(또는 일반 사용자 토큰의 `POST /api/charts`)가 정한 값이고 뒤의 제출이 고치지 않는다. 신뢰할 수 있는 출처가 아니므로 **표시용 메타**로만 쓰고 제출 검증의 상한으로 쓰지 않는다(S19 2차 수리 R2-ACC-2: 상한으로 쓰던 동안 `total_notes:1` 인 첫 제출 하나가 그 차트의 이후 정상 판을 모두 400 으로 막았다). 잘못 심긴 값의 점검·보정 SQL 은 테스트 부채 3.36.
 
 ### `score` (IRScoreData 슈퍼셋) — 모든 제출 history
 | 컬럼 | 타입 | 비고 |
@@ -116,7 +117,7 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 ### `course` / `course_chart` / `course_score`
 - `course`: `course_hash` PK · name · lntype · constraint json · trophy json · extra.
 - `course_chart`: course_hash + position **복합 PK** · chart_sha256(논리 chart 관계).
-- `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · ex_score · max_combo · gauge_value · minbp · trophy · scratch_auto bool default false · ranked · played_at · extra · `uniq(user_id, course_hash, played_at)`. `scratch_auto` 는 SCRATCH AUTO 스테이지가 낀 코스다(웨이브 20, 0002). 넓힌 판정 스테이지가 낀 코스(`assist` 에 `AUTO_SCRATCH` 밖의 태그)는 `ranked=false` 이다. flag 가 하나라도 있으면 `extra` 에 `flags`·`scratch_auto`·`assist` 를 담는다(api-spec §6).
+- `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · 판정 합계 `pgreat`·`great`·`good`·`bad`·`poor`·`miss` · `fast`·`slow`·`combobreak`·`empty_poor` · `max_ex_score`(이 열들은 0004, S19 2차 R2-ACC-3: 클라이언트는 코스 판정을 합계로만 보내고 분리는 0 이라, 그 전에는 판정이 모두 0 으로 저장됐다. 0004 이전 행은 복구할 수 없어 0 이다. 읽기는 분리 합이 0 이 아니면 그것, 아니면 합계) · ex_score · max_combo · gauge_value · minbp · trophy · scratch_auto bool default false · ranked · played_at · extra · `uniq(user_id, course_hash, played_at)`. `scratch_auto` 는 SCRATCH AUTO 스테이지가 낀 코스다(웨이브 20, 0002). 넓힌 판정 스테이지가 낀 코스(`assist` 에 `AUTO_SCRATCH` 밖의 태그)는 `ranked=false` 이다. flag 가 하나라도 있으면 `extra` 에 `flags`·`scratch_auto`·`assist` 를 담는다(api-spec §6).
 - `course_best`: course_hash + user_id + scratch_auto 복합 PK(랭킹 가속). `chart_best` 와 같이 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 둔다(0002).
 - `score.scratch_auto` 는 0002 전부터 있던 열이고, 웨이브 20부터는 `options.scratch_auto` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판이면 true 로 적는다. 그래서 점수 행에는 새 열을 더하지 않았다.
 
@@ -141,7 +142,7 @@ type ChartKey = Pick<typeof chart.$inferSelect, 'md5'|'sha256'>
 ```
 
 ## 마이그레이션
-- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 4개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성) → `0003_replay_user_quota`(`replay.user_id` 색인 `replay_user_idx`). 운영 DB 에는 앞의 세 개가 적용됐다(2026-10-14). 0003 은 아직 운영에 적용하지 않았다(S19, 적용은 메인의 `web-db.yml` 절차). 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
+- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 5개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성) → `0003_replay_user_quota`(`replay.user_id` 색인 `replay_user_idx`) → `0004_course_score_judge_totals`(`course_score` 판정 합계·FAST/SLOW·콤보 끊김·空POOR·`max_ex_score` 열). 운영 DB 에는 앞의 세 개가 적용됐다(2026-10-14). 0003·0004 는 아직 운영에 적용하지 않았다(S19, 적용은 메인의 `web-db.yml` 절차, 순서는 web/architecture.md 3-2). 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
 
 ## 설계 노트 (왜)
 - **best 분리 테이블**: 랭킹은 차트당 수천 history를 매번 정렬하지 않고 `chart_best`만 정렬 → P95<150ms(NFR).

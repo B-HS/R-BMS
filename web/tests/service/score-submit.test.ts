@@ -6,12 +6,11 @@ import { isBetterBest } from '@server/service/domain/score/best-policy'
 import {
     createScoreService,
     DUPLICATE_SUBMISSION_MESSAGE,
-    effectiveTotalNotes,
     findSubmissionIntegrityFailure,
+    isClearLampConsistent,
     isExScoreConsistent,
     isJudgeCountConsistent,
     isPlayedAtPlausible,
-    isTotalNotesPlausible,
     judgedNoteCount,
     type ScoreInsertRow,
     type ScoreRankedRow,
@@ -571,30 +570,94 @@ describe('EX 점수와 노트 수 대조 (IR-4)', () => {
         expect(isExScoreConsistent(split, 12)).toBe(false)
     })
 
-    test('차트가 아는 노트 수의 두 배를 넘는 total_notes 는 거절하고 모르면 통과한다', () => {
-        expect(isTotalNotesPlausible(1000, 500)).toBe(true)
-        expect(isTotalNotesPlausible(1001, 500)).toBe(false)
-        expect(isTotalNotesPlausible(999999, 0)).toBe(true)
-    })
-
-    test('클라이언트가 total_notes 를 0 으로 보내면 차트의 노트 수로 판정 수를 가둔다', () => {
-        expect(effectiveTotalNotes(0, 500)).toBe(500)
-        expect(effectiveTotalNotes(300, 500)).toBe(300)
-        expect(effectiveTotalNotes(0, 0)).toBe(0)
-        const heavy = judgeBreakdownSchema.parse({ ...judge, pgreat: 600 })
-        expect(findSubmissionIntegrityFailure({ judge: heavy, total_notes: 0, ex_score: 1200, mode: 'BEAT_7K' }, 500)).toEqual({
-            field: 'judge',
-            reason: 'judge count exceeds total_notes',
-        })
-        expect(findSubmissionIntegrityFailure({ judge: heavy, total_notes: 0, ex_score: 1200, mode: 'BEAT_7K' }, 0)).toBeNull()
-    })
+    const body = ({ judge: judged = {}, ...rest }: { judge?: Record<string, number> } & Record<string, unknown>) =>
+        submission({ clear: 'Normal', ex_score: 0, max_ex_score: 0, minbp: 0, ...rest, judge: { ...judge, ...judged } })
 
     test('EX 가 판정과 어긋난 본문은 ex_score 필드로 거절한다', () => {
-        expect(findSubmissionIntegrityFailure({ judge, total_notes: 812, ex_score: 999999, mode: 'BEAT_7K' }, 812)).toEqual({
+        expect(findSubmissionIntegrityFailure(body({ total_notes: 812, ex_score: 999999 }))).toEqual({
             field: 'ex_score',
             reason: 'ex_score does not match the judge counts',
         })
-        expect(findSubmissionIntegrityFailure({ judge, total_notes: 812, ex_score: 2, mode: 'BEAT_7K' }, 812)).toBeNull()
+        expect(findSubmissionIntegrityFailure(body({ total_notes: 812, ex_score: 2 }))).toBeNull()
+    })
+
+    test('분리 필드(epg)만 키우고 합계(pgreat)를 0 으로 둔 위조는 노트 수에 묶여 거절된다 (R2-ACC-1)', () => {
+        const forged = body({ judge: { pgreat: 0, epg: 100_000 }, total_notes: 500, ex_score: 200_000, clear: 'Max' })
+        expect(findSubmissionIntegrityFailure(forged)).toEqual({ field: 'judge', reason: 'judge count exceeds total_notes' })
+        expect(judgedNoteCount(forged.judge, 'BEAT_7K')).toBe(100_000)
+    })
+
+    test('total_notes 를 0 으로 보내 상한을 피할 수 없다', () => {
+        expect(findSubmissionIntegrityFailure(body({ judge: { pgreat: 600 }, total_notes: 0, ex_score: 1200 }))).toEqual({
+            field: 'judge',
+            reason: 'judge count exceeds total_notes',
+        })
+        expect(findSubmissionIntegrityFailure(body({ judge: { pgreat: 0, miss: 3 }, total_notes: 0, clear: 'NoPlay' }))).toBeNull()
+    })
+
+    test('max_ex_score 는 0 이거나 노트당 2 이하다', () => {
+        expect(findSubmissionIntegrityFailure(body({ total_notes: 500, max_ex_score: 1000 }))).toBeNull()
+        expect(findSubmissionIntegrityFailure(body({ total_notes: 500, max_ex_score: 1001 }))).toEqual({
+            field: 'max_ex_score',
+            reason: 'max_ex_score exceeds two per note',
+        })
+    })
+
+    test('minbp 는 0 이거나 BAD+POOR+空POOR 이상이다 (게이지가 끝난 판은 못 친 노트가 더해진다)', () => {
+        const judged = { pgreat: 400, poor: 100 }
+        expect(findSubmissionIntegrityFailure(body({ judge: judged, total_notes: 500, minbp: 1 }))).toEqual({
+            field: 'minbp',
+            reason: 'minbp is below the BAD, POOR and empty POOR count',
+        })
+        expect(findSubmissionIntegrityFailure(body({ judge: judged, total_notes: 500, minbp: 100 }))).toBeNull()
+        expect(findSubmissionIntegrityFailure(body({ judge: judged, total_notes: 600, minbp: 200, clear: 'Failed' }))).toBeNull()
+        expect(findSubmissionIntegrityFailure(body({ judge: judged, total_notes: 500, minbp: 0 }))).toBeNull()
+    })
+
+    test('판정과 무관한 MAX 램프는 clear 필드로 거절한다 (검증자 missed 2)', () => {
+        expect(findSubmissionIntegrityFailure(body({ judge: { pgreat: 400, poor: 100 }, total_notes: 500, clear: 'Max' }))).toEqual({
+            field: 'clear',
+            reason: 'clear lamp is not reachable with these judge counts',
+        })
+    })
+})
+
+describe('램프와 판정의 일관성 (원본 BMSPlayer.java:868 의 풀콤 조건)', () => {
+    const counts = (overrides: Record<string, number>) =>
+        judgeBreakdownSchema.parse({ pgreat: 0, great: 0, good: 0, bad: 0, poor: 0, miss: 0, fast: 0, slow: 0, combobreak: 0, ...overrides })
+
+    test('MAX 는 GREAT·GOOD 이 없고, PERFECT 는 GOOD 이 없다', () => {
+        expect(isClearLampConsistent('Max', counts({ pgreat: 10 }), 'BEAT_7K')).toBe(true)
+        expect(isClearLampConsistent('Max', counts({ pgreat: 9, great: 1 }), 'BEAT_7K')).toBe(false)
+        expect(isClearLampConsistent('Perfect', counts({ pgreat: 9, great: 1 }), 'BEAT_7K')).toBe(true)
+        expect(isClearLampConsistent('Perfect', counts({ pgreat: 9, good: 1 }), 'BEAT_7K')).toBe(false)
+        expect(isClearLampConsistent('FullCombo', counts({ pgreat: 8, great: 1, good: 1 }), 'BEAT_7K')).toBe(true)
+    })
+
+    test('풀콤 램프는 POOR 가 하나라도 있으면 불가능하고, BAD 는 노트를 가져가는 모드에서만 불가능하다', () => {
+        for (const lamp of ['FullCombo', 'Perfect', 'Max'] as const) {
+            expect(isClearLampConsistent(lamp, counts({ pgreat: 9, poor: 1 }), 'BEAT_7K')).toBe(false)
+            expect(isClearLampConsistent(lamp, counts({ pgreat: 9, poor: 1 }), 'POPN_9K')).toBe(false)
+            expect(isClearLampConsistent(lamp, counts({ pgreat: 9, bad: 1 }), 'BEAT_7K')).toBe(false)
+            expect(isClearLampConsistent(lamp, counts({ pgreat: 9, bad: 1 }), 'BEAT_5K')).toBe(false)
+            expect(isClearLampConsistent(lamp, counts({ pgreat: 9, bad: 1 }), 'POPN_9K')).toBe(true)
+        }
+    })
+
+    test("空POOR(miss) 는 노트를 가져가지 않아 어느 풀콤 램프도 막지 않는다 (7K 는 콤보를 잇고, 5K·pop'n 은 첫 노트 앞이면 된다)", () => {
+        for (const mode of ['BEAT_7K', 'BEAT_5K', 'POPN_9K', 'KEYBOARD_24K']) {
+            expect(isClearLampConsistent('Max', counts({ pgreat: 10, miss: 3, empty_poor: 3 }), mode)).toBe(true)
+        }
+    })
+
+    test('게이지 램프와 FAILED·어시스트 램프는 판정과 무관하다', () => {
+        for (const lamp of ['NoPlay', 'Failed', 'AssistEasy', 'LightAssistEasy', 'Easy', 'Normal', 'Hard', 'ExHard'] as const) {
+            expect(isClearLampConsistent(lamp, counts({ pgreat: 1, bad: 5, poor: 5 }), 'BEAT_7K')).toBe(true)
+        }
+    })
+
+    test('분리 필드만 보낸 판정도 같은 수로 읽는다', () => {
+        expect(isClearLampConsistent('Max', counts({ pgreat: 10, epr: 1 }), 'BEAT_7K')).toBe(false)
     })
 })
 
@@ -671,7 +734,7 @@ describe('judge 합계 일관성', () => {
         expect(judgedNoteCount(popn, 'BEAT_7K')).toBe(108)
     })
 
-    test('total_notes 가 0 인 구버전 제출은 검사를 건너뛴다', () => {
-        expect(isJudgeCountConsistent(judge, 0, 'BEAT_7K')).toBe(true)
+    test('total_notes 가 0 이면 노트를 가져간 판정도 0 이어야 한다', () => {
+        expect(isJudgeCountConsistent(judge, 0, 'BEAT_7K')).toBe(false)
     })
 })

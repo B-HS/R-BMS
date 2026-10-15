@@ -268,6 +268,7 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 
 - [x] IR-1: `chart_best`·`course_best` 갱신을 조건부 문장 하나로(동시 제출이 낮은 판으로 덮지 못함). DB 테스트 `tests/db/best-race.test.ts`
 - [x] IR-4: EX·`total_notes`·판정 수 일관성 검사, 코스 제출에 단일 곡과 같은 rate limit·본문 크기·빌드 해시 정책·감사
+- [x] S19 2차 R2-ACC-1·2·3: 본문만 보는 무결성 검사(분리·합계 같은 읽기 `effectiveJudgeCounts`, `total_notes` 0 회피 차단, `max_ex_score`, `minbp` 하한, 풀콤 램프의 판정 조건. 코스는 판정 × 2 ≤ `max_ex_score`), 첫 제출자·`POST /api/charts` 가 정한 `chart.notes` 를 상한에서 뺌(한 제출이 다른 사용자를 막지 못함), 코스 판정 합계 저장(마이그레이션 `0004_course_score_judge_totals`, 운영 미적용: 순서는 [architecture.md](./architecture.md) 3-2). 테스트 `tests/db/submission-integrity.test.ts`(라우트, 임시 MySQL), `tests/service/score-submit.test.ts`·`course.test.ts`. 운영 점검 SQL `web/scripts/chart-notes.{count,repair,restore}.sql`(복구는 `chart_notes_backup` 에 먼저 백업, `tests/db/chart-notes-scripts.test.ts`, 테스트 부채 3.36)
 - [x] IR-5: 가입·로그인 오류 구분, 비밀번호 길이 상한 128, 운영 필수 환경 변수를 인증 첫 사용 시 검증
 - [x] IR-8 서버: `DELETE /api/auth/token/current`, 로그인·가입 때 요청에 실린 이전 토큰 폐기(만료는 강제하지 않음)
 - [x] IR-9: 서버 컴포넌트의 자기 URL fetch 제거 → `public-reads.ts` 직접 읽기
