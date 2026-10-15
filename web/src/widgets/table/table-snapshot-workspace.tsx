@@ -43,7 +43,6 @@ type TableSnapshotWorkspaceProps = {
     detail: TableSnapshotDetail
     initialUserId: string | null
     tableUrl: string
-    snapshotDate: string
 }
 
 const SEARCH_COMMIT_DELAY_MS = 250
@@ -62,7 +61,7 @@ const replaceAddress = (filter: TableFilterState, mode: 'push' | 'replace') => {
     else window.history.replaceState(null, '', url)
 }
 
-export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail, initialUserId, tableUrl, snapshotDate }) => {
+export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail, initialUserId, tableUrl }) => {
     const searchParams = useSearchParams()
     const pathname = usePathname()
     const { user, isPending: isSessionPending } = useSessionUser()
@@ -329,7 +328,7 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
                 </TableLevelSection>
             ))}
 
-            <TableSnapshotSidebar table={table} tableUrl={tableUrl} snapshotDate={snapshotDate} />
+            <TableSnapshotSidebar table={table} tableUrl={tableUrl} />
             <TableChartDialog
                 entry={selectedEntry}
                 isOpen={isDialogOpen}

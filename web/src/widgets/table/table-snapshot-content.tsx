@@ -5,7 +5,7 @@ import { TableLevelSkeleton } from '@features/table/table-level-skeleton'
 import { ShellPage } from '@widgets/shell/shell-page'
 import { TableSnapshotSession } from '@widgets/table/table-snapshot-session'
 import { SITE_URL } from '@shared/constants/site'
-import { formatCount, formatDateTime } from '@shared/lib/format'
+import { formatCount } from '@shared/lib/format'
 import { CopyButton } from '@shared/ui/copy-button'
 import { getSnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { groupTableByLevel } from '@server/service/domain/table-snapshot/table-snapshot.service'
@@ -19,13 +19,12 @@ export const TableSnapshotContent = ({ tableId }: { tableId: string }) => {
     const detail = groupTableByLevel(snapshot)
     const { table, levels } = detail
     const tableUrl = `${SITE_URL}${table.standard_paths.page}`
-    const snapshotDate = formatDateTime(Date.parse(table.source.fetched_at)).split(' ')[0]
     const levelRange = levels.length > 0 ? `${table.symbol}${levels[0].level} ~ ${table.symbol}${levels[levels.length - 1].level}` : ''
 
     return (
         <ShellPage
             title={table.name}
-            description={`${levelRange} · ${formatCount(table.entry_count)}곡 · 원본 갱신 ${table.last_update}`}
+            description={`${levelRange} · ${formatCount(table.entry_count)}곡 · 갱신 ${table.last_update}`}
             actions={
                 <CopyButton
                     value={tableUrl}
@@ -42,7 +41,7 @@ export const TableSnapshotContent = ({ tableId }: { tableId: string }) => {
                         previewCards={SKELETON_PREVIEW_CARDS}
                     />
                 }>
-                <TableSnapshotSession detail={detail} tableUrl={tableUrl} snapshotDate={snapshotDate} />
+                <TableSnapshotSession detail={detail} tableUrl={tableUrl} />
             </Suspense>
         </ShellPage>
     )

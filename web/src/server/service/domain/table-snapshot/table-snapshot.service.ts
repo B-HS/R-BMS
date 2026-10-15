@@ -70,8 +70,6 @@ export const summariseTable = (table: SnapshotTable): TableSummaryOutput => {
         entry_count: table.entries.length,
         level_count: levels.length,
         last_update: table.header.last_update,
-        original_url: table.header.original_url,
-        source: { page_url: table.source.origin.page_url, fetched_at: table.source.fetched_at },
         levels,
         standard_paths: standardPaths(table.id),
     }
@@ -98,8 +96,6 @@ export const toStandardHeader = (table: SnapshotTable, origin: string) => ({
     data_url: `${origin}${standardPaths(table.id).data}`,
     level_order: table.header.level_order,
     last_update: table.header.last_update,
-    original_url: table.header.original_url,
-    mirror_of: table.source.origin.page_url,
 })
 
 const normaliseSearchText = (value: string) => value.normalize('NFKC').toLowerCase()

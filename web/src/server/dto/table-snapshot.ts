@@ -67,8 +67,6 @@ export const tableSummaryOutputSchema = z.object({
     entry_count: z.number().int(),
     level_count: z.number().int(),
     last_update: z.string(),
-    original_url: z.string(),
-    source: z.object({ page_url: z.string(), fetched_at: z.string() }),
     levels: z.array(z.object({ level: z.string(), count: z.number().int() })),
     standard_paths: z.object({ page: z.string(), header: z.string(), data: z.string() }),
 })

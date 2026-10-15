@@ -1,7 +1,6 @@
 import type { FC, ReactNode } from 'react'
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
-import { formatUrlHost } from '@features/table/format-url-host'
 import { LampStackBar, type LampCount } from '@features/lamp/lamp-stack-bar'
 import type { TableSnapshotSummary } from '@entities/table-snapshot.type'
 import { PERCENT_SCALE } from '@shared/constants/ui'
@@ -38,7 +37,7 @@ export const TableSnapshotCard: FC<TableSnapshotCardProps> = ({ table, progress,
                     <p className='text-muted-foreground text-xs tabular-nums'>
                         {formatCount(table.entry_count)}곡 ·{' '}
                         {firstLevel && lastLevel && `${table.symbol}${firstLevel} ~ ${table.symbol}${lastLevel} · `}
-                        {formatCount(table.level_count)}단계 · 원본 갱신 {table.last_update} · 출처 {formatUrlHost(table.source.page_url)}
+                        {formatCount(table.level_count)}단계 · 갱신 {table.last_update}
                     </p>
                 </div>
             </div>

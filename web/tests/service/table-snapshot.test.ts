@@ -103,7 +103,7 @@ describe('표준 표 형식', () => {
         expect(header.name).toBe('発狂BMS難易度表')
         expect(header.symbol).toBe('★')
         expect(header.level_order).toHaveLength(LEVEL_COUNT)
-        expect(header.mirror_of).toBe('https://darksabun.club/table/archive/insane1/')
+        expect(Object.keys(header).toSorted()).toEqual(['data_url', 'last_update', 'level_order', 'name', 'symbol'])
         expect(toStandardHeader(requireTable(), 'http://localhost:3102').data_url).toBe('http://localhost:3102/tables/insane1/data.json')
     })
 
