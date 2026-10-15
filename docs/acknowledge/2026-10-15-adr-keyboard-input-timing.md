@@ -1,6 +1,7 @@
 # ADR: 키보드 입력은 화면 대기와 떨어진 이벤트 루프가 받은 순간으로 판정하고, 레인 키에 디바운스를 둔다
 
-> 상태: 유효(기본값 16 ms 와 컨트롤러 LR2 형은 사용자 확인 끝, 아래 "확인받은 것") · 결정일 2026-10-15 · 결정자 사용자(S19 결정 2·3), 디바운스 방식은 결정 2 의 "LR2 등에서 쓰이는 방법으로"에 따라 LR2 형 · 커밋 미정(메인이 채운다)
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 상태: 유효(기본값 16 ms 와 컨트롤러 LR2 형은 사용자 확인 끝, 아래 "확인받은 것") · 결정일 2026-10-15 · 결정자 사용자(S19 결정 2·3), 디바운스 방식은 결정 2 의 "LR2 등에서 쓰이는 방법으로"에 따라 LR2 형 · 커밋 `794361b`(결정 1~3), `1676c57`(컨트롤러 LR2 형·PAD DEBOUNCE, 남은 한계 4), `c81eda1`(rbms-cli 의 PAD DEBOUNCE 표시)
 
 ## 배경
 
@@ -24,7 +25,7 @@
    - **불변식: 이미지를 요청해 둔 동안 메인은 queue 에 제출하지 않고, device 를 poll 하지 않고, 표면을 재설정하지 않는다.** wgpu-core 29.0.4 의 획득은 대기 내내 device 의 fence 를 읽기로 쥐고(`present.rs:165-175`), `Queue::submit` 은 같은 fence 를 쓰기로 잡는다(`device/queue.rs:1202`). 그래서 이 셋 가운데 하나라도 메인에 생기면 메인이 다시 vsync 까지 막혀 이번 결정이 조용히 무너진다. 지금 유일한 제출은 이미지를 받은 뒤의 `Gpu::render` 다(`gpu/present.rs` 모듈 문서에도 적었다).
    - **전용 스레드의 실패.** 전용 스레드가 끝날 때(패닉으로 풀릴 때 포함) 이벤트 루프를 깨운다. 그러면 메인의 다음 `take`·`request` 가 "rbms-present thread stopped" 로 패닉한다. 예전에 같은 오류(wgpu 검증 오류 등)가 메인에서 바로 크래시했던 것과 같은 결과이고, 창이 조용히 멈추지 않는다.
    - **종료.** 이벤트 루프가 끝나면 메인이 전용 스레드를 멈추고 최대 1 초(wgpu 의 획득 시한 `FRAME_TIMEOUT_MS`) 기다린다(`Gpu::stop_presenting`, `Presenter::stop`). 그래서 표면과 창의 마지막 참조는 메인에서 놓인다(macOS 에서 `Window::drop` 이 다른 스레드면 메인으로 동기 디스패치한다). 시한 안에 끝나지 않으면 경고를 남기고 그대로 종료한다.
-3. **키보드 레인 키에 디바운스(KEY DEBOUNCE)를 둔다. 방식은 LR2 의 `inputinterval` 이다.** 설정 `play.key_debounce_ms`(SETTINGS 의 INPUT 탭 CONTROLS 묶음, 0~100 ms, 1 ms 단위), **기본 16 ms**. LR2 의 상태 기계(배경 절)를 폴링 대신 창이 알린 변화의 시각으로 옮겼다(`stage/play/key_gate.rs`).
+3. **키보드 레인 키에 디바운스(KEY DEBOUNCE)를 둔다. 방식은 LR2 의 `inputinterval` 이다.** 설정 `play.key_debounce_ms`(SETTINGS 의 INPUT 탭 CONTROLS 묶음, 0~100 ms, 1 ms 단위), **기본 16 ms**. LR2 의 상태 기계(배경 절)를 폴링 대신 창이 알린 변화의 시각으로 옮겼다. 상태 기계는 `apps/rbms-player/src/input_debounce.rs` 의 `Lr2Debounce`(뗀 직후의 튐 구간 `LR2_POLL_GAP` 2 ms)이고, 키보드 레인 키는 `stage/play/key_gate.rs` 의 `KeyGates` 가 그것을 쓴다(`1676c57` 에서 컨트롤러와 함께 쓰도록 옮김).
    - **누름은 들어온 순간 그대로 넘긴다.** 디바운스가 누름을 늦추는 경우는 없다.
    - **누른 뒤 창(KEY DEBOUNCE) 안에 들어온 뗌은 창 끝까지 미룬다.** 창 끝에 그때도 떼어져 있으면 창 끝의 시각으로 넘기고, 그 전에 다시 눌렸으면 버린다(누르고 있는 것으로 남는다). 그래서 누를 때 접점이 튀는 채터는 한 번의 누름이 되고, 창보다 짧은 탭의 뗌은 창 끝에 판정된다. 창이 지난 뒤의 뗌은 들어온 순간 그대로다.
    - **넘겨진 뗌 뒤 LR2 의 한 폴링 간격(`POLLGAP` 2 ms, 창이 그보다 짧으면 창) 안에 들어온 누름은 새 누름이 아니다**(LR2 의 3→2). 뗄 때 접점이 튀는 채터다. 판에는 넘기지 않고, 판에서 그 키는 뗀 채로 남는다. 다음 누름은 그 키가 다시 떼어진 뒤에 받는다.
@@ -48,7 +49,10 @@
 | OS 이벤트 시각(macOS `NSEvent.timestamp`, Windows `GetMessageTime`, Wayland input-timestamps) | winit 이 넘겨주지 않는다. 받으려면 objc2·windows-sys 직접 의존과 FFI(unsafe)가 필요하다(이번 제약 위반). Windows 는 받아도 ms 단위이고 같은 기준인 `GetTickCount` 의 분해능이 10~16 ms 다 |
 | 키보드 전용 HID 스레드(IOHIDManager·Raw Input 직접 읽기, Etterna macOS 형) | 새 의존성·unsafe, macOS 입력 모니터링 권한 |
 | 게임 스레드 분리(B) / 단일 스레드 + 이벤트 대기 페이싱(C) | "이유" 절 |
+| 표시 모드를 Mailbox 로 바꾼다(S19 결정 2 의 선택지 B) | Metal 은 Immediate 에서도 드로어블 풀 때문에 평균 약 6 ms 막힌다(하네스 실측). present 모드만 바꾸면 메인이 여전히 획득을 기다린다(측정은 "이유" 절의 단일 스레드 안 C 에 있다) |
+| 키보드는 처리 시각으로 두고 바꾸지 않는다(S19 결정 2 의 선택지 C) | 프레임 스레드가 present 를 기다린 시간(0~1 프레임)이 판정 시각에 남는다. 사용자가 "LR2 등에서 쓰이는 방법으로 제대로 정확하게"를 택함 |
 | 디바운스: 양방향 잠금(마지막 변화 뒤 창 동안 누름·뗌 모두 막음, beatoraja `KeyBoardInputProcesseor.java:108`·R-BMS 컨트롤러 형) | 뗀 직후 창 안의 정상 재누름이 창 끝까지 늦게 판정된다(같은 레인 고밀도 연타에서 계통적인 SLOW, "이유" 절). LR2 는 누름을 늦추지 않는다 |
+| 아날로그 턴테이블 방향도 LR2 형으로("둘다 A" 의 2번 B) | 턴테이블 알고리즘이 잠금이 통과시킨 읽기 횟수를 세므로 감도가 원본과 달라진다. 턴테이블은 튀는 접점이 아니라 이점이 없다(남은 한계 4). 사용자가 A(원본 잠금 유지)를 택함 |
 | 디바운스: 누름은 즉시, 모든 뗌을 미룸(QMK `asym_eager_defer_pk` 형) | 누른 채 생기는 채터(뗌이 먼저 오는 채터)까지 막지만, 뗌을 (a) 원래 시각으로 판정하려면 그동안 다른 레인의 입력과 시간으로 진행되는 판정을 N ms 미뤄야 하고(키음·판정 표시 지연, 다른 레인 입력과의 순서), (b) 확정 시각으로 판정하면 CN·HCN 끝 판정이 N ms(기본 16 ms, PGREAT 창과 비슷한 크기) SLOW 로 밀린다. LR2 는 누른 뒤 창 안의 뗌만 미룬다 |
 
 ## 남은 한계
@@ -58,7 +62,7 @@
 3. **뗄 때 2 ms 넘게 튀는 채터.** 뗀 뒤 2 ms 가 지나 다시 붙는 튐은 새 누름으로 판정된다(빈 POOR 나 다음 노트의 이른 판정이 될 수 있다). LR2 도 폴링 간격보다 긴 튐은 같다. 양방향 잠금이면 막히지만 정상 연타의 누름을 늦추므로 택하지 않았다.
 4. **(해소, 2026-10-15) 컨트롤러 디바운스도 LR2 형이다.** 사용자 결정("둘 다 추천대로")으로 컨트롤러의 버튼과 두 키 축 방향도 키보드와 같은 상태 기계를 쓴다. 상태 기계는 `apps/rbms-player/src/input_debounce.rs`(`Lr2Debounce`) 하나이고, 키보드(`stage/play/key_gate.rs`)와 컨트롤러(`gamepad.rs` 의 `PadMapper::read_keys`·`take_opened`)가 같이 쓴다. 시각만 다르다(키보드는 `Instant`, 컨트롤러는 컨트롤러 시계의 µs). 같은 버튼 200 BPM 32분 연타의 누름은 노트 위 그대로 판정된다(`input_time_tests::a_controller_button_hit_in_quick_succession_is_played_where_every_press_came`, `gamepad::tests::a_button_hit_again_and_again_is_played_where_every_press_came`). 값은 **PAD DEBOUNCE**(SETTINGS 의 INPUT 탭 CONTROLS 묶음, KEY DEBOUNCE 아래, 0~100 ms, 1 ms 단위, 기본 16 ms)로 바꾼다. 저장은 지금처럼 키 설정 파일(`keyconfig.ron`)의 `pad.debounce_ms` 이다. 설정 표(`rbms-config`)는 이 행을 프로그램이 값을 가진 행(`host_row`)으로 두고 범위만 정하며, 앱이 키 설정에서 읽고 바꾸면 곧바로 키 설정 파일을 쓴다(`settings_ui.rs` 의 `AppShared::set_pad_debounce`. 슬라이더는 끌기를 놓을 때 한 번 쓴다). **남는 차이:** 아날로그 턴테이블 방향은 원본의 양방향 잠금(`PadMapper::read_turntables`: 받아들인 변화 뒤 창 동안 읽지 않음)을 그대로 둔다. 상태는 버튼과 같은 `Lr2Debounce` 에 두므로, 알고리즘을 바꿔 축이 턴테이블과 두 키 사이를 오가도 쥐고 있던 레인을 놓는다(`gamepad::tests::a_turntable_switched_to_two_keys_lets_go_of_the_lane_it_held`). 턴테이블 알고리즘(`analog.rs`)이 잠금이 통과시킨 읽기 횟수를 세므로(멈춤 판정의 idle 카운터), 잠금을 바꾸면 턴테이블의 감도가 원본과 달라진다. 턴테이블은 접점이 튀는 스위치가 아니어서 LR2 형의 이점(누를 때 튐 흡수)이 없다. **범위:** 키보드의 KEY DEBOUNCE 는 판의 레인 입력에만 걸지만, 컨트롤러는 한 곳(`PadMapper`)에서 읽으므로 PAD DEBOUNCE 는 선곡·설정·결과 화면의 메뉴 입력에도 걸린다. 전의 양방향 잠금은 뗌 뒤 16 ms 안의 튐도 막았지만 LR2 형은 2 ms 안만 막아, 뗌 뒤 2~16 ms 튀는 버튼은 메뉴에서 두 번 눌린 것이 될 수 있다(S19 리뷰 6번, 테스트 부채 3.71). 메뉴에 옛 잠금을 둘지는 사용자 결정으로 남겼다. 설정 화면의 PAD DEBOUNCE 설명은 이 범위에 맞췄다.
 5. **장치를 섞어 칠 때의 순서.** 키보드는 오는 즉시, 컨트롤러는 프레임 첫머리에서 처리된다. 곡 시계가 뒤로 가지 않으므로 이미 처리한 키보다 이른 컨트롤러 입력은 그 키의 시각으로 판정된다(테스트 부채 3.55). 어긋남은 "키보다 이른 컨트롤러 입력과 그 키 사이"로 예전("프레임 끝에 처리한 키"까지)보다 작다. 키 이벤트마다 컨트롤러를 폴링하면 풀리지만, 아날로그 턴테이블 상태 기계가 폴링 횟수를 세므로(감도가 바뀐다) 하지 않았다.
-6. **확인하지 못한 플랫폼 동작.** macOS 에서 wgpu Metal 의 `get_current_texture` 가 occlusion 검사로 `NSView.window`·`NSWindow.occlusionState` 를 메인 밖에서 읽는다(wgpu-hal 29.0.4 `metal/surface.rs:121-156`, 30.0.1 에도 같은 코드). 2차 감사(THR2-1)가 Xcode Main Thread Checker 로 위반을 재현했다(호출 지점마다 한 번 보고, 코드 경로는 이미지마다 실행). 크래시는 재현되지 않았다. 알려진 위험(정의되지 않은 동작, 읽기만 함): 메인이 같은 순간 창을 바꾸는 드문 경우(전체 화면 전환, 창 닫힘)에만 의미가 있다. 사용자 결정(2026-10-15, A): 구조를 유지하고 상류 수정을 기다린다(https://github.com/gfx-rs/wgpu/issues/10627, `bug` 라벨). wgpu 를 올릴 때 이 이슈가 고쳐졌는지 확인한다. Windows(DX12·Vulkan)·Linux 에서 다른 스레드의 획득·present 는 wgpu 타입상 허용되지만 실기에서 돌려 보지 않았다. 크기 변경 중 메인이 획득을 기다리지 않게 바꾼 것(결정 2)은 코드로만 확인했고, DXGI 의 Present 중 메시지·Wayland 의 숨긴 창 크기 변경을 실기에서 재현하지 않았다. 60 Hz 화면, 창 크기를 끌어 바꾸는 동안의 프레임, 전체 화면 전환, 가려진 창은 실기 확인 목록(`docs/quality-assurance/2026-10-11-default-skin-manual-check.md`)에 있다.
+6. **확인하지 못한 플랫폼 동작.** macOS 에서 wgpu Metal 의 `get_current_texture` 가 occlusion 검사로 `NSView.window`·`NSWindow.occlusionState` 를 메인 밖에서 읽는다(wgpu-hal 29.0.4 `metal/surface.rs:121-156`, 30.0.1 에도 같은 코드). 2차 감사(THR2-1)가 Xcode Main Thread Checker 로 위반을 재현했다(호출 지점마다 한 번 보고, 코드 경로는 이미지마다 실행). 크래시는 재현되지 않았다. 알려진 위험(정의되지 않은 동작, 읽기만 함): 메인이 같은 순간 창을 바꾸는 드문 경우(전체 화면 전환, 창 닫힘)에만 의미가 있다. 사용자 결정(2026-10-15, A): 구조를 유지하고 상류 수정을 기다린다(https://github.com/gfx-rs/wgpu/issues/10627, `bug` 라벨). wgpu 를 올릴 때 이 이슈가 고쳐졌는지 확인한다. 결정과 기각된 대안은 [wgpu Metal 메인 스레드 ADR](2026-10-15-adr-wgpu-metal-main-thread.md). Windows(DX12·Vulkan)·Linux 에서 다른 스레드의 획득·present 는 wgpu 타입상 허용되지만 실기에서 돌려 보지 않았다. 크기 변경 중 메인이 획득을 기다리지 않게 바꾼 것(결정 2)은 코드로만 확인했고, DXGI 의 Present 중 메시지·Wayland 의 숨긴 창 크기 변경을 실기에서 재현하지 않았다. 60 Hz 화면, 창 크기를 끌어 바꾸는 동안의 프레임, 전체 화면 전환, 가려진 창은 실기 확인 목록(`docs/quality-assurance/2026-10-11-default-skin-manual-check.md`)에 있다.
 7. **JUDGE OFFSET.** 키보드 판정 시각이 예전보다 평균 약 반 프레임, 최대 한 프레임 이르다. 예전 빌드에서 JUDGE OFFSET·자동 보정을 맞춘 키보드 사용자는 판정이 FAST 쪽으로 밀린 채 시작하므로 다시 맞춘다(릴리스 노트 "업그레이드"에 컨트롤러와 함께 안내).
 
 ## 확인받은 것
@@ -66,6 +70,8 @@
 - 기본값 16 ms: 추천대로 16 ms(키보드·컨트롤러 모두).
 - 컨트롤러 디바운스도 LR2 형으로 맞출지(남은 한계 4): 추천대로 LR2 형. 디바운스 값은 설정 화면에서 바꿀 수 있게 했다(PAD DEBOUNCE).
 - 사용자 원문(2026-10-15): "둘 다 추천대로", "다만 debounce 값은 나중에 오버조이가면 더 바뀔수도있으니 settings에서 바꿀수있게끔넣어두면좋을듯한데".
+- 아날로그 턴테이블 방향은 원본의 양방향 잠금을 유지한다(남은 한계 4 의 "남는 차이"): 사용자 원문(2026-10-15) "둘다 A" 의 2번(1번은 [BGA 상주 상한 ADR](2026-10-15-adr-bga-resident-texture-cap.md)).
+- 아직 확인받지 않은 것: 메뉴 입력의 PAD DEBOUNCE 를 옛 양방향 잠금으로 둘지(남은 한계 4, 테스트 부채 3.71).
 
 ## 영향과 관련 파일
 

@@ -1,10 +1,12 @@
 # CJK(일본어) 폰트 지원 — 아이디에이션
 
-## 대상 / 현 상태
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9. 2026-05 의 아이디에이션과 결정 기록이다. 결정(cosmic-text, 소형 Inter 번들 + 시스템 폰트 폴백)은 구현됐고, 지금 동작의 정본은 `crates/rbms-render/src/font.rs` 와 [crates.md](./crates.md) rbms-render 의 "Font engine" 이다. 아래 "대상 / 당시 상태"의 5×7 비트맵, `PlaySettings.font_path`, `TextEngine` 같은 이름은 그때의 것이고 지금 코드에는 없다: 글꼴 경로는 `Config.display.font_path`(SETTINGS 의 DISPLAY 묶음 FONT 행, `--font`), 엔진은 thread-local `ENGINE` 의 `TextContext`, 크기는 `px_for(scale) = round(scale*8.5).max(8)` 이다. "남은 후속"의 P3 중 run-length 병합(`merge_runs`), 보로우 키 캐시(`family→px→text→Laid`), 폭 맞춤 말줄임(`fit_text`), 글리프 아틀라스(`glyph_atlas.rs`)는 들어갔고, P4 웹폰트는 없다.
+
+## 대상 / 당시 상태(2026-05)
 - `crates/rbms-render/src/font.rs`: 하드코딩된 **5×7 ASCII 비트맵**(`glyph(c)->[u8;7]`). 비ASCII는 `[0;7]`=공백.
 - 텍스트는 `Renderer::fill_rect`로 픽셀당 사각형 1개씩 그림(전용 텍스처 파이프라인 없음, BGA만 텍스처).
 - `draw_text`/`text_width` **호출처 78곳** → 시그니처 유지 필수.
-- 증상: BMS 일본어 제목·난이도표명·★ 등이 빈칸(PROCESS §7 1순위 한계).
+- 증상: BMS 일본어 제목·난이도표명·★ 등이 빈칸(옛 PROCESS §7 1순위 한계, `docs/history/2026-10-15-process-archive.md` 의 옛 0~9절).
 
 ## 목표
 임의의 일본어(JIS 한자+가나)·기호(★ 등)를 **여러 UI 크기**(scale 1.2~4.5)에서 렌더.

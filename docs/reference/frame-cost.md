@@ -1,6 +1,8 @@
 # 플레이 화면의 프레임 비용 계측 (S19, 2026-10-15)
 
-기준(사용자 결정): 헤드리스 계측에서 플레이 단계의 갱신과 그리기 합의 p99 가 1ms 미만이고, 플레이 단계 프레임 안에서 256KB 이상의 할당이 없다. 계측 방법은 `development.md` 의 "Frame cost", 남은 확인은 `quality-assurance/2026-10-14-test-debt.md` 3.38~3.40 에 있다.
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9. 아래 수치는 측정 당시의 기록이다. 2절의 "수정 후"(판정 그래프, 판정 추적, BGA 캔버스)는 커밋 `f81d499` 로, 판정 목록·리플레이 기록을 미리 잡는 것과 BGA 큰 그림 교체("수리한 작업 트리")는 `4cc72d0` 으로, "리뷰 수정"(계획 뒤 칠하기)·텍스처 슬롯은 `1676c57` 로 들어갔다. 상한 값은 코드가 정본이다: `RESIDENT_BYTES`·`PREPARED_BGA_BYTES` 256MiB, preload 프레임당 `BGA_PRELOAD_BYTES_PER_FRAME` 8MiB(`apps/rbms-player/src/stage/canvas.rs`). 이 설계가 어디에 놓이는지는 [architecture.md](../architecture.md) 의 "A frame costs what changed" 를 본다.
+
+기준(사용자 결정, [ADR](../acknowledge/2026-10-14-adr-play-hitch-criteria.md)): 헤드리스 계측에서 플레이 단계의 갱신과 그리기 합의 p99 가 1ms 미만이고, 플레이 단계 프레임 안에서 256KB 이상의 할당이 없다. 계측 방법은 `development.md` 의 "Frame cost", 남은 확인은 `quality-assurance/2026-10-14-test-debt.md` 3.38~3.40 에 있다.
 
 ## 1. 조건
 
@@ -50,7 +52,7 @@
 
 ## BGA 큰 그림 교체 (R2-PERF-2, 2026-10-15)
 
-같은 하네스(`perf_audit_play_frames`, 실제 저장 스레드, 1920x1080, 오토플레이), 그림 48장을 베이스 30fps·레이어 15fps 로 바꾸는 합성 차트(`mkbga.py`). 전은 a13f6ce, 후는 수리한 작업 트리. 같은 기기에서 번갈아 쟀다. 갱신+그리기+렌더(인코드·제출), 플레이 단계.
+같은 하네스(`perf_audit_play_frames`, 실제 저장 스레드, 1920x1080, 오토플레이), 그림 48장을 베이스 30fps·레이어 15fps 로 바꾸는 합성 차트(`mkbga.py`, 하네스와 함께 세션 scratch 에만 있었고 저장소에는 없다). 전은 a13f6ce, 후는 수리한 작업 트리(뒤에 `4cc72d0` 로 커밋). 같은 기기에서 번갈아 쟀다. 갱신+그리기+렌더(인코드·제출), 플레이 단계.
 
 | 차트 | 전 p50 / p99 / max, 1ms 초과 | 후 p50 / p99 / max, 1ms 초과 |
 | --- | --- | --- |

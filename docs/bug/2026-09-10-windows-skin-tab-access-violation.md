@@ -1,5 +1,7 @@
 # Windows CI STATUS_ACCESS_VIOLATION — SKIN 탭 테스트
 
+최종 갱신 2026-10-15 · 대응 커밋 ea698a9 · 수정(오디오 호스트 스레드)과 그 회귀 테스트는 지금도 있다: `crates/rbms-audio/src/host.rs` 의 `output_device_names`, 테스트 `asking_from_threads_that_come_and_go_answers_the_same_list_every_time`·`every_question_is_answered_on_the_host_thread_whichever_thread_asks`, 호출처 `apps/rbms-player/src/stage/settings.rs` 의 `SettingsState::on_enter`. 이 기록이 크래시 지점으로 든 SKIN 탭 테스트 다섯 개와 `stage::render_tests_skin` 은 Lua 스킨 교체(`9241e73`)로 없어졌다. 재현 모양(짧은 스레드에서 반복 열거)은 위 호스트 테스트가 이어서 맡는다.
+
 ## 대상 파일
 
 - `crates/rbms-audio/src/host.rs` (신규 — 오디오 호스트 전용 스레드)

@@ -1,5 +1,7 @@
 # wgpu 29.0.3 / winit 0.30.13 API (레지스트리 소스 확인, 2026-05)
 
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9. 지금 `Cargo.lock` 은 wgpu 29.0.4, winit 0.30.13 이다. 아래 "rbms-player 계획"(CPU 캔버스 텍스처 블릿, `ControlFlow::Poll`, 480x640 고정 창)은 도입 당시 계획이고 지금 구현과 다르다: 렌더러는 인스턴스드 쿼드(`apps/rbms-player/src/gpu/batch.rs`), 이벤트 루프는 `ControlFlow::Wait` 이고 화면 대기는 `rbms-present` 스레드(`gpu/present.rs`)가 한다([architecture.md](../architecture.md) "Frames are paced by the display"). 그 스레드에서 wgpu Metal 획득이 AppKit 메인 스레드 API 를 읽는 문제는 [ADR](../acknowledge/2026-10-15-adr-wgpu-metal-main-thread.md)과 상류 gfx-rs/wgpu#10627 을 본다. wgpu 를 올릴 때 이 이슈와 아래 `CurrentSurfaceTexture` 처리 규칙을 다시 확인한다.
+
 > **역사 연구:** 이 문서는 도입 당시 API 조사 기록입니다. 현재 렌더러 구현과 의존성 버전은 코드와 `Cargo.lock`이 정본이며, 현재 작업 상태는 [roadmap](../roadmap.md)을 따릅니다.
 
 > 실시간 윈도우(rbms-player) 구현용. 추측 금지 — 아래는 실제 시그니처.

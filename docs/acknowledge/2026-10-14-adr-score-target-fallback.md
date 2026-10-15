@@ -1,6 +1,6 @@
 # ADR: 목표 점수의 fallback 과 RATE CUSTOM
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 > 상태: 유효 · 결정일 2026-10-14 · 결정자 사용자(요청) + 메인(설계)
 
 ## 배경
@@ -36,4 +36,4 @@
 
 ## 날짜와 사용자 원문
 
-2026-10-14. 요청 요지(`docs/PROCESS.md` 현재 작업의 사용자 지시 (바)): "판정·콤보 위의 숫자와 FAST/SLOW 의 target score 가 LOCAL BEST 로 해도 AAA 를 목표로 계산된다. fallback score 도 따로 설정할 수 있게 고도화한다." 원문 그대로는 보존되지 않았다.
+2026-10-14. 요청 요지(`docs/history/2026-10-15-process-archive.md` 의 "현재 작업" 절, 사용자 지시 (바)): "판정·콤보 위의 숫자와 FAST/SLOW 의 target score 가 LOCAL BEST 로 해도 AAA 를 목표로 계산된다. fallback score 도 따로 설정할 수 있게 고도화한다." 원문 그대로는 보존되지 않았다.

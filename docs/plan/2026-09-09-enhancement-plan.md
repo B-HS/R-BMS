@@ -145,7 +145,7 @@
 |---|---|---|---|
 | U1 | **실패 알림 수단 없음**(차트 없음·표 로드 실패·폰트·미리듣기·스코어 제출·파일 저장·리플레이 로드 전부 eprintln, 일부는 debug 게이트). 서버 인디케이터·온보딩 힌트만 존재 | `app_play.rs:17,58,314`, `tablesrc.rs:84`, `app_select.rs:580` | M |
 | U2 | 메인 스레드 블로킹: 표 추가 fetch(reqwest blocking 15s)·포커스 상세·BGA 전량 디코드(진행바 100% 후 정지처럼 보임)·rfd 3종·결과 저장 3연속 | `app_select.rs:740-748`, `app_play.rs:105-118,334-367`, `app_input.rs:147` | M |
-| U3 | **Root에서 Esc = 곡 유무 무관 무확인 종료**, **Play 중 Esc = 무확인 폐기**(단 Play-Esc 즉시 이탈은 PROCESS §7의 의도 사양 → 변경은 결정 필요) | `app_select.rs:824-827`, `main.rs:1108-1117` | S |
+| U3 | **Root에서 Esc = 곡 유무 무관 무확인 종료**, **Play 중 Esc = 무확인 폐기**(단 Play-Esc 즉시 이탈은 PROCESS §7의 의도 사양(옛 PROCESS.md 는 지금 `history/2026-10-15-process-archive.md` 의 옛 0~9절) → 변경은 결정 필요) | `app_select.rs:824-827`, `main.rs:1108-1117` | S |
 | U4 | 플레이 중 hispeed/cover/lift 변경 미저장 | `app_input.rs:89-105` | S |
 | U5 | 미리듣기 디바운스가 프레임 수(20) 기준, 페이드 없음, 볼륨 설정 없음 | `main.rs:59-60` | S |
 | U6 | 텍스트 입력: 커서/붙여넣기/스크롤 없음. 표 URL 중복 미검사. 표 로드 실패가 빈 레벨로 흡수 | `app_input.rs:180-203`, `app_select.rs:740-745`, `tablesrc.rs:84-87` | S |
@@ -256,7 +256,7 @@ A와 B는 파일이 겹치지 않는다(B는 `engine.rs/mixer.rs/app_play.rs son
 3. **시작 전 옵션 UX** — **B안(추천, 1.6)**: 곡선택 오버레이 패널 + 환경설정 축소 / A안: 현행 유지 + 인게임 조작 확장 / C안: decide 화면 신설.
 4. **IIDX 31 폐지 옵션(H-RANDOM·EXPAND-JUDGE 계열)** — **유지(추천)**: 레퍼런스 구현 패리티가 목표이므로 H-RANDOM·JUDGE WIDTH 유지 / 제거.
 5. **곡DB 구현** — **A안(추천)**: `rusqlite`(bundled)로 레퍼런스 구현 `songdata.db` 유사 스키마 → 향후 레퍼런스 구현 DB 임포트 가능 / B안: 자체 바이너리 캐시(경로+mtime+파싱 결과, 의존성 0).
-6. **Play 중 Esc 즉시 이탈**(PROCESS §7 의도 사양) — **A안(추천)**: 유지하되 "길게 누르기/2회 누르기" 옵션 추가 / B안: 확인 다이얼로그 / C안: 현행 유지.
+6. **Play 중 Esc 즉시 이탈**(PROCESS §7 의도 사양. 옛 PROCESS.md 는 지금 `history/2026-10-15-process-archive.md` 의 옛 0~9절) — **A안(추천)**: 유지하되 "길게 누르기/2회 누르기" 옵션 추가 / B안: 확인 다이얼로그 / C안: 현행 유지.
 7. **입력 장치 범위(G)** — **A안(추천)**: 게임패드(gilrs) + 스크래치 2키/아날로그 먼저, MIDI는 후순위 / B안: 셋 다 한 번에 / C안: 키보드만.
 8. **git 운용** — 레포에 `llm-rules.auto-commit/auto-push` 미설정. **수동(추천, 현행)** / 자동 커밋 / 자동 커밋+푸시. Phase A 이후 커밋 단위는 갈래별(judge/parser/audio/app/render).
 9. **대상 라이브러리 규모** — 곡DB(결정 5)·곡선택 O(N×M)의 우선순위가 곡 수에 좌우된다. 문서의 테스트 라이브러리 경로(`/Users/hyunseokbyun/Documents/personally/1`, 727차트)는 이 기기에 없고 현재 설정은 다운로드 폴더 1개를 가리킨다. 실제 운용 규모를 알려 주시면(수백 / 수천 / 1만 이상) G의 순서를 확정한다.

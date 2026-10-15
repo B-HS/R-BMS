@@ -1,6 +1,6 @@
 # rbms 백엔드 — 데이터 모델 (Drizzle / MySQL)
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 
 > 구현 정본은 `web/src/server/db/{schema,auth-schema}.ts`입니다. 테이블/컬럼은 **snake_case**, TS 필드는 **camelCase**, 모델 타입은 `$inferSelect`/`$inferInsert`에서 유도합니다. 시각은 `timestamp(fsp:3)` 또는 `bigint`(epoch ms)입니다. 설계 초안의 FK 표기는 일부가 **논리 관계**이며, 실제 `.references()`는 스키마 파일에 적힌 것만 존재합니다.
 
@@ -21,8 +21,8 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 |---|---|---|
 | id | varchar(36) PK | better-auth 생성 사용자 id |
 | login_id | varchar(64) uniq | IR 로그인 id, `/api/players/{id}`가 해석하는 공개 식별자 |
-| name | varchar(255) | 표시명 |
-| email | varchar(255) | better-auth 이메일 |
+| name | text | 표시명(가입 DTO 가 64자로 묶는다) |
+| email | varchar(255) uniq | better-auth 이메일 |
 | password_hash | 없음 | better-auth `account` 테이블이 소유 |
 | rank | varchar(32) default '' | 단위/등급(IRPlayerData.rank) |
 | rank_points | double default 0 | 산출 점수. **쓰는 코드가 없어 항상 0**(웹 순위는 쓰지 않는다) |
@@ -35,7 +35,8 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 ### `session` / `account` / `verification` — better-auth 표준 테이블(컨벤션 §11). 토큰 해시 저장.
 
 ### `api_token` (IR Bearer)
-| id varchar(36) PK · user_id FK · token_hash varchar(255) uniq · label · last_used_at · created_at · revoked bool |
+| id varchar(36) PK · user_id varchar(36) FK → `user.id` ON DELETE CASCADE(idx) · token_hash varchar(255) uniq(SHA-256 hex) · label varchar(64) · last_used_at bigint(epoch ms) null · created_at · revoked bool |
+- 폐기는 `revoked=true` 로 남긴다: 웹 설정의 토큰 폐기, 세션 토큰 회전(`POST /api/auth/token`, 그 사용자 토큰 전부), 로그아웃(`DELETE /api/auth/token/current`, 보낸 토큰 하나), 이전 토큰을 Bearer 로 실은 로그인·가입의 성공(그 토큰 하나, S19). 만료 열은 없다.
 
 ### `chart` (IRChartData 슈퍼셋) — md5↔sha256 연결의 단일 출처
 | 컬럼 | 타입 | 비고 |
@@ -86,16 +87,16 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 | replay_id | varchar(36) null, 논리 replay 관계 |
 | played_at | bigint(epoch ms) idx · created_at |
 | extra | json |
-- 인덱스: `uniq(user_id, chart_sha256, played_at)`(같은 밀리초의 이중 삽입을 막는다. 멱등 판정은 서비스가 같은 초 안의 `played_at` 을 먼저 찾아 하며, 규칙은 api-spec 의 멱등 항), `idx(chart_sha256, ranked, clear, ex_score)`(랭킹은 ranked=true만), `idx(user_id, played_at)`, `idx(client_build_sha256)`.
+- 인덱스: `score_idempotent_uniq(user_id, chart_sha256, played_at)`(같은 밀리초의 이중 삽입을 막는다. 멱등 판정은 서비스가 같은 초 안의 `played_at` 을 이 색인의 범위 탐색으로 먼저 찾아 하며, 규칙은 api-spec 5절의 멱등 항), `score_ranking_idx(chart_sha256, ranked, clear, ex_score)`, `score_player_idx(user_id, played_at)`, `score_build_idx(client_build_sha256)`, `score_recent_idx(played_at)`.
 - EX/BP는 저장하되 `judge`에서 유도 가능(`ex=(epg+lpg)*2+egr+lgr`). 랭킹/best는 **ranked=true**만.
 
 ### `chart_best` (랭킹 가속 — (chart, user, scratch_auto) 최고 1행)
-| chart_sha256 + user_id + scratch_auto **복합 PK** · score_id FK · clear · ex_score · minbp · max_combo · scratch_auto bool default false · updated_at |
+| chart_sha256 + user_id + scratch_auto **복합 PK** · score_id varchar(36)(논리 score 관계, FK 없음) · clear · ex_score · minbp · max_combo · scratch_auto bool default false · updated_at |
 - best 갱신 규칙: 램프 > EX > (BP 낮을수록) 순. 랭킹 조회는 이 테이블 정렬. 갱신은 `INSERT IGNORE` + `UPDATE … WHERE (저장된 값보다 좋음)` 문장 하나라 동시 제출이 낮은 판으로 덮지 못한다(S19, `compose/best-scope.ts` 의 `isBeatenBy`). 목록 정렬의 마지막 키는 `updated_at`, `user_id` 다(`listOrder`).
 - 웨이브 20(마이그레이션 `0002_scratch_auto_bests`): SCRATCH AUTO 판도 ranked 이고, 한 사용자가 한 차트에 일반 판 최고(`scratch_auto=false`)와 SCRATCH AUTO 판 최고(`true`)를 따로 가진다. 기본 순위는 `scratch_auto=false` 행만, 포함 순위는 사용자마다 두 행 가운데 더 높은 것(모두 같으면 일반 판)만 읽는다(`web/src/server/compose/best-scope.ts`). 0002 이전 행은 기본값 false 로 일반 판이 된다. 인덱스 `chart_best_rank_idx` 는 `(chart_sha256, scratch_auto, clear, ex_score)`.
 
 ### `replay` (µs 정밀)
-| id varchar(36) PK · user_id varchar(36) · chart_sha256 idx · score_id null · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) null · `data` mediumtext null · created_at |
+| id varchar(36) PK · user_id varchar(36) idx · chart_sha256 idx · score_id null idx · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) null · `data` mediumtext null · created_at |
 - 현재 `REPLAY_STORAGE=db`는 events JSON을 `data`에 저장하고 `storage_key`는 null입니다. 외부 object storage와 `REPLAY_STORAGE=blob`은 미구현입니다. 한 건의 상한은 `REPLAY_MAX_BYTES`, 사용자별 합계 상한은 2,000개·512MiB(`REPLAY_USER_QUOTA`, S19)이며 합계는 `replay_user_idx(user_id)`(마이그레이션 `0003_replay_user_quota`)로 읽는다. `size` 는 실제 저장 길이보다 작게 기록되지 않는다.
 - **µs 보존**: 이벤트 타임스탬프 `t_us`(i64)를 라운딩 없이 저장 → 핵분석(등간격·반응속도·동시성)·재시뮬 가능.
 
@@ -104,15 +105,15 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 - `/api/admin/builds`는 등록 경로를 제공하지만, 실제 키를 쓰는 릴리스 CI 등록은 Phase R에서 검증합니다. 미등록 해시는 `UNKNOWN_BUILD` flag가 되며 `REQUIRE_BUILD_HASH` 설정에 따라 ranked 여부가 달라집니다.
 
 ### `submission_audit` (제출 감사)
-| id PK · score_id FK null · user_id null · client_build_sha256 char(64) idx · client_platform · ip varchar(64) · user_agent varchar(255) · accepted bool · ranked bool · flags json · created_at idx |
+| id PK · score_id null(논리 관계, FK 없음) · user_id null · client_build_sha256 char(64) idx · client_platform · ip varchar(64) · user_agent varchar(255) · accepted bool · ranked bool · flags json · created_at idx |
 - 모든 제출(거부 포함) 기록 → 어뷰즈·변조 추적, 빌드 분포 분석.
 
 ### `rival` (self-ref M:N)
-| user_id varchar(64) + rival_id varchar(64) **복합 PK** · created_at |
+| user_id varchar(36) + rival_id varchar(36) **복합 PK**(둘 다 `user.id`) · created_at |
 
 ### `setting_blob` (설정 동기화)
-| user_id + name(varchar(64)) **복합 PK** · format varchar(16) · content mediumtext · size int · updated_at |
-- 이름별 `/api/players/{id}/settings/{name}` 경로가 구현돼 있습니다. 낙관적 잠금=`updated_at` vs req `base_updated_at`.
+| user_id + name(varchar(64)) **복합 PK** · format varchar(16) · content mediumtext · size int · updated_at bigint(epoch ms) |
+- 이름별 `/api/players/{id}/settings/{name}` 경로가 구현돼 있습니다. 낙관적 잠금=`updated_at` vs req `base_updated_at` 이고, 비교와 쓰기는 조건부 문장 하나(`UPDATE … WHERE updated_at = base`, base 0 이면 `INSERT IGNORE`)의 `affectedRows` 로 정한다(S19, `compose/setting.ts`). 이름은 `[A-Za-z0-9_.-]{1,64}`, 사용자당 16개(`SETTING_NAMES_PER_USER_MAX`). 규칙 전문은 [api-spec.md](./api-spec.md) 9절.
 
 ### `course` / `course_chart` / `course_score`
 - `course`: `course_hash` PK · name · lntype · constraint json · trophy json · extra.
@@ -142,7 +143,7 @@ type ChartKey = Pick<typeof chart.$inferSelect, 'md5'|'sha256'>
 ```
 
 ## 마이그레이션
-- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 5개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성) → `0003_replay_user_quota`(`replay.user_id` 색인 `replay_user_idx`) → `0004_course_score_judge_totals`(`course_score` 판정 합계·FAST/SLOW·콤보 끊김·空POOR·`max_ex_score` 열). 운영 DB 에는 앞의 세 개가 적용됐다(2026-10-14). 0003·0004 는 아직 운영에 적용하지 않았다(S19, 적용은 메인의 `web-db.yml` 절차, 순서는 web/architecture.md 3-2). 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
+- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 5개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성) → `0003_replay_user_quota`(`replay.user_id` 색인 `replay_user_idx`) → `0004_course_score_judge_totals`(`course_score` 판정 합계·FAST/SLOW·콤보 끊김·空POOR·`max_ex_score` 열). 운영 DB 에는 다섯 개가 모두 적용됐다: 0000~0002 는 2026-10-14, 0003 은 2026-10-15(`web-db.yml` run 38627474716), 0004 는 2026-10-15(run 38673724720). `__drizzle_migrations` 는 5행이다. 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
 
 ## 설계 노트 (왜)
 - **best 분리 테이블**: 랭킹은 차트당 수천 history를 매번 정렬하지 않고 `chart_best`만 정렬 → P95<150ms(NFR).

@@ -1,6 +1,6 @@
 # UI Theme (`theme.ron`)
 
-Last updated 2026-10-14 · matches 7095ef7
+Last updated 2026-10-15 · matches ea698a9 (S18 and S19 did not change the theme)
 
 rbms separates three kinds of look-and-feel:
 

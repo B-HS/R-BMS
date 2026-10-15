@@ -1,8 +1,8 @@
 # rbms web — 구현 작업 분할 (W1 / W2) 과 웹 남은 일
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 
-> **역사 작업 계획 + 현재 남은 일:** W1/W2의 체크 항목은 2026-09-09에 완료됐고, 웨이브 17B~20 은 아래에 이어서 적었습니다. 새 세션이 이어서 할 웹 일은 맨 아래 "남은 일" 절이 정본입니다. 현재 구현 상태와 미구현 경계는 [../backend/endpoint-tasks.md](../backend/endpoint-tasks.md), 실제 라우트는 `web/src/app/api/`가 정본입니다. 운영 배포(Phase R)는 2026-10-14 에 끝났습니다.
+> **역사 작업 계획 + 현재 남은 일:** W1/W2의 체크 항목은 2026-09-09에 완료됐고, 웨이브 17B~20 과 S18·S19(2026-10-14~15)는 아래에 이어서 적었습니다. 새 세션이 이어서 할 웹 일은 맨 아래 "남은 일" 절이 정본입니다. 현재 구현 상태와 미구현 경계는 [../backend/endpoint-tasks.md](../backend/endpoint-tasks.md), 실제 라우트는 `web/src/app/api/`가 정본입니다. 운영 배포(Phase R)는 2026-10-14 에 끝났습니다.
 
 > 근거: `docs/web/architecture.md`(라우트·계층·캐시·env), `docs/web/components.md`(shadcn 목록·토큰), `docs/backend/endpoint-tasks.md`(엔드포인트 체크리스트), `docs/acknowledge/2026-09-09-enhancement-decisions.md`(W1~W8).
 > 원칙: **네 갈래 작업이 같은 파일을 쓰지 않는다.** 아래 "파일 소유권"은 배타적이며, 다른 작업의 소유 파일은 읽기만 한다.
@@ -234,7 +234,7 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] 표 제공: 표준 형식 `header.json`/`data.json`, FE 표 API 4개, 내 기록 일괄 조회, 차트 제목 읽기 보강(M8)
 - [x] 점검 고장: 가입 id 서버 검증, `POST /api/charts` 덮어쓰기·상한, `POST /api/courses/meta` admin, `/api/auth/[...all]` 허용 경로만, `unstable_rethrow`, 리더보드 실제 값 정렬(M9), 순위의 `replay_id`, 보안 헤더, 점수 제출의 차트 메타 수용(M8), 환경 변수 없는 빌드의 오류 로그
 - [x] 배포: `web/vercel.json` `ignoreCommand`, `.github/workflows/web.yml`, 문서
-- [ ] 서버 컴포넌트의 자기 URL fetch 를 서비스 직접 호출로(프런트 소유 — 모든 `*-content.tsx`, `entities/*.query.ts`, `shared/lib/fetch.ts`)
+- [x] 서버 컴포넌트의 자기 URL fetch 를 서비스 직접 호출로 — S19 IR-9(b197446)에서 `public-reads.ts` 로 해소(아래 S19 절)
 - [x] `.github/workflows/ci.yml` 에 `paths-ignore: ["web/**"]`(web 만 바뀐 푸시에서 Rust 3 OS 빌드가 도는 낭비) — 웨이브 17B-1 통합에서 추가
 - [x] Q2~Q6 의 답이 정해졌다(`docs/acknowledge/2026-10-14-web-decisions.md` 3절): 발광 표는 카드 격자, 폴더는 v1 비공개. (운영 DB 마이그레이션은 처음엔 사용자 로컬 실행으로 정했으나 사용자가 "migrate 도 너가 처리" 로 바꿔 `web-db.yml` 워크플로로 메인이 실행했다 — 아래 웨이브 20 절)
 - [x] 웹 로그인·가입은 세션 전용 `POST /api/fe/auth/login`·`/api/fe/auth/register`(API 토큰을 만들지 않음). 게임용 `/api/auth/login`·`/register` 는 토큰을 발급한 채로 둔다
@@ -245,7 +245,7 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 
 근거: `docs/web/2026-10-14-foundation-contract.md`(13·14절이 이 웨이브의 화면·컴포넌트·검증), `docs/web/2026-10-14-design-direction.md` 3.3·4절, `docs/acknowledge/2026-10-14-web-decisions.md`(Q2=A 카드 격자, Q3=A 폴더 비공개, Q6=A 시험 데이터 정리).
 
-- [x] U3 발광 표: `/tables/insane1`(카드 격자·레벨 묶음·상세 대화상자·필터와 주소 반영·출처 세 곳·`bmstable` 메타·내 기록 서버 미리 채우기·늦게 그리기), `/tables` 의 번들 표 카드, 차트 페이지 배지
+- [x] U3 발광 표: `/tables/insane1`(카드 격자·레벨 묶음·상세 대화상자·필터와 주소 반영·출처 세 곳·`bmstable` 메타·내 기록 서버 미리 채우기·늦게 그리기), `/tables` 의 번들 표 카드, 차트 페이지 배지. 출처 세 곳은 2026-10-14~15 사용자 지시로 모두 지웠다(아래 "발광 표의 다른 사이트 흔적 제거")
 - [x] U4 폴더: `/folders`, `/folders/[folderId]`(명시 저장·충돌 409·미저장 경고·표에서 가져오기·검색 패널), `AddToFolderMenu`, 로그인·가입·로그아웃의 사용자 묶음 캐시 정리, `FormDialog`·`ConfirmAction` 포커스 복귀
 - [x] 리뷰 major 3건 수정: `useSessionUser` 의 하이드레이션 게이트(#418), 로그인 뒤 전체 이동(`next=/folders` 머묾), `ShellPage` 본문 자식 `shrink-0`(플레이어 패널 눌림)
 - [x] 리뷰 minor 수정: 발광 표 "내 진행" 기본 접힘과 중복 제거(사이드바 진행·복사 버튼), 진행 패널의 레벨 링크 제거, 레벨 칩 한 줄, 카드의 레벨 반복 제거, 라이트 `--muted-foreground` 대비, 보호 경로 로그아웃의 콘솔 404, 쓰지 않는 export·쿼리 키 제거, `.rbms-level-header` 모바일 층
@@ -262,13 +262,31 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] Vercel: 프로젝트 `rbms-web`, Git `B-HS/R-BMS` 연결, Root `web`, Production Branch `dev`, `vercel.json` 의 `ignoreCommand`. 첫 Git 배포 완료. `https://bms.hyuns.uk/api/version` 의 `commit` 이 7095ef7(2026-10-14 관찰)
 - [x] d733a8f: 2^53 를 넘는 `seed` 를 거절하지 않고 0 으로 저장(`seedSchema`). v0.1.2 점수 제출 400 의 서버 쪽 수리. 클라이언트 쪽은 7095ef7(새 판 배치 시드를 2^53 미만으로)
 
+## S18 서버 수리와 기록 동기화 짝 (2026-10-14)
+
+근거: [../acknowledge/2026-10-14-adr-judge-count-consumed-notes.md](../acknowledge/2026-10-14-adr-judge-count-consumed-notes.md), [../acknowledge/2026-10-14-adr-record-sync.md](../acknowledge/2026-10-14-adr-record-sync.md), [../backend/api-spec.md](../backend/api-spec.md) 0.1·5·8.
+
+- [x] 865643f: 판정 수 검사가 노트를 소비한 판정만 센다(`judgedNoteCount`: PG+GR+GD+BAD+POOR, 空POOR(`miss`·`empty_poor`) 제외, `POPN_9K` 는 BAD 도 제외). v0.1.3 까지의 "IR ERROR 400 VALIDATION_ERROR" 의 원인. 같은 커밋: 같은 초 멱등(`IDEMPOTENCY_WINDOW_MS`, `DUPLICATE_SUBMISSION_MESSAGE`), 리플레이 멱등(같은 점수에 연결된 리플레이가 있으면 200 으로 그것을 돌려줌), 프로덕션 오류 `details` 의 `field`·`reason` 노출(`publicErrorDetails`)
+- [x] e9aebae: 계약 교차 테스트(`apps/rbms-player/src/app_result/record_tests/contract_requests.rs` → `contract/client-requests/*.json` → `web/tests/dto/client-requests.test.ts`)
+- [x] 클라이언트 짝(5f4a9a2): 기록 동기화(자동+수동, 리플레이 포함), 결과 화면의 IR 오류 필드 표시
+
+## 발광 표의 다른 사이트 흔적 제거와 파비콘 (2026-10-14~15)
+
+근거: 사용자 지시("이런 문구는 삭제해" → "제발 다른사이트의 흔적좀 지워놔" → 곡 데이터 B → 정정 "외부주소 말한게 곡 다운로드 받는 그곳말한거야 ? 그건 지우면안되는데"), [../acknowledge/2026-10-14-adr-table-page-no-source-notice.md](../acknowledge/2026-10-14-adr-table-page-no-source-notice.md)(첫 단계), [../backend/api-spec.md](../backend/api-spec.md) 7.1(현재 필드).
+
+- [x] 4a0872d: 페이지의 출처 요약과 맨 아래 출처·삭제 요청 문단 삭제
+- [x] ea34002: 정보 패널을 "표 정보"(갱신·곡·레벨 수·표 주소 복사)로, 표 카드의 출처 표기 삭제, header 의 `original_url`·`mirror_of` 삭제, 요약 API 의 `original_url`·`source` 삭제(응답에서. 스냅샷 파일의 `original_url` 은 다음 줄)
+- [x] 4fda17c → dd5518e: 곡 데이터에서 주소를 모두 지웠다가(실수로 내려받기 링크까지) 되돌림. 최종 결과는 header 스냅샷의 `original_url` 을 버리고, 곡의 `comment`(792곡)를 비우고, `artist` 등 글자 필드 속 웹 주소(9곳)를 지우고, 표 상세 API 와 곡 상세 창에서 `comment` 를 빼고, 내려받기 주소(`url`·`url_diff`·`name_diff`)와 곡 상세의 받는 곳은 남김. 클라이언트 내장 표도 같은 파일을 쓴다. 규칙은 `web/scripts/snapshot-table.ts` 의 정규화가 정본
+- [x] 089c737: 파비콘(`favicon.ico` 16·32·48)·`icon.png`(512)·`apple-icon.png`(180)를 앱 아이콘으로 교체, `icon.svg` 삭제. 운영 확인(2026-10-15 GET): 셋 다 200
+- [ ] 저장소에 남은 흔적(서빙하지 않음): `web/data/tables/insane1/source.json`(스냅샷을 받은 주소·HTTP 기록), `web/scripts/snapshot-table.ts` 의 사용 예, `crates/rbms-config/src/tables.rs` 의 `same_as`(원본 주소를 이미 등록한 사용자의 중복 등록 방지), docs 의 조사 문서. 지울지 사용자 확인 필요(메인 권고: 기능에 쓰이는 `tables.rs` 는 유지, `source.json` 은 재현용으로 유지)
+
 ## S19 서버 수리 (2026-10-15)
 
 근거: 감사 결과 `scratchpad/s19/round1.json`(영역 account 의 서버 쪽), [../backend/api-spec.md](../backend/api-spec.md) 2·4·5·6·7.2·8·9, [architecture.md](./architecture.md) 4·5-4·6-1.
 
 - [x] IR-1: `chart_best`·`course_best` 갱신을 조건부 문장 하나로(동시 제출이 낮은 판으로 덮지 못함). DB 테스트 `tests/db/best-race.test.ts`
 - [x] IR-4: EX·`total_notes`·판정 수 일관성 검사, 코스 제출에 단일 곡과 같은 rate limit·본문 크기·빌드 해시 정책·감사
-- [x] S19 2차 R2-ACC-1·2·3: 본문만 보는 무결성 검사(분리·합계 같은 읽기 `effectiveJudgeCounts`, `total_notes` 0 회피 차단, `max_ex_score`, `minbp` 하한, 풀콤 램프의 판정 조건. 코스는 판정 × 2 ≤ `max_ex_score`), 첫 제출자·`POST /api/charts` 가 정한 `chart.notes` 를 상한에서 뺌(한 제출이 다른 사용자를 막지 못함), 코스 판정 합계 저장(마이그레이션 `0004_course_score_judge_totals`, 운영 미적용: 순서는 [architecture.md](./architecture.md) 3-2). 테스트 `tests/db/submission-integrity.test.ts`(라우트, 임시 MySQL), `tests/service/score-submit.test.ts`·`course.test.ts`. 운영 점검 SQL `web/scripts/chart-notes.{count,repair,restore}.sql`(복구는 `chart_notes_backup` 에 먼저 백업, `tests/db/chart-notes-scripts.test.ts`, 테스트 부채 3.36)
+- [x] S19 2차 R2-ACC-1·2·3: 본문만 보는 무결성 검사(분리·합계 같은 읽기 `effectiveJudgeCounts`, `total_notes` 0 회피 차단, `max_ex_score`, `minbp` 하한, 풀콤 램프의 판정 조건. 코스는 판정 × 2 ≤ `max_ex_score`), 첫 제출자·`POST /api/charts` 가 정한 `chart.notes` 를 상한에서 뺌(한 제출이 다른 사용자를 막지 못함), 코스 판정 합계 저장(마이그레이션 `0004_course_score_judge_totals`, 2026-10-15 운영 적용: 순서는 [architecture.md](./architecture.md) 3-2). 테스트 `tests/db/submission-integrity.test.ts`(라우트, 임시 MySQL), `tests/service/score-submit.test.ts`·`course.test.ts`. 운영 점검 SQL `web/scripts/chart-notes.{count,repair,restore,drop-backup}.sql`(복구는 `chart_notes_backup` 에 먼저 백업, `tests/db/chart-notes-scripts.test.ts`, 테스트 부채 3.36)
 - [x] S19 3차 R3-WEB-1~4: 점수·코스·차트 DTO 를 DB 열 범위로(INT·FLOAT 는 400, 글자는 열 길이로 자름, `extra` JSON 깊이 100, 빌드 해시 형식), 서버가 셈해 저장하는 EX·BP 의 INT 넘침을 무결성 검사 6 으로 거절(거절 전에는 차트 행도 쓰지 않음), 점수 응답 판정 합계를 `effectiveJudgeCounts` 로(`compose/judge-row.ts`), chart-notes SQL 이 SCRATCH AUTO 판을 세지 않음, `web-db.yml` 에 `chart-notes-restore`·`chart-notes-drop-backup`. 테스트 `tests/dto/column-bounds.test.ts`, `tests/lib/web-db-workflow.test.ts`, `tests/db/submission-integrity.test.ts`·`chart-notes-scripts.test.ts` 추가분
 - [x] S19 3차 리뷰 수정: 리플레이 업로드 DTO 도 DB 열 범위로(`lntype`·`offset_ms`·`judge_rate` INT, `event_count`·`size` 0~INT, 시간은 2^53-1 안, `score_id` 36자, `format`·`mode` 는 열 길이로 자름), `extra` 와 JSON 열에 들어가는 코스 문자열의 짝 없는 서로게이트를 400 으로(`fitsJsonColumn`·`jsonTextSchema`, MySQL 8.4.11 에서 거절 전 500 재현). 테스트 `tests/dto/column-bounds.test.ts`, `tests/db/submission-integrity.test.ts`
 - [x] S19 4차 마감 R4-WEB-1~3: `extra` 의 JSON 키를 UTF-8 65535 바이트로 묶음(`JSON_KEY_MAX_BYTES`, 넘으면 400·감사, 차트 행 안 남김), 점수·코스 중복 응답이 저장된 판의 값으로 최고 기록을 한 번 맞춘 뒤 순위를 셈(`tests/db/best-repair.test.ts`), 연결마다 `innodb_lock_wait_timeout = 5`(`LOCK_WAIT_TIMEOUT_SECONDS`), 관리자 코스 메타 `name` 255·`lntype` INT, 난이도표 `name` 255·`url` 512·폴더 이름 255·폴더 id 64, 가입 이메일 255·이름 64(모두 400). 남은 것: 테스트 부채 3.72·3.74
@@ -277,18 +295,20 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] IR-9: 서버 컴포넌트의 자기 URL fetch 제거 → `public-reads.ts` 직접 읽기
 - [x] IR-10: `proxy.ts` 로 없는 차트·플레이어·코스·리플레이 상세를 404 로
 - [x] IR-14: 순위 번호 정의 통일(공동 순위), 동점 정렬의 마지막 유일 키, `lnmode` 현재 동작 문서화(결정 대기: 테스트 부채 3.35)
-- [x] IR-15: 설정 낙관적 잠금 조건부 쓰기, 폴더 동시 추가 직렬화, 폴더 저장 한 요청, 설정 이름 16개·쓰기 30/min, 리플레이 사용자별 2,000개·512MiB. 마이그레이션 `0003_replay_user_quota`(운영 미적용: 적용 순서는 [architecture.md](./architecture.md) 3-2)
+- [x] IR-15: 설정 낙관적 잠금 조건부 쓰기, 폴더 동시 추가 직렬화, 폴더 저장 한 요청, 설정 이름 16개·쓰기 30/min, 리플레이 사용자별 2,000개·512MiB. 마이그레이션 `0003_replay_user_quota`(2026-10-15 운영 적용: 적용 순서는 [architecture.md](./architecture.md) 3-2)
 - [x] 클라이언트 쪽 짝(Rust, 계정): 로그아웃 때 `DELETE /api/auth/token/current` 호출(`ScoreServer::revoke_current_token`, `app_network::revoke_token_in_background`), 로그인·가입 요청에 쓰던 토큰을 Bearer 로 싣기(`HttpScoreServer` 가 토큰이 있으면 모든 호출에 싣는다. 요청 헤더는 `http::tests` 가 확인)
-- [ ] 클라이언트 쪽 짝(Rust, 기록): 413(`details.scope`)·409 구분
+- [x] 클라이언트 쪽 짝(Rust, 기록): 413·409 구분 — 기록 동기화(`crates/rbms-ir/src/sync.rs` 의 `failure_of`)가 413(`IrError::PayloadTooLarge`)·409(`IrError::Conflict`)를 서버 거절(`Failure::Refused`)로 다루고 다시 시도하지 않는다. 운영 응답에는 `details.scope` 가 없으므로(프로덕션 `details` 는 `field`·`reason` 만) scope 별 구분은 하지 않는다
+- [x] S19 4차(9e2cc0e): 범위 밖 값 400(`extra` 키 바이트, 관리자 메타·표 길이, 가입 이메일·이름), 쓰기의 잠금 오류 재시도(`withLockRetry`, [../backend/data-model.md](../backend/data-model.md) "잠금 오류 재시도"), 재전송의 최고 기록 복구, 순위 응답 판정 합계. 운영 배포 `51f3a1e`(2026-10-15 `/api/version`)
 
 ## 남은 일 (웹·서버, 새 세션이 이어서)
 
 우선순위 순. 각 항목의 근거는 괄호 안 문서.
 
-1. 사용자 확인 대기: 운영 서버에 한 판 쳐서 결과 화면에 `IR: RANK` 가 나오는지, 순위(`/leaderboards`)에 `bhs` 가 올라오는지. 안 오르면 `POST /api/scores` 의 400/401 원인을 본다(Vercel 로그). 계약 교차 테스트(다음 항목)가 재발 방지책이다
-2. 계약 교차 테스트: Rust 쪽이 실제 클라이언트가 만든 요청 본문(일반, SCRATCH AUTO, 코스, 리플레이 업로드)을 JSON 파일로 뽑고 웹 테스트가 서버 zod 스키마로 통과시킨다. 관련: `crates/rbms-ir/src/contract_tests/fixtures.rs`, `web/tests/dto/ir-contract.test.ts` ([../reference/ir-api.md](../reference/ir-api.md) 5절)
-3. (해소, S19) 없는 상세 주소가 HTTP 200: `proxy.ts` 가 존재를 확인해 404 로 재작성한다. 표 상세(`/tables/[id]`)는 아직 200 이다(번들 표라 보류). 배포 뒤 운영에서 읽기 전용 GET 으로 확인 ([architecture.md](./architecture.md) 5-4)
-4. 웹 2차(사용자가 "나중에" 로 둔 것): 발광 표 한 곡 한 행 보기, 카드 높이 선택, 폴더 끌어 옮기기, 2,000곡 가상화, 표 RSC 자료 축소(`level`·`url_diff` 중복), 지속형 rate limit(서버 컴포넌트 자기 URL fetch 는 S19 에서 제거), OG 이미지, 홈 대시보드 재구성
-5. 소소한 서버 부채: (해소, S19: 가입·로그인 실패 원인 구분 `auth.service.ts`, `BETTER_AUTH_SECRET`·`BETTER_AUTH_URL`·`NEXT_PUBLIC_APP_URL` 운영 필수 검증 `env.ts`) `release.yml` 이 `client_build` 를 등록하지 않음(admin 세션만 받는 `POST /api/admin/builds`), `user.rank_points` 열 미사용
-6. 클라이언트 쪽(웹 문서 밖이지만 서버와 짝): 게임 안 IR 순위 패널의 SCRATCH AUTO 포함 토글(서버는 `include_scratch_auto` 를 이미 받는다)
-7. 정책 확인 필요(메인이 정했고 사용자 미확인): 넓힌 판정 판은 저장·전송하지만 최고 기록·순위에서 제외, SCRATCH AUTO 램프는 `LightAssistEasy` 유지
+1. 사용자 확인 대기: v0.1.4 로 운영 서버에 한 판 쳐서 결과 화면에 `IR: RANK` 가 나오는지, SYNC RECORDS NOW. 관찰(2026-10-15 GET): 운영 제출 119건, 사용자 `bhs` 의 판은 모두 SCRATCH AUTO 판이라 기본 순위(`/leaderboards`)·최근 활동에는 0 이고 "SCRATCH AUTO 포함"을 켜면 플레이한 차트 91 로 보인다(설계대로: [../backend/api-spec.md](../backend/api-spec.md) 5절 SCRATCH AUTO)
+2. 사용자 결정 대기: 순위 `lnmode` 필터의 뜻(테스트 부채 3.35, [../backend/api-spec.md](../backend/api-spec.md) 4절), 지속형 rate limit 저장소(Upstash 등), `user.rank_points` 처리, 코스 램프 서버 검사를 켤 시점(0.1.0 클라이언트가 쓰이지 않게 되면, 3.36), 저장소에 남은 다른 사이트 흔적(위 절)
+3. 서버 부채: 같은 판의 같은 밀리초 동시 중복 제출이 `ER_DUP_ENTRY` 500, 재시도 밖 쓰기(3.72), 관리자 난이도표 저장의 중복 항목 500(3.74), `release.yml` 이 `client_build` 를 등록하지 않음(admin 세션만 받는 `POST /api/admin/builds`), 표 상세(`/tables/[id]`)의 없는 id 는 아직 200(번들 표라 보류)
+4. 웹 2차(사용자가 "나중에" 로 둔 것): 발광 표 한 곡 한 행 보기, 카드 높이 선택, 폴더 끌어 옮기기, 2,000곡 가상화, 표 RSC 자료 축소(`level`·`url_diff` 중복), OG 이미지, 홈 대시보드 재구성
+5. 클라이언트 쪽(웹 문서 밖이지만 서버와 짝): 게임 안 IR 순위 패널의 SCRATCH AUTO 포함 토글(서버는 `include_scratch_auto` 를 이미 받는다)
+6. `chart.notes` 복구 SQL 은 돌리지 않았다(2026-10-15 `chart-notes-count`: 복구 대상 0). 표시값이 어긋난 차트가 생기면 [architecture.md](./architecture.md) 3-2 의 `chart-notes-repair` 절차
+
+해소된 것(이전 목록): 계약 교차 테스트(e9aebae), 없는 상세 주소의 200(S19, 운영 404 확인 2026-10-15), 서버 컴포넌트 자기 URL fetch(S19), 가입·로그인 실패 원인 구분·운영 필수 환경 변수(S19), 넓힌 판정 판의 최고 기록·순위 제외와 SCRATCH AUTO 램프 `LightAssistEasy`(2026-10-14 사용자 확인, S18 결정 6).

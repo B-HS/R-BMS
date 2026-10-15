@@ -1,6 +1,6 @@
 # ADR: 배치 시드는 클라이언트가 2^53 미만으로 만들고 서버는 관대하게 받는다
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 > 상태: 유효 · 결정일 2026-10-14 · 결정자 메인(버그 수정, 사용자에게 보고)
 
 ## 배경
@@ -28,9 +28,9 @@
 
 ## 영향과 관련 파일
 
-- `apps/rbms-player/src/app_play.rs`(`LAYOUT_SEED_MASK`, `fresh_layout_seed`, 테스트 1083행 부근), `web/src/server/dto/common.ts`(`seedSchema`), `web/src/server/dto/score.ts`, `web/src/server/dto/replay.ts`, 테스트 `web/tests/dto/ir-contract.test.ts`, `web/tests/service/replay.test.ts`.
+- `apps/rbms-player/src/app_play.rs`(`LAYOUT_SEED_MASK`, `fresh_layout_seed`, 테스트 `a_fresh_layout_seed_fits_what_the_score_server_reads_exactly`), `web/src/server/dto/common.ts`(`seedSchema`), `web/src/server/dto/score.ts`, `web/src/server/dto/replay.ts`, 테스트 `web/tests/dto/ir-contract.test.ts`, `web/tests/service/replay.test.ts`.
 - 커밋: `d733a8f`(서버), `7095ef7`(클라이언트).
-- 재발 방지(미착수): 실제 클라이언트가 만든 요청 본문(일반, SCRATCH AUTO, 코스, 리플레이 업로드)을 Rust 테스트가 JSON 파일로 뽑고 웹 테스트가 서버 Zod 스키마로 통과시키는 교차 계약 테스트. 관련 파일 `crates/rbms-ir/src/contract_tests.rs`·`contract_tests/fixtures.rs`, `web/tests/dto/ir-contract.test.ts`.
+- 재발 방지(2026-10-14 `e9aebae` 로 해소): 실제 클라이언트가 만든 요청 본문(일반, 실패, SCRATCH AUTO, 空POOR>POOR, 넓힌 판정, 14K, 코스, 리플레이, 동기화 재제출 등)을 플레이어 테스트가 `contract/client-requests/*.json` 으로 뽑고(`apps/rbms-player/src/app_result/record_tests/contract_requests.rs`, 기본은 비교만, `RBMS_UPDATE_CONTRACT=1` 일 때 갱신), 웹 테스트가 서버 스키마·라우트 검사·서비스로 통과시킨다(`web/tests/dto/client-requests.test.ts`). 손으로 만든 고정 본문의 계약 테스트는 `crates/rbms-ir/src/contract_tests.rs`, `web/tests/dto/ir-contract.test.ts` 에 그대로 있다. 시드 테스트는 `app_play.rs` 의 `a_fresh_layout_seed_fits_what_the_score_server_reads_exactly`.
 - KNOWN ISSUE: 2^53 이상인 옛 시드를 넘겨받은 판(v0.1.2 이전에 저장된 로컬 리플레이로 다시 하기 등)의 리플레이를 올리면 서버가 시드를 0 으로 저장한다. 그 리플레이를 다른 클라이언트가 받으면(`apps/rbms-player/src/ir_replay.rs` 의 `from_ir_replay`, `seed: data.seed.unwrap_or_default()`) RANDOM 판의 배치가 기록과 달라 입력이 맞지 않게 재생된다. 로컬 리플레이 파일은 정확한 시드를 갖고 있어 영향이 없다. 고치는 방법(새 세션에서 결정): 시드를 10진 문자열로도 받는 선택 필드를 계약에 더하거나(서버는 문자열을 그대로 저장, 클라이언트는 2^53 이상일 때만 문자열 필드를 채움), 서버가 시드를 잃은 리플레이(`seed=0` 이고 RANDOM 이 OFF 가 아님)를 내려줄 때 재생 불가로 표시한다.
 
 ## 날짜와 사용자 원문

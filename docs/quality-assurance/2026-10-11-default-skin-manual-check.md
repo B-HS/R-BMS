@@ -1,25 +1,28 @@
 # 기본 스킨 수동 확인 목록
 
-최종 갱신 2026-10-14 · 대응 커밋 7095ef7 · 대응 단계: `docs/PROCESS.md` L6(최종 검증). 3절은 웨이브 8C 부터 20 까지 기능마다 쌓였고(3.1~3.17절, 웨이브 10A~18 의 구현은 모두 커밋됐다), 아래 목록의 항목은 아직 하나도 사람이 실행해 체크하지 않았다(미체크 114줄, 실행 대상 ID 116개. N9 와 W8 은 다른 절로 옮긴 표지라 실행하지 않는다).
+최종 갱신 2026-10-15 · 대응 커밋 ea698a9 · 대응 단계: `docs/history/2026-10-14-process-archive.md` 의 L6(최종 검증). 3절은 웨이브 8C 부터 S19 까지 기능마다 쌓였고(3.1~3.19절. 3.1~3.17절은 웨이브 10A~18, 3.18절은 S19 의 키 입력 시각, 3.19절은 S18·S19 의 기록 동기화), 아래 목록의 항목은 아직 하나도 사람이 실행해 체크하지 않았다(미체크 126줄, 실행 대상 ID 128개. N9 와 W8 은 다른 절로 옮긴 표지라 실행하지 않는다).
 
 자동 검사는 헤드리스 캔버스와 테스트 안의 앱으로 화면을 그린다. 실제 창(GPU, 마우스, 키보드, 소리, 시스템 글꼴, 다른 창 비율)에서만 드러나는 것은 사람이 확인해야 한다. 이 문서는 자동으로 확인된 것과 사람만 확인할 수 있는 것을 나누고, 후자를 체크박스로 추적한다. 체크하지 못한 항목이나 실패한 항목은 증상, 재현 조건, 확인한 날을 항목 아래에 적고, 결함이면 `docs/bug/` 에 따로 기록한다. 항목의 정본(방법·기대 결과 전문)은 3절이고, 아래 0절의 표는 찾기 위한 요약이다.
 
 ## 0. 실제 창에서 확인할 것 (미체크 일람)
 
-### 0.1 먼저 확인할 것 (v0.1.3 게시 전후)
+### 0.1 먼저 확인할 것 (v0.1.4 게시 뒤)
 
-릴리스 직전에 최소한으로 보는 목록이다. 앞의 둘은 사용자가 이미 기다리는 일이다.
+`v0.1.4` 는 2026-10-15T07:27:28Z 에 게시됐다([릴리스 이력](../ci-release.md)). 게시된 사본으로 최소한으로 보는 목록이다. 앞의 둘은 사용자가 이미 기다리는 일이다.
 
 | 순서 | 항목 | 이유 |
 | --- | --- | --- |
-| 1 | W3 → X3: 로그인한 채 한 판을 쳐서 결과 화면에 `IR: RANK` 가 나오는지 | v0.1.2 의 400(큰 시드, `docs/bug/2026-10-14-score-submit-400-large-seed.md`)이 운영 서버에서 실제로 풀렸는지 본 사람이 없다 |
+| 1 | W3 → X3: 로그인한 채 한 판을 쳐서 결과 화면에 `IR: RANK` 가 나오는지 | v0.1.2 의 400(큰 시드, `docs/bug/2026-10-14-score-submit-400-large-seed.md`)과 v0.1.3 의 400(空POOR, `docs/bug/2026-10-14-score-submit-400-empty-poor.md`)이 운영 서버에서 실제로 풀렸는지 사람이 쳐서 본 기록이 없다 |
 | 2 | A1, A2: dmg 로 설치한 `R-BMS.app` 을 Finder 에서 열어 첫 실행·재실행 | 앱 번들 배포는 v0.1.2 부터이고 Finder 로 처음 열 때 붙을 수 있는 `-psn_...` 인자는 곡 경로로 읽지 않게 고쳤지만(단위 테스트만 있음) 실제 Finder 실행의 기록이 없다. 설정 폴더(`$HOME/.config/rbms/`)가 만들어지는지도 함께 본다 |
 | 3 | X1, X2, X4 | SCRATCH AUTO 새 규칙(초록 노트, 키음, 같은 배치 다시 하기)은 웨이브 18 의 사용자 요청 그대로이고 GPU·소리·컨트롤러에서만 확인된다 |
 | 4 | X7, X8, X9 | 웹 연동(기본 발광 표, 설정 스키마 6, MY FOLDERS)은 실제 서버가 필요하다 |
 | 5 | D1 | 번들 글꼴은 라틴뿐이라 한글·일본어 제목은 시스템 글꼴 폴백이 유일한 경로이고 자동 확인이 없다 |
 | 6 | B2 | 7키 한 곡의 선곡 → 결정 → 플레이 → 결과 전체 흐름 한 번 |
 | 7 | N3 | 아날로그 턴테이블 실기기(START + 디스크). 실기기 없이는 확인되지 않는다 |
-| 8 | Windows 확인(`docs/reference/windows-compat.md` 의 미체크 7항목) | Windows zip 을 게시하기 전. 아직 실제 Windows 에서 연 기록이 없다 |
+| 8 | Windows 확인(`docs/reference/windows-compat.md` 의 미체크 7항목) | Windows zip 은 v0.1.4 와 함께 이미 게시됐다. 실제 Windows 에서 연 기록이 아직 없다 |
+| 9 | 3.18 K1~K4, K7, K8 | 화면 대기를 전용 스레드로 떼고 키보드 이벤트 루프를 `ControlFlow::Wait` 로 바꿨다. 헤드리스 하네스에서만 돌렸고 실제 창·다른 OS 에서는 돌려 보지 않았다 |
+| 10 | 3.18 K5, K6, K9와 JUDGE OFFSET 재조정 | 입력 이벤트 시각으로 판정하고 KEY DEBOUNCE·PAD DEBOUNCE 가 LR2 형으로 바뀌었다. 예전 빌드에서 맞춘 JUDGE OFFSET 은 다시 맞춰야 한다(K5) |
+| 11 | 3.19 R1~R3 | 기록 동기화(SYNC RECORDS NOW), Esc 로 중도 포기한 판의 저장·전송, 2026-10-15 사고로 다시 쓰인 설정의 확인. 이 사용자의 기록 DB 에는 리플레이 43개가 대기 중이다 |
 
 ### 0.2 전체 표
 
@@ -139,6 +142,18 @@
 | 3.17 X7 | 첫 실행의 발광 표 | 설정 폴더를 옮겨 새 설치처럼 만든 뒤(끝나면 되돌림) 네트워크를 끊고 켬, 이어서 네트워크를 잇고 Tables(T)에서 그 표에 R | 선곡 뿌리에 ALL SONGS 와 발광 표(로그인 전이라 MY FOLDERS 없음), 표 안에 26개 레벨 폴더, Tables 에서 표 줄이 `SAVED`, R 뒤 `https://bms.hyuns.uk/tables/insane1` 에서 다시 받음, D 로 지우고 재시작해도 안 돌아옴 |
 | 3.17 X8 | 설정 파일 스키마 5 에서 6 으로 | 기존 설정 폴더로 이 빌드를 처음 켬 | `settings.ron.v5.bak` 생성, NETWORK 의 SERVER URL 이 비어 있었으면 `https://bms.hyuns.uk/api` 가 들어가고 있었으면 그대로, 비우고 재시작하면 비어 있는 채로 유지 |
 | 3.17 X9 | MY FOLDERS(실제 서버) | 웹에서 폴더 둘을 만들고 곡을 넣은 뒤 앱에서 로그인, F6·Tables 의 R, 웹에서 이름을 바꾼 뒤 F6, 로그아웃 | 선곡 뿌리에 `MY FOLDERS (n)`, 안에 `이름 (가진 곡/전체)`, 폴더 안엔 가진 곡만, F6 뒤 바뀐 이름, Tables 맨 끝 줄에 받은 시각, 로그아웃하면 줄이 사라지고 일본어 이름이 제대로 보임 |
+| 3.18 K1 | 화면이 그대로 나오는가(macOS) | 기본 팩으로 선곡 → 7K 한 판 → 결과, DEBUG MODE 로 FPS | 이전 빌드와 같은 FPS, 깜박임·찢김·멈춤 없음, 터미널에 wgpu·AppKit 경고(특히 메인 스레드 밖 `NSView`·`NSWindow` 읽기) 없음 |
+| 3.18 K2 | 창 크기·모드 바꾸기 | 플레이 중과 선곡에서 창 모서리를 끌고 RESOLUTION·WINDOW MODE 를 바꿈 | 그림이 늘어나거나 멈추지 않고 앱이 안 멈춘다(바꾼 직후 한 프레임 빠질 수 있음) |
+| 3.18 K3 | 가려진 창·최소화·다른 앱 | 한 판 도중 최소화·Cmd+Tab, 롱노트를 누른 채로도 | 돌아오면 그대로 이어지고 롱노트는 포커스를 잃은 순간 뗀 것으로 판정, CPU 가 이전보다 높지 않음 |
+| 3.18 K4 | 종료 | 결과에서 Esc 후 Cmd+Q, 창 닫기 단추, 한 판 도중 Cmd+Q | 바로 끝나고(화면 대기 스레드는 최대 1 초) 기록·리플레이·설정이 남음, `rbms-present thread did not finish` 경고 없음 |
+| 3.18 K5 | 키 지연이 줄었는가 | 이전 빌드와 이 빌드로 같은 곡의 FAST/SLOW 분포, 정밀하게는 `--timing-csv` 의 `input_at_us` | 평균 약 반 프레임 FAST 쪽으로 옮겨지고 흩어짐이 줄어듦. 예전 JUDGE OFFSET 은 다시 맞춘다 |
+| 3.18 K6 | KEY DEBOUNCE | Tab → INPUT 에서 16 MS 확인, 롱노트 곡·채터 키보드, 0·100 으로 한 판씩 | 16 에서 채터로 롱노트가 안 끊기고 연타 FAST/SLOW 가 0 일 때와 같음, 100 에서는 빠른 연타 일부가 빠짐, 0 은 예전과 같음 |
+| 3.18 K7 | Windows·Linux | K1~K4 를 Windows(DX12, 가능하면 Vulkan)와 Linux(X11·Wayland)에서 | macOS 와 같음, DX12 에서 창 크기를 끄는 동안 멈추지 않고 Wayland 의 숨긴 창 크기 변경 뒤 이어짐 |
+| 3.18 K8 | Main Thread Checker(macOS) | `DYLD_INSERT_LIBRARIES=…/libMainThreadChecker.dylib` 로 5초 띄워 stderr 의 `Main Thread Checker` 줄을 셈 | wgpu Metal acquire 의 두 건(`-[NSView window]`, `-[NSWindow occlusionState]`, 스레드 `rbms-present`)만. 그 밖은 결함 |
+| 3.18 K9 | PAD DEBOUNCE(컨트롤러) | Tab → INPUT 에서 16 MS 확인, 마이크로스위치 컨트롤러로 연타·롱노트·CN 을 0·16·30 으로 한 판씩, 메뉴 조작 | 누름이 늦춰지지 않고 16 에서 튀는 접점이 빈 POOR·롱노트 끊김이 되지 않음, 바꾼 값이 다음 판에 적용, 메뉴에서 이중 입력 없음 |
+| 3.19 R1 | SYNC RECORDS NOW | 로그인한 채 Tab → NETWORK → SYNC RECORDS NOW, 서버에 없는 판이 있는 DB 와 모두 올라간 DB, 서버에 못 닿는 상태 | `SENDING n/m` → `REPLAYS n/m` → 알림 한 줄, 보낼 것이 없으면 `records: nothing to send`, 못 닿으면 `records sync stopped: server unreachable`, 앱은 안 멈춤 |
+| 3.19 R2 | Esc 로 중도 포기한 판 | 로그인한 채 곡 도중 Esc(판정이 하나도 없을 때도), 코스 첫 곡 도중 Esc, 끝 직전의 Esc | 남은 노트가 있으면 FAILED 판이 기록 목록(R)에 저장되고 서버에도 감, 코스는 곡 기록과 코스 기록(FAILED)이 모두 저장·전송, 남은 노트가 없으면 정상 결과 화면 |
+| 3.19 R3 | 사고로 다시 쓰인 설정 | v0.1.4 를 처음 켜기 전에 `settings.ron`·`keyconfig.ron` 사본, Tab 으로 설정 화면 | SERVER URL, JUDGE OFFSET, KEY DEBOUNCE·PAD DEBOUNCE, 해상도, 스킨 폴더가 의도한 값 |
 | Phase H AUDIO | 오디오 | 곡선택에서 프리뷰가 있는 곡과 없는 곡을 번갈아 포커스한 뒤 interactive 단일 차트로 레인 키를 누름. 차트 시작 직후 BGM·키음, 프리뷰 전환 반복 (`2026-09-16-phase-h-manual-checks.md`) | 키음이 눈에 띄는 지연 없이 들리고 BGM 시작이 차트 시작과 맞으며 프리뷰 전환·재생 중 클릭·팝·끊김 없음 |
 | Phase H Practice | 연습(F4) | LN 의 시작 또는 끝이 범위 경계를 넘고 범위 안에 BGA 변화가 있는 곡에서 START TIME·END TIME 을 경계 양쪽으로 설정해 Enter, 같은 설정으로 한 번 더 | 경계를 가로지르는 LN 의 시작·종료 판정이 유지, 범위 안 BGA 가 표시, 반복 실행에서 설정·BGA 가 누적되거나 사라지지 않음, 연습 결과는 로컬 기록과 IR 제출에 반영 안 됨 |
 | Phase H Course | 코스 진행 | Shift+Tab 으로 COURSE 탭, 2스테이지 이상 코스를 시작해 첫 스테이지를 비최대 게이지와 콤보로 끝내고 둘째 시작 상태와 COURSE RESULT 확인 | 둘째 스테이지의 초기 게이지·콤보가 첫 스테이지 종료 상태에서 이어지고 COURSE RESULT 집계가 실제 진행과 일치 |
@@ -380,7 +395,7 @@
 
 ### 3.18 S19-2b: 화면 대기를 뗀 키 입력 시각, KEY DEBOUNCE
 
-배경: 사용자 결정(2026-10-15) 2번 "beatmania iidx, lunatic rave 2(lr2)등에서 쓰이는방법으로 제대로 정확하게 구현해", 3번 "키보드에도 짧은 디바운스(설정 가능)". present 대기를 전용 스레드(`gpu/present.rs`)로 떼고 이벤트 루프는 `ControlFlow::Wait` 로 프레임 사이에 창만 기다리게 했다([ADR](../acknowledge/2026-10-15-adr-keyboard-input-timing.md)). 헤드리스 테스트로 확인한 것: 화면이 이미지를 붙잡고 있어도 다음 이미지 요청이 바로 돌아오는 것, 레인 키 디바운스의 동작, 설정 표. 같은 구조의 하네스(winit 0.30.13·wgpu 29.0.4, M5 Max 120 Hz, Metal)에서 이벤트 지연 p95 8.0 ms → 0.04 ms. 실제 플레이어 창·실제 키보드·다른 OS 에서는 돌려 보지 않았다. 아래는 그것이다.
+배경: 사용자 결정(2026-10-15) 2번 "beatmania iidx, lunatic rave 2(lr2)등에서 쓰이는방법으로 제대로 정확하게 구현해", 3번 "키보드에도 짧은 디바운스(설정 가능)". present 대기를 전용 스레드(`gpu/present.rs`)로 떼고 이벤트 루프는 `ControlFlow::Wait` 로 프레임 사이에 창만 기다리게 했다([ADR](../acknowledge/2026-10-15-adr-keyboard-input-timing.md)). 헤드리스 테스트로 확인한 것: 화면이 이미지를 붙잡고 있어도 다음 이미지 요청이 바로 돌아오는 것, 레인 키 디바운스의 동작, 설정 표. 같은 구조의 하네스(winit 0.30.13·wgpu 29.0.4, M5 Max 120 Hz, Metal)에서 이벤트 지연 p95 8.0 ms → 0.04 ms. 실제 플레이어 창·실제 키보드·다른 OS 에서는 돌려 보지 않았다. 아래는 그것이다. 이 절의 ID K1~K9 는 3.11 절의 K1~K9 와 이름이 같다. 표(0.2)에서는 `3.18 K2` 처럼 절 번호와 함께 부르고, 다른 문서가 절 없이 `K2`·`K7` 이라고 하면 이 절이다([테스트 부채](2026-10-14-test-debt.md) 3.60).
 
 - [ ] **K1 화면이 그대로 나오는가(macOS).** 방법: 기본 팩으로 선곡 → 7K 곡 한 판 → 결과까지 간다. DEBUG MODE 를 켜고 FPS 를 본다. 기대: 이전 빌드와 같은 FPS(모니터 주사율)이고 깜박임·찢김·멈춤이 없다. 터미널에 wgpu·AppKit 경고가 없다(특히 메인 스레드 밖에서 `NSView`·`NSWindow` 를 읽었다는 경고. Xcode 의 Main Thread Checker 로 띄우면 더 확실하다).
 - [ ] **K2 창 크기·모드 바꾸기.** 방법: 플레이 중과 선곡에서 창 모서리를 끌어 크기를 바꾸고, 설정의 RESOLUTION·WINDOW MODE 를 바꾼다(창 ↔ 테두리 없는 전체 화면). 기대: 바꾸는 동안과 뒤에 그림이 늘어나거나 멈추지 않고, 앱이 멈추거나 죽지 않는다. 크기를 바꿀 때 이벤트 루프는 화면을 기다리지 않고, 요청해 둔 이미지가 오면 그것을 버리고 표면을 다시 맞춘다(그래서 바꾼 직후 한 프레임이 빠질 수 있다). 끄는 동안 그림이 잠깐 멈췄다가 놓으면 이어져도 괜찮다(그렇다면 기록한다).
@@ -389,7 +404,16 @@
 - [ ] **K5 키 지연이 줄었는가.** 방법(간단): 이전 빌드와 이 빌드로 같은 곡을 키보드로 쳐 FAST/SLOW 분포를 본다. 방법(정밀): `--timing-csv` 로 한 판을 남겨 `input_at_us` 를 고속 카메라나 루프백 장치의 시각과 비교한다. 60 Hz 모니터에서도 한 번. 기대: 이 빌드가 평균 약 반 프레임(60 Hz 에서 약 8 ms, 120 Hz 에서 약 4 ms) FAST 쪽으로 옮겨지고 흩어짐이 줄어든다. 예전 빌드에서 맞춘 JUDGE OFFSET 은 다시 맞춰야 한다.
 - [ ] **K6 KEY DEBOUNCE.** 방법: Tab → INPUT 에서 KEY DEBOUNCE 가 16 MS 인지 본다. 롱노트가 많은 곡을 키보드로 친다. 채터가 있는 키보드가 있으면 그 키로. 값을 0 과 100 으로 바꿔 한 판씩. 기대: 16 에서 누르는 순간의 채터로 롱노트가 끊기지 않는다. 16 에서 같은 레인 32분 연타(200 BPM 안팎)의 FAST/SLOW 가 0 일 때와 같다(누름은 늦춰지지 않는다). 100 에서는 같은 키를 빠르게 연타하면 일부가 빠진다(누른 지 100 ms 안의 뗌이 미뤄지는 동안 다시 누르면 누른 채로 남는다. 그것이 창의 뜻). 0 은 예전과 같다. 누른 채 있다가 접점이 잠깐 떨어지는 채터로는 여전히 끊길 수 있다(ADR "남은 한계" 2). 메뉴·서버 주소 입력·IME 입력은 값과 상관없이 그대로다.
 - [ ] **K7 Windows·Linux.** 방법: Windows(DX12, 그리고 가능하면 Vulkan)와 Linux(X11·Wayland)에서 K1~K4 를 한 번씩. 기대: 같다. 다른 스레드에서의 이미지 획득·present 는 wgpu 가 허용하지만 이 OS 들에서 돌려 보지 않았다. Windows DX12 에서 창 크기를 끌어 바꾸는 동안 멈추지 않는지(Present 중 창 스레드로 오는 동기 메시지), Wayland 에서 다른 작업 공간에 숨긴 창의 크기를 바꿨다 돌아왔을 때 이어지는지를 함께 본다.
-- [ ] **K8 Main Thread Checker(macOS, 알려진 위험 확인).** 방법: `DYLD_INSERT_LIBRARIES=$(xcode-select -p)/usr/lib/libMainThreadChecker.dylib MTC_RESET_INSERT_LIBRARIES=0 ./rbms-player` 로 5초 띄운 뒤 stderr 의 `Main Thread Checker` 줄을 센다. 기대: wgpu Metal acquire 의 두 건(`-[NSView window]`, `-[NSWindow occlusionState]`, 스레드 `rbms-present`)만 나온다(상류 gfx-rs/wgpu#10627, ADR keyboard-input-timing 남은 한계 6). 그 밖의 위반이 나오면 결함이다. wgpu 를 올린 뒤에는 이 두 건이 사라졌는지 본다.
+- [ ] **K8 Main Thread Checker(macOS, 알려진 위험 확인).** 방법: `DYLD_INSERT_LIBRARIES=$(xcode-select -p)/usr/lib/libMainThreadChecker.dylib MTC_RESET_INSERT_LIBRARIES=0 ./rbms-player` 로 5초 띄운 뒤 stderr 의 `Main Thread Checker` 줄을 센다. 기대: wgpu Metal acquire 의 두 건(`-[NSView window]`, `-[NSWindow occlusionState]`, 스레드 `rbms-present`)만 나온다(상류 gfx-rs/wgpu#10627, [THR2-1 ADR](../acknowledge/2026-10-15-adr-wgpu-metal-main-thread.md), ADR keyboard-input-timing 남은 한계 6). 그 밖의 위반이 나오면 결함이다. wgpu 를 올린 뒤에는 이 두 건이 사라졌는지 본다.
+- [ ] **K9 PAD DEBOUNCE(컨트롤러).** 방법: Tab → INPUT 에서 PAD DEBOUNCE 가 16 MS 인지 본다(값은 `keyconfig.ron` 의 `pad.debounce_ms` 가 가진다, 범위 0~100). 마이크로스위치 컨트롤러나 저가 패드로 같은 버튼 연타와 롱노트·CN 을 치고 값을 0·16·30 으로 바꿔 한 판씩 친다. 컨트롤러로 선곡·설정·결과 메뉴도 조작한다. 기대: 누름은 늦춰지지 않는다. 16 에서 누르는 순간이나 누른 채 튀는 접점이 빈 POOR·롱노트 끊김이 되지 않는다. 설정 화면에서 바꾼 값이 다음 판에 바로 적용된다. 뗄 때 2 ms 넘게 튀는 버튼은 새 누름이 된다(키보드와 같다. 테스트 부채 3.70). 메뉴에서 뗌 직후의 튐이 두 번 눌림이 되면 기록한다(3.71). 아날로그 턴테이블 방향은 원본의 양방향 잠금 그대로다.
+
+### 3.19 S18·S19: 기록 동기화, Esc 로 중도 포기한 판, 사고 뒤 설정
+
+배경: 사용자 결정(2026-10-14~15) "서버로 저장되지 않는 기록따윈 없어 무조건 저장될거야", "그냥 서버에 전체 보내서 실패하면 실패한거만 잘 처리해놔", "실패기록도 다 서버로 보내야지". 판은 끝날 때 로컬에 저장하고, 서버가 받았는지는 기록 DB 의 `ir_sync` 에 남기며, 받지 못한 판은 동기화가 다시 보낸다. 헤드리스 테스트와 루프백 가짜 서버, 계약 교차 테스트(`contract/client-requests/` 의 `score-abandoned`·`score-sync-resend`)로 확인했다. 아래는 실제 서버와 실제 기록 DB 로만 드러나는 것이다. 규칙: [기록 동기화 ADR](../acknowledge/2026-10-14-adr-record-sync.md), [Esc ADR](../acknowledge/2026-10-15-adr-escape-keeps-every-run.md), [모든 판 저장·전송 ADR](../acknowledge/2026-10-14-adr-save-and-send-every-played-run.md).
+
+- [ ] **R1 SYNC RECORDS NOW.** 방법: 로그인한 상태로 Tab → NETWORK 의 SYNC RECORDS NOW 에서 Enter 를 누른다. 서버에 없는 판(옛 판, 거절됐던 판, 리플레이가 대기 중인 판)이 있는 기록 DB 로 한 번, 모두 올라간 상태로 한 번 한다. SERVER URL 을 닿지 않는 주소로 바꿔서도 한 번 한다(끝나면 되돌린다). 기대: 보낼 것이 있으면 행의 값이 `SENDING n/m` 에서 `REPLAYS n/m` 으로 바뀌고 끝나면 알림이 한 줄 뜬다. 보낼 것이 없으면 `records: nothing to send`, 닿지 못하면 `records sync stopped: server unreachable` 이고 앱은 멈추지 않는다. 시작할 때와 로그인할 때도 같은 동기화가 저절로 돌지만, 같은 클라이언트·서버 빌드 아래 거절된 판은 저절로 다시 보내지 않고 이 행을 눌렀을 때만 다시 보낸다([거절 재전송 ADR](../acknowledge/2026-10-15-adr-record-sync-refusal-resend.md), 테스트 부채 3.14·3.44). 2026-10-15 사고로 이 사용자의 기록 DB 에서 판 49개가 운영 서버에 올라갔고(모두 accepted, [사고 ADR](../acknowledge/2026-10-15-adr-accidental-sync-records-kept.md)) 리플레이 43개가 대기 중이다. 첫 동기화에서 그 리플레이가 올라가는지도 본다.
+- [ ] **R2 Esc 로 중도 포기한 판.** 방법: 로그인한 상태로 7K 곡을 시작해 몇 노트를 치고 Esc 로 나간다. 아무것도 치지 않고 바로 Esc 도 한 번. 곡 끝 직전에도 한 번. 2스테이지 이상 코스는 첫 곡 도중에 Esc 로 나간다. 기대: 남은 노트가 있으면 판정 수와 상관없이 FAILED 판이 기록 목록(R)에 저장되어 리플레이가 열리고 서버에도 같은 판이 있다. 코스 도중 Esc 는 끝낸 곡과 포기한 곡의 곡 기록, 코스 기록(FAILED)이 모두 저장·전송된다. 남은 노트가 없으면 정상 판정으로 결과 화면에 간다. 연습, 오토플레이, 리플레이 보기는 저장되지 않는다.
+- [ ] **R3 사고로 다시 쓰인 설정 확인.** 방법: v0.1.4 를 처음 켜기 전에 설정 폴더(`$HOME/.config/rbms/`)의 `settings.ron` 과 `keyconfig.ron` 사본을 만들어 둔다. 켠 뒤 Tab 으로 설정 화면을 열어 SERVER URL, JUDGE OFFSET, KEY DEBOUNCE(기본 16 MS), PAD DEBOUNCE(기본 16 MS), 해상도와 창 모드, 스킨 폴더를 본다. 기대: 사용자가 마지막으로 쓰던 값이다. 2026-10-15 12:15~12:17 에 감사 에이전트가 개발 빌드를 실제 HOME 으로 실행해 `settings.ron` 이 한 번 다시 쓰였고 곡 DB 를 훑었으며 `ir_sync` 와 `user-folders` 가 갱신됐다([피드백](../feedback/2026-10-15-run-the-player-with-a-scratch-home.md)). 의도와 다른 값이 있으면 사본과 비교해 기록한다.
 
 ## 4. 기록
 

@@ -1,5 +1,7 @@
 # 푸시 뒤 CI 결과를 확인하지 않음 (2026-10-11)
 
+최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+
 ## 무엇이 잘못됐나
 
 Lua 스킨 호환 작업(웨이브 1B~7B, 2026-10-09~11)에서 웨이브마다 로컬 게이트(fmt, clippy, `cargo test --workspace`, `git diff --check`)를 통과시키고 커밋·푸시했지만, GitHub Actions 의 결과는 한 번도 확인하지 않았다. 그 사이 ubuntu·macos·windows 의 test 작업이 웨이브 1B 푸시(run 37954732199)부터 전부 실패하고 있었다. fmt + clippy 작업만 통과했다. 사용자 지적이 아니라 웨이브 7B 푸시 뒤 메인이 `gh run list` 를 처음 실행해 발견했다.

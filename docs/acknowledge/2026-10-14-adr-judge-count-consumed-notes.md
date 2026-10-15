@@ -1,5 +1,6 @@
 # ADR: 점수 제출의 판정 수 검사는 노트를 소비한 판정만 센다
 
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 > 상태: 유효 · 결정일 2026-10-14 · 결정자 사용자(추천안 A) · 커밋 `865643f`
 
 ## 배경
@@ -22,7 +23,9 @@ v0.1.3 까지의 판 대부분이 결과 화면에 `IR ERROR: server error 400: 
 
 ## 영향과 관련 파일
 
-`web/src/server/service/domain/score/score.service.ts`(`judgedNoteCount`, `isJudgeCountConsistent`), `web/src/server/route/score.ts`, 테스트 `web/tests/service/score-submit.test.ts`(사용자 판 #52 의 값), 계약 파일 `contract/client-requests/score-empty-poor-exceeds-poor.json`.
+`web/src/server/service/domain/score/score.service.ts`(`judgedNoteCount`, `isJudgeCountConsistent`, 결정 1·2 의 식은 `countNotesTaken`·`badTakesNote`), `web/src/server/route/score.ts`, 테스트 `web/tests/service/score-submit.test.ts`(사용자 판 #52 의 값), 계약 파일 `contract/client-requests/score-empty-poor-exceeds-poor.json`. 거절 응답의 필드·이유 표시는 [IR 오류 필드 ADR](2026-10-14-adr-ir-error-field-display.md).
+
+S19 3차(`e7890fc`) 이후: 판정 수는 이른·늦은 분리 판정(`epg`+`lpg` 등)의 합이 있으면 그것으로, 없으면 합계 필드로 센다(`web/src/server/service/domain/score/best-policy.ts` 의 `effectiveJudgeCounts`). 분리 값과 합계 값을 따로 부풀린 본문이 검사를 빠져나가지 못하게 한 것이고, 결정 1~3 의 뜻은 같다. 코스 본문은 노트를 소비한 판정 수(같은 `countNotesTaken`)의 두 배가 본문의 `max_ex_score` 를 넘지 않는지로 본다(`course.service.ts` 의 `findCourseIntegrityFailure`).
 
 ## 날짜와 사용자 원문
 

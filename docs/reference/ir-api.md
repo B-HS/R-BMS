@@ -1,6 +1,6 @@
 # rbms IR-superset API 계약 — `rbms-ir` 클라이언트 정본
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 
 > **상태:** 현재 IR 계약과 구현된 경계의 정본입니다. 서버는 https://bms.hyuns.uk 에 배포됐고(2026-10-14) 클라이언트 기본 서버 주소가 이 주소입니다. 아래 JSON의 해시·시간·커밋 값은 **형식 예시**이며 현재 배포 식별자가 아닙니다. 알려진 클라이언트 갭은 본문에서 보존하고, 실제 수동 다중 IR/서버 QA는 [roadmap](../roadmap.md)의 미실시 항목입니다. 필드 규칙이 코드와 다르면 서버 zod 스키마(`web/src/server/dto/`)와 `crates/rbms-ir/src/dto/` 가 맞습니다.
 
@@ -124,14 +124,26 @@
 //   gauge_value:  z.number()               → f32 NaN/Inf 는 JSON `null` 로 직렬화되고,
 //                                            zod default 는 undefined 에만 걸리므로 400.
 // `ScoreSubmission::clamp_to_server_bounds()` 가 played_at 을 MIN_PLAYED_AT_MS(0) 로 올리고
-// 비유한 gauge_value 를 FALLBACK_GAUGE_VALUE(0.0) 로 바꾼다. `spawn_submit` 이 제출 전에 호출하므로
-// 정상 경로에서는 이 두 사유의 400 이 나오지 않는다. CourseSubmission 도 같은 두 제약을 받는다.
+// 비유한 gauge_value 를 FALLBACK_GAUGE_VALUE(0.0) 로 바꾼다. `spawn_submit` 과 기록 동기화(점수·코스)가
+// 제출 전에 호출하므로 정상 경로에서는 이 두 사유의 400 이 나오지 않는다. CourseSubmission 도 같은 두 제약을 받는다.
+//
+// extra 의 키(클라이언트가 쓰는 것, `dto/score.rs`):
+//   rule_version    (RULE_VERSION_EXTRA_KEY)  기록 규칙 세대(지금 4). 세대 4 부터 judge.avgjudge 가 레퍼런스 정의다.
+//                   이 키가 없는 본문의 avgjudge 는 옛 정의(부호 있는 평균 오프셋)다.
+//   mean_offset_us  (MEAN_OFFSET_EXTRA_KEY)   치우침: 친 노트의 부호 있는 평균 오프셋 µs(양수 = 빠름). 엔진의 avg_judge_us.
+//   reconstructed   (RECONSTRUCTED_EXTRA_KEY) true 면 끝날 때 남긴 본문이 없어 로컬 기록 행으로 다시 만든 본문이다
+//                   (fast/slow·옵션·빌드가 없다. play-options.md 10.9절 "재구성").
 
 // SubmitResponse — POST /scores, POST /courses
 { "accepted": true, "rank": 3, "previous_best": 1400, "message": "saved",
   "ranked": true, "flags": [], "is_new_best": true, "score_id": "sc_123", "extra": {} }
 // 서버(`submitResponseSchema`)는 `extra` 를 뺀 8개를 항상 보낸다. 클라는 뒤 5개를 serde default 로
 // 받으므로 이 필드들을 모르는 구버전 서버 응답도 그대로 디코드된다.
+// 멱등(기록 동기화의 전제): 로그인한 사용자·차트(sha256)·같은 1초 칸(played_at 을 1000ms 로 내림)의 판이 이미
+// 있으면 서버는 새로 저장하지 않고 200 과 message "duplicate submission ignored"(`DUPLICATE_SUBMISSION_MESSAGE`),
+// 저장된 판의 score_id 로 답한다. 저장된 판이 ranked 면 그 값으로 최고 기록을 한 번 더 조건부 갱신한다
+// (점수는 커밋됐는데 최고 기록 갱신이 실패한 판을 다시 보내면 고쳐진다). 클라는 `SubmitResponse::is_duplicate` 로
+// "이미 서버에 있음"을 센다. 같은 판을 거의 같은 순간에 두 번 보내면 늦은 쪽이 500 일 수 있다(테스트 부채 3.72).
 // `score_id` 는 리플레이 업로드를 스코어에 연결하는 키이고(`ReplayData.score_id`),
 // `flags`/`ranked` 는 `unranked_summary()` 와 `is_replay_upload_warranted` 가 읽는다.
 
@@ -238,7 +250,8 @@
 
 - settings PUT 의 409 본문이 잠금 봉투로 파싱되지 않으면 일반 `Conflict(body)` 로 떨어진다.
 - `IrError::status()` · `detail()` · `error_code()` 로 상태·원문·서버 코드를 꺼낸다. `is_auth_failure()` 는 401/403, `is_retryable()` 은 네트워크·429·5xx.
-- `Display` 는 봉투를 풀어 `not signed in (401): 인증이 필요합니다 (UNAUTHORIZED)` 처럼 렌더하고, 본문은 `ERROR_DETAIL_MAX_CHARS`(200자)에서 자른다.
+- `Display` 는 봉투를 풀어 `not signed in (401): 인증이 필요합니다 (UNAUTHORIZED)` 처럼 렌더하고, 본문은 `ERROR_DETAIL_MAX_CHARS`(200자)에서 자른다. 봉투의 `details` 에 `field` 가 있으면 메시지 대신 코드·필드·이유를 쓴다: `server error 400: VALIDATION_ERROR: judge (judge count exceeds total_notes)`(필드만 있으면 `코드: 필드`). `IrError::server_reason()` 이 그 셋(`ServerReason { code, field, reason }`)을 꺼낸다.
+- 기록 동기화가 답을 어떻게 다루는지는 `rbms_ir::sync`(`submit_verdict`·`upload_verdict`)가 한 곳에서 정한다: 수락(중복 포함), 4xx 와 수락되지 않은 2xx 는 거절(`Rejection`: 상태·코드·필드·이유), 429 는 대기, 네트워크·디코드·5xx 는 일시 실패, 401·서버 없음·`Unsupported` 는 동기화 중단. 규칙과 클라이언트 쪽 처리는 [crates.md](../crates.md) rbms-ir 의 `sync` 와 [play-options.md](../play-options.md) 10.9절이 정본이다.
 
 ---
 
@@ -259,6 +272,7 @@
 - **204 로 답하는 구버전 서버**는 `from_server: false` + 보낸 stamp 로 떨어진다. 이 stamp 는 추측이라 잠금에 넣지 않고(`ir_sync::upload_outcome` 이 `None`), 클라(`App::refresh_sync_base`)가 `get_settings` 를 한 번 더 돌려 진짜 값을 읽는다. 이 재조회가 없으면 그런 서버에서는 한 세션의 **두 번째 저장부터 항상 409** 다.
 - **409 는 잠금을 전진시키지 않는다.** 409 본문의 `server.updated_at` 을 그대로 다음 base 로 삼으면 바로 다음 업로드가 성공해 "먼저 다운로드하라"던 그 새 서버 사본을 덮어쓴다. 잠금 전이는 `ir_sync::SyncLock`/`SyncOutcome` 한 곳에 모여 있다: `Read(updated_at)` 와 `Uploaded(updated_at)`(= 서버가 알려준 stamp) 만 잠금을 설정하고, `Conflict` 는 그대로 두며, `SignedOut` 은 지운다.
 - **설정 blob 에 실리지 않는 것**(`ir_sync::keep_local`): 토큰·login id·이메일·PLAYER ID·서버 주소, 이 기기의 경로(곡 폴더·표·글꼴·시스템 효과음 폴더·스킨 메뉴. 이름에 folder·path·dir·location·file 이 든 필드가 새로 생기면 `ir_sync.rs` 의 가드 테스트 `a_field_of_the_configuration_that_names_a_place_on_disk_is_one_the_upload_blanks` 가 실패한다), 그리고 **추가 IR 서버 목록 `ir_profiles` 전체**(서버마다 그 서버가 발급한 토큰이 들어 있다). 업로드는 이것들을 기본값으로 바꿔 보내고, 다운로드는 이 기기의 것을 그대로 둔다. S19 이전에 올라간 blob 에 프로필 토큰이 있었다면 그 계정의 다음 업로드가 blob 을 덮어쓸 때 사라진다(서버 쪽 일괄 정리는 없다).
+- **설정 blob 의 줄바꿈은 모든 OS 에서 LF 다**(`ir_sync.rs` 의 `BLOB_NEW_LINE`, `8b6f8bb`). RON 의 기본 줄바꿈이 Windows 에서 CRLF 라 같은 설정이 OS 마다 다른 글로 올라가던 것을 계약 교차 테스트(`contract/client-requests/` 의 설정 blob)가 Windows CI 에서 잡았다. 테스트 `an_uploaded_blob_breaks_its_lines_the_same_way_on_every_platform`.
 - 미설정 기본값 `NullScoreServer` 는 8개 필수 메서드에 `NotConfigured`, 슈퍼셋 확장 메서드에 `Unsupported` 를 돌려준다(플레이 무영향, 연결 표시 빨강).
 
 ---
@@ -269,4 +283,4 @@
 - **`gauge` 를 생략한 업로드는 `AssistEasy` 로 되돌아온다.** 컬럼이 `NOT NULL DEFAULT 0` 이라 "미지정"과 0번 게이지를 구분하지 못한다. 클라(`ir_replay::to_ir_replay`)는 항상 게이지를 보내므로 정상 경로에는 영향이 없다.
 - 경로·쿼리 percent-encoding 은 `url` 크레이트 신규 의존이 필요해 보류 중이다(현재는 URL-safe 식별자 전제).
 - 차트 메타 업서트(`POST /charts`), 난이도표(`/tables`), 코스 메타 업서트(`POST /courses/meta`), 스코어 단건 조회(`GET /scores/{id}`) 는 서버에 있으나 `rbms-ir` 클라이언트에는 아직 없다. 차트 제목·아티스트·레벨은 `POST /charts` 대신 점수 제출의 `chart.title/artist/level` 로 올린다.
-- **계약 교차 테스트 공백(새 세션의 할 일)**: Rust 쪽 테스트(`contract_tests/fixtures.rs`)와 웹 쪽 테스트(`ir-contract.test.ts`)가 각자 손으로 쓴 예시 JSON 을 쓰고 둘이 공유하는 파일이 없다. 실제 클라이언트가 만든 요청 본문(일반 판, SCRATCH AUTO 판, 코스, 리플레이 업로드)을 Rust 테스트가 JSON 파일로 뽑고 웹 테스트가 서버 zod 스키마로 통과시키는 교차 테스트가 필요하다. v0.1.2 의 점수 제출 400(2^53 를 넘는 시드)이 이 공백에서 나왔다. 관련 파일: `crates/rbms-ir/src/contract_tests.rs`·`fixtures.rs`, `web/tests/dto/ir-contract.test.ts`.
+- **계약 교차 테스트(S18, `e9aebae`)**: 클라이언트 → 서버 방향은 닫혔다. 플레이어 테스트(`apps/rbms-player/src/app_result/record_tests/contract_requests.rs`)가 루프백 서버로 실제로 보낸 요청 본문 15종(일반·SCRATCH AUTO·넓힌 판정·오토플레이·FAILED·Esc 포기·空POOR 가 POOR 수를 넘는 판·14키 2P·동기화 재전송·코스 둘·리플레이 둘·설정 blob)을 `contract/client-requests/*.json` 과 비교하고(`RBMS_UPDATE_CONTRACT=1` 이면 다시 쓴다), 웹 테스트 `web/tests/dto/client-requests.test.ts` 가 그 파일들을 서버 zod 스키마로 통과시킨다. v0.1.2 의 점수 제출 400(2^53 를 넘는 시드)이 이 공백에서 나왔다. 남은 것은 반대 방향(서버 응답 → Rust 디코드)이다(`quality-assurance/2026-10-14-test-debt.md` 3.12). 양쪽 고유 테스트(`crates/rbms-ir/src/contract_tests.rs`·`fixtures.rs`, `web/tests/dto/ir-contract.test.ts`)는 그대로 있다.

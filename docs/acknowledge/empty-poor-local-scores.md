@@ -1,5 +1,6 @@
 # 확정 결정 — 空POOR 처리 · 로컬 기록 스키마
 
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9. 2026-10-15 대조 결과: 1절(空POOR 를 노트를 소비하지 않는 별도 카운터로 둔다)은 지금도 맞다(`crates/rbms-judge/src/matcher.rs` 의 `empty_poor`). 다음 서술은 그 뒤 결정으로 바뀌었다. (1) 대상 파일의 `apps/rbms-player/src/scores.rs`·`main.rs` 는 없다. 결과 진입은 `apps/rbms-player/src/app_result.rs` 의 `enter_result`, 기록은 `crates/rbms-store` 의 `ScoreDb` 다. (2) 1절 이유의 "FC 판정 `max_combo==total_notes`" 는 [풀콤 조건 ADR](2026-10-15-adr-full-combo-condition.md)(끝에 남은 콤보 = 지나간 노트)로 바뀌었다. (3) 2절의 "LightAssistEasy(3) 는 AssistEasy 로 흡수" 는 [SCRATCH AUTO 규칙 ADR](2026-10-14-adr-scratch-auto-rule.md) 결정 4 로 바뀌었다(SCRATCH AUTO 판은 LIGHT ASSIST). (4) 점수 서버가 空POOR 를 판정 수에 넣어 판을 거절하던 일은 [판정 수 ADR](2026-10-14-adr-judge-count-consumed-notes.md). 2절의 최고 기록 정의(램프 우선, 동률 시 EX)는 이번에 대조하지 않았다.
 > **상태(2026-09-16): 현재 정책.** 구현은 `rbms-store`의 SQLite 기록 경로와 호환되며, 이 문서의 `scores.ron` 설명은 역사 저장 형식으로 대체됐습니다. 空POOR 의미와 기록 제외 정책은 유지합니다.
 
 ## 대상 파일

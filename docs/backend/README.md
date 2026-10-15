@@ -1,8 +1,8 @@
 # rbms 백엔드 — IR 슈퍼셋 서버 (docs/backend)
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 
-> rbms 클라이언트(`rbms-ir`)가 호출하는 [`docs/reference/ir-api.md`](../reference/ir-api.md) 계약을 `web/`의 Next.js 서버로 구현한 문서 묶음이다. 운영 서버(https://bms.hyuns.uk)는 2026-10-14 에 배포됐다. 코드와 문서가 다르면 코드가 맞다.
+> rbms 클라이언트(`rbms-ir`)가 호출하는 [`docs/reference/ir-api.md`](../reference/ir-api.md) 계약을 `web/`의 Next.js 서버로 구현한 문서 묶음이다. 운영 서버(https://bms.hyuns.uk)는 2026-10-14 에 배포됐고 운영 DB 에는 마이그레이션 0000~0004 가 적용돼 있다(2026-10-15). 코드와 문서가 다르면 코드가 맞다.
 > 설계 원칙: **LR2IR + 레퍼런스 구현 IR의 슈퍼셋** + rbms 고유 기능(설정 동기화·리플레이 서버 저장·캐퍼빌리티 탐색·전방호환 `extra`).
 > 스택: **Next.js Route Handler (Bun) + Drizzle(MySQL) + Zod + better-auth**. Hono 별도 서버 전제는 구현 전에 폐기됐습니다.
 
@@ -20,12 +20,12 @@
 ## 한눈 요약 (도메인)
 
 ```
-auth        register / login / token / me (Bearer+세션쿠키)  (레퍼런스 구현 IRAccount 슈퍼셋)
+auth        register / login / token / me / token/current 폐기 (Bearer+세션쿠키)  (레퍼런스 구현 IRAccount 슈퍼셋)
 players     profile / rivals / recent                       (IRPlayerData)
 charts      ranking(md5·sha256) / best / meta / search       (LR2IR getrankingxml 슈퍼셋)
 scores      submit(전체옵션+빌드해시) / get(by player·chart)  (IRScoreData early·late 슈퍼셋)
 courses     submit / ranking / course meta                  (IRCourseData)
-tables      list / folders / courses                        (IRTableData). 발광 난이도표는 파일 스냅샷으로 `/tables/insane1/{header,data}.json` 제공
+tables      list / folders / courses                        (IRTableData). 발광 난이도표는 파일 스냅샷으로 `/tables/insane1/{header,data}.json` 제공(다른 사이트 주소·출처는 싣지 않음)
 folders     내 폴더(웹 편집, 클라이언트 읽기)                  (rbms 추가)
 replays     upload / download (µs 정밀, score 연결)          (rbms 추가 — 핵분석)
 settings    get / put (settings·keyconfig·tables·임의 blob)  (rbms 추가)
@@ -38,7 +38,7 @@ compat      LR2IR getrankingxml.cgi 등 레거시 어댑터(선택)    (LR2 클�
 ## 핵심 결정 (요지)
 - **스택 = Next.js Route Handler + Drizzle(MySQL) + Zod + better-auth**. 구현은 `src/server/route → service → compose(Drizzle)` 경계, `getEnv()` Zod, snake_case 컬럼을 사용합니다.
 - **차트 키 = sha256 우선 + md5 동시 보유**. LR2IR은 md5만, 레퍼런스 구현는 sha256. 둘 다 인덱싱해 양쪽 클라이언트 호환.
-- **스코어 모델 = 레퍼런스 구현 IRScoreData 슈퍼셋**: 판정 PG/GR/GD/BD/PR/MS × {early, late} 분리(EX·BP·avgjudge 유도) + `option`·`seed`·`gauge`·`assist`·`rule`·`skin` 보존.
+- **스코어 모델 = 레퍼런스 구현 IRScoreData 슈퍼셋**: 판정 PG/GR/GD/BD/PR/MS × {early, late} 분리(EX·BP·avgjudge 유도) + `option`·`seed`·`gauge`·`assist`·`rule`·`skin` 보존. 서버는 본문의 일관성(판정 수 ≤ 노트, EX·BP·램프)만 검사하고, 첫 제출자가 정한 `chart.notes` 는 상한으로 쓰지 않는다(S19, [api-spec.md](./api-spec.md) 5절).
 - **공평 평가 = 플레이 전체정보 보존**: 모든 옵션(judge_rate·total·autoplay·assist·hispeed·lift·cover…) + `client_build_sha256`(변조 탐지) + µs 리플레이. 서버가 `ranked` 산출.
 - **µs 리플레이**: 입력 타임스탬프를 µs로 무손실 저장 → 핵분석·재시뮬.
 - **인증 = better-auth**: 네이티브=Bearer 토큰, 웹 FE=세션 쿠키. guest 허용(설정).

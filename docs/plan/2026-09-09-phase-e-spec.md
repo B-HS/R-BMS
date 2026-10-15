@@ -214,7 +214,7 @@ impl Default for GoldenOptions { /* cols:16, rows:9, max_channel_delta:2, max_di
 pub fn assert_golden_png(canvas: &CpuCanvas, name: &str, opts: GoldenOptions) -> Result<(), String>;
 ```
 - PNG 인코딩/디코딩은 `png` 크레이트(순수 Rust, 무의존 확장 없음)를 dev-dependency 로 추가. 런타임 의존이 아니다.
-- **폰트 결정성**: 기존 CI 골든 실패 원인(임베드 폰트 폴백)을 반복하지 않도록, PNG 골든 테스트도 `TextEngine::embedded_only` / `use_embedded_fonts_only` 경로를 강제한다(PROCESS "CI(dev) 골든 실패 수정" 항목 참조).
+- **폰트 결정성**: 기존 CI 골든 실패 원인(임베드 폰트 폴백)을 반복하지 않도록, PNG 골든 테스트도 `TextEngine::embedded_only` / `use_embedded_fonts_only` 경로를 강제한다(PROCESS "CI(dev) 골든 실패 수정" 항목 참조. 지금은 `docs/history/2026-10-14-process-archive.md`).
 - 텍스처가 필요한 골든은 **코드 생성 텍스처**(체커보드·그라디언트 8x8/16x16)를 쓴다. 바이너리 에셋을 새로 커밋하지 않는다.
 
 ### 2.6 글리프 아틀라스 (K7)

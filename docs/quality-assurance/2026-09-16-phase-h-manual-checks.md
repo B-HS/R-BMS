@@ -1,6 +1,6 @@
 # Phase H 수동 확인 절차
 
-최종 갱신 2026-10-14 · 대응 커밋 7095ef7 · 네 절차(AUDIO, Practice, Course, Multi-IR) 모두 아직 사람이 실행한 기록이 없다(체크박스가 없는 절차 문서라 실행하면 아래 기록을 이 문서 끝에 남긴다). 사용하는 키는 현재 코드와 맞다: 연습 `F4`(`Shortcut::Practice`), 코스 탭 `Shift+Tab`, IR 랭킹 `I`, primary 전환 `Q`·`E`(`apps/rbms-player/src/ir_ranking_view.rs`). 이 문서의 항목은 `2026-10-11-default-skin-manual-check.md` 맨 위 표에도 한 줄씩 올라 있다.
+최종 갱신 2026-10-15 · 대응 커밋 ea698a9 · 네 절차(AUDIO, Practice, Course, Multi-IR) 모두 아직 사람이 실행한 기록이 없다(체크박스가 없는 절차 문서라 실행하면 아래 기록을 이 문서 끝에 남긴다). 사용하는 키는 현재 코드와 맞다: 연습 `F4`(`Shortcut::Practice`), 코스 탭 `Shift+Tab`, IR 랭킹 `I`, primary 전환 `Q`·`E`(`apps/rbms-player/src/ir_ranking_view.rs`). 이 문서의 항목은 `2026-10-11-default-skin-manual-check.md` 맨 위 표에도 한 줄씩 올라 있다.
 
 ## 범위와 준비
 

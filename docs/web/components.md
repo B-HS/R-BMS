@@ -1,6 +1,6 @@
 # rbms web — 컴포넌트 / 디자인 토큰 매핑 (W0)
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 
 > **구현 상태:** 이 문서는 W0 설계 기준입니다. W1/W2 UI 통합은 완료됐고, 현재 컴포넌트와 경로는 `web/src/{shared,entities,features,widgets,app}`가 정본입니다. 네이티브 `theme.ron` 편집·동기화는 웹 기능이 아니며 [../theme.md](../theme.md)의 경계를 따릅니다.
 
@@ -238,6 +238,6 @@ design.md §7-4의 랜드마크·텍스트 이중 인코딩은 현재 컴포넌�
 | `useIsHydrated` | `shared/hooks/use-is-hydrated.ts` | 서버 HTML 과 다른 값을 하이드레이션 뒤에만 쓰게 함(사이드바 슬롯, 세션) |
 | `useDialogFocusReturn` | `features/dialog/use-dialog-focus-return.ts` | 상태로 여는 대화상자의 포커스 복귀 |
 
-- 같은 정보를 한 화면에 두 번 두지 않는다(17B-2 리뷰: 발광 표의 "내 진행" `h2` 와 "표 주소 복사" 가 둘씩이었음). 데스크톱 사이드바는 출처와 복사, 본문은 진행, 모바일 머리의 복사는 `md:hidden`.
+- 같은 정보를 한 화면에 두 번 두지 않는다(17B-2 리뷰: 발광 표의 "내 진행" `h2` 와 "표 주소 복사" 가 둘씩이었음). 데스크톱 사이드바는 "표 정보"(갱신·곡·레벨 수)와 복사, 본문은 진행, 모바일 머리의 복사는 `md:hidden`. 출처 표기는 2026-10-15 에 지웠다(ea34002).
 - 라이트 테마의 작은 회색 글자는 `text-muted-foreground` 로 4.5:1 을 넘는다(토큰 `oklch(0.48 0 0)`). 새 회색 단계를 만들지 않는다.
 - 행 전체를 누르게 할 때는 제목 링크에 `after:absolute after:inset-0` 과 행의 `relative` 를 쓴다(`ScoreRow`, `FolderListItem`, `TableSnapshotCard`). 홈 "최근 활동" 행도 이미 이 방식이라 행 오른쪽 끝을 눌러도 링크가 받는다(17B-2 에서 `elementFromPoint` 로 확인).

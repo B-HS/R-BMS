@@ -1,9 +1,10 @@
 # 발광 난이도표(発狂BMS難易度表) 스냅샷과 사본·기본 등록 설계
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 
 > 작성: 2026-10-14, 웨이브 17A 작업 A3. 조사와 설계이며 웹 소스(`web/src`)와 Rust 소스는 고치지 않았다.
 > **구현 결과(웨이브 17B~18, 2026-10-14): 이 문서의 추천안이 모두 그대로 채택·구현됐다.** 6절의 결정은 [../acknowledge/2026-10-14-web-decisions.md](../acknowledge/2026-10-14-web-decisions.md)(U2·U3·M1·M2·M5·Q1) 와 [../acknowledge/2026-10-14-adr-default-insane-table.md](../acknowledge/2026-10-14-adr-default-insane-table.md) 가 정본이다: 사본 주소 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음, noindex. 출처·삭제 요청 문구는 2026-10-14 에 뺐다: [../acknowledge/2026-10-14-adr-table-page-no-source-notice.md](../acknowledge/2026-10-14-adr-table-page-no-source-notice.md)), 표는 DB 가 아니라 파일을 직접 서빙(7.2 의 A안), 클라이언트는 `seeded_default_tables` 표식과 실행 파일에 내장한 스냅샷으로 기본 등록(7.4 의 B안, 8b11a17). 서빙 코드: `web/src/server/service/domain/table-snapshot/`, `web/src/server/route/table-snapshot.ts`, 라우트 `web/src/app/tables/[tableId]/{header,data}.json`, 화면 `web/src/app/(app)/tables/insane1/page.tsx`. 응답 규칙은 [../backend/api-spec.md](../backend/api-spec.md) 7.1, 라우트는 [architecture.md](./architecture.md) 1-3. 본문은 조사 당시의 기록이다.
+> **이후 바뀐 것(2026-10-14~15, 사용자 지시 "제발 다른사이트의 흔적좀 지워놔")**: 6절의 "출처 세 곳·삭제 요청 문구"와 header 의 `mirror_of` 는 모두 없앴다(4a0872d·ea34002). 스냅샷 정규화도 바뀌어 0절의 "정규화는 값을 바꾸지 않는다"는 더 이상 맞지 않는다: `web/scripts/snapshot-table.ts` 가 header 의 `original_url` 을 버리고, 곡의 `comment` 를 비우고, 내려받기 주소(`url`·`url_diff`·`name_diff`) 밖의 글자 필드에서 웹 주소를 지운다(4fda17c·dd5518e. 내려받기 주소는 사용자 정정으로 남겼다). 지금 `source.json` 은 2026-10-15 에 다시 받은 기록이고 `normalization` 에 이 규칙을 적는다. 서빙하는 필드는 [../backend/api-spec.md](../backend/api-spec.md) 7.1 이 정본이다.
 > 만든 것: `web/data/tables/insane1/{header.json,data.json,source.json}`, `web/scripts/snapshot-table.ts`, 이 문서.
 > 관찰 시각: 2026-10-14 02:38~02:42 UTC. 모든 수치는 그 시각 `https://darksabun.club/table/archive/insane1/` 의 응답이다.
 

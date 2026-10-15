@@ -1,8 +1,8 @@
 # IR 계약 동결 기록 (2026-09-09)
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7 (동결 당시의 기록이라 본문은 그대로 두고 상태 줄만 갱신)
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9 (동결 당시의 기록이라 본문은 그대로 두고 상태 줄만 갱신)
 
-> **역사 상태:** 이 문서는 구현 전 동결 기록입니다. 2026-09-09에 `web/` 안의 Next.js Route Handler + Drizzle(MySQL) + Zod + better-auth 구현으로 전환됐습니다. 별도 MIT 레포와 Hono 부트스트랩 전제는 폐기됐고, 현재 정본은 [README.md](./README.md), [api-spec.md](./api-spec.md), [endpoint-tasks.md](./endpoint-tasks.md) 및 실제 `web/src/`입니다. 운영 배포는 2026-10-14 에 끝났습니다(https://bms.hyuns.uk). 이후 추가된 경로(`/api/players/{id}/folders`, `include_scratch_auto`, 코스 제출의 `scratch_auto`·`assist` 등)는 이 동결 목록에 없고 [api-spec.md](./api-spec.md) 가 정본입니다.
+> **역사 상태:** 이 문서는 구현 전 동결 기록입니다. 2026-09-09에 `web/` 안의 Next.js Route Handler + Drizzle(MySQL) + Zod + better-auth 구현으로 전환됐습니다. 별도 MIT 레포와 Hono 부트스트랩 전제는 폐기됐고, 현재 정본은 [README.md](./README.md), [api-spec.md](./api-spec.md), [endpoint-tasks.md](./endpoint-tasks.md) 및 실제 `web/src/`입니다. 운영 배포는 2026-10-14 에 끝났습니다(https://bms.hyuns.uk, 운영 DB 마이그레이션 0000~0004 적용). 이후 추가된 경로(`/api/players/{id}/folders`, `include_scratch_auto`, 코스 제출의 `scratch_auto`·`assist`, `DELETE /api/auth/token/current`(S19) 등)는 이 동결 목록에 없고 [api-spec.md](./api-spec.md) 가 정본입니다.
 
 ## A. 클라가 실제 호출하는 경로 (검증: `crates/rbms-ir/src/http.rs`)
 `base = --server 값(trailing / 제거)`, 각 호출은 `{base}{path}`:

@@ -1,6 +1,6 @@
 # rbms 백엔드 — PRD (Product Requirements)
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
 
 > 대상: rbms 전용 IR-슈퍼셋 백엔드. **역사 PRD + 구현 기준:** 핵심 요구는 `web/`에 구현됐습니다. 현재 계약·제약은 [api-spec.md](./api-spec.md)와 [endpoint-tasks.md](./endpoint-tasks.md), 실제 구현은 `web/src/`가 정본입니다. 운영 배포(https://bms.hyuns.uk)는 2026-10-14 에 끝났습니다(현재 상태는 [../web/architecture.md](../web/architecture.md) 6-2).
 

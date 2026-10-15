@@ -1,7 +1,10 @@
 # 테스트 BMS 라이브러리 실측 (발광 BMS ★1)
 
+최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+
 ## 경로
-`/Users/hyunseokbyun/Documents/personally/1/` — 약 50곡. 엔드투엔드 검증용.
+`/Volumes/SSD/2026-07-31-backup/Documents/personally/1/` — 폴더 53개, 약 50곡(곡 DB 기준 727 차트, [테스트 부채](../quality-assurance/2026-10-14-test-debt.md) 3.18). 엔드투엔드 검증용. 이 문서의 아래 수치는 2026-10-15 에 이 경로에서 다시 센 값이다(아래 확장자 수와 모두 같았다).
+이 폴더는 예전에 `/Users/hyunseokbyun/Documents/personally/1/` 에 있었고 그 경로는 지금 없다. 큰 라이브러리는 `/Volumes/SSD/bms`(같은 문서 3.18 이 센 11,336 차트)다. 둘 다 외장 SSD 라 마운트가 자주 빠진다. 마운트되어 있지 않으면 라이브러리가 필요한 검증(3.18, 3.38, 3.51, 3.56)은 하지 못하고 부채로 남는다.
 (저장소에는 커밋 금지 — 저작권. `.gitignore`의 `/assets/songs` 처럼 외부 참조만.)
 
 ## 차트 포맷 분포 (확장자 카운트)

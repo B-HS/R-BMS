@@ -1,0 +1,317 @@
+# PROCESS.md 보관분 (2026-10-14 ~ 2026-10-15 작업 구간, 보존 이력, 옛 0~9절)
+
+> 옮긴 날짜 2026-10-15 · 출처 `docs/PROCESS.md` @ 커밋 `ea698a9`(302줄). `docs/PROCESS.md` 가 300줄을 넘어(ai-process 2.1) 진행 중이 없는 구간을 문장 변경 없이 그대로 옮겼다. 체크박스, "현재 작업", "진행", "다음 세션" 표기와 수치는 작성 시점의 것이다.
+>
+> 담긴 것(원래 순서): 옛 머리말(3~8줄) · 현재 작업 "웹 배포 준비와 클라이언트 보완"(S1~S19, 웨이브 16~20·17A·17B, 사용자 결정 원문, 2026-10-15 사고 기록) · 보존 이력(전체 로드맵 Phase 0~7, 2026-06-03~) · 옛 0~9절(목표, 확정 결정, 모드 프로파일, 크레이트 맵, 완료 기능, 실행, 검증 메모, 알려진 한계, docs 맵, 작업 규칙). 이 구간 앞의 기록(Phase A~I, 스킨 시스템, Lua 스킨 호환 L1~L7, 웨이브 9~15)은 [2026-10-14-process-archive.md](2026-10-14-process-archive.md). 현재 상태와 체크리스트는 [../PROCESS.md](../PROCESS.md).
+>
+> 옮긴 뒤 달라진 것(읽을 때 주의, 2026-10-15 확인):
+> - S16 의 `[ ]` 는 열린 일이 아니다. S18 사용자 결정 3 으로 v0.1.3 은 게시하지 않고 v0.1.4 로 냈다. v0.1.3 draft 는 게시되지 않은 채 남아 있고(`gh release view`), v0.1.4 는 2026-10-15 07:27 UTC 에 게시됐다. 아래 S18-6·S19-6·"v0.1.4 릴리스" 문단의 "게시는 사용자"는 그 전의 표기다.
+> - S1~S19 블록 맨 끝의 "진행:" 줄(배포 S10 대기, 웨이브 18 이 도는 중)은 웨이브 17B-2 시점의 것이다. S10~S12 는 이후 모두 끝났다.
+> - 옛 0~9절은 2026-06 ~ 2026-10-11 시점이다. 현재 정본은 목표·진행 [../HANDOFF.md](../HANDOFF.md) 1~3절, 결정 [../acknowledge/README.md](../acknowledge/README.md), 크레이트(옛 맵의 9개 → 지금은 크레이트 15개 + 앱 2개, 루트 `Cargo.toml`) [../crates.md](../crates.md)·[../architecture.md](../architecture.md), 실행과 영속 파일 [../../README.md](../../README.md)·[../development.md](../development.md), 조작과 옵션 [../play-options.md](../play-options.md), 남은 일 [../roadmap.md](../roadmap.md)·[../HANDOFF.md](../HANDOFF.md) 8절.
+> - 옛 1절의 사용자 설정 파일 가운데 `tables.ron`·`scores.ron` 은 `settings.ron` 과 `scoredb.sqlite` 로 합쳐졌다(옛 `tables.ron` 은 옛 설정을 옮길 때만 읽고, 옛 `scores.ron` 은 `scoredb.sqlite` 를 처음 만들 때 가져온 뒤 `scores.ron.migrated` 로 남는다. [../development.md](../development.md) Persistence). 옛 1절의 테스트 데이터 경로 `/Users/hyunseokbyun/Documents/personally/1/` 는 지금 없고, 같은 라이브러리가 `/Volumes/SSD/2026-07-31-backup/Documents/personally/1` 에 있다(별도 `/Volumes/SSD/bms`. 마운트가 자주 빠진다).
+> - 옛 9절의 "커밋은 사용자 요청 시에만"은 결정 D7([../acknowledge/2026-10-09-lua-skin-compat-decisions.md](../acknowledge/2026-10-09-lua-skin-compat-decisions.md))로 대체됐고, 이후 작업은 게이트를 통과하면 논리 단위로 커밋·푸시한다([../HANDOFF.md](../HANDOFF.md) 5절). 같은 절의 "`Cargo.lock` 커밋 금지"는 D12 로 폐기됐다(`Cargo.lock` 추적).
+
+---
+
+옛 머리말(PROCESS.md 3~8줄. 1줄은 제목 `# rbms — 레퍼런스 구현 core PLAY 모듈 Rust 포팅 (PROCESS / 단일 출처)`).
+
+> 세션 인수인계 스냅샷은 `docs/HANDOFF.md`(2026-10-11, Lua 스킨 호환 작업의 웨이브 8 까지 완료)다. 2026-10-09 스냅샷은 `docs/history/2026-10-09-handoff-snapshot.md`, 2026-09-18 스냅샷은 `docs/history/2026-09-18-handoff-snapshot.md`. 이전 Phase G 중단 스냅샷은 `docs/history/2026-09-10-handoff-snapshot.md`와 `docs/history/2026-09-10-session-wrap-up.md`에 보존한다. Phase G·H는 완료했고 Phase R은 실제 키와 함께 추후 진행한다.
+> 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
+> 베이스 룰: 프로젝트 작업 환경의 `AGENTS.md`와 llm-rules 전문(`ai-process`·`common`·`comments`·`git`·`security`)을 따른다. Rust 프로젝트에는 TS/JS 전용 규칙을 적용하지 않으며, 공통 원칙(문서는 `docs/`에 기록·정확한 이름·근본 해결·공식 문서 확인·검증 후 진행)은 그대로 적용한다.
+> 위치: 저장소 루트(2026-10-09 기준 `/Users/hyunseokbyun/development/R-BMS`). 빌드 `cargo build`, 테스트 `cargo test --workspace`(2026-09-17 스킨 시스템 K5 게이트 실측 3,181 통과·0 실패; 실제 오디오 장치 테스트 등 ignored 3건). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
+> git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·라이브러리 차트 커밋 금지(.gitignore). `Cargo.lock` 은 2026-10-11 부터 추적한다(D12).
+> 다음 할 일(로드맵)은 **`docs/roadmap.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
+
+---
+
+## 현재 작업 — 웹 배포 준비와 클라이언트 보완 (2026-10-14)
+
+> 직전까지의 완료 구간(웨이브 9~15, 첫 릴리스 v0.1.0 draft)은 `docs/history/2026-10-14-process-archive.md` 로 옮겼다. 결정 기록은 `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md`(D1~D18)와 아래.
+
+> 사용자 지시(2026-10-14, 요지). 웹: (가) https://darksabun.club/table/archive/insane1/ 의 표 정보를 가져와 저장한다. 웹페이지에서 발광 난이도 페이지를 제공하고 R-BMS 에 기본으로 등록된다. (나) 로그인한 사용자에게 사용자 폴더가 할당된다. R-BMS 는 로그인한 사용자의 정보를 불러올 때 곡 preset 폴더도 불러온다(기능은 table 과 같다). (다) 웹페이지는 UI/UX 가 최대한 좋아야 한다. 좋은 예는 `/Users/hyunseokbyun/development/iidx-rank/`. (라) 주소는 https://bms.hyuns.uk/ 로 이미 배포돼 있다. 현재 기능을 다 점검하고 웹페이지를 다시 점검한다. Vercel 과 GitHub 을 연결한다. 클라이언트: (마) 로그인하지 않으면 기록이 저장되지 않는 것 같다(클리어 램프만 저장됨). 점검한다. (바) 판정·콤보 위의 숫자와 FAST/SLOW 의 target score 가 LOCAL BEST 로 해도 AAA 를 목표로 계산된다. fallback score 도 따로 설정할 수 있게 고도화한다. (사) Tab 을 누르면 나오는 메뉴를 UI/UX 좋게 고도화한다(지금은 딱딱하고 불편해 보인다).
+
+사용자 결정(2026-10-14): Workflow 사용(Opus/Sonnet 배분, Fable·Haiku 제외). 발광 난이도표는 저장소에 스냅샷(JSON)으로 커밋하고 웹이 페이지와 표준 BMS 표 형식으로 제공하며 출처를 적는다. R-BMS 의 기본 등록 주소는 `bms.hyuns.uk` 의 사본. 사용자 폴더는 사용자당 여러 개, 이름을 붙여 웹에서 편집하고 R-BMS 는 읽기만. Vercel 프로덕션 브랜치는 `dev`, 루트 `web/`, `web/` 이 바뀐 푸시에서만 배포(`prod` 는 앱 릴리스 워크플로의 브랜치).
+
+- [x] S1. 기록 저장 점검 — 로그인하지 않은 플레이의 기록이 무엇까지 저장되고 어디에 보이는가. 웨이브 16.
+- [x] S2. 목표 점수 — LOCAL BEST 가 AAA 로 계산되는 원인, fallback 목표 설정. 웨이브 16(S1 뒤).
+- [x] S3. 설정 화면(Tab) UI/UX 고도화. 웨이브 16.
+- [x] S4. 웹 현황 점검 — `web/` 코드와 실제 사이트(https://bms.hyuns.uk/)의 기능별 동작, 고장·누락 목록. 웨이브 17A.
+- [x] S5. 디자인 기준 — `iidx-rank` 의 디자인 언어를 읽어 R-BMS 웹의 화면 설계로 정리. 웨이브 17A.
+- [x] S6. 발광 난이도표 스냅샷 — 가져와 저장, 형식과 출처 기록. 웨이브 17A.
+- [x] S7. 사용자 폴더와 기본 표의 서버·클라이언트 계약 설계. 웨이브 17A.
+- [x] S8. 웹 구현 — 발광 난이도 페이지와 표준 표 형식 제공, 사용자 폴더(편집·API), 화면 재설계, 점검에서 나온 고장 수정. 웨이브 17B(S4~S7 뒤).
+- [x] S9. 클라이언트 연동 — 기본 표 등록(스냅샷 내장), 로그인 시 사용자 폴더 불러오기(MY FOLDERS), 서버 주소 기본값, 점수 제출의 차트 메타. 웨이브 18.
+- [x] S10. 배포 — Vercel 과 GitHub 연결, DB 마이그레이션 적용, 배포된 사이트 재점검. (계정 접근이 필요한 단계는 사용자와.)
+  첫 Git 배포(커밋 `d81eafc`) Ready. 운영 점검(읽기 요청): `/api/version` commit `d81eafc`, `/tables/insane1/header.json` 200·`data_url` 이 `https://bms.hyuns.uk/tables/insane1/data.json`, `data.json` 1,035곡, 페이지 head 에 `bmstable` 메타와 noindex, 보안 헤더 6종, 주요 페이지 200, `/folders` 307, 없는 주소 404.
+- [x] S13. 클라이언트 `v0.1.1` 릴리스(사용자 지시 2026-10-14: "삭제하고 0.1.1 릴리스만들어. 드래프트로 올릴텐데 드래프트 내용도 정확하게 잘 적어놔야해"). 릴리스할 커밋의 CI 세 OS 통과 확인 뒤 `release.yml` 수동 실행(patch, run 38550449246). 버전 잡이 `cdd27a6 release: v0.1.1` 과 태그를 올림. 빌드 전 자격 증명 점검(새 순서)·유니버설 빌드·Developer ID 서명·공증 `status: Accepted`·draft 생성 모두 통과. 메인이 내려받아 확인: 두 아카이브와 실행 파일의 SHA-256 일치, `x86_64 arm64`, `codesign --verify --strict` 통과, 하드닝 런타임, Developer ID 체인. draft 본문은 메인이 코드와 문서로 사실을 확인해 쓴 릴리스 노트로 바꿈(내려받기 표, SCRATCH AUTO, 기록과 점수 서버, 선곡과 난이도표, 목표 점수, 결과 화면, 설정 화면, 웹사이트, 업그레이드, 알려진 한계). 게시는 사용자. `v0.1.0` draft 는 게시되지 않은 채 남아 있다.
+- [x] S14. macOS 배포 형식을 앱 번들 + dmg 로(2026-10-14). 사용자가 받은 v0.1.1 실행 파일이 "Apple could not verify ... free of malware" 로 막혔다. 같은 파일은 `spctl` 온라인 판정 `accepted, source=Notarized Developer ID` 였으나 `syspolicy_check distribution` 이 "Notary Ticket Missing"(단독 실행 파일에는 티켓을 붙일 수 없음). 사용자 결정(모두 추천안): `R-BMS.app` 을 `.dmg` 에 담아 앱과 dmg 모두 공증·티켓 부착, `v0.1.1` draft 를 지우고 `v0.1.2` 로. 커밋 `bfa0cca`(릴리스 워크플로와 `scripts/macos-app.sh`·`scripts/macos-notarize.sh`), 인자 수정(Finder 가 붙이는 `-psn_` 를 곡 경로로 읽지 않음). 릴리스 run 38559305840 전부 통과. 메인이 내려받아 확인: dmg SHA-256 일치, dmg 와 안의 `R-BMS.app` 모두 `stapler validate` 통과, Gatekeeper 판정 `accepted, source=Notarized Developer ID`, `syspolicy_check distribution` "passed all pre-distribution checks", `CFBundleShortVersionString` 0.1.2, `x86_64 arm64`, Windows zip SHA-256 일치. draft 본문은 v0.1.2 와 dmg 에 맞게 고친 릴리스 노트. 게시는 사용자.
+- [x] S15. 점수 제출 400(2026-10-14): v0.1.2 로 친 판의 결과 화면에 `IR ERROR: server error 400 … (VALIDATION_ERROR)`. 원인: 새 판 시드가 시계 나노초(약 1.79e18)인데 서버 Zod 4 `int()` 는 2^53 이하만 받음 → 모든 실제 판이 거절. 수정 `7095ef7`(클라 `fresh_layout_seed` 2^53 미만, 서버 `seedSchema` 범위 밖은 0), 웹 재배포 `7095ef7`, CI 통과. v0.1.2 draft 삭제. 기록 `docs/bug/2026-10-14-score-submit-400-large-seed.md`, ADR `docs/acknowledge/2026-10-14-adr-layout-seed-range.md`.
+- [ ] S16. v0.1.3 게시 — draft 준비 완료(run 38563811699, 버전 커밋 `fb29d24`, dmg·앱 티켓·Gatekeeper·syspolicy_check·SHA-256 확인, 본문 작성). 사용자가 한 판 쳐서 `IR: RANK` 확인 뒤 게시.
+- [x] S17. 인수인계(2026-10-14, /prepare-new): 문서 4묶음 코드 대조(클라이언트·웹·릴리스 QA·결정 기록), ADR 15건과 색인 `docs/acknowledge/README.md`, `docs/quality-assurance/2026-10-14-test-debt.md`, `docs/bug/2026-10-14-score-submit-400-large-seed.md`, `docs/feedback/2026-10-14-preflight-before-build.md`, `docs/HANDOFF.md`(이전 것은 `docs/history/2026-10-11-handoff-snapshot.md`). 커밋 `e2c5a38`.
+
+### S18. 점수 제출 400(空POOR) 수리, 기록 동기화, 계약 교차 테스트, v0.1.4 (2026-10-14 재개 세션)
+
+사용자 보고: SCRATCH AUTO 판 결과 화면에 `IR ERROR: server error 400 … (VALIDATION_ERROR)`, "거의 다 저장이 안 된다". 원인(Workflow `wf_8baf7eed-678` 조사, scratchpad 재현): 서버 `judgedNoteCount`(`web/src/server/service/domain/score/score.service.ts`)가 `miss`(클라이언트에서는 空POOR, 노트를 소비하지 않음)를 소비 판정으로 세고 `poor` 에서 `empty_poor` 를 빼서, 空POOR 가 見逃し POOR 보다 많은 판이 `judge count exceeds total_notes` 로 거절됨. SCRATCH AUTO 와 무관. 로컬 52판 중 37판 해당, 운영 순위와 예측 일치. 운영 배포는 `7095ef7`.
+
+사용자 결정(2026-10-14): (1) 판정 수 검사는 노트를 소비한 판정만 센다(9K 는 BAD 가 소비하지 않으면 뺀다). (2) 결과 화면에 오류 필드 표시. (3) v0.1.3 draft 는 두고 v0.1.4 로 낸다. (4) v0.1.0 draft 는 둔다. (5) Esc 중도 포기 판도 저장·전송(FAILED, 남은 노트는 놓침). (6) 넓힌 판정 판은 최고 기록·순위 제외, SCRATCH AUTO 램프 LIGHT ASSIST 유지. (7) 원문 "그냥 서버에 전체 보내서 실패하면 실패한거만 잘 처리해놔" — 로컬 이력 전체를 서버로 보내고, 실패한 판만 실패로 기록·표시·재시도. (8) 로그인·시작 시 자동 + 설정 화면 수동 버튼. (9) 리플레이도 함께. (10) 옛 규칙 SCRATCH AUTO(세대 2) 판은 보내지 않음. (11) 서버가 (사용자, 차트, played_at) 이 같은 제출을 이미 받은 것으로 처리, 로컬은 서버 수락 여부와 score_id 를 기록.
+
+- [x] S18-1. 서버: `judgedNoteCount` 의미 수정 + 실제 판 값 테스트, 같은 판 재제출의 멱등 처리(점수·리플레이), 거절 이유 기록 여부 점검.
+- [x] S18-2. 클라이언트: 오류 세부(field, reason) 표시, 판별 서버 수락 상태 기록(기록 DB), 로컬 기록 전체 동기화(자동 + 수동, 리플레이 포함, 세대 2 SCRATCH AUTO 제외, 실패 판 기록·표시), Esc 포기 판 저장·전송, `scoredb_store.rs` 모듈 문서.
+- [x] S18-3. 작은 수리 5건: `web-db.yml` status 종료 코드, `verify-notary-credentials.sh` `read -rs`, `verify-signing-cert.sh` `-v`, `release.yml` concurrency, `web/scripts/run-sql.ts` 개수만 출력.
+- [x] S18-4. 계약 교차 테스트: Rust 가 실제 판 경로로 만든 요청 본문(일반, 실패, SCRATCH AUTO, 空POOR>POOR, 넓힌 판정, 14K, 코스, 리플레이, 동기화 재제출)을 `contract/client-requests/*.json` 으로 뽑고 웹 테스트가 서버 스키마와 라우트 검사로 통과시킴. `web.yml` 에 MySQL 서비스 + `RBMS_DB_E2E=1`.
+결과(Workflow `wf_c8406f6e-8d8`, 8 에이전트: 설계 ∥ 작은 수리 → 서버 ∥ 클라이언트 → 계약 → 리뷰(발견 9건, 8건 수정·1건 부채) → 게이트). 게이트: fmt·clippy 통과, `cargo test --workspace` 5,758 통과·0 실패·ignored 6, 웹 verify 521 통과·skip 11, format, build, 스킨 덤프 `--strict`, 생성 이미지 `--check`. 커밋 `865643f`(서버), `258596c`(CI·스크립트), `5f4a9a2`(클라이언트), `e9aebae`(계약 테스트). 같은 날 사용자 지시로 발광 표 페이지의 출처·삭제 요청 문구 제거(`4a0872d`, 운영 반영 확인).
+- [x] S18-5. 리뷰, 게이트, 커밋·푸시, 3 OS·웹 CI, 웹 배포 확인(운영 `/api/version`), 필요 시 운영 DB 마이그레이션(web-db).
+- [x] S18-6. v0.1.4 릴리스 draft — 사용자 결정(2026-10-14)으로 S19 고도화까지 넣어 한 번에 낸다(S19-6).
+- [x] S18-7. 문서 갱신: ADR(판정 수 검사, 기록 동기화, Esc 포기 판), bug 기록, test-debt, HANDOFF, play-options, api-spec, README.
+
+### S19. 잠재 버그 전수 수리와 고도화·최적화 (2026-10-14)
+
+사용자 지시(원문): "가끔씩 이런건 없어야해 그거포함해서 잠재적 버그도 다 수정하고 기록저장 유저관련 기능 그리고 플레이관련 기능 그리고 플레이시에 렉걸릴 가능성 이런것들을 포함해서 고도화 및 최적화도 제대로 잘 해놔."
+사용자 결정(2026-10-14): (1) Workflow 사용. (2) 영역별 찾기 → 재현·측정 확인 → 수정 → 회귀 테스트, 새 결함이 나오지 않을 때까지 반복. 영역: 가끔 실패하는 테스트, 기록 저장·동기화, 계정·IR, 플레이·판정, 플레이 중 렉. (3) 렉 기준: 플레이 중 프레임 스레드에 디스크 I/O·큰 할당·잠금 대기·동기 네트워크 없음, 헤드리스 계측으로 그리기를 뺀 프레임 처리 p99 1ms 미만, 오디오 언더런 0, 로딩·결과 진입 끊김 없음. (4) 판정·점수 의미가 원본과 달라지는 수정은 고치기 전에 사용자 확인, 성능·명백한 버그는 바로. (5) v0.1.4 는 이 작업까지 넣어 한 번에 낸다.
+
+- [x] S19-1. 1차 감사(찾기 → 반박 검증): 떠는 테스트(play_parts 픽셀 비교 포함), 기록 저장·동기화, 계정·IR(클라이언트·서버), 플레이·판정, 렉·성능 계측.
+사용자 결정(2026-10-15, 판정 의미 9건 "전부 추천안대로"): (1) avgjudge 는 원본 정의(절대 오차 평균, 놓친 노트 1초 벌점)로 통일, 부호 있는 평균은 별도 필드. (2) 입력 이벤트 시각으로 판정, 게이지 틱은 경과 시간(리플레이 결정적). (3) TOTAL 덮어쓰기는 어시스트(저장·전송, 최고 기록·순위 제외). (4) 게이지 사망 판의 BP 에 미도달 노트 포함. (5) 코스 곡별 기록은 곡별 콤보. (6) 풀콤 조건은 원본대로. (7) 같은 레인 LN 몸통 안 일반 노트는 원본처럼 배경음으로. (8) 짝 없는 LN 머리는 원본 처리로 한 곳에서 정리. (9) 원문 "9번은 ESC 눌렀을때 남은 노트가 없다면 그냥 판단해서, 또한 실패기록도 다 서버로 보내야지 뭘 안보내려고 발악을 쳐하는거야" — 코스 도중 Esc: 남은 노트가 없으면 정상 판단(결과로), 있으면 끝낸 곡·포기한 곡(FAILED) 곡 기록과 코스 기록(FAILED)을 모두 저장·전송. 단일 곡 Esc 의 "판정이 없는 판은 저장 안 함" 예외도 없앤다(`docs/feedback/2026-10-15-do-not-exclude-runs.md`).
+- [x] S19-2. 확인된 결함 수정(판정 의미 변경은 사용자 확인 뒤) + 회귀 테스트.
+결과(2026-10-15): 1차 감사 Workflow `wf_c79a69a5-724`(5 영역 찾기 + 반박 검증, 확인 57건, 반박 1건), 1차 수정 `wf_df1fcde7-512`(판정 의미 무관 결함), 2차 수정 `wf_8b1e87e7-049`(판정 의미 9건 + Esc 정책 + 남은 떠는 테스트: 스킨 Lua 프레임 예산의 벽시계). 게이트: Rust 5,918 통과·0 실패, 떠는 테스트 반복(멈춤 주입 200·CPU 부하 10·rbms-ir 120·렌더 400) 0 실패, 727 차트 오토플레이 만점 0 예외, 웹 597 + DB 통합 34 통과, 스킨 덤프·생성 이미지·계약 통과. 렌더 계측(같은 길이 합성 차트) p99 0.08~0.09 ms, 1 ms 초과 0, 결과 진입 프레임 8~9 ms → 0.3 ms. 커밋: 웹 `b197446`(운영 마이그레이션 0003 적용), 코드 `f81d499`. 같은 기간에 앱 아이콘 `cc500ef`, 웹 파비콘 `089c737`(사용자 지시).
+남은 것(사용자에게 보고): 키보드 입력 시각은 아직 처리 시각(winit 이벤트에 시각이 없고 present 대기 뒤에 들어옴, test-debt 3.53), 코스 램프 규칙을 원본으로 바꾼 것(결정 5 범위 밖, 승인 필요), LN 이 키 채터에 약해짐, 컨트롤러 판정이 평균 약 8 ms 빨라짐(JUDGE OFFSET 재조정 안내), airTKkill 류 오토플레이 Failed(TOTAL 낮음 추정, 미확인).
+사용자 결정(2026-10-15): (1) 코스 램프는 원본 규칙(MusicResult.java:402-428) 유지. (3) 키보드에도 짧은 디바운스(설정 가능)로 채터를 막는다. (2) 원문 "2번은 beatmania iidx, lunatic rave 2(lr2)등에서 쓰이는방법으로 제대로 정확하게 구현해" — 키보드 판정 시각을 IIDX·LR2 의 입력 처리 방식을 조사해 그대로 정확히 구현한다(S19-2b).
+- [x] S19-2b. 입력 처리 방식 조사(IIDX·LR2·beatoraja) → 키보드 입력 시각 구현 → 키보드 디바운스 → 리뷰·게이트.
+S19-2b 결과(2026-10-15, Workflow `wf_da2e2873-f73`): 커밋 `794361b`(rbms-present 스레드, LR2 방식 레인 키 디바운스 16 ms), `a13f6ce`(문서). CI 3 OS·웹 통과.
+2차 감사(Workflow `wf_32dc80f0-053`): 확인 17건(수리가 만든 결함: 서버 total_notes 영구 상한, Esc 리플레이 Missing 경합, 연습 게이지 사망 판정 정지). 3차 수정 Workflow `wf_5cbb07fa-653` 진행.
+사용자 결정(2026-10-15, THR2-1 A): rbms-present 스레드가 wgpu-hal Metal acquire 안에서 메인 스레드 전용 AppKit API(NSView.window, NSWindow.occlusionState)를 읽는 위반은 구조를 유지하고 ADR·QA 에 알려진 위험으로 기록, 상류 이슈 https://github.com/gfx-rs/wgpu/issues/10627 (2026-10-15 등록). 키보드 ADR 과 QA(Main Thread Checker 실행 절차) 반영은 3차 수정 뒤.
+3차 수정(Workflow `wf_5cbb07fa-653`) 결과: 커밋 `0e7be91`(마이그레이션 0004·chart-notes 동작, 운영 적용 run 38673724720), `e7890fc`(웹), `4cc72d0`(클라이언트), `082c8fb`(문서). CI 3 OS·웹 통과, 운영 `082c8fb`. 운영 chart-notes 점검(run 38673771025): 어긋난 notes 0, 복구 대상 0(복구 SQL 미실행), 점수 없는 차트 행 3, 누적 거절 39. 오토플레이 만점: 727 차트 예외 0, SSD 전체 11,336 차트 중 airTKkill·airTkill 2곡만 FAILED(차트의 #TOTAL 1.1·1 — 원본도 FAILED, 결함 아님). THR2-1 은 ADR keyboard-input-timing 남은 한계 6 과 QA K8 에 기록.
+사용자 결정(2026-10-15, "둘 다 추천대로"): KEY DEBOUNCE 기본 16 ms 확정. 컨트롤러 디바운스도 LR2 방식(누름은 항상 그 순간, 누른 뒤 창 안의 뗌만 미룸)으로 바꾼다 — 3차 감사 수정과 함께 구현(ADR keyboard-input-timing 의 "확인받을 것" 해소).
+사용자 요청(2026-10-15, 원문): "다만 debounce 값은 나중에 오버조이가면 더 바뀔수도있으니 settings에서 바꿀수있게끔넣어두면좋을듯한데" — 컨트롤러 디바운스(keyconfig.ron 의 pad.debounce_ms)를 설정 화면 INPUT 탭에서 바꿀 수 있게 한다(키보드 KEY DEBOUNCE 는 이미 있음). 3차 감사 수정과 함께.
+사고(2026-10-15 12:15~12:17): 3차 감사 에이전트가 개발 빌드(afa1e2f 작업 트리)를 실제 HOME 으로 `--help` 실행(앱이 그 인자를 처리하지 않아 정상 실행). 시작 기록 동기화가 사용자 계정으로 운영 서버에 판 49개를 보냄(모두 accepted, 리플레이 6 업로드·43 대기, 옛 세대 2 SCRATCH AUTO 37판은 설계대로 미전송). settings.ron 재작성, songdb 전체 재스캔(PARSER_VERSION 4), scoredb 의 ir_sync 기록, user-folders 갱신. 사용자 결정(원문): "A 나중에 테스트할떄 참조가능할수도있으니 뭐" — 49개 기록은 운영에 그대로 둔다. 재발 방지: 모든 에이전트 지시에 scratch HOME·닿지 않는 서버만 허용, 앱의 --help/--version 처리(4차 수정).
+사용자 결정(2026-10-15, "둘다 A"): (1) BGA 상주 텍스처 상한 256 MiB 유지(YATA 1,144 → 1,504 MB, 플레이 p99 0.14 ms 우선). (2) 아날로그 턴테이블 디바운스는 원본 양방향 잠금 유지(버튼·키 축만 LR2 방식). 4차 수정 커밋 1676c57·ec00a0d, 마지막 확인 라운드 Workflow `wf_54da5aca-a31`(웹 DB 교착·write-races 테스트 수정 + 4차 수정분 확인 감사).
+- [x] S19-3. 2차 감사(새 결함이 없을 때까지 반복).
+- [x] S19-4. 성능 계측 결과와 기준 충족 기록(`docs/quality-assurance/`).
+- [x] S19-5. 리뷰, 게이트, 커밋·푸시, CI(떠는 테스트가 없는지 반복 실행 포함), 웹 배포 확인.
+- [x] S19-6. v0.1.4 릴리스 draft(산출물 확인, 본문 사실 확인). 게시는 사용자.
+- [x] S19-7. 문서(HANDOFF, test-debt, ADR, 실제 창 확인 목록).
+
+S19 마무리(2026-10-15): 마지막 확인 라운드 Workflow `wf_54da5aca-a31`(웹 교착 재시도 + 확인 감사 minor 5건), 수리 `wf_1d0668c7-469`. 커밋 `9e2cc0e`(웹), `c81eda1`(클라이언트), `51f3a1e`(문서). CI 3 OS·웹(MySQL 포함) 통과, 운영 `51f3a1e`. 게이트: Rust 6,024 통과·0 실패, 떠는 테스트 반복 0 실패, 오토플레이 만점(727·11,336 차트, 예외는 #TOTAL 1·1.1 인 airTKkill·airTkill 뿐), 웹 653 + DB 57×10. 같은 기간 발광 표의 다른 사이트 흔적 제거(`ea34002`, `4fda17c` 다운로드 링크까지 지웠다가 사용자 정정으로 `dd5518e` 에서 복구 — 메모·artist 주소·original_url 만 제거).
+v0.1.4 릴리스(run 38696475211): 메인이 산출물 점검(서명·공증·티켓·Gatekeeper·syspolicy_check·버전·아이콘·SHA-256·Windows exe 아이콘 리소스), draft 본문 작성. 게시는 사용자.
+
+다음 세션: `docs/HANDOFF.md` 8절의 순서(사용자 확인 → 계약 교차 테스트 → 작은 코드 수리 → 웹 KNOWN ISSUE → 클라이언트 한계 → 실제 창 QA → 웹 2차).
+
+웨이브 17A 결과(2026-10-14, Workflow `wf_132333d1-1d9`, 조사·설계 4 에이전트). 산출물: `docs/web/2026-10-14-audit.md`, `docs/web/2026-10-14-design-direction.md`, `docs/web/2026-10-14-insane-table.md`, `docs/plan/2026-10-14-web-user-folders.md`, 스냅샷 `web/data/tables/insane1/{header,data,source}.json`, 다시 받는 스크립트 `web/scripts/snapshot-table.ts`(`--check` 일치). 결정은 `docs/acknowledge/2026-10-14-web-decisions.md`(사용자 결정 U1~U5, 메인이 추천안으로 정한 M1~M11, 사용자에게 물은 Q1~Q6).
+- 점검: 로컬은 lint·테스트 208 통과·prettier 통과. typecheck 는 `.next` 가 없으면 실패(`next typegen` 선행 필요). 빌드는 DB 설정이 없으면 `/admin/builds` 프리렌더에서 실패(`session-gate.tsx` 가 `headers()` 보다 `getAuth()` 를 먼저 부른다). 운영은 공개 페이지 전부 200 이지만 없는 차트·플레이어 주소도 200 에 빈 화면, 보안 헤더는 HSTS 뿐, 모든 제목이 `rbms IR`, 차트의 제목·레벨이 전부 공란, 리더보드는 항상 0.00, `/api/tables` 는 빈 배열. `web/drizzle/meta` 가 `.gitignore` 에 걸려 없어 마이그레이션을 만들 수도 적용할 수도 없다. 운영은 Git 연동이 아니라 수동 배포로 보인다(`/api/version` 의 commit 이 null. 추정).
+- 표: 1,035곡, 레벨 `1`~`25` 와 `???`, 전 곡 md5 만(sha256 없음), 이름 `発狂BMS難易度表`, 기호 `★`. 원본에 재배포 금지 문구도 허락 문구도 없고 페이지는 NOINDEX 다.
+- 디자인: `iidx-rank` 와 기본 토큰은 같은 값이고 차이는 그 위의 골격(2열 셸, 페이지 머리, 카드 격자, 게임 원색의 램프 띠, 패널별 로딩·빈·오류, 모바일 문서 스크롤)이다.
+- 폴더: 테이블 둘, 편집 API 12 경로와 읽기 2 경로, 클라이언트 전용 통로, 구현 단위 10개.
+
+웨이브 17B-1 결과(2026-10-14, Workflow `wf_89d903ba-b9d`, 3 에이전트: 프런트 기반 ∥ 서버 → 통합). 커밋 `6b10947`(웹 CI 분리), `d38b6fb`(웹). 게이트: frozen 설치, verify(테스트 363 통과·0 실패), format:check, 환경 변수 없는 build(오류 로그 0), drizzle generate "No schema changes". Docker 임시 MySQL 로 마이그레이션 0000→0001 적용과 로그인→홈→설정·표준 표 응답·폴더 API 를 끝까지 확인. 계약 문서 `docs/web/2026-10-14-foundation-contract.md`.
+- 화면: iidx-rank 의 2열 셸, 48px 페이지 머리, 다크 기본, 무채색 단계와 `--rbms-*` 의미색, 모든 페이지의 로딩·빈·오류 상태, 404·오류 화면, 페이지별 메타데이터, robots, sitemap, 보호 경로의 서버 307.
+- 서버: drizzle meta 복원(0000 의 when = 2026-09-01. 설치된 drizzle-orm 0.45.2 의 migrate 가 마지막 created_at 보다 큰 when 만 실행함을 소스와 두 시험 DB 로 확인), `user_folder`·`user_folder_item`(0001), 폴더 편집 API 13개(명시 저장용 통째 바꾸기 PUT 포함)와 읽기 2개, 표준 `header.json`·`data.json` 과 화면용 표 API 4개, 웹 로그인은 토큰을 만들지 않는 `/api/fe/auth/login`·`register`, 리더보드는 클리어한 차트 수로 정렬, 보안 헤더(CSP 는 프로덕션), 점수 제출이 차트 메타를 받아 빈 칸만 채움, `vercel.json` ignoreCommand, `db:status` 스크립트.
+- 아직: `/tables/insane1`·`/folders` 화면이 없어 지금 배포하면 404(17B-2).
+
+웨이브 16 결과(2026-10-14, Workflow `wf_d2cb5aad-038`, 5 에이전트: 기록 ∥ 설정 화면 → 목표 → 리뷰 → 수정. 리뷰 발견 10건 중 8건 수정, 2건 사용자 결정 대기). 커밋 `4bed711`, `d7a0034`. 게이트: fmt·clippy·`cargo test --workspace --no-fail-fast --locked` 5,594 통과·0 실패·ignored 5, 동영상 끈 구성 2,298 통과, 덤프 `--strict`, 두 팩 lib 테스트 통과. 메인이 설정 화면 전후 캡처를 확인.
+- S1 원인(사용자 실제 DB 의 읽기 전용 사본으로 확정): 로그인이 아니라 SCRATCH AUTO. `scorelog` 37판 전부 assist=1, 최고 기록 29행 전부 램프만. 어시스트 판은 원본(`ScoreData.update`)과 결정 12 대로 램프·횟수·이력만 최고 기록에 남긴다. 리플레이를 보면 SCRATCH AUTO·GAUGE·RANDOM 이 리플레이 값으로 덮여 설정 파일에 저장되던 결함을 찾아 고쳤다(사용자의 `scratch_auto: true` 가 이것 때문일 수 있다). SCRATCH AUTO 는 턴테이블 노트가 있는 판만 어시스트로 센다(원본 규칙). 화면이 어시스트임을 말한다.
+- S2: 보고된 "AAA" 는 코드로 재현되지 않았다. LOCAL BEST 가 없을 때(어시스트로만 친 차트) 이전에는 MAX 로 조용히 물러났고 기본 스킨 범례가 고정 글자 TARGET 이라 알 수 없었다. TARGET FALLBACK(기본 RATE AAA), RATE CUSTOM, 물러남 순서, 실제 목표를 말하는 범례·선곡·PLAY 메뉴. 결과 화면과 선곡이 플레이와 같은 로컬 최고를 쓴다.
+- S3: 설정 화면을 묶음 레일 + 소제목 행 목록 + 정보 패널로 재구성(SKIN·PLAY 메뉴와 같은 문법), 설명 문구 신규, 0 키·묶음 되돌리기·마우스. 설정 형식과 행 순서 불변.
+- 사용자 결정(2026-10-14): (1) "당연히 갱신. 다만 SC auto 인경우 SC의 점수는 빼고 저장" — SCRATCH AUTO 판도 로컬 최고 기록을 갱신하되 스크래치 노트의 몫을 빼고 저장한다(결정 12 를 이 점에서 바꾼다. 점수 서버 전송과 램프 강등은 그대로). (2) 설정 화면의 스위치·선택 행 Enter 는 다음 값(추천안).
+- 사용자 재정리(2026-10-14, 위 (1) 을 대신하는 정본. 원문): "1. scratch auto를 하면 scratch 가 초록색이된다 2. scratch auto 초록색은 플레이중에 카운트되지않는다. 그냥 치지 않은 노트처리이다. 3. 다만 틀린 노트는아니고 진짜로 존재하지 않는 노트처럼 처리된다 4. 플레이가 끝나면 서버로 똑같이 보낸다 5. 37판의 내용은 그냥 없어져도 괜찮으니 (램프만있어도됨) 이것도 잘 처리해둔다. 서버로 저장되지 않는 기록따윈 없어 무조건 저장될거야. 또한 리플레이도 잘 저장되어야하고". 추가 요청: "곡이 끝나고 파란건반 (2, 4, 6키) 를 누른채로 start를 누르면 똑같은 랜덤배치로 다시시작할수있도록해줘".
+- [x] S11. SCRATCH AUTO 새 규칙(초록, 없는 노트, 최고 기록 갱신과 서버 전송), 사람이 친 모든 판의 저장·전송·리플레이, 옛 37판 정리, 파란 건반 + START 로 같은 배치 다시 하기, 설정 화면 Enter. 웨이브 18(다시 띄움, Workflow `wf_0dc71355-847`. 이전 해석으로 띄운 `wf_f22147c8-bb6` 은 변경이 생기기 전에 멈췄다).
+  웨이브 18 결과(2026-10-14, Workflow `wf_0dc71355-847`, 4 에이전트. 커밋 `38153fc`, `8b11a17`, `ff99a90`, CI 세 OS 통과): SCRATCH AUTO 는 판정 차트에서 턴테이블 노트를 빼고(원본 AutoplayModifier) 초록 단색으로 그리며 키음만 울린다. 그 판도 최고 기록을 갱신하고 서버로 보낸다(램프 LIGHT ASSIST). 판정 규칙 세대 3: 옛 SCRATCH AUTO 이력(세대 2, 사용자 DB 37판)은 램프와 이력으로만 읽는다. 사람이 친 판은 전부 이력·리플레이·전송, 넓힌 판정은 최고 기록만 제외. 결과 화면의 파란 건반 + START = 같은 시드로 다시. 설정 화면 Enter = 다음 값. 웹 연동(S9)도 같은 웨이브: 발광 표 스냅샷 내장·한 번 등록(설정 스키마 6), MY FOLDERS, 서버 주소 기본값, 제출의 차트 메타.
+- 사용자 결정(2026-10-14): 어시스트 곡이 낀 코스도 코스로 보낸다(B). 웨이브 19(`wf_4ac91063-e18`): 코스 제출에 scratch_auto·assist 선택 필드, 서버는 단일 곡과 같은 정책(ranked=false, flags, course_best 미갱신)으로 저장, 스키마 변경 없음. 배포 순서: 서버(웹)를 먼저 올리고 클라이언트 릴리스를 나중에(옛 서버는 어시스트 코스를 ranked 로 받는다).
+- 사용자 결정(2026-10-14, 원문): "B 로가긴하는데 B로 구현하고 기본적적으로 리스트에서는 안보이고 어딘가 토글을 누르면 보일수있도록하는게 좋지않을까" — SCRATCH AUTO 판도 일반 판과 똑같이 순위에 올리되, 순위 목록에서는 기본으로 숨기고 토글로 보인다.
+- [x] S12. SCRATCH AUTO 순위 반영과 목록 토글(서버 최고 기록을 SCRATCH AUTO 여부로 나눔, 마이그레이션 0002, 웹 토글과 표지). 웨이브 20(`wf_8b68e818-5c2`). 넓힌 판정은 unranked 그대로.
+  웨이브 20 결과(2026-10-14, Workflow `wf_8b68e818-5c2`. 커밋 `cf40490`, `0b04629`): chart_best·course_best 를 (사용자, 차트·코스, scratch_auto) 로 나눔(마이그레이션 0002), 순위 목록·리더보드는 기본 일반 판만이고 `include_scratch_auto` 로 포함, 웹의 차트 순위·코스 순위·리더보드에 스위치(주소에 남음)와 A-SCR 표지, 클라이언트는 SCRATCH_AUTO 를 순위를 막지 않는 표지로. 웹 테스트 415 통과, Rust 5,671 통과.
+- 배포(S10) 진행(2026-10-14): 운영 `DATABASE_URL` 은 Vercel Secret 이라 CLI 로 받을 수 없어 저장소 시크릿 `WEB_DATABASE_URL`(사용자 등록)과 수동 워크플로 `web-db.yml` 로 운영 DB 작업을 한다(`baff560`). 상태 확인(run 38548385742: 0000 만 기록, 0001·0002 대기) → 마이그레이션(run 38548459519: `__drizzle_migrations` 3행, Result up to date) → 시험 계정 세기(run 38548532538: 계정 5, score 7, chart_best 3, replay 5, submission_audit 13, rival 1, setting_blob 3, api_token 11, session 10, account 5, 다른 사용자의 score 3). 시험 계정 지우기(사용자 승인 2026-10-14, run 38549827633): 대상 전부 0, 다른 사용자의 score 3 그대로. Vercel: `vercel git connect` 로 `B-HS/R-BMS` 연결(운영 브랜치 dev 자동), Root Directory 를 `web` 으로(API PATCH). 연결 과정에서 `vercel link` 가 `web/.env.local` 을 자동으로 만들었고 사용자가 지웠다(내용은 읽지 않음).
+
+웨이브 17B-2 결과(2026-10-14, Workflow `wf_f3ca094d-a1b`, 4 에이전트: 발광 표 화면 ∥ 폴더 화면 → 사이트 리뷰 → 수정. 리뷰 major 3·minor 10 가운데 major 전부와 minor 대부분 수정). 커밋 `711b518`. 게이트: verify 395 통과·0 실패, format, 환경 변수 없는 build, drizzle "No schema changes". 프로덕션 빌드 + 임시 MySQL 로 캡처 확인.
+- `/tables/insane1`: 루트 상대 `bmstable` 메타와 noindex 가 head 안(미리 그린 셸과 응답 모두), 레벨별 접히는 묶음과 카드 격자, 필터(주소에 남음), 상세 대화상자(외부 링크는 http/https 만), 로그인 시 램프·EX·랭크와 진행, 출처 세 곳과 삭제 요청 문구. 먼 묶음을 늦게 그려 HTML 1.5MB → 0.67MB, DOM 8,975 → 1,380.
+- `/folders`, `/folders/[id]`: 만들기·순서, 곡 검색과 표에서 가져오기, 명시 저장·미저장 경고·409 충돌 안내, 삭제 확인. 차트 페이지와 표 상세에 "내 폴더에 넣기".
+- 리뷰 major 수정: 프로덕션 수화 불일치 #418(세션 스토어. 재현 테스트), 보호 경로 로그인 뒤 이동, 플레이어 페이지 패널 눌림.
+- 운영 시험 계정 정리 SQL: `web/scripts/cleanup-test-accounts.{count,delete}.sql`(대상은 운영 GET 으로 확인한 다섯 아이디).
+- 2차로 남김: 한 곡 한 행 보기, 폴더 끌어 옮기기·2,000곡 가상화, 표 RSC 자료 축소, 기존 화면의 자기 URL fetch 제거, 지속형 rate limit.
+
+진행: 웹 구현 끝(17B-1, 17B-2). 배포(S10)는 사용자의 운영 DB 작업과 Vercel 연결을 기다린다. 클라이언트는 웨이브 18(`wf_0dc71355-847`)이 도는 중.
+
+---
+
+## 보존 이력 — 전체 로드맵 실행 당시 기록 (2026-06-03~)
+
+> 이 블록은 당시의 계획·실행 스냅샷을 보존한다. 체크박스와 미구현 표기는 작성 시점의 사실이며 현재 상태를 나타내지 않는다. 현재 정본은 이 문서 상단과 `docs/roadmap.md`이며, Phase A~H는 완료되고 Phase R만 실제 키를 기다리는 미착수 상태다.
+>
+> 당시 사용자 지시: "계획을 docs에 반영 후 Phase 0→7까지 멈추지 말고 진행." 확정 순서(9-에이전트 적대적 분석·비평으로 도출, 비평 정정 반영). 당시 forward plan은 `docs/roadmap.md`, 결정 대기 항목은 `docs/acknowledge/`.
+> 효력: S<1일 · M=1~3일 · L≈1주 · XL=수주. `(선택)`/`(BLOCKED)` 표기.
+
+**Phase 0 — 위생 & 사실 정정 (전부 S, 즉시) ✅ 완료(2026-06-03)**
+- [x] 문서 사실 정정 1패스 — 테스트 수 `132/92/100 → 880`(PROCESS·CLAUDE·ci-release), CN/HCN 판정 미차별 명확화(`divergences.md` 추가)
+- [x] `ci-release.md` stale 정정 — 리모트·dev 존재 반영, prod 브랜치+첫 태그만 잔여
+- [x] 루트 `LICENSE`(GPL-3.0 전문) 추가
+- [x] `docs/roadmap.md`·README 배포 섹션 dev/prod·Actions 상태 정정 (역할: roadmap=로컬 워킹, docs/roadmap=공개 ledger)
+- [x] 미커밋 `docs/` + `LICENSE`를 dev 커밋(`1d3fb13`, 작성자 Hyunseok Byun, co-author 없음; gitignore 항목 제외)
+- [x] dev → origin 푸시 (CI 3-OS 트리거됨)
+
+**Phase 1 — 클라 정확성(핵심 패리티) + 마무리**
+- [x] `PlayOptions.lntype`를 헤더에서 유도 (app_play.rs 하드코딩 제거 → `ir_map::ir_lntype`, 0=LN/1=CN/2=HCN, 테스트)
+- [x] #PREVIEW: `config.debug` 6분기 계측 + `samples/preview-demo` 픽스처 + dead_code 제거 (가청 확인은 수동 1회 — `docs/bug/2026-06-03-preview-playback.md`)
+- [x] (2026-06-07) **곡선택 하이브리드 미리듣기** — `#PREVIEW` 있으면 파일, 없으면 곡 **autoplay 미리듣기**(백그라운드 코디네이터 스레드: 파싱→스케줄→키음 디코드, 취소가능, 위상연속 루프). `load()`와 디코드 헬퍼 공통화. 2R 적대적 리뷰 반영. → `docs/history/2026-06-07-select-autoplay-preview.md` (가청 1회는 사용자 몫)
+- [x] ⭐ `LnKind` 판정 전파 + CN/HCN 2-판정 모델(head@press + end@release, 이른릴리스=end 판정·미히트=2 Miss, 분모 CN=2) + 합성 픽스처 5종. `Cn`/`Hcn` 게이트 → LN/Normal byte 불변. HCN 200 ms 틱·CN deferral·BSS/MSS는 **Phase D에서 완료**(→ `docs/history/2026-09-09-phase-d-judge-parity.md`).
+
+**Phase 2 — 첫 릴리스(인프라)**
+- [ ] prod 브랜치 생성·푸시 + 브랜치 보호 전략 결정(필수, `docs/acknowledge` 기록)
+- [ ] 첫 GitHub Release (v0.1.0 수동 태그, macOS 유니버설+Windows+sha256)
+
+**Phase 3 — 클라 마지막 기능**
+- [x] NETWORK 설정 탭 — SERVER URL/PLAYER ID 행(22/23), text_input 인플레이스 편집(Enter 커밋·Esc 취소·버퍼 표시), `PlaySettings` 영속(라운드트립 테스트), `build_server` 추출로 ScoreServer 재구성. 빈 URL=오프라인·빈 ID=guest.
+
+**Phase 4~6 — 백엔드 + 웹 FE (2026-09-09 Phase W 로 대체·완료, 별 레포 대신 이 레포 `web/`)**
+- [x] IR 계약 동결(/api 프리픽스·settings 경로·필드명) → decisions W7
+- [x] 백엔드 M1·M1.5·M2·M3 전부 `web/` Next.js 단독 서버로 구현(38 라우트: health/version/auth/scores/charts/players/replays/settings/rivals/courses/tables/admin/fe) + ranked 정책·build allowlist·audit + Vercel 프로덕션 배포
+- [x] 웹 FE: 검색·차트·리더보드·플레이어·인증(로그인/가입)·홈·tables·courses·리플레이 뷰어·settings(토큰/동기화/라이벌)·admin/builds
+- [ ] 클라 `SubmitResponse` DTO 확장 — 현 `rbms-ir` DTO 는 accepted/rank/previous_best/message 뿐, 서버가 주는 ranked/flags/is_new_best/score_id 미수신
+- [ ] 클라 로그인 UI/토큰 — `apps/rbms-player/src/main.rs` `build_server` 가 `HttpScoreServer::try_new(url, None)` 으로 token=None → 플레이어 제출은 전부 guest(unranked). NETWORK 탭에 로그인(register/login → 토큰 저장) 필요. `rbms-ir` 는 Bearer 지원 완료
+- [ ] 클라 랭킹 패널·리플레이 업/다운로드·설정 동기화 토글·rival UI — 서버 엔드포인트는 전부 준비됨, 클라 호출부 없음
+- [ ] (선택) 설정 화면 마우스 스테퍼 UX
+
+**Phase 7 — 롱테일 / 선택 폴리시 & 하드닝**
+- [x] ~~HCN 연속 게이지~~ · ~~스크래치 BSS/MSS~~ — **Phase D에서 완료**(CN deferral·HCN 200 ms 틱 포함, → `docs/history/2026-09-09-phase-d-judge-parity.md`)
+- [ ] (선택) 게이지 5K/PMS
+- [ ] (선택/BLOCKED) 결과·메뉴 레이아웃 RON화 · (선택) 테마 chrome 색 완성
+- [ ] (선택) 백엔드 M4 LR2IR READ 어댑터 · (선택/BLOCKED) FE 리플레이 뷰어 · (선택) 백엔드 M5 안티치트
+- [ ] (선택) macOS 서명/공증·Windows Authenticode · (선택) .app/.dmg+무인자 picker
+- [ ] (선택) 코스메틱: 리사이즈 리플로우·BGA 비디오(mpg)·글리프 아틀라스(P3a)·웹폰트(P4) — 판정/점수 영향 0
+
+> 결정 대기(요약): CN/HCN 테스트 코퍼스 범위 · prod 보호+첫 버전 · 서명 비용. (IR 계약·백엔드 소유권·리플레이 뷰어는 Phase W 로 해소.) 다음 착수 후보: ① 클라 로그인/토큰 + DTO 확장(MVP 루프 완성) ② 고도화 계획 Phase B~G(`docs/plan/2026-09-09-enhancement-plan.md` §2) ③ prod 브랜치·첫 릴리스.
+
+---
+
+## 0. 목표 / 현재 상태
+
+레퍼런스 구현(Java/libGDX) **코어 PLAY**를 Rust로 재구현. **완전 플레이 가능 + 레퍼런스 구현/IIDX 확장 다수 완성.**
+흐름: BMS 로드 → (노트옵션 셔플) → 로딩화면 → 하이스피드 스크롤 → 키음 샘플정확 재생 → 입력/판정/게이지 → HUD → 결과 → (옵션)스코어 서버 전송. GUI 곡선택(폴더·난이도표 네비)·설정(탭)·키설정 에디터·리플레이 포함.
+
+판정/게이지/TOTAL은 **레퍼런스 구현과 byte/수치 단위로 대조 검증됨**(§6 검증 참고). 미구현은 §7 한계.
+
+## 1. 확정 결정
+
+- **그래픽**: `wgpu 29 + winit 0.30`, 네이티브 인스턴스드 쿼드(`fill_rect`=1인스턴스). 렌더는 `Renderer` trait 추상화(CPU 백엔드 `CpuCanvas`도 존재 → 테스트/예제). 레퍼런스 좌표공간 **1280×720(16:9)** 고정, GPU 유니폼이 NDC로 매핑.
+- **오디오**: `cpal 0.17 + symphonia 0.5 + 커스텀 RT 믹서`. **마스터 클럭 = 재생된 샘플 수**(vsync 아님) — 레퍼런스 구현의 vsync 양자화 자체는 피했으나, 클럭이 **오디오 콜백 주기(실측 512프레임/10.667ms 고정)로 양자화**되는 점은 남아 있다(판정 타임스탬프 오차 평균 5.33ms·최대 10.67ms). 근본 해결은 Phase B에서 마지막 콜백 시각 기준 연속 보간으로 처리 예정 — `docs/plan/2026-09-09-enhancement-plan.md` §1.2 A1.
+- **시간 전역 µs(i64)**. 차트 해시 = raw 바이트 MD5+SHA-256(byte-exact).
+- **모드/스킨/키맵/설정은 데이터 주도**. 모드=`Mode` 구조체, 스킨=`SkinConfig`(RON), 키=`KeyConfig`(RON), 플레이옵션=`PlaySettings`(RON).
+- **키맵 기본 = 레퍼런스 구현 Z열**(사용자 결정). 차트 모드 자동감지로 프리셋 선택, CLI/인앱 오버라이드.
+- **사용자 설정 파일**(`~/.config/rbms/`): `settings.ron`(플레이옵션) · `keyconfig.ron`(키) · `tables.ron`(난이도표 목록) · `scores.ron`(로컬 플레이 기록) · `replays/`(리플레이). 모두 없으면 기본값 자동생성, 파싱실패 시 `.bak` 백업.
+- **테스트 데이터**: `/Users/hyunseokbyun/Documents/personally/1/`(발광 ★1, 727차트). **커밋 금지(저작권)**. 발광1 난이도표 = `https://darksabun.club/table/archive/insane1/data.json`(로컬 86곡/18레벨 매칭 실측).
+
+## 2. 모드 프로파일 (확장성)
+
+`rbms_model::Mode`(name/key/player/scratch/channel_assign) + 상수 `BEAT_7K/5K/10K/14K/POPN_9K`. `detect_mode(src, filename)` 자동판별. 새 키모드 = 데이터 추가(엔진 분기 없음).
+**14K 레인(주의)**: BEAT7 table 기준 P1 키=lane0-6/스크=7, **P2 키=lane8-14/스크=15**.
+
+## 3. 크레이트 맵 (의존: 위→아래)
+
+```
+apps/rbms-player  ← winit+wgpu 윈도우·게임루프·GUI(셀렉트/설정탭/키설정/난이도표·로컬기록모달·마우스·디버그). 모든 크레이트 사용.
+                    main.rs + 모듈: keyconfig.rs(키설정) · settings.rs(플레이옵션 영속) · replay.rs(리플레이) · tables.rs(난이도표목록) · scores.rs(로컬 기록 ScoreBook).
+apps/rbms-cli     ← 차트 정보 출력(파싱 검증 도구).
+crates/
+  rbms-play       ← 통합 드라이버: 키음 스케줄러·autoplay·press/release·auto_lanes·키빔상태·**키봄상태(bomb: 노트히트 판정 기록)**·set_judge_rate·simulate_autoplay.
+  rbms-render     ← Renderer trait + CpuCanvas + skin(SkinConfig/Skin) + playfield(노트·키빔·레인장식·커버) + hud(콤보/판정/가로게이지) + result + **select**(SelectView/SelectHot/render_select: 곡선택 행리스트·상세·밀도그래프·기록·모달, 헤드리스 예제) + **render_key_bomb**(노트히트 폭발, SkinConfig 데이터주도) + font(**cosmic-text 다국어**: FontSystem+SwashCache, fill_rect 알파, load_font/set_ui_family).
+  rbms-table      ← 난이도표(BMS table): dto(TableEntry/Header)·DifficultyTable(fetch/fetch_or_cache·by_level)·md5 매칭. reqwest blocking.
+  rbms-audio      ← decode(symphonia)·mixer(RT voice pool,stride 리샘플)·engine(cpal, SAMPLES_PLAYED 클럭, **sample_duration_us**=프리뷰 루프용).
+  rbms-ir         ← IR-슈퍼셋 클라이언트: dto(serde)·ScoreServer trait·HttpScoreServer·NullScoreServer. (클라 계약=docs/reference/ir-api.md, **서버 전체설계=docs/backend/**)
+  rbms-judge      ← windows(µs 윈도우·rank·scaled)·matcher(JudgeEngine: 매칭·콤보·EX·미스·LN·fast/slow·**空POOR empty_poor**·set_windows)·gauge(GrooveGauge·ClearType).
+  rbms-chart      ← detect_mode·to_model(마디→µs·채널→레인·LN/mine)·scroll(visible/constant_offsets·그린넘버)·shuffle(NoteOption)·count_playable_notes·**note_density**(레퍼런스 구현 SongInformation 포팅: 1초빈 히스토그램+peak/avg/end).
+  rbms-parser     ← BMS lexical: base36/62·Shift-JIS·#mmmCC·#RANDOM/#IF·MD5/SHA-256 → BmsSource.
+  rbms-model      ← 순수 타입: Mode·Note·TimeLine·Model·LnKind·NoteKind.
+```
+
+## 4. 완료 기능 (전부 검증됨)
+
+**코어:** 파서(727곡 MD5 byte-exact) · 타이밍모델 · 오디오(실디바이스) · 스크롤/렌더 · 판정엔진 · autoplay · 입력 · 라이브 윈도우.
+**판정/게이지:** 판정 윈도우(레퍼런스 구현 `JudgeProperty.SEVENKEYS` 일치) · `#RANK→judgerank`(`[25,50,75,100,125]%`, NORMAL=#RANK2=75%) · 게이지 6종+모디파이어 · 클리어램프(색=레퍼런스 구현 `LAMP`) · LN 풀판정(head hold→release) · **空POOR(이른 빈 POOR)=노트 미소실·콤보 유지·MS페널티**(레퍼런스 구현 `judgeVanish[5]=false`·`combo[5]=true`, `empty_poor` 카운터).
+**게임옵션:** 모드 자동감지 · **노트옵션**(OFF/MIRROR/RANDOM/S-RANDOM/R-RANDOM/ROTATE, 시드 결정적·DP 사이드분리) · **하이스피드 고정**(FLOATING/CONSTANT 그린넘버) · **판정 오프셋**(±200ms) · **오토 캘리브레이션**(정확판정 평균오차로 결과 시 offset 보정, per-run 수렴) · **JUDGE WIDTH**(judge_rate 50~200% 윈도우 스케일) · **TOTAL**(override/노트수 기본) · lift · lane cover(sudden) · scratch side/auto.
+**렌더/UI:** 1280×720 랜드스케이프(필드 center-left+우측 BGA) · 키 빔 · 레인 outline+구분선(opacity/onoff) · **가로 게이지**(레인 아래 0~100, IIDX식) · **다국어 폰트**(cosmic-text+Inter+시스템폴백 → 일/한/중/태/아랍 등 모든 언어 AA 렌더, `font_path`/`--font`로 교체) · 플레이 HUD(콤보·직전판정·FAST/SLOW·판정카운트·EX·게이지) · 결과화면 · 일반/와이드 스킨(RON, 임베드+`--skin`) · BGA(이미지) · BGA on/off.
+**셀렉트/설정/키:** GUI 곡선택(재귀 스캔·폴더 네비 Root→ALL SONGS/난이도표→레벨→차트, ↑↓·←상위/→진입·Enter·**마우스 클릭**) · 우측 정보패널+**로컬 기록 인라인 리스트·상세 모달**(`R`/클릭, 리플레이 재생) · 폴더 선택(rfd) · **난이도표 인앱 관리**(다중표 tables.ron·URL텍스트입력/파일rfd 추가·제거) · **설정 탭**(PLAY/GAUGE/JUDGE/DISPLAY/INPUT, 탭/값 **마우스 클릭**) · **통합 키 설정**(파일+인앱 에디터, 레인+조작키 전부 재바인딩·충돌검출) · **설정 영속**(settings.ron, AUTO REPLAY 토글 포함) · **리플레이 저장·재생**(`--replay`/모달, 시드/옵션 복원해 동일 재현) · **로컬 스코어 영속**(scores.ron, 서버 무관).
+**IR:** IR 슈퍼셋 클라이언트(스코어 제출, `--server`·`--player`) — DTO 슈퍼셋 확장(JudgeBreakdown **early/late(epg…lms)·avgjudge·empty_poor**, PlayOptions **전체옵션**, ScoreSubmission **seed/algo/rule/skin/`client_build_sha256`(자기-빌드 sha2)·`client_platform`**, ReplayData **µs구조**(`ReplayEvent`), settings/replay-dl/auth/course 메서드 stub). 전부 serde default 후방호환. **백엔드 서버는 설계 완료·구현 후속**.
+**ROADMAP 클라이언트 9종(2026-05-31 완료):** 폴더 SCANNING 로딩·**스코어 랭크 그래프(IIDX 9분법 `dj_rank`+랭크바, 결과+셀렉트)**·**점수 ΔEX 비교(직전/베스트)**·**리플레이 분석모드(재생바·일시정지·배속·재시뮬 시크·노트별 ms-off)**·**데이터 주도 HUD 스킨**(판정 팔레트/라벨/게이지 임계·색/요소위치 RON화)·**폰트 P3**(무할당 중첩 캐시·말줄임)·**노트옵션 ALL-SCRATCH/H-RANDOM**(시간임계 40/125ms)·**그린넘버 표시**·**CN/HCN(`#LNMODE`)**·**듀얼필드 14K(P1좌·P2우)**. SCORE GRAPH·REPLAY ANALYSIS 설정 토글. → `docs/history/2026-05-31-roadmap-client-features.md`.
+**UI(IIDX/LR2 지향 재설계, 2026-05-31):** 폴더 영속(`songs_folder`)·폴더 스캔 백그라운드 스레드+애니메이션 LOADING·노트 상단 클리핑(`[top_y,judge_y]`, 프레임 상단서 흘러나옴)·플레이 IIDX 레이아웃(좌 정보, 중앙 **라이브 스코어 그래프**, 우 판정카운트/BGA)·결과 IIDX 레이아웃(거대 DJ LEVEL+스코어 리포트, PGREAT 핫핑크)·곡선택 행별 클리어램프 LED·**곡선택 상세 메타 고도화**(부제/아티스트/장르·제작자 + 2열 스탯그리드: BPM범위·DIFFICULTY명·NOTES(+LN)·JUDGE(#RANK명+%)·LENGTH·TOTAL; 포커스 곡만 lazy `to_model`로 노트수/길이/BPM범위 산출, `#MAKER` 파싱, bms-rs 메타 모델 참조). DP(14K)는 BGA 비키도록 좌측 앵커. 레퍼런스 `docs/reference/ui/`·스펙 `docs/reference/ui-design.md`. → `docs/history/2026-05-31-ui-redesign-iidx.md`.
+**곡선택 전면 재설계(레퍼런스 구현 modern chic, 2026-05-31):** 렌더링을 **`rbms-render::render_select`로 추출**(`SelectView`/`SelectHot`, `CpuCanvas` 헤드리스 PNG 검증 가능, `main.rs` 인라인 제거) — 행 KEY/레벨 배지·클리어램프 LED(좌바+우세로바)·포커스 연출(시안테두리+노랑타이틀)·중앙포커스 스크롤, 상세 **커버(`#STAGEFILE`→`#BANNER`, 단일 BGA슬롯 쿼드뒤·포커스당1회 디코드)**+제목블록(2줄 래핑)+2열 스탯그리드+**노트 밀도 히스토그램**(`note_density`, 서브픽셀·긴곡 오버플로없음·PEAK/AVG/END notes/sec)+기록(베스트바·DJ랭크바·최근행 EX+랭크+추세)+기록모달. `main.rs` `build_select_view` 조립 + `SelectKey` 캐시(매프레임 재할당 방지)+hot 매핑. 파서 `#BANNER`/`#PREVIEW` 추가(`#PREVIEW`는 데이터만, 재생 후속). **2라운드 적대적 멀티에이전트 리뷰**(1R 16건 반영·2R 0건). → `docs/history/2026-05-31-select-redesign.md`, 스펙 `docs/reference/ui-select-redesign.md`, 타깃 `…/ui/provided/06-reference-select-target.png`.
+**곡선택 후속(2026-05-31): 스탯그리드 잘림 수정·#PREVIEW·KEY BOMB.** (1) 상세 스탯그리드 **2열×3행→3열×2행** 압축(하단 LENGTH/TOTAL이 DENSITY 구분선에 잘리던 것 해결). (2) **`#PREVIEW` 프리뷰 재생 (TODO — 실재생 미동작, 2026-06-07 해소)** — 포커스 settle(디바운스 20프레임) 시 `#PREVIEW` 디코드+루프(경계 재트리거, mixer `play(key)`가 동일키 먼저 stop하므로 선스케줄 대신 자연종료 후 재발화) 로직·select 전용 `AudioEngine`(플레이 엔진과 분리, `load()` 진입부·select 이탈 시 정지)·`AudioEngine::sample_duration_us`·**DISPLAY 탭 PREVIEW 토글**(`PlaySettings.preview`)까지 배선했으나 **포커스해도 소리 안 남**(추후 디버깅, 코드 유지). (3) **KEY BOMB** — 노트 히트(judge≤3, 空POOR/miss 제외) 시 판정선 판정색 확장+소멸 버스트. `Player.bomb`(press/release/autoplay 전 경로 기록)·`rbms_render::render_key_bomb`·**`SkinConfig` bomb_enabled/height/duration_ms 데이터주도**(기존 RON serde default 호환). 적대적 리뷰 1건(LOW: 리플레이 직접실행 시 cpal 스트림 1프레임 공존) 근본수정. → `docs/history/2026-05-31-select-redesign.md`.
+**CI/배포:** GitHub Actions(`.github/workflows/ci.yml`·`release.yml`) — 자동 버전·macOS 유니버설·Windows 빌드·릴리스(→`docs/ci-release.md`). 실제 동작은 GitHub 원격 push 시.
+
+**2026-06-03 세션:** IR `lntype` 차트 유도(`ir_map::ir_lntype`, 0=LN/1=CN/2=HCN; 기존 하드코딩 제거) · **`#PREVIEW` 계측**(6 silent 분기 `config.debug` 로그)+`samples/preview-demo` 픽스처+dead_code 제거(가청 확인만 수동 잔여) · **CN/HCN 2-판정**(head@press + end@release, `Cn`/`Hcn` 게이트, 분모 2, 픽스처 5종; LN/Normal byte 불변) · **NETWORK 설정 탭**(SERVER URL/PLAYER ID 인앱 편집·`PlaySettings` 영속·`build_server` 재구성) · **Windows 설정 경로**(`config_dir` HOME→USERPROFILE). + Phase 0 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시) · 릴리스/백엔드 결정 기록(보류). → `docs/history/2026-06-03-session.md`.
+
+**2026-06-07 세션:** **곡선택 하이브리드 미리듣기**. 사용자 의도 정정 — 원하던 건 `#PREVIEW` 파일만이 아니라 "포커스한 곡이 들리는 미리듣기". 원본 레퍼런스 구현도 곡 autoplay 미리듣기는 없음(=#PREVIEW 파일 or 메뉴 BGM)이라, **하이브리드 신규 구현**: `#PREVIEW` 있으면 파일, 없으면 **백그라운드 코디네이터 스레드**가 차트 파싱→throwaway `Player`로 autoplay 키음 스케줄 추출→전체 키음 병렬 디코드(취소가능)→메인 스레드가 `PreviewMsg` 채널 드레인 후 클럭 앵커·dispatch-먼저-루프(+2초 tail, 위상연속 재-앵커). 키음 디코드 fan-out/job빌드는 `load()`와 공통 헬퍼(`keysound_jobs`/`spawn_keysound_decode`)로 통합. 헤드리스 통합테스트(`tests/autoplay_preview.rs`)+디코드→믹스 테스트 추가(889통과). **2라운드 적대적 리뷰**(1R 8건·2R 1건 전부 반영). → `docs/history/2026-06-07-select-autoplay-preview.md`. (실기 가청 1회는 사용자 몫)
+
+**2026-06-07 세션 (2) — 첫 실행/온보딩(.dmg 대비):** `.dmg` 더블클릭(터미널 없음) 대비. (1) **무인자 진입** — 인자·기억폴더 없을 때 `usage`+`exit` 대신 GUI 진입. (2) **초기 스캔 백그라운드화** — `App::new` 동기 블로킹(창도 안 뜸) → 백그라운드 스레드+`scan_rx`/`apply_scan`, SCANNING 화면에 **곡 수 카운트** 표시. (3) **첫 실행 빈 곡선택 + 온보딩 CTA**(`SelectView.empty_hint`: WELCOME/add-folder, 헤드리스 렌더 시각확인). (4) **Esc-중-스캔** 종료 회귀 수정(취소 복귀). 집중 적대 리뷰 1건 반영. → `docs/history/2026-06-07-first-launch-onboarding.md`. (`.app`/`.dmg` 패키징·공증은 release.yml 측 후속)
+
+상세 이력 → `docs/history/2026-05-31-*.md`·`2026-06-03-session.md` (§8 docs맵). 당시 다음 할 일 → `docs/roadmap.md`.
+
+## 5. 실행
+
+```bash
+cargo run --release -p rbms-player --                    # 기억 폴더 → RBMS_SONGS → 빈 GUI
+cargo run --release -p rbms-player -- "<폴더>"            # GUI 곡선택
+cargo run --release -p rbms-player -- "<차트.bms>" --auto # 단일 차트 autoplay
+cargo run --release -p rbms-player -- "<차트.bms>" --interactive
+./target/release/rbms-player "<폴더>"                    # macOS / Linux 빌드 바이너리
+.\target\release\rbms-player.exe "<폴더>"               # Windows PowerShell 빌드 바이너리
+```
+- **곡선택**: ↑↓ 이동 · →/Enter 열기/플레이 · ←/Esc 뒤로/상위 · **Tab 설정** · **O 폴더선택**(`+ ADD FOLDER` 선택 → Enter → Esc로 저장·재스캔) · **T 난이도표 관리** · **R 기록 모달** · **마우스**(행 1클릭 선택·재클릭 열기, 우측 기록 클릭→모달). 모달: ↑↓ 이전/다음·Enter 리플레이·Esc 닫기.
+- **설정(Tab)**: **Tab으로 탭 전환**(PLAY/GAUGE/JUDGE/DISPLAY/INPUT) · ↑↓ 이동 · ←→ 값변경 · Enter(KEY CONFIG 진입) · Esc 저장후복귀.
+  - PLAY: AUTOPLAY·HI-SPEED·SPEED FIX(FLOATING/CONSTANT)·RANDOM·**AUTO REPLAY**. GAUGE: GAUGE·TOTAL. JUDGE: JUDGE OFFSET·JUDGE WIDTH·AUTO CAL. DISPLAY: SKIN(NORMAL/WIDE)·**FONT**(DEFAULT/CUSTOM, Enter/우/클릭=파일선택 라이브 적용·좌=기본)·LIFT·LANE COVER·BGA·**DEBUG MODE**. INPUT: SCRATCH SIDE·SCRATCH AUTO·KEY CONFIG. (탭/값 마우스 클릭 가능)
+- **플레이 중**: Esc=뒤로(중도 포기) — 단 **남은 노트가 없으면 Esc로 곧장 결과화면**(아웃트로 대기 스킵). **DEBUG MODE** 시 좌상단 FPS/RAM/프레임시간/노트·콤보·게이지 등 수치 오버레이.
+- **키 설정**: 설정→`KEY CONFIG`→`Stage::KeyConfig`(EDIT MODE 전환·Enter 캡처 재바인딩·충돌 빨강·Esc 저장) 또는 `~/.config/rbms/keyconfig.ron` 직접 편집.
+- **기본 레인 키(레퍼런스 구현 Z열)**: 7K=`Z S X D C F V`+LShift(스크) · 5K=`Z S X D C`+LShift · 9K/PMS=`Z S X D C F V G B`(스크없음) · 14K=좌손 P1(`Z S X D C F V`+LShift)·우손 P2(`M K , L . ; /`+RShift).
+- **기본 조작 키(플레이 중, 재바인딩 가능)**: ↑/↓=hi-speed · →/←=lane cover · ]/[=lift. Esc=뒤로.
+- **CLI 옵션**: `--interactive|--auto --sc-left --sc-auto --lift F --hispeed F --gauge ... --keys Z,S,X,... --skin file.ron --font file.ttf --table URL --keyconfig path.ron --replay file.ron --server URL --player ID`.
+
+## 6. 검증 메모 (판정/게이지 — 사용자 "빡세다" 검증)
+
+- 판정 윈도우 = 레퍼런스 구현 `JudgeProperty.SEVENKEYS`(PG±20/GR±60/GD±150/BD-280~220/MS-150~500 µs @judgerank100) **정확 일치**.
+- `#RANK 0~4 → judgerank [25,50,75,100,125]%` = `JudgeWindowRule.NORMAL`과 일치. **#RANK 2(NORMAL)=75%=PGREAT ±15ms**는 레퍼런스 구현과 동일.
+- 게이지/TOTAL = `deltas * total/notes`(그루브) 일치. 자동미스는 BAD 늦은경계 이후. **예외(2026-09-09 감사, Phase A에서 수정 완료)**: 見逃し POOR(스윕 미스)가 게이지 MS 슬롯(idx5)으로 잘못 들어가던 결함(J1)이 있었다 — 코드 4(PR)가 아니라 코드 5(MS)로 처리돼 게이지 페널티가 실제보다 컸다. `crates/rbms-judge/src/matcher.rs`에서 슬롯을 정정했다 → `docs/acknowledge/reference-divergences.md` "판정 윈도우·게이지 발산" 섹션.
+- 결론: "빡센" 건 NORMAL 윈도우가 원래 타이트 + 입력/표시 지연 미보정. → **JUDGE OFFSET** 수동 또는 **AUTO CAL**(한 곡 플레이로 자동 보정).
+
+## 7. 알려진 한계 / 다음 후보
+
+- ~~CJK 폰트 없음~~ **해결**(cosmic-text). ~~캐시키 할당~~/~~말줄임~~ **P3 해결**(무할당 중첩 캐시·`fit_text`). **P3a run-length 병합 보류**(프로파일 ROI~11%, AA 텍스트 픽셀별 alpha 상이 → 본 해법은 글리프 텍스처 아틀라스, 후속). **P4 웹폰트(URL)** 후속.
+- ~~14K 단일필드~~ **듀얼필드 해결**(`dual_field`, P1좌·P2우·바깥 스크래치, 필드별 judge라인/구분선/게이지 1개). 비활성화(`dual_field:false`) 시 레거시 단일필드.
+- ~~ALL-SCRATCH/H-RANDOM 미구현~~ **해결**(시간임계 40/125ms). ~~green-number 미반영~~ **표시·반영**(HUD). ~~CN/HCN 미구분~~ **`#LNMODE`→`LnKind` 구분 + 종단 2-판정 차별화 적용**. HCN 200 ms 틱·CN deferral·스크래치 BSS/MSS는 **Phase D에서 완료**(→ `docs/history/2026-09-09-phase-d-judge-parity.md`). 스크래치 회전(2키 교대) 단순화는 잔존.
+- 윈도우 리사이즈 UI 리플로우 없음(논리 1280×720 고정). BGA 비디오(mpg) 미지원. 게이지 5K/PMS 변종·judgerank 커스텀 일부 미반영. 난이도표 추가 fetch는 동기(1개씩).
+- **미구현(2026-09-09 감사, `docs/plan/2026-09-09-enhancement-plan.md` 참조)**: 곡DB(매 실행 전량 스캔·증분 없음) · 컨트롤러/MIDI/마우스 스크래치(의존성 0) · 코스/단위 · 연습 모드 · 곡선택 난이도·모드 필터/즐겨찾기/랜덤 선택 · 볼륨 3분리(system/key/bg, `#VOLWAV` 미반영, 현재 마스터 게인 1계통뿐).
+- **IR 백엔드 = 전체 설계 완료(`docs/backend/`, 문서 단계)·구현 후속**. ~~클라 슈퍼셋 확장 필요~~ **클라 DTO 슈퍼셋 확장 완료**(§4 IR). 서버 미구현이라 신규 메서드(settings/replay-dl/auth/course)는 호출 시 `Unsupported`. `PlayOptions.lntype`에 실제 LN모드 전파는 후속(모델에 lnmode 미보유).
+- ~~UI 곡선택 재설계~~·~~KEY BOMB~~ **완료**(§4). ~~#PREVIEW 파일만~~ **곡선택 하이브리드 미리듣기 완료**(2026-06-07): `#PREVIEW` 있으면 파일, 없으면 곡 **autoplay 미리듣기**(백그라운드 코디네이터·취소가능·위상연속 루프). 실기 가청 1회만 사용자 몫 → `docs/history/2026-06-07-select-autoplay-preview.md`. 남은 UI 후속: **스킨 데이터화**(결과/메뉴 패널까지 — 곡선택 추출·KEY BOMB 데이터화로 진척). ~~`.dmg` 첫 실행 UI~~ **첫 실행/온보딩 런타임 UI 완료**(2026-06-07: 무인자 진입·백그라운드 스캔+곡수·온보딩 CTA·Esc 취소 → `docs/history/2026-06-07-first-launch-onboarding.md`); 남은 건 **`.app`/`.dmg` 패키징·무인자 진입·macOS 공증**(release.yml 측).
+- ~~Windows 설정 경로~~ **해결**(`config_dir` HOME→USERPROFILE, → `docs/reference/windows-compat.md`). ~~CN/HCN 판정 차별화~~ **종단 2-판정 적용**. HCN 200 ms 틱·CN deferral·BSS/MSS는 **Phase D에서 완료**(→ `docs/history/2026-09-09-phase-d-judge-parity.md`). 남은: **F5 결과/메뉴 패널 위치 RON화**(현재 HUD 표면만 데이터화), **P3a 글리프 아틀라스·P4 웹폰트**, **FE 프로젝트**(별 저장소·MIT) → 당시 `docs/roadmap.md`. 적대적 리뷰 보류 차이 → `docs/acknowledge/reference-divergences.md`.
+
+> **세션 이력(완료)**: 입력판정 근본수정(空POOR)·폴더 ←→ 네비·마우스·로컬기록 모달·레퍼런스 구현 램프색·AUTO REPLAY·Play-Esc-즉시결과·DEBUG MODE → `docs/history/2026-05-31-input-judge-nav-mouse-records.md`. 다국어 폰트(cosmic-text) → `…-multilingual-font.md`. 백엔드 IR-슈퍼셋 설계 + CI/CD → `…-backend-ir-ci.md`. (모두 §4 완료기능·§8 docs맵에 반영됨)
+
+## 8. docs 맵
+
+- `docs/reference/` — mechanics(레퍼런스 구현 메커닉)·rust-stack·architecture·wgpu29-winit030-api·ir-api(서버계약)·_appendix-raw·**cn-hcn-judgment**(CN/HCN 판정 레퍼런스 구현 대조 구현 스펙·후속)·**windows-compat**(Windows/크로스플랫폼 현황: CI 보장·USERPROFILE 수정·런타임 검증 잔여)·**ui-design**(IIDX/LR2/레퍼런스 구현 UI 레이아웃 스펙)·**ui-select-redesign**(곡선택 정밀 스펙: render_select 추출·밀도 포팅·레이아웃)·**ui/**(레퍼런스 스크린샷: provided 6 + fetched 18 + README).
+- `docs/plan/` — **2026-09-09 전면 고도화 계획**: `2026-09-09-enhancement-plan.md`(관점별 갭 표·판정 발산 J1~J26·Phase A~G 실행계획·결정 12건·문서 정정 목록, 이 문서의 정본) + `research-2026-09-09/`(근거 보고서·검증·후속조사·비평 24편, 원 리서치 산출물 보존용).
+- `docs/acknowledge/` — decisions(확정결정)·reference-divergences(보류차이)·empty-poor-local-scores(空POOR처리·로컬기록 스키마).
+- `docs/font-cjk-support.md` — 다국어 폰트 지원(cosmic-text 결정·레퍼런스 구현 폰트 파악·P1/P2 완료·P3/P4 후속).
+- `docs/backend/` — **백엔드 IR-슈퍼셋 서버** 설계: README·PRD·api-spec(전 엔드포인트)·data-model(Drizzle)·endpoint-tasks·compatibility(LR2IR/레퍼런스 구현 매핑+출처)·**contract-freeze**(Phase 4 게이트: 클라 경로 대조·계약 동결·M0 단계). (Hono/Bun/Drizzle)
+- `docs/ci-release.md` — GitHub Actions(ci/release): 자동 버전·macOS 유니버설·Windows 빌드·릴리스. 주의(원격/브랜치보호/LICENSE/서명).
+- `docs/bug/` — 버그/진단 기록(예: `2026-06-03-preview-playback` #PREVIEW 계측·검증절차).
+- `docs/memory/` — test-library(라이브러리 실측).
+- `docs/history/` (시간순):
+  - `m0-m1-parser-chart` · `m2-audio` · `m3-render-scroll` · `m6-judge-m4-autoplay` · `m7-live-window` — 코어 마일스톤.
+  - `features-mode-gauge-ln-result-gpu-config-select` · `skin-bga-ir` · `font-hud-gui` — 1차 확장.
+  - `beam-keymap-720p-table` — 키빔·모드별키맵·720p·재귀선택·난이도표.
+  - `options-settings-folders` — 노트옵션·설정영속·게이지·BGA·하이스피드고정·오프셋·폴더선택·리플레이·다중표.
+  - `judge-verify-tuning-skins` — 판정검증·JUDGE WIDTH/TOTAL·설정탭·일반/와이드스킨·레인장식·가로게이지·오토캘.
+  - `input-judge-nav-mouse-records` — 空POOR 판정 근본수정·폴더 ←→ 네비·마우스 입력·로컬 기록(scores)+상세 모달·레퍼런스 구현 램프색·AUTO REPLAY·Play-Esc-즉시결과·DEBUG MODE.
+  - `multilingual-font` — 다국어 폰트(cosmic-text+Inter+시스템폴백, 모든 언어 AA)·`font_path`/`--font` 교체·레퍼런스 구현 폰트 파악.
+  - `backend-ir-ci` — 백엔드 IR-슈퍼셋 전체 설계(LR2IR+레퍼런스 구현 IR+설정동기화·µs리플레이·빌드해시무결성·FE) + GitHub Actions(자동버전·macOS유니버설·Windows)·라이선스/서명 정리.
+  - `roadmap-client-features` — ROADMAP 클라이언트 9종: 폴더 SCANNING 로딩·스코어 랭크 그래프(IIDX 9분법)·점수 ΔEX 비교·리플레이 분석모드·데이터 주도 HUD 스킨·폰트 P3(캐시·말줄임)·IR 슈퍼셋 DTO·자기-빌드 SHA-256·노트옵션(ALL-SCR/H-RAN·green-number·CN/HCN·듀얼필드14K). 웨이브별 적대적 멀티에이전트 리뷰.
+  - `ui-redesign-iidx` — IIDX/LR2 지향 UI 재설계: 폴더 영속·백그라운드 스캔(애니 로딩)·노트 상단 클리핑(근본 수정, 베젤 hack 제거)·플레이 IIDX 레이아웃+라이브 스코어 그래프·결과 IIDX 레이아웃·곡선택 클리어램프 LED+상세 메타 고도화(bms-rs 참조, `#MAKER`). DP 레이아웃 BGA 비킴. 적대적 리뷰로 DP충돌·stale폴더·perf 수정. 레퍼런스 수집·디자인 스펙.
+  - `select-redesign` — 곡선택 전면 재설계(레퍼런스 구현 modern chic): `rbms-render::render_select` 추출(헤드리스 검증)·`note_density`(SongInformation 포팅)·커버(단일 BGA슬롯)·KEY/레벨 배지·밀도 히스토그램·타이틀 2줄·`build_select_view` 캐시·파서 `#BANNER`/`#PREVIEW`. 2라운드 적대적 리뷰(16건→0건).
+  - `2026-06-03-session` — 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시)·IR lntype 차트 유도·#PREVIEW 계측+픽스처·CN/HCN 2-판정·NETWORK 설정 탭·Windows 설정 경로(HOME→USERPROFILE). 릴리스/백엔드 결정 기록(보류).
+  - `2026-06-07-select-autoplay-preview` — 곡선택 **하이브리드 미리듣기**(#PREVIEW 파일 or 곡 autoplay): 백그라운드 코디네이터 스레드(파싱→autoplay 키음 스케줄→전체 키음 병렬 디코드, 취소가능)·위상연속 루프(+2초 tail)·`load()`와 디코드 헬퍼 공통화. 2R 적대적 리뷰(1R 8건·2R 1건 반영). 헤드리스 통합테스트 추가(889통과).
+  - `2026-06-07-first-launch-onboarding` — `.dmg` 대비 **첫 실행/온보딩**: 무인자 GUI 진입(usage+exit 제거)·초기 스캔 백그라운드화(SCANNING+곡수 카운트, 창 즉시 표시)·첫 실행 빈 곡선택 온보딩 CTA(`empty_hint`)·Esc-중-스캔 종료 회귀 수정. 집중 적대 리뷰 1건 반영.
+  - `2026-09-09-phase-a-accuracy-hotfix` — Phase A 정확성 핫픽스: 판정 윈도우·게이지 발산 J1~J19+J14(見逃し POOR 슬롯·5K/PMS 윈도우·LN 마진 등, 상세는 `reference-divergences.md`)·오디오 마스터 게인 재조정+seqlock 클럭·IR 타임아웃 강등 제거·폰트 캐시 LRU+골든 하네스 강화·`#SWITCH`계열 결함·앱 통합(IR 제출 게이트·assist 플래그·원자적 저장 등). 갈래별 병렬 구현→적대적 리뷰 1라운드→반영.
+  - `2026-09-09-phase-d-judge-parity` — Phase D 판정 패리티 완성: `JudgeAlgorithm` 4종·9게이지+GAS·BSS/MSS·CN/HCN 2단계 폴드·LN MODE 전축 통일·24K Mode 신설·어시스트 램프 강등. 적대 리뷰 23건 반영.
+  - `2026-09-10-phase-f-integration` — Phase F 갈래 합류: F0~F4 교차 배선(결과 fast/slow 스크래치 분리·모드 라벨·LETTERBOX 매프레임 반영·텍스트에디터 통일·PACEMAKER HUD·re-export·정렬 방향 확인). `stage/play.rs` 800행 초과 분리.
+  - `2026-09-09-phase-f-ux` — Phase F 최종 검증(코드 수정 없음, `cargo fmt --all`만 적용): fmt/clippy(`-D warnings`)/`cargo test --workspace`(2232통과·0실패) 전부 green, 금지어·금지주석 0건, 옵션 오버레이·결과 그래프·필터+토스트 3화면 헤드리스 PNG 육안 확인.
+- **새 세션 진입점 = 이 PROCESS.md**(CLAUDE.md가 지정). 별도 글로벌 하네스 메모리는 사용 안 함 — SSOT는 docs/.
+
+## 9. 작업 규칙(요약)
+
+각 스텝 검증 후 진행(테스트/렌더 PNG). 모호·범위변경 시 멈추고 질의. 큰 변경 후 적대적 멀티에이전트 리뷰. 커밋은 사용자 요청 시에만, **co-author 미포함**. `target`/`Cargo.lock`/라이브러리 차트 커밋 금지(.gitignore).

@@ -1,6 +1,6 @@
 # 웹 기반 계약 (웨이브 17B-1 통합, 17B-2 반영)
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7 (웨이브 20 의 SCRATCH AUTO 순위는 6.6절에 반영돼 있고, 12절·14절의 테스트 수와 측정값은 각 웨이브 종료 시점의 기록이라 지금 값과 다를 수 있다)
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9 (웨이브 20 의 SCRATCH AUTO 순위는 6.6절에, 2026-10-14~15 의 발광 표 다른 사이트 흔적 제거는 6.2·13·14절에 반영돼 있고, 12절·14절의 테스트 수와 측정값은 각 웨이브 종료 시점의 기록이라 지금 값과 다를 수 있다)
 
 > 현재 상태: 토큰·골격·기존 화면(17B-1 U1)과 서버·폴더·표 제공(17B-1 U2) 위에 17B-2 가 발광 표 화면(U3)과 폴더 화면(U4)을 올렸고, 리뷰 발견을 고친 뒤 게이트와 화면 확인을 다시 통과했습니다. 17B-2 에서 바뀐 계약은 해당 절을 고쳤고, 새 화면·컴포넌트·쿼리 키·검증은 13절과 14절에 모았습니다.
 > 작성일 2026-10-14. 근거는 실제 파일과 로컬 실행(포트 3103, 임시 MySQL 8.4)의 응답이며, 두 단위의 보고와 달랐던 곳은 11절에 적었습니다. 문서와 파일이 다르면 파일이 맞습니다.
@@ -26,7 +26,7 @@
 | 인증 | `web/src/entities/auth.{type,query}.ts`, `web/src/widgets/auth/*`, `web/src/proxy.ts` | 3.4, 6.1절 |
 | 서버 | `web/src/server/{route,service/domain,compose,dto,lib}/*`, `web/src/app/api/**` | 6절 |
 | 표 스냅샷 | `web/data/tables/insane1/{header.json,data.json,source.json}` | 서버만 읽습니다 |
-| 마이그레이션 | `web/drizzle/{0000_smooth_cerebro,0001_user_folders,0002_scratch_auto_bests}.sql`, `web/drizzle/meta/*` | 커밋 대상. 셋 다 운영 DB 에 적용됨(2026-10-14) |
+| 마이그레이션 | `web/drizzle/{0000_smooth_cerebro,0001_user_folders,0002_scratch_auto_bests}.sql`, `web/drizzle/meta/*` | 커밋 대상. 이후 `0003_replay_user_quota`·`0004_course_score_judge_totals` 가 더해졌고 다섯 개 모두 운영 DB 에 적용됨(0003·0004 는 2026-10-15) |
 
 ## 2. 토큰
 
@@ -87,7 +87,7 @@ export default FoldersPage
 
 ### 3.3 사이드바 슬롯
 
-`ShellSidebarPortal` 안에 요소를 두면 메뉴 아래 슬롯으로 올라갑니다(발광 표의 출처·표 주소 복사, 폴더의 "R-BMS 에서 보기"). 데스크톱에서만 사이드바에 보이고 모바일은 시트 안에 들어갑니다. 서버 렌더에서는 비어 있다가 하이드레이션 뒤에 채워집니다(`useIsHydrated`, `@shared/hooks/use-is-hydrated`).
+`ShellSidebarPortal` 안에 요소를 두면 메뉴 아래 슬롯으로 올라갑니다(발광 표의 "표 정보"·표 주소 복사, 폴더의 "R-BMS 에서 보기"). 데스크톱에서만 사이드바에 보이고 모바일은 시트 안에 들어갑니다. 서버 렌더에서는 비어 있다가 하이드레이션 뒤에 채워집니다(`useIsHydrated`, `@shared/hooks/use-is-hydrated`).
 
 ```tsx
 <ShellSidebarPortal>
@@ -225,17 +225,15 @@ export const metadata = {
 
 표 id 는 `insane1` 하나이고 목록에서 읽습니다. `/api/fe/tables` 아래 세 읽기는 공개 캐시(`public, max-age=300, s-maxage=3600, stale-while-revalidate=86400`)이고 IP 120/분(`fe-read`) 한도를 받습니다. `records` 와 표준 형식 두 주소는 아래에 따로 적었습니다. 없는 id 와 모양이 틀린 id(`^[a-z0-9][a-z0-9-]{0,63}$` 아님)는 404 `IR_TABLE_NOT_FOUND` 입니다.
 
-`GET /api/fe/tables` → 표 요약 배열(1,129B).
+`GET /api/fe/tables` → 표 요약 배열(946B, 2026-10-15 운영). 다른 사이트의 주소·출처(`original_url`·`source`)는 2026-10-15(ea34002)부터 싣지 않는다.
 
 ```json
 {"success":true,"data":[{"id":"insane1","name":"発狂BMS難易度表","symbol":"★","entry_count":1035,"level_count":26,"last_update":"2017.02.05",
-"original_url":"http://nekokan.dyndns.info/~lobsak/genocide/insane.html",
-"source":{"page_url":"https://darksabun.club/table/archive/insane1/","fetched_at":"2026-10-14T02:41:43.771Z"},
 "levels":[{"level":"1","count":53},{"level":"2","count":56}],
 "standard_paths":{"page":"/tables/insane1","header":"/tables/insane1/header.json","data":"/tables/insane1/data.json"}}]}
 ```
 
-`GET /api/fe/tables/insane1` → `{ table: <요약>, levels: [{ level: string, entries: Entry[] }] }`. `levels` 는 `level_order`("1" … "25", "???") 순서이고 380,844B 입니다. `Entry = { md5, level, title, artist, url, url_diff, name_diff, comment }`(전부 문자열, 없으면 빈 문자열). `sha256` 이 없고 곡 식별자는 `md5` 입니다. `url`·`url_diff` 는 외부 자료라 `http://` 또는 `https://` 로 시작할 때만 링크로 만들고 `target='_blank' rel='noopener noreferrer'` 를 답니다.
+`GET /api/fe/tables/insane1` → `{ table: <요약>, levels: [{ level: string, entries: Entry[] }] }`. `levels` 는 `level_order`("1" … "25", "???") 순서이고 307,253B 입니다(2026-10-15 운영). `Entry = { md5, level, title, artist, url, url_diff, name_diff }`(전부 문자열, 없으면 빈 문자열. 원본 표의 메모 `comment` 는 4fda17c 부터 싣지 않는다). `sha256` 이 없고 곡 식별자는 `md5` 입니다. `url`·`url_diff` 는 외부 자료라 `http://` 또는 `https://` 로 시작할 때만 링크로 만들고 `target='_blank' rel='noopener noreferrer'` 를 답니다.
 
 `GET /api/fe/tables/insane1/entries?q=&level=&page=&limit=` → `data: Entry[]` + `pagination`. `q` 는 제목·아티스트의 부분 일치(NFKC 소문자)와 md5 앞 6자 이상. `limit` 최대 100(기본 50).
 
@@ -253,8 +251,8 @@ export const metadata = {
 
 표준 형식(봉투 없음, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400`):
 
-- `GET /tables/insane1/header.json` → `{ name, symbol, data_url, level_order, last_update, original_url, mirror_of }`. `data_url` 은 요청의 origin 으로 만든 절대 주소(`https://bms.hyuns.uk/tables/insane1/data.json`)입니다.
-- `GET /tables/insane1/data.json` → 원본 배열 그대로(399,616B, 1,035건, 곡마다 `lr2_bmsid` 포함). `ETag` 를 주고 `If-None-Match` 가 같으면 304.
+- `GET /tables/insane1/header.json` → `{ name, symbol, data_url, level_order, last_update }`(`original_url`·`mirror_of` 는 ea34002 부터 없다). `data_url` 은 요청의 origin 으로 만든 절대 주소(`https://bms.hyuns.uk/tables/insane1/data.json`)입니다.
+- `GET /tables/insane1/data.json` → 스냅샷 배열 그대로(339,663B, 2026-10-15 운영, 1,035건, 곡마다 `lr2_bmsid` 포함, `comment` 는 빈 문자열, 글자 필드 속 웹 주소는 지웠고 내려받기 주소 `url`·`url_diff`·`name_diff` 는 그대로. 규칙은 [../backend/api-spec.md](../backend/api-spec.md) 7.1). `ETag` 를 주고 `If-None-Match` 가 같으면 304.
 - 이 두 주소는 `src/app/tables/[tableId]/{header,data}.json/route.ts` 가 처리합니다. 화면 페이지(`(app)/tables/[tableId]`)와 같은 `[tableId]` 이름을 써야 라우트 충돌이 나지 않습니다. 정적 `(app)/tables/insane1/page.tsx` 는 동적보다 우선합니다.
 
 ### 6.3 사용자 폴더
@@ -423,7 +421,7 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 | 경로 | 페이지 파일 | 내용 |
 |---|---|---|
 | `/tables` | `app/(app)/tables/page.tsx` → `widgets/table/table-catalog-content.tsx` | 번들 표 카드(`TableSnapshotCard`: 진행 막대, 표 주소 복사)를 위에, DB 의 IR 표(`TableListPanel`)를 아래에 |
-| `/tables/insane1` | `app/(app)/tables/insane1/page.tsx` → `widgets/table/table-snapshot-content.tsx` | 정적 metadata(`bmstable`, noindex). 머리(표 이름, 범위, 곡 수, 모바일만 표 주소 복사), 출처 요약 줄, 로그인하면 "내 진행"(기본 접힘: 요약 + 램프 막대, "레벨별 보기"로 분포·범례와 레벨 26줄), 비로그인 안내 줄, 필터 막대(검색 `/` 단축키, 레벨 범위, 램프, 정렬. 모바일은 아래 시트), 레벨 칩 한 줄, 접히는 레벨 묶음(붙는 머리, 램프 막대, 플레이 수), 카드 격자(2~6열), 상세 대화상자, 바닥 출처 문안. 사이드바 슬롯: 출처와 표 주소 복사 |
+| `/tables/insane1` | `app/(app)/tables/insane1/page.tsx` → `widgets/table/table-snapshot-content.tsx` | 정적 metadata(`bmstable`, noindex). 머리(표 이름, "범위 · 곡 수 · 갱신 날짜" 설명, 모바일만 표 주소 복사), 로그인하면 "내 진행"(기본 접힘: 요약 + 램프 막대, "레벨별 보기"로 분포·범례와 레벨 26줄), 비로그인 안내 줄, 필터 막대(검색 `/` 단축키, 레벨 범위, 램프, 정렬. 모바일은 아래 시트), 레벨 칩 한 줄, 접히는 레벨 묶음(붙는 머리, 램프 막대, 플레이 수), 카드 격자(2~6열), 상세 대화상자. 사이드바 슬롯: "표 정보"(갱신·곡·레벨 수)와 표 주소 복사. 출처 요약 줄·바닥 출처 문안·사이드바 출처는 2026-10-14~15 사용자 지시로 지웠다(4a0872d·ea34002) |
 | `/folders` | `app/(app)/folders/page.tsx` → `widgets/folder/folder-list-content.tsx` | 폴더 행(행 전체가 링크, 위·아래, 메뉴), 새 폴더 대화상자, 빈 상태. 사이드바 슬롯: "R-BMS 에서 보기" |
 | `/folders/[folderId]` | `app/(app)/folders/[folderId]/page.tsx` → `widgets/folder/folder-editor-content.tsx` | 명시 저장 편집: 곡 목록(순번, ★레벨, 위·아래, 메뉴, 빼기), xl 이상 오른쪽 검색 패널(아래는 시트), 표에서 가져오기, 409 충돌 안내, 미저장 경고(앱 안 링크·탭 닫기), Ctrl/Cmd+S |
 | `/charts/[hash]` | (기존) | 표에 있는 곡이면 "★16 発狂BMS難易度表" 배지(`/tables/insane1#lv-16`), 머리의 "내 폴더에 넣기" |
@@ -445,7 +443,7 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 | `TableFilterFields` | `features/table/table-filter-fields.tsx` | `layout: 'inline' \| 'stacked'` 의 레벨·램프·정렬 필드 |
 | `TableExternalLink`, `formatUrlHost` | `features/table/*` | http(s) 만 링크, 새 탭, `noopener noreferrer` |
 | `TableSnapshotCard` | `features/table/table-snapshot-card.tsx` | `/tables` 의 번들 표 카드 |
-| `TableChartDialog` / `TableChartDetails` | `widgets/table/*` | 상세 대화상자(외부 링크, 코멘트, 내 기록, MD5 복사, `AddToFolderMenu`, 서버에 차트가 있을 때만 차트 순위 링크). 닫으면 포커스가 카드로 |
+| `TableChartDialog` / `TableChartDetails` | `widgets/table/*` | 상세 대화상자(내려받기 링크, 내 기록, MD5 복사, `AddToFolderMenu`, 서버에 차트가 있을 때만 차트 순위 링크). 닫으면 포커스가 카드로 |
 | `TableSnapshotWorkspace` / `-Sidebar` / `-Session` / `-ListItem` | `widgets/table/*` | 표 화면의 조립, 사이드바 슬롯, 서버의 내 기록 미리 채우기, `/tables` 의 번들 표 행 |
 | `FolderListItem`, `FolderChartRow`, `ChartSearchResultRow`, `FolderMetaDialog`, `FolderNoteDialog`, `FolderTableImportDialog`, `FolderConflictNotice`, `FolderGuidePanel` | `features/folder/*` | 폴더 화면의 순수 조각 |
 | `FolderListContent` / `-Panel`, `FolderEditorContent` / `FolderEditor` / `-Workspace`, `FolderChartSearchPanel` | `widgets/folder/*` | 폴더 화면의 조립. 초안 계산은 `folder-draft.ts`, 이탈 막기는 `use-folder-leave-guard.ts`, 편집 화면용 표 색인은 `read-folder-table-index.ts`(서버, 약 110KB) |

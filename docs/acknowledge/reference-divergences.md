@@ -1,5 +1,7 @@
 # 레퍼런스 구현과의 의도적/보류 차이 (M0/M1 적대적 리뷰 결과)
 
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9. 이번 갱신에서 코드와 대조한 범위: 2026-10-14 이후 절(Esc 포기 판 저장 ~ 연습과 #TOTAL)과 아래에 표시한 죽은 서술. 그 전 절(2026-06 ~ 09)의 함수 이름은 대조하지 않았다.
+
 > 워크플로우 `wfgr2tk4o`(21 에이전트) 결과. 18개 발견 중 14개 확정, 그러나 검증자 판정상 **거의 전부 현 corpus(727곡)에 미발현**. 아래는 처리 결정.
 
 ## 수정 완료 (이번 커밋)
@@ -81,7 +83,7 @@
 | D-D3 | **`dj_rank` 의 `max_ex == 0` 처리** | 밴드 0(F) | `ScoreDataProperty.java:101` `rate = totalnotes == 0 ? 1.0f` → AAA | 노트 0개 차트는 실사용 경로가 아니다. rbms 현행 유지, `crates/rbms-render/src/result.rs` 의 `dj_rank_zero_max_is_lowest` 가 고정 |
 | D-D4 | **KEYBOARD 게이지 세트의 init 혼재** | ASSIST_EASY_KB `init 30`, EASY_KB/NORMAL_KB `init 20` 을 원문 그대로 | `GaugeProperty.java:107-115` 원문이 그렇다 | 오타처럼 보이지만 **수정하지 않는다**(스펙 §2 명시). 24K 는 아직 UI 도달 경로가 없어 실영향 0 |
 | D-D5 | **PMS/KEYBOARD 의 빈 스크래치 테이블을 키 테이블로 대체** | `JudgeProperty::PMS`/`::KEYBOARD` 의 `scratch`/`ln_scratch_end` 에 각각 note/ln_end 표를 복사 | `JudgeProperty.java:35,38,46,49` 는 `new long[]{}` — 빈 배열이라 `getJudge` 가 루프를 한 번도 돌지 않아 **항상 0(PERFECT GREAT)** 을 돌려준다 | POPN_9K 는 스크래치 레인이 없어 무해. KEYBOARD_24K 는 스크래치 레인(24,25)이 있으나 `Mode::ALL` 에 없어 도달 불가 — 24K 를 실제로 여는 Phase G 에서 "빈 표 = 항상 PG" 의미론을 그대로 이식할지 결정한다. `windows.rs` 의 `rows_without_a_scratch_lane_stand_in_their_key_tables` 가 현행을 고정 |
-| D-D6 | **assist 1(AUTO SCRATCH) 런의 리플레이 저장** | 저장한다(`saves_replay(assist) = assist < 2`) | `MusicResult.java:317-321` 이 `resource.isUpdateScore()` 로 게이트하고, assist 를 올리는 모든 분기가 `score=false` 로 만들므로(`BMSPlayer.java:203-252`) assist 1 에서도 저장하지 않는다 | 결정 12 는 assist 2 에 대해서만 리플레이 차단을 문구화했다. assist 1 의 리플레이는 rbms 가 유지하는 편의 기능 |
+| D-D6 | **assist 1(AUTO SCRATCH) 런의 리플레이 저장** | (2026-10-14 대체: `saves_replay` 는 없어졌고, 사람이 친 판은 어시스트와 상관없이 모두 리플레이를 저장한다 → [모든 판 저장·전송 ADR](2026-10-14-adr-save-and-send-every-played-run.md). 아래는 당시 서술) 저장한다(`saves_replay(assist) = assist < 2`) | `MusicResult.java:317-321` 이 `resource.isUpdateScore()` 로 게이트하고, assist 를 올리는 모든 분기가 `score=false` 로 만들므로(`BMSPlayer.java:203-252`) assist 1 에서도 저장하지 않는다 | 결정 12 는 assist 2 에 대해서만 리플레이 차단을 문구화했다. assist 1 의 리플레이는 rbms 가 유지하는 편의 기능 |
 | D-D7 | **GAS 로 전환된 런의 게이지 보고** | 실제로 클리어를 정한 게이지(`PlaySummary::finished_gauge`)를 기록·제출한다 | `BMSPlayer.java:884` `score.setGauge(gauge.isTypeChanged() ? -1 : gauge.getType())` | 로컬 `ScoreRecord.gauge` 도 IR `options.gauge`(`rbms_ir::GaugeType`)도 `-1` 에 해당하는 값이 없다. "NORMAL 게이지로 HARD 램프" 같은 모순을 피하려면 전환 후 게이지를 보고하는 편이 정확하다 |
 | D-D8 | **리플레이 이벤트의 스크래치 방향이 IR 와이어에 없다** | 로컬 `ReplayEvent.backward` 로 기록·재생 | 해당 없음(rbms 고유 포맷) | `rbms_ir::ReplayEvent` 에는 방향 필드가 없어, 업로드/다운로드를 거친 리플레이는 전부 정회전으로 재생된다. 필드 추가는 IR 계약 변경이라 별건 |
 | D-D9 | **구 세대 어시스트 기록의 클리어 램프** | `rule_version < 2` 이면서 `assisted` 인 기록은 셀렉트 LED 집계에서 제외 | `PlayDataAccessor.java:427-430` 은 이미 강등된 램프만 올린다 | Phase D 이전 빌드는 램프를 강등하지 않고 저장했다. 그 기록을 그대로 올리면 어시스트 클리어가 정규 클리어 LED 로 소급 상승한다 |
@@ -181,6 +183,8 @@
 
 ## Phase E — 스킨 완전 커스터마이징 (2026-09-10, 착수 전 선반영)
 
+> 이 절과 바로 아래 "적대 리뷰 반영" 절은 JSON 스킨 시스템(2026-09 ~ 10-08)의 기록이다. 스킨 시스템은 2026-10-09 Lua 스킨 호환으로 바뀌었다([Lua 스킨 호환 결정](2026-10-09-lua-skin-compat-decisions.md), `docs/skin.md`). 여기 적힌 함수·설정 이름 가운데 E-D13 의 `AppShared::skin_now_ms()`(지금은 µs 단위 `AppShared::skin_now_us()`, 장면 시작부터 잰다)와 E-D17 의 `max_call_micros`·`max_frame_micros`(지금 예산은 `crates/rbms-skin/src/lua/budget.rs` 의 프레임 50 ms·호출당 100만 명령 등, 정본 `docs/skin.md` 의 예산 표)는 코드에 없다. 이력으로만 읽는다.
+
 > 근거: `docs/plan/2026-09-09-phase-e-spec.md` §2.1.1 / §2.1.2 / §2.2 / §5.4 / §5.6. 아래 5건은 사양이 **레퍼런스 구현을 직접 읽고 확정한 차이**이며, 코드가 아직 없는 시점(웨이브 0 스캐폴드)에 미리 기록한다. 실현 브랜치를 함께 적어 두었으니, 해당 단계가 끝나면 "상태" 칸만 갱신하면 된다.
 > 다섯 건 중 화면 결과가 달라지는 것은 E-D4 하나뿐이고(축소·확대 시 보간 품질), 나머지는 동형 매핑·관대화·내부 구조·보안 추가다.
 
@@ -262,7 +266,7 @@
 | 끝나지 않은 LN 머리 | 머리가 모델에 남아 곡 DB 노트 수·기본 TOTAL 은 세고 판정 엔진은 세지 않았다(코퍼스 18개 차트) | 디코드 끝에서 경고하고 레인에서 지운다(`BMSDecoder.decode`). 그 뒤의 노트는 그대로 친다 | 같다 |
 | 노트 수의 정의 | `rbms-chart` 와 BMSON 변환기가 같은 식을 따로 가졌다 | `TimeLine.getTotalNotes(lntype)`: 일반 노트 1, LN 머리 1, 꼬리는 CN·HCN 일 때만(미정의 LN 은 LN MODE 가 LN 이 아닐 때) | `rbms_model::NoteKind::counts_as_playable_note` 한 곳. 판정 엔진의 `total_notes` 와 같은 값이 나온다(`crates/rbms-play/tests/note_count.rs`) |
 
-**기록의 의미:** 이 두 정리가 걸리는 차트(감사 때 11,336 차트 라이브러리에서 몸통 안에 일반 노트가 있는 차트 약 15개, 노트 수가 어긋난 차트 18개)는 곡 DB `notes`·`long_notes`·밀도, 기본 TOTAL, 판정 엔진의 `total_notes`·`max_ex` 가 바뀐다. 곡 DB 는 `PARSER_VERSION` 3 이 다음 스캔을 전체 재스캔으로 만든다. 점수 기록의 규칙 세대(`SCORE_RULE_VERSION`)는 이 변경만으로 올리지 않았다(결정은 [몸통 안 일반 노트 ADR](2026-10-15-adr-long-note-body-notes.md)와 [짝 없는 머리 ADR](2026-10-15-adr-unpaired-long-note-heads.md)).
+**기록의 의미:** 이 두 정리가 걸리는 차트(감사 때 11,336 차트 라이브러리에서 몸통 안에 일반 노트가 있는 차트 약 15개, 노트 수가 어긋난 차트 18개)는 곡 DB `notes`·`long_notes`·밀도, 기본 TOTAL, 판정 엔진의 `total_notes`·`max_ex` 가 바뀐다. 곡 DB 는 `PARSER_VERSION` 3 이 다음 스캔을 전체 재스캔으로 만든다(같은 릴리스 안에서 4·5 로 더 올라 지금은 5, 아래 "연습과 #TOTAL" 절). 점수 기록의 규칙 세대(`SCORE_RULE_VERSION`)는 이 변경만으로 올리지 않았다(결정은 [몸통 안 일반 노트 ADR](2026-10-15-adr-long-note-body-notes.md)와 [짝 없는 머리 ADR](2026-10-15-adr-unpaired-long-note-heads.md)).
 
 **아직 원본과 다른 점(이 차트들을 일부러 남겼다):**
 

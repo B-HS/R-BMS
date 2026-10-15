@@ -1,5 +1,7 @@
 # CN / HCN 판정 — 레퍼런스 구현 대조 구현 스펙
 
+> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9. S19 에서 판정이 프레임 단위가 아니라 일이 생긴 순간 단위로 바뀌었다([ADR](../acknowledge/2026-10-15-adr-event-time-judging.md)). HCN 틱은 지나간 시간만큼 모두 치르고(프레임당 하나가 아니다), 아래 테스트 수(887, 3,040)는 그때의 기록이다. 엔진의 지금 동작은 [crates.md](../crates.md) rbms-judge 가 정본이다.
+
 > **상태(2026-09-16): 현재 구현 기준.** CN/HCN 2-판정, CN deferral/재홀드, HCN 연속 게이지, scratch BSS/MSS 및 IR `lntype` 보고는 완료했습니다. Phase H `cargo test --workspace`는 exit 0이며 등록 테스트는 3,040개입니다.
 
 > 로드맵 Phase 1과 Phase 7의 판정 동작을 실제 `rbms-judge` matcher에 반영한 구현 스펙입니다.
@@ -49,14 +51,14 @@
 - `passing` = 현재 통과 중인 HCN(머리 통과 시 set, 종단 통과 시 clear). `inclease` = 이번 프레임 눌림 여부(또는 autoplay/auto-hit).
 - 눌림 유지: `mpassingcount += dt`; `> hcnmduration`마다 `gauge.update(1, 0.5)` (게이지 +0.5), `mpassingcount -= hcnmduration`.
 - 안 눌림: `mpassingcount -= dt`; `< -hcnmduration`마다 `gauge.update(3, 0.5)` (게이지 -0.5, BAD 취급).
-- ⇒ rbms `matcher::tick_hell_charges`가 `LaneHold.passing`과 `passing_us`로 이를 구현합니다. 200ms를 넘길 때 프레임당 최대 한 번 half-GREAT/half-BAD를 적용하고 나머지 시간을 유지하며, 판정 수·combo·EX·timing에는 영향을 주지 않습니다.
+- ⇒ rbms `matcher::run_hell_charges`가 `LaneHold.passing`과 `passing_us`로 이를 구현합니다. 쥔(또는 놓은) 시간 200ms 마다 half-GREAT/half-BAD 를 하나씩, 지나간 시간만큼 모두 적용하고(S19 부터. 원본은 프레임당 최대 하나) 나머지 시간을 유지하며, 판정 수·combo·EX·timing에는 영향을 주지 않습니다. `update` 는 틱이 기한이 되는 순간마다 멈추므로 시간을 어떻게 나눠 불러도 틱이 같다.
 
 ## rbms 구현 (✅ 완료)
 1. **플럼빙:** `matcher.rs`의 `JNote`에 `ln: Option<LnKind>` 추가, `from_model`이 `LongStart{ln}`에서 운반. 공개 `from_pairs`/`new` 시그니처 유지(내부 `from_triples` 도입, pair-빌드는 `LnKind::Ln` 기본). `is_charge(ln)`로 CN/HCN 게이트.
-2. **2-판정 모델:** CN/HCN은 **head(press 시 즉시 카운트) + end(release 시 별도 카운트)** = 2 판정/노트. `total_notes`·`count_playable_notes`가 CN/HCN을 2로 카운트(분모 일관). `press`: CN/HCN head면 `apply(judge)` 즉시. `release`: CN/HCN은 `final = end_judge`(ln_end 윈도우, head로 capping 안 함), LN은 `worse(head,end)` 유지. `update`: CN/HCN over-hold면 end 1판정, 미히트면 head+end 2 Miss; LN은 1.
+2. **2-판정 모델:** CN/HCN은 **head(press 시 즉시 카운트) + end(release 시 별도 카운트)** = 2 판정/노트. `total_notes`·`count_playable_notes`가 CN/HCN을 2로 카운트(분모 일관). `press`: CN/HCN head면 `apply(judge)` 즉시. `release`: CN/HCN은 `final = end_judge`(ln_end 윈도우, head로 capping 안 함), LN은 `worse(head,end)` 유지. `update`: CN/HCN 종단을 쥔 채 지나면 end 1판정, 미히트면 head+end 2개의 見逃し POOR; LN은 1(쥔 채 종단을 지나면 머리 판정으로 확정).
 3. **CN deferral/재홀드:** 이른 BAD/POOR release는 `release_us`/`end_judge`로 보류합니다. `longnoteMargin` 안의 re-grab은 보류를 취소하고, 만료한 `update`는 저장된 종단 판정으로 확정합니다. 늦은 release와 GOOD 이상 종단은 즉시 확정합니다.
 4. **BSS/MSS:** scratch owner 방향을 기록합니다. BSS는 반대 방향 press로 charge note를 종단하고, 같은 방향 press는 보류 release를 re-grab합니다. 다른 방향 release와 end window 안의 mid-spin release는 무시합니다. MSS는 종단 뒤 owner를 해제해 다음 spin이 어느 방향으로도 시작할 수 있습니다.
-5. **HCN 연속 게이지:** `tick_hell_charges`가 held/GOOD-or-better end에는 half-GREAT, unheld에는 half-BAD를 200ms마다 프레임당 한 번 적용합니다. remainder·통계 불변·결정성 테스트가 이를 고정합니다.
+5. **HCN 연속 게이지:** `run_hell_charges`가 held/GOOD-or-better end에는 half-GREAT, unheld에는 half-BAD를 200ms마다 적용합니다(지나간 시간만큼 모두). remainder·통계 불변·결정성 테스트가 이를 고정합니다.
 6. **검증:** 2026-06-03 당시 2-판정 픽스처 5종과 전체 887 통과를 기록했습니다. 현재 기준은 2026-09-16 Phase H `cargo test --workspace` exit 0, 등록 테스트 3,040개이며, deferral/re-grab, HCN tick, BSS/MSS까지 matcher 테스트가 포함됩니다.
 
 ## 남은 실제 제약

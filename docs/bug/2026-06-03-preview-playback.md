@@ -1,5 +1,11 @@
 # #PREVIEW 실재생 — 진단 계측 + 검증 픽스처
 
+최종 갱신 2026-10-15 · 대응 커밋 ea698a9 · 이 기록은 2026-06-03~07 의 사실이다. 아래 파일과 로그 문구는 당시 것이고, 지금 코드는 다르다.
+
+- `apps/rbms-player/src/app_select.rs` 는 stage 기반 앱 개편(`02dea73`)으로 없어졌고 미리듣기는 `apps/rbms-player/src/stage/select/preview.rs` 의 `start_preview`·`update_preview`·`stop_preview` 로 옮겨졌다. `SongEntry.preview` 는 `rbms_library::SongEntry`(`crates/rbms-library/src/lib.rs`)의 필드다.
+- 진단 로그는 지금 `eprintln!` 이 아니라 `notify(Level::Warn, "[preview] …")` 알림이다. 분기 문구가 `song index … out of range`, `no parent dir for …`, `#PREVIEW '…' not found under …`, `no output stream — preview skipped`, `read failed …`, `decode failed …` 로 바뀌었고 아래 3절의 `defines no #PREVIEW`·`AudioEngine::new failed` 문구는 없다.
+- 픽스처 `samples/preview-demo/`(`preview-demo.bms`, `preview.wav`)와 디코드 테스트 `crates/rbms-audio/src/decode.rs` 의 `decodes_in_memory_wav`·`preview_demo_fixture_decodes_and_mixes_to_nonzero_audio` 는 그대로 있다.
+
 ## 대상 파일
 - `apps/rbms-player/src/app_select.rs` (`update_preview` / `start_preview` / `stop_preview`)
 - `apps/rbms-player/src/main.rs` (`SongEntry.preview` — dead_code 주석 제거), `apps/rbms-player/src/app_play.rs` (`load`가 select 진입 전 `stop_preview`)
