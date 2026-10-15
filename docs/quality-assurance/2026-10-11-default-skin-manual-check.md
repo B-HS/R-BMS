@@ -389,6 +389,7 @@
 - [ ] **K5 키 지연이 줄었는가.** 방법(간단): 이전 빌드와 이 빌드로 같은 곡을 키보드로 쳐 FAST/SLOW 분포를 본다. 방법(정밀): `--timing-csv` 로 한 판을 남겨 `input_at_us` 를 고속 카메라나 루프백 장치의 시각과 비교한다. 60 Hz 모니터에서도 한 번. 기대: 이 빌드가 평균 약 반 프레임(60 Hz 에서 약 8 ms, 120 Hz 에서 약 4 ms) FAST 쪽으로 옮겨지고 흩어짐이 줄어든다. 예전 빌드에서 맞춘 JUDGE OFFSET 은 다시 맞춰야 한다.
 - [ ] **K6 KEY DEBOUNCE.** 방법: Tab → INPUT 에서 KEY DEBOUNCE 가 16 MS 인지 본다. 롱노트가 많은 곡을 키보드로 친다. 채터가 있는 키보드가 있으면 그 키로. 값을 0 과 100 으로 바꿔 한 판씩. 기대: 16 에서 누르는 순간의 채터로 롱노트가 끊기지 않는다. 16 에서 같은 레인 32분 연타(200 BPM 안팎)의 FAST/SLOW 가 0 일 때와 같다(누름은 늦춰지지 않는다). 100 에서는 같은 키를 빠르게 연타하면 일부가 빠진다(누른 지 100 ms 안의 뗌이 미뤄지는 동안 다시 누르면 누른 채로 남는다. 그것이 창의 뜻). 0 은 예전과 같다. 누른 채 있다가 접점이 잠깐 떨어지는 채터로는 여전히 끊길 수 있다(ADR "남은 한계" 2). 메뉴·서버 주소 입력·IME 입력은 값과 상관없이 그대로다.
 - [ ] **K7 Windows·Linux.** 방법: Windows(DX12, 그리고 가능하면 Vulkan)와 Linux(X11·Wayland)에서 K1~K4 를 한 번씩. 기대: 같다. 다른 스레드에서의 이미지 획득·present 는 wgpu 가 허용하지만 이 OS 들에서 돌려 보지 않았다. Windows DX12 에서 창 크기를 끌어 바꾸는 동안 멈추지 않는지(Present 중 창 스레드로 오는 동기 메시지), Wayland 에서 다른 작업 공간에 숨긴 창의 크기를 바꿨다 돌아왔을 때 이어지는지를 함께 본다.
+- [ ] **K8 Main Thread Checker(macOS, 알려진 위험 확인).** 방법: `DYLD_INSERT_LIBRARIES=$(xcode-select -p)/usr/lib/libMainThreadChecker.dylib MTC_RESET_INSERT_LIBRARIES=0 ./rbms-player` 로 5초 띄운 뒤 stderr 의 `Main Thread Checker` 줄을 센다. 기대: wgpu Metal acquire 의 두 건(`-[NSView window]`, `-[NSWindow occlusionState]`, 스레드 `rbms-present`)만 나온다(상류 gfx-rs/wgpu#10627, ADR keyboard-input-timing 남은 한계 6). 그 밖의 위반이 나오면 결함이다. wgpu 를 올린 뒤에는 이 두 건이 사라졌는지 본다.
 
 ## 4. 기록
 

@@ -60,10 +60,11 @@
 결과(2026-10-15): 1차 감사 Workflow `wf_c79a69a5-724`(5 영역 찾기 + 반박 검증, 확인 57건, 반박 1건), 1차 수정 `wf_df1fcde7-512`(판정 의미 무관 결함), 2차 수정 `wf_8b1e87e7-049`(판정 의미 9건 + Esc 정책 + 남은 떠는 테스트: 스킨 Lua 프레임 예산의 벽시계). 게이트: Rust 5,918 통과·0 실패, 떠는 테스트 반복(멈춤 주입 200·CPU 부하 10·rbms-ir 120·렌더 400) 0 실패, 727 차트 오토플레이 만점 0 예외, 웹 597 + DB 통합 34 통과, 스킨 덤프·생성 이미지·계약 통과. 렌더 계측(같은 길이 합성 차트) p99 0.08~0.09 ms, 1 ms 초과 0, 결과 진입 프레임 8~9 ms → 0.3 ms. 커밋: 웹 `b197446`(운영 마이그레이션 0003 적용), 코드 `f81d499`. 같은 기간에 앱 아이콘 `cc500ef`, 웹 파비콘 `089c737`(사용자 지시).
 남은 것(사용자에게 보고): 키보드 입력 시각은 아직 처리 시각(winit 이벤트에 시각이 없고 present 대기 뒤에 들어옴, test-debt 3.53), 코스 램프 규칙을 원본으로 바꾼 것(결정 5 범위 밖, 승인 필요), LN 이 키 채터에 약해짐, 컨트롤러 판정이 평균 약 8 ms 빨라짐(JUDGE OFFSET 재조정 안내), airTKkill 류 오토플레이 Failed(TOTAL 낮음 추정, 미확인).
 사용자 결정(2026-10-15): (1) 코스 램프는 원본 규칙(MusicResult.java:402-428) 유지. (3) 키보드에도 짧은 디바운스(설정 가능)로 채터를 막는다. (2) 원문 "2번은 beatmania iidx, lunatic rave 2(lr2)등에서 쓰이는방법으로 제대로 정확하게 구현해" — 키보드 판정 시각을 IIDX·LR2 의 입력 처리 방식을 조사해 그대로 정확히 구현한다(S19-2b).
-- [ ] S19-2b. 입력 처리 방식 조사(IIDX·LR2·beatoraja) → 키보드 입력 시각 구현 → 키보드 디바운스 → 리뷰·게이트.
+- [x] S19-2b. 입력 처리 방식 조사(IIDX·LR2·beatoraja) → 키보드 입력 시각 구현 → 키보드 디바운스 → 리뷰·게이트.
 S19-2b 결과(2026-10-15, Workflow `wf_da2e2873-f73`): 커밋 `794361b`(rbms-present 스레드, LR2 방식 레인 키 디바운스 16 ms), `a13f6ce`(문서). CI 3 OS·웹 통과.
 2차 감사(Workflow `wf_32dc80f0-053`): 확인 17건(수리가 만든 결함: 서버 total_notes 영구 상한, Esc 리플레이 Missing 경합, 연습 게이지 사망 판정 정지). 3차 수정 Workflow `wf_5cbb07fa-653` 진행.
 사용자 결정(2026-10-15, THR2-1 A): rbms-present 스레드가 wgpu-hal Metal acquire 안에서 메인 스레드 전용 AppKit API(NSView.window, NSWindow.occlusionState)를 읽는 위반은 구조를 유지하고 ADR·QA 에 알려진 위험으로 기록, 상류 이슈 https://github.com/gfx-rs/wgpu/issues/10627 (2026-10-15 등록). 키보드 ADR 과 QA(Main Thread Checker 실행 절차) 반영은 3차 수정 뒤.
+3차 수정(Workflow `wf_5cbb07fa-653`) 결과: 커밋 `0e7be91`(마이그레이션 0004·chart-notes 동작, 운영 적용 run 38673724720), `e7890fc`(웹), `4cc72d0`(클라이언트), `082c8fb`(문서). CI 3 OS·웹 통과, 운영 `082c8fb`. 운영 chart-notes 점검(run 38673771025): 어긋난 notes 0, 복구 대상 0(복구 SQL 미실행), 점수 없는 차트 행 3, 누적 거절 39. 오토플레이 만점: 727 차트 예외 0, SSD 전체 11,336 차트 중 airTKkill·airTkill 2곡만 FAILED(차트의 #TOTAL 1.1·1 — 원본도 FAILED, 결함 아님). THR2-1 은 ADR keyboard-input-timing 남은 한계 6 과 QA K8 에 기록.
 - [ ] S19-3. 2차 감사(새 결함이 없을 때까지 반복).
 - [ ] S19-4. 성능 계측 결과와 기준 충족 기록(`docs/quality-assurance/`).
 - [ ] S19-5. 리뷰, 게이트, 커밋·푸시, CI(떠는 테스트가 없는지 반복 실행 포함), 웹 배포 확인.
