@@ -37,7 +37,8 @@
 | [2026-10-15-adr-course-stage-combo.md](2026-10-15-adr-course-stage-combo.md) | 코스 곡별 기록의 max_combo·풀콤은 스테이지 콤보로, 화면·다음 스테이지는 코스 콤보. 코스 램프는 코스의 끊김 없는 연속으로 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-full-combo-condition.md](2026-10-15-adr-full-combo-condition.md) | 풀콤 = 끝에 남은 콤보가 지나간 노트 수(원본 `BMSPlayer.java:868`). 5K·PMS 의 마지막 노트 뒤 空POOR 는 풀콤을 깬다 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-escape-keeps-every-run.md](2026-10-15-adr-escape-keeps-every-run.md) | Esc 판은 판정 수와 상관없이 FAILED 저장·전송. 코스 도중 Esc 는 남은 노트가 없으면 정상 판정, 있으면 곡 기록 + FAILED 코스 기록까지 저장·전송 | 2026-10-15 | 유효 |
-| [2026-10-15-adr-event-time-judging.md](2026-10-15-adr-event-time-judging.md) | 입력은 들어온 시각(키는 받은 순간, 컨트롤러는 gilrs 시각)으로, 스윕·지연 릴리스·지뢰·HCN 틱·GAS 는 그 시각 순서로. HCN 틱은 경과 시간, 게이지가 빈 순간 판정 멈춤, 리플레이 `clock` 세대(EVENT/FRAME) | 2026-10-15 | 유효 |
+| [2026-10-15-adr-event-time-judging.md](2026-10-15-adr-event-time-judging.md) | 입력은 들어온 시각(키는 받은 순간, 컨트롤러는 gilrs 시각)으로, 스윕·지연 릴리스·지뢰·HCN 틱·GAS 는 그 시각 순서로. HCN 틱은 경과 시간, 게이지가 빈 순간 판정 멈춤, 리플레이 `clock` 세대(EVENT/FRAME) | 2026-10-15 | 유효(남은 한계 PERF-2 는 아래 키보드 시각 ADR 이 다룸) |
+| [2026-10-15-adr-keyboard-input-timing.md](2026-10-15-adr-keyboard-input-timing.md) | 화면 대기(present)를 전용 스레드로 떼어 이벤트 루프가 키를 오는 즉시 받고 그 순간으로 판정(LR2·beatoraja·osu! 의 원리). 레인 키 KEY DEBOUNCE(기본 16 ms, LR2 `inputinterval` 형: 누름은 즉시, 누른 뒤 창 안의 뗌만 창 끝까지 미룸). 메인은 화면을 기다리지 않음(크기 변경도) | 2026-10-15 | 유효(기본값·컨트롤러 디바운스는 확인 대기) |
 
 ## 그 전의 결정 파일
 
@@ -56,6 +57,7 @@
 
 ## 사용자에게 아직 확인받지 않은 메인의 결정
 
-- 없음. Esc 포기 판의 두 예외(판정 없는 판, 코스 도중)는 2026-10-15 에 사용자가 거부했다([Esc 판은 모두 저장](2026-10-15-adr-escape-keeps-every-run.md)).
+- [키보드 시각 ADR](2026-10-15-adr-keyboard-input-timing.md) 의 기본값 16 ms, 그리고 컨트롤러 디바운스(지금은 원본형 양방향 잠금)도 LR2 형으로 맞출지. 키보드 디바운스 방식은 결정 2 의 "LR2 등에서 쓰이는 방법으로"에 따라 LR2 형으로 했다(누름은 늦추지 않음, 누른 채 뗌이 먼저 오는 채터는 막지 못함).
+- Esc 포기 판의 두 예외(판정 없는 판, 코스 도중)는 2026-10-15 에 사용자가 거부했다([Esc 판은 모두 저장](2026-10-15-adr-escape-keeps-every-run.md)).
 
 2026-10-14 에 확인받은 것: SCRATCH AUTO 램프 LIGHT ASSIST 유지, 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외(추천안 A). `v0.1.0` draft 는 둔다, `v0.1.3` draft 도 두고 다음은 `v0.1.4`.
