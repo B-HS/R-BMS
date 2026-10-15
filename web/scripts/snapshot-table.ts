@@ -18,7 +18,8 @@ const ATTRIBUTE_PATTERN = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g
 const BMSTABLE_META_NAME = 'bmstable'
 const EXIT_CODE = { SAME: 0, DIFFERENT: 1, FAILED: 2 } as const
 const HEADER_FIELDS_DROPPED = ['original_url'] as const
-const ENTRY_FIELDS_EMPTIED = ['url', 'url_diff', 'name_diff', 'comment'] as const
+const ENTRY_FIELDS_EMPTIED = ['comment'] as const
+const ENTRY_FIELDS_KEPT = ['url', 'url_diff', 'name_diff'] as const
 const WEB_ADDRESS_PATTERN = /\s*[/／]?\s*(?:https?:\/\/|www\.)\S*/gi
 
 type Fetched = {
@@ -111,15 +112,16 @@ const withoutWebAddresses = (value: unknown) => (typeof value === 'string' ? val
 const stripHeader = (header: Record<string, unknown>) =>
     Object.fromEntries(Object.entries(header).filter(([key]) => !(HEADER_FIELDS_DROPPED as readonly string[]).includes(key)))
 
+const emptiedOrCleaned = (key: string, value: unknown) => {
+    if ((ENTRY_FIELDS_EMPTIED as readonly string[]).includes(key)) return ''
+    if ((ENTRY_FIELDS_KEPT as readonly string[]).includes(key)) return value
+    return withoutWebAddresses(value)
+}
+
 const stripEntry = (entry: unknown) => {
     const fields = objectSchema.safeParse(entry).data
     if (!fields) return entry
-    return Object.fromEntries(
-        Object.entries(fields).map(([key, value]) => [
-            key,
-            (ENTRY_FIELDS_EMPTIED as readonly string[]).includes(key) ? '' : withoutWebAddresses(value),
-        ]),
-    )
+    return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, emptiedOrCleaned(key, value)]))
 }
 
 const normalizeHeader = (header: Record<string, unknown>) => `${JSON.stringify(stripHeader(header), null, HEADER_JSON_INDENT)}\n`
@@ -197,7 +199,7 @@ const sourceJsonOf = (snapshot: Snapshot, fetchedAt: string, tableUrl: string, o
                     'UTF-8 without BOM, LF line endings, a single trailing newline',
                     'header.json: JSON.stringify with 2-space indent, key order kept',
                     'header.json: original_url is dropped',
-                    'data.json: one entry per line, entry order and key order kept; url, url_diff, name_diff and comment are emptied and web addresses are removed from the other text fields, so the table carries no other site',
+                    'data.json: one entry per line, entry order and key order kept; comment is emptied and web addresses are removed from the text fields other than the download links (url, url_diff, name_diff), which are kept as they are',
                     'the page html is not stored: Cloudflare injects a per-request script, so its hash changes on every request',
                 ],
             },

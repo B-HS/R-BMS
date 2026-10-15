@@ -8,7 +8,7 @@
       "https://darksabun.club/table/archive/insane1/data.json"
     ]
   },
-  "fetched_at": "2026-10-15T04:51:16.357Z",
+  "fetched_at": "2026-10-15T04:55:20.236Z",
   "http": {
     "page": {
       "requested_url": "https://darksabun.club/table/archive/insane1/",
@@ -18,7 +18,7 @@
       "last_modified": "Tue, 04 Aug 2026 13:11:48 GMT",
       "etag": null,
       "bytes": 4171,
-      "sha256_volatile": "286f3dd46aa5406d784f5457b367410d7d408868dddc0922deeb587e736875c0"
+      "sha256_volatile": "dbc4e6419b77d035ff6de266379fe4fd15cd25a2a7c2a1a0f44b0ad5eb69b933"
     },
     "header": {
       "requested_url": "https://darksabun.club/table/archive/insane1/header.json",
@@ -46,7 +46,7 @@
   },
   "snapshot": {
     "header_file_sha256": "c5beb338f827bcd5feff1504989486fd2f99f2dcedf6c3d3799dedb544d31ad5",
-    "data_file_sha256": "259ead416bf6f367d538a045301ccefc204a7675b0b033468db9347b29adc5ce",
+    "data_file_sha256": "23e7fbb3583c91e069dfae681f1bd571d47134479d431a5c1fdcce74fd7da79a",
     "entries": 1035,
     "levels": 26,
     "entries_with_valid_md5": 1035
@@ -57,7 +57,7 @@
       "UTF-8 without BOM, LF line endings, a single trailing newline",
       "header.json: JSON.stringify with 2-space indent, key order kept",
       "header.json: original_url is dropped",
-      "data.json: one entry per line, entry order and key order kept; url, url_diff, name_diff and comment are emptied and web addresses are removed from the other text fields, so the table carries no other site",
+      "data.json: one entry per line, entry order and key order kept; comment is emptied and web addresses are removed from the text fields other than the download links (url, url_diff, name_diff), which are kept as they are",
       "the page html is not stored: Cloudflare injects a per-request script, so its hash changes on every request"
     ]
   }

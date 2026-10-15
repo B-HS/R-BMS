@@ -20,6 +20,9 @@ const entry = (md5Seed: string, level: string, title: string, artist = 'artist')
     level,
     title,
     artist,
+    url: '',
+    url_diff: '',
+    name_diff: '',
 })
 
 const record = (clear: TableSnapshotRecord['clear'], exScore: number, totalNotes = 1000): TableSnapshotRecord => ({

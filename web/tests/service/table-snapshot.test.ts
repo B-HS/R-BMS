@@ -13,6 +13,7 @@ import {
 const TABLE_ID = 'insane1'
 const ENTRY_COUNT = 1035
 const LEVEL_COUNT = 26
+const DOWNLOAD_LINK_COUNT = 1033
 const ORIGIN = 'https://bms.hyuns.uk'
 
 const requireTable = () => {
@@ -107,13 +108,14 @@ describe('표준 표 형식', () => {
         expect(toStandardHeader(requireTable(), 'http://localhost:3102').data_url).toBe('http://localhost:3102/tables/insane1/data.json')
     })
 
-    test('data 본문은 표준 필드를 갖되 다른 사이트의 주소는 담지 않는다', () => {
+    test('data 본문은 표준 필드와 곡 다운로드 링크를 갖되 원본 표의 메모와 주소는 담지 않는다', () => {
         const text = createService().getStandardDataText(TABLE_ID)
         const parsed: Record<string, string>[] = JSON.parse(text ?? '[]')
         expect(parsed).toHaveLength(ENTRY_COUNT)
         expect(Object.keys(parsed[0]).sort()).toEqual(['artist', 'comment', 'level', 'lr2_bmsid', 'md5', 'name_diff', 'title', 'url', 'url_diff'])
-        expect(text).not.toMatch(/https?:\/\/|www\./)
-        expect(parsed.every((row) => row.url === '' && row.url_diff === '' && row.name_diff === '' && row.comment === '')).toBe(true)
+        expect(text).not.toMatch(/darksabun/)
+        expect(parsed.every((row) => row.comment === '')).toBe(true)
+        expect(parsed.filter((row) => row.url !== '').length).toBe(DOWNLOAD_LINK_COUNT)
         expect(parsed.map((entry) => entry.md5)).toEqual(requireTable().entries.map((entry) => entry.md5))
     })
 

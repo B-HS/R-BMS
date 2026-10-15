@@ -53,6 +53,9 @@ export const tableEntryOutputSchema = z.object({
     level: z.string(),
     title: z.string(),
     artist: z.string(),
+    url: z.string(),
+    url_diff: z.string(),
+    name_diff: z.string(),
 })
 
 export const tableSummaryOutputSchema = z.object({
