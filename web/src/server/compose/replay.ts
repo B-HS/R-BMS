@@ -4,6 +4,7 @@ import { user } from '@server/db/auth-schema'
 import { chart, replay, score } from '@server/db/schema'
 import { getEnv } from '@server/lib/env'
 import { newId } from '@server/lib/token'
+import { withLockRetry } from '@server/lib/with-lock-retry'
 import { createReplayService, type ReplayRow } from '@server/service/domain/replay/replay.service'
 import { createMysqlReplayStorage } from '@server/service/shared/storage/replay-storage'
 
@@ -53,9 +54,9 @@ export const composeReplay = (db: Database) => {
         newId,
         storage,
         db: {
-            insertReplay: async (row) => {
+            insertReplay: withLockRetry(async (row) => {
                 await db.insert(replay).values(row)
-            },
+            }),
             findReplayById: async (id) => {
                 const [row] = await db
                     .select({ ...replaySelection, data: replay.data })
@@ -99,12 +100,12 @@ export const composeReplay = (db: Database) => {
                     .where(eq(replay.userId, userId))
                 return { count: row?.count ?? 0, bytes: Number(row?.bytes ?? 0) }
             },
-            linkScoreReplay: async ({ scoreId, userId, replayId }) => {
+            linkScoreReplay: withLockRetry(async ({ scoreId, userId, replayId }) => {
                 await db
                     .update(score)
                     .set({ replayId })
                     .where(and(eq(score.id, scoreId), eq(score.userId, userId)))
-            },
+            }),
         },
     })
 

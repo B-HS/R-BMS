@@ -13,13 +13,17 @@ import {
     type ScoreFlag,
 } from '@server/service/domain/score/ranked-policy'
 import {
+    areDerivedCountsStorable,
     countNotesTaken,
+    DERIVED_COUNTS_FAILURE,
+    DUPLICATE_SUBMISSION_MESSAGE,
     isExScoreConsistent,
     isMinbpConsistent,
     toScoreRecord,
     type BestScope,
     type ScoreRankedRow,
     type ScoreRankingRow,
+    type StoredRunForBest,
     type SubmissionIntegrityFailure,
 } from '@server/service/domain/score/score.service'
 
@@ -89,7 +93,7 @@ export type CourseServiceDb = {
         extra: Record<string, unknown>
     }) => Promise<void>
     replaceCourseCharts: (courseHash: string, charts: { position: number; chartSha256: string }[]) => Promise<void>
-    findCourseScoreIdByIdempotency: (params: { userId: string; courseHash: string; playedAt: number }) => Promise<string | null>
+    findCourseScoreByIdempotency: (params: { userId: string; courseHash: string; playedAt: number }) => Promise<StoredRunForBest | null>
     insertCourseScore: (row: CourseScoreInsertRow) => Promise<void>
     getCourseBest: (params: {
         courseHash: string
@@ -146,6 +150,7 @@ export const findCourseIntegrityFailure = (
     if (countNotesTaken(effectiveJudgeCounts(input.judge), COURSE_BAD_TAKES_NOTE) * EX_PER_PGREAT > input.max_ex_score)
         return { field: 'judge', reason: 'judge count exceeds the notes of the course' }
     if (!isMinbpConsistent(input.judge, input.minbp)) return { field: 'minbp', reason: 'minbp is below the BAD, POOR and empty POOR count' }
+    if (!areDerivedCountsStorable(input.judge)) return DERIVED_COUNTS_FAILURE
     return null
 }
 
@@ -242,23 +247,44 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
         const ranked = rankBlockingFlags(flags).length === 0 && !isBuildBlockingRank(params.buildTrust, params.requireTrustedBuild)
         const scratchAuto = isScratchAutoPlay(input)
 
-        const existingId = await deps.db.findCourseScoreIdByIdempotency({
+        const countRank = async (run: { clear: number; exScore: number; minbp: number; scratchAuto: boolean }) =>
+            (await deps.db.countBetterCourseBests({
+                courseHash: input.course_hash,
+                clear: run.clear,
+                exScore: run.exScore,
+                minbp: run.minbp,
+                includeScratchAuto: run.scratchAuto,
+            })) + 1
+
+        const stored = await deps.db.findCourseScoreByIdempotency({
             userId: user.id,
             courseHash: input.course_hash,
             playedAt: input.played_at,
         })
-        if (existingId) {
+        if (stored) {
+            if (stored.ranked) {
+                await deps.db.upsertCourseBestIfBetter({
+                    courseHash: input.course_hash,
+                    userId: user.id,
+                    scratchAuto: stored.scratchAuto,
+                    courseScoreId: stored.id,
+                    clear: stored.clear,
+                    exScore: stored.exScore,
+                    minbp: stored.minbp,
+                    maxCombo: stored.maxCombo,
+                })
+            }
             const response: SubmitResponseOutput = {
                 accepted: true,
-                rank: null,
+                rank: stored.ranked ? await countRank(stored) : null,
                 previous_best: null,
-                message: 'duplicate submission ignored',
+                message: DUPLICATE_SUBMISSION_MESSAGE,
                 ranked,
                 flags,
                 is_new_best: false,
-                score_id: existingId,
+                score_id: stored.id,
             }
-            return { courseScoreId: existingId, duplicated: true, ranked, flags, response }
+            return { courseScoreId: stored.id, duplicated: true, ranked, flags, response }
         }
 
         const courseScoreId = deps.newId('cs_')
@@ -281,9 +307,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                 maxCombo: input.max_combo,
             }))
 
-        const rank = ranked
-            ? (await deps.db.countBetterCourseBests({ courseHash: input.course_hash, clear, exScore, minbp, includeScratchAuto: scratchAuto })) + 1
-            : null
+        const rank = ranked ? await countRank({ clear, exScore, minbp, scratchAuto }) : null
 
         const response: SubmitResponseOutput = {
             accepted: true,

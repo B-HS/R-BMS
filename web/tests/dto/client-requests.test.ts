@@ -104,7 +104,7 @@ const createScoreStub = () => {
     const inserted: ScoreInsertRow[] = []
     const service = createScoreService({
         db: {
-            findScoreIdByIdempotency: async () => null,
+            findScoreByIdempotency: async () => null,
             insertScore: async (row) => {
                 inserted.push(row)
             },
@@ -132,7 +132,7 @@ const createCourseStub = (charts: { md5: string; sha256: string }[]) => {
             findCourseCharts: async () => charts.map((chart, position) => ({ position, chartSha256: chart.sha256, md5: chart.md5 })),
             upsertCourse: async () => undefined,
             replaceCourseCharts: async () => undefined,
-            findCourseScoreIdByIdempotency: async () => null,
+            findCourseScoreByIdempotency: async () => null,
             insertCourseScore: async (row) => {
                 inserted.push(row)
             },

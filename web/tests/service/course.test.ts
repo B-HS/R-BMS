@@ -7,6 +7,7 @@ import {
     toCourseMeta,
     type CourseScoreInsertRow,
 } from '@server/service/domain/course/course.service'
+import type { StoredRunForBest } from '@server/service/domain/score/score.service'
 import { BUILD_TRUST } from '@server/service/domain/score/ranked-policy'
 
 const COURSE_HASH = 'course-hash-1'
@@ -28,11 +29,32 @@ const submission = (overrides: Record<string, unknown> = {}) =>
         ...overrides,
     })
 
-const createService = (options: { existingId?: string; best?: { clear: number; exScore: number; minbp: number }; winsBest?: boolean } = {}) => {
+const LOCK_DEADLOCK = Object.assign(new Error('Deadlock found when trying to get lock'), { code: 'ER_LOCK_DEADLOCK' })
+
+const storedRun = (overrides: Partial<StoredRunForBest> & { id: string }): StoredRunForBest => ({
+    clear: clearLampToId('Normal'),
+    exScore: 5000,
+    minbp: 30,
+    maxCombo: 3000,
+    ranked: true,
+    scratchAuto: false,
+    ...overrides,
+})
+
+const createService = (
+    options: {
+        existing?: StoredRunForBest
+        best?: { clear: number; exScore: number; minbp: number }
+        winsBest?: boolean
+        remembersInserted?: boolean
+        bestFailures?: number
+    } = {},
+) => {
     const inserted: CourseScoreInsertRow[] = []
     const bests: { courseScoreId: string; clear: number; exScore: number; scratchAuto: boolean }[] = []
     const bestLookups: boolean[] = []
     const rankScopes: boolean[] = []
+    const calls: string[] = []
     let counter = 0
     const service = createCourseService({
         newId: (prefix) => `${prefix}${(counter += 1)}`,
@@ -41,7 +63,11 @@ const createService = (options: { existingId?: string; best?: { clear: number; e
             findCourseCharts: async () => [{ position: 0, chartSha256: 'b'.repeat(64), md5: 'c'.repeat(32) }],
             upsertCourse: async () => undefined,
             replaceCourseCharts: async () => undefined,
-            findCourseScoreIdByIdempotency: async () => options.existingId ?? null,
+            findCourseScoreByIdempotency: async () => {
+                const [row] = inserted
+                if (options.remembersInserted && row) return row
+                return options.existing ?? null
+            },
             insertCourseScore: async (row) => {
                 inserted.push(row)
             },
@@ -50,10 +76,13 @@ const createService = (options: { existingId?: string; best?: { clear: number; e
                 return options.best ?? null
             },
             upsertCourseBestIfBetter: async (row) => {
+                calls.push('best')
+                if (calls.filter((call) => call === 'best').length <= (options.bestFailures ?? 0)) throw LOCK_DEADLOCK
                 bests.push({ courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore, scratchAuto: row.scratchAuto })
                 return options.winsBest ?? true
             },
             countBetterCourseBests: async ({ includeScratchAuto }) => {
+                calls.push('rank')
                 rankScopes.push(includeScratchAuto)
                 return 2
             },
@@ -62,7 +91,7 @@ const createService = (options: { existingId?: string; best?: { clear: number; e
             getRivalUserIds: async () => [],
         },
     })
-    return { service, inserted, bests, bestLookups, rankScopes }
+    return { service, inserted, bests, bestLookups, rankScopes, calls }
 }
 
 describe('courseService.submit', () => {
@@ -79,12 +108,32 @@ describe('courseService.submit', () => {
         expect(bests).toHaveLength(1)
     })
 
-    test('같은 (player, course, played_at) 재전송은 기존 id 를 돌려주고 새로 넣지 않는다', async () => {
-        const { service, inserted } = createService({ existingId: 'cs_existing' })
+    test('같은 (player, course, played_at) 재전송은 기존 id 를 돌려주고 새로 넣지 않으며, 저장된 판의 값으로 베스트를 맞춘 뒤 순위를 센다', async () => {
+        const { service, inserted, bests, calls } = createService({ existing: storedRun({ id: 'cs_existing', exScore: 4800 }) })
         const result = await service.submit({ input: submission(), user: USER, ...TRUSTED })
         expect(result.courseScoreId).toBe('cs_existing')
         expect(result.duplicated).toBe(true)
         expect(inserted).toHaveLength(0)
+        expect(bests).toEqual([{ courseScoreId: 'cs_existing', clear: clearLampToId('Normal'), exScore: 4800, scratchAuto: false }])
+        expect(calls).toEqual(['best', 'rank'])
+        expect(result.response.rank).toBe(3)
+        expect(result.response.is_new_best).toBe(false)
+    })
+
+    test('저장된 코스 판이 unranked 면 재전송은 베스트를 건드리지 않는다', async () => {
+        const { service, bests } = createService({ existing: storedRun({ id: 'cs_unranked', ranked: false }) })
+        const result = await service.submit({ input: submission(), user: USER, ...TRUSTED })
+        expect(bests).toHaveLength(0)
+        expect(result.response.rank).toBeNull()
+    })
+
+    test('코스 점수는 남고 베스트 갱신이 실패한 판을 다시 보내면 베스트가 그 판으로 바뀐다', async () => {
+        const { service, inserted, bests } = createService({ remembersInserted: true, bestFailures: 1 })
+        await expect(service.submit({ input: submission(), user: USER, ...TRUSTED })).rejects.toBe(LOCK_DEADLOCK)
+        expect(inserted).toHaveLength(1)
+        const resent = await service.submit({ input: submission(), user: USER, ...TRUSTED })
+        expect(resent.duplicated).toBe(true)
+        expect(bests).toEqual([{ courseScoreId: inserted[0].id, clear: clearLampToId('Normal'), exScore: 5000, scratchAuto: false }])
     })
 
     test('기존 베스트가 더 좋으면 베스트를 갱신하지 않는다', async () => {
@@ -183,7 +232,7 @@ describe('courseService.submit', () => {
     })
 
     test('SCRATCH AUTO 코스의 재전송도 ranked 와 flags 를 그대로 돌려준다', async () => {
-        const { service } = createService({ existingId: 'cs_existing' })
+        const { service } = createService({ existing: storedRun({ id: 'cs_existing', scratchAuto: true }) })
         const result = await service.submit({ input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH'] }), user: USER, ...TRUSTED })
         expect(result.response.ranked).toBe(true)
         expect(result.response.flags).toEqual(['SCRATCH_AUTO'])

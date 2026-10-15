@@ -4,6 +4,8 @@ import { extraSchema, playerIdSchema } from '@server/dto/common'
 export const MIN_PASSWORD_LENGTH = 8
 export const MAX_PASSWORD_LENGTH = 128
 const MAX_LOGIN_ID_LENGTH = 64
+export const MAX_EMAIL_LENGTH = 255
+export const MAX_DISPLAY_NAME_LENGTH = 64
 const LOGIN_ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 const RESERVED_LOGIN_IDS = ['guest']
 
@@ -18,8 +20,8 @@ export const accountSchema = z.object({
     api_version: z.number().int().min(1).default(1),
     id: loginIdSchema,
     password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
-    email: z.email(),
-    name: z.string().min(1).nullish().default(null),
+    email: z.email().max(MAX_EMAIL_LENGTH),
+    name: z.string().min(1).max(MAX_DISPLAY_NAME_LENGTH).nullish().default(null),
 })
 
 export const loginSchema = z.object({

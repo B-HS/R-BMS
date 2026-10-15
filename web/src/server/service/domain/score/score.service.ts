@@ -1,4 +1,12 @@
-import { clearLampFromId, clearLampToId, gaugeTypeToId, type ClearLamp, type JudgeBreakdownInput } from '@server/dto/common'
+import {
+    clearLampFromId,
+    clearLampToId,
+    gaugeTypeToId,
+    INT_COLUMN_MAX,
+    isIntColumnValue,
+    type ClearLamp,
+    type JudgeBreakdownInput,
+} from '@server/dto/common'
 import type { ScoreRecordOutput, ScoreSubmissionInput, SubmitResponseOutput } from '@server/dto/score'
 import {
     deriveExScore,
@@ -42,8 +50,24 @@ export type BestScope = { includeScratchAuto: boolean }
 
 export type ScoreInsertRow = ReturnType<typeof buildScoreRow>
 
+/** What the best of a stored run is made of, read back when the same run is sent again. */
+export type StoredRunForBest = {
+    id: string
+    clear: number
+    exScore: number
+    minbp: number
+    maxCombo: number
+    ranked: boolean
+    scratchAuto: boolean
+}
+
 export type ScoreServiceDb = {
-    findScoreIdByIdempotency: (params: { userId: string; chartSha256: string; playedAtFrom: number; playedAtTo: number }) => Promise<string | null>
+    findScoreByIdempotency: (params: {
+        userId: string
+        chartSha256: string
+        playedAtFrom: number
+        playedAtTo: number
+    }) => Promise<StoredRunForBest | null>
     insertScore: (row: ScoreInsertRow) => Promise<void>
     getChartBest: (params: {
         chartSha256: string
@@ -105,6 +129,7 @@ export const buildScoreRow = (params: {
     flags: ScoreFlag[]
 }) => {
     const { input } = params
+    const greenNumber = Math.round(input.options.green_number)
     return {
         id: params.id,
         userId: params.userId,
@@ -153,7 +178,7 @@ export const buildScoreRow = (params: {
         seed: input.seed,
         hispeed: input.options.hispeed,
         constant: input.options.constant,
-        greenNumber: Math.round(input.options.green_number),
+        greenNumber: isIntColumnValue(greenNumber) ? greenNumber : null,
         lift: input.options.lift,
         laneCover: input.options.lane_cover,
         assist: input.options.assist.length,
@@ -254,6 +279,14 @@ export const isClearLampConsistent = (clear: ClearLamp, judge: JudgeBreakdownInp
 export type SubmissionIntegrityFailure = { field: string; reason: string }
 
 /**
+ * The EX and BP the server works out from these counts and stores fit the database's INT columns. Each count fits on its
+ * own, but two per PGREAT, or BAD, POOR and empty POOR added up, can go past it.
+ */
+export const areDerivedCountsStorable = (judge: JudgeBreakdownInput) => deriveExScore(judge) <= INT_COLUMN_MAX && deriveMinbp(judge) <= INT_COLUMN_MAX
+
+export const DERIVED_COUNTS_FAILURE: SubmissionIntegrityFailure = { field: 'judge', reason: 'judge counts add up past what a score can hold' }
+
+/**
  * The first reason a score body can not be what a real play sends, or null. Only the body is read: the chart row the
  * server keeps was written by whoever submitted the chart first, so its note count bounds nothing.
  */
@@ -266,6 +299,7 @@ export const findSubmissionIntegrityFailure = (
     if (!isMinbpConsistent(input.judge, input.minbp)) return { field: 'minbp', reason: 'minbp is below the BAD, POOR and empty POOR count' }
     if (!isClearLampConsistent(input.clear, input.judge, input.mode))
         return { field: 'clear', reason: 'clear lamp is not reachable with these judge counts' }
+    if (!areDerivedCountsStorable(input.judge)) return DERIVED_COUNTS_FAILURE
     return null
 }
 
@@ -293,31 +327,48 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         const exScore = input.ex_score > 0 ? input.ex_score : deriveExScore(input.judge)
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
-        const countRank = async () =>
-            (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore, minbp, includeScratchAuto: scratchAuto })) + 1
+        const countRank = async (run: { clear: number; exScore: number; minbp: number; scratchAuto: boolean }) =>
+            (await deps.db.countBetterBests({
+                chartSha256: params.chartSha256,
+                clear: run.clear,
+                exScore: run.exScore,
+                minbp: run.minbp,
+                includeScratchAuto: run.scratchAuto,
+            })) + 1
 
         const playedAtFrom = Math.floor(input.played_at / IDEMPOTENCY_WINDOW_MS) * IDEMPOTENCY_WINDOW_MS
-        const existingId = user
-            ? await deps.db.findScoreIdByIdempotency({
+        const stored = user
+            ? await deps.db.findScoreByIdempotency({
                   userId: user.id,
                   chartSha256: params.chartSha256,
                   playedAtFrom,
                   playedAtTo: playedAtFrom + IDEMPOTENCY_WINDOW_MS - 1,
               })
             : null
-        if (existingId) {
-            const rank = user && ranked ? await countRank() : null
+        if (user && stored) {
+            if (stored.ranked) {
+                await deps.db.upsertChartBestIfBetter({
+                    chartSha256: params.chartSha256,
+                    userId: user.id,
+                    scratchAuto: stored.scratchAuto,
+                    scoreId: stored.id,
+                    clear: stored.clear,
+                    exScore: stored.exScore,
+                    minbp: stored.minbp,
+                    maxCombo: stored.maxCombo,
+                })
+            }
             const response: SubmitResponseOutput = {
                 accepted: true,
-                rank,
+                rank: stored.ranked ? await countRank(stored) : null,
                 previous_best: null,
                 message: DUPLICATE_SUBMISSION_MESSAGE,
                 ranked,
                 flags,
                 is_new_best: false,
-                score_id: existingId,
+                score_id: stored.id,
             }
-            return { scoreId: existingId, duplicated: true, ranked, flags, response }
+            return { scoreId: stored.id, duplicated: true, ranked, flags, response }
         }
 
         const scoreId = deps.newId('sc_')
@@ -353,7 +404,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
                 maxCombo: input.max_combo,
             }))
 
-        const rank = ranked && user ? await countRank() : null
+        const rank = ranked && user ? await countRank({ clear, exScore, minbp, scratchAuto }) : null
 
         await deps.db
             .insertAudit({

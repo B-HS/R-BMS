@@ -3,6 +3,7 @@ import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chart, course, courseBest, courseChart, courseScore, rival } from '@server/db/schema'
 import { newId } from '@server/lib/token'
+import { withLockRetry } from '@server/lib/with-lock-retry'
 import { createCourseService } from '@server/service/domain/course/course.service'
 import { effectiveJudgeCounts } from '@server/service/domain/score/best-policy'
 import type { ScoreRankedRow, ScoreRankingRow } from '@server/service/domain/score/score.service'
@@ -137,7 +138,7 @@ export const composeCourse = (db: Database) => {
                     .orderBy(asc(courseChart.position))
                 return rows
             },
-            upsertCourse: async (row) => {
+            upsertCourse: withLockRetry(async (row) => {
                 const values = {
                     courseHash: row.courseHash,
                     name: row.name,
@@ -152,24 +153,33 @@ export const composeCourse = (db: Database) => {
                     .onDuplicateKeyUpdate({
                         set: { name: values.name, lntype: values.lntype, constraint: values.constraint, trophy: values.trophy, extra: values.extra },
                     })
-            },
-            replaceCourseCharts: async (courseHash, charts) =>
+            }),
+            replaceCourseCharts: withLockRetry(async (courseHash, charts) =>
                 db.transaction(async (tx) => {
                     await tx.delete(courseChart).where(eq(courseChart.courseHash, courseHash))
                     if (charts.length === 0) return
                     await tx.insert(courseChart).values(charts.map((entry) => ({ ...entry, courseHash })))
                 }),
-            findCourseScoreIdByIdempotency: async ({ userId, courseHash, playedAt }) => {
+            ),
+            findCourseScoreByIdempotency: async ({ userId, courseHash, playedAt }) => {
                 const [row] = await db
-                    .select({ id: courseScore.id })
+                    .select({
+                        id: courseScore.id,
+                        clear: courseScore.clear,
+                        exScore: courseScore.exScore,
+                        minbp: courseScore.minbp,
+                        maxCombo: courseScore.maxCombo,
+                        ranked: courseScore.ranked,
+                        scratchAuto: courseScore.scratchAuto,
+                    })
                     .from(courseScore)
                     .where(and(eq(courseScore.userId, userId), eq(courseScore.courseHash, courseHash), eq(courseScore.playedAt, playedAt)))
                     .limit(1)
-                return row?.id ?? null
+                return row ?? null
             },
-            insertCourseScore: async (row) => {
+            insertCourseScore: withLockRetry(async (row) => {
                 await db.insert(courseScore).values(row)
-            },
+            }),
             getCourseBest: async ({ courseHash, userId, scratchAuto }) => {
                 const [row] = await db
                     .select({ clear: courseBest.clear, exScore: courseBest.exScore, minbp: courseBest.minbp })
@@ -178,7 +188,7 @@ export const composeCourse = (db: Database) => {
                     .limit(1)
                 return row ?? null
             },
-            upsertCourseBestIfBetter: async (row) => {
+            upsertCourseBestIfBetter: withLockRetry(async (row) => {
                 const [inserted] = await db.insert(courseBest).ignore().values(row)
                 if (inserted.affectedRows > 0) return true
                 const [replaced] = await db
@@ -193,7 +203,7 @@ export const composeCourse = (db: Database) => {
                         ),
                     )
                 return replaced.affectedRows > 0
-            },
+            }),
             countBetterCourseBests: async ({ courseHash, clear, exScore, minbp, includeScratchAuto }) => {
                 const [row] = await db
                     .select({ value: count() })

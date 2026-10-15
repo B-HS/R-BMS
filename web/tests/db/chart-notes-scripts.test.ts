@@ -20,12 +20,18 @@ const PLAYERS = ['first', 'second', 'third'] as const
 const BASE_PLAYED_AT = 1_792_000_000_000
 const POISONED_SHA = '5'.repeat(64)
 const SPLIT_SHA = '6'.repeat(64)
-const CHART_SHAS = [POISONED_SHA, SPLIT_SHA]
+const SCRATCH_SHA = '7'.repeat(64)
+const CHART_SHAS = [POISONED_SHA, SPLIT_SHA, SCRATCH_SHA]
 const POISONED_NOTES = 1
 const REAL_NOTES = 1000
 const SPLIT_NOTES = 300
 const OUTVOTED_NOTES = 301
-const WOULD_CHANGE_LABEL = 'chart rows chart-notes.repair.sql would change (to the LN-mode total_notes the most users sent)'
+const SCRATCH_CHART_NOTES = 1500
+const SCRATCH_AUTO_NOTES = 1400
+const SCRATCH_PLAYED_AT_OFFSET = 100
+const DIFFER_LABEL = 'chart rows whose notes differ from an accepted LN-mode total_notes (SCRATCH AUTO plays left out)'
+const WOULD_CHANGE_LABEL = 'chart rows chart-notes.repair.sql would change (to the LN-mode total_notes the most users sent without SCRATCH AUTO)'
+const BACKUP_LABEL = 'chart_notes_backup tables (1 = chart-notes.repair.sql has run, and it will not run again until that table is dropped)'
 
 type Player = (typeof PLAYERS)[number]
 
@@ -106,6 +112,30 @@ describe.skipIf(!hasDatabase)('차트 노트 수 운영 SQL (임시 MySQL)', () 
 
     afterAll(cleanUp)
 
+    test('SCRATCH AUTO 판의 줄어든 total_notes 는 다르다고도, 복구가 바꿀 행으로도 세지 않는다', async () => {
+        const before = await runScript('chart-notes.count.sql')
+        const db = getDb()
+        await db.insert(chart).values({ sha256: SCRATCH_SHA, notes: SCRATCH_CHART_NOTES })
+        const plays: { player: Player; notes: number; scratchAuto: boolean }[] = [
+            { player: 'first', notes: SCRATCH_CHART_NOTES, scratchAuto: false },
+            { player: 'second', notes: SCRATCH_AUTO_NOTES, scratchAuto: true },
+            { player: 'third', notes: SCRATCH_AUTO_NOTES, scratchAuto: true },
+        ]
+        await db.insert(score).values(
+            plays.map((play, index) => ({
+                id: `${PREFIX}-scratch-${index}`,
+                userId: loginOf(play.player),
+                chartSha256: SCRATCH_SHA,
+                notes: play.notes,
+                scratchAuto: play.scratchAuto,
+                playedAt: BASE_PLAYED_AT + SCRATCH_PLAYED_AT_OFFSET + index,
+            })),
+        )
+        const after = await runScript('chart-notes.count.sql')
+        expect(countOf(after, DIFFER_LABEL)).toBe(countOf(before, DIFFER_LABEL))
+        expect(countOf(after, WOULD_CHANGE_LABEL)).toBe(countOf(before, WOULD_CHANGE_LABEL))
+    })
+
     test('세기는 복구가 바꿀 행 수를 따로 보여 주고, 복구는 바꾼 행을 먼저 백업한다', async () => {
         const wouldChange = countOf(await runScript('chart-notes.count.sql'), WOULD_CHANGE_LABEL)
         expect(typeof wouldChange).toBe('number')
@@ -116,6 +146,7 @@ describe.skipIf(!hasDatabase)('차트 노트 수 운영 SQL (임시 MySQL)', () 
         expect(updated).toBe(wouldChange)
         expect(await notesOf(POISONED_SHA)).toBe(REAL_NOTES)
         expect(await notesOf(SPLIT_SHA)).toBe(SPLIT_NOTES)
+        expect(await notesOf(SCRATCH_SHA)).toBe(SCRATCH_CHART_NOTES)
 
         const [backup] = await withConnection((connection) =>
             connection.query<RowDataPacket[]>(`SELECT \`old_notes\`, \`new_notes\` FROM \`${BACKUP_TABLE}\` WHERE \`sha256\` = ?`, [POISONED_SHA]),
@@ -128,5 +159,13 @@ describe.skipIf(!hasDatabase)('차트 노트 수 운영 SQL (임시 MySQL)', () 
         await runScript('chart-notes.restore.sql')
         expect(await notesOf(POISONED_SHA)).toBe(POISONED_NOTES)
         expect(await notesOf(SPLIT_SHA)).toBe(SPLIT_NOTES)
+    })
+
+    test('백업을 지우면 세기가 0 으로 보이고 복구를 다시 돌릴 수 있다', async () => {
+        await runScript('chart-notes.drop-backup.sql')
+        expect(countOf(await runScript('chart-notes.count.sql'), BACKUP_LABEL)).toBe(0)
+        await runScript('chart-notes.repair.sql')
+        expect(await notesOf(POISONED_SHA)).toBe(REAL_NOTES)
+        expect(await notesOf(SCRATCH_SHA)).toBe(SCRATCH_CHART_NOTES)
     })
 })

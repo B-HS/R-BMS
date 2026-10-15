@@ -2,19 +2,14 @@ import { and, asc, count, eq, inArray, max, sql, type SQL } from 'drizzle-orm'
 import { TransactionRollbackError } from 'drizzle-orm/errors'
 import type { Database } from '@server/db'
 import { chart, userFolder, userFolderItem } from '@server/db/schema'
+import { hasMysqlErrorCode, MYSQL_ERROR_CODE } from '@server/lib/mysql-error'
 import { newId } from '@server/lib/token'
+import { withLockRetry } from '@server/lib/with-lock-retry'
 import { createFolderService, nextStamp } from '@server/service/domain/folder/folder.service'
 import type { FolderItemRow, FolderRow } from '@server/service/domain/folder/folder.service'
 import type { TableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
 
-const DUPLICATE_ENTRY_CODE = 'ER_DUP_ENTRY'
-
-const hasDuplicateEntryCode = (error: unknown): boolean => {
-    if (typeof error !== 'object' || error === null) return false
-    const code = 'code' in error ? error.code : undefined
-    if (code === DUPLICATE_ENTRY_CODE) return true
-    return 'cause' in error ? hasDuplicateEntryCode(error.cause) : false
-}
+const isDuplicateEntry = (error: unknown) => hasMysqlErrorCode(error, [MYSQL_ERROR_CODE.DUPLICATE_ENTRY])
 
 const folderSelection = {
     id: userFolder.id,
@@ -93,17 +88,17 @@ export const composeFolder = (
                 return Number(row?.value ?? 0)
             },
 
-            insertFolder: async (row) => {
+            insertFolder: withLockRetry(async (row) => {
                 try {
                     await db.insert(userFolder).values(row)
                     return 'created'
                 } catch (error) {
-                    if (hasDuplicateEntryCode(error)) return 'name_taken'
+                    if (isDuplicateEntry(error)) return 'name_taken'
                     throw error
                 }
-            },
+            }),
 
-            updateFolder: async ({ userId, folderId, name, description, updatedAt }) => {
+            updateFolder: withLockRetry(async ({ userId, folderId, name, description, updatedAt }) => {
                 try {
                     const [result] = await db
                         .update(userFolder)
@@ -115,12 +110,12 @@ export const composeFolder = (
                         .where(and(eq(userFolder.id, folderId), eq(userFolder.userId, userId)))
                     return result.affectedRows > 0 ? 'updated' : 'missing'
                 } catch (error) {
-                    if (hasDuplicateEntryCode(error)) return 'name_taken'
+                    if (isDuplicateEntry(error)) return 'name_taken'
                     throw error
                 }
-            },
+            }),
 
-            deleteFolder: async ({ userId, folderId }) =>
+            deleteFolder: withLockRetry(async ({ userId, folderId }) =>
                 db.transaction(async (tx) => {
                     const [result] = await tx.delete(userFolder).where(and(eq(userFolder.id, folderId), eq(userFolder.userId, userId)))
                     if (result.affectedRows === 0) return false
@@ -134,8 +129,9 @@ export const composeFolder = (
                     }
                     return true
                 }),
+            ),
 
-            reorderFolders: async ({ userId, folderIds, updatedAt }) =>
+            reorderFolders: withLockRetry(async ({ userId, folderIds, updatedAt }) =>
                 db.transaction(async (tx) => {
                     const current = await tx
                         .select({ id: userFolder.id, position: userFolder.position })
@@ -150,8 +146,9 @@ export const composeFolder = (
                             .where(and(eq(userFolder.id, folderId), eq(userFolder.userId, userId)))
                     }
                 }),
+            ),
 
-            appendItems: async ({ folderId, items, updatedAt, maxItems }) => {
+            appendItems: withLockRetry(async ({ folderId, items, updatedAt, maxItems }) => {
                 try {
                     return await db.transaction(async (tx) => {
                         const folder = await lockFolder(tx, eq(userFolder.id, folderId))
@@ -174,9 +171,9 @@ export const composeFolder = (
                     if (error instanceof TransactionRollbackError) return { status: 'folder_full' as const }
                     throw error
                 }
-            },
+            }),
 
-            removeItems: async ({ folderId, md5s, updatedAt }) =>
+            removeItems: withLockRetry(async ({ folderId, md5s, updatedAt }) =>
                 db.transaction(async (tx) => {
                     await lockFolder(tx, eq(userFolder.id, folderId))
                     const [result] = await tx
@@ -186,8 +183,9 @@ export const composeFolder = (
                     if (result.affectedRows > 0) await tx.update(userFolder).set({ itemCount, updatedAt }).where(eq(userFolder.id, folderId))
                     return { removed: result.affectedRows, itemCount }
                 }),
+            ),
 
-            reorderItems: async ({ folderId, md5s, updatedAt }) =>
+            reorderItems: withLockRetry(async ({ folderId, md5s, updatedAt }) =>
                 db.transaction(async (tx) => {
                     await lockFolder(tx, eq(userFolder.id, folderId))
                     if (md5s.length > 0) {
@@ -202,8 +200,9 @@ export const composeFolder = (
                     }
                     await tx.update(userFolder).set({ updatedAt }).where(eq(userFolder.id, folderId))
                 }),
+            ),
 
-            replaceItems: async ({ userId, folderId, items, updatedAt, baseUpdatedAt, meta }) => {
+            replaceItems: withLockRetry(async ({ userId, folderId, items, updatedAt, baseUpdatedAt, meta }) => {
                 try {
                     return await db.transaction(async (tx) => {
                         const folder = await lockFolder(tx, and(eq(userFolder.id, folderId), eq(userFolder.userId, userId)))
@@ -226,12 +225,12 @@ export const composeFolder = (
                         return { status: 'replaced' as const, itemCount: items.length, updatedAt: stamp }
                     })
                 } catch (error) {
-                    if (meta.name !== undefined && hasDuplicateEntryCode(error)) return { status: 'name_taken' as const }
+                    if (meta.name !== undefined && isDuplicateEntry(error)) return { status: 'name_taken' as const }
                     throw error
                 }
-            },
+            }),
 
-            updateItemNote: async ({ folderId, md5, note, updatedAt }) =>
+            updateItemNote: withLockRetry(async ({ folderId, md5, note, updatedAt }) =>
                 db.transaction(async (tx) => {
                     await lockFolder(tx, eq(userFolder.id, folderId))
                     const [result] = await tx
@@ -242,6 +241,7 @@ export const composeFolder = (
                     await tx.update(userFolder).set({ updatedAt }).where(eq(userFolder.id, folderId))
                     return true
                 }),
+            ),
 
             listFolderIdsContaining: async ({ userId, md5 }) => {
                 const rows = await db

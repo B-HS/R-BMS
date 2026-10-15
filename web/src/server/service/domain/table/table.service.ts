@@ -1,5 +1,5 @@
 import type { CourseMetaInput } from '@server/dto/course'
-import type { TableDataInput } from '@server/dto/table'
+import { folderIdFor, type TableDataInput } from '@server/dto/table'
 
 export type TableRow = {
     id: string
@@ -36,8 +36,6 @@ export type TableServiceDeps = {
     newId: (prefix: string) => string
     loadCourses: (courseHashes: string[]) => Promise<CourseMetaInput[]>
 }
-
-export const folderIdFor = (tableId: string, position: number) => `${tableId}#${position}`
 
 export const assembleTable = (params: {
     table: TableRow

@@ -5,6 +5,7 @@ import { user } from '@server/db/auth-schema'
 import { apiToken, chart, chartBest, clientBuild, rival, score, submissionAudit } from '@server/db/schema'
 import { getAuth } from '@server/lib/auth'
 import { generateApiToken, hashApiToken, newId } from '@server/lib/token'
+import { withLockRetry } from '@server/lib/with-lock-retry'
 import { createAuthService } from '@server/service/domain/auth/auth.service'
 import { createChartService } from '@server/service/domain/chart/chart.service'
 import { createPlayerService } from '@server/service/domain/player/player.service'
@@ -23,59 +24,7 @@ import { composeFolder } from '@server/compose/folder'
 import { composeTable } from '@server/compose/table'
 import { composeTableSnapshot } from '@server/compose/table-snapshot'
 import { chartBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
-import type { JudgeBreakdownInput } from '@server/dto/common'
-
-type JudgeColumns = {
-    pgreat: number
-    great: number
-    good: number
-    bad: number
-    poor: number
-    miss: number
-    fast: number
-    slow: number
-    combobreak: number
-    epg: number
-    lpg: number
-    egr: number
-    lgr: number
-    egd: number
-    lgd: number
-    ebd: number
-    lbd: number
-    epr: number
-    lpr: number
-    ems: number
-    lms: number
-    avgjudge: number
-    emptyPoor: number
-}
-
-const toJudgeBreakdown = (row: JudgeColumns): JudgeBreakdownInput => ({
-    pgreat: row.pgreat,
-    great: row.great,
-    good: row.good,
-    bad: row.bad,
-    poor: row.poor,
-    miss: row.miss,
-    fast: row.fast,
-    slow: row.slow,
-    combobreak: row.combobreak,
-    epg: row.epg,
-    lpg: row.lpg,
-    egr: row.egr,
-    lgr: row.lgr,
-    egd: row.egd,
-    lgd: row.lgd,
-    ebd: row.ebd,
-    lbd: row.lbd,
-    epr: row.epr,
-    lpr: row.lpr,
-    ems: row.ems,
-    lms: row.lms,
-    avgjudge: row.avgjudge,
-    empty_poor: row.emptyPoor,
-})
+import { toJudgeBreakdown, type JudgeColumns } from '@server/compose/judge-row'
 
 const judgeSelection = {
     pgreat: score.pgreat,
@@ -167,13 +116,13 @@ const composeAll = () => {
                 const [row] = await db.select().from(chart).where(eq(chart.md5, md5)).limit(1)
                 return row ? toChartRow(row) : null
             },
-            upsert: async (row) => {
+            upsert: withLockRetry(async (row) => {
                 const values = { ...row, extra: row.extra }
                 await db
                     .insert(chart)
                     .values(values)
                     .onDuplicateKeyUpdate({ set: { ...values, sha256: sql`${chart.sha256}` } })
-            },
+            }),
         },
     })
 
@@ -218,18 +167,26 @@ const composeAll = () => {
         newId,
         now: () => Date.now(),
         db: {
-            findScoreIdByIdempotency: async ({ userId, chartSha256, playedAtFrom, playedAtTo }) => {
+            findScoreByIdempotency: async ({ userId, chartSha256, playedAtFrom, playedAtTo }) => {
                 const [row] = await db
-                    .select({ id: score.id })
+                    .select({
+                        id: score.id,
+                        clear: score.clear,
+                        exScore: score.exScore,
+                        minbp: score.minbp,
+                        maxCombo: score.maxCombo,
+                        ranked: score.ranked,
+                        scratchAuto: score.scratchAuto,
+                    })
                     .from(score)
                     .where(and(eq(score.userId, userId), eq(score.chartSha256, chartSha256), between(score.playedAt, playedAtFrom, playedAtTo)))
                     .orderBy(asc(score.playedAt))
                     .limit(1)
-                return row?.id ?? null
+                return row ?? null
             },
-            insertScore: async (row) => {
+            insertScore: withLockRetry(async (row) => {
                 await db.insert(score).values(row)
-            },
+            }),
             getChartBest: async ({ chartSha256, userId, scratchAuto }) => {
                 const [row] = await db
                     .select({ clear: chartBest.clear, exScore: chartBest.exScore, minbp: chartBest.minbp })
@@ -238,7 +195,7 @@ const composeAll = () => {
                     .limit(1)
                 return row ?? null
             },
-            upsertChartBestIfBetter: async (row) => {
+            upsertChartBestIfBetter: withLockRetry(async (row) => {
                 const [inserted] = await db.insert(chartBest).ignore().values(row)
                 if (inserted.affectedRows > 0) return true
                 const [replaced] = await db
@@ -253,7 +210,7 @@ const composeAll = () => {
                         ),
                     )
                 return replaced.affectedRows > 0
-            },
+            }),
             countBetterBests: async ({ chartSha256, clear, exScore, minbp, lnmode, includeScratchAuto }) => {
                 const base = db.select({ value: count() }).from(chartBest).$dynamic()
                 const [row] = await (lnmode === undefined ? base : base.innerJoin(score, eq(score.id, chartBest.scoreId))).where(

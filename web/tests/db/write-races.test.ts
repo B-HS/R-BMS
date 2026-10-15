@@ -176,20 +176,23 @@ describe.skipIf(!hasDatabase)('쓰기 경합 (임시 MySQL)', () => {
     })
 
     describe('폴더 변경끼리의 교착', () => {
-        test('곡 넣기, 빼기, 순서 바꾸기, 메모가 한 폴더에 동시에 와도 모두 오류 없이 끝난다', async () => {
+        test('곡 넣기, 빼기, 메모가 한 폴더에 동시에 와도 모두 오류 없이 끝난다', async () => {
             const folder = await createFolder(OWNER, 'mixed-writes')
             const { folderService } = compose()
+            const seeded = CONCURRENT_WRITES * 2
+            const removedSeed = (round: number) => 2_000 + round
+            const notedSeed = (round: number) => 2_000 + seeded - 1 - round
             await folderService.addItems({
                 userId: OWNER,
                 folderId: folder.id,
-                items: Array.from({ length: 20 }, (_, index) => itemOf(2_000 + index)),
+                items: Array.from({ length: seeded }, (_, index) => itemOf(2_000 + index)),
             })
             const settled = await Promise.all(
                 Array.from({ length: CONCURRENT_WRITES }, (_, round) =>
                     Promise.all([
                         folderService.addItems({ userId: OWNER, folderId: folder.id, items: [itemOf(3_000 + round)] }),
-                        folderService.removeItems({ userId: OWNER, folderId: folder.id, md5s: [md5Of(2_000 + round)] }),
-                        folderService.updateItemNote({ userId: OWNER, folderId: folder.id, md5: md5Of(2_019 - round), note: `note-${round}` }),
+                        folderService.removeItems({ userId: OWNER, folderId: folder.id, md5s: [md5Of(removedSeed(round))] }),
+                        folderService.updateItemNote({ userId: OWNER, folderId: folder.id, md5: md5Of(notedSeed(round)), note: `note-${round}` }),
                     ]),
                 ),
             )
@@ -197,7 +200,11 @@ describe.skipIf(!hasDatabase)('쓰기 경합 (임시 MySQL)', () => {
             const rows = await storedItems(folder.id)
             const [row] = await getDb().select().from(userFolder).where(eq(userFolder.id, folder.id))
             expect(row.itemCount).toBe(rows.length)
-            expect(rows).toHaveLength(20)
+            expect(rows).toHaveLength(seeded)
+            const notes = new Map(rows.map((item) => [item.md5, item.note]))
+            const rounds = Array.from({ length: CONCURRENT_WRITES }, (_, round) => round)
+            expect(rounds.map((round) => notes.get(md5Of(notedSeed(round))))).toEqual(rounds.map((round) => `note-${round}`))
+            expect(rounds.some((round) => notes.has(md5Of(removedSeed(round))))).toBe(false)
         })
     })
 

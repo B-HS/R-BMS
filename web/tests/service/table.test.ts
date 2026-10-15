@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { assembleTable, folderIdFor } from '@server/service/domain/table/table.service'
+import { folderIdFor } from '@server/dto/table'
+import { assembleTable } from '@server/service/domain/table/table.service'
 
 const TABLE = { id: 'insane', name: '発狂BMS難易度表', url: null, extra: null }
 

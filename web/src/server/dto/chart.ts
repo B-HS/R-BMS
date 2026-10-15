@@ -1,10 +1,9 @@
 import { z } from 'zod'
-import { extraSchema, md5FieldSchema, sha256FieldSchema } from '@server/dto/common'
+import { extraSchema, intColumnSchema, md5FieldSchema, sha256FieldSchema } from '@server/dto/common'
 
 const TEXT_MAX = 255
 const MODE_MAX = 16
 const URL_MAX = 512
-const COUNT_MAX = 2_147_483_647
 const EXTRA_MAX_BYTES = 16 * 1024
 export const CHART_UPSERT_MAX_BYTES = 64 * 1024
 
@@ -18,14 +17,14 @@ export const chartMetaSchema = z.object({
     genre: z.string().max(TEXT_MAX).default(''),
     artist: z.string().max(TEXT_MAX).default(''),
     subartist: z.string().max(TEXT_MAX).default(''),
-    level: z.number().int().max(COUNT_MAX).nullish().default(null),
+    level: intColumnSchema.nullish().default(null),
     total: z.number().nullish().default(null),
     mode: z.string().max(MODE_MAX).default(''),
-    lntype: z.number().int().max(COUNT_MAX).default(0),
-    judge: z.number().int().max(COUNT_MAX).default(0),
-    minbpm: z.number().int().max(COUNT_MAX).default(0),
-    maxbpm: z.number().int().max(COUNT_MAX).default(0),
-    notes: z.number().int().max(COUNT_MAX).default(0),
+    lntype: intColumnSchema.default(0),
+    judge: intColumnSchema.default(0),
+    minbpm: intColumnSchema.default(0),
+    maxbpm: intColumnSchema.default(0),
+    notes: intColumnSchema.default(0),
     has_ln: z.boolean().default(false),
     has_cn: z.boolean().default(false),
     has_hcn: z.boolean().default(false),

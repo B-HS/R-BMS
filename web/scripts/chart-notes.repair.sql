@@ -14,7 +14,7 @@ JOIN (
             s.`notes`,
             ROW_NUMBER() OVER (PARTITION BY s.`chart_sha256` ORDER BY COUNT(DISTINCT s.`user_id`) DESC, COUNT(*) DESC, s.`notes` DESC) AS `pick`
         FROM `score` s
-        WHERE s.`user_id` IS NOT NULL AND s.`lntype` = 0 AND s.`notes` > 0
+        WHERE s.`user_id` IS NOT NULL AND s.`lntype` = 0 AND s.`scratch_auto` = false AND s.`notes` > 0
         GROUP BY s.`chart_sha256`, s.`notes`
     ) ranked
     WHERE ranked.`pick` = 1

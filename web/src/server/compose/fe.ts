@@ -7,6 +7,7 @@ import { createFeService, type ActivityRow, type LeaderboardRow } from '@server/
 import type { TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toChartRow } from '@server/compose/chart-row'
 import { chartBestScope } from '@server/compose/best-scope'
+import { toJudgeBreakdown } from '@server/compose/judge-row'
 import type { ScoreRankingRow } from '@server/service/domain/score/score.service'
 
 const activitySelection = {
@@ -278,31 +279,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
             option: row.option,
             totalNotes: row.totalNotes,
             scratchAuto: row.scratchAuto,
-            judge: {
-                pgreat: row.pgreat,
-                great: row.great,
-                good: row.good,
-                bad: row.bad,
-                poor: row.poor,
-                miss: row.miss,
-                fast: row.fast,
-                slow: row.slow,
-                combobreak: row.combobreak,
-                epg: row.epg,
-                lpg: row.lpg,
-                egr: row.egr,
-                lgr: row.lgr,
-                egd: row.egd,
-                lgd: row.lgd,
-                ebd: row.ebd,
-                lbd: row.lbd,
-                epr: row.epr,
-                lpr: row.lpr,
-                ems: row.ems,
-                lms: row.lms,
-                avgjudge: row.avgjudge,
-                empty_poor: row.emptyPoor,
-            },
+            judge: toJudgeBreakdown(row),
         }))
     }
 

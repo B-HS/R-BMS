@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays'
+        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again'
         type: choice
-        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair]
+        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup]
         default: status
 
 permissions:
@@ -72,11 +72,17 @@ jobs:
         if: inputs.action == 'cleanup-delete'
         run: bun scripts/run-sql.ts cleanup-test-accounts.count.sql
       - name: Count the chart notes
-        if: inputs.action == 'chart-notes-count' || inputs.action == 'chart-notes-repair'
+        if: startsWith(inputs.action, 'chart-notes-')
         run: bun scripts/run-sql.ts chart-notes.count.sql
       - name: Repair the chart notes
         if: inputs.action == 'chart-notes-repair'
         run: bun scripts/run-sql.ts chart-notes.repair.sql
+      - name: Restore the chart notes the repair changed
+        if: inputs.action == 'chart-notes-restore'
+        run: bun scripts/run-sql.ts chart-notes.restore.sql
+      - name: Drop the repair's backup
+        if: inputs.action == 'chart-notes-drop-backup'
+        run: bun scripts/run-sql.ts chart-notes.drop-backup.sql
       - name: Count the chart notes again
-        if: inputs.action == 'chart-notes-repair'
+        if: startsWith(inputs.action, 'chart-notes-') && inputs.action != 'chart-notes-count'
         run: bun scripts/run-sql.ts chart-notes.count.sql

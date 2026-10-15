@@ -1,8 +1,13 @@
 import { z } from 'zod'
 import {
+    buildHashSchema,
     chartIdSchema,
+    CLIENT_PLATFORM_LENGTH,
     clearLampSchema,
+    columnTextSchema,
+    countColumnSchema,
     extraSchema,
+    floatColumnSchema,
     includeScratchAutoSchema,
     judgeBreakdownSchema,
     playOptionsSchema,
@@ -14,6 +19,12 @@ export const API_VERSION = 1
 
 const CHART_TEXT_MAX = 255
 const CHART_LEVEL_MAX = 1000
+const MODE_LENGTH = 16
+const JUDGE_ALGORITHM_LENGTH = 16
+const RULE_LENGTH = 16
+const SKIN_LENGTH = 64
+const CLIENT_LENGTH = 64
+const REPLAY_ID_MAX = 36
 
 const lenientText = z
     .string()
@@ -35,26 +46,26 @@ export const scoreSubmissionSchema = z.object({
     api_version: z.number().int().min(1).default(API_VERSION),
     chart: submissionChartSchema,
     player: playerIdSchema,
-    mode: z.string().default(''),
+    mode: columnTextSchema(MODE_LENGTH).default(''),
     clear: clearLampSchema,
-    ex_score: z.number().int().min(0),
-    max_ex_score: z.number().int().min(0).default(0),
+    ex_score: countColumnSchema,
+    max_ex_score: countColumnSchema.default(0),
     judge: judgeBreakdownSchema,
-    max_combo: z.number().int().min(0).default(0),
-    total_notes: z.number().int().min(0).default(0),
-    passnotes: z.number().int().min(0).default(0),
-    minbp: z.number().int().min(0).default(0),
-    gauge_value: z.number().default(0),
+    max_combo: countColumnSchema.default(0),
+    total_notes: countColumnSchema.default(0),
+    passnotes: countColumnSchema.default(0),
+    minbp: countColumnSchema.default(0),
+    gauge_value: floatColumnSchema.default(0),
     options: playOptionsSchema,
     played_at: z.number().int().min(0),
-    client: z.string().default(''),
-    replay_id: z.string().nullish().default(null),
+    client: columnTextSchema(CLIENT_LENGTH).default(''),
+    replay_id: z.string().max(REPLAY_ID_MAX).nullish().default(null),
     seed: seedSchema.default(0),
-    judge_algorithm: z.string().default(''),
-    rule: z.string().default(''),
-    skin: z.string().default(''),
-    client_build_sha256: z.string().nullish().default(null),
-    client_platform: z.string().nullish().default(null),
+    judge_algorithm: columnTextSchema(JUDGE_ALGORITHM_LENGTH).default(''),
+    rule: columnTextSchema(RULE_LENGTH).default(''),
+    skin: columnTextSchema(SKIN_LENGTH).default(''),
+    client_build_sha256: buildHashSchema,
+    client_platform: columnTextSchema(CLIENT_PLATFORM_LENGTH).nullish().default(null),
     extra: extraSchema,
 })
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { judgeBreakdownSchema } from '@server/dto/common'
+import { clearLampToId, judgeBreakdownSchema } from '@server/dto/common'
 import { scoreSubmissionSchema, submitResponseSchema, type ScoreSubmissionInput } from '@server/dto/score'
 import { BUILD_TRUST } from '@server/service/domain/score/ranked-policy'
 import { isBetterBest } from '@server/service/domain/score/best-policy'
@@ -15,6 +15,7 @@ import {
     type ScoreInsertRow,
     type ScoreRankedRow,
     type ScoreServiceDb,
+    type StoredRunForBest,
 } from '@server/service/domain/score/score.service'
 
 const CHART_SHA = 'f'.repeat(64)
@@ -52,8 +53,19 @@ const submission = (overrides: Partial<Record<string, unknown>> = {}): ScoreSubm
     })
 }
 
+const storedRun = (overrides: Partial<StoredRunForBest> & { id: string }): StoredRunForBest => ({
+    clear: clearLampToId('Hard'),
+    exScore: 1488,
+    minbp: 15,
+    maxCombo: 540,
+    ranked: true,
+    scratchAuto: false,
+    ...overrides,
+})
+
 type Recorder = {
     inserted: ScoreInsertRow[]
+    calls: string[]
     bests: { scoreId: string; clear: number; exScore: number; scratchAuto: boolean }[]
     bestLookups: boolean[]
     rankScopes: boolean[]
@@ -65,14 +77,17 @@ type Recorder = {
 
 const createStub = (
     options: {
-        existingScoreId?: string | null
+        existingRun?: StoredRunForBest | null
         currentBest?: { clear: number; exScore: number; minbp: number } | null
         winsBest?: boolean
         rankedRows?: ScoreRankedRow[]
+        remembersInserted?: boolean
+        bestFailures?: number
     } = {},
 ) => {
     const recorder: Recorder = {
         inserted: [],
+        calls: [],
         bests: [],
         bestLookups: [],
         rankScopes: [],
@@ -82,10 +97,12 @@ const createStub = (
         idempotencyWindows: [],
     }
     const db: ScoreServiceDb = {
-        findScoreIdByIdempotency: async ({ playedAtFrom, playedAtTo }) => {
+        findScoreByIdempotency: async ({ playedAtFrom, playedAtTo }) => {
             recorder.idempotencyLookups += 1
             recorder.idempotencyWindows.push({ playedAtFrom, playedAtTo })
-            return options.existingScoreId ?? null
+            const [inserted] = recorder.inserted
+            if (options.remembersInserted && inserted) return inserted
+            return options.existingRun ?? null
         },
         insertScore: async (row) => {
             recorder.inserted.push(row)
@@ -95,10 +112,13 @@ const createStub = (
             return options.currentBest ?? null
         },
         upsertChartBestIfBetter: async (row) => {
+            recorder.calls.push('best')
+            if (recorder.calls.filter((call) => call === 'best').length <= (options.bestFailures ?? 0)) throw LOCK_DEADLOCK
             recorder.bests.push({ scoreId: row.scoreId, clear: row.clear, exScore: row.exScore, scratchAuto: row.scratchAuto })
             return options.winsBest ?? true
         },
         countBetterBests: async ({ includeScratchAuto }) => {
+            recorder.calls.push('rank')
             recorder.rankScopes.push(includeScratchAuto)
             return 2
         },
@@ -121,6 +141,8 @@ const createStub = (
 }
 
 const alice = { id: 'usr_1', loginId: 'alice', name: 'Alice' }
+
+const LOCK_DEADLOCK = Object.assign(new Error('Deadlock found when trying to get lock'), { code: 'ER_LOCK_DEADLOCK' })
 
 describe('scoreService.submit', () => {
     test('정상 제출은 score 를 남기고 랭킹 순위를 계산한다', async () => {
@@ -214,7 +236,7 @@ describe('scoreService.submit', () => {
     })
 
     test('SCRATCH AUTO 판의 재전송은 포함 목록 순위를 돌려준다', async () => {
-        const { recorder, service } = createStub({ existingScoreId: 'sc_existing' })
+        const { recorder, service } = createStub({ existingRun: storedRun({ id: 'sc_existing', scratchAuto: true }) })
         const result = await service.submit({
             input: submission({ options: { scratch_auto: true, assist: ['AUTO_SCRATCH'] } }),
             chartSha256: CHART_SHA,
@@ -230,8 +252,8 @@ describe('scoreService.submit', () => {
         expect(recorder.rankScopes).toEqual([true])
     })
 
-    test('같은 (player, chart, played_at) 재전송은 기존 score_id 를 반환하고 새로 만들지 않는다', async () => {
-        const { recorder, service } = createStub({ existingScoreId: 'sc_existing' })
+    test('같은 (player, chart, played_at) 재전송은 기존 score_id 를 반환하고 새로 만들지 않으며, 저장된 판의 값으로 best 를 한 번 맞춘 뒤 순위를 센다', async () => {
+        const { recorder, service } = createStub({ existingRun: storedRun({ id: 'sc_existing', exScore: 1400 }) })
         const result = await service.submit({
             input: submission(),
             chartSha256: CHART_SHA,
@@ -245,14 +267,55 @@ describe('scoreService.submit', () => {
         expect(result.duplicated).toBe(true)
         expect(result.scoreId).toBe('sc_existing')
         expect(recorder.inserted).toHaveLength(0)
-        expect(recorder.bests).toHaveLength(0)
+        expect(recorder.bests).toEqual([{ scoreId: 'sc_existing', clear: clearLampToId('Hard'), exScore: 1400, scratchAuto: false }])
+        expect(recorder.calls).toEqual(['best', 'rank'])
         expect(result.response.message).toBe('duplicate submission ignored')
         expect(result.response.score_id).toBe('sc_existing')
         expect(result.response.is_new_best).toBe(false)
+        expect(result.response.rank).toBe(3)
+    })
+
+    test('저장된 판이 unranked 면 재전송은 best 를 건드리지 않고 순위도 돌려주지 않는다', async () => {
+        const { recorder, service } = createStub({ existingRun: storedRun({ id: 'sc_unranked', ranked: false }) })
+        const result = await service.submit({
+            input: submission(),
+            chartSha256: CHART_SHA,
+            chartMd5: null,
+            user: alice,
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+            ip: null,
+            userAgent: null,
+        })
+        expect(result.duplicated).toBe(true)
+        expect(recorder.bests).toHaveLength(0)
+        expect(result.response.rank).toBeNull()
+    })
+
+    test('점수는 남고 best 갱신이 실패한 판을 다시 보내면 best 가 그 판으로 바뀐다', async () => {
+        const { recorder, service } = createStub({ remembersInserted: true, bestFailures: 1 })
+        const send = () =>
+            service.submit({
+                input: submission(),
+                chartSha256: CHART_SHA,
+                chartMd5: null,
+                user: alice,
+                buildTrust: BUILD_TRUST.TRUSTED,
+                requireTrustedBuild: false,
+                ip: null,
+                userAgent: null,
+            })
+        await expect(send()).rejects.toBe(LOCK_DEADLOCK)
+        expect(recorder.inserted).toHaveLength(1)
+        const resent = await send()
+        expect(resent.duplicated).toBe(true)
+        expect(resent.scoreId).toBe(recorder.inserted[0].id)
+        expect(recorder.bests).toEqual([{ scoreId: recorder.inserted[0].id, clear: clearLampToId('Hard'), exScore: 1488, scratchAuto: false }])
+        expect(recorder.calls.at(-1)).toBe('rank')
     })
 
     test('같은 초 안의 played_at 재전송은 기존 score_id 를 돌려준다', async () => {
-        const { recorder, service } = createStub({ existingScoreId: 'sc_old' })
+        const { recorder, service } = createStub({ existingRun: storedRun({ id: 'sc_old' }) })
         const result = await service.submit({
             input: submission({ played_at: PLAYED_AT + 456 }),
             chartSha256: CHART_SHA,
@@ -356,7 +419,7 @@ describe('scoreService.submit', () => {
     })
 
     test('guest 제출은 멱등 선조회를 하지 않고 항상 새 기록을 남긴다', async () => {
-        const { recorder, service } = createStub({ existingScoreId: 'sc_other_guest' })
+        const { recorder, service } = createStub({ existingRun: storedRun({ id: 'sc_other_guest' }) })
         const result = await service.submit({
             input: submission({ player: { id: 'guest' } }),
             chartSha256: CHART_SHA,
@@ -496,7 +559,7 @@ describe('최고 기록 경합 (IR-1)', () => {
             release = resolve
         })
         const db: ScoreServiceDb = {
-            findScoreIdByIdempotency: async () => null,
+            findScoreByIdempotency: async () => null,
             insertScore: async () => undefined,
             getChartBest: async () => {
                 readsDone += 1
