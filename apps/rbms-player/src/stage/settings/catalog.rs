@@ -239,7 +239,9 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         }
         SettingId::AutoUploadReplay => "Sends the replay of a run to the score server after a score that was ranked.",
         SettingId::AutoUploadTrace => {
-            "Sends what each run was note by note, its judgments, gauges and scroll changes, after the score server took its score. You see it, a rival you allow sees only its summary by section, and nobody else sees it. Every run keeps it on this machine either way."
+            "Sends each run's note-by-note record (judgments, gauges, scroll changes) once the server took its score. Only you read it; \
+             with sharing on in the web settings, a rival who has you as one too sees its summary by section. \
+             Every run keeps it here; an earlier run gets one from its replay when that plays back exactly."
         }
         SettingId::Rivals => "The players shown beside you on a ranking. ENTER opens the list to add and remove them.",
         SettingId::IrProfiles => "More score servers every run is also sent to. ENTER opens the list to add, switch off and remove them.",

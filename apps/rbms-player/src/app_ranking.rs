@@ -203,6 +203,7 @@ impl AppShared {
         self.poll_profile_submits();
         self.poll_course_submits();
         self.poll_record_sync();
+        self.poll_trace_backfill(stage);
         self.poll_saves();
     }
 

@@ -32,7 +32,7 @@ const UPDATE_HINT: &str = "if the change is meant, run `RBMS_UPDATE_CONTRACT=1 c
      `bun test tests/dto/client-requests.test.ts` in web/, and commit the files with the change";
 
 /// Every file the contract folder holds, one per test below.
-const CONTRACT_FILES: [&str; 19] = [
+const CONTRACT_FILES: [&str; 32] = [
     "course-normal",
     "course-scratch-auto",
     "replay-long",
@@ -40,16 +40,29 @@ const CONTRACT_FILES: [&str; 19] = [
     "score-14k-2p",
     "score-abandoned",
     "score-autoplay",
+    "score-bad",
+    "score-charge-note",
     "score-empty-poor-exceeds-poor",
     "score-failed",
+    "score-hell-charge-note",
+    "score-long-note",
     "score-max-with-empty-poor",
     "score-normal",
+    "score-popn-9k",
     "score-scratch-auto",
     "score-sync-resend",
+    "score-trace-normal",
     "score-widened-judge",
     "settings-blob",
     "trace-abandoned",
+    "trace-bad",
+    "trace-charge-note",
+    "trace-empty-poor-exceeds-poor",
+    "trace-failed",
+    "trace-hell-charge-note",
+    "trace-long-note",
     "trace-normal",
+    "trace-popn-9k",
     "trace-random",
     "trace-scratch-auto",
 ];
@@ -113,6 +126,33 @@ const SECOND_STAGE_SLOTS: usize = 8;
 const LONG_HEADER: &str = "#PLAYER 1\n#TITLE Contract Long\n#ARTIST rbms contract\n#BPM 150\n#PLAYLEVEL 12\n#RANK 2\n#TOTAL 500\n#WAV01 a.wav\n";
 const LONG_MEASURES: usize = 56;
 const LONG_SLOTS: usize = 16;
+
+/// The chart the long-note runs play: plain notes and long notes the chart leaves to LN MODE
+/// (`#LNTYPE 1`, no `#LNMODE`), on keys of their own, and a turntable note.
+const LONG_NOTE_CHART: &[u8] =
+    b"#PLAYER 1\n#TITLE Contract Long Notes\n#ARTIST rbms contract\n#BPM 150\n#PLAYLEVEL 9\n#RANK 2\n#TOTAL 300\n#LNTYPE 1\n#WAV01 a.wav\n\
+#00112:00010001\n#00151:01000100\n#00211:00100010\n#00253:01000001\n#00316:01000000\n#00314:01010000\n";
+
+/// How late a long note's head is pressed: inside GREAT, so its timing is not nought.
+const LONG_HEAD_LATE_US: i64 = 30_000;
+
+/// A key note pressed this far from its time takes a BAD on the seven-key contract chart, late and
+/// early, and late on the pop'n one.
+const BAD_LATE_US: i64 = 180_000;
+const BAD_EARLY_US: i64 = 160_000;
+const POPN_BAD_LATE_US: i64 = 150_000;
+
+/// Key notes pressed on their time, a BAD late, a little late, and a BAD early.
+const BAD_OFFSETS_US: [Option<i64>; 4] = [Some(0), Some(BAD_LATE_US), Some(20_000), Some(-BAD_EARLY_US)];
+
+/// The same for the pop'n chart: on their time, a BAD late, a little early, and late inside GOOD.
+const POPN_OFFSETS_US: [Option<i64>; 4] = [Some(0), Some(POPN_BAD_LATE_US), Some(-20_000), Some(40_000)];
+
+/// The nine-key chart, stepping through the nine buttons.
+const POPN_HEADER: &str = "#PLAYER 1\n#TITLE Contract Popn\n#ARTIST rbms contract\n#BPM 150\n#PLAYLEVEL 20\n#RANK 2\n#TOTAL 300\n#WAV01 a.wav\n";
+const POPN_CHANNELS: [&str; 9] = ["11", "12", "13", "14", "15", "22", "23", "24", "25"];
+const POPN_MEASURES: usize = 3;
+const POPN_SLOTS: usize = 9;
 
 /// The course the course tests play, and the trophy a clean run of it earns.
 const COURSE_NAME: &str = "CONTRACT COURSE";
@@ -233,10 +273,25 @@ fn early_presses_before_every_key_note(laid_out: &rbms_model::Model) -> Vec<Inpu
 
 /// Hand `session` to the app as a run of the chart called `name` that has just ended.
 fn end_named_run(shared: &mut AppShared, session: PlaySession, name: &str) -> Transition {
+    end_named_run_as(shared, session, name, FROM_THE_CHART)
+}
+
+/// How a run's long notes were judged: its `lntype` and the long-note key its record is kept under.
+#[derive(Clone, Copy)]
+struct LongNotes<'a> {
+    lntype: i32,
+    key: &'a str,
+}
+
+/// The long notes of a chart that leaves none of them to LN MODE.
+const FROM_THE_CHART: LongNotes<'static> = LongNotes { lntype: 0, key: SCORE_LN_MODE_FROM_CHART };
+
+/// [`end_named_run`] of a run whose long notes were judged as `long_notes` says.
+fn end_named_run_as(shared: &mut AppShared, session: PlaySession, name: &str, long_notes: LongNotes<'_>) -> Transition {
     shared.mode = session.model().mode;
     shared.chart_path = name.to_owned();
     shared.replay = None;
-    let mut ended = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_owned());
+    let mut ended = PlayState::new(session, std::collections::HashMap::new(), long_notes.lntype, long_notes.key.to_owned());
     enter_result(&mut ended, shared)
 }
 
@@ -258,8 +313,18 @@ fn sent_from_the_result_screen(shared: &mut AppShared, server: &CaptureServer, s
 /// End `session` as the result screen does, let the app take the server's answer as it does frame
 /// by frame, and answer the score it sent and the trace a records sync of the run sent after it.
 fn traced_from_the_result_screen(shared: &mut AppShared, server: &CaptureServer, session: PlaySession) -> (wire::Request, wire::Request) {
+    traced_from_the_result_screen_as(shared, server, session, FROM_THE_CHART)
+}
+
+/// [`traced_from_the_result_screen`] of a run whose long notes were judged as `long_notes` says.
+fn traced_from_the_result_screen_as(
+    shared: &mut AppShared,
+    server: &CaptureServer,
+    session: PlaySession,
+    long_notes: LongNotes<'_>,
+) -> (wire::Request, wire::Request) {
     let md5 = session.model().md5.clone();
-    let entered = end_named_run(shared, session, RECORDED_CHART_NAME);
+    let entered = end_named_run_as(shared, session, RECORDED_CHART_NAME, long_notes);
     assert!(matches!(entered, Transition::To(Stage::Result(_))), "the run did not reach the result screen");
     let deadline = std::time::Instant::now() + WORK_WAIT;
     while shared.submit_rx.is_some() {
@@ -472,7 +537,8 @@ fn a_finished_random_run_and_its_replay() {
     check_contract("replay-random", &replay.body);
 }
 
-/// A run that fails on EX-HARD with most notes let go by.
+/// A run that fails on EX-HARD with most notes let go by, and its trace, which says where the gauge
+/// emptied and leaves the notes after it at state 0.
 #[test]
 fn a_failed_run() {
     let server = CaptureServer::spawn();
@@ -480,8 +546,12 @@ fn a_failed_run() {
     shared.config.play.gauge = GaugeKind::ExHard;
     let session = played(&shared, contract_model(), &FAILING_OFFSETS_US);
     assert!(session.summary().failed, "the fixture run fails");
-    let (score, _) = sent_from_the_result_screen(&mut shared, &server, session);
+    let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
     check_contract("score-failed", &score.body);
+    linked_to_its_score(&trace, &score);
+    let kept = rbms_ir::PlayTrace::from_json(&trace.body).expect("the trace body reads as a trace");
+    assert!(kept.failed_at_ms.is_some() && kept.notes.state.contains(&0), "the trace says where the gauge emptied: {:?}", kept.failed_at_ms);
+    check_contract("trace-failed", &trace.body);
 }
 
 /// A run with SCRATCH AUTO playing the turntable.
@@ -536,8 +606,98 @@ fn a_run_with_more_empty_poor_than_poor() {
     let summary = session.summary();
     assert!(summary.counts[5] > summary.counts[4] && summary.counts[4] > 0, "the fixture has more 空POOR than POOR: {:?}", summary.counts);
     assert!(summary.clear_lamp.is_cleared() && summary.total_judged == summary.total_notes, "the fixture run is played to its end and clears: {summary:?}");
-    let (score, _) = sent_from_the_result_screen(&mut shared, &server, session);
+    let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
     check_contract("score-empty-poor-exceeds-poor", &score.body);
+    linked_to_its_score(&trace, &score);
+    check_contract("trace-empty-poor-exceeds-poor", &trace.body);
+}
+
+/// A run with BADs early and late, and its trace.
+#[test]
+fn a_run_with_bads_and_its_trace() {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, "trace-bad");
+    let session = played(&shared, contract_model(), &BAD_OFFSETS_US);
+    let summary = session.summary();
+    assert!(summary.early[3] > 0 && summary.late[3] > 0, "the fixture has BADs either way: {summary:?}");
+    let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
+    linked_to_its_score(&trace, &score);
+    check_contract("score-bad", &score.body);
+    check_contract("trace-bad", &trace.body);
+}
+
+/// The inputs of a run of the long-note chart: a plain note pressed on its time and let go, a long
+/// note's head pressed [`LONG_HEAD_LATE_US`] late and held to its end, let go there on its time.
+fn long_note_inputs(laid_out: &rbms_model::Model) -> Vec<Input> {
+    let mut inputs = Vec::new();
+    for line in &laid_out.timelines {
+        for (lane, note) in line.notes.iter().enumerate() {
+            match note.as_ref().map(|note| &note.kind) {
+                Some(rbms_model::NoteKind::Normal) => inputs.extend([(line.time_us, lane, true), (line.time_us + KEY_HELD_US, lane, false)]),
+                Some(rbms_model::NoteKind::LongStart { .. }) => inputs.push((line.time_us + LONG_HEAD_LATE_US, lane, true)),
+                Some(rbms_model::NoteKind::LongEnd { .. }) => inputs.push((line.time_us, lane, false)),
+                Some(rbms_model::NoteKind::Mine { .. }) | None => {}
+            }
+        }
+    }
+    inputs.sort_unstable();
+    inputs
+}
+
+/// The long-note chart played on LN MODE `ln_mode`, every note taken, and its trace, which tells a
+/// long note's head from a plain note by the end that follows it, and the end of `end_kind`.
+fn a_long_note_run(tag: &str, ln_mode: rbms_judge::ln::LnMode, end_kind: u8, files: [&str; 2]) {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, tag);
+    shared.config.judge.ln_mode = ln_mode;
+    let mut model = model_of(LONG_NOTE_CHART, "long-notes.bms");
+    assert!(rbms_chart::contains_undefined_long_note(&model), "the chart leaves its long notes to LN MODE");
+    let setup = crate::judge_setup::run_judge_setup(&shared.config, None);
+    rbms_chart::resolve_long_note_flavour(&mut model, setup.ln_mode.resolve());
+    let long_notes = LongNotes { lntype: crate::judge_setup::run_lntype(0, setup.ln_mode), key: rbms_config::ln_mode_token(setup.ln_mode) };
+    let (session, laid_out) = loaded(&shared, model, None);
+    let session = replay_inputs(session, &long_note_inputs(&laid_out));
+    let summary = session.summary();
+    assert!(summary.total_judged == summary.total_notes && summary.counts[4] == 0, "every note is taken: {summary:?}");
+    let (score, trace) = traced_from_the_result_screen_as(&mut shared, &server, session, long_notes);
+    linked_to_its_score(&trace, &score);
+    let kept = rbms_ir::PlayTrace::from_json(&trace.body).expect("the trace body reads as a trace");
+    assert!(kept.notes.kind.contains(&rbms_ir::TRACE_KIND_LONG_HEAD) && kept.notes.kind.contains(&end_kind), "the kinds: {:?}", kept.notes.kind);
+    assert_eq!(kept.lntype, long_notes.lntype);
+    let [score_file, trace_file] = files;
+    check_contract(score_file, &score.body);
+    check_contract(trace_file, &trace.body);
+}
+
+#[test]
+fn a_long_note_run_and_its_trace() {
+    a_long_note_run("trace-ln", rbms_judge::ln::LnMode::LongNote, rbms_ir::TRACE_KIND_LONG_END, ["score-long-note", "trace-long-note"]);
+}
+
+#[test]
+fn a_charge_note_run_and_its_trace() {
+    a_long_note_run("trace-cn", rbms_judge::ln::LnMode::ChargeNote, rbms_ir::TRACE_KIND_CHARGE_END, ["score-charge-note", "trace-charge-note"]);
+}
+
+#[test]
+fn a_hell_charge_note_run_and_its_trace() {
+    a_long_note_run("trace-hcn", rbms_judge::ln::LnMode::HellChargeNote, rbms_ir::TRACE_KIND_CHARGE_END, ["score-hell-charge-note", "trace-hell-charge-note"]);
+}
+
+/// A run of a pop'n chart with a BAD, which leaves its note to be judged again, and its trace.
+#[test]
+fn a_popn_run_and_its_trace() {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, "trace-popn");
+    let model = model_of(&stepped_chart(POPN_HEADER, POPN_MEASURES, POPN_SLOTS, &POPN_CHANNELS), "popn.pms");
+    assert_eq!(model.mode, Mode::POPN_9K, "the fixture is a pop'n chart");
+    let session = played(&shared, model, &POPN_OFFSETS_US);
+    assert!(session.summary().counts[3] > 0, "the fixture has a BAD: {:?}", session.summary());
+    let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
+    let kept = rbms_ir::PlayTrace::from_json(&trace.body).expect("the trace body reads as a trace");
+    assert_eq!(kept.mode, "POPN_9K");
+    check_contract("score-popn-9k", &score.body);
+    check_contract("trace-popn-9k", &trace.body);
 }
 
 /// A MAX run with 空POOR: every note on its time and every key note hunted for early, inside the
@@ -594,7 +754,7 @@ fn a_run_left_mid_song() {
 }
 
 /// A run played to its end, sent from the result screen, and its trace, which a records sync of
-/// the run sends once the server has taken the score.
+/// the run sends once the server has taken the score, with the score body it is the trace of.
 #[test]
 fn a_finished_run_and_its_trace() {
     let server = CaptureServer::spawn();
@@ -602,6 +762,7 @@ fn a_finished_run_and_its_trace() {
     let session = played(&shared, contract_model(), &HAND_OFFSETS_US);
     let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
     linked_to_its_score(&trace, &score);
+    check_contract("score-trace-normal", &score.body);
     check_contract("trace-normal", &trace.body);
 }
 

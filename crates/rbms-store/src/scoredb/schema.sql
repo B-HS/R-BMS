@@ -146,6 +146,10 @@ CREATE TABLE IF NOT EXISTS play_trace (
     body   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS trace_backfill_refused (
+    log_id INTEGER PRIMARY KEY
+);
+
 CREATE TABLE IF NOT EXISTS course_submission (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     course_hash TEXT NOT NULL,

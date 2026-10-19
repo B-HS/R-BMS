@@ -110,6 +110,13 @@ impl ScoreDb {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Every course kept, oldest first, with no server's answer read.
+    pub fn kept_courses(&self) -> Result<Vec<KeptCourse>, ScoreDbError> {
+        let mut stmt = self.conn.prepare("SELECT id, course_hash, played_at, body, played_as, NULL AS sync_state FROM course_submission ORDER BY id ASC")?;
+        let rows = stmt.query_map([], KeptCourse::from_row)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(ScoreDbError::from)
+    }
+
     /// The newest course kept, or `None` when there is none ([`SyncWalk::courses_up_to`]).
     pub fn newest_course_id(&self) -> Result<Option<i64>, ScoreDbError> {
         Ok(self.conn.query_row("SELECT MAX(id) FROM course_submission", [], |row| row.get(0))?)

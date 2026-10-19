@@ -52,6 +52,9 @@ pub(crate) enum Saving {
     PendingRun { file: PathBuf },
     /// The trace of a run whose row is stored ([`crate::play_trace`]).
     Trace { log_id: i64 },
+    /// Traces made for runs stored without one, and how far the making has got
+    /// ([`crate::trace_backfill`]).
+    BackfilledTraces,
 }
 
 /// One write that failed, and why.
@@ -221,6 +224,19 @@ impl SaveWorker {
         });
     }
 
+    /// Keep what `batch`, a batch of the traces made for runs stored without one, came to in the
+    /// score database at `db_path`, in one write ([`ScoreDb::keep_backfilled_traces`]): its traces,
+    /// the runs that will never get one, and its mark, which moves only from where the batch was
+    /// made on, so a batch written after one that failed moves it no further. A run that has a trace
+    /// by now keeps its own.
+    pub(crate) fn keep_backfilled_traces(&self, db_path: PathBuf, batch: rbms_store::scoredb::BackfillBatch) {
+        self.hand_over(Job {
+            what: Saving::BackfilledTraces,
+            replaces: None,
+            work: Box::new(move || ScoreDb::open(&db_path).and_then(|mut db| db.keep_backfilled_traces(&batch)).map(|_| ()).map_err(|e| e.to_string())),
+        });
+    }
+
     /// Write `run`, a run the score database could not take, to `path`, a file nothing else writes,
     /// with the body of the trace `source` makes laid out here. `text` is the run as it stands
     /// without the trace, written when the trace makes no body.
@@ -331,6 +347,7 @@ fn failure_line(failure: &SaveFailure) -> String {
         Saving::Replay { .. } => format!("replay not saved: {}", failure.error),
         Saving::PendingRun { .. } => format!("run not kept: {}", failure.error),
         Saving::Trace { .. } => format!("trace of the run not stored: {}", failure.error),
+        Saving::BackfilledTraces => format!("traces of earlier runs not stored: {}", failure.error),
     }
 }
 

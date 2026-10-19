@@ -12,7 +12,9 @@
 //!   it stands with each score server it was sent to ([`SyncState`]). A play with no `ir_sync` row
 //!   for a server has never been confirmed there.
 //! * `play_trace` — what each play was note by note, kept with the play and sent once a server took
-//!   its score; where it stands with each server is in `ir_sync` beside the replay's state.
+//!   its score; where it stands with each server is in `ir_sync` beside the replay's state. A play
+//!   stored before its client kept one may gain one later, made from its replay
+//!   ([`ScoreDb::keep_backfilled_traces`]).
 //! * `course_submission` and `course_sync` — the same for a finished course: the body it was sent
 //!   as, and what each server answered ([`KeptCourse`]).
 //!
@@ -36,6 +38,9 @@
 //! (`PlayDataAccessor.java:200-205`); rbms already had a play mode under that name, so the axis
 //! keeps the name rbms gives it and joins the primary key beside the play mode.
 
+mod backfill;
+#[cfg(test)]
+mod backfill_tests;
 mod courses;
 mod migrate;
 mod pending;
@@ -56,6 +61,7 @@ use serde::{Deserialize, Serialize};
 
 use rows::{BEST_COLUMNS, JUDGE_COLUMNS, LOG_COLUMNS, accumulate_day, insert_log, log_from_row, read_best, write_best};
 
+pub use backfill::{BackfillBatch, BackfillWritten, TRACE_BACKFILL_NOT_STARTED, UntracedPlay};
 pub use courses::{CourseSyncRow, KeptCourse};
 pub use migrate::{ASSIST_UNRECORDED, MigrationReport, SEED_UNRECORDED, migrate_score_book, open_with_import};
 pub use pending::{PENDING_RUN_SUFFIX, PendingImport, PendingRun};

@@ -436,13 +436,15 @@ impl LoadingState {
     /// their first fetch from here on, which the song list starts once it is up
     /// ([`crate::tablesrc::start_first_fetches`]); the scan itself waited for none of them. The
     /// player's own folders are matched against the new library from what was kept of them, asking
-    /// the network nothing ([`crate::user_folders::rematch`]).
+    /// the network nothing ([`crate::user_folders::rematch`]). Runs whose chart file was not found
+    /// when their traces were made are looked at again ([`AppShared::trace_backfill_after_scan`]).
     fn apply_scan(shared: &mut AppShared, out: ScanOutcome) -> Transition {
         shared.library = out.library;
         shared.table_names = out.names;
         shared.table_levels = out.levels;
         shared.table_fetches.first_fetches_are_due();
         crate::user_folders::rematch(shared);
+        shared.trace_backfill_after_scan();
         shared.select_view = SelectView::Root;
         shared.sel = 0;
         shared.rebuild_select_items();

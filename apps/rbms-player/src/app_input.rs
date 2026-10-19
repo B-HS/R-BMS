@@ -213,6 +213,12 @@ impl HeldKeyQuery for SkinKeys<'_> {
     }
 }
 
+/// What a lane shade set at `set_at` shows: that amount while it is switched on (`enabled`), and
+/// nothing while it is off ([`AppShared::effective_cover`]).
+pub(crate) fn shade_shown(enabled: bool, set_at: f32) -> f32 {
+    if enabled { set_at } else { LANE_SHADE_MIN }
+}
+
 impl AppShared {
     /// The held keys in the form a skin's host answers `Gdx.input:isKeyPressed` from.
     pub(crate) fn skin_keys(&self) -> SkinKeys<'_> {
@@ -385,17 +391,17 @@ impl AppShared {
     /// had rather than a default. The same shape holds for the lift and the hidden band, which is
     /// what lets SUD+ and HID+ be up at the same time.
     pub(crate) fn effective_cover(&self) -> f32 {
-        if self.config.play.enable_cover { self.config.play.cover } else { LANE_SHADE_MIN }
+        shade_shown(self.config.play.enable_cover, self.config.play.cover)
     }
 
     /// How much of the field the hidden band hides right now.
     pub(crate) fn effective_hidden(&self) -> f32 {
-        if self.config.play.enable_hidden { self.config.play.hidden } else { LANE_SHADE_MIN }
+        shade_shown(self.config.play.enable_hidden, self.config.play.hidden)
     }
 
     /// How far the lift raises the judgment line right now.
     pub(crate) fn effective_lift(&self) -> f32 {
-        if self.config.play.enable_lift { self.config.play.lift } else { LANE_SHADE_MIN }
+        shade_shown(self.config.play.enable_lift, self.config.play.lift)
     }
 
     /// Apply an in-play control and answer what moved: hi-speed, lane cover (sudden), lift and the

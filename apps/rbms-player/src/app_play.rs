@@ -158,16 +158,16 @@ pub(crate) fn scratch_auto_lanes(mode: rbms_model::Mode, scratch_auto: bool) -> 
 }
 
 /// What the load path needs from a chart file, whatever format it is written in.
-struct DecodedChart {
-    mode: rbms_model::Mode,
-    model: rbms_model::Model,
+pub(crate) struct DecodedChart {
+    pub(crate) mode: rbms_model::Mode,
+    pub(crate) model: rbms_model::Model,
     /// The file hash a replay is checked against.
-    md5: String,
+    pub(crate) md5: String,
     /// The long-note mode the chart states, in `#LNMODE` codes.
-    lnmode: i32,
+    pub(crate) lnmode: i32,
     /// The bmson document, kept only because bmson states TOTAL as a percentage of the mode default
     /// and that percentage is not final until the long-note flavour is resolved.
-    bmson: Option<Box<rbms_parser::bmson::BmsonChart>>,
+    pub(crate) bmson: Option<Box<rbms_parser::bmson::BmsonChart>>,
 }
 
 /// Whether a chart path names a bmson document, which is decoded from JSON rather than from the BMS
@@ -178,7 +178,7 @@ fn is_bmson_path(path: &str) -> bool {
 
 /// Decode a chart file of either format into the play model. `None` when the bytes are not a chart
 /// this build can read, which the caller reports instead of playing silence.
-fn decode_chart(bytes: &[u8], path: &str) -> Option<DecodedChart> {
+pub(crate) fn decode_chart(bytes: &[u8], path: &str) -> Option<DecodedChart> {
     if is_bmson_path(path) {
         let chart = rbms_parser::bmson::parse(bytes).ok()?;
         let mode = chart.mode();

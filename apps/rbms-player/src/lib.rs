@@ -105,6 +105,7 @@ pub mod target;
 mod textedit;
 mod timing;
 mod toast;
+mod trace_backfill;
 mod user_folders;
 mod window_mode;
 use app_network::build_server;
@@ -849,6 +850,8 @@ struct AppShared {
     /// The thread file writes are handed to, so a save never stalls a frame on the disk
     /// ([`save_worker`]).
     saves: save_worker::SaveWorker,
+    /// The traces being made for runs stored without one ([`trace_backfill`]).
+    trace_backfill: trace_backfill::TraceBackfill,
     /// The wall clock the audio fallback and the timing probe read, restarted when a run begins. The
     /// skin does not read it: that is [`AppShared::scene_clock`].
     clock: Instant,
@@ -1119,6 +1122,7 @@ impl App {
                 server_build: None,
                 course_submits: Vec::new(),
                 saves: save_worker::SaveWorker::for_this_build(),
+                trace_backfill: trace_backfill::TraceBackfill::default(),
                 clock: Instant::now(),
                 booted: Instant::now(),
                 scene_clock: scene_clock::SceneClock::begun(Instant::now()),
@@ -1672,6 +1676,7 @@ fn run_in(args: impl Iterator<Item = String>, config_dir: &Path) -> ExitCode {
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(chart, config, launch, settings_path);
     app.frame_waker = Some(event_loop.create_proxy());
+    app.shared.start_trace_backfill(trace_backfill::BackfillPacing::GAME);
     let ran = event_loop.run_app(&mut app);
     if let Some(gpu) = app.shared.gpu.as_mut() {
         gpu.stop_presenting();

@@ -230,10 +230,31 @@ impl GhostJob {
     }
 }
 
-/// Judge the stored run `source` again from its replay: the chart laid out as the replay was
-/// recorded on (its long-note mode, lane option, seed and TOTAL), judged by every JUDGE row it
-/// recorded, on its gauge and its SCRATCH AUTO, as a watched replay is ([`AppShared::load`]). The
-/// run that comes out has to be of this chart and come to what its record says, note count, PGREATs
+/// A run of `model`, the chart as it was read, set up to play `replay` back with no screen and no
+/// sound: the chart laid out as the replay was recorded on (its long-note mode, lane option, seed
+/// and TOTAL), judged by every JUDGE row it recorded, on its gauge and its SCRATCH AUTO, as a
+/// watched replay is ([`AppShared::load`]). Nothing is judged until the caller moves its clock.
+pub(crate) fn session_of_replay(mut model: Model, bmson: Option<&BmsonChart>, mode: Mode, replay: Replay) -> PlaySession {
+    let setup = replay_judge_setup(&replay.judge);
+    rbms_chart::resolve_long_note_flavour(&mut model, setup.ln_mode.resolve());
+    lay_out_notes(&mut model, NoteOption::from_str(&replay.random), replay.seed, bmson, &mode);
+    if crate::overrides_total(replay.judge.total_override) {
+        model.meta.total = replay.judge.total_override;
+    }
+    let options = SessionOptions {
+        gauge: gauge_from_name(&replay.gauge),
+        auto_lanes: scratch_auto_lanes(mode, replay.scratch_auto),
+        seed: replay.seed,
+        replay: Some(replay),
+        ..SessionOptions::default()
+    };
+    let mut session = PlaySession::new(model, options);
+    session.set_judge_setup(setup);
+    session
+}
+
+/// Judge the stored run `source` again from its replay, played out at once ([`session_of_replay`]).
+/// The run that comes out has to be of this chart and come to what its record says, note count, PGREATs
 /// and GREATs, or it is not the run the record is of and is no ghost.
 fn rejudge(job: &GhostJob, source: &GhostSource) -> Result<GhostPace, String> {
     let replay = Replay::load(&job.replay_dir.join(&source.file)).map_err(|e| format!("its replay could not be read ({e})"))?;
@@ -243,22 +264,7 @@ fn rejudge(job: &GhostJob, source: &GhostSource) -> Result<GhostPace, String> {
     if replay.judge.clock != rbms_store::REPLAY_EVENT_CLOCK {
         return Err(format!("its replay was judged on the {} clock, which is not played back note for note", replay.judge.clock));
     }
-    let setup = replay_judge_setup(&replay.judge);
-    let mut model = job.model.clone();
-    rbms_chart::resolve_long_note_flavour(&mut model, setup.ln_mode.resolve());
-    lay_out_notes(&mut model, NoteOption::from_str(&replay.random), replay.seed, job.bmson.as_deref(), &job.mode);
-    if crate::overrides_total(replay.judge.total_override) {
-        model.meta.total = replay.judge.total_override;
-    }
-    let options = SessionOptions {
-        gauge: gauge_from_name(&replay.gauge),
-        auto_lanes: scratch_auto_lanes(job.mode, replay.scratch_auto),
-        seed: replay.seed,
-        replay: Some(replay),
-        ..SessionOptions::default()
-    };
-    let mut session = PlaySession::new(model, options);
-    session.set_judge_setup(setup);
+    let mut session = session_of_replay(job.model.clone(), job.bmson.as_deref(), job.mode, replay);
     session.play_out();
     let judge = session.judge();
     if judge.total_notes() != source.total_notes {
