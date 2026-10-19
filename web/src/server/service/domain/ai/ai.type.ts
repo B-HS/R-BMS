@@ -10,5 +10,6 @@ export type AiServiceFailure =
     | { reason: 'usage_limit'; limit: AiUsageLimitReason }
     | { reason: 'provider'; provider: AiProviderId; detail: AiFailureDetail }
     | { reason: 'output_invalid'; provider: AiProviderId }
+    | { reason: 'not_enough_data'; need: string }
 
 export type AiServiceResult<T> = { ok: true; value: T } | ({ ok: false } & AiServiceFailure)

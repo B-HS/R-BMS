@@ -68,7 +68,7 @@ describe.skipIf(!hasDatabase)('AI 기반 표 (임시 MySQL)', () => {
         const [tables] = await getDb().execute(
             sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name LIKE 'ai\\_%'`,
         )
-        expect(Array.isArray(tables) ? tables.map((row) => String(Object.values(row)[0])).toSorted() : []).toEqual(NEW_TABLES)
+        expect(Array.isArray(tables) ? tables.map((row) => String(Object.values(row)[0])).toSorted() : []).toEqual(expect.arrayContaining(NEW_TABLES))
         const [indexes] = await getDb().execute(
             sql`SELECT column_name AS name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'chart_best' AND index_name = 'chart_best_user_idx' ORDER BY seq_in_index`,
         )

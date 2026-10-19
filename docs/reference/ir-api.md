@@ -29,6 +29,7 @@
 | GET | `/charts/{md5}/best?player={id}` | — | — | 200 `ScoreRecord` 또는 `null` | `player_best` |
 | POST | `/charts/{md5}/replays` | Bearer | `ReplayData` | 201 `ReplayUploadResponse` | `upload_replay` |
 | GET | `/charts/{md5}/replays?limit=&player=` | — | — | 200 `[ReplayMeta]` | `chart_replays` |
+| POST | `/charts/{md5}/traces` | Bearer, 점수의 주인 | `PlayTrace`(`score_id` 필수) | 201 `TraceUploadResponse`(같은 점수의 재전송은 200, 같은 id) | `upload_trace` |
 | GET | `/replays/{id}` | — | — | 200 `ReplayData` | `download_replay` |
 | GET | `/players/{id}` | — | — | 200 `PlayerProfile` | `player_profile` |
 | GET | `/players/{id}/rivals` | — | — | 200 `[PlayerProfile]` | `rivals` |
@@ -75,7 +76,7 @@
 { "name": "rbms-ir", "version": "0.1.0", "ir_compat": "superset-1",
   "capabilities": { "ranking": true, "player_best": true, "rivals": true, "courses": true,
                     "replays": true, "tables": true, "settings_sync": true, "folders": true,
-                    "accounts": true, "lr2ir_compat": false } }   // 블록·개별 플래그 모두 생략 시 false
+                    "accounts": true, "lr2ir_compat": false, "traces": true } }   // 블록·개별 플래그 모두 생략 시 false
 
 // VersionInfo — GET /version
 { "api_version": 1, "server": "0.1.0", "commit": "c6f0885" }   // commit 은 null 가능(Git 연동 배포가 아니면)
@@ -182,6 +183,22 @@
 // ReplayUploadResponse — 201
 { "id": "rp_77", "url": "/api/replays/rp_77", "event_count": 2 }
 
+// PlayTrace — POST /charts/{md5}/traces 본문(형식 정본: crates/rbms-ir/src/dto/trace.rs, 계약 파일 contract/client-requests/trace-*.json)
+{ "format": "rbms-trace", "version": 1, "score_id": "sc_1", "chart": { "md5": "…", "sha256": "…" },
+  "mode": "BEAT_7K", "lntype": 0, "random": "Off", "auto_lanes": [],
+  "notes": { "time_us": [1600000], "lane": [0], "kind": [0], "state": [2], "err_us": [-40000] },   // 길이가 같은 열
+  "empty_poors": { "time_us": [], "lane": [] },
+  "gauge": { "interval_ms": 500, "selected": 2, "series": [[20.0, 22.5]] }, "gauge_bounds": [{ "min": 2.0, "max": 100.0, "border": 80.0 }],
+  "failed_at_ms": null, "play_time_ms": 12800,
+  "speed": { "start": { … }, "end": { … }, "changes": [] }, "tempo": [{ "t_us": 0, "bpm": 150.0, "stop_us": 0, "scroll": 1.0 }] }
+// 서버는 재판정하지 않고 점수 행과 판정 합계·FAST/SLOW·空POOR 를 허용 오차 없이 맞춘다(규칙: web/architecture.md 13-1).
+// 2 MiB(TRACE_MAX_BYTES) 초과 413, 남의 점수·없는 점수 404 IR_SCORE_NOT_FOUND, 어긋나면 400 IR_TRACE_MISMATCH { field, reason }, 30/min/사용자.
+// 읽기 경로는 없다(본인 분석은 웹 화면만).
+
+// TraceUploadResponse — 201(처음) / 200(같은 점수에 이미 있음)
+{ "id": "tr_…", "analysis": "stored", "storage": { "traces": 1, "bytes": 9267, "limit_traces": 5000, "limit_bytes": 536870912, "level": "ok" } }
+// 클라이언트는 id 만 읽는다. storage.level 은 ok·near·over 이고 over 여도 저장한다(ADR Q17).
+
 // ReplayMeta — GET /charts/{md5}/replays
 // url 은 **배포 오리진 기준**이라 이미 배포의 `/api` 프리픽스를 포함한다. 설정 base
 // (`https://bms.hyuns.uk/api`)와 이어 붙이면 `/api/api/...` 가 되므로 join 하지 말고
@@ -237,18 +254,19 @@
 |---|---|---|
 | 401 | `Unauthorized(body)` | `UNAUTHORIZED` |
 | 403 | `Forbidden(body)` | `FORBIDDEN` |
-| 404 | `NotFound(body)` | `IR_CHART_NOT_FOUND` · `IR_PLAYER_NOT_FOUND` · `IR_REPLAY_NOT_FOUND` · `IR_SETTING_NOT_FOUND` · `IR_COURSE_NOT_FOUND` · `IR_TABLE_NOT_FOUND` · `IR_FOLDER_NOT_FOUND` |
+| 404 | `NotFound(body)` | `IR_CHART_NOT_FOUND` · `IR_PLAYER_NOT_FOUND` · `IR_SCORE_NOT_FOUND`(trace 업로드의 `score_id`) · `IR_REPLAY_NOT_FOUND` · `IR_SETTING_NOT_FOUND` · `IR_COURSE_NOT_FOUND` · `IR_TABLE_NOT_FOUND` · `IR_FOLDER_NOT_FOUND` |
 | 409 | `Conflict(body)` | `IR_ACCOUNT_EXISTS` · `IR_FOLDER_NAME_TAKEN` · `IR_FOLDER_LIMIT_EXCEEDED` · `IR_FOLDER_CONFLICT`(폴더 편집은 웹 전용이라 클라이언트는 받지 않는다) |
 | 409 (settings PUT, 잠금 본문) | `SettingsConflict(server copy)` | — |
 | 413 | `PayloadTooLarge(body)` | `IR_PAYLOAD_TOO_LARGE` |
 | 429 | `RateLimited(body)` | `RATE_LIMITED` |
-| 그 외 4xx/5xx | `Server(status, body)` | `VALIDATION_ERROR` · `IR_API_VERSION_UNSUPPORTED` · `INTERNAL_ERROR` |
+| 그 외 4xx/5xx | `Server(status, body)` | `VALIDATION_ERROR` · `IR_API_VERSION_UNSUPPORTED` · `IR_TRACE_MISMATCH`(400, trace 와 점수 행이 다름) · `INTERNAL_ERROR` |
 | 전송 실패·타임아웃 | `Network(reason)` | — |
 | 2xx 인데 본문이 계약과 다름 | `Decode(reason)` | — |
 | `--server` 미설정(`NullScoreServer`) | `NotConfigured` | — |
 | 서버가 지원하지 않는 트레이트 메서드 | `Unsupported` | — |
 
 - settings PUT 의 409 본문이 잠금 봉투로 파싱되지 않으면 일반 `Conflict(body)` 로 떨어진다.
+- 웹 전용 경로(AI 해석 `/api/fe/me/ai/*`, 관리자 곡별 패턴 `/api/admin/chart-patterns/*`)의 코드 `IR_CHART_PATTERN_INVALID`(400) · `AI_CREDENTIAL_INVALID`(400) · `AI_PROVIDER_QUOTA`(402) · `AI_PROVIDER_FORBIDDEN`(403) · `AI_CREDENTIAL_NOT_FOUND`(404) · `AI_NOT_ENOUGH_DATA` · `AI_MODEL_UNAVAILABLE` · `AI_PROVIDER_REFUSED`(422) · `AI_PROVIDER_RATE_LIMITED` · `AI_USAGE_LIMIT`(429) · `AI_PROVIDER_BAD_REQUEST` · `AI_PROVIDER_UNAVAILABLE` · `AI_OUTPUT_TRUNCATED` · `AI_OUTPUT_INVALID`(502) 는 게임 클라이언트가 부르지 않는 경로의 것이라 클라이언트 코드에는 없다. 만나면 위 표의 `Server(status, body)` 로 떨어지고 429 는 `RateLimited` 다. 뜻과 `details` 는 [api-spec.md](../backend/api-spec.md) 0.2.1 이 정본이다.
 - `IrError::status()` · `detail()` · `error_code()` 로 상태·원문·서버 코드를 꺼낸다. `is_auth_failure()` 는 401/403, `is_retryable()` 은 네트워크·429·5xx.
 - `Display` 는 봉투를 풀어 `not signed in (401): 인증이 필요합니다 (UNAUTHORIZED)` 처럼 렌더하고, 본문은 `ERROR_DETAIL_MAX_CHARS`(200자)에서 자른다. 봉투의 `details` 에 `field` 가 있으면 메시지 대신 코드·필드·이유를 쓴다: `server error 400: VALIDATION_ERROR: judge (judge count exceeds total_notes)`(필드만 있으면 `코드: 필드`). `IrError::server_reason()` 이 그 셋(`ServerReason { code, field, reason }`)을 꺼낸다.
 - 기록 동기화가 답을 어떻게 다루는지는 `rbms_ir::sync`(`submit_verdict`·`upload_verdict`)가 한 곳에서 정한다: 수락(중복 포함), 4xx 와 수락되지 않은 2xx 는 거절(`Rejection`: 상태·코드·필드·이유), 429 는 대기, 네트워크·디코드·5xx 는 일시 실패, 401·서버 없음·`Unsupported` 는 동기화 중단. 규칙과 클라이언트 쪽 처리는 [crates.md](../crates.md) rbms-ir 의 `sync` 와 [play-options.md](../play-options.md) 10.9절이 정본이다.
@@ -283,4 +301,4 @@
 - **`gauge` 를 생략한 업로드는 `AssistEasy` 로 되돌아온다.** 컬럼이 `NOT NULL DEFAULT 0` 이라 "미지정"과 0번 게이지를 구분하지 못한다. 클라(`ir_replay::to_ir_replay`)는 항상 게이지를 보내므로 정상 경로에는 영향이 없다.
 - 경로·쿼리 percent-encoding 은 `url` 크레이트 신규 의존이 필요해 보류 중이다(현재는 URL-safe 식별자 전제).
 - 차트 메타 업서트(`POST /charts`), 난이도표(`/tables`), 코스 메타 업서트(`POST /courses/meta`), 스코어 단건 조회(`GET /scores/{id}`) 는 서버에 있으나 `rbms-ir` 클라이언트에는 아직 없다. 차트 제목·아티스트·레벨은 `POST /charts` 대신 점수 제출의 `chart.title/artist/level` 로 올린다.
-- **계약 교차 테스트(S18, `e9aebae`)**: 클라이언트 → 서버 방향은 닫혔다. 플레이어 테스트(`apps/rbms-player/src/app_result/record_tests/contract_requests.rs`)가 루프백 서버로 실제로 보낸 요청 본문 15종(일반·SCRATCH AUTO·넓힌 판정·오토플레이·FAILED·Esc 포기·空POOR 가 POOR 수를 넘는 판·14키 2P·동기화 재전송·코스 둘·리플레이 둘·설정 blob)을 `contract/client-requests/*.json` 과 비교하고(`RBMS_UPDATE_CONTRACT=1` 이면 다시 쓴다), 웹 테스트 `web/tests/dto/client-requests.test.ts` 가 그 파일들을 서버 zod 스키마로 통과시킨다. v0.1.2 의 점수 제출 400(2^53 를 넘는 시드)이 이 공백에서 나왔다. 남은 것은 반대 방향(서버 응답 → Rust 디코드)이다(`quality-assurance/2026-10-14-test-debt.md` 3.12). 양쪽 고유 테스트(`crates/rbms-ir/src/contract_tests.rs`·`fixtures.rs`, `web/tests/dto/ir-contract.test.ts`)는 그대로 있다.
+- **계약 교차 테스트(S18, `e9aebae`)**: 클라이언트 → 서버 방향은 닫혔다. 플레이어 테스트(`apps/rbms-player/src/app_result/record_tests/contract_requests.rs`)가 루프백 서버로 실제로 보낸 요청 본문 19종(일반·SCRATCH AUTO·넓힌 판정·오토플레이·FAILED·Esc 포기·空POOR 가 POOR 수를 넘는 판·14키 2P·동기화 재전송·코스 둘·리플레이 둘·설정 blob·판별 trace 넷(일반·RANDOM·SCRATCH AUTO·Esc 포기))을 `contract/client-requests/*.json` 과 비교하고(`RBMS_UPDATE_CONTRACT=1` 이면 다시 쓴다), 웹 테스트 `web/tests/dto/client-requests.test.ts` 가 그 파일들을 서버 zod 스키마로 통과시킨다. trace 넷은 짝이 되는 점수 파일을 점수 서비스가 저장한 행과 일관성 검사·저장·분석까지 통과해야 한다. v0.1.2 의 점수 제출 400(2^53 를 넘는 시드)이 이 공백에서 나왔다. 남은 것은 반대 방향(서버 응답 → Rust 디코드)이다(`quality-assurance/2026-10-14-test-debt.md` 3.12). 양쪽 고유 테스트(`crates/rbms-ir/src/contract_tests.rs`·`fixtures.rs`, `web/tests/dto/ir-contract.test.ts`)는 그대로 있다.

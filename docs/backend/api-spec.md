@@ -35,7 +35,7 @@
 | HTTP | 상황 | code(예) |
 |---|---|---|
 | 200/201 | 성공 | — |
-| 400 | DTO 검증 실패 / 지원하지 않는 `api_version` | `VALIDATION_ERROR` · `IR_API_VERSION_UNSUPPORTED` |
+| 400 | DTO 검증 실패 / 지원하지 않는 `api_version` / 판별 trace 가 연결한 점수 행과 다름(`POST /api/charts/[hash]/traces`, `details = { field: "judge.poor" 등, reason: "score 25, trace 0" }`, 규칙은 [../web/architecture.md](../web/architecture.md) 13-1) | `VALIDATION_ERROR` · `IR_API_VERSION_UNSUPPORTED` · `IR_TRACE_MISMATCH` |
 | 401 | 토큰 없음/무효 | `UNAUTHORIZED` |
 | 403 | 권한 없음 | `FORBIDDEN` |
 | 404 | 리소스 없음 | `IR_CHART_NOT_FOUND`·`IR_PLAYER_NOT_FOUND`·`IR_SCORE_NOT_FOUND`·`IR_REPLAY_NOT_FOUND`·`IR_SETTING_NOT_FOUND`·`IR_COURSE_NOT_FOUND`·`IR_TABLE_NOT_FOUND`·`IR_FOLDER_NOT_FOUND`(그 밖에 일반 `NOT_FOUND`) |
@@ -45,6 +45,24 @@
 | 500 | 원인을 알 수 없는 서버 오류. 가입·로그인에서는 DB 끊김, 인증 설정 누락처럼 계정 문제가 아닌 실패가 여기로 온다 | `INTERNAL_ERROR` (원인은 서버 로그에만 남는다) |
 | 503 | 미구성 서비스 | `SERVICE_NOT_CONFIGURED` |
 > 에러는 `web/src/server/lib/error-code.ts`·`error-message.ts`·`error.ts` 3파일 중앙화(컨벤션 §6). 도메인 접두사 `IR_*`. 코드 목록의 정본은 `error-code.ts` 다.
+
+### 0.2.1 웹 전용 코드 (게임 클라이언트는 받지 않는다)
+
+위 표는 게임 클라이언트가 쓰는 IR 경로의 코드다. 웹 화면과 관리자 스크립트만 쓰는 경로(`/api/fe/me/ai/*`, `/api/admin/chart-patterns/*`)의 코드는 아래다. 같은 봉투(`{ success: false, error: { code, message, details? } }`)이고 `details` 는 프로덕션에서 `field`·`reason` 만 나간다. 정본은 `error-code.ts`·`error.ts`(`STATUS_MAP`).
+
+| HTTP | 코드 | 상황 |
+|---|---|---|
+| 400 | `IR_CHART_PATTERN_INVALID` | 곡별 패턴 업로드(`PUT /api/admin/chart-patterns/[md5]`)의 경로 md5 와 본문 md5 가 다름 `details = { field: "md5", reason: "md5_mismatch" }`. 본문 형식·상한(24시간, 노트 20만 개) 위반은 `VALIDATION_ERROR` |
+| 400 | `AI_CREDENTIAL_INVALID` | AI 키가 맞지 않거나 취소됨 |
+| 402 | `AI_PROVIDER_QUOTA` | AI 공급자 계정의 잔액·지출 한도 |
+| 403 | `AI_PROVIDER_FORBIDDEN` | 공급자가 이 키의 요청을 막음(키 권한·모델 접근) |
+| 404 | `AI_CREDENTIAL_NOT_FOUND` | 등록된 AI 키가 없음 |
+| 422 | `AI_NOT_ENOUGH_DATA` | 해석할 기록이 모자라 AI 를 부르지 않음. `details.need` 가 모자란 것(`table_records`·`candidates`·`recent_plays`·`week_plays`·`goal_reached`·`remaining_charts`·`chart_patterns`·`table`) |
+| 422 | `AI_MODEL_UNAVAILABLE` · `AI_PROVIDER_REFUSED` | 고른 모델이 없어짐 · 모델이 답을 거절함 |
+| 429 | `AI_PROVIDER_RATE_LIMITED` · `AI_USAGE_LIMIT` | 공급자가 잠시 막음(`details.retry_after_seconds`) · 서비스의 사용 한도 |
+| 502 | `AI_PROVIDER_BAD_REQUEST` · `AI_PROVIDER_UNAVAILABLE` · `AI_OUTPUT_TRUNCATED` · `AI_OUTPUT_INVALID` | 공급자가 요청을 받지 않음 · 연결 실패 · 출력이 상한에서 잘림 · 출력 형식이 틀리거나 검증 뒤 남는 항목이 없음 |
+
+관리자 경로의 인증·권한은 `UNAUTHORIZED`(토큰 없음·무효, 세션 쿠키만으로는 401)·`FORBIDDEN`(관리자가 아닌 사용자의 토큰), 한도는 `RATE_LIMITED` 이다.
 
 ### 0.3 enum 표기 (variant 이름 그대로 JSON 문자열)
 - `ClearLamp`: `NoPlay|Failed|AssistEasy|LightAssistEasy|Easy|Normal|Hard|ExHard|FullCombo|Perfect|Max` (the reference implementation `ClearType` id 0-10).

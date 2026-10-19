@@ -6,6 +6,7 @@ import { courseSubmissionSchema } from '@server/dto/course'
 import { replayUploadSchema } from '@server/dto/replay'
 import { API_VERSION, scoreSubmissionSchema } from '@server/dto/score'
 import { SETTING_MAX_BYTES, settingPutSchema } from '@server/dto/setting'
+import { TRACE_MAX_BYTES, traceUploadSchema } from '@server/dto/trace'
 import { parseEnv } from '@server/lib/env'
 import { createCourseService, findCourseIntegrityFailure, type CourseScoreInsertRow } from '@server/service/domain/course/course.service'
 import { createReplayService, type ReplayInsertRow } from '@server/service/domain/replay/replay.service'
@@ -19,35 +20,57 @@ import {
     type ScoreInsertRow,
 } from '@server/service/domain/score/score.service'
 import { createSettingService } from '@server/service/domain/setting/setting.service'
+import { findTraceMismatch } from '@server/service/domain/trace/trace-check'
+import { TRACE_ANALYSIS_STATE, TRACE_UPLOAD_OUTCOME } from '@server/service/domain/trace/trace.service'
 import { createMysqlReplayStorage } from '@server/service/shared/storage/replay-storage'
+import { createMemoryTraceDb, createMemoryTraceService } from '../support/trace-fixture'
 
 const CONTRACT_DIR = join(import.meta.dirname, '..', '..', '..', 'contract', 'client-requests')
-const CONTRACT_KINDS = ['score', 'course', 'replay', 'settings'] as const
+const CONTRACT_KINDS = ['score', 'course', 'replay', 'settings', 'trace'] as const
 const REQUEST_SCHEMA = {
     score: scoreSubmissionSchema,
     course: courseSubmissionSchema,
     replay: replayUploadSchema,
     settings: settingPutSchema,
+    trace: traceUploadSchema,
 } as const
 const FLOAT_FIELDS: Record<ContractKind, ReadonlySet<string>> = {
     score: new Set(['gauge_value', 'options.hispeed', 'options.lift', 'options.lane_cover', 'options.total_override', 'options.green_number']),
     course: new Set(['gauge_value']),
     replay: new Set(),
     settings: new Set(),
+    trace: new Set([
+        'gauge.series[][]',
+        'gauge_bounds[].min',
+        'gauge_bounds[].max',
+        'gauge_bounds[].border',
+        ...['start', 'end'].flatMap((at) => ['hispeed', 'lane_cover', 'lift', 'hidden'].map((field) => `speed.${at}.${field}`)),
+        'speed.changes[].value',
+        'tempo[].bpm',
+        'tempo[].scroll',
+    ]),
 }
 const NULLISH_FIELDS: Record<ContractKind, ReadonlySet<string>> = {
     score: new Set(['replay_id', 'client_build_sha256', 'client_platform', 'options.random_p2']),
     course: new Set(['trophy']),
     replay: new Set(['chart', 'score_id', 'random', 'random_p2', 'seed', 'gauge', 'client_build_sha256', 'event_count', 'duration_us', 'size']),
     settings: new Set(['name', 'updated_at', 'base_updated_at']),
+    trace: new Set(['failed_at_ms']),
 }
 const DROPPED_FIELDS: Record<ContractKind, ReadonlySet<string>> = {
     score: new Set(),
     course: new Set(),
     replay: new Set(['id']),
     settings: new Set(),
+    trace: new Set(),
 }
 const BUILDLESS_SCORE_FILES = ['score-sync-resend.json']
+const TRACE_SCORE_FILE: Record<string, string> = {
+    'trace-abandoned.json': 'score-abandoned.json',
+    'trace-normal.json': 'score-normal.json',
+    'trace-random.json': 'score-normal.json',
+    'trace-scratch-auto.json': 'score-scratch-auto.json',
+}
 const REPLAY_EVENTS_THAT_MUST_FIT = 100_000
 const CONTRACT_USER_ID = 'usr_contract'
 const SERVER_NOW = 1_791_970_074_354
@@ -179,7 +202,7 @@ const createSettingStub = () =>
     })
 
 describe('클라이언트 요청 계약 파일', () => {
-    test('네 종류의 요청이 모두 하나 이상 있다', () => {
+    test('다섯 종류의 요청이 모두 하나 이상 있다', () => {
         expect(CONTRACT_KINDS.filter((kind) => filesOf(kind).length === 0)).toEqual([])
     })
 
@@ -341,5 +364,51 @@ describe.each(filesOf('settings'))('%s — 설정 업로드 라우트와 서비�
     test('서비스가 충돌 없이 저장한다', async () => {
         const result = await createSettingStub().put({ userId: CONTRACT_USER_ID, name: input.name ?? '', input })
         expect(result.status).toBe('stored')
+    })
+})
+
+const storedScoreOf = async (file: string) => {
+    const input = scoreSubmissionSchema.parse(readContract(file))
+    const { inserted, service } = createScoreStub()
+    await service.submit({
+        input,
+        chartSha256: input.chart.sha256,
+        chartMd5: input.chart.md5,
+        user: { id: CONTRACT_USER_ID, loginId: input.player.id, name: input.player.id },
+        buildTrust: BUILD_TRUST.TRUSTED,
+        requireTrustedBuild: false,
+        ip: null,
+        userAgent: null,
+    })
+    return inserted[0]
+}
+
+describe.each(filesOf('trace'))('%s — 판별 trace 업로드 라우트와 서비스', (file) => {
+    const raw = readContract(file)
+    const input = traceUploadSchema.parse(raw)
+    const scoreFile = TRACE_SCORE_FILE[file]
+
+    test('짝이 되는 점수 계약 파일이 있다', () => {
+        expect(contractFiles).toContain(scoreFile)
+    })
+
+    test('본문이 업로드 한도 안이다', () => {
+        expect(byteLength(raw)).toBeLessThanOrEqual(TRACE_MAX_BYTES)
+    })
+
+    test('같은 판의 점수 본문을 서버가 저장한 행과 판정 합계·FAST/SLOW·空POOR·차트가 허용 오차 없이 같다', async () => {
+        const score = await storedScoreOf(scoreFile)
+        expect(score.id).toBe(input.score_id)
+        expect(findTraceMismatch({ trace: input, pathHash: input.chart.md5, score })).toBeNull()
+    })
+
+    test('서비스가 그 점수에 연결해 저장하고 분석한다', async () => {
+        const score = await storedScoreOf(scoreFile)
+        const memory = createMemoryTraceDb([score])
+        const { service, failures } = createMemoryTraceService(memory)
+        const result = await service.upload({ input, pathHash: input.chart.md5, userId: CONTRACT_USER_ID })
+        expect(result).toMatchObject({ outcome: TRACE_UPLOAD_OUTCOME.CREATED, analysis: TRACE_ANALYSIS_STATE.STORED })
+        expect(failures).toEqual([])
+        expect([...memory.traces.values()].map((row) => [row.scoreId, row.noteCount])).toEqual([[input.score_id, input.notes.time_us.length]])
     })
 })

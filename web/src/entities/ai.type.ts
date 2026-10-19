@@ -1,6 +1,19 @@
 import type {
+    AiChartCandidate,
     AiCredentialOutput,
     AiFailureKind,
+    AiGoalKind,
+    AiGoalOutput,
+    AiGoalParams,
+    AiGoalPlanView,
+    AiInsight,
+    AiJudgeHabitView,
+    AiPracticeFolderCreateInput,
+    AiPracticeFolderResult,
+    AiPracticeFolderView,
+    AiPracticeSourceInput,
+    AiRecommendView,
+    AiWeeklyView,
     AiModelOutput,
     AiOperatorLimitsOutput,
     AiOperatorLimitsPutInput,
@@ -32,6 +45,23 @@ export type AiRecordQueryAnswer = AiRecordQueryAnswerOutput
 export type AiRecordQueryPlan = AiRecordQueryRunInput
 export type AiRecordQueryRow = AiRecordQueryRowOutput
 export type { AiRecordQueryField, AiRecordQueryFilter, AiRecordQueryIssue, AiRecordQueryOp }
+export type {
+    AiChartCandidate,
+    AiGoalKind,
+    AiGoalParams,
+    AiGoalPlanView,
+    AiInsight,
+    AiJudgeHabitView,
+    AiPracticeFolderCreateInput,
+    AiPracticeFolderResult,
+    AiPracticeFolderView,
+    AiPracticeSourceInput,
+    AiRecommendView,
+    AiWeeklyView,
+}
+export type AiGoal = AiGoalOutput
+/** How a stored or fresh AI answer was made, without the answer itself. */
+export type AiInterpretationMeta = Omit<NonNullable<AiRecommendView['ai']>, 'output'>
 
 export const AI_PROVIDER_ORDER = ['anthropic', 'openai', 'ollama'] as const satisfies readonly AiProviderId[]
 
@@ -171,4 +201,102 @@ export const AI_RECORD_QUERY_FORM_LIMIT = {
     MAX_FILTERS: 8,
     ROWS_MIN: 1,
     ROWS_MAX: 100,
+} as const
+
+/** The hub tabs, kept in the `tab` search parameter. */
+export const AI_HUB_TABS = ['query', 'recommend', 'goals', 'weekly', 'habit'] as const
+export type AiHubTab = (typeof AI_HUB_TABS)[number]
+
+export const AI_HUB_TAB_LABEL = {
+    query: '기록에 묻기',
+    recommend: '추천·연습 폴더',
+    goals: '목표',
+    weekly: '주간 요약',
+    habit: '판정 습관',
+} satisfies Record<AiHubTab, string>
+
+/** Why a feature shows numbers only and makes no AI call: what it still needs (the server's `notice.need`). */
+export const AI_DATA_NEED_LABEL: Record<string, string> = {
+    table_records: '난이도표 곡의 기록이 아직 없습니다. 표의 곡을 몇 판 친 뒤 다시 열어 보세요.',
+    candidates: '지금 기록으로는 고를 후보 곡이 없습니다.',
+    chart_patterns: '이 패턴으로 고를 곡별 패턴 데이터가 아직 없습니다.',
+    goal_reached: '이미 이룬 목표입니다.',
+    remaining_charts: '남은 곡이 없습니다.',
+    table: '목표의 난이도표를 찾을 수 없습니다.',
+    week_plays: '이 주에 친 판이 없습니다.',
+    recent_plays: '최근 판이 10판 아래입니다. 더 친 뒤 다시 열어 보세요.',
+}
+
+export const AI_RECOMMEND_KIND_LABEL = {
+    failed: '실패한 곡',
+    unplayed: '안 친 곡',
+    lamp_up: '램프 올리기',
+} satisfies Record<AiRecommendView['candidates'][number]['kind'], string>
+
+export const AI_INSIGHT_TONE_LABEL = {
+    strength: '강점',
+    weakness: '약점',
+    neutral: '참고',
+} satisfies Record<AiInsight['tone'], string>
+
+export const AI_GOAL_KIND_LABEL = {
+    lamp_count_at_level: '레벨에서 램프 N곡',
+    clear_all_level: '레벨 전부 클리어',
+    ex_rate_on_chart: '한 곡의 EX 비율',
+} satisfies Record<AiGoalKind, string>
+
+export const AI_OFFSET_DIRECTION_LABEL = {
+    earlier: '노트가 먼저 보이도록 올리기',
+    later: '노트가 늦게 보이도록 내리기',
+    keep: '그대로 두기',
+} satisfies Record<AiJudgeHabitView['offset']['direction'], string>
+
+export const AI_GREEN_DIRECTION_LABEL = {
+    faster: '더 빠르게(GREEN 낮게)',
+    slower: '더 느리게(GREEN 높게)',
+    keep: '그대로',
+} satisfies Record<'faster' | 'slower' | 'keep', string>
+
+export const AI_EVIDENCE_LABEL = {
+    strong: '근거 충분',
+    uncertain: '불확실',
+    insufficient: '표본 부족',
+} satisfies Record<AiJudgeHabitView['offset']['grade'], string>
+
+/** Mirrors the server's PATTERN_TAGS (pinned by the contract test), named for the screen. */
+export const AI_PATTERN_TAG_LABEL = {
+    chord_2: '2키 동시치기',
+    chord_3: '3키 동시치기',
+    chord_4plus: '4키 이상 동시치기',
+    jack: '연타',
+    trill: '트릴',
+    stair: '계단',
+    stream: '연속 난타',
+    scratch_solo: '단독 스크래치',
+    scratch_chord: '스크래치 동시치기',
+    scratch_mixed: '스크래치 섞임',
+    with_scratch: '스크래치 곁 건반',
+    scratch_run: '스크래치 연속',
+    ln_head: 'LN 시작',
+    ln_end: 'LN 끝',
+    ln_hold_hit: 'LN 누른 채 치기',
+    ln_release_then_hit: 'LN 뗀 뒤 치기',
+    soflan: '소프란',
+    dense: '고밀도',
+    mine_near: '지뢰 근처',
+} as const
+
+export type AiPatternTag = keyof typeof AI_PATTERN_TAG_LABEL
+
+export const isAiPatternTag = (tag: string): tag is AiPatternTag => tag in AI_PATTERN_TAG_LABEL
+
+export const aiPatternTagLabel = (tag: string) => (isAiPatternTag(tag) ? AI_PATTERN_TAG_LABEL[tag] : tag)
+
+/** Mirrors the server's AI_PRACTICE_LIMIT and AI_GOAL_LIMIT values the forms need (pinned by the contract test). */
+export const AI_SCORE_FEATURE_FORM_LIMIT = {
+    PRACTICE_NAME_PREFIX: 'AI 연습 · ',
+    PRACTICE_NAME_SUFFIX_MAX: 40,
+    GOAL_ACTIVE_MAX: 10,
+    GOAL_COUNT_MAX: 2000,
+    GOAL_EX_RATE_MAX: 100,
 } as const

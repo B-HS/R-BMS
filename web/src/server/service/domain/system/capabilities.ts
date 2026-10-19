@@ -19,6 +19,7 @@ export const SERVER_CAPABILITIES: ServerCapabilitiesOutput = {
     folders: true,
     accounts: true,
     lr2ir_compat: false,
+    traces: true,
 }
 
 export const getServerInfo = (env: Env = getEnv()): ServerInfoOutput => ({

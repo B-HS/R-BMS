@@ -23,7 +23,8 @@ const escapeLike = (value: string) => value.replace(LIKE_WILDCARDS, (character) 
 
 type RecordColumns = { clear: MySqlColumn; exScore: MySqlColumn; minbp: MySqlColumn; scratchAuto: MySqlColumn }
 
-const exScoreDenominator = () => sql`(case when ${score.maxExScore} > 0 then ${score.maxExScore} else ${score.notes} * ${EX_PER_PGREAT} end)`
+/** A play's maximum EX: the stored maximum, or notes × 2 when the row has none. */
+export const exScoreDenominator = () => sql`(case when ${score.maxExScore} > 0 then ${score.maxExScore} else ${score.notes} * ${EX_PER_PGREAT} end)`
 
 const compareNumber = (column: MySqlColumn, op: 'eq' | 'ne' | 'gte' | 'lte' | 'in', values: readonly (number | string)[]) => {
     const [first = 0] = values

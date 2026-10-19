@@ -11,6 +11,7 @@ export const serverCapabilitiesSchema = z.object({
     folders: z.boolean().default(false),
     accounts: z.boolean().default(false),
     lr2ir_compat: z.boolean().default(false),
+    traces: z.boolean().default(false),
 })
 
 export const serverInfoSchema = z.object({

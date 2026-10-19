@@ -23,6 +23,7 @@ describe('getServerInfo', () => {
             folders: true,
             accounts: true,
             lr2ir_compat: false,
+            traces: true,
         })
     })
 })

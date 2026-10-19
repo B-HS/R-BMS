@@ -17,6 +17,8 @@ import { toChartRow } from '@server/compose/chart-row'
 import { composeAdmin } from '@server/compose/admin'
 import { composeAi } from '@server/compose/ai'
 import { composeAiRecordQuery } from '@server/compose/ai-record-query'
+import { composeAiScoreFeatures } from '@server/compose/ai-score-features'
+import { composeChartPattern } from '@server/compose/chart-pattern'
 import { composeCourse } from '@server/compose/course'
 import { composeFe } from '@server/compose/fe'
 import { composeReplay } from '@server/compose/replay'
@@ -25,6 +27,7 @@ import { composeSetting } from '@server/compose/setting'
 import { composeFolder } from '@server/compose/folder'
 import { composeTable } from '@server/compose/table'
 import { composeTableSnapshot } from '@server/compose/table-snapshot'
+import { composeTrace } from '@server/compose/trace'
 import { chartBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
 import { toJudgeBreakdown, type JudgeColumns } from '@server/compose/judge-row'
 
@@ -349,6 +352,15 @@ const composeAll = () => {
     const { courseService } = composeCourse(db)
     const tableSnapshot = composeTableSnapshot(db)
     const ai = composeAi(db)
+    const folder = composeFolder(db, { tableSnapshotService: tableSnapshot.tableSnapshotService, lookupTableText: findSnapshotTextByMd5 })
+    const patterns = composeChartPattern(db, {
+        listCoverageTables: () =>
+            [...getSnapshotTables().values()].map((table) => ({
+                id: table.id,
+                name: table.header.name,
+                md5s: [...new Set(table.entries.map((entry) => entry.md5))],
+            })),
+    })
 
     return {
         chartService,
@@ -366,9 +378,19 @@ const composeAll = () => {
         }),
         ...composeTable(db, courseService),
         ...tableSnapshot,
-        ...composeFolder(db, { tableSnapshotService: tableSnapshot.tableSnapshotService, lookupTableText: findSnapshotTextByMd5 }),
+        ...folder,
         ...ai,
         ...composeAiRecordQuery(db, { aiFeatureRunner: ai.aiFeatureRunner, loadTables: getSnapshotTables }),
+        ...patterns,
+        ...composeTrace(db, { chartPatternService: patterns.chartPatternService }),
+        ...composeAiScoreFeatures(db, {
+            aiFeatureRunner: ai.aiFeatureRunner,
+            aiResultService: ai.aiResultService,
+            tableSnapshotService: tableSnapshot.tableSnapshotService,
+            chartPatternService: patterns.chartPatternService,
+            folderService: folder.folderService,
+            loadTables: getSnapshotTables,
+        }),
         resolveBuildTrust: (sha256: string | null) => resolveBuildTrust(buildAllowlist, sha256),
     }
 }

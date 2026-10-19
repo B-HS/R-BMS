@@ -35,6 +35,28 @@ export type AiFeatureRunOutput<TData> = {
     createdAt: number
 }
 
+type AiRunHashFields = Pick<
+    AiFeatureRunInput<z.ZodType>,
+    'digest' | 'system' | 'schemaName' | 'analysisVersion' | 'promptVersion' | 'maxOutputTokens' | 'effort'
+>
+
+/**
+ * The cache key of one run: everything that changes the provider's answer. A stored result whose `inputHash` equals this for its
+ * own provider and model was made from the same digest, prompt and schema, so a screen can tell a current result from a stale one.
+ */
+export const hashAiRunInput = (input: AiRunHashFields, target: { provider: AiProviderId; model: string }) =>
+    hashAiInput({
+        digest: input.digest,
+        system: input.system,
+        schemaName: input.schemaName,
+        analysisVersion: input.analysisVersion,
+        promptVersion: input.promptVersion,
+        maxOutputTokens: input.maxOutputTokens,
+        effort: input.effort ?? null,
+        provider: target.provider,
+        model: target.model,
+    })
+
 type AiFeatureRunnerDeps = {
     credentialService: Pick<AiCredentialService, 'list' | 'withApiKey' | 'markRejected'>
     usageService: Pick<AiUsageService, 'reserve' | 'record' | 'release'>
@@ -75,17 +97,7 @@ export const createAiFeatureRunner = (deps: AiFeatureRunnerDeps) => {
         const { provider, model } = credential
         if (!model) return { ok: false, reason: 'model_not_selected', provider } as const
 
-        const inputHash = hashAiInput({
-            digest: input.digest,
-            system: input.system,
-            schemaName: input.schemaName,
-            analysisVersion: input.analysisVersion,
-            promptVersion: input.promptVersion,
-            maxOutputTokens: input.maxOutputTokens,
-            effort: input.effort ?? null,
-            provider,
-            model,
-        })
+        const inputHash = hashAiRunInput(input, { provider, model })
         const resultKey = { userId, feature: input.feature, subjectKey: input.subjectKey }
         const cached = await deps.resultService.findCached({ ...resultKey, inputHash })
         const cachedOutput = cached ? input.schema.safeParse(cached.output) : null

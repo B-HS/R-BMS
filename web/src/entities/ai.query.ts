@@ -1,17 +1,28 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { QUERY_KEY } from '@shared/constants/query-key'
 import { buildApiUrl, fetchEnvelope, fetchNoContent } from '@shared/lib/fetch'
 import type {
     AiCredential,
+    AiGoal,
+    AiGoalParams,
+    AiGoalPlanView,
+    AiJudgeHabitView,
     AiModel,
     AiOperatorLimits,
     AiOperatorLimitsInput,
+    AiPracticeFolderCreateInput,
+    AiPracticeFolderResult,
+    AiPracticeFolderView,
+    AiPracticeSourceInput,
     AiProviderId,
+    AiRecommendView,
     AiRecordQueryAnswer,
     AiRecordQueryPlan,
     AiUsageSummary,
     AiUserSetting,
     AiUserSettingInput,
+    AiWeeklyView,
 } from '@entities/ai.type'
 
 const MODEL_LIST_STALE_TIME_MS = 300_000
@@ -169,3 +180,162 @@ export const useRunAiRecordQuery = () =>
                 body: JSON.stringify(plan),
             }),
     })
+
+const AI_DIGEST = {
+    RECOMMEND: 'recommend',
+    PRACTICE: 'practice',
+    GOAL_PLAN: 'goal_plan',
+    WEEKLY: 'weekly',
+    JUDGE_HABIT: 'judge_habit',
+} as const
+
+const AI_FEATURE_PATH = {
+    RECOMMEND: '/fe/me/ai/recommend',
+    PRACTICE: '/fe/me/ai/practice-folder',
+    GOALS: '/fe/me/ai/goals',
+    WEEKLY: '/fe/me/ai/weekly',
+    JUDGE_HABIT: '/fe/me/ai/judge-habit',
+} as const
+
+const goalPath = (goalId: string) => `${AI_FEATURE_PATH.GOALS}/${encodeURIComponent(goalId)}`
+
+export const aiRecommendQueryOptions = (tableId: string | null) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.RECOMMEND, { table: tableId }),
+        queryFn: () => fetchEnvelope<AiRecommendView>(buildApiUrl(AI_FEATURE_PATH.RECOMMEND, { table: tableId })),
+    })
+
+export const aiPracticeFolderQueryOptions = (source: AiPracticeSourceInput) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.PRACTICE, source),
+        queryFn: () => fetchEnvelope<AiPracticeFolderView>(buildApiUrl(AI_FEATURE_PATH.PRACTICE, source)),
+    })
+
+export const aiGoalListQueryOptions = () =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.GOALS,
+        queryFn: () => fetchEnvelope<AiGoal[]>(buildApiUrl(AI_FEATURE_PATH.GOALS)),
+    })
+
+export const aiGoalPlanQueryOptions = (goalId: string) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.GOAL_PLAN, { goalId }),
+        queryFn: () => fetchEnvelope<AiGoalPlanView>(buildApiUrl(`${goalPath(goalId)}/plan`)),
+    })
+
+export const aiWeeklyQueryOptions = (week: string | null) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.WEEKLY, { week }),
+        queryFn: () => fetchEnvelope<AiWeeklyView>(buildApiUrl(AI_FEATURE_PATH.WEEKLY, { week })),
+    })
+
+export const aiJudgeHabitQueryOptions = () =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.JUDGE_HABIT, {}),
+        queryFn: () => fetchEnvelope<AiJudgeHabitView>(buildApiUrl(AI_FEATURE_PATH.JUDGE_HABIT)),
+    })
+
+export const useAiRecommend = (tableId: string | null) => useQuery(aiRecommendQueryOptions(tableId))
+
+export const useAiPracticeFolder = (source: AiPracticeSourceInput) => useQuery(aiPracticeFolderQueryOptions(source))
+
+export const useAiGoalList = () => useQuery(aiGoalListQueryOptions())
+
+export const useAiGoalPlan = (goalId: string) => useQuery(aiGoalPlanQueryOptions(goalId))
+
+export const useAiWeekly = (week: string | null) => useQuery(aiWeeklyQueryOptions(week))
+
+export const useAiJudgeHabit = () => useQuery(aiJudgeHabitQueryOptions())
+
+/**
+ * One press of an "AI 해석 만들기" button: a single POST, then the usage and the feature's digest are read again so the stored
+ * answer shows. A failure is shown on the panel with its wait time and settings link, so the shared error toast is skipped.
+ */
+const useAiInterpretMutation = <TInput, TResult>(options: { path: (input: TInput) => string; feature: string }) => {
+    const queryClient = useQueryClient()
+    return useMutation({
+        meta: { suppressErrorToast: true },
+        mutationFn: (input: TInput) =>
+            fetchEnvelope<TResult>(buildApiUrl(options.path(input)), {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input ?? {}),
+            }),
+        onSettled: () =>
+            Promise.all([
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.USAGE }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.DIGEST_FEATURE(options.feature) }),
+            ]),
+    })
+}
+
+export const useInterpretAiRecommend = () =>
+    useAiInterpretMutation<{ table?: string }, NonNullable<AiRecommendView['ai']>>({
+        path: () => AI_FEATURE_PATH.RECOMMEND,
+        feature: AI_DIGEST.RECOMMEND,
+    })
+
+export const usePreviewAiPracticeFolder = () =>
+    useAiInterpretMutation<AiPracticeSourceInput, NonNullable<AiPracticeFolderView['ai']>>({
+        path: () => `${AI_FEATURE_PATH.PRACTICE}/preview`,
+        feature: AI_DIGEST.PRACTICE,
+    })
+
+export const useInterpretAiGoalPlan = () =>
+    useAiInterpretMutation<{ goalId: string }, NonNullable<AiGoalPlanView['ai']>>({
+        path: ({ goalId }) => `${goalPath(goalId)}/plan`,
+        feature: AI_DIGEST.GOAL_PLAN,
+    })
+
+export const useInterpretAiWeekly = () =>
+    useAiInterpretMutation<{ week?: string }, NonNullable<AiWeeklyView['ai']>>({
+        path: () => AI_FEATURE_PATH.WEEKLY,
+        feature: AI_DIGEST.WEEKLY,
+    })
+
+export const useInterpretAiJudgeHabit = () =>
+    useAiInterpretMutation<Record<string, never>, NonNullable<AiJudgeHabitView['ai']>>({
+        path: () => AI_FEATURE_PATH.JUDGE_HABIT,
+        feature: AI_DIGEST.JUDGE_HABIT,
+    })
+
+/** Makes (or, for the same preview, updates) the practice folder the user confirmed; it shows in the game's MY FOLDERS on the next refresh. */
+export const useCreateAiPracticeFolder = () => {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: (input: AiPracticeFolderCreateInput) =>
+            fetchEnvelope<AiPracticeFolderResult>(buildApiUrl(AI_FEATURE_PATH.PRACTICE), {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+        onSuccess: async (result) => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.FOLDER.ALL }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.DIGEST_FEATURE(AI_DIGEST.PRACTICE) }),
+            ])
+            toast.success(result.outcome === 'created' ? `연습 폴더 "${result.name}" 를 만들었습니다` : `연습 폴더 "${result.name}" 를 갱신했습니다`)
+        },
+    })
+}
+
+export const useCreateAiGoal = () => {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: (input: AiGoalParams) =>
+            fetchEnvelope<AiGoal>(buildApiUrl(AI_FEATURE_PATH.GOALS), { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(input) }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.GOALS }),
+    })
+}
+
+export const useArchiveAiGoal = () => {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: (goalId: string) => fetchNoContent(buildApiUrl(goalPath(goalId)), { method: 'DELETE' }),
+        onSuccess: () =>
+            Promise.all([
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.GOALS }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.DIGEST_FEATURE(AI_DIGEST.GOAL_PLAN), refetchType: 'none' }),
+            ]),
+    })
+}

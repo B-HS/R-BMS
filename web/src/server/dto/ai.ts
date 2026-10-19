@@ -248,3 +248,341 @@ export const aiRecordQueryAnswerSchema = z.object({
 export type AiRecordQueryIssue = z.infer<typeof aiRecordQueryIssueSchema>
 export type AiRecordQueryRowOutput = z.infer<typeof aiRecordQueryRowSchema>
 export type AiRecordQueryAnswerOutput = z.infer<typeof aiRecordQueryAnswerSchema>
+
+export const AI_INSIGHT_TONES = ['strength', 'weakness', 'neutral'] as const
+
+/** Text lengths the server keeps in AI output. A longer summary is cut; a longer item is dropped, never cut (plan 5.6). */
+export const AI_TEXT_LIMIT = {
+    SUMMARY_MAX_CHARS: 500,
+    REASON_MAX_CHARS: 300,
+    INSIGHT_TITLE_MAX_CHARS: 80,
+    INSIGHT_BODY_MAX_CHARS: 400,
+    KEY_MAX_CHARS: 128,
+} as const
+
+/** One claim of an AI answer; `key` points at the digest item it rests on, and a key that is not in the digest drops the claim. */
+export const aiInsightSchema = z.object({
+    key: z.string(),
+    title: z.string(),
+    body: z.string(),
+    tone: z.enum(AI_INSIGHT_TONES),
+})
+
+export type AiInsight = z.infer<typeof aiInsightSchema>
+
+/** A stored AI answer as a screen shows it: `is_current` is false once the digest, prompt or model it was made from changed. */
+export const aiInterpretationSchema = <TOutput extends z.ZodType>(output: TOutput) =>
+    z.object({
+        output,
+        cached: z.boolean(),
+        is_current: z.boolean(),
+        provider: aiProviderIdSchema,
+        model: z.string(),
+        usage: aiUsageSchema,
+        created_at: z.number().int(),
+    })
+
+export const aiDataNoticeSchema = z.object({ need: z.string() }).nullable()
+
+const TABLE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
+const MD5_PATTERN = /^[0-9a-f]{32}$/
+const TAG_PATTERN = /^[a-z0-9_]{1,32}$/
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const AI_GOAL_ID_PATTERN = /^aig_[0-9a-f]{30}$/
+
+const aiTableIdSchema = z.string().regex(TABLE_ID_PATTERN)
+const aiMd5Schema = z
+    .string()
+    .transform((value) => value.trim().toLowerCase())
+    .refine((value) => MD5_PATTERN.test(value))
+
+export const aiGoalIdSchema = z.string().regex(AI_GOAL_ID_PATTERN)
+
+export const aiTableQuerySchema = z.object({ table: aiTableIdSchema.optional() })
+
+export const aiChartCandidateSchema = z.object({
+    key: z.string(),
+    md5: z.string(),
+    title: z.string(),
+    artist: z.string(),
+    level: z.string(),
+    lamp: clearLampSchema,
+    ex_rate: z.number().nullable(),
+    bp: z.number().int().nullable(),
+    tags: z.array(z.object({ tag: z.string(), ratio: z.number() })),
+})
+
+export const AI_RECOMMEND_KINDS = ['failed', 'unplayed', 'lamp_up'] as const
+
+export const aiLevelProgressSchema = z.object({
+    key: z.string(),
+    level: z.string(),
+    charts: z.number().int(),
+    played: z.number().int(),
+    cleared: z.number().int(),
+    hard_or_better: z.number().int(),
+    clear_rate: z.number(),
+})
+
+export const aiRecommendOutputSchema = z.object({
+    summary: z.string(),
+    picks: z.array(z.object({ md5: z.string(), reason: z.string(), focus_key: z.string() })),
+})
+
+export const aiRecommendViewSchema = z.object({
+    table: z.object({ id: z.string(), name: z.string(), symbol: z.string() }),
+    frontier: aiLevelProgressSchema.nullable(),
+    levels: z.array(aiLevelProgressSchema),
+    candidates: z.array(aiChartCandidateSchema.extend({ kind: z.enum(AI_RECOMMEND_KINDS), score: z.number() })),
+    pattern_coverage: z.object({ with_features: z.number().int(), candidates: z.number().int(), stale_features: z.number().int() }),
+    notice: aiDataNoticeSchema,
+    ai: aiInterpretationSchema(aiRecommendOutputSchema).nullable(),
+})
+
+export type AiRecommendOutput = z.infer<typeof aiRecommendOutputSchema>
+export type AiRecommendView = z.infer<typeof aiRecommendViewSchema>
+export type AiChartCandidate = z.infer<typeof aiChartCandidateSchema>
+export type AiLevelProgress = z.infer<typeof aiLevelProgressSchema>
+
+export const AI_PRACTICE_SOURCES = ['recommend', 'tag', 'goal'] as const
+
+export const AI_PRACTICE_LIMIT = {
+    ITEMS_MAX: 30,
+    NAME_PREFIX: 'AI 연습 · ',
+    NAME_SUFFIX_MAX: 40,
+    MEMO_MAX: 100,
+    DESCRIPTION_MAX: 255,
+    WRITE_MAX_BYTES: 32 * 1024,
+} as const
+
+export const aiPracticeSourceSchema = z.object({
+    source: z.enum(AI_PRACTICE_SOURCES),
+    table: aiTableIdSchema.optional(),
+    tag: z.string().regex(TAG_PATTERN).optional(),
+    goal_id: aiGoalIdSchema.optional(),
+})
+
+export const aiPracticeFolderOutputSchema = z.object({
+    name_suffix: z.string(),
+    description: z.string(),
+    items: z.array(z.object({ md5: z.string(), memo: z.string() })),
+})
+
+export const aiPracticeFolderCreateSchema = aiPracticeSourceSchema.extend({
+    name_suffix: z.string().trim().min(1).max(AI_PRACTICE_LIMIT.NAME_SUFFIX_MAX),
+    description: z.string().trim().max(AI_PRACTICE_LIMIT.DESCRIPTION_MAX),
+    items: z
+        .array(z.object({ md5: aiMd5Schema, memo: z.string().trim().max(AI_PRACTICE_LIMIT.MEMO_MAX) }))
+        .min(1)
+        .max(AI_PRACTICE_LIMIT.ITEMS_MAX),
+})
+
+export const aiPracticeFolderViewSchema = z.object({
+    source: z.enum(AI_PRACTICE_SOURCES),
+    table_id: z.string(),
+    tag: z.string().nullable(),
+    goal_id: z.string().nullable(),
+    candidates: z.array(aiChartCandidateSchema),
+    folders: z.object({ used: z.number().int(), limit: z.number().int(), can_create: z.boolean() }),
+    notice: aiDataNoticeSchema,
+    ai: aiInterpretationSchema(aiPracticeFolderOutputSchema).nullable(),
+})
+
+export const aiPracticeFolderResultSchema = z.object({
+    outcome: z.enum(['created', 'updated']),
+    folder_id: z.string(),
+    name: z.string(),
+    item_count: z.number().int(),
+})
+
+export type AiPracticeSourceInput = z.infer<typeof aiPracticeSourceSchema>
+export type AiPracticeFolderOutput = z.infer<typeof aiPracticeFolderOutputSchema>
+export type AiPracticeFolderCreateInput = z.infer<typeof aiPracticeFolderCreateSchema>
+export type AiPracticeFolderView = z.infer<typeof aiPracticeFolderViewSchema>
+export type AiPracticeFolderResult = z.infer<typeof aiPracticeFolderResultSchema>
+
+export const AI_GOAL_KINDS = ['lamp_count_at_level', 'clear_all_level', 'ex_rate_on_chart'] as const
+export type AiGoalKind = (typeof AI_GOAL_KINDS)[number]
+
+export const AI_GOAL_LIMIT = {
+    ACTIVE_MAX: 10,
+    LEVEL_MAX_CHARS: 32,
+    COUNT_MAX: 2000,
+    EX_RATE_MAX_PERCENT: 100,
+    MAX_WEEKS: 8,
+    WRITE_MAX_BYTES: 4 * 1024,
+} as const
+
+const goalLevelSchema = z.string().trim().min(1).max(AI_GOAL_LIMIT.LEVEL_MAX_CHARS)
+
+export const aiGoalParamsSchema = z.discriminatedUnion('kind', [
+    z.object({
+        kind: z.literal('lamp_count_at_level'),
+        table: aiTableIdSchema,
+        level: goalLevelSchema,
+        lamp: clearLampSchema,
+        count: z.number().int().min(1).max(AI_GOAL_LIMIT.COUNT_MAX),
+    }),
+    z.object({ kind: z.literal('clear_all_level'), table: aiTableIdSchema, level: goalLevelSchema }),
+    z.object({
+        kind: z.literal('ex_rate_on_chart'),
+        table: aiTableIdSchema,
+        md5: aiMd5Schema,
+        ex_rate: z.number().positive().max(AI_GOAL_LIMIT.EX_RATE_MAX_PERCENT),
+    }),
+])
+
+export type AiGoalParams = z.infer<typeof aiGoalParamsSchema>
+
+export const aiGoalProgressSchema = z.object({
+    label: z.string(),
+    target: z.number(),
+    achieved: z.number(),
+    done: z.boolean(),
+    remaining: z.number().int(),
+    recent_updates: z.number().int(),
+})
+
+export const aiGoalSchema = z.object({
+    id: z.string(),
+    params: aiGoalParamsSchema,
+    created_at: z.number().int(),
+    progress: aiGoalProgressSchema.nullable(),
+})
+
+export const aiGoalPlanOutputSchema = z.object({
+    summary: z.string(),
+    steps: z.array(z.object({ week_index: z.number().int(), focus: z.string(), chart_md5s: z.array(z.string()), check_key: z.string() })),
+})
+
+export const aiGoalPlanViewSchema = z.object({
+    goal: aiGoalSchema,
+    remaining: z.array(aiChartCandidateSchema),
+    notice: aiDataNoticeSchema,
+    ai: aiInterpretationSchema(aiGoalPlanOutputSchema).nullable(),
+})
+
+export type AiGoalOutput = z.infer<typeof aiGoalSchema>
+export type AiGoalProgress = z.infer<typeof aiGoalProgressSchema>
+export type AiGoalPlanOutput = z.infer<typeof aiGoalPlanOutputSchema>
+export type AiGoalPlanView = z.infer<typeof aiGoalPlanViewSchema>
+
+export const aiWeekQuerySchema = z.object({ week: z.string().regex(ISO_DATE_PATTERN).optional() })
+
+export const aiWeeklyOutputSchema = z.object({
+    headline: z.string(),
+    highlights: z.array(aiInsightSchema),
+    next_week: z.string(),
+})
+
+const weeklyChartChangeSchema = z.object({
+    key: z.string(),
+    title: z.string(),
+    level: z.string().nullable(),
+    from_lamp: clearLampSchema,
+    to_lamp: clearLampSchema,
+    from_ex_rate: z.number().nullable(),
+    to_ex_rate: z.number().nullable(),
+    scratch_auto: z.boolean(),
+})
+
+const weeklyTotalsSchema = z.object({
+    plays: z.number().int(),
+    charts: z.number().int(),
+    active_days: z.number().int(),
+    first_plays: z.number().int(),
+    lamp_ups: z.number().int(),
+    new_clears: z.number().int(),
+    ex_ups: z.number().int(),
+    fast: z.number().int(),
+    slow: z.number().int(),
+    fast_share: z.number().nullable(),
+    mean_offset_ms: z.number().nullable(),
+})
+
+export const aiWeeklyViewSchema = z.object({
+    week: z.object({ start: z.string(), end: z.string(), in_progress: z.boolean() }),
+    totals: weeklyTotalsSchema,
+    previous: weeklyTotalsSchema,
+    lamp_changes: z.array(weeklyChartChangeSchema),
+    ex_changes: z.array(weeklyChartChangeSchema),
+    levels: z.array(z.object({ key: z.string(), level: z.string(), lamp_ups: z.number().int(), plays: z.number().int() })),
+    notice: aiDataNoticeSchema,
+    ai: aiInterpretationSchema(aiWeeklyOutputSchema).nullable(),
+})
+
+export type AiWeeklyOutput = z.infer<typeof aiWeeklyOutputSchema>
+export type AiWeeklyView = z.infer<typeof aiWeeklyViewSchema>
+
+export const AI_OFFSET_DIRECTIONS = ['earlier', 'later', 'keep'] as const
+export const AI_GREEN_DIRECTIONS = ['faster', 'slower', 'keep'] as const
+export const AI_EVIDENCE_GRADES = ['strong', 'uncertain', 'insufficient'] as const
+
+export const aiJudgeHabitOutputSchema = z.object({
+    summary: z.string(),
+    offset_direction: z.enum(AI_OFFSET_DIRECTIONS),
+    offset_reasoning: z.string(),
+    green_direction: z.enum(AI_GREEN_DIRECTIONS),
+    green_reasoning: z.string(),
+    notes: z.array(aiInsightSchema),
+})
+
+const greenEdgeSchema = z.object({ green: z.number().int(), lane_ms: z.number().int() })
+const greenNumberSchema = greenEdgeSchema.extend({ is_estimated: z.boolean() })
+
+export const aiJudgeHabitViewSchema = z.object({
+    plays: z.number().int(),
+    from: z.number().int().nullable(),
+    to: z.number().int().nullable(),
+    fast_slow: z.object({
+        fast: z.number().int(),
+        slow: z.number().int(),
+        fast_share: z.number().nullable(),
+        grade: z.enum(AI_EVIDENCE_GRADES),
+        leaning: z.enum(['fast', 'slow']).nullable(),
+        by_grade: z.array(z.object({ grade: z.enum(['great', 'good', 'bad']), early: z.number().int(), late: z.number().int() })),
+    }),
+    offset: z.object({
+        plays: z.number().int(),
+        notes: z.number().int(),
+        mean_offset_ms: z.number().nullable(),
+        grade: z.enum(AI_EVIDENCE_GRADES),
+        direction: z.enum(AI_OFFSET_DIRECTIONS),
+        suggested_shift_ms: z.number().int().nullable(),
+        auto_adjust_plays: z.number().int(),
+    }),
+    avgjudge: z.object({
+        plays: z.number().int(),
+        older_ms: z.number().nullable(),
+        newer_ms: z.number().nullable(),
+        change_ms: z.number().nullable(),
+        grade: z.enum(AI_EVIDENCE_GRADES),
+    }),
+    green: z.object({
+        plays: z.number().int(),
+        latest: greenNumberSchema.nullable(),
+        median: greenNumberSchema.nullable(),
+        constant_plays: z.number().int(),
+        buckets: z.array(
+            z.object({
+                key: z.string(),
+                from: greenEdgeSchema,
+                to: greenEdgeSchema,
+                plays: z.number().int(),
+                fast_share: z.number().nullable(),
+                ex_rate: z.number().nullable(),
+            }),
+        ),
+    }),
+    notice: aiDataNoticeSchema,
+    ai: aiInterpretationSchema(aiJudgeHabitOutputSchema).nullable(),
+})
+
+export type AiJudgeHabitOutput = z.infer<typeof aiJudgeHabitOutputSchema>
+export type AiJudgeHabitView = z.infer<typeof aiJudgeHabitViewSchema>
+
+/** The timing fields a score row's `extra` may carry (ADR 2026-10-15 avgjudge); anything else in it is ignored. */
+export const aiScoreTimingExtraSchema = z.object({
+    mean_offset_us: z.number().optional(),
+    rule_version: z.number().optional(),
+})

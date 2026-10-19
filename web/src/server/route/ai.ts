@@ -3,34 +3,49 @@ import { NextResponse, connection } from 'next/server'
 import { compose } from '@server/compose'
 import {
     AI_FAILURE_KIND,
+    AI_GOAL_LIMIT,
     AI_LIMIT,
+    AI_PRACTICE_LIMIT,
     AI_RECORD_QUERY_LIMIT,
     aiCredentialModelSchema,
     aiCredentialPutSchema,
+    aiGoalIdSchema,
+    aiGoalParamsSchema,
     aiOperatorLimitsPutSchema,
+    aiPracticeFolderCreateSchema,
+    aiPracticeSourceSchema,
     aiProviderParamSchema,
     aiRecordQueryAskSchema,
     aiRecordQueryRunSchema,
+    aiTableQuerySchema,
     aiUserSettingPutSchema,
+    aiWeekQuerySchema,
     type AiFailureKind,
 } from '@server/dto/ai'
+import { FOLDER_LIMIT } from '@server/dto/folder'
 import { successResponse } from '@server/lib/api-response'
 import type { AuthUser } from '@server/lib/auth-context'
 import { createAppError, isAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { summarizeError } from '@server/lib/error-summary'
-import { parseLimitedJsonBody } from '@server/lib/parse-request'
+import { parseLimitedJsonBody, parseSearchParams } from '@server/lib/parse-request'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { RATE_LIMIT, enforceUserRateLimit } from '@server/lib/with-rate-limit'
 import { withAdmin, withSession } from '@server/lib/with-session'
 import type { AiServiceFailure, AiServiceResult } from '@server/service/domain/ai/ai.type'
 import type { AiCredentialService } from '@server/service/domain/ai/credential.service'
+import type { AiGoalFailure, AiGoalService } from '@server/service/domain/ai/goal-plan.service'
+import type { AiJudgeHabitService } from '@server/service/domain/ai/judge-habit.service'
+import type { AiPracticeFolderService, AiPracticeSourceFailure } from '@server/service/domain/ai/practice-folder.service'
+import type { AiRecommendService } from '@server/service/domain/ai/recommend.service'
+import type { AiWeeklySummaryService } from '@server/service/domain/ai/weekly-summary.service'
 import type { AiRecordQueryService } from '@server/service/domain/ai/record-query.service'
 import type { AiSettingsService } from '@server/service/domain/ai/settings.service'
 import type { AiUsageService } from '@server/service/domain/ai/usage.service'
 import type { AuthService } from '@server/service/domain/auth/auth.service'
 import { AI_SCHEMA_UNSUPPORTED_ERROR_TYPE } from '@server/service/shared/ai-provider/http'
 import type { AiFailureDetail } from '@server/service/shared/ai-provider/types'
+import { unwrapFolderResult } from '@server/route/folder'
 
 export type AiRouteDeps = {
     authService: Pick<AuthService, 'resolveSessionUser'>
@@ -87,6 +102,7 @@ export const toAiAppError = (failure: AiServiceFailure) => {
     if (failure.reason === 'model_not_selected') return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'model', reason: failure.reason })
     if (failure.reason === 'usage_limit') return createAppError(ERROR_CODE.AI_USAGE_LIMIT, { reason: failure.limit })
     if (failure.reason === 'output_invalid') return createAppError(ERROR_CODE.AI_OUTPUT_INVALID, { reason: AI_FAILURE_KIND.INVALID_OUTPUT })
+    if (failure.reason === 'not_enough_data') return createAppError(ERROR_CODE.AI_NOT_ENOUGH_DATA, { reason: failure.reason, need: failure.need })
     return providerFailureError(failure.provider, failure.detail)
 }
 
@@ -248,5 +264,170 @@ export const createAiRecordQueryRoutes = (resolveDeps: () => AiRecordQueryRouteD
             const plan = await parseLimitedJsonBody(request, aiRecordQueryRunSchema, AI_RECORD_QUERY_LIMIT.WRITE_MAX_BYTES)
             return aiPrivateJson(successResponse(await deps.aiRecordQueryService.run({ userId: user.id, plan })))
         }),
+    }
+}
+
+export type AiScoreFeatureRouteDeps = SessionDeps & {
+    aiRecommendService: Pick<AiRecommendService, 'view' | 'interpret'>
+    aiPracticeFolderService: Pick<AiPracticeFolderService, 'view' | 'preview' | 'create'>
+    aiGoalService: Pick<AiGoalService, 'list' | 'create' | 'archive' | 'planView' | 'interpret'>
+    aiWeeklySummaryService: Pick<AiWeeklySummaryService, 'view' | 'interpret'>
+    aiJudgeHabitService: Pick<AiJudgeHabitService, 'view' | 'interpret'>
+}
+
+type GoalContext = { params: Promise<{ goalId: string }> }
+
+const CREATED_STATUS = 201
+
+const requireTable = <T>(value: T | null) => {
+    if (value === null) throw createAppError(ERROR_CODE.IR_TABLE_NOT_FOUND)
+    return value
+}
+
+const requireGoal = <T>(value: T | null) => {
+    if (value === null) throw createAppError(ERROR_CODE.NOT_FOUND, { reason: 'goal_not_found' })
+    return value
+}
+
+const requireWeek = <T>(value: T | null) => {
+    if (value === null) throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'week', reason: 'not_a_past_monday' })
+    return value
+}
+
+const parseGoalId = async (context: GoalContext) => {
+    const parsed = aiGoalIdSchema.safeParse((await context.params).goalId)
+    if (!parsed.success) throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'goalId' })
+    return parsed.data
+}
+
+const sourceFailureError = (failure: AiPracticeSourceFailure) => {
+    if (failure.reason === 'table_not_found') return createAppError(ERROR_CODE.IR_TABLE_NOT_FOUND)
+    if (failure.reason === 'goal_not_found') return createAppError(ERROR_CODE.NOT_FOUND, { reason: failure.reason })
+    return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: failure.field, reason: failure.reason })
+}
+
+const goalFailureError = (failure: AiGoalFailure) => {
+    if (failure.reason === 'table_not_found') return createAppError(ERROR_CODE.IR_TABLE_NOT_FOUND)
+    if (failure.reason === 'goal_not_found') return createAppError(ERROR_CODE.NOT_FOUND, { reason: failure.reason })
+    if (failure.reason === 'goal_limit')
+        return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'goal', reason: 'active_goal_limit', limit: failure.limit })
+    return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: failure.field, reason: failure.reason })
+}
+
+const isSourceFailure = (result: { ok: boolean; reason?: string }): result is { ok: false } & AiPracticeSourceFailure =>
+    !result.ok && (result.reason === 'table_not_found' || result.reason === 'goal_not_found' || result.reason === 'invalid_source')
+
+/**
+ * Features 4 (score-row part), 5, 6, 7 and 10. Each GET returns the deterministic digest with the latest stored AI answer and never
+ * calls a provider; each POST is the user's "AI 해석 만들기" press and calls the shared runner once (no automatic retry). Every
+ * response is private and read only for the session user.
+ */
+export const createAiScoreFeatureRoutes = (
+    resolveDeps: () => AiScoreFeatureRouteDeps = compose,
+    waitForRequest: () => Promise<void> = connection,
+) => {
+    const { withUser } = createAiRouteWrappers(resolveDeps, waitForRequest)
+
+    const withLimited = <TContext>(scope: string, handler: AiHandler<TContext, AiScoreFeatureRouteDeps>) =>
+        withUser<TContext>(async (request, context, user, deps) => {
+            enforceUserRateLimit(scope, user.id, RATE_LIMIT.TABLE_RECORDS)
+            return handler(request, context, user, deps)
+        })
+
+    const ok = (data: unknown, status = 200) => aiPrivateJson(successResponse(data), status)
+
+    return {
+        recommendView: withLimited<unknown>('ai-recommend', async (request, _context, user, deps) => {
+            const query = parseSearchParams(request, aiTableQuerySchema)
+            return ok(requireTable(await deps.aiRecommendService.view({ userId: user.id, tableId: query.table })))
+        }),
+
+        recommendInterpret: withLimited<unknown>('ai-recommend-run', async (request, _context, user, deps) => {
+            const input = await parseLimitedJsonBody(request, aiTableQuerySchema, AI_LIMIT.WRITE_MAX_BYTES)
+            return ok(unwrapAiResult(requireTable(await deps.aiRecommendService.interpret({ userId: user.id, tableId: input.table }))))
+        }),
+
+        practiceView: withLimited<unknown>('ai-practice', async (request, _context, user, deps) => {
+            const input = parseSearchParams(request, aiPracticeSourceSchema)
+            const result = await deps.aiPracticeFolderService.view({ userId: user.id, input })
+            if (!result.ok) throw sourceFailureError(result)
+            return ok(result.value)
+        }),
+
+        practicePreview: withLimited<unknown>('ai-practice-run', async (request, _context, user, deps) => {
+            const input = await parseLimitedJsonBody(request, aiPracticeSourceSchema, AI_LIMIT.WRITE_MAX_BYTES)
+            const result = await deps.aiPracticeFolderService.preview({ userId: user.id, input })
+            if (isSourceFailure(result)) throw sourceFailureError(result)
+            if (!result.ok && result.reason === 'folder_limit') {
+                throw createAppError(ERROR_CODE.IR_FOLDER_LIMIT_EXCEEDED, {
+                    scope: 'folders',
+                    limit: result.limit,
+                    current: result.used,
+                    requested: 1,
+                })
+            }
+            return ok(unwrapAiResult(result))
+        }),
+
+        practiceCreate: withUser<unknown>(async (request, _context, user, deps) => {
+            enforceUserRateLimit('folder-write', user.id, RATE_LIMIT.FOLDER_WRITE)
+            const input = await parseLimitedJsonBody(request, aiPracticeFolderCreateSchema, AI_PRACTICE_LIMIT.WRITE_MAX_BYTES)
+            const result = await deps.aiPracticeFolderService.create({ userId: user.id, input })
+            if (isSourceFailure(result)) throw sourceFailureError(result)
+            if (!result.ok && result.reason === 'no_items') {
+                throw createAppError(ERROR_CODE.VALIDATION_ERROR, {
+                    field: 'items',
+                    reason: 'no_candidate_items',
+                    limit: FOLDER_LIMIT.ITEMS_PER_REQUEST,
+                })
+            }
+            const value = unwrapFolderResult(result)
+            return ok(value, value.outcome === 'created' ? CREATED_STATUS : 200)
+        }),
+
+        goalList: withLimited<unknown>('ai-goal', async (_request, _context, user, deps) => ok(await deps.aiGoalService.list(user.id))),
+
+        goalCreate: withUser<unknown>(async (request, _context, user, deps) => {
+            enforceUserRateLimit('ai-setting-write', user.id, RATE_LIMIT.SETTING_WRITE)
+            const input = await parseLimitedJsonBody(request, aiGoalParamsSchema, AI_GOAL_LIMIT.WRITE_MAX_BYTES)
+            const result = await deps.aiGoalService.create({ userId: user.id, input })
+            if (!result.ok) throw goalFailureError(result)
+            return ok(result.value, CREATED_STATUS)
+        }),
+
+        goalArchive: withUser<GoalContext>(async (_request, context, user, deps) => {
+            enforceUserRateLimit('ai-setting-write', user.id, RATE_LIMIT.SETTING_WRITE)
+            const goalId = await parseGoalId(context)
+            if (!(await deps.aiGoalService.archive({ userId: user.id, goalId }))) throw goalFailureError({ reason: 'goal_not_found' })
+            return new NextResponse(null, { status: NO_CONTENT_STATUS, headers: AI_PRIVATE_HEADERS })
+        }),
+
+        goalPlanView: withLimited<GoalContext>('ai-goal', async (_request, context, user, deps) => {
+            const goalId = await parseGoalId(context)
+            return ok(requireGoal(await deps.aiGoalService.planView({ userId: user.id, goalId })))
+        }),
+
+        goalPlanInterpret: withLimited<GoalContext>('ai-goal-run', async (_request, context, user, deps) => {
+            const goalId = await parseGoalId(context)
+            return ok(unwrapAiResult(requireGoal(await deps.aiGoalService.interpret({ userId: user.id, goalId }))))
+        }),
+
+        weeklyView: withLimited<unknown>('ai-weekly', async (request, _context, user, deps) => {
+            const query = parseSearchParams(request, aiWeekQuerySchema)
+            return ok(requireWeek(await deps.aiWeeklySummaryService.view({ userId: user.id, week: query.week })))
+        }),
+
+        weeklyInterpret: withLimited<unknown>('ai-weekly-run', async (request, _context, user, deps) => {
+            const input = await parseLimitedJsonBody(request, aiWeekQuerySchema, AI_LIMIT.WRITE_MAX_BYTES)
+            return ok(unwrapAiResult(requireWeek(await deps.aiWeeklySummaryService.interpret({ userId: user.id, week: input.week }))))
+        }),
+
+        judgeHabitView: withLimited<unknown>('ai-judge-habit', async (_request, _context, user, deps) =>
+            ok(await deps.aiJudgeHabitService.view(user.id)),
+        ),
+
+        judgeHabitInterpret: withLimited<unknown>('ai-judge-habit-run', async (_request, _context, user, deps) =>
+            ok(unwrapAiResult(await deps.aiJudgeHabitService.interpret(user.id))),
+        ),
     }
 }

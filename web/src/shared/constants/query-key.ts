@@ -77,6 +77,10 @@ export const QUERY_KEY = {
         MODELS: (provider: string) => ['ai', 'models', provider],
         USAGE: ['ai', 'usage'],
         SETTINGS: ['ai', 'settings'],
+        DIGEST_ALL: ['ai', 'digest'],
+        DIGEST_FEATURE: (feature: string) => ['ai', 'digest', feature],
+        DIGEST: (feature: string, params: Record<string, unknown>) => ['ai', 'digest', feature, params],
+        GOALS: ['ai', 'goals'],
     },
     ADMIN: {
         ALL: ['admin'],

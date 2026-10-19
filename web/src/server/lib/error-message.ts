@@ -22,6 +22,8 @@ export const ERROR_MESSAGE: Record<ErrorCode, string> = {
     [ERROR_CODE.IR_ACCOUNT_EXISTS]: '이미 존재하는 계정입니다.',
     [ERROR_CODE.IR_PAYLOAD_TOO_LARGE]: '요청 본문이 허용 크기를 초과했습니다.',
     [ERROR_CODE.IR_API_VERSION_UNSUPPORTED]: '지원하지 않는 api_version 입니다.',
+    [ERROR_CODE.IR_CHART_PATTERN_INVALID]: '차트 패턴이 요청한 차트와 맞지 않습니다.',
+    [ERROR_CODE.IR_TRACE_MISMATCH]: '판별 기록이 연결한 점수 기록과 맞지 않습니다.',
     [ERROR_CODE.AI_CREDENTIAL_NOT_FOUND]: '등록된 AI 키가 없습니다. 설정에서 키를 등록해 주세요.',
     [ERROR_CODE.AI_CREDENTIAL_INVALID]: 'AI 키가 맞지 않거나 취소되었습니다. 설정에서 다시 등록해 주세요.',
     [ERROR_CODE.AI_PROVIDER_FORBIDDEN]: 'AI 공급자가 이 키의 요청을 막았습니다. 키 권한 또는 모델 접근을 확인하세요.',
@@ -34,4 +36,5 @@ export const ERROR_MESSAGE: Record<ErrorCode, string> = {
     [ERROR_CODE.AI_OUTPUT_TRUNCATED]: 'AI 출력이 상한에 닿아 잘렸습니다.',
     [ERROR_CODE.AI_OUTPUT_INVALID]: 'AI 출력의 형식이 올바르지 않아 해석을 만들지 못했습니다.',
     [ERROR_CODE.AI_USAGE_LIMIT]: 'AI 사용 한도에 닿았습니다.',
+    [ERROR_CODE.AI_NOT_ENOUGH_DATA]: '해석할 기록이 아직 모자랍니다. AI 를 부르지 않았습니다.',
 }

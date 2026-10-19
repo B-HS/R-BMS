@@ -1,6 +1,6 @@
 # rbms web — 아키텍처 설계 (W0)
 
-> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리
+> 최종 갱신 2026-10-20 · 대응 커밋 5df064c 이후 작업 트리(W3 곡별 패턴: §1-2·§1-4·§3·§4-4·§11, W2 점수 기반 AI 기능: §12)
 
 > **현재 구현 기준:** W0~W2 와 웨이브 17B(웹 골격·폴더·발광 표)·20(SCRATCH AUTO 순위), S18~S19(2026-10-14~15, 서버 수리·발광 표의 다른 사이트 흔적 제거·파비콘)까지 반영했습니다. 실제 라우트는 `web/src/app/{(app),(public),api,tables}/`, 서버 경계는 `web/src/server/`가 정본입니다. 본문에 남은 "착수 시", "향후", 가정은 설계 이력으로만 읽고, 이 상태 블록과 §9를 우선합니다. **운영 배포는 2026-10-14 에 끝났습니다**(https://bms.hyuns.uk, Vercel 프로젝트 `rbms-web`, 시험 계정 삭제). 운영 DB 에는 마이그레이션 0000~0004 가 모두 적용됐고(0003·0004 는 2026-10-15), 2026-10-15 관찰 시 운영 웹은 `51f3a1e` 입니다(`/api/version`). 배포 설정은 §6-2, 운영 DB 작업은 §3-2 가 정본입니다. 2026-10-14 점검에서 나온 고장 12건의 해소 현황은 [2026-10-14-audit.md](./2026-10-14-audit.md) 맨 위 표입니다.
 
@@ -82,6 +82,7 @@
 | GET | `/api/charts/[hash]/best` | `.../best/route.ts` | 없음 | `chart-best:{sha}` |
 | POST | `/api/charts/[hash]/replays` | `.../replays/route.ts` | Bearer | — |
 | GET | `/api/charts/[hash]/replays` | `.../replays/route.ts` | 없음 | `chart-replays:{sha}` |
+| POST | `/api/charts/[hash]/traces` | `.../traces/route.ts` | Bearer(점수의 주인만). 읽기 경로는 없다(§13) | — |
 | GET | `/api/replays/[replayId]` | `app/api/replays/[replayId]/route.ts` | 없음 | `replay:{id}` |
 | GET | `/api/players/[playerId]` | `app/api/players/[playerId]/route.ts` | 없음 | `player:{id}` |
 | GET/PUT | `/api/players/[playerId]/rivals` | `.../rivals/route.ts` | GET 없음 / PUT 세션·본인 | `player-rivals:{id}` |
@@ -96,6 +97,10 @@
 | GET/POST | `/api/tables` | `app/api/tables/route.ts` | GET 없음 / POST admin | `tables` |
 | GET | `/api/tables/[tableId]` | `.../[tableId]/route.ts` | 없음 | `table:{id}` |
 | GET/POST | `/api/admin/builds` | `app/api/admin/builds/route.ts` | admin 세션만(`withAdmin`). 릴리스 CI 는 아직 이 경로로 등록하지 않는다(KNOWN ISSUE) | `client-builds` |
+| PUT | `/api/admin/chart-patterns/[md5]` | `app/api/admin/chart-patterns/[md5]/route.ts` | 관리자 Bearer만(`withAdminBearer`). 세션은 받지 않는다 | 없음(`private, no-store`) |
+| GET | `/api/admin/chart-patterns/coverage` | `app/api/admin/chart-patterns/coverage/route.ts` | 관리자 Bearer만(`withAdminBearer`) | 없음(`private, no-store`) |
+| POST | `/api/admin/chart-patterns/recompute` | `app/api/admin/chart-patterns/recompute/route.ts` | 관리자 Bearer만(`withAdminBearer`) | 없음(`private, no-store`) |
+| GET | `/api/admin/traces/usage` | `app/api/admin/traces/usage/route.ts` | 관리자 Bearer만(`withAdminBearer`). 판별 trace 보관량 수치만(§13) | 없음(`private, no-store`) |
 
 **클라 호출 대조(contract-freeze A 전수)**: `/health` `/scores` `/charts/{md5}/ranking?limit=` `/charts/{md5}/best?player=` `/players/{id}` `/players/{id}/rivals` `/courses` `/charts/{md5}/replays` `/courses/{hash}/ranking?limit=` `/replays/{id}` `/players/{id}/settings/{name}`(GET/PUT) `/auth/register` `/auth/login` — 14개 전부 위 표에 존재. 누락 없음.
 
@@ -127,6 +132,7 @@
 | GET/POST | `/api/fe/tokens` | 내 API 토큰 목록 / 발급 | 세션 | 없음 |
 | DELETE | `/api/fe/tokens/[tokenId]` | 토큰 폐기 | 세션·본인 | — |
 | GET | `/api/fe/me/settings` | 내 설정 blob 키 목록 | 세션 | 없음 |
+| GET | `/api/fe/me/traces/usage` | 내 판별 trace 보관량과 경고 단계(`ok`·`near`·`over`, §13) | 세션 | 없음(`private, no-store`) |
 | GET | `/api/fe/tables` | 번들된 표 목록(요약) | 없음 | 정적(배포 단위) |
 | GET | `/api/fe/tables/[tableId]` | 표 머리(요약)·레벨별 곡 전체 | 없음 | 정적(배포 단위) |
 | GET | `/api/fe/tables/[tableId]/entries` | 표 안의 곡 검색(q·level·page·limit) | 없음 | 정적(배포 단위) |
@@ -155,6 +161,7 @@
 | 웹 FE | better-auth 세션 쿠키(HttpOnly·SameSite=Lax) | `withSession` HOF → `auth.api.getSession({ headers })` |
 | guest 제출 | 자격 없음 + `ALLOW_GUEST=true` | `POST /api/scores` 만 허용, 항상 `ranked=false` + `flags:["GUEST"]` |
 | admin | 세션 + `user.role='admin'` | `withAdmin` |
+| admin 스크립트(곡별 패턴 업로드) | `Authorization: Bearer <api_token>` + 토큰 사용자의 `user.role='admin'`. 역할은 요청마다 토큰 사용자 행에서 다시 읽으므로 역할을 빼면 같은 토큰이 바로 403 이다. 세션 쿠키만으로는 401 | `withAdminBearer`(`lib/with-admin-bearer.ts`), §11 |
 | 릴리스 CI(빌드 등록) | 미구현. `withAdmin` 이 세션만 받아 API 토큰으로는 등록할 수 없고 `release.yml` 도 호출하지 않는다 | `POST /api/admin/builds` |
 
 `GET /api/auth/me` 는 **Bearer 와 세션 둘 다** 수용한다(네이티브·FE 공용). 그 외 네이티브 경로는 Bearer, FE 경로는 세션.
@@ -251,7 +258,7 @@ Route Handler (app/api/**/route.ts)
 | 영역 | 소유 | 파일 |
 |---|---|---|
 | `user` · `session` · `account` · `verification` | **better-auth**(Drizzle adapter, `provider: 'mysql'`) | `npx @better-auth/cli generate` 산출 → `src/server/db/auth-schema.ts` |
-| 도메인 전부(`chart` `score` `chart_best` `replay` `api_token` `rival` `setting_blob` `course*` `difficulty_table` `table_*` `client_build` `submission_audit` `user_folder` `user_folder_item`) | **Drizzle 수기** | `src/server/db/schema.ts` (= `docs/backend/data-model.md` 그대로) |
+| 도메인 전부(`chart` `score` `chart_best` `replay` `api_token` `rival` `setting_blob` `course*` `difficulty_table` `table_*` `client_build` `submission_audit` `user_folder` `user_folder_item` `ai_*` `chart_pattern` `play_trace` `play_analysis`) | **Drizzle 수기** | `src/server/db/schema.ts` (= `docs/backend/data-model.md` 그대로) |
 
 - contract-freeze D-2 결정 유지. 도메인 FK 는 `user.id` 참조.
 - `user` 의 IR 확장 필드(`rank`·`rank_points`·`total_plays`·`allow_guest_merge`·`extra`)는 better-auth `user.additionalFields` 로 선언해 어댑터가 같은 테이블에 들고 있게 한다. **가정**: data-model.md 의 `user.id varchar(64)` = 로그인 id 를 그대로 better-auth PK 로 쓴다(better-auth 기본은 생성 id). 어긋나면 §7 오픈 질문 참조.
@@ -264,6 +271,7 @@ Route Handler (app/api/**/route.ts)
 - **`drizzle-kit push` 금지**(운영 DB 히스토리 유실). 로컬 실험도 generate/migrate 로 통일.
 - 현재 파일(`web/drizzle/`, `meta/_journal.json` 과 스냅샷 5개도 커밋): `0000_smooth_cerebro`(21 테이블) → `0001_user_folders`(`user_folder`, `user_folder_item` 과 FK 둘, 인덱스 셋) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 를 `scratch_auto` 포함으로, `chart_best_rank_idx` 재생성). **셋 모두 운영 DB 에 적용됐다(2026-10-14, `web-db.yml` 의 `migrate`).** 그 뒤 `0003_replay_user_quota`(`replay.user_id` 색인, S19) → `0004_course_score_judge_totals`(`course_score` 에 판정 합계 `pgreat`·`great`·`good`·`bad`·`poor`·`miss`, `fast`·`slow`·`combobreak`·`empty_poor`·`max_ex_score` 열 추가, 모두 `int DEFAULT 0 NOT NULL`, S19 2차 R2-ACC-3)가 있고 **둘 다 2026-10-15 에 운영에 적용됐다**(아래 순서대로. 0003 은 `web-db.yml` run 38627474716, 0004 는 run 38673724720. `__drizzle_migrations` 5행). 저널 `when`: 0000 = 1788220800000, 0001 = 1791947162271, 0002 = 1791970074354, 0003 = 1791999623784, 0004 = 1792027422523 (단조 증가).
 - **0003·0004 의 운영 적용 순서(푸시를 두 번에 나눈다. 2026-10-15 에 이 순서로 끝냈고, 다음 마이그레이션도 같은 순서를 쓴다)**: Production Branch 가 `dev` 라 `web/` 이 바뀐 푸시는 곧바로 배포되고, `web-db.yml` 의 `migrate` 는 `dev` 에 올라간 마이그레이션 파일을 읽는다. 그래서 마이그레이션 파일과 새 코드를 한 푸시에 담으면 migrate 가 끝날 때까지 새 코드가 없는 열을 읽어 코스 제출·코스 순위·코스 best 가 500 이 된다. 순서: ① 아직 `dev` 에 없는 마이그레이션 파일만(`web/drizzle/0004_course_score_judge_totals.sql`, `web/drizzle/meta/0004_snapshot.json`, `web/drizzle/meta/_journal.json`. 0003 은 이미 `dev` 에 있다) 담은 커밋을 먼저 `dev` 에 푸시한다. 이 배포는 옛 코드 그대로라(옛 코드는 새 열·색인을 읽지도 쓰지도 않는다) 안전하다 → ② `gh workflow run web-db.yml --ref dev -f action=status` 로 0003·0004 가 `would_run=yes` 인지 본다 → ③ `-f action=migrate`(0003 색인, 0004 열 추가. 둘 다 기존 행을 바꾸지 않는 추가뿐이고 0004 의 새 열은 기본값 0) → ④ 다시 `status` 가 최신인지 본다 → ⑤ 그 다음에 `web/src` 와 테스트를 담은 코드 커밋을 푸시한다. ①과 ⑤ 사이에 `web/src` 를 바꾼 커밋이 끼면 같은 문제가 생긴다.
+- **0007_chart_pattern(W3, 2026-10-20 생성, 운영 미적용)**: `chart_pattern` 표 하나와 `chart_pattern_sha256_idx` 색인을 더할 뿐 기존 표를 바꾸지 않는다. 저널 `when` = 1792423286917(0006 보다 큼). 운영 적용은 위와 같은 두 번 푸시 순서(마이그레이션 파일만 먼저 → `status` → `migrate` → `status` → 코드)를 따른다. 로컬 `mysql:8.4.11`(기본 `max_allowed_packet` 64 MiB)에서 0000~0007 적용과 7만 노트(약 2 MB JSON) 패턴의 저장·읽기를 확인했다(`tests/db/chart-pattern.test.ts`). 운영 DB 의 `max_allowed_packet` 은 아직 보지 못했다.
 - **저널 `when` 의 규칙**: 설치된 drizzle-orm 0.45.2 의 마이그레이터(`mysql-core/dialect.js` 의 `migrate`)는 `__drizzle_migrations` 에서 `created_at` 이 가장 큰 행 하나만 읽고, 저널 항목의 `when` 이 그 값보다 **큰** 항목만 실행한다(해시는 비교하지 않는다. `drizzle-kit migrate` 는 `drizzle-orm/mysql2/migrator` 를 그대로 부른다). 그래서 복원한 `0000` 의 `when` 은 운영에 적용된 값(2026-09-09 근처)보다 작은 **2026-09-01 00:00 UTC(`1788220800000`)** 로 두었다. 운영에서 `0000` 은 건너뛰고 `0001`(`when` = 생성 시각)만 실행된다. 새 마이그레이션은 `db:generate` 가 현재 시각으로 `when` 을 붙이므로 항상 더 크다.
 - **운영 DB 의 상태 확인**: `bun scripts/db-migration-status.ts`(환경 변수의 DB 로 접속, 읽기 전용 쿼리만. 해시 앞 8자·`created_at`·파일별 적용 여부·새 테이블의 존재만 출력하고 접속 정보와 자료는 출력하지 않는다). 종료 코드 0 = 최신, 1 = 할 일이 있음(마이그레이션 대기 또는 기준선 필요), 2 = 접속 실패.
 - **운영이 `push` 로 만들어져 `__drizzle_migrations` 가 없다면(기준선 절차)**: `db:migrate` 를 먼저 돌리면 `0000` 의 `CREATE TABLE` 이 "이미 있음" 으로 실패한다. 상태 스크립트가 이 경우를 알려 주면 ① `bun scripts/db-migration-status.ts --baseline-sql` 의 출력(`__drizzle_migrations` 테이블 생성과 `0000` 의 해시·`when` 한 행 삽입)을 DB 에 한 번 적용하고 ② 상태를 다시 확인한 뒤 ③ `bun run db:migrate` 를 돌린다. 이 절차는 로컬 MySQL 에서 `0000` 을 직접 적용해 만든 push 상태의 DB 로 확인했다.
@@ -308,16 +316,19 @@ Route Handler (app/api/**/route.ts)
 | `DELETE /api/auth/token/current` | 5/min/IP (로그인·가입과 다른 버킷) |
 | `PUT /api/players/[id]/settings/[name]` | 30/min/사용자 |
 | `POST /api/charts/[hash]/replays` | 10/min/사용자 |
+| `POST /api/charts/[hash]/traces` | 30/min/사용자(`TRACE_UPLOAD_RATE_LIMIT`. 클라이언트는 2.5초 간격, 분당 24건) |
 | `/api/fe/*` 공개 읽기, `/api/auth/get-session`·`sign-out` | 120/min/IP |
 | `POST /api/fe/auth/login` · `/register` | 5/min/IP (각각 `/api/auth/login`·`/api/auth/register` 와 같은 버킷) |
 | 폴더 편집(만들기·고치기·지우기·순서·곡 넣고 빼기) | 60/min/사용자 |
 | 폴더에 표 가져오기 | 10/min/사용자 |
 | 폴더 읽기(웹·클라이언트) | 120/min/사용자 |
 | 표의 내 기록 조회 | 30/min/사용자 |
+| 곡별 패턴 업로드(`PUT /api/admin/chart-patterns/[md5]`) | 1,200/min/관리자(`CHART_PATTERN_WRITE_RATE_LIMIT`). 업로드 스크립트가 요청 시작 간격을 `UPLOAD_REQUEST_INTERVAL_MS`(56 ms, 한도의 90%)로 벌려 7K 전체 7,903곡을 한 번에 올려도 넘지 않는다(§11-2) |
+| 곡별 패턴 일괄 재계산(`POST /api/admin/chart-patterns/recompute`) | 30/min/관리자(`CHART_PATTERN_RECOMPUTE_RATE_LIMIT`) |
 
 - 구현: `withRateLimit(scope, { limit, windowMs })`(IP 키)와 `enforceUserRateLimit(scope, userId, config)`(사용자 키), 값은 `RATE_LIMIT` 상수. **v1 은 인스턴스 로컬 고정 창 카운터(`Map`, 버킷 5,000개를 넘으면 만료된 것을 정리)** — Vercel 멀티 인스턴스에서는 best-effort. 정본 표는 [../backend/api-spec.md](../backend/api-spec.md) 10절. 로그인/가입을 DB 카운터로 보강하는 계획은 **구현하지 않았다**(KNOWN ISSUE: 가입·로그인 5/분도 인스턴스 로컬이라 Vercel 다중 인스턴스에서 한도가 인스턴스 수만큼 늘고 콜드스타트마다 초기화된다). 전역 정확성이 필요해지면 Upstash Redis 등 지속형 저장소나 Vercel Firewall 규칙을 도입한다(웹 2차 후보, 사용자 결정 필요).
 - IP 키(2026-10-14 웨이브 17B-2 리뷰): `getClientIp` 는 `X-Forwarded-For` 의 첫 값이다. Vercel 은 이 헤더를 덮어쓰고 바깥 IP 를 넘기지 않으므로(Vercel 문서 "Request headers", 스푸핑 방지) 운영에서는 클라이언트가 바꿀 수 없다. 다른 호스팅이나 Vercel 앞의 다른 프록시에서는 헤더를 바꿔 한도를 피할 수 있으므로(로컬에서 재현), 호스팅을 바꾸거나 지속형 한도로 옮길 때 신뢰하는 헤더를 하나로 고정한다.
-- 본문 크기: `POST /api/scores`·코스 제출·설정 PUT 256KB, `POST /api/charts` 64KB(`content-length` 헤더 + 실제 스트림 바이트 수 둘 다 검사, `parseLimitedJsonBody`), 리플레이 `REPLAY_MAX_BYTES`(기본 4MB) 초과 시 `413 IR_PAYLOAD_TOO_LARGE`.
+- 본문 크기: `POST /api/scores`·코스 제출·설정 PUT 256KB, `POST /api/charts` 64KB(`content-length` 헤더 + 실제 스트림 바이트 수 둘 다 검사, `parseLimitedJsonBody`), 리플레이 `REPLAY_MAX_BYTES`(기본 4MB), 곡별 패턴 `CHART_PATTERN_MAX_BYTES`(4 MiB, 측정한 가장 큰 7K 차트가 약 1.6 MB), 판별 trace `TRACE_MAX_BYTES`(2 MiB, 클라이언트 `TRACE_MAX_BYTES` 와 같다) 초과 시 `413 IR_PAYLOAD_TOO_LARGE`.
 
 ### 4-5. 보안 기본
 
@@ -554,3 +565,128 @@ CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(
 6. 레이트리밋 v1 = 인스턴스 로컬(best-effort).
 7. `POST /api/courses` = 코스 **결과 제출**(클라 계약 우선), 메타 업서트는 `/api/courses/meta`.
 8. (정정) `(app)` 인증 게이팅은 `proxy.ts`(쿠키 존재 확인)와 세그먼트 layout 의 `SessionGate`(서버 세션 확인) 두 겹으로 수행한다(§1-1).
+
+## 11. 곡별 차트 패턴과 결정론 분석 (W3, 2026-10-20)
+
+근거: [기획](../plan/2026-10-19-web-ai-features.md) 3.3·3.4·3.5·4절, [W0 ADR](../acknowledge/2026-10-19-adr-web-ai-decisions.md)(기획보다 우선: Q8 A, Q9 B 7K 전체, Q17 gzip).
+
+### 11-1. 저장과 접근
+
+| 항목 | 내용 |
+|---|---|
+| 형식 | `rbms-cli chart-pattern` 이 쓰는 `<md5>.json`(`apps/rbms-cli/src/chart_pattern/document.rs` 가 정본). Zod: `server/dto/chart-pattern.ts` `chartPatternDocumentSchema`. `format`·`version` 1·`mode` `BEAT_7K` 고정, 레인 0~6 = 건반 1~7, 7 = 스크래치, `kind` 0 일반·1 LN 머리·2 LN 끝·3 지뢰. `play_level` null(정수 레벨이 없는 헤더)·`total` 0 을 받는다. 네 열 길이가 같아야 하고 `(time_us, lane)` 오름차순(같은 쌍 반복은 허용), `tempo` 는 `t_us` 오름차순. 열 검사는 많은 노트가 틀려도 첫 위치 한 개만 보고한다(오류 본문이 커지지 않게). 상한: `time_us`·`t_us` 는 24시간(`CHART_PATTERN_MAX_TIME_US` = 86,400,000,000 µs)까지, 노트는 열마다 200,000개(`CHART_PATTERN_MAX_NOTES`, 측정한 가장 큰 곡이 약 64,000개)까지. 밀도 창 배열은 시각에 비례하므로 이 상한이 길이를 `MAX_DENSITY_WINDOWS`(86,401)로 묶는다 |
+| 범위 | 7K 전체(ADR Q9 B). 발광 표 밖 md5 도 받는다(기획 3.3 의 "표 밖 md5 400"은 폐지) |
+| 표 | `chart_pattern`(PK `md5`, `sha256` 색인, `mode`, `format_version`, `parser_version`, `playable_notes`, `note_count`, `content_hash`, `byte_size`, `data` mediumblob, `features` json, `features_version`, `uploaded_by`, `created_at`, `updated_at`). Drizzle 0.45 mysql-core 에 blob 열이 없어 `customType` 으로 `mediumblob` 을 선언했다(`db/schema.ts`) |
+| 압축 | `data` = 정규화한 JSON(Zod 가 돌려준 객체의 `JSON.stringify`, 스키마 순서·모르는 필드 제거) 의 gzip(`node:zlib`, `service/shared/storage/gzip-json.ts`). `byte_size` 는 압축 전 UTF-8 바이트, `content_hash` 는 압축 전 텍스트의 SHA-256 |
+| 멱등 | 같은 md5 + 같은 `parser_version` + 같은 `content_hash` → `unchanged`(200, 아무것도 바꾸지 않음. 단 `features_version` 이 낮으면 특징만 다시 계산). 그 밖의 차이(`parser_version` 이 다르거나, 같아도 내용이 다르면) → `replaced`(200, 행 전체와 특징을 다시 씀). 처음 → `created`(201). 동시에 처음 올린 같은 md5 는 `ER_DUP_ENTRY` 를 잡아 다시 비교하므로 한 건만 `created` 이다 |
+| 검증 실패 | 형식 오류 400 `VALIDATION_ERROR`(details.field 예 `notes.lane.0`), 경로 md5 와 본문 md5 가 다르면 400 `IR_CHART_PATTERN_INVALID` `{ field: "md5", reason: "md5_mismatch" }`, 4 MiB 초과 413 |
+| coverage | `GET /api/admin/chart-patterns/coverage` → `{ tables: [{ table_id, name, table_md5s, covered, missing: md5[] }], patterns_total, stale_features, analysis_version }`. 표는 `data/tables` 스냅샷(지금 `insane1` 1,035곡) |
+| 일괄 재계산 | `POST /api/admin/chart-patterns/recompute` 본문 `{ limit?, after? }`(`limit` 1~`CHART_PATTERN_RECOMPUTE_BATCH.MAX` 200, 기본 50 / `after` = 앞 배치가 끝난 md5, 처음은 생략·null) → `{ analysis_version, examined, recomputed, skipped: md5[], next_after, remaining }`. 분석 버전이 낮은 곡을 md5 순서로 `limit` 곡만 하나씩 다시 계산한다(가장 큰 곡도 약 60 ms). 읽을 수 없는 배치는 `skipped` 에 적고 그대로 둔다. `next_after` 가 null 이 될 때까지 받은 값을 `after` 로 넣어 부르면 끝나고, 못 읽는 곡이 있어도 같은 곡을 되풀이하지 않는다. 본문은 `{}` 도 된다 |
+| 읽기 경로 없음 | 노트 배치를 돌려주는 라우트가 없다. `chartPatternService.readPattern`·`readFeatures` 는 서버 분석 서비스 전용이고 라우트 의존 타입은 `Pick<ChartPatternService, 'upload' \| 'coverage' \| 'recomputeStale'>` 다. `tests/route/chart-pattern-admin.test.ts` 가 (1) 패턴 라우트 파일이 PUT·GET·POST 하나씩뿐임 (2) `chart_pattern` 표를 읽는 곳이 `compose/chart-pattern.ts` 하나뿐임 (3) 저장된 배치를 읽는 함수가 서비스·compose 밖에서 불리지 않음을 고정한다 |
+| 로그 | 패턴 라우트의 예상 밖 오류는 클래스 이름과 드라이버 코드만 남긴다(`route/admin.ts` `withSummarizedErrors`). DB 오류 메시지에는 바인딩 값(노트 배치)이 들어 있기 때문이다. AI 라우트의 `withSafeAiErrors`(`route/ai.ts`)와 같은 일을 하므로 하나로 합칠 후보다 |
+
+### 11-2. 업로드 스크립트
+
+`bun scripts/upload-chart-patterns.ts <패턴 폴더> [--server <주소>] [--token-env <이름>] [--dry-run]`(`web/` 에서 실행).
+
+- 폴더의 `<md5>.json` 만 이름 순서로 올린다. `_` 로 시작하는 파일(`_coverage.json`)과 다른 이름은 건너뛴다. 보내기 전에 서버와 같은 Zod 스키마로 검사하고, 파일 이름의 md5 와 본문 md5 가 다르면 보내지 않고 실패로 남긴다. `--dry-run` 은 검사만 한다.
+- 동시 요청은 `UPLOAD_CONCURRENCY`(4). 201 `created`, 200 `replaced`·`unchanged` 를 따로 세고, 실패 목록(md5, HTTP 상태, 오류 코드·필드·이유)과 요약을 출력한다. 실패가 있으면 종료 코드 1. 401·403 이 오면 나머지는 같은 이유로 실패하므로 멈춘다. 실패한 파일을 다시 보내는 재시도는 없다: 다시 돌리면 이미 올라간 것은 200 `unchanged` 라 빠진 것만 다시 올라간다.
+- 서버 한도(분당 1,200)를 지킨다. 워커 전체가 요청 시작 사이를 `UPLOAD_REQUEST_INTERVAL_MS`(= ceil(60,000 / (1,200 × `UPLOAD_RATE_SHARE` 0.9)) = 56 ms, 분당 약 1,071건) 이상 벌린다. 7,903곡이면 약 7.4분이다. 429 를 받으면 실패로 세지 않고 레이트리밋을 따른다: `Retry-After`(초 또는 HTTP 날짜, 없으면 서버 창 길이 `RATE_LIMIT_FALLBACK_PAUSE_MS` 60초, 한 번에 최대 `RATE_LIMIT_MAX_PAUSE_MS` 300초)만큼 모든 워커가 멈췄다가 같은 파일을 다시 보낸다. 요청이 날아가던 중에 같은 때 429 를 받은 워커들은 대기 한 번으로 센다. 요청이 한 번이라도 통과하면 연속 횟수를 0 으로 되돌리고, 통과 없이 `MAX_CONSECUTIVE_RATE_LIMIT_PAUSES`(5)번 기다린 뒤에도 429 이면 그 파일을 429 실패로 보고하고 나머지를 멈춘다(요약에 "속도 제한이 이어져 나머지를 멈춤").
+- 서버 기본값 `https://bms.hyuns.uk`. `--server` 는 https 이거나 이 컴퓨터의 http(`localhost`·`127.0.0.1`·`[::1]`)여야 한다(관리자 토큰이 평문으로 나가지 않게).
+- 토큰: 기본은 실행 중에 `security find-generic-password -a rbms-admin -s rbms-pattern-upload -w` 를 `Bun.spawn` 으로 불러 읽는다(stderr 는 버림). `--token-env NAME` 이면 그 환경변수. 값은 Authorization 헤더에만 쓰고 출력·로그·파일에 남기지 않는다.
+- 검증은 실제 서버·DB 없이 실제 라우트 핸들러와 메모리 표로 한다(`tests/scripts/upload-chart-patterns.test.ts`). 한도 준수와 429 대기는 실제 시간을 기다리지 않는 가상 시계(`tests/support/virtual-clock.ts`)로 7,903곡 업로드를 서버의 고정 창 카운터(`consumeRateLimit`)에 대어 보고, 429 가 한 번도 나지 않고 어떤 60초 창에서도 1,200건을 넘지 않음을 확인한다(`tests/scripts/upload-rate-limit.test.ts`). 운영 업로드는 배포·마이그레이션 뒤 메인이 한다.
+
+### 11-3. 결정론 분석 엔진(`service/domain/analysis/`, 순수 함수)
+
+DB·HTTP·시계를 모르고 같은 입력에 같은 출력을 낸다. 모든 임계값은 `analysis-constants.ts` 한 파일의 이름 있는 상수이고, 바꾸면 `ANALYSIS_VERSION`(지금 1)을 올린다. 저장된 특징의 버전이 낮으면 `readFeatures` 가 읽을 때 다시 계산해 저장하고, 같은 내용을 다시 올려도 특징만 다시 계산한다. 여러 곡을 읽는 `readFeaturesMany` 는 요청 한 번에 `CHART_PATTERN_READ_RECOMPUTE_MAX`(10)곡까지만 다시 계산하고(§12-4), 나머지는 관리자 일괄 재계산(§11-1 `recompute`)이 따라잡는다.
+
+| 파일 | 내용 |
+|---|---|
+| `pattern-tags.ts` | 기획 4.2 패턴 분류 v1 `classifyPattern`: 입력 노트마다 태그 목록(입력 순서). 태그 19개 `PATTERN_TAGS`. 밀도 창 배열(`densityWindowCounts`)은 `MAX_DENSITY_WINDOWS` 를 넘지 않고 24시간을 넘는 시각은 마지막 창에 센다(`densityWindowOf`). 간격은 뒤 노트 시각의 국소 16분(`15,000,000 / bpm` µs)의 배수로 재고 µs 반올림을 견디게 `GAP_TOLERANCE_RATIO`(1%)를 더한다. BPM 이 0 이하인 곳은 `init_bpm`, 그것도 0 이하면 `FALLBACK_BPM` |
+| `chart-features.ts` | 곡별 특징 `computeChartFeatures`(→ `chart_pattern.features`): 판정 노트 수, 태그별 노트 수·비율, 1초 창 밀도(최고·평균·후반 1/3 평균), 소프란 횟수·STOP 수·BPM 최소/최대 비, LN·스크래치 비율, 지뢰 수, 길이. `layout: "original"` 과 `layout_dependent_tags`(레인을 읽는 태그) 를 함께 담아 원본 배치(옵션 OFF) 기준임을 표시한다(기획 4.5) |
+| `play-metrics.ts` | 기획 4.3 판 지표 `computePlayMetrics`(W4 trace 가 넣을 입력 모양 `JudgedPlayNote`, `layout: "played"`): 전체·태그별·레인별·밀도 칸별 판정과 EX 비율, FAST/SLOW(등급별, `err_us >= 0` 이 빠름), 32 구간 BP(BD + POOR + 空POOR)·콤보 끊김, PG·GR 오차 평균·중앙값·표준편차·IQR·1ms 히스토그램(±150ms, 0 쪽으로 버림 = `TimingDistribution`), 앞·뒤 1/3 EX 비율 차(`fatigue`; 판정이 하나도 없는 구간 = 노트가 없거나 판이 거기까지 가지 못한 구간은 비율 0 이 아니라 null 이고 그러면 `delta` 도 null 이라 비교에서 빠진다). `findGaugeDrops`(4초 창 안 범위의 15% 이상 하락), `summarizeGaugeCurves`(게이지마다 끝값·클리어·바닥 닿음, 서버는 게이지 규칙을 계산하지 않는다. 클리어: 생존 게이지(최소 0·border 0 = HARD·EXHARD·HAZARD·CLASS 류, `gauge_tables.rs`)는 끝값이 0 보다 크면, 그 밖은 끝값이 border 이상이면. 곡선에 `failedAtMs`(trace 의 `failed_at_ms`)가 있으면 그것이 먼저라 실패), `describeGreenNumber`(점수 행의 레인 통과 ms 에서 GREEN = ms × 0.6 을 어림하고 ms 병기, `is_estimated: true`, ADR Q11)·`readTraceGreenNumber`(trace `speed.end` 의 `green`·`green_ms` 를 다시 계산하지 않고 그대로, `is_estimated: false`) |
+| `sample.ts` | 기획 4.4·4.6: 판 내부 잔차의 노트 가중 평균, 95% 윌슨 구간, 등급 `strong`·`uncertain`·`insufficient`(`MIN_TAG_NOTES` 300, `MIN_TAG_PLAYS` 5)과 `weakness`·`strength`, SCRATCH AUTO 판은 스크래치 태그 표본에서 빼고 `auto_plays` 로 센다, 오프셋 제안 표본(`MIN_TIMING_PLAYS` 10, `MIN_TIMING_NOTES` 2,000) |
+
+기획 4.2 문장을 코드로 옮기며 정한 해석(골든 테스트 `tests/service/analysis/pattern-tags.test.ts` 가 고정, 메인 확인 대상):
+
+1. 행·동시치기·트릴·계단·연타·연속 난타는 "치는 노트"(일반 노트와 LN 머리)로 만든다. 판정되는 CN·HCN 끝은 `ln_end` 와 시간 창 태그(`soflan`·`dense`·`mine_near`)만 받는다. 판정되지 않는 LN 끝과 지뢰는 태그가 없다. 곡별 패턴에서 LN 끝은 `declared_ln` 이 `cn`·`hcn` 일 때만 판정 노트로 센다(선언 없음은 기본 LN 으로 본다).
+2. `chord_k` 는 그 행의 건반 노트에만 붙는다. 같은 행의 스크래치는 `scratch_chord` 다.
+3. 연타(`jack`)는 같은 레인의 두 노트 사이에 다른 건반 행이 없을 때만 잇는다. 기획 문장 그대로("같은 레인 연속 간격")면 16분 트릴의 각 레인이 8분 연타로도 잡혀 트릴 곡이 연타 곡으로 보이기 때문이다. 동시치기 행이 같은 레인을 이어 받는 연타(코드 연타)는 잡힌다.
+4. 트릴·계단은 "건반 하나만 있는 행"이 이어질 때이고, 스크래치만 있는 행은 끼어도 끊지 않는다. 깨진 자리의 앞 행부터 새 트릴·계단이 시작될 수 있다(예: 1-2-3-4-3-2-1 은 계단 둘).
+5. 고밀도(`dense`)는 창의 수가 90 분위 이상이면서 중앙값보다 클 때다(`DENSE_BASELINE_PERCENTILE`). 90 분위만 쓰면 밀도가 고른 차트에서 모든 노트가 고밀도가 된다.
+6. `mine_near` 는 기획 문장대로 레인을 가리지 않는다(어느 레인의 지뢰든 ±16분).
+7. `ln_release_then_hit` 의 손은 기본 배정(`SP7_LANE_HANDS`: S·1·2·3 왼손, 4 공유, 5·6·7 오른손)이고 공유 레인은 양쪽과 같은 손으로 본다. 화면에는 "기본 손 배정 기준"이라고 적는다(기획 4.4).
+8. 소프란 구간은 BPM 이 직전 대비 1.25배 이상 바뀐 지점부터 2초, 100ms 이상 STOP 지점부터 STOP 길이 + 2초, `scroll ≠ 1` 인 동안이다. 0 이하 BPM 으로 바뀌면 값이 다르기만 해도 소프란이다.
+
+성능: 분류는 노트 수에 거의 비례한다(LN 은 누르는 중인 LN 만 들고 다니는 쓸기, 소프란 구간은 합친 뒤 이진 탐색). 이 때문에 분석 모듈 안의 지역 배열은 `push` 로 쌓는다(공통 컨벤션의 비파괴 연산 예외, 대용량 처리 사유). 7만 노트 패턴의 업로드·특징 계산·저장이 로컬 DB 통합 테스트에서 1초 안에 끝났다.
+
+## 12. 점수 기반 AI 기능 (W2, 2026-10-20)
+
+기획 [2026-10-19-web-ai-features.md](../plan/2026-10-19-web-ai-features.md) 5.4(점수 행 부분)·5.5·5.6·5.7·5.10. 모두 점수 행·발광 표 기록·곡별 특징(§11)만 읽고 판별 trace(W4)는 쓰지 않는다.
+
+### 12-1. 공통 흐름
+
+| 단계 | 어디 | 내용 |
+| --- | --- | --- |
+| 결정론 digest | `service/domain/ai/{recommend,practice-folder,goal-plan,weekly-summary,judge-habit}.service.ts`, 공통 `table-progress.ts`·`ai-digest.ts`, 상수 `score-feature.constants.ts` | 숫자는 서버가 계산한다. 항목마다 `key` 가 있고 AI 출력의 `key`·`focus_key`·`check_key` 는 digest 안의 키여야 한다(`collectDigestKeys`) |
+| 보기(GET) | `route/ai.ts` `createAiScoreFeatureRoutes` | digest 와 그 기능의 마지막 저장 결과(`readStoredInterpretation`)를 함께 준다. 공급자를 부르지 않는다. `is_current` 는 저장 결과의 `input_hash` 가 지금 digest·프롬프트·스키마와 그 결과의 공급자·모델로 다시 계산한 값과 같은지다(`hashAiRunInput`, `feature-runner.service.ts`) |
+| AI 해석(POST) | 같은 라우트 | 사용자가 버튼을 누를 때만. W1 `aiFeatureRunner.run` 한 번(한도·캐시·사용량·자동 재시도 없음). 표본이 모자라면 부르지 않고 422 `AI_NOT_ENOUGH_DATA` + `details.need` |
+| 출력 검증 | 기능별 `refine*Output` | 후보 밖 md5·모르는 키·한 줄에 안 맞는 항목은 버린다(자르지 않는다). 요약 문장만 자른다. 남는 항목이 없으면 `AI_OUTPUT_INVALID` |
+| 주입 방어 | 프롬프트 공통 문장 `DIGEST_IS_DATA_RULE`·`DIGEST_KEY_RULE` | 곡 제목·아티스트는 digest JSON 의 문자열로만 들어간다. 화면은 React 기본 이스케이프로만 그린다 |
+
+응답 헤더는 성공 응답 모두 `Cache-Control: private, no-store`(W1 `aiPrivateJson`). 오류 응답은 W1 과 같이 `withErrorHandling` 이 만든다.
+
+### 12-2. 기능별 결정
+
+| 기능 | 경로 | 결정론 | 캐시 주제(`subject_key`) |
+| --- | --- | --- | --- |
+| 5 다음 도전 곡 | `GET/POST /api/fe/me/ai/recommend` (`table`) | 경계 레벨 = 클리어 비율 0.5 이상인 가장 높은 레벨의 다음(없으면 첫 레벨, 전부면 마지막). 후보 = 경계 ±1 레벨의 실패·미플레이·HARD 아래 클리어, 점수 = 종류 가중(실패 3·미플레이 2·램프 갱신 1) − 1.5 × 레벨 거리 + 실패 판의 EX 비율. 상위 40곡, 곡별 패턴이 있으면 상위 태그 3개(원본 배치) | `table:<id>` |
+| 6 AI 연습 폴더 | `GET /practice-folder`(`source`=recommend·tag·goal), `POST /practice-folder/preview`(AI), `POST /practice-folder`(만들기) | 후보 최대 60곡(추천 순위, 태그 비율 0.1 이상 경계 −2~+1 레벨, 목표의 남은 곡). 폴더 50개면 미리보기도 하지 않는다 | `src:<source>:<table 또는 goal>:<tag>` |
+| 7 목표 계획 | `GET/POST /goals`, `DELETE /goals/[goalId]`(보관), `GET/POST /goals/[goalId]/plan` | 목표 종류는 `lamp_count_at_level`·`clear_all_level`·`ex_rate_on_chart` 셋(자유 문장 없음, `tag_residual` 은 trace 가 있는 W5 에서). 진행도·남은 곡(가까운 순)·최근 28일 갱신 곡 수. 활성 목표 10개 | `goal:<id>` |
+| 10 주간 요약 | `GET/POST /weekly` (`week`=월요일 `YYYY-MM-DD`, UTC) | ISO 주 [월 00:00 UTC, 다음 월 00:00). 그 주 전 최고(같은 SCRATCH AUTO 여부)와 비교한 램프 갱신·첫 클리어·EX 갱신·처음 친 곡, FAST/SLOW, 규칙 세대 4 판의 치우침, 앞 주 값. 열 때만 만든다(자동 생성 없음) | `week:<월요일>` |
+| 4 판정 습관(점수 행) | `GET/POST /judge-habit` | 최근 100판(오토플레이 제외). FAST 비율의 윌슨 95% 구간, 등급별 빠름/늦음, `extra.mean_offset_us`(세대 4, AUTO ADJUST 판 제외) 가중 평균, 오프셋 제안(10판·PG+GR 2,000노트·FAST 비율 strong·같은 쪽일 때만, 빠르면 내리고 늦으면 올림), avgjudge 앞·뒤 절반, 녹색 숫자 GREEN + ms 병기(점수 행만 있으면 레인 ms × 0.6 을 어림한 값이라 `is_estimated: true` 이고 화면에 "추정", 판에 trace 의 green 값(`traceGreen`)이 있으면 그 값을 그대로 쓰고 추정이 아니다. 가운데값은 하나라도 추정이면 추정), 50 단위 칸 | `recent` |
+
+연습 폴더 만들기: 이름 `AI 연습 · <이름>`, 겹치면 끝에 오늘 날짜(UTC). 같은 미리보기(출처·이름·설명·곡과 메모의 해시)로 다시 누르면 `ai_practice_folder` 연결로 같은 폴더의 곡을 바꾼다. 곡은 그때 다시 계산한 후보 안에서만 남는다. 폴더가 지워지면 연결 행도 FK cascade 로 지워진다. 같은 미리보기를 동시에 누르는 경합: 폴더를 만든 직후 PK `(user_id, preview_hash)` 로 연결을 잡고(`claimLink`, `ER_DUP_ENTRY` 를 잡아 먼저 잡은 폴더 id 를 돌려준다), 진 요청은 자기가 만든 폴더를 지우고 이긴 폴더의 곡을 바꾼다(`updated`). 진 요청이 폴더 한도·이름 겹침으로 폴더를 못 만들었을 때도 연결을 다시 읽어 이긴 폴더를 갱신한다. 연결을 곡 채우기보다 먼저 잡으므로 곡 채우기가 실패해도 다시 누르면 같은 폴더를 채운다. 새 폴더는 잠깐(수 ms) 둘이 보일 수 있다.
+
+### 12-3. 표(마이그레이션 0008_ai_goal, 추가만)
+
+- `ai_goal`(PK `id` `aig_…`; `user_id` FK cascade, `kind`, `params` json(종류를 뺀 나머지), `created_at`, `archived_at`; 색인 `(user_id, archived_at)`)
+- `ai_practice_folder`(PK `(user_id, preview_hash)`; `folder_id` FK `user_folder.id` cascade, `created_at`)
+
+운영 적용은 §3-2 의 두 번 푸시 순서를 따른다.
+
+### 12-4. 곡별 특징 읽기
+
+`chartPatternService.readFeaturesMany(md5s)`(§11 서비스에 추가)가 배치 없이 저장된 특징만 읽는다. GET 한 번이 분석 버전이 낮은 특징을 한꺼번에 다시 계산하지 않도록, 요청한 순서로 앞에서부터 `CHART_PATTERN_READ_RECOMPUTE_MAX`(10)곡만 `readFeatures` 로 다시 계산해 저장하고 나머지는 옛 특징을 그대로 쓰며 `isStale: true` 로 돌려준다(옛 특징이 태그 비율로 읽히지 않으면 그 곡은 뺀다). 태그 불러오기(`createChartTagLoader`)는 `{ shares, staleMd5s }` 를 돌려주고, 다음 도전 곡 보기는 `pattern_coverage.stale_features` 로 옛 특징을 쓴 후보 수를 알리며 화면이 "옛 분석 버전 N곡"을 적는다. 남은 곡은 관리자 일괄 재계산(§11-1)으로 따라잡는다. `chart_pattern` 표를 읽는 compose 는 여전히 `compose/chart-pattern.ts` 하나다.
+
+### 12-5. 화면
+
+`/ai` 허브는 탭(`?tab=query|recommend|goals|weekly|habit`, `widgets/ai/ai-hub-tabs.tsx`)이다. 기록 질문만 키 게이트 안에 있고, 나머지 탭은 키가 없어도 결정론 숫자를 보이며 AI 버튼을 누르면 실패 안내(설정 링크)를 보인다. 공통 조각은 `features/ai/{ai-interpret-section,ai-interpretation-meta,ai-insight-list,ai-data-notice,ai-chart-candidate-list,ai-goal-form}.tsx`, 쿼리는 `entities/ai.query.ts`(`QUERY_KEY.AI.DIGEST(feature, params)`, `QUERY_KEY.AI.GOALS`; AI 호출 뒤 그 기능의 digest 와 사용량을 무효화).
+
+## 13. 판별 trace 와 판별 분석 (W4 웹, 2026-10-20)
+
+근거: [기획](../plan/2026-10-19-web-ai-features.md) 3.1·3.2·3.4·3.5·4.4·4.5·8절 W4 행, [W0 ADR](../acknowledge/2026-10-19-adr-web-ai-decisions.md)(Q3 본인만, Q6 게이지 9개, Q17 gzip·거절 없는 보관 상한, 구현 중 메인 결정의 9키 규칙). 형식의 정본은 Rust 구현(`crates/rbms-ir/src/dto/trace.rs` `PlayTrace`, `apps/rbms-player/src/play_trace.rs`)과 계약 파일 `contract/client-requests/trace-{normal,random,scratch-auto,abandoned}.json` 이다.
+
+### 13-1. 업로드 `POST /api/charts/[hash]/traces`
+
+| 항목 | 내용 |
+|---|---|
+| 능력 플래그 | `GET /api/health` 의 `capabilities.traces: true`. 클라이언트는 이 값이 참일 때만 보낸다(`record_sync.rs` `takes_traces`) |
+| 순서 | 본문 크기(2 MiB, `content-length` 와 실제 스트림) → Bearer 유무 → 토큰 사용자 → 30/min/사용자 → 경로 해시 꼴(md5·sha256 아니면 404 `IR_CHART_NOT_FOUND`) → Zod(`server/dto/trace.ts` `traceUploadSchema`) → 서비스 |
+| 형식 검사 | `format` `"rbms-trace"`·`version` 1, `score_id` 필수, `chart.sha256` 64자 16진(`md5` 는 32자 또는 빈 값), 노트 다섯 열·空POOR 두 열의 길이가 같음, `time_us` 0~24시간, `lane` 0~63, `kind` 0~3, `state` 0~5, 정수 칸은 안전한 정수, 속도 변경·tempo 각 4,096개 이하(`TRACE_MAX_SPEED_CHANGES`·`TRACE_MAX_TEMPO_POINTS`, 클라이언트 상한과 같다), `speed.changes[].field` 는 `TRACE_SPEED_FIELDS` 아홉 이름. 노트 순서는 강제하지 않고 분석이 정렬한다 |
+| 소유 | `score_id` 의 점수 행이 토큰 사용자의 것이어야 한다. 남의 점수와 없는 점수는 똑같이 404 `IR_SCORE_NOT_FOUND`(`details.field: "score_id"`) |
+| 멱등 | 점수 하나에 trace 하나(`play_trace.score_id` 고유). 이미 있으면 본문과 관계없이 그 id 를 200 으로 돌려준다. 동시에 들어온 같은 점수는 `ER_DUP_ENTRY` 를 잡아 이긴 쪽 id 를 200 으로 돌려준다 |
+| 일관성 검사 | 서버는 재판정하지 않고 점수 행과 허용 오차 없이 맞춘다(`service/domain/trace/trace-check.ts` `findTraceMismatch`). ① `chart.sha256` = 점수의 `chart_sha256`, 경로 해시 = 점수의 sha256 또는 md5(점수에 md5 가 없으면 본문 md5) ② state 1~5 개수 = `pgreat`·`great`·`good`·`bad`·`poor` ③ state 1~4 의 `err_us >= 0` 개수와 `< 0` 개수 = `epg/lpg`…`ebd/lbd` ④ `empty_poors` 개수 = `empty_poor`. POOR 쪽: `failed_at_ms` 가 null 인 판(끝까지 친 판, Esc·종료로 남긴 판)은 도달하지 못한 판정 객체(state 0, 일반 LN 끝 kind 2 제외)를 POOR 로 더한다(`PlaySummary::left_unfinished` 와 같음, `trace-abandoned.json` 이 고정). 게이지가 빈 판(`failed_at_ms` 숫자)은 더하지 않는다(점수가 판정된 노트만 센다). 9키(`POPN_9K`, `badTakesNote` 가 false 인 모드)는 BAD·POOR·`ebd`·`lbd` 를 비교하지 않는다. 어긋나면 400 `IR_TRACE_MISMATCH` `{ field: "judge.poor" 등, reason: "score 25, trace 0" }` |
+| 저장 | `play_trace`: 정규화한 JSON(Zod 결과의 `JSON.stringify`)의 gzip 을 `data` mediumblob 에, `byte_size`(압축 전 바이트)·`stored_size`(압축 뒤)·`note_count`·`format_version`·점수의 `played_at`·`chart_sha256`·`chart_md5`. 6만 노트 trace(약 1.4 MB)를 Docker MySQL 8.4.11 에 저장·재분석하는 DB 테스트가 있다 |
+| 응답 | 201 `{ id: "tr_…", analysis: "stored" \| "pending", storage }`, 중복 200 `{ id, storage }`. 클라이언트는 `id` 만 읽는다(`TraceUploadResponse`) |
+| 보관 상한 | ADR Q17: 사용자당 5,000판·512 MiB(`TRACE_USER_QUOTA`, 바이트는 압축 전 `byte_size` 합). **넘어도 거절하지 않는다.** `storage = { traces, bytes, limit_traces, limit_bytes, level }`, `level` 은 어느 한쪽이 90%(`NEAR_RATIO`) 이상이면 `near`, 넘으면 `over`. 같은 값을 `GET /api/fe/me/traces/usage`(세션)가 화면 경고용으로 돌려주고, `GET /api/admin/traces/usage`(관리자 Bearer)가 `{ limits, totals: { users, traces, bytes, stored_bytes }, accounts_near, accounts_over, top: [{ login_id, traces, bytes, stored_bytes, level }](바이트 상위 20), analysis: { analysis_version, missing, stale } }` 를 돌려준다 |
+| 읽기 경로 없음 | trace 를 돌려주는 라우트가 없다(Q3: 본인만, 화면은 분석만). `tests/route/trace.test.ts` 가 trace 라우트 파일이 POST 하나·GET 둘뿐임, `play_trace`·`play_analysis` 표를 쓰는 곳이 `compose/trace.ts` 뿐임, 저장된 trace 를 푸는 함수(`findStoredTrace`·`readAnalysis`)를 부르는 곳이 compose 와 서비스뿐임을 고정한다 |
+
+### 13-2. 판별 분석 `play_analysis`
+
+업로드가 저장한 직후 같은 요청에서 계산한다(`service/domain/trace/trace-analysis.ts` `analyzeTrace`, 순수 함수). 분석이 실패해도 trace 는 저장되고 응답은 `analysis: "pending"` 이며 오류는 클래스 이름과 드라이버 코드만 로그에 남긴다. `traceService.readAnalysis({ traceId, userId })` 는 본인 trace 만 읽고, 분석이 없거나 `analysis_version` 이 낮으면 저장된 trace 에서 다시 계산해 저장한다(W5 화면이 쓸 입구, 아직 라우트 없음).
+
+- 표: `play_analysis`(PK `trace_id` FK `play_trace.id` cascade, `analysis_version`, `summary` json, `pattern_join` `matched`·`mismatch`·`absent`, `pattern_md5`, `computed_at`). `play_trace` 는 `user_id` FK cascade(사용자를 지우면 trace 와 분석이 같이 지워진다), 색인 `(user_id, played_at)`·`(chart_sha256, user_id)`. 마이그레이션 `0009_play_trace`(추가만).
+- `summary`: `analysis_version`, `format_version`, `mode`, `random`, `lntype`, `scratch_auto`(자동 레인이 있었나), `run_end`(`finished`·`gauge_empty`·`left`), `metrics`(BEAT_7K 만 `computePlayMetrics`: 판정·태그·레인·밀도·구간 32개·FAST/SLOW·오차 분포·피로, 레이아웃은 플레이어가 본 배치 `played`. 도달하지 못한 노트는 넣지 않는다. 다른 모드는 null), `gauge`(`selected`, `interval_ms`, `failed_at_ms`, 친 게이지의 `drops`, 9개 게이지 각각의 끝값·클리어·바닥 닿음 — 친 게이지에만 `failed_at_ms` 를 준다), `speed`(시작·끝 GREEN 과 레인 시간 — trace 값을 그대로 써서 `is_estimated: false`, 변경 횟수와 바뀐 칸 이름), `pattern`(`join`, `md5`).
+- 패턴 정합(기획 3.4, 거절하지 않음): trace 의 `chart.md5` 로 곡별 패턴을 읽고(`chartPatternService.readPattern`, 서버 안에서만), 패턴의 sha256 이 점수의 sha256 과 같고 trace 의 모든 객체 시각 다중집합이 패턴의 지뢰를 뺀 노트 시각 다중집합(SCRATCH AUTO 레인 `auto_lanes` 의 원본 노트 제외)과 같으면 `matched` 이고 `pattern_md5` 를 남긴다. 다르면 `mismatch`(특징을 잇지 않음), 패턴이 없으면 `absent`. 옵션은 시각을 바꾸지 않으므로 RANDOM 판도 맞는다. LN 끝은 양쪽에 다 있어 LN 종류와 무관하다.
+- 업로드 뒤에 패턴이 올라온 판은 `absent` 로 남는다(분석 버전을 올리거나 다시 계산할 때 바뀐다).
