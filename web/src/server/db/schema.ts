@@ -573,3 +573,43 @@ export const aiPracticeFolder = mysqlTable(
     },
     (table) => [primaryKey({ columns: [table.userId, table.previewHash] })],
 )
+
+export const playTrace = mysqlTable(
+    'play_trace',
+    {
+        id: varchar('id', { length: 36 }).primaryKey(),
+        scoreId: varchar('score_id', { length: 36 }).notNull(),
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        chartSha256: char('chart_sha256', { length: 64 }).notNull(),
+        chartMd5: char('chart_md5', { length: 32 }),
+        playedAt: bigint('played_at', { mode: 'number' }).notNull(),
+        formatVersion: int('format_version').notNull(),
+        noteCount: int('note_count').default(0).notNull(),
+        byteSize: int('byte_size').default(0).notNull(),
+        storedSize: int('stored_size').default(0).notNull(),
+        data: mediumBlob('data').notNull(),
+        createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    },
+    (table) => [
+        uniqueIndex('play_trace_score_uniq').on(table.scoreId),
+        index('play_trace_user_played_idx').on(table.userId, table.playedAt),
+        index('play_trace_chart_user_idx').on(table.chartSha256, table.userId),
+    ],
+)
+
+export const playAnalysis = mysqlTable(
+    'play_analysis',
+    {
+        traceId: varchar('trace_id', { length: 36 })
+            .primaryKey()
+            .references(() => playTrace.id, { onDelete: 'cascade' }),
+        analysisVersion: int('analysis_version').notNull(),
+        summary: json('summary').notNull(),
+        patternJoin: varchar('pattern_join', { length: 16 }).notNull(),
+        patternMd5: char('pattern_md5', { length: 32 }),
+        computedAt: bigint('computed_at', { mode: 'number' }).notNull(),
+    },
+    (table) => [index('play_analysis_version_idx').on(table.analysisVersion)],
+)

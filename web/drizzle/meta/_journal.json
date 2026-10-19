@@ -64,6 +64,13 @@
       "when": 1792425088225,
       "tag": "0008_ai_goal",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1792430699507,
+      "tag": "0009_play_trace",
+      "breakpoints": true
     }
   ]
 }
