@@ -71,6 +71,13 @@
       "when": 1792430699507,
       "tag": "0009_play_trace",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1792433908219,
+      "tag": "0010_play_share_setting",
+      "breakpoints": true
     }
   ]
 }

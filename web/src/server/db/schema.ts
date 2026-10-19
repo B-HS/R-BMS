@@ -613,3 +613,15 @@ export const playAnalysis = mysqlTable(
     },
     (table) => [index('play_analysis_version_idx').on(table.analysisVersion)],
 )
+
+/**
+ * What a player shares of their play analysis. `rivalSegments`: a player who keeps this one as a rival may send the segment totals of
+ * this one's plays (never notes) to their own AI for a comparison. Off unless the player turns it on; no row is off.
+ */
+export const playShareSetting = mysqlTable('play_share_setting', {
+    userId: varchar('user_id', { length: 36 })
+        .primaryKey()
+        .references(() => user.id, { onDelete: 'cascade' }),
+    rivalSegments: boolean('rival_segments').default(false).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).default(0).notNull(),
+})
