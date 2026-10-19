@@ -14,7 +14,7 @@
 
 - 클라이언트 `v0.1.4` 는 2026-10-15 07:27 UTC 에 게시됐다(release run 38696475211, 버전 커밋 `87eacd0`). `v0.1.3`·`v0.1.0` draft 는 게시하지 않고 남겨 뒀다. 릴리스 이력은 [ci-release.md](ci-release.md) 2.3절.
 - 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0004 적용(`web/drizzle/`, 실행은 `web-db.yml`).
-- 진행 중: 아래 "웹 기록 표시와 구동기 Esc·목표 보완"(2026-10-19). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
+- 2026-10-19 "웹 기록 표시와 구동기 Esc·목표 보완" 완료, 클라이언트 `v0.1.5` draft 게시 대기(사용자). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
 
 ## 체크리스트 — 웹 기록 표시와 구동기 Esc·목표 보완 (2026-10-19)
 
@@ -25,8 +25,8 @@
 - [x] W3. 웹 플레이 기록 페이지네이션 — 플레이어 전체 판, 제목 "플레이 기록" (W1~W3 `b302db3`, [ADR](acknowledge/2026-10-19-adr-web-clear-and-play-history.md))
 - [x] P1. 구동기 판정 0 판의 Esc — 저장·전송하지 않음, Esc ADR 갱신 (`84e1dc7`, 기준: PG·GR·GD·BD 0 이고 쥔 롱노트 없음, [Esc ADR 결정 7](acknowledge/2026-10-15-adr-escape-keeps-every-run.md))
 - [x] P2. 구동기 기록 목표의 리플레이 따라가기 — 조사·설계 뒤 구현, 목표 ADR 갱신 (`46d0a01`, [ADR](acknowledge/2026-10-19-adr-record-target-follows-its-run.md), [조사](reference/record-target-pace.md), 미확인 선택은 HANDOFF 6절 11·12)
-- [ ] G. 게이트(fmt·clippy·cargo test·웹 verify·format:check), 커밋·푸시, CI 확인, 문서 정리 — workflow 게이트 Rust 6,044 통과·0 실패, 웹 676 통과·0 실패, DB 통합 62 통과(작업자). 리뷰 뒤 수정은 rbms-player lib 2,559 통과·clippy 0
-- [ ] R. 클라이언트 v0.1.5 — 버전 커밋, 태그, release draft(산출물 내려받아 점검, 본문 사실 확인). 게시는 사용자
+- [x] G. 게이트(fmt·clippy·cargo test·웹 verify·format:check), 커밋·푸시, CI 확인, 문서 정리 — workflow 게이트 Rust 6,044 통과·0 실패, 웹 676 통과·0 실패, DB 통합 62 통과(작업자). 리뷰 뒤 수정은 rbms-player lib 2,559 통과·clippy 0. 커밋 `b302db3`·`84e1dc7`·`46d0a01`·`109061c`, CI ci run 39244031688·web run 39244031816 통과, 운영 웹 `/api/version` = `109061c`
+- [x] R. 클라이언트 v0.1.5 — 버전 커밋, 태그, release draft(산출물 내려받아 점검, 본문 사실 확인). 게시는 사용자 — run 39245774265, `9ee3481`, 점검 결과는 [ci-release.md](ci-release.md) 2.3절. 게시 대기
 
 ## 체크리스트 — 웹 배포 준비와 클라이언트 보완 (2026-10-14 ~ 10-15)
 

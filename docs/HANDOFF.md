@@ -11,7 +11,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 ## 2. 현재 목표
 
 - 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹(순위, 발광 난이도표, 내 폴더). 사용자는 "더 이상 구현하거나 버그가 없도록" 남은 일을 정확히 끝내길 원하고, "가끔씩" 실패하는 테스트도 없어야 한다고 했다.
-- 현재 마일스톤: 클라이언트 `v0.1.4` 게시 완료(2026-10-15 07:27 UTC, 사용자가 게시. `v0.1.0`·`v0.1.3` 은 draft 로 남김). 웹 운영 배포 `51f3a1e`, 운영 DB 마이그레이션 0000~0004 적용. 진행 중인 작업 없음. 2026-10-19: 웹 3건(`b302db3`), 노트를 하나도 치지 않은 판의 Esc·종료 미저장(`84e1dc7`), 기록 목표의 리플레이 따라가기(`46d0a01`), 클라이언트 `v0.1.5` 태그와 release draft(PROCESS 의 2026-10-19 체크리스트).
+- 현재 마일스톤: 클라이언트 `v0.1.4` 게시 완료(2026-10-15 07:27 UTC, 사용자가 게시. `v0.1.0`·`v0.1.3` 은 draft 로 남김). 웹 운영 배포 `51f3a1e`, 운영 DB 마이그레이션 0000~0004 적용. 진행 중인 작업 없음. 2026-10-19: 웹 3건(`b302db3`), 노트를 하나도 치지 않은 판의 Esc·종료 미저장(`84e1dc7`), 기록 목표의 리플레이 따라가기(`46d0a01`), 클라이언트 `v0.1.5` 태그와 release draft(`9ee3481`, run 39245774265, 산출물 점검 통과, 게시 대기).
 - 직전 작업(이 세션): (1) 점수 제출 400(空POOR) 근본 수리, (2) 로컬 기록 서버 동기화, (3) 계약 교차 테스트·작은 수리(S18), (4) 잠재 버그 전수 감사 4회와 수리·입력 시각 판정·렉 최적화(S19), (5) 앱 아이콘·파비콘, (6) 발광 표의 다른 사이트 흔적 제거, (7) v0.1.4 릴리스와 산출물 점검, (8) 이 인수인계.
 
 ## 3. 완료 / 진행 중 / 미착수
@@ -99,7 +99,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 7. 환경 & 전제
 
-- 저장소 `/Users/hyunseokbyun/development/R-BMS`, 브랜치 `dev`, 원격 `B-HS/R-BMS`(공개). `prod` 브랜치는 없고 릴리스는 `dev` 에서 `gh workflow run release.yml --ref dev -f bump=patch`. Rust 1.95.0(`rust-toolchain.toml`), 웹 bun 1.4.0, Cargo 버전 0.1.4.
+- 저장소 `/Users/hyunseokbyun/development/R-BMS`, 브랜치 `dev`, 원격 `B-HS/R-BMS`(공개). `prod` 브랜치는 없고 릴리스는 `dev` 에서 `gh workflow run release.yml --ref dev -f bump=patch`. Rust 1.95.0(`rust-toolchain.toml`), 웹 bun 1.4.0, Cargo 버전 0.1.5.
 - 게이트: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --no-fail-fast --locked`(마지막 6,024 통과·6 ignored), 웹 `cd web && bun run verify && bun run format:check && bun run build`(653 통과), DB 통합 `RBMS_DB_E2E=1 bun test tests/db`(Docker `mysql:8.4.11`, 끝나면 컨테이너 삭제), 스킨 `cargo run -q -p rbms-cli --locked -- skin-dump assets/skins/rbms-default --strict --frames 120`, 이미지 `uv run assets/skins/rbms-default/tools/generate-images.py --check`, 아이콘 `uv run assets/icon/tools/generate-icon.py --check`, 표 스냅샷 `cd web && bun scripts/snapshot-table.ts https://darksabun.club/table/archive/insane1/ data/tables/insane1 --check`, 계약 `cargo test -p rbms-player --locked contract_requests` + `bun test tests/dto/client-requests.test.ts`(갱신은 `RBMS_UPDATE_CONTRACT=1`).
 - CI: `ci.yml`(Rust 3 OS + fmt/clippy, Windows 는 아이콘 리소스도 컴파일·링크), `web.yml`(typecheck·lint·test·format·build + MySQL `db` 잡, `contract/**` 변경에도 돎), `release.yml`(수동, concurrency), `signing-check.yml`, `web-db.yml`(`status|migrate|cleanup-count|cleanup-delete|chart-notes-count|chart-notes-repair|chart-notes-restore|chart-notes-drop-backup`).
 - 저장소 시크릿: `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `WEB_DATABASE_URL`.
