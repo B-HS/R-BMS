@@ -474,7 +474,7 @@ fn content_bits(model: &Model, has_text: bool, has_preview: bool, length_ms: i64
 
 /// Whether the chart file carries a `#RANDOM`/`#SWITCH` family command. The parser resolves control
 /// flow while reading, so the built model no longer says whether there was any; the file does.
-fn uses_control_flow(bytes: &[u8]) -> bool {
+pub fn uses_control_flow(bytes: &[u8]) -> bool {
     bytes.split(|b| *b == b'\n').any(|line| {
         let line = line.trim_ascii_start();
         CONTROL_FLOW_COMMANDS.iter().any(|cmd| line.len() >= cmd.len() && line[..cmd.len()].eq_ignore_ascii_case(cmd))

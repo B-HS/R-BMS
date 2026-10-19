@@ -1,10 +1,12 @@
 //! Headless companion to the player: inspect a chart, read the player's configuration, scan a song
-//! folder, query the local score book, or dump a skin pack. The config, scan, scores and skin-dump
-//! subcommands drive `rbms-config`, `rbms-library`, `rbms-store` and `rbms-skin` without a window,
-//! which is how those crates get exercised outside the GUI.
+//! folder, query the local score book, dump a skin pack, or write the note layout of a library's
+//! charts. The config, scan, scores and skin-dump subcommands drive `rbms-config`, `rbms-library`,
+//! `rbms-store` and `rbms-skin` without a window, which is how those crates get exercised outside
+//! the GUI.
 
 #![forbid(unsafe_code)]
 
+mod chart_pattern;
 mod skin_dump;
 
 use std::io::ErrorKind;
@@ -22,7 +24,9 @@ const USAGE: &str = "usage:\n  \
     rbms-cli scores <scores.ron> [--md5 <md5>]   local score book\n  \
     rbms-cli skin-dump <skin pack folder|document>   load skins without a game and report what they came to\n      \
     [--scenario <json>] [--overlay <folder>] [--frames <N>] [--seed <n>] [--json] [--probe-budget]\n      \
-    [--strict] [--allow-failure <document>]...   fail unless every document but the allowed ones comes out clean";
+    [--strict] [--allow-failure <document>]...   fail unless every document but the allowed ones comes out clean\n  \
+    rbms-cli chart-pattern <library folder> --out <folder>   write each chart's note layout as <md5>.json\n      \
+    [--table <data.json>] [--mode beat-7k]   with a table, report which of its md5s the library has";
 
 /// Exit code for a usage error, matching the code the bare chart mode has always returned.
 const EXIT_USAGE: u8 = 2;
@@ -60,6 +64,10 @@ fn run(args: impl Iterator<Item = String>) -> ExitCode {
         },
         Some("skin-dump") => match skin_dump::parse_args(&args[1..]) {
             Ok(parsed) => skin_dump::run(&parsed),
+            Err(e) => usage_error(&e),
+        },
+        Some("chart-pattern") => match chart_pattern::parse_args(&args[1..]) {
+            Ok(parsed) => chart_pattern::run(&parsed),
             Err(e) => usage_error(&e),
         },
         Some(chart) => chart_command(chart),
@@ -368,6 +376,13 @@ mod tests {
         assert!(path.with_extension("ron.v0.bak").exists(), "the migration kept the original");
         assert_eq!(run(args(&["rbms-cli", "config"]).into_iter()), ExitCode::from(EXIT_USAGE), "the path is required");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chart_pattern_is_a_subcommand_and_not_read_as_a_chart_path() {
+        assert!(USAGE.contains("rbms-cli chart-pattern"), "the usage line lists it: {USAGE}");
+        assert_eq!(run(args(&["rbms-cli", "chart-pattern"]).into_iter()), ExitCode::from(EXIT_USAGE), "the library folder is required");
+        assert_eq!(run(args(&["rbms-cli", "chart-pattern", "/library"]).into_iter()), ExitCode::from(EXIT_USAGE), "--out is required");
     }
 
     #[test]

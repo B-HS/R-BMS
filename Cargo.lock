@@ -2974,6 +2974,7 @@ dependencies = [
  "rbms-parser",
  "rbms-skin",
  "rbms-store",
+ "rbms-table",
  "serde",
  "serde_json",
 ]
