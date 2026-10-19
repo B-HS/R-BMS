@@ -5,8 +5,7 @@ import { ChartLeaderboardPanel } from '@widgets/chart/chart-leaderboard-panel'
 import { levelAnchorId } from '@widgets/table/table-snapshot-filter'
 import { chartLeaderboardQueryOptions } from '@entities/chart.query'
 import { fetchQueryOrNotFound } from '@shared/lib/fetch-query-or-not-found'
-import { readBooleanParam } from '@shared/lib/search-params'
-import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
+import { readIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
 import { getQueryClient } from '@shared/utils/get-query-client'
 import { chartLeaderboardQuerySchema } from '@server/dto/fe'
 import { parseQueryParams, readChartLeaderboard } from '@server/service/public-reads'
@@ -39,7 +38,7 @@ type ChartDetailContentProps = {
 
 export const ChartDetailContent = async ({ params, searchParams }: ChartDetailContentProps) => {
     const { hash } = await params
-    const leaderboardParams = { include_scratch_auto: readBooleanParam(await searchParams, INCLUDE_SCRATCH_AUTO_PARAM) }
+    const leaderboardParams = { include_scratch_auto: readIncludeScratchAutoParam(await searchParams) }
     const queryClient = getQueryClient()
     const leaderboard = await fetchQueryOrNotFound(queryClient, {
         ...chartLeaderboardQueryOptions(hash, leaderboardParams),

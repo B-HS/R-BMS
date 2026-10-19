@@ -18,6 +18,7 @@ import { ShellPage } from '@widgets/shell/shell-page'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 import { ApiError } from '@shared/lib/fetch'
 import { formatCount, formatDateTime, formatHash } from '@shared/lib/format'
+import { writeIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
 import { serializeSearchParams } from '@shared/lib/search-params'
 import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/constants/scratch-auto'
 import { useCourseMeta, useCourseRanking } from '@entities/course.query'
@@ -78,7 +79,7 @@ export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rank
     const rows = ranking.data ?? []
 
     const handleScratchAutoChange = (checked: boolean) => {
-        const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: checked ? 'true' : undefined })
+        const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: writeIncludeScratchAutoParam(checked) })
         router.push(query ? `${pathname}?${query}` : pathname, { scroll: false })
     }
 

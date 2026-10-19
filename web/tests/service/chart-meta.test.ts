@@ -173,7 +173,7 @@ describe('표 제목으로 읽을 때 보강', () => {
                 return { rows: [blankRow()], total: 1 }
             },
             listRecentActivity: async () => [],
-            listPlayerRecent: async () => [],
+            listPlayerRecent: async () => ({ rows: [], total: 0 }),
             listPlayerLeaderboard: async () => ({ rows: [], total: 0 }),
             countLampsByUser: async () => [],
             summarise: async () => ({ charts: 0, players: 0, scores: 0 }),

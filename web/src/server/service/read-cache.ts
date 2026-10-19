@@ -238,7 +238,7 @@ export const getPlayerScoresCached = async (params: {
     return rows.map((row) => toScoreRecord(row, null))
 }
 
-export const getPlayerRecentCached = async (params: { loginId: string; userId: string; limit: number }) => {
+export const getPlayerRecentCached = async (params: { loginId: string; userId: string; page: number; limit: number }) => {
     'use cache'
     cacheLife('minutes')
     cacheTag(CACHE_TAG.playerRecent(params.loginId))

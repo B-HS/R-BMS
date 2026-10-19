@@ -192,15 +192,16 @@ describe.skipIf(!hasDatabase)('SCRATCH AUTO 순위 (임시 MySQL)', () => {
         expect([daveStats.lamps, daveStats.scratch_auto_charts]).toEqual([[{ clear: 'Easy', count: 1 }], 0])
     })
 
-    test('홈 최근 활동은 SCRATCH AUTO 판을 빼고 플레이어 최근 기록은 표시와 함께 넣는다', async () => {
+    test('홈 최근 활동은 SCRATCH AUTO 판을 빼고 플레이어 플레이 기록은 표시와 함께 넣는다', async () => {
         const recent = await compose().feService.recentActivity(100)
         expect(recent.filter((row) => row.chart.sha256 === CHART_SHA).map((row) => [row.player.id, row.scratch_auto])).toEqual([
             ['dave', false],
             ['bob', false],
             ['alice', false],
         ])
-        const aliceRecent = await compose().feService.playerRecent({ userId: userId('alice'), limit: 10 })
-        expect(aliceRecent.map((row) => row.scratch_auto)).toEqual([true, true, false])
+        const aliceRecent = await compose().feService.playerRecent({ userId: userId('alice'), page: 1, limit: 10 })
+        expect(aliceRecent.items.map((row) => row.scratch_auto)).toEqual([true, true, false])
+        expect(aliceRecent.total).toBe(3)
     })
 
     test('코스도 같은 규칙이고 scratch_auto 가 없는 옛 클라이언트 코스는 일반 판이다', async () => {

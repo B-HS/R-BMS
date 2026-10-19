@@ -14,6 +14,9 @@ export const CLEAR_LAMPS = [
 
 export type ClearLamp = (typeof CLEAR_LAMPS)[number]
 
+/** The lowest lamp that counts as a clear. Mirrors the server's MIN_CLEAR_LAMP_ID: every lamp but NO PLAY and FAILED is a clear. */
+export const MIN_CLEAR_LAMP = 'AssistEasy' satisfies ClearLamp
+
 export const CLEAR_LAMP_LABEL: Record<ClearLamp, string> = {
     NoPlay: 'NO PLAY',
     Failed: 'FAILED',

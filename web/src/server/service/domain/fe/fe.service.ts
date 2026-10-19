@@ -38,7 +38,7 @@ export type TokenRow = {
 export type FeServiceDb = {
     searchCharts: (query: ChartSearchQuery, options: { extraMd5s: string[] }) => Promise<{ rows: ChartRow[]; total: number }>
     listRecentActivity: (limit: number) => Promise<ActivityRow[]>
-    listPlayerRecent: (params: { userId: string; limit: number }) => Promise<ActivityRow[]>
+    listPlayerRecent: (params: { userId: string; page: number; limit: number }) => Promise<{ rows: ActivityRow[]; total: number }>
     listPlayerLeaderboard: (query: PlayerLeaderboardQuery) => Promise<{ rows: LeaderboardRow[]; total: number }>
     countLampsByUser: (userId: string) => Promise<LampCountRow[]>
     summarise: () => Promise<{ charts: number; players: number; scores: number }>
@@ -85,8 +85,10 @@ export const createFeService = (deps: { db: FeServiceDb; lookupTableText?: Table
 
     recentActivity: async (limit: number) => (await deps.db.listRecentActivity(limit)).map((row) => toActivityItem(row, deps.lookupTableText)),
 
-    playerRecent: async (params: { userId: string; limit: number }) =>
-        (await deps.db.listPlayerRecent(params)).map((row) => toActivityItem(row, deps.lookupTableText)),
+    playerRecent: async (params: { userId: string; page: number; limit: number }) => {
+        const { rows, total } = await deps.db.listPlayerRecent(params)
+        return { items: rows.map((row) => toActivityItem(row, deps.lookupTableText)), total }
+    },
 
     playerLeaderboard: async (query: PlayerLeaderboardQuery) => {
         const { rows, total } = await deps.db.listPlayerLeaderboard(query)

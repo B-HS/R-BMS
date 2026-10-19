@@ -31,6 +31,10 @@ export const feedQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(MAX_FEED_LIMIT).default(DEFAULT_FEED_LIMIT),
 })
 
+export const playerRecentQuerySchema = feedQuerySchema.extend({
+    page: z.coerce.number().int().min(1).default(1),
+})
+
 export const chartLeaderboardQuerySchema = z.object({
     include_scratch_auto: includeScratchAutoSchema,
 })
@@ -59,6 +63,7 @@ export const tokenCreateSchema = z.object({
 
 export type ChartSearchQuery = z.infer<typeof chartSearchQuerySchema>
 export type FeedQuery = z.infer<typeof feedQuerySchema>
+export type PlayerRecentQuery = z.infer<typeof playerRecentQuerySchema>
 export type PlayerLeaderboardQuery = z.infer<typeof playerLeaderboardQuerySchema>
 export type ChartLeaderboardQuery = z.infer<typeof chartLeaderboardQuerySchema>
 export type PlayerScoresQuery = z.infer<typeof playerScoresQuerySchema>

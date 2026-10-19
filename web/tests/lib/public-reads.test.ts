@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { chartLeaderboardQuerySchema, chartSearchQuerySchema, feedQuerySchema, playerLeaderboardQuerySchema } from '@server/dto/fe'
+import {
+    chartLeaderboardQuerySchema,
+    chartSearchQuerySchema,
+    feedQuerySchema,
+    playerLeaderboardQuerySchema,
+    playerRecentQuerySchema,
+} from '@server/dto/fe'
 import { rankingQuerySchema } from '@server/dto/score'
 import { paginatedResponse, toPagination } from '@server/lib/api-response'
 import { parseQueryParams } from '@server/service/public-reads'
@@ -31,6 +37,19 @@ describe('parseQueryParams', () => {
             parseQueryParams(feedQuerySchema, { limit: 100_000 })
         } catch (error) {
             expect(error).toMatchObject({ code: 'VALIDATION_ERROR', statusCode: 400 })
+        }
+    })
+})
+
+describe('플레이 기록 질의', () => {
+    test('page 와 limit 은 기본이 1페이지 20판이고 숫자 문자열을 받는다', () => {
+        expect(parseQueryParams(playerRecentQuerySchema, {})).toEqual({ page: 1, limit: 20 })
+        expect(parseQueryParams(playerRecentQuerySchema, { page: 3, limit: 50 })).toEqual({ page: 3, limit: 50 })
+    })
+
+    test('0 이하의 page 와 상한을 넘는 limit 은 VALIDATION_ERROR 다', () => {
+        for (const params of [{ page: 0 }, { page: -1 }, { page: 1.5 }, { limit: 0 }, { limit: 101 }]) {
+            expect(() => parseQueryParams(playerRecentQuerySchema, params)).toThrow()
         }
     })
 })

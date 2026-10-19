@@ -16,9 +16,9 @@ export const generateMetadata = async ({ params }: PageProps<'/players/[playerId
     })
 }
 
-const PlayerDetailPage = ({ params }: PageProps<'/players/[playerId]'>) => (
+const PlayerDetailPage = ({ params, searchParams }: PageProps<'/players/[playerId]'>) => (
     <Suspense fallback={<ShellPageLoading title='플레이어' />}>
-        <PlayerDetailContent params={params} />
+        <PlayerDetailContent params={params} searchParams={searchParams} />
     </Suspense>
 )
 

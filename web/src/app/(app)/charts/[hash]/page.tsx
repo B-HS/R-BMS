@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { DEFAULT_INCLUDE_SCRATCH_AUTO } from '@shared/constants/scratch-auto'
 import { formatChartTitle, formatHash } from '@shared/lib/format'
 import { buildPageMetadata } from '@shared/lib/metadata'
 import { readChartLeaderboard } from '@server/service/public-reads'
@@ -8,7 +9,7 @@ import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 
 export const generateMetadata = async ({ params }: PageProps<'/charts/[hash]'>): Promise<Metadata> => {
     const { hash } = await params
-    const leaderboard = await readChartLeaderboard(hash, { include_scratch_auto: false }).catch(() => null)
+    const leaderboard = await readChartLeaderboard(hash, { include_scratch_auto: DEFAULT_INCLUDE_SCRATCH_AUTO }).catch(() => null)
     if (!leaderboard?.chart) return buildPageMetadata({ title: `차트 ${formatHash(hash)}`, index: false })
     return buildPageMetadata({
         title: formatChartTitle(leaderboard.chart),

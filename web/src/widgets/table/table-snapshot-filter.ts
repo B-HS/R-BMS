@@ -1,6 +1,6 @@
 import type { LampCount } from '@features/lamp/lamp-stack-bar'
 import type { TableSnapshotEntry, TableSnapshotLevel, TableSnapshotRecord } from '@entities/table-snapshot.type'
-import { CLEAR_LAMPS, type ClearLamp } from '@shared/constants/clear-lamp'
+import { CLEAR_LAMPS, MIN_CLEAR_LAMP, type ClearLamp } from '@shared/constants/clear-lamp'
 import { getMaxExScore } from '@shared/lib/format'
 import { serializeSearchParams } from '@shared/lib/search-params'
 
@@ -11,8 +11,9 @@ type LampFilterDefinition = { value: string; label: string; min?: ClearLamp; max
 export const TABLE_LAMP_FILTERS = [
     { value: 'all', label: '모든 램프' },
     { value: 'noplay', label: '미플레이', max: 'NoPlay' },
-    { value: 'failed', label: 'FAILED ~ L-ASSIST', min: 'Failed', max: 'LightAssistEasy' },
-    { value: 'unclear', label: 'EASY 미만 (미플레이 포함)', max: 'LightAssistEasy' },
+    { value: 'failed', label: 'FAILED', min: 'Failed', max: 'Failed' },
+    { value: 'unclear', label: '미클리어 (미플레이 포함)', max: 'Failed' },
+    { value: 'cleared', label: '클리어 (ASSIST 이상)', min: MIN_CLEAR_LAMP },
     { value: 'easy', label: 'EASY 이상', min: 'Easy' },
     { value: 'clear', label: 'CLEAR 이상', min: 'Normal' },
     { value: 'hard', label: 'HARD 이상', min: 'Hard' },

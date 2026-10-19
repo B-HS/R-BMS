@@ -1,6 +1,6 @@
 # rbms web — 구현 작업 분할 (W1 / W2) 과 웹 남은 일
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리
 
 > **역사 작업 계획 + 현재 남은 일:** W1/W2의 체크 항목은 2026-09-09에 완료됐고, 웨이브 17B~20 과 S18·S19(2026-10-14~15)는 아래에 이어서 적었습니다. 새 세션이 이어서 할 웹 일은 맨 아래 "남은 일" 절이 정본입니다. 현재 구현 상태와 미구현 경계는 [../backend/endpoint-tasks.md](../backend/endpoint-tasks.md), 실제 라우트는 `web/src/app/api/`가 정본입니다. 운영 배포(Phase R)는 2026-10-14 에 끝났습니다.
 
@@ -300,15 +300,24 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] 클라이언트 쪽 짝(Rust, 기록): 413·409 구분 — 기록 동기화(`crates/rbms-ir/src/sync.rs` 의 `failure_of`)가 413(`IrError::PayloadTooLarge`)·409(`IrError::Conflict`)를 서버 거절(`Failure::Refused`)로 다루고 다시 시도하지 않는다. 운영 응답에는 `details.scope` 가 없으므로(프로덕션 `details` 는 `field`·`reason` 만) scope 별 구분은 하지 않는다
 - [x] S19 4차(9e2cc0e): 범위 밖 값 400(`extra` 키 바이트, 관리자 메타·표 길이, 가입 이메일·이름), 쓰기의 잠금 오류 재시도(`withLockRetry`, [../backend/data-model.md](../backend/data-model.md) "잠금 오류 재시도"), 재전송의 최고 기록 복구, 순위 응답 판정 합계. 운영 배포 `51f3a1e`(2026-10-15 `/api/version`)
 
+## 클리어 기준·SCRATCH AUTO 기본 켬·플레이 기록 페이지 (2026-10-19)
+
+근거: 사용자 지시 3건(원문은 [../acknowledge/2026-10-19-adr-web-clear-and-play-history.md](../acknowledge/2026-10-19-adr-web-clear-and-play-history.md)), [architecture.md](./architecture.md) 3-1·SCRATCH AUTO 절.
+
+- [x] W1: 클리어 = NO PLAY·FAILED 가 아닌 모든 램프. `MIN_CLEAR_LAMP_ID`(서버) 를 `AssistEasy` 로, 화면 쪽 `MIN_CLEAR_LAMP`, 표 램프 필터에 `cleared`(ASSIST 이상) 추가·`failed`/`unclear` 정의 갱신. 마이그레이션 없음(집계는 `chart_best.clear` 에서 질의 때 센다)
+- [x] W2: SCRATCH AUTO 포함 화면 기본 켬(`DEFAULT_INCLUDE_SCRATCH_AUTO`, 주소는 `include_scratch_auto=false` 만 남김). 서버 API 기본 `false` 는 유지(Rust 클라이언트가 파라미터를 싣지 않음)
+- [x] W3: `/api/fe/players/{id}/recent` 가 `page`·`limit` 과 `pagination` 을 갖고 모든 판을 `played_at`·`score.id` 내림차순으로, 플레이어 페이지의 패널 "플레이 기록" 이 `?page=` 로 나눠 보여 줌. 인덱스 `score_player_idx` 사용, 마이그레이션 없음
+- 테스트: `tests/dto/clear-lamps.test.ts`, `tests/service/fe-player-history.test.ts`, `tests/components/{scratch-auto-param,player-recent-panel}.test.ts(x)`, `tests/db/clear-lamps-and-history.test.ts`(임시 MySQL)
+
 ## 남은 일 (웹·서버, 새 세션이 이어서)
 
 우선순위 순. 각 항목의 근거는 괄호 안 문서.
 
-1. 사용자 확인 대기: v0.1.4 로 운영 서버에 한 판 쳐서 결과 화면에 `IR: RANK` 가 나오는지, SYNC RECORDS NOW. 관찰(2026-10-15 GET): 운영 제출 119건, 사용자 `bhs` 의 판은 모두 SCRATCH AUTO 판이라 기본 순위(`/leaderboards`)·최근 활동에는 0 이고 "SCRATCH AUTO 포함"을 켜면 플레이한 차트 91 로 보인다(설계대로: [../backend/api-spec.md](../backend/api-spec.md) 5절 SCRATCH AUTO)
+1. 사용자 확인 대기: v0.1.4 로 운영 서버에 한 판 쳐서 결과 화면에 `IR: RANK` 가 나오는지, SYNC RECORDS NOW. 관찰(2026-10-15 GET): 운영 제출 119건, 사용자 `bhs` 의 판은 모두 SCRATCH AUTO 판이라 당시 기본 순위(`/leaderboards`)·최근 활동에는 0 이었고 "SCRATCH AUTO 포함"을 켜면 플레이한 차트 91 로 보였다(2026-10-19 부터 순위 화면은 기본으로 포함하므로 `/leaderboards` 에도 보이고, 최근 활동은 계속 뺀다)(설계대로: [../backend/api-spec.md](../backend/api-spec.md) 5절 SCRATCH AUTO)
 2. 사용자 결정 대기: 순위 `lnmode` 필터의 뜻(테스트 부채 3.35, [../backend/api-spec.md](../backend/api-spec.md) 4절), 지속형 rate limit 저장소(Upstash 등), `user.rank_points` 처리, 코스 램프 서버 검사를 켤 시점(0.1.0 클라이언트가 쓰이지 않게 되면, 3.36), 저장소에 남은 다른 사이트 흔적(위 절)
 3. 서버 부채: 같은 판의 같은 밀리초 동시 중복 제출이 `ER_DUP_ENTRY` 500, 재시도 밖 쓰기(3.72), 관리자 난이도표 저장의 중복 항목 500(3.74), `release.yml` 이 `client_build` 를 등록하지 않음(admin 세션만 받는 `POST /api/admin/builds`), 표 상세(`/tables/[id]`)의 없는 id 는 아직 200(번들 표라 보류)
 4. 웹 2차(사용자가 "나중에" 로 둔 것): 발광 표 한 곡 한 행 보기, 카드 높이 선택, 폴더 끌어 옮기기, 2,000곡 가상화, 표 RSC 자료 축소(`level`·`url_diff` 중복), OG 이미지, 홈 대시보드 재구성
-5. 클라이언트 쪽(웹 문서 밖이지만 서버와 짝): 게임 안 IR 순위 패널의 SCRATCH AUTO 포함 토글(서버는 `include_scratch_auto` 를 이미 받는다)
+5. 클라이언트 쪽(웹 문서 밖이지만 서버와 짝): 게임 안 IR 순위 패널의 SCRATCH AUTO 포함 토글(서버는 `include_scratch_auto` 를 이미 받는다. 웹 화면의 기본이 켬으로 바뀐 뒤에도 클라이언트 패널은 파라미터를 싣지 않아 일반 판만의 목록이다)
 6. `chart.notes` 복구 SQL 은 돌리지 않았다(2026-10-15 `chart-notes-count`: 복구 대상 0). 표시값이 어긋난 차트가 생기면 [architecture.md](./architecture.md) 3-2 의 `chart-notes-repair` 절차
 
 해소된 것(이전 목록): 계약 교차 테스트(e9aebae), 없는 상세 주소의 200(S19, 운영 404 확인 2026-10-15), 서버 컴포넌트 자기 URL fetch(S19), 가입·로그인 실패 원인 구분·운영 필수 환경 변수(S19), 넓힌 판정 판의 최고 기록·순위 제외와 SCRATCH AUTO 램프 `LightAssistEasy`(2026-10-14 사용자 확인, S18 결정 6).

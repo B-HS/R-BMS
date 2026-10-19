@@ -16,6 +16,7 @@ import { usePlayerLeaderboard } from '@entities/stats.query'
 import type { PlayerLeaderboardParams, PlayerLeaderboardRow } from '@entities/stats.type'
 import { cn } from '@shared/lib/cn'
 import { formatCount } from '@shared/lib/format'
+import { writeIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
 import { serializeSearchParams } from '@shared/lib/search-params'
 import { PLAYER_SORT_OPTIONS } from '@shared/constants/leaderboard'
 import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
@@ -52,7 +53,7 @@ const buildColumns = (rankOffset: number): DataTableColumn<PlayerLeaderboardRow>
 ]
 
 const LEADERBOARD_SCRATCH_AUTO_NOTE =
-    '클리어·플레이 곡·제출 수는 기본으로 SCRATCH AUTO 판을 빼고 셉니다. SCRATCH AUTO 포함을 켜면 곡마다 더 높은 기록으로 셉니다.'
+    '클리어·플레이 곡·제출 수는 기본으로 SCRATCH AUTO 판을 포함해 곡마다 더 높은 기록으로 셉니다. SCRATCH AUTO 포함을 끄면 일반 판만 셉니다. 클리어는 FAILED 가 아닌 모든 램프(ASSIST 포함)입니다.'
 
 type PlayerLeaderboardPanelProps = {
     params: PlayerLeaderboardParams
@@ -71,7 +72,7 @@ export const PlayerLeaderboardPanel: FC<PlayerLeaderboardPanelProps> = ({ params
         const merged = serializeSearchParams({
             sort: params.sort,
             page: params.page,
-            [INCLUDE_SCRATCH_AUTO_PARAM]: params.include_scratch_auto ? 'true' : undefined,
+            [INCLUDE_SCRATCH_AUTO_PARAM]: writeIncludeScratchAutoParam(params.include_scratch_auto),
             ...next,
         })
         router.push(merged ? `${pathname}?${merged}` : pathname)
@@ -83,7 +84,7 @@ export const PlayerLeaderboardPanel: FC<PlayerLeaderboardPanelProps> = ({ params
                 <SortSelect label='정렬' value={params.sort} options={PLAYER_SORT_OPTIONS} onValueChange={(sort) => push({ sort, page: 1 })} />
                 <ScratchAutoToggle
                     checked={params.include_scratch_auto}
-                    onCheckedChange={(checked) => push({ [INCLUDE_SCRATCH_AUTO_PARAM]: checked ? 'true' : undefined, page: 1 })}
+                    onCheckedChange={(checked) => push({ [INCLUDE_SCRATCH_AUTO_PARAM]: writeIncludeScratchAutoParam(checked), page: 1 })}
                 />
             </FilterBar>
             {isLoading && (

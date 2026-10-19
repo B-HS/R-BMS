@@ -49,7 +49,7 @@ export const RecentActivityPanel: FC = () => {
                 </ul>
             )}
             <p className='text-muted-foreground px-3 py-2 text-xs'>
-                순위에 반영되는 제출만 표시됩니다. SCRATCH AUTO 판은 차트·코스 순위에서 SCRATCH AUTO 포함을 켜야 보입니다.
+                순위에 반영되는 제출만 표시됩니다. SCRATCH AUTO 판은 이 목록에 나오지 않고, 차트·코스 순위에서 볼 수 있습니다.
             </p>
         </DashboardPanel>
     )

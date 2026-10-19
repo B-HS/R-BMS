@@ -1,7 +1,7 @@
 import 'server-only'
 import type { z } from 'zod'
 import { compose } from '@server/compose'
-import type { ChartLeaderboardQuery, ChartSearchQuery, FeedQuery, PlayerLeaderboardQuery } from '@server/dto/fe'
+import type { ChartLeaderboardQuery, ChartSearchQuery, FeedQuery, PlayerLeaderboardQuery, PlayerRecentQuery } from '@server/dto/fe'
 import type { RankingQuery } from '@server/dto/score'
 import { toPagination } from '@server/lib/api-response'
 import { createAppError } from '@server/lib/error'
@@ -86,8 +86,15 @@ export const readPlayerProfile = async (playerId: string) => {
     return profile
 }
 
-export const readPlayerRecent = async (playerId: string, query: FeedQuery) =>
-    getPlayerRecentCached({ loginId: playerId, userId: await requireUserId(playerId), limit: query.limit })
+export const readPlayerRecent = async (playerId: string, query: PlayerRecentQuery) => {
+    const { items, total } = await getPlayerRecentCached({
+        loginId: playerId,
+        userId: await requireUserId(playerId),
+        page: query.page,
+        limit: query.limit,
+    })
+    return { data: items, pagination: toPagination({ page: query.page, limit: query.limit, total }) }
+}
 
 export const readPlayerStats = async (playerId: string) => getPlayerStatsCached({ loginId: playerId, userId: await requireUserId(playerId) })
 

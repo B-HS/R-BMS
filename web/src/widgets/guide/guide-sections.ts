@@ -76,7 +76,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
             {
                 label: 'SCRATCH AUTO',
                 description:
-                    'SCRATCH AUTO 로 친 플레이는 턴테이블 노트를 판정에서 빼고 제출되며 랭킹에 오릅니다. 서버는 일반 판 최고 기록과 SCRATCH AUTO 판 최고 기록을 따로 남깁니다. 웹 순위 목록은 기본으로 일반 판만 보여 주고, SCRATCH AUTO 포함을 켜면 플레이어마다 둘 가운데 더 높은 기록을 A-SCR 표지와 함께 보여 줍니다. 결과 화면의 순위는 그 판이 속한 목록 기준이라 IR: RANK #<순위> (SCRATCH AUTO) 로 나옵니다. 곡 선택 랭킹 패널은 기본 목록을 씁니다. SCRATCH AUTO 스테이지가 하나라도 낀 코스도 같습니다. 판정폭 확대와 함께 쓴 판은 판정폭 확대 때문에 UNRANKED 입니다.',
+                    'SCRATCH AUTO 로 친 플레이는 턴테이블 노트를 판정에서 빼고 제출되며 랭킹에 오릅니다. 서버는 일반 판 최고 기록과 SCRATCH AUTO 판 최고 기록을 따로 남깁니다. 웹 순위 목록은 기본으로 SCRATCH AUTO 포함이 켜져 있어 플레이어마다 일반 판과 SCRATCH AUTO 판 가운데 더 높은 기록을 A-SCR 표지와 함께 보여 주고, SCRATCH AUTO 포함을 끄면 일반 판만 보여 줍니다. 결과 화면의 순위는 그 판이 속한 목록 기준이라 IR: RANK #<순위> (SCRATCH AUTO) 로 나옵니다. 곡 선택 랭킹 패널은 일반 판만의 목록을 씁니다. SCRATCH AUTO 스테이지가 하나라도 낀 코스도 같습니다. 판정폭 확대와 함께 쓴 판은 판정폭 확대 때문에 UNRANKED 입니다.',
             },
             {
                 label: '어시스트 옵션 · guest 제출',

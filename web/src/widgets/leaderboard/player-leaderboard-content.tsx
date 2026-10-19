@@ -2,9 +2,9 @@ import { dehydrate, HydrationBoundary } from '@tanstack/react-query'
 import { PlayerLeaderboardPanel } from '@widgets/leaderboard/player-leaderboard-panel'
 import { playerLeaderboardQueryOptions } from '@entities/stats.query'
 import { getQueryClient } from '@shared/utils/get-query-client'
-import { readBooleanParam, readNumberParam, readParam } from '@shared/lib/search-params'
+import { readIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
+import { readNumberParam, readParam } from '@shared/lib/search-params'
 import { DEFAULT_PLAYER_SORT } from '@shared/constants/leaderboard'
-import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
 import { playerLeaderboardQuerySchema } from '@server/dto/fe'
 import { parseQueryParams, readPlayerLeaderboard } from '@server/service/public-reads'
 
@@ -16,7 +16,7 @@ export const PlayerLeaderboardContent = async ({ searchParams }: { searchParams:
         sort: readParam(resolved, 'sort') ?? DEFAULT_PLAYER_SORT,
         page: readNumberParam(resolved, 'page', 1),
         limit: DEFAULT_LIMIT,
-        include_scratch_auto: readBooleanParam(resolved, INCLUDE_SCRATCH_AUTO_PARAM),
+        include_scratch_auto: readIncludeScratchAutoParam(resolved),
     }
 
     const queryClient = getQueryClient()

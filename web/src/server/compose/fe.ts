@@ -140,16 +140,19 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
                 return rows.map(toActivityRow)
             },
 
-            listPlayerRecent: async ({ userId, limit }) => {
+            listPlayerRecent: async ({ userId, page, limit }) => {
+                const where = eq(score.userId, userId)
                 const rows = await db
                     .select(activitySelection)
                     .from(score)
                     .innerJoin(user, eq(user.id, score.userId))
                     .leftJoin(chart, eq(chart.sha256, score.chartSha256))
-                    .where(eq(score.userId, userId))
-                    .orderBy(desc(score.playedAt))
+                    .where(where)
+                    .orderBy(desc(score.playedAt), desc(score.id))
                     .limit(limit)
-                return rows.map(toActivityRow)
+                    .offset((page - 1) * limit)
+                const [total] = await db.select({ value: count() }).from(score).where(where)
+                return { rows: rows.map(toActivityRow), total: total?.value ?? 0 }
             },
 
             listPlayerLeaderboard: async (query): Promise<{ rows: LeaderboardRow[]; total: number }> => {

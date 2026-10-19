@@ -8,13 +8,19 @@ import { PlayerStatsPanel } from '@widgets/player/player-stats-panel'
 import { ShellPage } from '@widgets/shell/shell-page'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 import { usePlayer } from '@entities/player.query'
+import type { PlayerRecentParams } from '@entities/player.type'
 import { ApiError } from '@shared/lib/fetch'
 import { formatCount } from '@shared/lib/format'
 
 const PAGE_TITLE = '플레이어'
 const NOT_FOUND_STATUS = 404
 
-export const PlayerDetailPanel: FC<{ playerId: string }> = ({ playerId }) => {
+type PlayerDetailPanelProps = {
+    playerId: string
+    recentParams: PlayerRecentParams
+}
+
+export const PlayerDetailPanel: FC<PlayerDetailPanelProps> = ({ playerId, recentParams }) => {
     const { data, isLoading, isError, error, isFetching, refetch } = usePlayer(playerId)
 
     if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
@@ -48,7 +54,7 @@ export const PlayerDetailPanel: FC<{ playerId: string }> = ({ playerId }) => {
                 </p>
             </div>
             <PlayerStatsPanel playerId={playerId} />
-            <PlayerRecentPanel playerId={playerId} />
+            <PlayerRecentPanel playerId={playerId} params={recentParams} />
         </ShellPage>
     )
 }

@@ -32,10 +32,17 @@ describe('연동 가이드 문서', () => {
         for (const reason of ['autoplay', 'replay playback', 'widened judge', 'assist options', 'UNRANKED']) expect(html).toContain(reason)
     })
 
-    test('SCRATCH AUTO 판은 랭킹에 오르되 기본 목록에서 빠지고 토글로 보인다고 안내한다', () => {
+    test('SCRATCH AUTO 판은 랭킹에 오르고 웹 순위에 기본으로 포함되며 토글로 끌 수 있다고 안내한다', () => {
         const html = markup()
         expect(html).not.toContain('UNRANKED: auto scratch')
-        for (const token of ['SCRATCH AUTO 포함', 'A-SCR', 'IR: RANK #&lt;순위&gt; (SCRATCH AUTO)']) expect(html).toContain(token)
+        for (const token of [
+            'SCRATCH AUTO 포함',
+            'A-SCR',
+            'IR: RANK #&lt;순위&gt; (SCRATCH AUTO)',
+            '기본으로 SCRATCH AUTO 포함이 켜져 있어',
+            '끄면 일반 판만',
+        ])
+            expect(html).toContain(token)
     })
 
     test('어시스트 플레이는 제출 생략이 아니라 랭킹 제외로 안내한다', () => {

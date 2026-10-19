@@ -1,6 +1,6 @@
 # rbms web — 아키텍처 설계 (W0)
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리
 
 > **현재 구현 기준:** W0~W2 와 웨이브 17B(웹 골격·폴더·발광 표)·20(SCRATCH AUTO 순위), S18~S19(2026-10-14~15, 서버 수리·발광 표의 다른 사이트 흔적 제거·파비콘)까지 반영했습니다. 실제 라우트는 `web/src/app/{(app),(public),api,tables}/`, 서버 경계는 `web/src/server/`가 정본입니다. 본문에 남은 "착수 시", "향후", 가정은 설계 이력으로만 읽고, 이 상태 블록과 §9를 우선합니다. **운영 배포는 2026-10-14 에 끝났습니다**(https://bms.hyuns.uk, Vercel 프로젝트 `rbms-web`, 시험 계정 삭제). 운영 DB 에는 마이그레이션 0000~0004 가 모두 적용됐고(0003·0004 는 2026-10-15), 2026-10-15 관찰 시 운영 웹은 `51f3a1e` 입니다(`/api/version`). 배포 설정은 §6-2, 운영 DB 작업은 §3-2 가 정본입니다. 2026-10-14 점검에서 나온 고장 12건의 해소 현황은 [2026-10-14-audit.md](./2026-10-14-audit.md) 맨 위 표입니다.
 
@@ -46,7 +46,7 @@
 | `(app)` | `/` | 홈 대시보드(서버 통계 + 최근 제출 피드) | **A**(radius 0, 3열 셸) | 공개 읽기 |
 | `(app)` | `/search` | 차트 검색 | A | 공개 읽기 |
 | `(app)` | `/charts/[hash]` | 차트 리더보드(랭킹·메타·내 기록) | A | 공개 읽기 |
-| `(app)` | `/players/[id]` | 플레이어 프로필(통계·최근 기록·라이벌) | A | 공개 읽기 |
+| `(app)` | `/players/[id]` | 플레이어 프로필(통계·플레이 기록(전체 판, `?page=` 페이지)·라이벌) | A | 공개 읽기 |
 | `(app)` | `/leaderboards` | 종합 플레이어 랭킹 | A | 공개 읽기 |
 | `(app)` | `/tables` · `/tables/[id]` | 번들 표 카드 + IR 난이도표 | A | 공개 읽기 |
 | `(app)` | `/tables/insane1` | 発狂BMS難易度表 사본(카드 격자, 내 램프, `bmstable` 메타 = `/tables/insane1/header.json`, noindex). 2026-10-14 웨이브 17B-2(711b518). 이 페이지의 주소 `https://bms.hyuns.uk/tables/insane1` 가 R-BMS 의 기본 등록 표 주소다 | A | 공개 읽기(로그인 시 내 기록) |
@@ -116,10 +116,10 @@
 | 메서드 | 경로 | 용도 | 인증 | 캐시 태그 |
 |---|---|---|---|---|
 | GET | `/api/fe/charts/search` | 차트 검색(q·mode·level·sort·page·limit) | 없음 | `chart-search`(+쿼리 인자) |
-| GET | `/api/fe/charts/[hash]/leaderboard` | 리더보드(랭킹 + 차트 메타 조인 + player_name·replay_id). `include_scratch_auto=true` 면 SCRATCH AUTO 판 포함 목록 | 없음 | `chart-ranking:{sha}` |
+| GET | `/api/fe/charts/[hash]/leaderboard` | 리더보드(랭킹 + 차트 메타 조인 + player_name·replay_id). `include_scratch_auto=true` 면 SCRATCH AUTO 판 포함 목록(API 기본은 `false`, 화면 기본은 켬: 아래 SCRATCH AUTO 절) | 없음 | `chart-ranking:{sha}` |
 | GET | `/api/fe/activity/recent` | 전체 최근 제출 피드(ranked 이고 SCRATCH AUTO 가 아닌 판) | 없음 | `activity-recent` |
 | GET | `/api/fe/leaderboards/players` | 종합 플레이어 랭킹. `include_scratch_auto=true` 면 SCRATCH AUTO 판까지 센다 | 없음 | `leaderboard-players` |
-| GET | `/api/fe/players/[playerId]/recent` | 플레이어 최근 플레이(차트 조인) | 없음 | `player-recent:{id}` |
+| GET | `/api/fe/players/[playerId]/recent` | 플레이어의 모든 판을 `played_at`·점수 id 내림차순으로(차트 조인). `page`(기본 1)·`limit`(기본 20, 최대 100), 응답은 `{ success, data, pagination: { page, limit, total, totalPages } }`. 화면 제목은 "플레이 기록" | 없음 | `player-recent:{id}`(모든 페이지가 같은 태그) |
 | GET | `/api/fe/players/[playerId]/stats` | 플레이어 통계(램프 분포·레벨별 EX·플레이수) | 없음 | `player-stats:{id}` |
 | GET | `/api/fe/stats/summary` | 서버 통계(차트/플레이어/제출 수) | 없음 | `stats-summary` |
 | POST | `/api/fe/auth/login` | 웹 로그인(`{ id, password }` → 세션 쿠키만 세팅하고 `{ user: { id, login_id, name, role } }`. API 토큰은 만들지 않음. 5/min/IP, 게임용 `/api/auth/login` 과 같은 버킷) | 없음 | — |
@@ -145,7 +145,7 @@
 
 표준 BMS 표 형식(루트 `src/app/tables/[tableId]/`, 봉투 없음, 무인증, `Access-Control-Allow-Origin: *`): `GET /tables/insane1/header.json`(`{ name, symbol, data_url, level_order, last_update }`, `data_url` 은 **요청 origin 의 절대 주소**)과 `GET /tables/insane1/data.json`(스냅샷 배열 그대로. `ETag` 와 304 지원, `Cache-Control: public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400`). 응답과 화면에는 다른 사이트의 주소·출처를 싣지 않는다(2026-10-14~15 사용자 지시: header 의 `original_url`·`mirror_of`, 요약 API 의 `original_url`·`source`, 곡의 `comment`, `artist` 등 글자 필드 속 웹 주소를 뺐고, 곡 내려받기 주소 `url`·`url_diff`·`name_diff` 는 남겼다. 정규화 규칙과 필드 목록의 정본은 [../backend/api-spec.md](../backend/api-spec.md) 7.1). 자료는 `web/data/tables/<id>/{header,data,source}.json` 을 **정적 import** 해서 쓰므로(`source.json` 은 스냅샷 재현 기록이고 `ETag` 해시만 읽는다) DB 도 파일 추적 설정(`outputFileTracingIncludes`)도 필요 없다(서버 번들에 실린다). 표를 더하려면 폴더를 만들고 `table-snapshot.data.ts` 의 `RAW_SNAPSHOTS` 에 한 줄을 더한다. 사람이 보는 페이지 `/tables/insane1`(`bmstable` 메타는 `/tables/insane1/header.json` 루트 상대 경로)은 웨이브 17B-2 에서 구현됐다.
 
-내 기록 조회(`/records`)는 표의 md5 전부(1,035개)를 `IN` 한 번으로 묻고, 기록이 있는 곡만 `{ md5: { clear, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } }` 로 돌려준다(최대 약 150KB). 곡마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, 화면은 SCRATCH AUTO 쪽이면 A-SCR 표지를 붙인다(웨이브 20). 표 상세는 약 307KB(gzip 전, `comment` 를 뺀 뒤)이고 공개 캐시(`s-maxage=3600`)다. `GET /api/fe/leaderboards/players` 는 `rank_points` 를 쓰지 않는다: `sort` 는 `cleared`(클리어한 차트 수, 기본)·`played`(플레이한 차트 수)·`plays`(제출 수)이고 옛 값 `rank_points`·`total_plays` 는 각각 `cleared`·`plays` 로 받는다. 항목에 `cleared_charts`·`played_charts` 가 더해진다(클리어 = `chart_best.clear >= Easy`).
+내 기록 조회(`/records`)는 표의 md5 전부(1,035개)를 `IN` 한 번으로 묻고, 기록이 있는 곡만 `{ md5: { clear, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } }` 로 돌려준다(최대 약 150KB). 곡마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, 화면은 SCRATCH AUTO 쪽이면 A-SCR 표지를 붙인다(웨이브 20). 표 상세는 약 307KB(gzip 전, `comment` 를 뺀 뒤)이고 공개 캐시(`s-maxage=3600`)다. `GET /api/fe/leaderboards/players` 는 `rank_points` 를 쓰지 않는다: `sort` 는 `cleared`(클리어한 차트 수, 기본)·`played`(플레이한 차트 수)·`plays`(제출 수)이고 옛 값 `rank_points`·`total_plays` 는 각각 `cleared`·`plays` 로 받는다. 항목에 `cleared_charts`·`played_charts` 가 더해진다(클리어 = `chart_best.clear >= AssistEasy`, 곧 NO PLAY 와 FAILED 가 아닌 모든 램프. 서버는 `MIN_CLEAR_LAMP_ID`, 화면은 `MIN_CLEAR_LAMP` 하나가 정의하고 `tests/dto/clear-lamps.test.ts` 가 둘의 일치를 지킨다).
 
 ### 1-4. 인증 방식 요약 표
 
@@ -496,7 +496,7 @@ CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(
 | FR-14 ranked 판정 | `@server/service/domain/score/ranked-policy.ts` — 순수 함수 `rankedPolicy({ options, buildTrust, isGuest, requireTrustedBuild }) => { ranked, flags }`. 입력만으로 결정되므로 DB 무관, 단위 테스트 대상 |
 | 빌드 신뢰도와 ranked | `UNKNOWN_BUILD` flag 는 항상 남기되, ranked 를 막는 것은 ① `untrusted`(allowlist 에 `trusted=false` 로 등록) ② `unknown` + `REQUIRE_BUILD_HASH=true` 두 경우다. 기본 배포(`REQUIRE_BUILD_HASH=false`)에서 미등록 빌드는 flag 만 남고 ranked 로 집계된다 — allowlist 등록 경로(`POST /api/admin/builds`)가 W2a 이므로, 그 전까지 랭킹이 통째로 비는 것을 막기 위함 |
 | flags 종류 | `AUTOPLAY` `SCRATCH_AUTO` `ASSIST`(`AUTO_SCRATCH` 밖의 assist 태그) `JUDGE_WIDTH`(judge_rate>100) `TOTAL_OVERRIDE` `UNKNOWN_BUILD` `GUEST`(`ranked-policy.ts` 의 `SCORE_FLAG`) `REPLAY_MISMATCH`(후속, 코드에 없음). `SCRATCH_AUTO` 와 `UNKNOWN_BUILD`(기본 설정) 는 표지일 뿐 ranked 를 막지 않는다(`rankBlockingFlags`) |
-| SCRATCH AUTO(웨이브 20, 0b04629) | 사용자 결정(2026-10-14, 근거 [../acknowledge/2026-10-14-adr-scratch-auto-rule.md](../acknowledge/2026-10-14-adr-scratch-auto-rule.md)·[../acknowledge/2026-10-14-adr-scratch-auto-ranking-toggle.md](../acknowledge/2026-10-14-adr-scratch-auto-ranking-toggle.md)): SCRATCH AUTO 판도 일반 판처럼 순위에 올리되 목록에서는 기본으로 숨기고 토글로 보인다. `chart_best`·`course_best` 를 `scratch_auto` 로 나눠 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 남기고, 목록 질의는 `best-scope.ts` 의 `chartBestScope`·`courseBestScope` 로 "일반 판만" 또는 "플레이어마다 더 높은 쪽"을 고른다. 차트 순위·코스 순위·리더보드 화면에는 "SCRATCH AUTO 포함" 스위치가 있고 상태는 주소의 `include_scratch_auto=true` 로 남는다(쿼리 키에 포함). 목록의 SCRATCH AUTO 행에는 A-SCR 배지. SCRATCH AUTO 판의 `rank` 는 그 판이 속한 목록(일반 판은 기본 목록, SCRATCH AUTO 판은 포함 목록) 기준이고 `previous_best`·`is_new_best` 는 그 판의 칸 기준이다(`score.service.ts` `submit`). 넓힌 판정(`options.assist` 의 `CUSTOM_JUDGE`)은 `ASSIST` flag 로 그대로 unranked |
+| SCRATCH AUTO(웨이브 20, 0b04629) | 사용자 결정(2026-10-14, 근거 [../acknowledge/2026-10-14-adr-scratch-auto-rule.md](../acknowledge/2026-10-14-adr-scratch-auto-rule.md)·[../acknowledge/2026-10-14-adr-scratch-auto-ranking-toggle.md](../acknowledge/2026-10-14-adr-scratch-auto-ranking-toggle.md)): SCRATCH AUTO 판도 일반 판처럼 순위에 올린다(2026-10-19 부터 웹 화면은 기본으로 포함하고 토글로 끈다. [../acknowledge/2026-10-19-adr-web-clear-and-play-history.md](../acknowledge/2026-10-19-adr-web-clear-and-play-history.md)). `chart_best`·`course_best` 를 `scratch_auto` 로 나눠 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 남기고, 목록 질의는 `best-scope.ts` 의 `chartBestScope`·`courseBestScope` 로 "일반 판만" 또는 "플레이어마다 더 높은 쪽"을 고른다. 차트 순위·코스 순위·리더보드 화면에는 "SCRATCH AUTO 포함" 스위치가 있다. 화면 기본은 켬이고 주소에 `include_scratch_auto` 가 없으면 켠 것으로 읽으며, 끄면 `include_scratch_auto=false` 가 주소에 남고 켜면 파라미터를 지운다(쿼리 키에 포함). 서버 API 의 기본값은 그대로 `false` 다: Rust 클라이언트가 파라미터를 싣지 않고 기본 목록(일반 판만)에 기대기 때문이다. 목록의 SCRATCH AUTO 행에는 A-SCR 배지. SCRATCH AUTO 판의 `rank` 는 그 판이 속한 목록(일반 판은 기본 목록, SCRATCH AUTO 판은 포함 목록) 기준이고 `previous_best`·`is_new_best` 는 그 판의 칸 기준이다(`score.service.ts` `submit`). 넓힌 판정(`options.assist` 의 `CUSTOM_JUDGE`)은 `ASSIST` flag 로 그대로 unranked |
 | 클라 정책 정합 | 옛 결정 #12("어시스트 판은 최고 기록이 아니다")는 2026-10-14 사용자 결정으로 **대체**됐다: 손으로 친 모든 판은 클라이언트가 저장·전송하고, SCRATCH AUTO 는 서버에서도 ranked 다. 넓힌 판정(클라이언트 어시스트 태그 `CUSTOM_JUDGE`)은 서버에서 `ASSIST` flag + unranked 이고 `chart_best`·순위에 들어가지 않는다. SCRATCH AUTO 램프는 `LightAssistEasy` 로 유지한다. 둘 다 2026-10-14 사용자 확인(S18 결정 6). 서버는 클라이언트의 판단을 신뢰하지 않고 독립 재판정한다 |
 | FR-18 감사 로그 | `score.service.ts` 의 `submit` 이 `deps.db.insertAudit`(compose 구현)을 불러 `submission_audit` 에 insert 한다. IP 는 `x-forwarded-for` 첫 값, UA 는 `user-agent`. 별도 `audit.ts` 파일은 없다 |
 | best 갱신 | `chart_best` 조건부 갱신(키 `(chart, user, scratch_auto)`, `upsertChartBestIfBetter`: `INSERT IGNORE` 뒤 `UPDATE … WHERE` 저장된 값이 더 나쁨(`isBeatenBy`), `affectedRows` 로 `is_new_best`). 비교 순서 **램프 > EX > BP(낮을수록)**. `ranked=false` 는 갱신 대상 제외. 코스는 `upsertCourseBestIfBetter` |

@@ -5,6 +5,7 @@ import { clientBuildListQueryOptions } from '../../src/entities/build.query'
 import { tableListQueryOptions } from '../../src/entities/table.query'
 import { courseRankingQueryOptions } from '../../src/entities/course.query'
 import { chartLeaderboardQueryOptions } from '../../src/entities/chart.query'
+import { playerRecentQueryOptions } from '../../src/entities/player.query'
 
 const originalFetch = globalThis.fetch
 
@@ -50,6 +51,21 @@ describe('entities 쿼리가 실제 라우트 응답 형태를 따른다', () =>
         const calls = capture('[]')
         await run<unknown[]>(courseRankingQueryOptions('ch 1', { limit: 25, include_scratch_auto: true }))
         expect(calls[0]).toEndWith('/api/courses/ch%201/ranking?limit=25&include_scratch_auto=true')
+    })
+
+    test('플레이 기록은 page 와 limit 을 쿼리스트링으로 보내고 pagination 을 함께 돌려준다', async () => {
+        const calls = capture('{"success":true,"data":[],"pagination":{"page":2,"limit":20,"total":21,"totalPages":2}}')
+        const result = await run<{ data: unknown[]; pagination: { total: number; totalPages: number } }>(
+            playerRecentQueryOptions('al ice', { page: 2, limit: 20 }),
+        )
+        expect(calls[0]).toEndWith('/api/fe/players/al%20ice/recent?page=2&limit=20')
+        expect([result.data, result.pagination.total, result.pagination.totalPages]).toEqual([[], 21, 2])
+    })
+
+    test('플레이 기록은 페이지가 다르면 쿼리 키가 다르다', () => {
+        expect(playerRecentQueryOptions('alice', { page: 1, limit: 20 }).queryKey).not.toEqual(
+            playerRecentQueryOptions('alice', { page: 2, limit: 20 }).queryKey,
+        )
     })
 
     test('SCRATCH AUTO 포함 여부가 다르면 차트 순위 쿼리 키가 다르다', () => {

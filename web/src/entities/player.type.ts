@@ -11,6 +11,11 @@ export type PlayerProfile = {
 
 export type PlayerRecentRow = ActivityRow
 
+export type PlayerRecentParams = {
+    page: number
+    limit: number
+}
+
 export type PlayerStats = {
     total_plays: number
     cleared: number

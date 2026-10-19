@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { TableChartCard } from '../../src/features/table/table-chart-card'
 import { TableChartGrid } from '../../src/features/table/table-chart-grid'
 import { tableSnapshotRecordsQueryOptions } from '../../src/entities/table-snapshot.query'
+import { CLEAR_LAMPS } from '../../src/shared/constants/clear-lamp'
 import type { TableSnapshotEntry, TableSnapshotLevel, TableSnapshotRecord } from '../../src/entities/table-snapshot.type'
 import {
     countActiveTableFilters,
@@ -93,6 +94,22 @@ describe('발광 표 걸러내기', () => {
         expect(cleared.flatMap((group) => group.entries.map((item) => item.title))).toEqual(['Zeta'])
         const unplayed = filterTableLevels(LEVELS, { ...DEFAULT_TABLE_FILTER, lamp: 'noplay' }, RECORDS)
         expect(unplayed.flatMap((group) => group.entries)).toHaveLength(4)
+    })
+
+    test('클리어는 FAILED 가 아닌 모든 램프이고 미클리어는 미플레이와 FAILED 다', () => {
+        const byLamp: TableSnapshotLevel[] = [{ level: '1', entries: CLEAR_LAMPS.map((lamp, index) => entry(`l${index.toString(16)}`, '1', lamp)) }]
+        const records = Object.fromEntries(
+            CLEAR_LAMPS.flatMap((lamp, index) => (lamp === 'NoPlay' ? [] : [[byLamp[0].entries[index].md5, record(lamp, 100)]])),
+        )
+        const titlesFor = (lamp: (typeof DEFAULT_TABLE_FILTER)['lamp']) =>
+            filterTableLevels(byLamp, { ...DEFAULT_TABLE_FILTER, lamp }, records).flatMap((group) => group.entries.map((item) => item.title))
+        expect(titlesFor('cleared')).toEqual(CLEAR_LAMPS.filter((lamp) => lamp !== 'NoPlay' && lamp !== 'Failed'))
+        expect(titlesFor('cleared')).toContain('AssistEasy')
+        expect(titlesFor('cleared')).toContain('LightAssistEasy')
+        expect(titlesFor('unclear')).toEqual(['NoPlay', 'Failed'])
+        expect(titlesFor('failed')).toEqual(['Failed'])
+        expect(titlesFor('noplay')).toEqual(['NoPlay'])
+        expect(titlesFor('easy')).toEqual(CLEAR_LAMPS.slice(CLEAR_LAMPS.indexOf('Easy')))
     })
 
     test('곡명 순과 램프 낮은 순으로 묶음 안을 정렬한다', () => {

@@ -11,7 +11,14 @@ export const readNumberParam = (params: Record<string, string | string[] | undef
     return Number.isFinite(parsed) ? parsed : fallback
 }
 
-export const readBooleanParam = (params: Record<string, string | string[] | undefined>, key: string) => readParam(params, key) === 'true'
+export const readBooleanParam = (params: Record<string, string | string[] | undefined>, key: string, fallback: boolean) => {
+    const raw = readParam(params, key)
+    if (raw === 'true') return true
+    if (raw === 'false') return false
+    return fallback
+}
+
+export const writeBooleanParam = (value: boolean, fallback: boolean) => (value === fallback ? undefined : String(value))
 
 export const readListParam = (params: Record<string, string | string[] | undefined>, key: string) => {
     const raw = readParam(params, key)

@@ -8,6 +8,7 @@ import { TableExternalLink } from '@features/table/table-external-link'
 import { AddToFolderMenu } from '@widgets/folder/add-to-folder-menu'
 import { useChartLeaderboard } from '@entities/chart.query'
 import type { TableSnapshotEntry, TableSnapshotRecord } from '@entities/table-snapshot.type'
+import { DEFAULT_INCLUDE_SCRATCH_AUTO } from '@shared/constants/scratch-auto'
 import { formatCount } from '@shared/lib/format'
 import { Badge } from '@shared/ui/badge'
 import { Button } from '@shared/ui/button'
@@ -37,7 +38,11 @@ const toWebUrl = (value: string) => {
 }
 
 export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, record, isSignedIn, isRecordPending, loginHref }) => {
-    const { data: leaderboard, isPending: isChartPending, isError: isChartError } = useChartLeaderboard(entry.md5, { include_scratch_auto: false })
+    const {
+        data: leaderboard,
+        isPending: isChartPending,
+        isError: isChartError,
+    } = useChartLeaderboard(entry.md5, { include_scratch_auto: DEFAULT_INCLUDE_SCRATCH_AUTO })
     const bodyUrl = toWebUrl(entry.url)
     const diffUrl = toWebUrl(entry.url_diff)
     const isSameLink = bodyUrl !== null && bodyUrl === diffUrl

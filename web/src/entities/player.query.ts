@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { QUERY_KEY } from '@shared/constants/query-key'
-import { buildApiUrl, fetchEnvelope, fetchRaw } from '@shared/lib/fetch'
-import type { PlayerProfile, PlayerRecentRow, PlayerStats } from '@entities/player.type'
+import { buildApiUrl, fetchEnvelope, fetchEnvelopePage, fetchRaw } from '@shared/lib/fetch'
+import type { PlayerProfile, PlayerRecentParams, PlayerRecentRow, PlayerStats } from '@entities/player.type'
 
 export const playerQueryOptions = (playerId: string) =>
     queryOptions({
@@ -9,10 +9,10 @@ export const playerQueryOptions = (playerId: string) =>
         queryFn: () => fetchRaw<PlayerProfile>(buildApiUrl(`/players/${encodeURIComponent(playerId)}`)),
     })
 
-export const playerRecentQueryOptions = (playerId: string, params: { limit: number }) =>
+export const playerRecentQueryOptions = (playerId: string, params: PlayerRecentParams) =>
     queryOptions({
         queryKey: QUERY_KEY.PLAYER.RECENT(playerId, params),
-        queryFn: () => fetchEnvelope<PlayerRecentRow[]>(buildApiUrl(`/fe/players/${encodeURIComponent(playerId)}/recent`, params)),
+        queryFn: () => fetchEnvelopePage<PlayerRecentRow[]>(buildApiUrl(`/fe/players/${encodeURIComponent(playerId)}/recent`, params)),
     })
 
 export const playerStatsQueryOptions = (playerId: string) =>
@@ -23,6 +23,6 @@ export const playerStatsQueryOptions = (playerId: string) =>
 
 export const usePlayer = (playerId: string) => useQuery(playerQueryOptions(playerId))
 
-export const usePlayerRecent = (playerId: string, params: { limit: number }) => useQuery(playerRecentQueryOptions(playerId, params))
+export const usePlayerRecent = (playerId: string, params: PlayerRecentParams) => useQuery(playerRecentQueryOptions(playerId, params))
 
 export const usePlayerStats = (playerId: string) => useQuery(playerStatsQueryOptions(playerId))

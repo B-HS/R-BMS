@@ -1,5 +1,12 @@
 import { compose } from '@server/compose'
-import { chartLeaderboardQuerySchema, chartSearchQuerySchema, feedQuerySchema, playerLeaderboardQuerySchema, tokenCreateSchema } from '@server/dto/fe'
+import {
+    chartLeaderboardQuerySchema,
+    chartSearchQuerySchema,
+    feedQuerySchema,
+    playerLeaderboardQuerySchema,
+    playerRecentQuerySchema,
+    tokenCreateSchema,
+} from '@server/dto/fe'
 import { successResponse } from '@server/lib/api-response'
 import { NextResponse } from 'next/server'
 import { createAppError } from '@server/lib/error'
@@ -53,9 +60,9 @@ export const createFePlayerLeaderboardRoute = () =>
 
 export const createFePlayerRecentRoute = () =>
     withPublicRead(async (request: Request, context: PlayerContext) => {
-        const query = parseSearchParams(request, feedQuerySchema)
+        const query = parseSearchParams(request, playerRecentQuerySchema)
         const { playerId } = await context.params
-        return envelope(await readPlayerRecent(playerId, query))
+        return pageEnvelope(await readPlayerRecent(playerId, query))
     })
 
 export const createFePlayerStatsRoute = () =>

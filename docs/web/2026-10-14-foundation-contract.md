@@ -1,6 +1,6 @@
 # 웹 기반 계약 (웨이브 17B-1 통합, 17B-2 반영)
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9 (웨이브 20 의 SCRATCH AUTO 순위는 6.6절에, 2026-10-14~15 의 발광 표 다른 사이트 흔적 제거는 6.2·13·14절에 반영돼 있고, 12절·14절의 테스트 수와 측정값은 각 웨이브 종료 시점의 기록이라 지금 값과 다를 수 있다)
+> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리 (6.5·6.6절의 클리어 기준·SCRATCH AUTO 화면 기본값·플레이 기록 페이지는 2026-10-19 에 바뀌었고, 웨이브 20 의 SCRATCH AUTO 순위는 6.6절에, 2026-10-14~15 의 발광 표 다른 사이트 흔적 제거는 6.2·13·14절에 반영돼 있고, 12절·14절의 테스트 수와 측정값은 각 웨이브 종료 시점의 기록이라 지금 값과 다를 수 있다)
 
 > 현재 상태: 토큰·골격·기존 화면(17B-1 U1)과 서버·폴더·표 제공(17B-1 U2) 위에 17B-2 가 발광 표 화면(U3)과 폴더 화면(U4)을 올렸고, 리뷰 발견을 고친 뒤 게이트와 화면 확인을 다시 통과했습니다. 17B-2 에서 바뀐 계약은 해당 절을 고쳤고, 새 화면·컴포넌트·쿼리 키·검증은 13절과 14절에 모았습니다.
 > 작성일 2026-10-14. 근거는 실제 파일과 로컬 실행(포트 3103, 임시 MySQL 8.4)의 응답이며, 두 단위의 보고와 달랐던 곳은 11절에 적었습니다. 문서와 파일이 다르면 파일이 맞습니다.
@@ -310,18 +310,18 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 
 ### 6.5 이 웨이브에서 바뀐 기존 API
 
-- `GET /api/fe/leaderboards/players?sort=cleared|played|plays`(기본 `cleared`; 옛 `rank_points` 는 `cleared`, `total_plays` 는 `plays` 로 받음). 항목은 `PlayerProfile` + `cleared_charts` + `played_charts`. `rank_points` 는 항상 0 이므로 화면에서 쓰지 않습니다. 클리어는 램프 EASY 이상입니다. 화면(`player-leaderboard-panel.tsx`)은 이미 이 값으로 바꿨습니다.
+- `GET /api/fe/leaderboards/players?sort=cleared|played|plays`(기본 `cleared`; 옛 `rank_points` 는 `cleared`, `total_plays` 는 `plays` 로 받음). 항목은 `PlayerProfile` + `cleared_charts` + `played_charts`. `rank_points` 는 항상 0 이므로 화면에서 쓰지 않습니다. 클리어는 NO PLAY 와 FAILED 가 아닌 모든 램프(ASSIST 이상)입니다(2026-10-19 에 EASY 이상에서 바뀜). 화면(`player-leaderboard-panel.tsx`)은 이미 이 값으로 바꿨습니다.
 - 차트 순위(`/api/fe/charts/{hash}/leaderboard` 의 `ranking[]`, `/api/charts/{hash}/ranking`)의 `extra.replay_id`(문자열, 리플레이가 있는 점수만). 차트 화면의 "리플레이" 열이 `/replays/{id}` 로 잇습니다.
 - 차트 제목 보강: 제출이 만든 제목 없는 차트 행은 읽을 때 번들 표의 제목·아티스트로 채워집니다(`GET /api/charts/{hash}`, FE 리더보드, 검색, 활동 피드). 점수 제출 본문의 `chart` 에 `title`, `artist`, `level` 을 선택으로 실을 수 있고 제목 없는 행만 채워집니다.
 - `POST /api/charts` 는 빈 값만 채우는 방식(fill-only)이고 `POST /api/courses/meta` 는 관리자 세션 전용입니다.
 
 ### 6.6 웨이브 20: SCRATCH AUTO 순위
 
-사용자 결정(2026-10-14): SCRATCH AUTO 판도 순위에 올리되 순위 목록에서는 기본으로 보이지 않고 토글을 켜면 보입니다. 넓힌 판정 판은 그대로 unranked 입니다.
+사용자 결정(2026-10-14): SCRATCH AUTO 판도 순위에 올리고 목록에서 토글로 고릅니다. 화면 기본은 처음에 끔이었으나 2026-10-19 사용자 지시로 켬이 됐습니다. 넓힌 판정 판은 그대로 unranked 입니다.
 
-- 쿼리 `include_scratch_auto=true|false`(기본 `false`): `/api/fe/charts/{hash}/leaderboard`, `/api/charts/{hash}/ranking`·`/best`, `/api/courses/{hash}/ranking`·`/best`, `/api/fe/leaderboards/players`. 차트·코스 목록은 기본이 일반 판 최고, 켜면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것입니다. 리더보드의 클리어·플레이 곡·제출 수는 기본이 일반 판만이고, 켜면 SCRATCH AUTO 판까지 셉니다.
-- 목록 행 `ScoreRecord.extra.scratch_auto: true` 가 SCRATCH AUTO 판입니다(없으면 일반 판). 활동 행(`/api/fe/players/{id}/recent`)은 `scratch_auto: boolean`, 통계(`/api/fe/players/{id}/stats`)는 `scratch_auto_charts`(더 높은 쪽이 SCRATCH AUTO 판인 곡 수)가 더해졌습니다. 홈의 최근 활동은 SCRATCH AUTO 판을 뺍니다.
-- 화면: 차트 순위(`chart-leaderboard-panel.tsx`, 순위 머리), 코스 순위(`course-detail-panel.tsx`, 순위 카드의 action), 리더보드(`player-leaderboard-panel.tsx`, 정렬 옆)에 `ScratchAutoToggle`(`@features/filter/scratch-auto-toggle`, shadcn `Switch`)이 있고, 상태는 주소의 `include_scratch_auto=true` 로 남습니다(`router.push`, 뒤로 가기로 돌아감). 서버 `*-content.tsx` 가 `readBooleanParam` 으로 읽어 같은 값으로 미리 채웁니다. SCRATCH AUTO 행에는 `ScratchAutoBadge`(`@features/score/scratch-auto-badge`, 무채색 outline "A-SCR")가 붙고 뜻은 각 목록의 각주(`SCRATCH_AUTO_LIST_NOTE`)로 알립니다. 문구 상수는 `@shared/constants/scratch-auto`.
+- 쿼리 `include_scratch_auto=true|false`(기본 `false`): `/api/fe/charts/{hash}/leaderboard`, `/api/charts/{hash}/ranking`·`/best`, `/api/courses/{hash}/ranking`·`/best`, `/api/fe/leaderboards/players`. 차트·코스 목록은 기본이 일반 판 최고, 켜면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것입니다. 리더보드의 클리어·플레이 곡·제출 수는 API 기본이 일반 판만이고, 켜면 SCRATCH AUTO 판까지 셉니다(화면은 기본으로 켠 채 요청합니다).
+- 목록 행 `ScoreRecord.extra.scratch_auto: true` 가 SCRATCH AUTO 판입니다(없으면 일반 판). 활동 행(`/api/fe/players/{id}/recent`, 2026-10-19 부터 `page`·`limit` 으로 모든 판을 나눠 주고 응답에 `pagination` 이 붙음)은 `scratch_auto: boolean`, 통계(`/api/fe/players/{id}/stats`)는 `scratch_auto_charts`(더 높은 쪽이 SCRATCH AUTO 판인 곡 수)가 더해졌습니다. 홈의 최근 활동은 SCRATCH AUTO 판을 뺍니다.
+- 화면: 차트 순위(`chart-leaderboard-panel.tsx`, 순위 머리), 코스 순위(`course-detail-panel.tsx`, 순위 카드의 action), 리더보드(`player-leaderboard-panel.tsx`, 정렬 옆)에 `ScratchAutoToggle`(`@features/filter/scratch-auto-toggle`, shadcn `Switch`)이 있고, 화면 기본은 켬입니다(2026-10-19). 주소에 `include_scratch_auto` 가 없으면 켠 것이고, 끄면 `include_scratch_auto=false` 가 남고 켜면 파라미터가 지워집니다(`router.push`, 뒤로 가기로 돌아감). 서버 `*-content.tsx` 가 `readIncludeScratchAutoParam`(`@shared/lib/scratch-auto-param`)으로 읽어 같은 값으로 미리 채웁니다. 서버 API 의 쿼리 기본값은 `false` 로 그대로입니다(클라이언트가 파라미터를 싣지 않음). SCRATCH AUTO 행에는 `ScratchAutoBadge`(`@features/score/scratch-auto-badge`, 무채색 outline "A-SCR")가 붙고 뜻은 각 목록의 각주(`SCRATCH_AUTO_LIST_NOTE`)로 알립니다. 문구 상수는 `@shared/constants/scratch-auto`.
 
 ## 7. 쿼리 키 규칙
 
@@ -427,7 +427,7 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 | `/charts/[hash]` | (기존) | 표에 있는 곡이면 "★16 発狂BMS難易度表" 배지(`/tables/insane1#lv-16`), 머리의 "내 폴더에 넣기" |
 
 - 보호: `/folders` 아래는 `folders/layout.tsx` 의 `SessionGate`(3.4절). 편집 화면은 세션이 없으면 `buildLoginHref('/folders/<id>')` 로 보내 깊은 경로를 지킵니다.
-- 표 필터 주소: `q`, `from`, `to`(레벨 값), `lamp`(`all|noplay|failed|unclear|easy|clear|hard|exhard|fullcombo`), `sort`(`table|title|lamp|rate`). 기본값은 주소에 쓰지 않고, `window.history.pushState/replaceState` 로 바꿔 서버 왕복이 없습니다. 레벨 앵커는 `levelAnchorId(level, index)`: `lv-12`, 영숫자가 아닌 레벨은 `lv-other-<순서>`(`???` → `lv-other-25`). 표는 마운트할 때 해시 위치로 스크롤합니다.
+- 표 필터 주소: `q`, `from`, `to`(레벨 값), `lamp`(`all|noplay|failed|unclear|cleared|easy|clear|hard|exhard|fullcombo`; `failed` 는 FAILED 만, `unclear` 는 NO PLAY 와 FAILED, `cleared` 는 ASSIST 이상, `easy` 는 EASY 이상), `sort`(`table|title|lamp|rate`). 기본값은 주소에 쓰지 않고, `window.history.pushState/replaceState` 로 바꿔 서버 왕복이 없습니다. 레벨 앵커는 `levelAnchorId(level, index)`: `lv-12`, 영숫자가 아닌 레벨은 `lv-other-<순서>`(`???` → `lv-other-25`). 표는 마운트할 때 해시 위치로 스크롤합니다.
 - 렌더 비용: 화면에서 먼 레벨 묶음은 `TableDeferredMount`(IntersectionObserver)로 늦게 그리고 그동안 정확한 높이의 자리만 둡니다. 비로그인 HTML 668,814B(gzip 135,873B).
 
 ### 13.2 컴포넌트

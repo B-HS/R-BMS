@@ -23,6 +23,7 @@ import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/cons
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
 import { formatChartTitle, formatCount, formatDateTime, formatHash, getMaxExScore } from '@shared/lib/format'
+import { writeIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
 import { serializeSearchParams } from '@shared/lib/search-params'
 import { Badge } from '@shared/ui/badge'
 import { CopyButton } from '@shared/ui/copy-button'
@@ -101,7 +102,7 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
     const { data, isLoading, isError, isFetching, refetch } = useChartLeaderboard(hash, params)
 
     const handleScratchAutoChange = (checked: boolean) => {
-        const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: checked ? 'true' : undefined })
+        const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: writeIncludeScratchAutoParam(checked) })
         router.push(query ? `${pathname}?${query}` : pathname, { scroll: false })
     }
 

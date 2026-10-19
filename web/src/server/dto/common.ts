@@ -30,7 +30,8 @@ export const clearLampToId = (lamp: ClearLamp) => CLEAR_LAMPS.indexOf(lamp)
 
 export const clearLampFromId = (id: number) => CLEAR_LAMPS[id] ?? CLEAR_LAMPS[0]
 
-export const MIN_CLEAR_LAMP_ID = clearLampToId('Easy')
+/** The lowest lamp id that counts as a clear. Every lamp but NO PLAY and FAILED does, so AssistEasy and LightAssistEasy are clears. */
+export const MIN_CLEAR_LAMP_ID = clearLampToId('AssistEasy')
 
 export const gaugeTypeToId = (gauge: GaugeType) => GAUGE_TYPES.indexOf(gauge)
 
