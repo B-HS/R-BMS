@@ -17,6 +17,7 @@ import { toChartRow } from '@server/compose/chart-row'
 import { composeAdmin } from '@server/compose/admin'
 import { composeAi } from '@server/compose/ai'
 import { composeAiRecordQuery } from '@server/compose/ai-record-query'
+import { composeAiPlayFeatures } from '@server/compose/ai-play-features'
 import { composeAiScoreFeatures } from '@server/compose/ai-score-features'
 import { composeChartPattern } from '@server/compose/chart-pattern'
 import { composeCourse } from '@server/compose/course'
@@ -362,6 +363,8 @@ const composeAll = () => {
             })),
     })
 
+    const trace = composeTrace(db, { chartPatternService: patterns.chartPatternService })
+
     return {
         chartService,
         playerService,
@@ -382,13 +385,22 @@ const composeAll = () => {
         ...ai,
         ...composeAiRecordQuery(db, { aiFeatureRunner: ai.aiFeatureRunner, loadTables: getSnapshotTables }),
         ...patterns,
-        ...composeTrace(db, { chartPatternService: patterns.chartPatternService }),
+        ...trace,
         ...composeAiScoreFeatures(db, {
             aiFeatureRunner: ai.aiFeatureRunner,
             aiResultService: ai.aiResultService,
             tableSnapshotService: tableSnapshot.tableSnapshotService,
             chartPatternService: patterns.chartPatternService,
             folderService: folder.folderService,
+            traceService: trace.traceService,
+            loadTables: getSnapshotTables,
+        }),
+        ...composeAiPlayFeatures(db, {
+            aiFeatureRunner: ai.aiFeatureRunner,
+            aiResultService: ai.aiResultService,
+            traceService: trace.traceService,
+            tableSnapshotService: tableSnapshot.tableSnapshotService,
+            chartPatternService: patterns.chartPatternService,
             loadTables: getSnapshotTables,
         }),
         resolveBuildTrust: (sha256: string | null) => resolveBuildTrust(buildAllowlist, sha256),

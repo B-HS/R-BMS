@@ -23,6 +23,12 @@ import type {
     AiUserSetting,
     AiUserSettingInput,
     AiWeeklyView,
+    AiCoachView,
+    AiCompareQuery,
+    AiCompareView,
+    AiGaugeAdviceView,
+    AiReportView,
+    AiShareSetting,
 } from '@entities/ai.type'
 
 const MODEL_LIST_STALE_TIME_MS = 300_000
@@ -187,6 +193,10 @@ const AI_DIGEST = {
     GOAL_PLAN: 'goal_plan',
     WEEKLY: 'weekly',
     JUDGE_HABIT: 'judge_habit',
+    REPORT: 'play_report',
+    COACH: 'replay_coach',
+    COMPARE: 'play_compare',
+    GAUGE_ADVICE: 'gauge_advice',
 } as const
 
 const AI_FEATURE_PATH = {
@@ -195,7 +205,12 @@ const AI_FEATURE_PATH = {
     GOALS: '/fe/me/ai/goals',
     WEEKLY: '/fe/me/ai/weekly',
     JUDGE_HABIT: '/fe/me/ai/judge-habit',
+    REPORT: '/fe/me/ai/report',
+    GAUGE_ADVICE: '/fe/me/ai/gauge-advice',
+    SHARING: '/fe/me/traces/sharing',
 } as const
+
+const playPath = (scoreId: string, feature: 'coach' | 'compare') => `/fe/me/ai/plays/${encodeURIComponent(scoreId)}/${feature}`
 
 const goalPath = (goalId: string) => `${AI_FEATURE_PATH.GOALS}/${encodeURIComponent(goalId)}`
 
@@ -234,6 +249,51 @@ export const aiJudgeHabitQueryOptions = () =>
         queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.JUDGE_HABIT, {}),
         queryFn: () => fetchEnvelope<AiJudgeHabitView>(buildApiUrl(AI_FEATURE_PATH.JUDGE_HABIT)),
     })
+
+export const aiReportQueryOptions = () =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.REPORT, {}),
+        queryFn: () => fetchEnvelope<AiReportView>(buildApiUrl(AI_FEATURE_PATH.REPORT)),
+    })
+
+export const aiCoachQueryOptions = (scoreId: string) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.COACH, { scoreId }),
+        queryFn: () => fetchEnvelope<AiCoachView>(buildApiUrl(playPath(scoreId, 'coach'))),
+    })
+
+export const aiCompareQueryOptions = (scoreId: string, query: AiCompareQuery) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.COMPARE, { scoreId, ...query }),
+        queryFn: () => fetchEnvelope<AiCompareView>(buildApiUrl(playPath(scoreId, 'compare'), query)),
+    })
+
+export const aiGaugeAdviceQueryOptions = () =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.DIGEST(AI_DIGEST.GAUGE_ADVICE, {}),
+        queryFn: () => fetchEnvelope<AiGaugeAdviceView>(buildApiUrl(AI_FEATURE_PATH.GAUGE_ADVICE)),
+    })
+
+export const aiShareSettingQueryOptions = () =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.SHARING,
+        queryFn: () => fetchEnvelope<AiShareSetting>(buildApiUrl(AI_FEATURE_PATH.SHARING)),
+    })
+
+export const useAiReport = () => useQuery(aiReportQueryOptions())
+
+export const useAiCoach = (scoreId: string) => useQuery(aiCoachQueryOptions(scoreId))
+
+/** Keeps the last comparison of this play on screen while another target loads, so the target list does not disappear while switching. */
+export const useAiCompare = (scoreId: string, query: AiCompareQuery) =>
+    useQuery({
+        ...aiCompareQueryOptions(scoreId, query),
+        placeholderData: (previous) => (previous?.base.score_id === scoreId ? previous : undefined),
+    })
+
+export const useAiGaugeAdvice = () => useQuery(aiGaugeAdviceQueryOptions())
+
+export const useAiShareSetting = () => useQuery(aiShareSettingQueryOptions())
 
 export const useAiRecommend = (tableId: string | null) => useQuery(aiRecommendQueryOptions(tableId))
 
@@ -298,6 +358,48 @@ export const useInterpretAiJudgeHabit = () =>
         path: () => AI_FEATURE_PATH.JUDGE_HABIT,
         feature: AI_DIGEST.JUDGE_HABIT,
     })
+
+export const useInterpretAiReport = () =>
+    useAiInterpretMutation<Record<string, never>, NonNullable<AiReportView['ai']>>({
+        path: () => AI_FEATURE_PATH.REPORT,
+        feature: AI_DIGEST.REPORT,
+    })
+
+export const useInterpretAiCoach = (scoreId: string) =>
+    useAiInterpretMutation<Record<string, never>, NonNullable<AiCoachView['ai']>>({
+        path: () => playPath(scoreId, 'coach'),
+        feature: AI_DIGEST.COACH,
+    })
+
+export const useInterpretAiCompare = (scoreId: string) =>
+    useAiInterpretMutation<AiCompareQuery, NonNullable<AiCompareView['ai']>>({
+        path: () => playPath(scoreId, 'compare'),
+        feature: AI_DIGEST.COMPARE,
+    })
+
+export const useInterpretAiGaugeAdvice = () =>
+    useAiInterpretMutation<Record<string, never>, NonNullable<AiGaugeAdviceView['ai']>>({
+        path: () => AI_FEATURE_PATH.GAUGE_ADVICE,
+        feature: AI_DIGEST.GAUGE_ADVICE,
+    })
+
+/** Turns sharing segment totals with rivals on or off; the comparisons that read it are read again. */
+export const useSaveAiShareSetting = () => {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: (rivalSegments: boolean) =>
+            fetchEnvelope<AiShareSetting>(buildApiUrl(AI_FEATURE_PATH.SHARING), {
+                method: 'PUT',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ rival_segments: rivalSegments }),
+            }),
+        onSuccess: () =>
+            Promise.all([
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.SHARING }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.DIGEST_FEATURE(AI_DIGEST.COMPARE) }),
+            ]),
+    })
+}
 
 /** Makes (or, for the same preview, updates) the practice folder the user confirmed; it shows in the game's MY FOLDERS on the next refresh. */
 export const useCreateAiPracticeFolder = () => {

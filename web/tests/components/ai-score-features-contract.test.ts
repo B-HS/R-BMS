@@ -44,7 +44,26 @@ describe('점수 기반 AI 기능 화면과 서버의 계약', () => {
             'table',
             'week_plays',
             'recent_plays',
+            'traced_plays',
+            'play_trace',
+            'play_metrics',
+            'comparable_play',
         ]
         expect(Object.keys(AI_DATA_NEED_LABEL).toSorted()).toEqual(serverNeeds.toSorted())
+    })
+})
+
+describe('판별 기반 AI 기능 화면과 서버의 계약', () => {
+    test('게이지·옵션·결과·비교 이유 이름이 서버와 같고, 판 id 꼴이 서버 경로 검사와 같다', async () => {
+        const server = await import('../../src/server/dto/ai-play')
+        const screen = await import('../../src/entities/ai.type')
+        expect(Object.keys(screen.AI_GAUGE_LABEL)).toEqual([...server.AI_GAUGE_NAMES])
+        expect(Object.keys(screen.AI_OPTION_LABEL)).toEqual([...server.AI_OPTION_NAMES])
+        expect(Object.keys(screen.AI_GAUGE_OUTCOME_LABEL)).toEqual([...server.AI_GAUGE_OUTCOMES])
+        expect(Object.keys(screen.AI_RUN_END_LABEL)).toEqual([...server.AI_RUN_ENDS])
+        expect(Object.keys(screen.AI_COMPARE_REASON_LABEL).toSorted()).toEqual([...server.AI_COMPARE_REASONS].toSorted())
+        for (const id of ['sc_0123abcd', 'a-b_c', 'x'.repeat(36), 'bad id', 'x'.repeat(37), '../a']) {
+            expect(screen.isAiScoreId(id)).toBe(server.aiScoreIdSchema.safeParse(id).success)
+        }
     })
 })

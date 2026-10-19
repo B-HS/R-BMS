@@ -65,11 +65,21 @@ const DROPPED_FIELDS: Record<ContractKind, ReadonlySet<string>> = {
     trace: new Set(),
 }
 const BUILDLESS_SCORE_FILES = ['score-sync-resend.json']
-const TRACE_SCORE_FILE: Record<string, string> = {
-    'trace-abandoned.json': 'score-abandoned.json',
-    'trace-normal.json': 'score-normal.json',
-    'trace-random.json': 'score-normal.json',
-    'trace-scratch-auto.json': 'score-scratch-auto.json',
+/**
+ * The trace files whose run has no `score-<name>.json` of its own: `score-normal.json` is the same hands played on RANDOM, which is
+ * the run of `trace-random.json`.
+ */
+const TRACE_SCORE_FILE_EXCEPTIONS: Record<string, string> = { 'trace-random.json': 'score-normal.json' }
+
+/**
+ * The score file of a trace file's run, found by name: `score-<trace file name>` (`score-trace-normal.json`, the score body the Rust
+ * test captures with the trace of one run) when it exists, otherwise `score-<name>.json` for `trace-<name>.json`. A new trace file
+ * is paired with no change here, and fails the pairing test when its score file is missing.
+ */
+const traceScoreFileOf = (file: string, contractFileNames: readonly string[]) => {
+    const captured = `score-${file}`
+    if (contractFileNames.includes(captured)) return captured
+    return TRACE_SCORE_FILE_EXCEPTIONS[file] ?? file.replace(/^trace-/, 'score-')
 }
 const REPLAY_EVENTS_THAT_MUST_FIT = 100_000
 const CONTRACT_USER_ID = 'usr_contract'
@@ -383,10 +393,23 @@ const storedScoreOf = async (file: string) => {
     return inserted[0]
 }
 
+describe('trace 계약 파일의 점수 짝 찾기', () => {
+    test('같은 판에서 함께 캡처한 score-trace-<이름> 이 있으면 그 파일이고, 없으면 score-<이름> 이다', () => {
+        const files = ['score-normal.json', 'score-trace-normal.json', 'score-abandoned.json', 'trace-normal.json', 'trace-abandoned.json']
+        expect(traceScoreFileOf('trace-normal.json', files)).toBe('score-trace-normal.json')
+        expect(traceScoreFileOf('trace-abandoned.json', files)).toBe('score-abandoned.json')
+        expect(traceScoreFileOf('trace-normal.json', ['score-normal.json'])).toBe('score-normal.json')
+    })
+
+    test('trace-random 은 RANDOM 으로 친 판이 score-normal 이라 그 파일과 짝이다', () => {
+        expect(traceScoreFileOf('trace-random.json', ['score-normal.json', 'score-trace-normal.json'])).toBe('score-normal.json')
+    })
+})
+
 describe.each(filesOf('trace'))('%s — 판별 trace 업로드 라우트와 서비스', (file) => {
     const raw = readContract(file)
     const input = traceUploadSchema.parse(raw)
-    const scoreFile = TRACE_SCORE_FILE[file]
+    const scoreFile = traceScoreFileOf(file, contractFiles)
 
     test('짝이 되는 점수 계약 파일이 있다', () => {
         expect(contractFiles).toContain(scoreFile)

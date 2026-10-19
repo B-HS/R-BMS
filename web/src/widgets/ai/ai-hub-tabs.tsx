@@ -5,11 +5,13 @@ import { useSearchParams } from 'next/navigation'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@shared/ui/tabs'
 import { AI_HUB_TABS, AI_HUB_TAB_LABEL, type AiHubTab } from '@entities/ai.type'
 import { AiActiveProviderPanel } from '@widgets/ai/ai-active-provider-panel'
+import { AiGaugeAdvicePanel } from '@widgets/ai/ai-gauge-advice-panel'
 import { AiGoalPanel } from '@widgets/ai/ai-goal-panel'
 import { AiJudgeHabitPanel } from '@widgets/ai/ai-judge-habit-panel'
 import { AiPracticeFolderPanel } from '@widgets/ai/ai-practice-folder-panel'
 import { AiReadyGate } from '@widgets/ai/ai-ready-gate'
 import { AiRecommendPanel } from '@widgets/ai/ai-recommend-panel'
+import { AiReportPanel } from '@widgets/ai/ai-report-panel'
 import { AiWeeklyPanel } from '@widgets/ai/ai-weekly-panel'
 import { RecordQueryPanel } from '@widgets/ai/record-query-panel'
 
@@ -51,8 +53,14 @@ export const AiHubTabs: FC = () => {
             <TabsContent value='weekly' className={TAB_CONTENT_CLASS}>
                 <AiWeeklyPanel />
             </TabsContent>
+            <TabsContent value='report' className={TAB_CONTENT_CLASS}>
+                <AiReportPanel />
+            </TabsContent>
             <TabsContent value='habit' className={TAB_CONTENT_CLASS}>
                 <AiJudgeHabitPanel />
+            </TabsContent>
+            <TabsContent value='gauge' className={TAB_CONTENT_CLASS}>
+                <AiGaugeAdvicePanel />
             </TabsContent>
         </Tabs>
     )

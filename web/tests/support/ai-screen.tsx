@@ -5,7 +5,7 @@ import { createQueryClient } from '../../src/shared/utils/get-query-client'
 import { mount, unmountAll } from './dom-harness'
 
 export type FetchCall = { method: string; path: string; body: unknown }
-type FetchHandler = (call: FetchCall) => Response | Promise<Response>
+type FetchHandler = (call: FetchCall, query: { search: string }) => Response | Promise<Response>
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
@@ -23,11 +23,11 @@ export const installFetchRoutes = (routes: Record<string, FetchHandler>) => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
         const method = init?.method ?? 'GET'
-        const path = String(input).split('?')[0]
+        const [path, search = ''] = String(input).split('?')
         const call = { method, path, body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : null }
         calls.push(call)
         const handler = routes[`${method} ${path}`]
-        return handler ? handler(call) : errorResponse(404, 'NOT_FOUND', `unrouted ${method} ${path}`)
+        return handler ? handler(call, { search }) : errorResponse(404, 'NOT_FOUND', `unrouted ${method} ${path}`)
     }, originalFetch)
     return { calls, restore: () => void (globalThis.fetch = originalFetch) }
 }

@@ -354,6 +354,7 @@ W1 구현에서 이 표 초안과 달라진 점(2026-10-19, 작업 트리 기준
 | 화면 | `/ai` 리포트 탭: 태그별 잔차 막대(결정론), 레인 히트맵, AI 문단 |
 | 캐시 | 사용자당 최신 1건 표시, 이력 보관 |
 | 데이터 없음 | trace 0 이면 점수 행 기반 일부(램프·FAST/SLOW 합계)만 + 안내 |
+| 구현(W5, 2026-10-20) | `GET/POST /api/fe/me/ai/report`. 표본은 7키 지표가 있는 판 수(`plays.measured`)로 세고(다른 모드의 판은 `plays.analyzed` 에만 든다), 5판 미만이면 AI 를 부르지 않는다(`traced_plays`). 프롬프트(버전 2)가 `mean_ms` 의 부호(양수 = 빠름), 피로 `mean_delta`(뒤 1/3 − 앞 1/3), 레인 `deviation`, `fast_share` 의 정의를 적는다. 불확실·표본 부족 태그는 digest 에 이름만 넣어 가리킬 수 없게 하고, 강점·약점에 strong 목록 밖 태그가 있거나 그런 태그가 있는데 `caveats` 가 비면 출력을 버린다. 선호 패턴 (1)은 2판 이상 친 곡과 친 곡 전체의 원본 배치 태그 비율 차(표 전체 평균 대신). 상세 `docs/web/architecture.md` §14 |
 
 ### 5.2 리플레이 코치 (기능 2)
 
@@ -366,6 +367,7 @@ W1 구현에서 이 표 초안과 달라진 점(2026-10-19, 작업 트리 기준
 | 화면 | `/ai/plays/[scoreId]`: 게이지 선 + 구간 BP 막대(결정론 그래프), 구간 클릭 시 AI 진단 |
 | 캐시 | 판(score_id)당 1건. 판은 바뀌지 않으므로 `ANALYSIS_VERSION`·`prompt_version` 이 바뀔 때만 다시 만들 수 있게 |
 | 데이터 없음 | 그 판에 trace 가 없으면 점수 행 요약만 |
+| 구현(W5, 2026-10-20) | `GET/POST /api/fe/me/ai/plays/[scoreId]/coach`, 화면 `/ai/plays/[scoreId]`. 구간마다 EX·FAST/SLOW·태그 3·구간 끝 게이지를 `play_analysis` 에 더했다(분석 버전 2). 문제 구간은 BP 큰 순 + 꺾임이 끝나는 구간, 최대 5. 게이지 사망 뒤 구간의 게이지와, Esc·종료로 나간 판(`left`)의 마지막 게이지 표본 시각 뒤에 끝나는 구간의 게이지는 null. 저장 분석은 판 분석 버전(`PLAY_ANALYSIS_VERSION`)과 곡별 분류 버전(`ANALYSIS_VERSION`)을 함께 담고 둘 중 하나라도 낮으면 읽을 때 다시 계산한다. 다시 계산이 예외로 끝난 trace 는 그 trace 만 실패로 표시해 빼고 나머지로 답하며(GET 이 500 이 되지 않는다), 버전이 오를 때만 다시 시도한다 |
 
 ### 5.3 베스트·라이벌 비교 (기능 3)
 
@@ -378,6 +380,7 @@ W1 구현에서 이 표 초안과 달라진 점(2026-10-19, 작업 트리 기준
 | 화면 | 두 판 EX 누적 차 곡선(결정론), 구간 표, AI 설명 |
 | 캐시 | `(기준 score_id, 비교 score_id)` 쌍당 1건 |
 | 실패 | 라이벌 trace 접근이 막히면 판정 합계(공개 데이터) 비교로 내려간다 |
+| 구현(W5, 2026-10-20) | `GET/POST /api/fe/me/ai/plays/[scoreId]/compare?against=best\|rival&rival=<login>`. 노트 단위 정렬 대신 같은 32 구간의 집계로 맞댄다(구간의 판정 객체 수가 모두 같을 때만; 라이벌 허용 범위가 구간 집계라 두 경우를 한 방식으로). 라이벌은 **서로** 라이벌 목록에 있고(양쪽 방향의 `rival` 행: 등록은 상대 동의 없이 되므로 한쪽만으로는 열지 않는다) 그 라이벌이 `play_share_setting.rival_segments` 를 켰을 때만 구간, 아니면 공개 판정 합계(이유 `rival_not_sharing`, 공개 기록도 없으면 `rival_no_record`). 한쪽 판이 도달하지 못한 구간(Esc·게이지 사망 뒤)은 차이를 null 로 하고 합계(`overall.ex_diff`)·AI digest 에서 뺀다. 머리의 EX 와 표의 EX 는 항상 같은 판이다. AI digest 의 라이벌 쪽은 구간 차이 말고 아무것도 없다 |
 
 ### 5.4 판정 습관 진단 (기능 4)
 
@@ -389,6 +392,7 @@ W1 구현에서 이 표 초안과 달라진 점(2026-10-19, 작업 트리 기준
 | 출력 스키마 | `{ summary: string, offset_direction: "earlier" \| "later" \| "keep", offset_reasoning: string, green_direction: "faster" \| "slower" \| "keep", green_reasoning: string, notes: insight[] }` |
 | 화면 | 오차 히스토그램, 제안 오프셋 숫자(결정론), AI 설명 |
 | 주의 | JUDGE OFFSET 은 노트를 그리는 시각만 옮기고 판정은 옮기지 않는다(`docs/play-options.md` 3.1). 문구는 "판정을 옮긴다"가 아니라 "노트가 보이는 위치를 옮긴다"로 고정(시스템 프롬프트 + 결정론 라벨). 옛 빌드의 `offset_ms` 는 의미가 달라(server.md 1.2) 오프셋 제안에 쓰지 않는다. 녹색 숫자 표기는 Q11 |
+| 구현(W5, 2026-10-20) | trace 부분(`trace_timing`): AUTO ADJUST 판을 뺀 PG·GR 오차의 노트 가중 평균과 95% 구간, 전체보다 가장 치우친 레인 3. 10판·2,000노트 이상이고 구간이 0 을 벗어나면 오프셋 제안이 trace 를 따른다(`offset.source`). GREEN 은 trace 의 값을 그대로 쓴다 |
 
 ### 5.5 다음 도전 곡 추천 (기능 5)
 
@@ -436,6 +440,7 @@ W1 구현에서 이 표 초안과 달라진 점(2026-10-19, 작업 트리 기준
 | AI 에게 | 레벨별 "현재 게이지로 실패했지만 다른 게이지면 통과" 개수, 옵션별 EX 비율·잔차 상위 |
 | 출력 스키마 | `{ summary: string, gauge_advice: { gauge: "assist_easy" \| "easy" \| "normal" \| "hard" \| "ex_hard" \| "hazard" \| "class" \| "ex_class" \| "ex_hard_class", reasoning: string }[], option_advice: { option: "off" \| "mirror" \| "random" \| "r_random" \| "s_random" \| "h_random" \| "all_scratch", reasoning: string }[] }` (게이지 열거값은 구현 때 클라이언트 `GaugeIndex` 9개 이름과 맞춘다) |
 | 데이터 없음 | 게이지 곡선이 없으면 점수 행의 게이지·램프만으로(가정 계산 없이) |
+| 구현(W5, 2026-10-20) | `GET/POST /api/fe/me/ai/gauge-advice`. "다른 게이지였다면"은 끝까지 친 판만 끝값 규칙으로, Esc·종료로 남긴 판은 9개 모두 실패, 게이지 사망 판은 실패 시점까지만 읽어 친 게이지와 이미 바닥에 닿은 생존 게이지는 실패, 나머지는 `unknown`(세지 않음). 게이지 열거값은 `GaugeIndex` 순서의 snake 이름 9개, 옵션은 서버 `RANDOM_OPTIONS` 9개 |
 
 ### 5.9 자연어 기록 질문 (기능 9)
 
@@ -626,7 +631,7 @@ API 토큰(Bearer)으로는 이 경로와 AI 기능 경로를 부를 수 없다(
 | W2 점수 기반 기능 | 마이그레이션 0006, 기능 5(레벨·램프만), 6, 7, 10, 4(점수 행 부분) | 경계 레벨·후보 결정론 테스트, 폴더 생성 한도·이름 겹침, md5 후보 밖 버림, 주간 경계(UTC) | 웹 게이트 + DB 통합 | 아니오 |
 | W3 곡별 패턴 (b) | `rbms-cli chart-pattern`, `withAdminBearer`, 마이그레이션 0007, 업로드 라우트·스크립트, 패턴 분류 엔진 v1(원본 배치), 곡별 특징, 기능 5·6 에 특징 반영 | Rust: 임시 폴더 차트로 출력 형식(기존 CLI 테스트 선례). 웹: 분류 골든 테스트(손으로 만든 트릴·계단·연타·동시치기·스크래치·LN·소프란 차트), 업로드 멱등·검증, 패턴 읽기 공개 경로 없음 | Rust `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test`; 웹 게이트; 사용자 SSD 연결 뒤 사용자가 추출·업로드, coverage 1,035 확인 | 아니오(CLI 는 사용자가 소스에서 실행) |
 | W4 판별 trace (a) | 마이그레이션 0008, `POST /charts/[hash]/traces`, 일관성 검사, 능력 플래그 `traces`, 클라이언트 trace 생성·로컬 보관·전송·속도 변경 로그, 계약 fixture `trace-*`, 판별 분석(`play_analysis`) | 계약 교차 테스트 양쪽, 일관성 검사(정상·중단·RANDOM·SCRATCH AUTO·CN/HCN 판), 소유 검사, 크기 상한, Rust 단위 테스트(trace 생성이 `PlaySummary` 합계와 같음) | Rust 게이트 + 웹 게이트 + DB 통합, 3 OS CI(`gh run list --branch dev`), 서버 먼저 배포 후 클라이언트 | **예**(v0.1.6 예정, 태그·draft 까지, 게시는 사용자) |
-| W5 판별 기반 기능 | 기능 1, 2, 3, 8, 4 전체, 분석 버전 재계산 라우트 | 잔차·윌슨 구간·표본 부족 처리, 노트 정렬 비교, 게이지 가정, digest `key` 검증 | 웹 게이트 + DB 통합, 사용자 실기(실제 판 몇 개로 리포트 확인) | 아니오 |
+| W5 판별 기반 기능 | 기능 1, 2, 3, 8, 4 전체, 분석 버전 재계산 라우트(`POST /api/admin/traces/recompute`), 라이벌 구간 공유 설정(마이그레이션 0010, 기본 끔). 구현 2026-10-20(작업 트리), 상세 `docs/web/architecture.md` §14 | 잔차·윌슨 구간·표본 부족 처리, 노트 정렬 비교, 게이지 가정, digest `key` 검증 | 웹 게이트 + DB 통합, 사용자 실기(실제 판 몇 개로 리포트 확인) | 아니오 |
 | W6 소급(선택) | 로컬 리플레이 재판정으로 과거 판 trace 생성(EVENT 시계 판만) | 재판정 결과가 저장된 점수 합계와 같은지 | Rust·웹 게이트 | Q7 에 따라 |
 
 W1~W2 는 클라이언트와 무관하게 먼저 쓸 수 있다. W3 와 W4 는 서로 독립이라 순서를 바꿀 수 있다.

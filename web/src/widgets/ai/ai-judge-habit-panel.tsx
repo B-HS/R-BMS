@@ -37,7 +37,8 @@ export const AiJudgeHabitPanel: FC = () => {
             {view && (
                 <>
                     <p className='text-muted-foreground text-xs'>
-                        최근 {formatCount(view.plays)}판의 점수 기록으로 계산했습니다(노트 단위 판별 데이터가 생기면 레인별 치우침이 더해집니다).
+                        최근 {formatCount(view.plays)}판의 점수 기록과, 그중 판별 데이터가 있는 {formatCount(view.trace_timing.plays)}판의 노트 단위
+                        기록으로 계산했습니다.
                     </p>
                     <section aria-label='FAST·SLOW' className='flex flex-col gap-1 text-xs tabular-nums'>
                         <p className='text-sm'>
@@ -67,6 +68,28 @@ export const AiJudgeHabitPanel: FC = () => {
                         <p className='text-muted-foreground'>
                             규칙 세대 4 이상 판 {formatCount(view.offset.plays)}판 · AUTO ADJUST 판 {formatCount(view.offset.auto_adjust_plays)}판은
                             따로 둡니다.
+                        </p>
+                    </section>
+                    <section aria-label='노트 단위 오차' className='flex flex-col gap-1 text-xs tabular-nums'>
+                        <p className='text-sm'>
+                            노트 단위 평균 오차 {view.trace_timing.mean_ms === null ? MISSING : `${view.trace_timing.mean_ms} ms`}
+                            {view.trace_timing.ci_low_ms !== null &&
+                                view.trace_timing.ci_high_ms !== null &&
+                                ` (95% 구간 ${view.trace_timing.ci_low_ms} ~ ${view.trace_timing.ci_high_ms} ms)`}{' '}
+                            <Badge variant='outline'>{AI_EVIDENCE_LABEL[view.trace_timing.grade]}</Badge>
+                        </p>
+                        {view.trace_timing.lanes.length > 0 && (
+                            <ul aria-label='레인별 치우침' className='text-muted-foreground flex flex-wrap gap-3'>
+                                {view.trace_timing.lanes.map((lane) => (
+                                    <li key={lane.key}>
+                                        {lane.lane} 레인 {lane.mean_ms} ms (전체보다 {lane.deviation_ms > 0 ? '+' : ''}
+                                        {lane.deviation_ms} ms)
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        <p className='text-muted-foreground'>
+                            {view.offset.source === 'trace' ? '오프셋 제안은 노트 단위 기록을 따릅니다.' : '오프셋 제안은 점수 기록을 따릅니다.'}
                         </p>
                     </section>
                     <section aria-label='평균 판정 거리' className='text-xs tabular-nums'>

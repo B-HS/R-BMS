@@ -128,6 +128,30 @@ describe('업로드 스크립트 — 서비스 단위(서버·DB 없이 실제 �
         expect(seen).toHaveLength(0)
     })
 
+    test('파일을 읽지 못하면 그 파일만 실패로 남기고 나머지는 올린다', async () => {
+        const { fakeFetch } = createServer()
+        const { files, skipped } = await listPatternFiles(dir)
+        const unreadable = files[0]
+        const summary = await uploadChartPatterns({
+            files,
+            skipped,
+            server: SERVER,
+            token: ADMIN_TOKEN,
+            dryRun: false,
+            fetch: fakeFetch,
+            readText: async (path) => {
+                if (path === unreadable.path) throw new Error('EACCES: permission denied')
+                return Bun.file(path).text()
+            },
+        })
+        expect(summary.failures.find((failure) => failure.md5 === unreadable.md5)).toEqual({
+            md5: unreadable.md5,
+            status: null,
+            reason: '파일을 읽지 못했습니다',
+        })
+        expect(summary.created).toBe(MD5S.length - 1)
+    })
+
     test('서버에 닿지 못하면 그 파일을 실패로 남긴다', async () => {
         const unreachable: FakeFetch = async () => {
             throw new Error('connect ECONNREFUSED')

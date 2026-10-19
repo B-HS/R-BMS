@@ -8,6 +8,8 @@ import { DashboardPanelError } from '@features/dashboard/dashboard-panel-error'
 import { DashboardPanelLoading } from '@features/dashboard/dashboard-panel-loading'
 import { ScoreRow } from '@features/score/score-row'
 import { Pager } from '@features/table/pager'
+import { aiPlayHref } from '@entities/ai.type'
+import { useSessionUser } from '@entities/auth.query'
 import { usePlayerRecent } from '@entities/player.query'
 import type { PlayerRecentParams } from '@entities/player.type'
 import { formatChartTitle, formatCount } from '@shared/lib/format'
@@ -25,9 +27,11 @@ export const PlayerRecentPanel: FC<PlayerRecentPanelProps> = ({ playerId, params
     const router = useRouter()
     const pathname = usePathname()
     const { data, isLoading, isError, isFetching, refetch } = usePlayerRecent(playerId, params)
+    const { user } = useSessionUser()
     const rows = data?.data ?? []
     const total = data?.pagination?.total ?? 0
     const totalPages = data?.pagination?.totalPages ?? FIRST_PAGE
+    const isOwnRecord = user?.login_id === playerId
 
     const handlePageChange = (page: number) => {
         const query = serializeSearchParams({ page: page > FIRST_PAGE ? page : undefined })
@@ -64,6 +68,7 @@ export const PlayerRecentPanel: FC<PlayerRecentPanelProps> = ({ playerId, params
                             minBp={row.minbp}
                             playedAt={row.played_at}
                             isScratchAuto={row.scratch_auto}
+                            action={isOwnRecord ? { href: aiPlayHref(row.score_id), label: '판 코치' } : undefined}
                         />
                     ))}
                 </ul>

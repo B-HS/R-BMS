@@ -175,7 +175,17 @@ const habitView = (): JudgeHabitView => ({
     from: CREATED_AT,
     to: CREATED_AT,
     fast_slow: { fast: 840, slow: 360, fast_share: 0.7, grade: 'strong', leaning: 'fast', by_grade: [{ grade: 'great', early: 500, late: 200 }] },
-    offset: { plays: 12, notes: 10_800, mean_offset_ms: 4.4, grade: 'strong', direction: 'later', suggested_shift_ms: -4, auto_adjust_plays: 0 },
+    offset: {
+        plays: 12,
+        notes: 10_800,
+        mean_offset_ms: 4.4,
+        grade: 'strong',
+        direction: 'later',
+        suggested_shift_ms: -4,
+        auto_adjust_plays: 0,
+        source: 'score',
+    },
+    trace_timing: { plays: 0, notes: 0, mean_ms: null, ci_low_ms: null, ci_high_ms: null, grade: 'insufficient', lanes: [] },
     avgjudge: { plays: 12, older_ms: 14, newer_ms: 10, change_ms: -4, grade: 'strong' },
     green: {
         plays: 12,

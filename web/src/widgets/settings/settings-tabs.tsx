@@ -10,6 +10,7 @@ import { ProfilePanel } from '@widgets/settings/profile-panel'
 import { TokenPanel } from '@widgets/settings/token-panel'
 import { SyncBlobPanel } from '@widgets/settings/sync-blob-panel'
 import { RivalPanel } from '@widgets/settings/rival-panel'
+import { RivalSharingPanel } from '@widgets/settings/rival-sharing-panel'
 import type { SessionUser } from '@entities/auth.type'
 
 const TAB_CONTENT_CLASS = 'flex flex-col gap-px'
@@ -41,6 +42,7 @@ export const SettingsTabs: FC<{ user: SessionUser }> = ({ user }) => {
             </TabsContent>
             <TabsContent value='rivals' className={TAB_CONTENT_CLASS}>
                 <RivalPanel playerId={user.login_id} />
+                <RivalSharingPanel />
             </TabsContent>
             <TabsContent value={AI_SETTINGS_TAB} className={TAB_CONTENT_CLASS}>
                 <AiCredentialPanel />

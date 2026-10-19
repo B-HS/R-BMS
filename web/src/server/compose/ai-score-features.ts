@@ -17,11 +17,12 @@ import type { ChartPatternService } from '@server/service/domain/chart-pattern/c
 import type { FolderService } from '@server/service/domain/folder/folder.service'
 import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { orderedLevels, type TableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
+import type { TraceService } from '@server/service/domain/trace/trace.service'
 import { exScoreDenominator } from '@server/compose/ai-record-query'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
-const toProgressTable = (table: SnapshotTable) =>
+export const toProgressTable = (table: SnapshotTable) =>
     ({
         id: table.id,
         name: table.header.name,
@@ -158,11 +159,16 @@ export const createAiWeeklySummaryDb = (db: Database) =>
         },
     }) satisfies AiWeeklySummaryServiceDb
 
-export const createAiJudgeHabitDb = (db: Database) =>
+/**
+ * The judge-habit rows: the newest score rows and, for those with a trace, its GREEN (`speed.end`) and PGREAT and GREAT timing from
+ * the play's analysis (read through the trace service, which alone touches the trace tables).
+ */
+export const createAiJudgeHabitDb = (db: Database, traceService: Pick<TraceService, 'analyzedPlaysOfScores'>) =>
     ({
         listRecentTimingRows: async ({ userId, limit }) => {
             const rows = await db
                 .select({
+                    scoreId: score.id,
                     playedAt: score.playedAt,
                     pgreat: score.pgreat,
                     great: score.great,
@@ -188,7 +194,20 @@ export const createAiJudgeHabitDb = (db: Database) =>
                 .where(and(eq(score.userId, userId), eq(score.autoplay, false)))
                 .orderBy(desc(score.playedAt), desc(score.id))
                 .limit(limit)
-            return rows.map(({ extra, ...row }) => ({ ...row, ...timingExtraOf(extra) }))
+            const traced = await traceService.analyzedPlaysOfScores({ userId, scoreIds: rows.map((row) => row.scoreId) })
+            return rows.map(({ extra, scoreId, ...row }) => {
+                const summary = traced.get(scoreId)?.summary
+                const timing = summary?.metrics?.timing
+                return {
+                    ...row,
+                    ...timingExtraOf(extra),
+                    traceGreen: summary ? { green: summary.speed.end.green, greenMs: summary.speed.end.lane_ms } : null,
+                    traceTiming:
+                        timing && summary.metrics
+                            ? { notes: timing.notes, meanUs: timing.mean_us, stdevUs: timing.stdev_us, byLane: summary.metrics.timing_by_lane }
+                            : null,
+                }
+            })
         },
     }) satisfies AiJudgeHabitServiceDb
 
@@ -206,33 +225,40 @@ export const createChartTagLoader = (chartPatternService: Pick<ChartPatternServi
     } satisfies ChartTagLoad
 }
 
+/** The difficulty table a feature reads (the first snapshot table without an id) and the player's records on it. */
+export const createTableLoaders = (deps: Pick<ComposeAiScoreFeaturesDeps, 'tableSnapshotService' | 'loadTables'>) => ({
+    loadTable: (tableId: string | undefined) => {
+        const tables = deps.loadTables()
+        const table = tableId === undefined ? tables.values().next().value : tables.get(tableId)
+        return table ? toProgressTable(table) : null
+    },
+    loadRecords: async ({ tableId, userId }: { tableId: string; userId: string }) =>
+        (await deps.tableSnapshotService.getRecords({ tableId, userId }))?.records ?? null,
+})
+
+/** The table level of a chart md5 as `<symbol><level>` in the first snapshot table that lists it, or null. */
+export const createLevelLabelOf = (loadTables: () => Map<string, SnapshotTable>) => (md5: string) => {
+    for (const table of loadTables().values()) {
+        const entry = table.entries.find((candidate) => candidate.md5 === md5)
+        if (entry) return `${table.header.symbol}${entry.level}`
+    }
+    return null
+}
+
 type ComposeAiScoreFeaturesDeps = {
     aiFeatureRunner: Pick<AiFeatureRunner, 'run'>
     aiResultService: Pick<AiResultService, 'findLatest'>
     tableSnapshotService: Pick<TableSnapshotService, 'getRecords'>
     chartPatternService: Pick<ChartPatternService, 'readFeaturesMany'>
     folderService: Pick<FolderService, 'list' | 'get' | 'create' | 'replaceItems' | 'remove'>
+    traceService: Pick<TraceService, 'analyzedPlaysOfScores'>
     loadTables: () => Map<string, SnapshotTable>
 }
 
 export const composeAiScoreFeatures = (db: Database, deps: ComposeAiScoreFeaturesDeps) => {
     const now = () => Date.now()
-    const tableDeps: TableFeatureDeps = {
-        loadTable: (tableId) => {
-            const tables = deps.loadTables()
-            const table = tableId === undefined ? tables.values().next().value : tables.get(tableId)
-            return table ? toProgressTable(table) : null
-        },
-        loadRecords: async ({ tableId, userId }) => (await deps.tableSnapshotService.getRecords({ tableId, userId }))?.records ?? null,
-        loadChartTags: createChartTagLoader(deps.chartPatternService),
-    }
-    const levelLabelOf = (md5: string) => {
-        for (const table of deps.loadTables().values()) {
-            const entry = table.entries.find((candidate) => candidate.md5 === md5)
-            if (entry) return `${table.header.symbol}${entry.level}`
-        }
-        return null
-    }
+    const tableDeps: TableFeatureDeps = { ...createTableLoaders(deps), loadChartTags: createChartTagLoader(deps.chartPatternService) }
+    const levelLabelOf = createLevelLabelOf(deps.loadTables)
     const shared = { runner: deps.aiFeatureRunner, results: deps.aiResultService }
 
     const aiRecommendService = createAiRecommendService({ ...tableDeps, ...shared })
@@ -247,7 +273,7 @@ export const composeAiScoreFeatures = (db: Database, deps: ComposeAiScoreFeature
         now,
     })
     const aiWeeklySummaryService = createAiWeeklySummaryService({ ...shared, db: createAiWeeklySummaryDb(db), levelLabelOf, now })
-    const aiJudgeHabitService = createAiJudgeHabitService({ ...shared, db: createAiJudgeHabitDb(db) })
+    const aiJudgeHabitService = createAiJudgeHabitService({ ...shared, db: createAiJudgeHabitDb(db, deps.traceService) })
 
     return { aiRecommendService, aiGoalService, aiPracticeFolderService, aiWeeklySummaryService, aiJudgeHabitService }
 }

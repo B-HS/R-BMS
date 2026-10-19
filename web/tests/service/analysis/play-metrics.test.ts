@@ -6,6 +6,8 @@ import {
     describeGreenNumber,
     findGaugeDrops,
     readTraceGreenNumber,
+    GAUGE_OUTCOME,
+    RUN_END,
     summarizeGaugeCurves,
     summarizeTiming,
     type JudgedPlayNote,
@@ -59,12 +61,34 @@ describe('판 하나의 지표(4.3)', () => {
             [5 * SECOND + 1],
         )
         expect(metrics.segments).toHaveLength(SEGMENT_COUNT)
-        expect(metrics.segments[0]).toEqual({ id: 's00', bp: 2, combo_breaks: 1 })
-        expect(metrics.segments[5]).toEqual({ id: 's05', bp: 1, combo_breaks: 0 })
-        expect(metrics.segments[31]).toEqual({ id: 's31', bp: 1, combo_breaks: 1 })
+        expect(metrics.segments[0]).toMatchObject({ id: 's00', bp: 2, combo_breaks: 1 })
+        expect(metrics.segments[5]).toMatchObject({ id: 's05', bp: 1, combo_breaks: 0 })
+        expect(metrics.segments[31]).toMatchObject({ id: 's31', bp: 1, combo_breaks: 1 })
         expect(metrics.empty_poor).toBe(1)
         expect(metrics.overall.fast.bad).toBe(1)
         expect(metrics.overall.slow.good).toBe(1)
+    })
+
+    test('구간마다 시각 범위, 판정 객체 수(도달 못한 것 포함), 판정 받은 노트·EX, FAST/SLOW(GREAT~BAD), 많은 태그 셋을 남긴다', () => {
+        const metrics = metricsOf([
+            ...TRILL,
+            played(S16 * 4, 2, JUDGE_STATE.GOOD, -3000),
+            played(S16 * 5, 3, JUDGE_STATE.NONE),
+            played(10 * SECOND, 0, JUDGE_STATE.GREAT, -700),
+        ])
+        expect(metrics.segments[0]).toMatchObject({
+            from_ms: 0,
+            to_ms: 1000,
+            chart_notes: 6,
+            notes: 5,
+            ex_score: 8,
+            fast: 0,
+            slow: 1,
+        })
+        expect(metrics.segments[0].top_tags).toContainEqual({ tag: 'trill', notes: 4 })
+        expect(metrics.segments[0].top_tags.length).toBeLessThanOrEqual(3)
+        expect(metrics.segments[10]).toMatchObject({ from_ms: 10_000, chart_notes: 1, notes: 1, ex_score: 1, slow: 1 })
+        expect(metrics.timing_by_lane).toEqual({ '1': { notes: 3, mean_us: 767 }, '2': { notes: 2, mean_us: 1500 } })
     })
 
     test('밀도 칸은 1초 창의 판정 노트 수를 5개 단위로 묶는다', () => {
@@ -117,43 +141,92 @@ describe('게이지 곡선', () => {
         expect(findGaugeDrops({ ...curve, values: [100, 95, 90, 95, 100] })).toEqual([])
     })
 
-    test('게이지마다 끝값·클리어 여부·바닥에 닿았는지를 읽기만 한다', () => {
+    test('끝까지 친 판은 게이지마다 끝값·클리어 여부·바닥에 닿았는지를 읽기만 한다', () => {
         expect(
-            summarizeGaugeCurves([
-                { ...curve, values: [20, 50, 82] },
-                { ...curve, values: [100, 0, 0] },
-            ]),
+            summarizeGaugeCurves(
+                [
+                    { ...curve, values: [20, 50, 82] },
+                    { ...curve, values: [100, 0, 0] },
+                ],
+                FINISHED_RUN,
+            ),
         ).toEqual([
-            { end: 82, cleared: true, reached_min: false },
-            { end: 0, cleared: false, reached_min: true },
+            { end: 82, cleared: true, reached_min: false, outcome: GAUGE_OUTCOME.CLEARED },
+            { end: 0, cleared: false, reached_min: true, outcome: GAUGE_OUTCOME.FAILED },
         ])
     })
 })
+
+const FINISHED_RUN = { end: RUN_END.FINISHED, failedAtMs: null, selected: 0 } as const
 
 describe('게이지 곡선 — 클리어 판정', () => {
     const groove = { intervalMs: 500, min: 2, max: 100, border: 80 }
     const survival = { intervalMs: 500, min: 0, max: 100, border: 0 }
 
     test('생존 게이지(최소 0, border 0)는 끝값이 0 보다 크면 클리어, 0 이면 아니다', () => {
-        expect(summarizeGaugeCurves([{ ...survival, values: [100, 40, 3.2] }])).toEqual([{ end: 3.2, cleared: true, reached_min: false }])
-        expect(summarizeGaugeCurves([{ ...survival, values: [100, 40, 0, 0] }])).toEqual([{ end: 0, cleared: false, reached_min: true }])
-    })
-
-    test('생존 게이지가 실패 시각 정보를 갖고 있으면 끝값이 0 보다 커도 실패다', () => {
-        expect(summarizeGaugeCurves([{ ...survival, values: [100, 60, 30], failedAtMs: 1000 }])).toEqual([
-            { end: 30, cleared: false, reached_min: false },
+        expect(summarizeGaugeCurves([{ ...survival, values: [100, 40, 3.2] }], FINISHED_RUN)).toEqual([
+            { end: 3.2, cleared: true, reached_min: false, outcome: GAUGE_OUTCOME.CLEARED },
         ])
-        expect(summarizeGaugeCurves([{ ...survival, values: [100, 60, 30], failedAtMs: null }])[0]).toMatchObject({ cleared: true })
+        expect(summarizeGaugeCurves([{ ...survival, values: [100, 40, 0, 0] }], FINISHED_RUN)).toEqual([
+            { end: 0, cleared: false, reached_min: true, outcome: GAUGE_OUTCOME.FAILED },
+        ])
     })
 
-    test('그 밖의 게이지는 끝값이 border 이상일 때만 클리어이고, 실패 시각이 있으면 그것이 먼저다', () => {
+    test('그 밖의 게이지는 끝값이 border 이상일 때만 클리어다', () => {
         expect(
-            summarizeGaugeCurves([
-                { ...groove, values: [20, 80] },
-                { ...groove, values: [20, 79.99] },
-            ]).map((summary) => summary.cleared),
+            summarizeGaugeCurves(
+                [
+                    { ...groove, values: [20, 80] },
+                    { ...groove, values: [20, 79.99] },
+                ],
+                FINISHED_RUN,
+            ).map((summary) => summary.cleared),
         ).toEqual([true, false])
-        expect(summarizeGaugeCurves([{ ...groove, values: [20, 90], failedAtMs: 500 }])[0]).toMatchObject({ cleared: false })
+    })
+
+    test('Esc·종료로 남긴 판은 FAILED 로 기록되므로 끝값이 border 위여도 아홉 게이지 모두 클리어가 아니다', () => {
+        const left = { end: RUN_END.LEFT, failedAtMs: null, selected: 0 } as const
+        expect(
+            summarizeGaugeCurves(
+                [
+                    { ...groove, values: [20, 90] },
+                    { ...survival, values: [100, 100] },
+                ],
+                left,
+            ),
+        ).toEqual([
+            { end: 90, cleared: false, reached_min: false, outcome: GAUGE_OUTCOME.FAILED },
+            { end: 100, cleared: false, reached_min: false, outcome: GAUGE_OUTCOME.FAILED },
+        ])
+    })
+
+    test('게이지가 빈 판은 실패 시점 뒤를 클라이언트가 0 으로 채우므로, 다른 게이지는 실패 시점까지만 읽고 그 뒤는 모른다', () => {
+        const failedAtMs = 1000
+        const emptied = { end: RUN_END.GAUGE_EMPTY, failedAtMs, selected: 1 } as const
+        const padded = (live: number[]) => [...live, 0, 0, 0]
+        expect(
+            summarizeGaugeCurves(
+                [
+                    { ...groove, values: padded([20, 60, 85]) },
+                    { ...survival, values: padded([100, 30, 0]) },
+                    { ...survival, values: padded([100, 0, 0]) },
+                    { ...survival, values: padded([100, 70, 40]) },
+                ],
+                emptied,
+            ),
+        ).toEqual([
+            { end: 85, cleared: null, reached_min: false, outcome: GAUGE_OUTCOME.UNKNOWN },
+            { end: 0, cleared: false, reached_min: true, outcome: GAUGE_OUTCOME.FAILED },
+            { end: 0, cleared: false, reached_min: true, outcome: GAUGE_OUTCOME.FAILED },
+            { end: 40, cleared: null, reached_min: false, outcome: GAUGE_OUTCOME.UNKNOWN },
+        ])
+    })
+
+    test('실패 시점의 표본 수는 0 으로 채운 꼬리보다 짧은 곡선에서도 곡선 길이를 넘지 않는다', () => {
+        const emptied = { end: RUN_END.GAUGE_EMPTY, failedAtMs: 60_000, selected: 0 } as const
+        expect(summarizeGaugeCurves([{ ...survival, values: [100, 0] }], emptied)).toEqual([
+            { end: 0, cleared: false, reached_min: true, outcome: GAUGE_OUTCOME.FAILED },
+        ])
     })
 })
 

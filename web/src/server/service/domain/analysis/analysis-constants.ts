@@ -6,6 +6,13 @@ import { CHART_PATTERN_MAX_TIME_US } from '@server/dto/chart-pattern'
  */
 export const ANALYSIS_VERSION = 1
 
+/**
+ * The generation of one play's stored analysis (`play_analysis.summary`). It goes up with ANALYSIS_VERSION and also when the summary
+ * of a play changes while the pattern classification does not, so chart features are not computed again for nothing. 2: segment EX,
+ * FAST/SLOW and tags, timing by lane, gauges read only up to an empty gauge's failure (2026-10-20).
+ */
+export const PLAY_ANALYSIS_VERSION = 2
+
 /** A local sixteenth note lasts `S16_US_PER_BPM / bpm` microseconds (`measure_us(bpm) / 16`, rbms-model). */
 export const S16_US_PER_BPM = 15_000_000
 
@@ -63,6 +70,8 @@ export type Hand = (typeof HAND)[keyof typeof HAND]
 export const SP7_LANE_HANDS: readonly Hand[] = [HAND.LEFT, HAND.LEFT, HAND.LEFT, HAND.SHARED, HAND.RIGHT, HAND.RIGHT, HAND.RIGHT, HAND.LEFT]
 
 export const SEGMENT_COUNT = 32
+/** A segment names this many of its most frequent tags. */
+export const SEGMENT_TOP_TAGS = 3
 
 /** Seconds of chart time are grouped by how many judged notes they hold, this many notes per group, for accuracy against density. */
 export const DENSITY_BUCKET_WIDTH = 5

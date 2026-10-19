@@ -7,7 +7,7 @@ import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chartPattern, playAnalysis, playTrace, score } from '@server/db/schema'
 import { TRACE_MAX_BYTES, type TraceUploadInput } from '@server/dto/trace'
-import { ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
+import { PLAY_ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
 import { createChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
 import { PATTERN_JOIN } from '@server/service/domain/trace/trace-analysis'
 import { countTraceJudgements } from '@server/service/domain/trace/trace-check'
@@ -142,7 +142,7 @@ describe.skipIf(!hasDatabase)('판별 trace 표 (임시 MySQL)', () => {
             storedSize: stored.data.length,
         })
         const [analysis] = await getDb().select().from(playAnalysis).where(eq(playAnalysis.traceId, stored.id))
-        expect(analysis).toMatchObject({ analysisVersion: ANALYSIS_VERSION, patternJoin: PATTERN_JOIN.MATCHED, patternMd5: NORMAL.chart.md5 })
+        expect(analysis).toMatchObject({ analysisVersion: PLAY_ANALYSIS_VERSION, patternJoin: PATTERN_JOIN.MATCHED, patternMd5: NORMAL.chart.md5 })
     })
 
     test(`같은 점수의 trace 를 ${PARALLEL_UPLOADS}개 동시에 올려도 행은 하나이고 모두 같은 id 를 받는다`, async () => {
@@ -198,7 +198,7 @@ describe.skipIf(!hasDatabase)('판별 trace 표 (임시 MySQL)', () => {
         })
         const usage = await service.adminUsage()
         expect(usage.top.find((row) => row.login_id === OWNER)).toMatchObject({ traces: 3, bytes })
-        expect(usage.analysis.analysis_version).toBe(ANALYSIS_VERSION)
+        expect(usage.analysis.analysis_version).toBe(PLAY_ANALYSIS_VERSION)
     })
 
     test('사용자를 지우면 그 trace 와 분석도 지워진다', async () => {

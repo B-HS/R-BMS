@@ -15,9 +15,21 @@ type ScoreRowProps = {
     minBp: number
     playedAt: number
     isScratchAuto?: boolean
+    action?: { href: string; label: string }
 }
 
-export const ScoreRow: FC<ScoreRowProps> = ({ href, title, subtitle, subtitleHref, lamp, exScore, minBp, playedAt, isScratchAuto = false }) => (
+export const ScoreRow: FC<ScoreRowProps> = ({
+    href,
+    title,
+    subtitle,
+    subtitleHref,
+    lamp,
+    exScore,
+    minBp,
+    playedAt,
+    isScratchAuto = false,
+    action,
+}) => (
     <li className='border-border hover:bg-muted/50 relative flex min-h-10 items-stretch border-b'>
         <LampStrip lamp={lamp} />
         <div className='flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-1.5'>
@@ -42,6 +54,11 @@ export const ScoreRow: FC<ScoreRowProps> = ({ href, title, subtitle, subtitleHre
                 <span className='text-muted-foreground text-2xs tabular-nums'>
                     BP {formatCount(minBp)} · {formatDateTime(playedAt)}
                 </span>
+                {action && (
+                    <Link href={action.href} className='text-2xs relative z-(--z-rail) text-primary hover:underline'>
+                        {action.label}
+                    </Link>
+                )}
             </div>
         </div>
     </li>

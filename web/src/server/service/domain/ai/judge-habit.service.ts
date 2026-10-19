@@ -27,9 +27,11 @@ import { GREEN_DISPLAY_FACTOR, MIN_TIMING_PLAYS } from '@server/service/domain/a
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
 import { describeGreenNumber, readTraceGreenNumber } from '@server/service/domain/analysis/play-metrics'
 import { EVIDENCE, timingEvidence, wilsonInterval } from '@server/service/domain/analysis/sample'
+import { PLAY_LANE_BIAS_TOP } from '@server/service/domain/ai/play-feature.constants'
+import { WILSON_Z_95 } from '@server/service/domain/analysis/analysis-constants'
 
 export const AI_JUDGE_HABIT_FEATURE = 'judge_habit'
-export const AI_JUDGE_HABIT_PROMPT_VERSION = 1
+export const AI_JUDGE_HABIT_PROMPT_VERSION = 2
 export const AI_JUDGE_HABIT_MAX_OUTPUT_TOKENS = 8_000
 export const AI_JUDGE_HABIT_EFFORT = 'low' satisfies AiEffort
 export const AI_JUDGE_HABIT_NOTES_MAX = 5
@@ -43,7 +45,7 @@ const MEDIAN_HALF = 2
 export const AI_JUDGE_HABIT_SYSTEM_PROMPT = [
     'You explain the timing habits of a rhythm game (BMS) player from the totals of their recent plays.',
     DIGEST_IS_DATA_RULE,
-    '`fast_slow` counts early (FAST) and late (SLOW) judgments, `offset` is the average signed timing error (positive means early) with the server suggestion, `avgjudge` the average distance from the note in the older and newer half of the plays, `green` the GREEN numbers the plays used.',
+    '`fast_slow` counts early (FAST) and late (SLOW) judgments, `offset` is the average signed timing error (positive means early) with the server suggestion (`source` says whether it rests on note-by-note traces or on score rows), `trace_timing` is the note-by-note timing of PGREAT and GREAT from traces with its 95% interval and the lanes (as played) that stray furthest from it, `avgjudge` the average distance from the note in the older and newer half of the plays, `green` the GREEN numbers the plays used.',
     'JUDGE OFFSET moves only where notes are drawn, never the judgment: say "노트가 보이는 위치를 옮긴다", never that it moves the judgment. Raising it makes notes arrive earlier on screen, lowering it later.',
     'Set `offset_direction` to the `offset.direction` given; explain it in `offset_reasoning`. When `offset.grade` is not "strong", say the evidence is not enough.',
     'Write GREEN numbers as the GREEN value first with the lane time in milliseconds after it, for example "GREEN 300 (500 ms)". A green number with `is_estimated` true is worked out from the score row, not read from the skin: call it an estimate.',
@@ -87,6 +89,8 @@ export type TimingScoreRow = {
     autoOffset: boolean
     greenNumber: number | null
     traceGreen?: { green: number; greenMs: number } | null
+    /** The PGREAT and GREAT timing of the play's trace (`metrics.timing`, `metrics.timing_by_lane`), when it has one. */
+    traceTiming?: { notes: number; meanUs: number; stdevUs: number; byLane: Readonly<Record<string, { notes: number; mean_us: number }>> } | null
     constant: boolean
     exScore: number
     maxExScore: number
@@ -136,12 +140,62 @@ const pooledExRate = (rows: readonly TimingScoreRow[]) => {
     return max > 0 ? roundTo((sum(rows.map((row) => row.exScore)) / max) * PERCENT, PERCENT_DECIMALS) : null
 }
 
+const traceGradeOf = (isEnough: boolean, leavesOutZero: boolean) => {
+    if (!isEnough) return EVIDENCE.INSUFFICIENT
+    return leavesOutZero ? EVIDENCE.STRONG : EVIDENCE.UNCERTAIN
+}
+
 /**
- * Timing habits from score rows only (plan 5.4, the part with no trace): the FAST share with its 95% Wilson interval, early and late
+ * The note-by-note timing of the plays that have a trace (AUTO ADJUST plays apart): the pooled mean of PGREAT and GREAT errors with
+ * its 95% interval (pooled variance over the plays), graded `strong` only with MIN_TIMING_PLAYS plays and MIN_TIMING_NOTES notes and an
+ * interval that leaves out 0, and the PLAY_LANE_BIAS_TOP lanes (as played) whose mean strays furthest from it.
+ */
+export const computeTraceTiming = (rows: readonly TimingScoreRow[]) => {
+    const timed = rows.flatMap((row) => (row.traceTiming && row.traceTiming.notes > 0 && !row.autoOffset ? [row.traceTiming] : []))
+    const notes = sum(timed.map((timing) => timing.notes))
+    const meanUs = notes > 0 ? sum(timed.map((timing) => timing.meanUs * timing.notes)) / notes : null
+    const variance = meanUs === null ? 0 : sum(timed.map((timing) => timing.notes * (timing.stdevUs ** 2 + (timing.meanUs - meanUs) ** 2))) / notes
+    const margin = notes > 0 ? WILSON_Z_95 * Math.sqrt(variance / notes) : 0
+    const leavesOutZero = meanUs !== null && (meanUs - margin > 0 || meanUs + margin < 0)
+    const grade = traceGradeOf(timingEvidence({ plays: timed.length, notes }) === EVIDENCE.STRONG, leavesOutZero)
+    const lanePools = new Map<string, { notes: number; total: number }>()
+    for (const timing of timed) {
+        for (const [lane, row] of Object.entries(timing.byLane)) {
+            const pool = lanePools.get(lane) ?? { notes: 0, total: 0 }
+            lanePools.set(lane, { notes: pool.notes + row.notes, total: pool.total + row.mean_us * row.notes })
+        }
+    }
+    const lanes = [...lanePools.entries()]
+        .map(([lane, pool]) => {
+            const laneMeanUs = pool.total / pool.notes
+            return {
+                key: `timing.lane.${lane}`,
+                lane,
+                notes: pool.notes,
+                mean_ms: roundTo(laneMeanUs / MICROS_PER_MILLI, MILLIS_DECIMALS),
+                deviation_ms: roundTo((laneMeanUs - (meanUs ?? 0)) / MICROS_PER_MILLI, MILLIS_DECIMALS),
+            }
+        })
+        .toSorted((left, right) => Math.abs(right.deviation_ms) - Math.abs(left.deviation_ms))
+        .slice(0, PLAY_LANE_BIAS_TOP)
+    return {
+        plays: timed.length,
+        notes,
+        mean_ms: meanUs === null ? null : roundTo(meanUs / MICROS_PER_MILLI, MILLIS_DECIMALS),
+        ci_low_ms: meanUs === null ? null : roundTo((meanUs - margin) / MICROS_PER_MILLI, MILLIS_DECIMALS),
+        ci_high_ms: meanUs === null ? null : roundTo((meanUs + margin) / MICROS_PER_MILLI, MILLIS_DECIMALS),
+        grade,
+        lanes,
+    }
+}
+
+/**
+ * Timing habits (plan 5.4). From score rows: the FAST share with its 95% Wilson interval, early and late
  * counts per judgment, the signed timing bias of reference-rule plays (`extra.mean_offset_us`, AUTO ADJUST plays apart) and the
- * offset change it suggests, the average judge distance of the older and newer half, and the GREEN numbers used. The offset change
- * is suggested only with MIN_TIMING_PLAYS plays and MIN_TIMING_NOTES PGREAT and GREAT notes, a FAST share whose interval leaves out
- * one half, and a bias on the same side.
+ * offset change it suggests, the average judge distance of the older and newer half, and the GREEN numbers used (a trace's own GREEN
+ * when there is one). From traces: `trace_timing` (`computeTraceTiming`). The offset change rests on the trace timing when it is
+ * `strong` (`source: "trace"`); otherwise on score rows, only with MIN_TIMING_PLAYS plays and MIN_TIMING_NOTES PGREAT and GREAT notes, a
+ * FAST share whose interval leaves out one half, and a bias on the same side (`source: "score"`).
  */
 export const computeJudgeHabit = (rows: readonly TimingScoreRow[]) => {
     const plays = rows.length
@@ -163,8 +217,13 @@ export const computeJudgeHabit = (rows: readonly TimingScoreRow[]) => {
     const timingNotes = sum(timed.map((row) => row.pgreat + row.great))
     const offsetGrade = timingEvidence({ plays: timed.length, notes: timingNotes })
     const isSameSide = meanOffsetMs !== null && leaning !== null && meanOffsetMs > 0 === (leaning === 'fast')
-    const shift = meanOffsetMs === null ? 0 : -Math.round(meanOffsetMs)
-    const canSuggest = offsetGrade === EVIDENCE.STRONG && fastSlowGrade === EVIDENCE.STRONG && isSameSide && Math.abs(shift) >= OFFSET_SUGGEST_MIN_MS
+    const traceTiming = computeTraceTiming(rows)
+    const isTraceBased = traceTiming.grade === EVIDENCE.STRONG && traceTiming.mean_ms !== null
+    const biasMs = isTraceBased ? traceTiming.mean_ms : meanOffsetMs
+    const shift = biasMs === null ? 0 : -Math.round(biasMs)
+    const canSuggest =
+        Math.abs(shift) >= OFFSET_SUGGEST_MIN_MS &&
+        (isTraceBased || (offsetGrade === EVIDENCE.STRONG && fastSlowGrade === EVIDENCE.STRONG && isSameSide))
     const direction = canSuggest ? (shift > 0 ? ('earlier' as const) : ('later' as const)) : ('keep' as const)
 
     const judged = rows.filter((row) => isReference(row) && row.avgjudge > 0).toSorted((left, right) => left.playedAt - right.playedAt)
@@ -209,7 +268,9 @@ export const computeJudgeHabit = (rows: readonly TimingScoreRow[]) => {
             direction,
             suggested_shift_ms: canSuggest ? shift : null,
             auto_adjust_plays: rows.filter((row) => row.autoOffset).length,
+            source: isTraceBased ? ('trace' as const) : ('score' as const),
         },
+        trace_timing: traceTiming,
         avgjudge: {
             plays: judged.length,
             older_ms: older,
@@ -254,6 +315,7 @@ export const toJudgeHabitDigest = (habit: JudgeHabit) => ({
         by_grade: habit.fast_slow.by_grade.map((row) => ({ key: `timing.${row.grade}`, ...row })),
     },
     offset: { key: 'timing.offset', ...habit.offset },
+    trace_timing: { key: 'timing.trace', ...habit.trace_timing },
     avgjudge: { key: 'timing.avgjudge', ...habit.avgjudge },
     green: { key: 'green', ...habit.green },
 })

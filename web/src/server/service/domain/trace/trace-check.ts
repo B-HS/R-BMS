@@ -23,8 +23,11 @@ type CheckedCount = (typeof TRACE_CHECKED_COUNTS)[number]
 
 export type TraceJudgeCounts = Record<CheckedCount, number>
 
-/** What a trace is checked against: the stored score row it names. */
-export type TraceScoreRow = Pick<ScoreInsertRow, CheckedCount | 'id' | 'userId' | 'chartSha256' | 'chartMd5' | 'mode' | 'playedAt'>
+/** What a trace is checked against: the stored score row it names. Its `random` is the column as stored, a plain string. */
+export type TraceScoreRow = Pick<
+    ScoreInsertRow,
+    CheckedCount | 'id' | 'userId' | 'chartSha256' | 'chartMd5' | 'mode' | 'lntype' | 'scratchAuto' | 'playedAt'
+> & { random: string }
 
 /** In a mode where a BAD leaves its note to be judged again (POPN_9K), BAD and POOR are not compared (main decision 2026-10-20). */
 const COUNTS_A_KEPT_NOTE_DISTORTS = new Set<CheckedCount>(['bad', 'poor', 'ebd', 'lbd'])
@@ -96,15 +99,31 @@ export const countTraceJudgements = (trace: Pick<TraceUploadInput, 'notes' | 'em
 }
 
 /**
+ * The run conditions a trace states and its score row must state the same way (the client fills both from one run): the mode, the
+ * LN type, the lane option and whether SCRATCH AUTO played any note (`auto_lanes` has a played lane exactly when the score says so).
+ */
+const runConditionMismatch = (trace: TraceUploadInput, score: TraceScoreRow) => {
+    if (trace.mode !== score.mode) return { field: 'mode', reason: `score ${score.mode}, trace ${trace.mode}` }
+    if (trace.lntype !== score.lntype) return { field: 'lntype', reason: `score ${score.lntype}, trace ${trace.lntype}` }
+    if (trace.random !== score.random) return { field: 'random', reason: `score ${score.random}, trace ${trace.random}` }
+    const isTraceScratchAuto = trace.auto_lanes.some(Boolean)
+    if (isTraceScratchAuto !== score.scratchAuto) return { field: 'auto_lanes', reason: `score ${score.scratchAuto}, trace ${isTraceScratchAuto}` }
+    return null
+}
+
+/**
  * The first way a trace and the score it names disagree, or null: the chart (the path's hash and the body's chart must be the
- * score's), then every judgement count, its early/late split and the empty POORs, with no tolerance. `field` is the wire name
- * and `reason` says both values.
+ * score's), the run conditions (`runConditionMismatch`), then every judgement count, its early/late split and the empty POORs,
+ * with no tolerance. The 9-key exception follows the score's mode, which the trace's must equal. `field` is the wire name and
+ * `reason` says both values.
  */
 export const findTraceMismatch = (params: { trace: TraceUploadInput; pathHash: string; score: TraceScoreRow }) => {
     const { trace, pathHash, score } = params
     const chartMd5 = score.chartMd5 ?? trace.chart.md5
     if (trace.chart.sha256 !== score.chartSha256) return { field: 'chart.sha256', reason: 'the trace names another chart than its score' }
     if (pathHash !== score.chartSha256 && pathHash !== chartMd5) return { field: 'hash', reason: 'the path names another chart than the score' }
+    const condition = runConditionMismatch(trace, score)
+    if (condition) return condition
     const counted = countTraceJudgements(trace)
     const compared = badTakesNote(score.mode) ? TRACE_CHECKED_COUNTS : TRACE_CHECKED_COUNTS.filter((name) => !COUNTS_A_KEPT_NOTE_DISTORTS.has(name))
     const differing = compared.find((name) => counted[name] !== score[name])

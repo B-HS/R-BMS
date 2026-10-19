@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import type { TraceUploadInput } from '@server/dto/trace'
-import { ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
-import { PATTERN_JOIN, RUN_END, analyzeTrace, joinPattern } from '@server/service/domain/trace/trace-analysis'
+import { ANALYSIS_VERSION, PLAY_ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
+import { RUN_END } from '@server/service/domain/analysis/play-metrics'
+import { PATTERN_JOIN, analyzeTrace, joinPattern } from '@server/service/domain/trace/trace-analysis'
 import { makePatternDocument, type FixtureNote } from '../../support/chart-pattern-fixture'
 import { readContractTrace } from '../../support/trace-fixture'
 
@@ -44,6 +45,23 @@ describe('joinPattern — trace 와 곡별 패턴의 정합(기획 3.4)', () => 
         )
     })
 
+    test('ALL-SCRATCH 처럼 노트를 스크래치 레인으로 옮기는 옵션과 SCRATCH AUTO 가 함께인 판은 자동으로 친 노트를 원본 레인으로 가릴 수 없어 unsupported 다', () => {
+        const scratchIndex = SCRATCH_AUTO.notes.time_us.length
+        const pattern = contractPattern()
+        const patternTimes = pattern.notes.time_us.filter((_, index) => pattern.notes.lane[index] !== SCRATCH_LANE)
+        const keyTimes = [...patternTimes.slice(1), ...pattern.notes.time_us.filter((_, index) => pattern.notes.lane[index] === SCRATCH_LANE)]
+        const moved = { ...SCRATCH_AUTO, random: 'AllScratch' as const, notes: { ...SCRATCH_AUTO.notes, time_us: keyTimes.slice(0, scratchIndex) } }
+        expect(joinPattern({ trace: moved, chartSha256: moved.chart.sha256, pattern })).toBe(PATTERN_JOIN.UNSUPPORTED)
+        const foreign = {
+            ...moved,
+            notes: { ...moved.notes, time_us: moved.notes.time_us.map((time, index) => (index === 0 ? time + SHIFT_US : time)) },
+        }
+        expect(joinPattern({ trace: foreign, chartSha256: moved.chart.sha256, pattern })).toBe(PATTERN_JOIN.MISMATCH)
+        expect(joinPattern({ trace: { ...SCRATCH_AUTO, random: 'Random' }, chartSha256: SCRATCH_AUTO.chart.sha256, pattern })).toBe(
+            PATTERN_JOIN.MATCHED,
+        )
+    })
+
     test('시각이 1 µs 라도 다르거나 노트가 하나 더 있으면 mismatch 다', () => {
         const shifted = {
             ...NORMAL,
@@ -59,7 +77,7 @@ describe('analyzeTrace — play_analysis.summary', () => {
     test('끝까지 친 판의 지표는 trace 의 판정 그대로이고, 녹색 숫자는 추정이 아니다', () => {
         const { summary, patternJoin, patternMd5 } = analyze(NORMAL, contractPattern())
         expect(summary).toMatchObject({
-            analysis_version: ANALYSIS_VERSION,
+            analysis_version: PLAY_ANALYSIS_VERSION,
             mode: 'BEAT_7K',
             scratch_auto: false,
             run_end: RUN_END.FINISHED,
@@ -95,6 +113,50 @@ describe('analyzeTrace — play_analysis.summary', () => {
         expect(summary.run_end).toBe(RUN_END.GAUGE_EMPTY)
         expect(summary.gauge.failed_at_ms).toBe(failedAtMs)
         expect(summary.gauge.curves[ABANDONED.gauge.selected].cleared).toBe(false)
+    })
+
+    test('Esc 로 남긴 판은 FAILED 로 기록되므로 끝값과 상관없이 아홉 게이지 모두 클리어가 아니다', () => {
+        const { summary } = analyze(ABANDONED)
+        expect(summary.gauge.curves).toHaveLength(ABANDONED.gauge.series.length)
+        expect(summary.gauge.curves.every((curve) => curve.cleared === false)).toBe(true)
+    })
+
+    test('게이지가 빈 판은 실패 시점 뒤 0 으로 채운 값을 읽지 않고 다른 게이지는 알 수 없음으로 둔다', () => {
+        const failedAtMs = 1000
+        const liveSamples = failedAtMs / ABANDONED.gauge.interval_ms + 1
+        const series = ABANDONED.gauge.series.map((values) => values.map((value, index) => (index < liveSamples ? value : 0)))
+        const { summary } = analyze({ ...ABANDONED, failed_at_ms: failedAtMs, gauge: { ...ABANDONED.gauge, series } })
+        const curves = summary.gauge.curves
+        expect(curves[ABANDONED.gauge.selected]).toMatchObject({ cleared: false })
+        const others = curves.filter((_, index) => index !== ABANDONED.gauge.selected)
+        expect(others.every((curve) => curve.cleared === null && curve.reached_min === false)).toBe(true)
+        expect(curves[0].end).toBe(ABANDONED.gauge.series[0][liveSamples - 1])
+        const segments = summary.metrics?.segments ?? []
+        expect(summary.gauge.segment_values.filter((_, index) => (segments[index]?.to_ms ?? 0) > failedAtMs).every((value) => value === null)).toBe(
+            true,
+        )
+        expect(summary.gauge.segment_values[0]).not.toBeNull()
+    })
+
+    test('Esc 로 나간 판은 나간 시점 뒤 구간의 게이지를 마지막 표본으로 채우지 않고 알 수 없음으로 둔다', () => {
+        const { summary } = analyze(ABANDONED)
+        const lastSampleMs = (ABANDONED.gauge.series[0].length - 1) * ABANDONED.gauge.interval_ms
+        const segments = summary.metrics?.segments ?? []
+        const known = summary.gauge.segment_values.flatMap((value, index) => ((segments[index]?.to_ms ?? 0) <= lastSampleMs ? [value] : []))
+        const unknown = summary.gauge.segment_values.flatMap((value, index) => ((segments[index]?.to_ms ?? 0) > lastSampleMs ? [value] : []))
+        expect(known.length).toBeGreaterThan(0)
+        expect(known.every((value) => value !== null)).toBe(true)
+        expect(unknown.length).toBeGreaterThan(0)
+        expect(unknown.every((value) => value === null)).toBe(true)
+    })
+
+    test('끝까지 친 판은 마지막 구간까지 게이지 값이 있다', () => {
+        const { summary } = analyze(NORMAL)
+        expect(summary.gauge.segment_values.every((value) => value !== null)).toBe(true)
+    })
+
+    test('요약에 곡별 분류 버전도 남긴다', () => {
+        expect(analyze(NORMAL).summary.pattern_analysis_version).toBe(ANALYSIS_VERSION)
     })
 
     test('속도 변경 기록은 횟수와 바뀐 칸 이름만 남긴다', () => {

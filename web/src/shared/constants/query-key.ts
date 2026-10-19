@@ -81,6 +81,7 @@ export const QUERY_KEY = {
         DIGEST_FEATURE: (feature: string) => ['ai', 'digest', feature],
         DIGEST: (feature: string, params: Record<string, unknown>) => ['ai', 'digest', feature, params],
         GOALS: ['ai', 'goals'],
+        SHARING: ['ai', 'sharing'],
     },
     ADMIN: {
         ALL: ['admin'],

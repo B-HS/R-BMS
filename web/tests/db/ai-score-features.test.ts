@@ -219,7 +219,10 @@ describe.skipIf(!hasDatabase)('점수 기반 AI 기능 DB (임시 MySQL)', () =>
     })
 
     test('판정 습관은 최근 판부터 limit 만큼, 오토플레이 없이 읽는다', async () => {
-        const rows = await createAiJudgeHabitDb(getDb()).listRecentTimingRows({ userId: OWNER, limit: 3 })
+        const rows = await createAiJudgeHabitDb(getDb(), { analyzedPlaysOfScores: async () => new Map() }).listRecentTimingRows({
+            userId: OWNER,
+            limit: 3,
+        })
         expect(rows.map((row) => row.playedAt - MONDAY)).toEqual([7 * DAY, 2 * DAY, 0])
         expect(rows[1]).toMatchObject({ greenNumber: 500, maxExScore: NOTES * 2, ruleVersion: null })
     })

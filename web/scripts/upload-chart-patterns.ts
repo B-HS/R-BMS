@@ -20,6 +20,8 @@ export const UPLOAD_REQUEST_INTERVAL_MS = Math.ceil(
 export const RATE_LIMIT_FALLBACK_PAUSE_MS = CHART_PATTERN_WRITE_RATE_LIMIT.windowMs
 /** The longest one wait after a 429 lasts, whatever `Retry-After` asks for. */
 export const RATE_LIMIT_MAX_PAUSE_MS = 300_000
+/** The shortest one wait after a 429 lasts, so a `Retry-After` of 0 or of a date already past does not resend at once. */
+export const RATE_LIMIT_MIN_PAUSE_MS = 1_000
 /** After this many waits in a row with no request getting through, the run stops and reports the file as failed. */
 export const MAX_CONSECUTIVE_RATE_LIMIT_PAUSES = 5
 
@@ -124,6 +126,14 @@ type FileResult = { kind: 'created' | 'replaced' | 'unchanged' | 'checked' } | {
 const failed = (md5: string, status: number | null, reason: string, stop: StopCause | null = null) =>
     ({ kind: 'failed', failure: { md5, status, reason }, stop }) satisfies FileResult
 
+const discardBody = async (response: Response) => {
+    try {
+        await response.arrayBuffer()
+    } catch {
+        return
+    }
+}
+
 const checkLocally = (file: PatternFile, text: string) => {
     let body: unknown
     try {
@@ -164,8 +174,8 @@ export type UploadOptions = {
 
 /**
  * Keeps the whole run (every worker) under the server's write limit. Each request start reserves the next slot UPLOAD_REQUEST_INTERVAL_MS
- * after the previous one. A 429 pauses every worker until `Retry-After` (RATE_LIMIT_FALLBACK_PAUSE_MS without it, at most
- * RATE_LIMIT_MAX_PAUSE_MS); the workers whose requests were already in flight when the pause began join it and do not count as a new one.
+ * after the previous one. A 429 pauses every worker until `Retry-After` (RATE_LIMIT_FALLBACK_PAUSE_MS without it, at least
+ * RATE_LIMIT_MIN_PAUSE_MS and at most RATE_LIMIT_MAX_PAUSE_MS); the workers whose requests were already in flight when the pause began join it and do not count as a new one.
  */
 const createRequestGate = (clock: UploadClock) => {
     let nextSlotAt = 0
@@ -197,7 +207,7 @@ const createRequestGate = (clock: UploadClock) => {
             consecutivePauses += 1
             totalPauses += 1
             const askedMs = retryAfterSeconds === null ? RATE_LIMIT_FALLBACK_PAUSE_MS : retryAfterSeconds * MILLIS_PER_SECOND
-            pausedUntil = clock.now() + Math.min(askedMs, RATE_LIMIT_MAX_PAUSE_MS)
+            pausedUntil = clock.now() + Math.min(Math.max(askedMs, RATE_LIMIT_MIN_PAUSE_MS), RATE_LIMIT_MAX_PAUSE_MS)
             return true
         },
         pauses: () => totalPauses,
@@ -206,7 +216,7 @@ const createRequestGate = (clock: UploadClock) => {
 
 /**
  * Checks every file with the server's own schema and, unless it is a dry run, PUTs it to the admin route, UPLOAD_CONCURRENCY at a
- * time and never faster than UPLOAD_REQUEST_INTERVAL_MS between two request starts. A 200 (`unchanged` or `replaced`) and a 201
+ * time and never faster than UPLOAD_REQUEST_INTERVAL_MS between two request starts. A file that cannot be read fails alone. A 200 (`unchanged` or `replaced`) and a 201
  * (`created`) both count as uploaded, so running it again after a failure only redoes what is missing. A 401 or 403 stops the
  * remaining files, since every one of them would fail the same way. A 429 pauses every worker and sends the same file again (see
  * `createRequestGate`); MAX_CONSECUTIVE_RATE_LIMIT_PAUSES waits in a row with no request getting through fail the file and stop the run.
@@ -236,11 +246,21 @@ export const uploadChartPatterns = async (options: UploadOptions) => {
                 return response
             }
             if (!gate.rateLimited(sentAt, parseRetryAfterSeconds(response.headers.get('retry-after'), clock.now()))) return response
+            await discardBody(response)
+        }
+    }
+
+    const readOrNull = async (path: string) => {
+        try {
+            return await readText(path)
+        } catch {
+            return null
         }
     }
 
     const uploadOne = async (file: PatternFile) => {
-        const text = await readText(file.path)
+        const text = await readOrNull(file.path)
+        if (text === null) return failed(file.md5, null, '파일을 읽지 못했습니다')
         const localProblem = checkLocally(file, text)
         if (localProblem) return failed(file.md5, null, localProblem)
         if (options.dryRun || !options.token) return { kind: 'checked' } as const

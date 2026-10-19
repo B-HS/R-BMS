@@ -173,3 +173,23 @@ export const traceUploadSchema = z.object({
 
 export type TraceUploadInput = z.infer<typeof traceUploadSchema>
 export type TraceSpeedInput = z.infer<typeof speedSchema>
+
+/** How many traces one admin recompute call looks at: `limit` from MIN to MAX, DEFAULT without one. */
+export const TRACE_ANALYSIS_RECOMPUTE_BATCH = { MIN: 1, MAX: 200, DEFAULT: 50 } as const
+
+/** `POST /api/admin/traces/recompute`: `after` is the `next_after` of the call before (none or null the first time). */
+export const traceRecomputeSchema = z.object({
+    limit: z
+        .number()
+        .int()
+        .min(TRACE_ANALYSIS_RECOMPUTE_BATCH.MIN)
+        .max(TRACE_ANALYSIS_RECOMPUTE_BATCH.MAX)
+        .default(TRACE_ANALYSIS_RECOMPUTE_BATCH.DEFAULT),
+    after: z.string().min(1).max(SCORE_ID_MAX).nullable().default(null),
+})
+
+/** Admin recompute requests one admin token may make per minute. */
+export const TRACE_RECOMPUTE_RATE_LIMIT = { limit: 30, windowMs: 60_000 } as const
+
+/** Share setting writes one account may make per minute. */
+export const TRACE_SHARE_WRITE_RATE_LIMIT = { limit: 10, windowMs: 60_000 } as const

@@ -5,6 +5,7 @@ import {
     MAX_CONSECUTIVE_RATE_LIMIT_PAUSES,
     RATE_LIMIT_FALLBACK_PAUSE_MS,
     RATE_LIMIT_MAX_PAUSE_MS,
+    RATE_LIMIT_MIN_PAUSE_MS,
     UPLOAD_CONCURRENCY,
     UPLOAD_REQUEST_INTERVAL_MS,
     formatSummary,
@@ -156,6 +157,33 @@ describe('업로드 스크립트 — 429 를 받으면 멈췄다가 같은 파�
         }
         expect(await longestPauseFor({})).toBe(RATE_LIMIT_FALLBACK_PAUSE_MS)
         expect(await longestPauseFor({ 'retry-after': '86400' })).toBe(RATE_LIMIT_MAX_PAUSE_MS)
+        expect(await longestPauseFor({ 'retry-after': '0' })).toBe(RATE_LIMIT_MIN_PAUSE_MS)
+        expect(await longestPauseFor({ 'retry-after': 'Thu, 01 Jan 1970 00:00:00 GMT' })).toBe(RATE_LIMIT_MIN_PAUSE_MS)
+    })
+
+    test('429 응답의 본문은 다시 보내기 전에 읽어 버린다', async () => {
+        const clock = createVirtualClock()
+        const responses: Response[] = []
+        let isFirst = true
+        const fetch = async () => {
+            const response = isFirst ? limited({ 'retry-after': '1' }) : created()
+            isFirst = false
+            responses.push(response)
+            return response
+        }
+        const summary = await uploadChartPatterns({
+            files: filesOf(1),
+            skipped: 0,
+            server: SERVER,
+            token: TOKEN,
+            dryRun: false,
+            fetch,
+            readText,
+            clock,
+            concurrency: 1,
+        })
+        expect(summary.created).toBe(1)
+        expect(responses.map((response) => response.bodyUsed)).toEqual([true, true])
     })
 
     test('429 가 계속되면 최대 대기 횟수 뒤에 그 파일을 실패로 보고하고 나머지를 보내지 않는다', async () => {

@@ -550,6 +550,16 @@ export const aiJudgeHabitViewSchema = z.object({
         direction: z.enum(AI_OFFSET_DIRECTIONS),
         suggested_shift_ms: z.number().int().nullable(),
         auto_adjust_plays: z.number().int(),
+        source: z.enum(['trace', 'score']),
+    }),
+    trace_timing: z.object({
+        plays: z.number().int(),
+        notes: z.number().int(),
+        mean_ms: z.number().nullable(),
+        ci_low_ms: z.number().nullable(),
+        ci_high_ms: z.number().nullable(),
+        grade: z.enum(AI_EVIDENCE_GRADES),
+        lanes: z.array(z.object({ key: z.string(), lane: z.string(), notes: z.number().int(), mean_ms: z.number(), deviation_ms: z.number() })),
     }),
     avgjudge: z.object({
         plays: z.number().int(),

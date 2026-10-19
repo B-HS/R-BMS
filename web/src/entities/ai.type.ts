@@ -29,6 +29,18 @@ import type {
     AiUserSettingOutput,
     AiUserSettingPutInput,
 } from '@server/dto/ai'
+import type {
+    AiCompareMode,
+    AiCompareQuery,
+    AiCompareReason,
+    AiCompareView,
+    AiCoachView,
+    AiGaugeAdviceView,
+    AiGaugeName,
+    AiOptionName,
+    AiReportView,
+    AiShareSettingOutput,
+} from '@server/dto/ai-play'
 import { ApiError } from '@shared/lib/fetch'
 
 export type { AiFailureKind, AiProviderId }
@@ -59,6 +71,8 @@ export type {
     AiRecommendView,
     AiWeeklyView,
 }
+export type { AiCoachView, AiCompareMode, AiCompareQuery, AiCompareReason, AiCompareView, AiGaugeAdviceView, AiGaugeName, AiOptionName, AiReportView }
+export type AiShareSetting = AiShareSettingOutput
 export type AiGoal = AiGoalOutput
 /** How a stored or fresh AI answer was made, without the answer itself. */
 export type AiInterpretationMeta = Omit<NonNullable<AiRecommendView['ai']>, 'output'>
@@ -204,7 +218,7 @@ export const AI_RECORD_QUERY_FORM_LIMIT = {
 } as const
 
 /** The hub tabs, kept in the `tab` search parameter. */
-export const AI_HUB_TABS = ['query', 'recommend', 'goals', 'weekly', 'habit'] as const
+export const AI_HUB_TABS = ['query', 'recommend', 'goals', 'weekly', 'report', 'habit', 'gauge'] as const
 export type AiHubTab = (typeof AI_HUB_TABS)[number]
 
 export const AI_HUB_TAB_LABEL = {
@@ -212,7 +226,9 @@ export const AI_HUB_TAB_LABEL = {
     recommend: '추천·연습 폴더',
     goals: '목표',
     weekly: '주간 요약',
+    report: '플레이어 리포트',
     habit: '판정 습관',
+    gauge: '게이지·옵션',
 } satisfies Record<AiHubTab, string>
 
 /** Why a feature shows numbers only and makes no AI call: what it still needs (the server's `notice.need`). */
@@ -225,6 +241,11 @@ export const AI_DATA_NEED_LABEL: Record<string, string> = {
     table: '목표의 난이도표를 찾을 수 없습니다.',
     week_plays: '이 주에 친 판이 없습니다.',
     recent_plays: '최근 판이 10판 아래입니다. 더 친 뒤 다시 열어 보세요.',
+    traced_plays:
+        '판별 데이터(새 클라이언트로 친 판의 노트 단위 기록, 리포트는 7키 단일 플레이만)가 5판 아래입니다. 몇 판 더 친 뒤 다시 열어 보세요.',
+    play_trace: '이 판에는 판별 데이터가 없습니다(옛 클라이언트로 쳤거나 업로드를 끈 판). 점수 기록만 보입니다.',
+    play_metrics: '이 판은 7키 단일 플레이가 아니라 구간 분석이 없습니다.',
+    comparable_play: '구간을 맞대어 볼 판이 없습니다. 판정 합계만 비교합니다.',
 }
 
 export const AI_RECOMMEND_KIND_LABEL = {
@@ -300,3 +321,59 @@ export const AI_SCORE_FEATURE_FORM_LIMIT = {
     GOAL_COUNT_MAX: 2000,
     GOAL_EX_RATE_MAX: 100,
 } as const
+
+/** Mirrors the server's AI_GAUGE_NAMES (pinned by the contract test), named for the screen. */
+export const AI_GAUGE_LABEL = {
+    assist_easy: 'ASSIST EASY',
+    easy: 'EASY',
+    normal: 'NORMAL',
+    hard: 'HARD',
+    ex_hard: 'EX HARD',
+    hazard: 'HAZARD',
+    class: 'CLASS',
+    ex_class: 'EX CLASS',
+    ex_hard_class: 'EX HARD CLASS',
+} satisfies Record<AiGaugeName, string>
+
+/** Mirrors the server's AI_OPTION_NAMES (pinned by the contract test), named for the screen. */
+export const AI_OPTION_LABEL = {
+    off: 'OFF',
+    mirror: 'MIRROR',
+    random: 'RANDOM',
+    r_random: 'R-RANDOM',
+    s_random: 'S-RANDOM',
+    spiral: 'SPIRAL',
+    h_random: 'H-RANDOM',
+    all_scratch: 'ALL-SCRATCH',
+    converge: 'CONVERGE',
+} satisfies Record<AiOptionName, string>
+
+export const AI_GAUGE_OUTCOME_LABEL = {
+    cleared: '통과',
+    failed: '실패',
+    unknown: '알 수 없음',
+} satisfies Record<NonNullable<AiCoachView['analysis']>['gauge']['curves'][number]['outcome'], string>
+
+export const AI_RUN_END_LABEL = {
+    finished: '끝까지 친 판',
+    gauge_empty: '게이지가 비어 끝난 판',
+    left: '중간에 나간 판',
+} satisfies Record<NonNullable<AiCoachView['analysis']>['run_end'], string>
+
+export const AI_COMPARE_REASON_LABEL = {
+    no_other_play: '이 곡의 다른 판이 없습니다.',
+    note_layout_differs: 'LN 종류나 SCRATCH AUTO 가 달라 구간의 노트 수가 맞지 않습니다. 판정 합계만 비교합니다.',
+    rival_not_sharing:
+        '이 라이벌과는 구간 요약을 주고받지 않습니다. 서로 라이벌로 등록하고 상대가 공유를 켜야 합니다. 공개된 판정 합계만 비교합니다.',
+    rival_no_trace: '이 라이벌의 이 곡 판에는 판별 데이터가 없습니다. 공개된 판정 합계만 비교합니다.',
+    rival_no_record: '이 라이벌의 이 곡 공개 기록이 없어 맞댈 판이 없습니다.',
+    not_a_rival: '내 라이벌 목록에 없는 플레이어입니다.',
+} satisfies Record<AiCompareReason, string>
+
+/** Mirrors the server's score id pattern of the AI play routes (pinned by the contract test). */
+export const AI_SCORE_ID_PATTERN = /^[A-Za-z0-9_-]{1,36}$/
+
+export const isAiScoreId = (value: string) => AI_SCORE_ID_PATTERN.test(value)
+
+/** The coach page of one own play. */
+export const aiPlayHref = (scoreId: string) => `/ai/plays/${encodeURIComponent(scoreId)}`

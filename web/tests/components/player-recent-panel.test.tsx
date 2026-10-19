@@ -1,12 +1,18 @@
-import { afterAll, afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime'
 import { PathnameContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime'
 
-GlobalRegistrator.register()
+GlobalRegistrator.register({ url: 'http://localhost:3000/' })
 
 afterAll(() => GlobalRegistrator.unregister())
+
+const session: { user: { id: string; name: string; email: string; loginId: string; role: string } | null } = { user: null }
+
+mock.module('@shared/lib/auth-client', () => ({
+    authClient: { useSession: () => ({ data: session.user ? { user: session.user } : null, isPending: false }), $store: { notify: () => undefined } },
+}))
 
 const { cleanup, fireEvent, render } = await import('@testing-library/react')
 const { PlayerRecentPanel } = await import('../../src/widgets/player/player-recent-panel')
@@ -83,5 +89,17 @@ describe('플레이어 플레이 기록 패널', () => {
         expect(view.getByText('이 페이지에는 기록이 없습니다.')).toBeTruthy()
         fireEvent.click(view.getByText('마지막 페이지로'))
         expect(pushed).toEqual([`${PATHNAME}?page=3`])
+    })
+
+    test('로그인한 본인의 기록에만 그 판의 코치 페이지 링크를 단다', async () => {
+        session.user = { id: 'user-bob', name: 'Bob', email: 'bob@example.test', loginId: 'bob', role: 'user' }
+        const other = renderPanel({ page: 1, limit: LIMIT }, { data: [recentRow('Other chart')], total: 1 })
+        expect(other.view.queryByRole('link', { name: '판 코치' })).toBeNull()
+        cleanup()
+        session.user = { id: 'user-alice', name: 'Alice', email: 'alice@example.test', loginId: PLAYER_ID, role: 'user' }
+        const own = renderPanel({ page: 1, limit: LIMIT }, { data: [recentRow('sc_own')], total: 1 })
+        const link = await own.view.findByRole('link', { name: '판 코치' })
+        expect(link.getAttribute('href')).toBe('/ai/plays/sc_own')
+        session.user = null
     })
 })

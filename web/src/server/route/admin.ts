@@ -1,4 +1,3 @@
-import { unstable_rethrow } from 'next/navigation'
 import { NextResponse, connection } from 'next/server'
 import { compose } from '@server/compose'
 import { clientBuildSchema } from '@server/dto/admin'
@@ -14,9 +13,9 @@ import {
 } from '@server/dto/chart-pattern'
 import { irRaw, successResponse } from '@server/lib/api-response'
 import type { AuthUser } from '@server/lib/auth-context'
-import { createAppError, isAppError } from '@server/lib/error'
+import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
-import { summarizeError } from '@server/lib/error-summary'
+import { withSummarizedErrors } from '@server/lib/with-summarized-errors'
 import { parseJsonBody, parseLimitedJsonBody, parseQueryObject } from '@server/lib/parse-request'
 import { withAdmin } from '@server/lib/with-session'
 import { withAdminBearer } from '@server/lib/with-admin-bearer'
@@ -63,23 +62,8 @@ const ADMIN_PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store' }
 
 const adminPrivateJson = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: ADMIN_PRIVATE_HEADERS })
 
-/**
- * Logs only the class and driver code of an unexpected error: a database error message carries the query and its bound values,
- * which for these routes is a chart's note layout.
- */
-const withSummarizedErrors =
-    <TContext>(run: (request: Request, context: TContext) => Promise<Response>) =>
-    async (request: Request, context: TContext) => {
-        try {
-            return await run(request, context)
-        } catch (error) {
-            if (isAppError(error)) throw error
-            unstable_rethrow(error)
-            const summary = summarizeError(error)
-            console.error('chart pattern route failed', summary)
-            throw createAppError(ERROR_CODE.INTERNAL_ERROR, summary)
-        }
-    }
+/** Logs only the class and driver code of an unexpected error: a database error message of these routes carries a chart's note layout. */
+const withSummarizedPatternErrors = withSummarizedErrors('chart pattern route failed')
 
 /**
  * The chart-pattern admin routes: an API token of an admin user only (`withAdminBearer`), never a session. There is no route that
@@ -91,7 +75,7 @@ export const createAdminChartPatternRoutes = (
 ) => {
     const withAdminToken = <TContext>(handler: AdminTokenHandler<TContext>) =>
         withErrorHandling(
-            withSummarizedErrors(async (request: Request, context: TContext) => {
+            withSummarizedPatternErrors(async (request: Request, context: TContext) => {
                 await waitForRequest()
                 const deps = resolveDeps()
                 return withAdminBearer({ resolveApiTokenUser: deps.authService.resolveApiTokenUser })(

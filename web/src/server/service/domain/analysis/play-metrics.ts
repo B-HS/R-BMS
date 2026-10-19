@@ -6,6 +6,7 @@ import {
     GAUGE_DROP_WINDOW_MS,
     GREEN_DISPLAY_FACTOR,
     SEGMENT_COUNT,
+    SEGMENT_TOP_TAGS,
     SP7_LANE_NAMES,
     TIMING_HISTOGRAM_RANGE_MS,
 } from '@server/service/domain/analysis/analysis-constants'
@@ -49,6 +50,7 @@ const EX_PER_PGREAT = 2
 const EX_PER_GREAT = 1
 const MICROS_PER_MILLI = 1000
 const PLAY_THIRDS = 3
+const EX_OF_GRADE: Record<Grade, number> = { pgreat: EX_PER_PGREAT, great: EX_PER_GREAT, good: 0, bad: 0, poor: 0 }
 
 type TallyCounts = Record<Grade, number> & { fast: Record<TimedGrade, number>; slow: Record<TimedGrade, number> }
 
@@ -130,8 +132,10 @@ const tallyGroups = <Key extends string>(entries: Iterable<[Key, Grade, number]>
 
 /**
  * The per-play figures of plan 4.3 from the notes as the judge engine left them, on the lanes the player saw (`layout: "played"`):
- * judgements overall and by tag, lane and note density, BP and combo breaks in SEGMENT_COUNT equal parts of the play, FAST/SLOW by
- * grade and tag, the timing of PGREAT and GREAT, and the first and last third's EX ratios. An unjudged LN end is left out. A third
+ * judgements overall and by tag, lane and note density; for each of SEGMENT_COUNT equal parts of the play its time span, its judged
+ * objects (`chart_notes`, reached or not), the notes that took a judgement with their EX score, BP, combo breaks and FAST/SLOW (GREAT
+ * to BAD) and its SEGMENT_TOP_TAGS most frequent tags; FAST/SLOW by grade and tag, the timing of PGREAT and GREAT overall and by lane,
+ * and the first and last third's EX ratios. An unjudged LN end is left out. A third
  * with no judged note (nothing in it, or the play ended before it) has a null EX ratio and so a null `fatigue.delta`.
  */
 export const computePlayMetrics = (input: PlayMetricsInput) => {
@@ -148,10 +152,35 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
     for (const { note, grade } of judged) addNote(overall, grade, note.errUs)
 
     const windowCounts = densityWindowCounts(input.notes)
-    const segments = Array.from({ length: SEGMENT_COUNT }, (_, index) => ({ id: segmentId(index), bp: 0, combo_breaks: 0 }))
+    const segmentEdgeMs = (index: number) => Math.floor((index * lengthUs) / SEGMENT_COUNT / MICROS_PER_MILLI)
+    const segments = Array.from({ length: SEGMENT_COUNT }, (_, index) => ({
+        id: segmentId(index),
+        from_ms: segmentEdgeMs(index),
+        to_ms: segmentEdgeMs(index + 1),
+        chart_notes: 0,
+        notes: 0,
+        ex_score: 0,
+        bp: 0,
+        combo_breaks: 0,
+        fast: 0,
+        slow: 0,
+    }))
+    const segmentTags = Array.from({ length: SEGMENT_COUNT }, () => new Map<PatternTag, number>())
+    input.notes.forEach((note, index) => {
+        if (!isJudgedNote(note)) return
+        const at = segmentOf(note.timeUs)
+        segments[at].chart_notes += 1
+        for (const tag of tagLists[index]) segmentTags[at].set(tag, (segmentTags[at].get(tag) ?? 0) + 1)
+    })
     let combo = 0
     for (const { note, grade } of judged) {
         const segment = segments[segmentOf(note.timeUs)]
+        segment.notes += 1
+        segment.ex_score += EX_OF_GRADE[grade]
+        if (grade !== 'pgreat' && grade !== 'poor') {
+            if (note.errUs >= 0) segment.fast += 1
+            else segment.slow += 1
+        }
         if (grade === 'bad' || grade === 'poor') {
             segment.bp += 1
             if (combo > 0) segment.combo_breaks += 1
@@ -170,6 +199,8 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
     }
     const first = finishTally(firstThird)
     const last = finishTally(lastThird)
+
+    const timed = judged.filter(({ grade }) => grade === 'pgreat' || grade === 'great')
 
     const byTag = tallyGroups<PatternTag>(
         judged.flatMap(({ note, grade, tags }) => tags.map((tag): [PatternTag, Grade, number] => [tag, grade, note.errUs])),
@@ -190,9 +221,21 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
                 note.errUs,
             ]),
         ),
-        segments,
+        segments: segments.map((segment, index) => ({
+            ...segment,
+            top_tags: [...segmentTags[index].entries()]
+                .toSorted(([leftTag, left], [rightTag, right]) => right - left || PATTERN_TAGS.indexOf(leftTag) - PATTERN_TAGS.indexOf(rightTag))
+                .slice(0, SEGMENT_TOP_TAGS)
+                .map(([tag, notes]) => ({ tag, notes })),
+        })),
         empty_poor: input.emptyPoorTimesUs.length,
-        timing: summarizeTiming(judged.filter(({ grade }) => grade === 'pgreat' || grade === 'great').map(({ note }) => note.errUs)),
+        timing: summarizeTiming(timed.map(({ note }) => note.errUs)),
+        timing_by_lane: Object.fromEntries(
+            [...Map.groupBy(timed, ({ note }) => SP7_LANE_NAMES[note.lane] ?? String(note.lane)).entries()].map(([lane, notes]) => [
+                lane,
+                { notes: notes.length, mean_us: Math.round(notes.reduce((sum, { note }) => sum + note.errUs, 0) / notes.length) },
+            ]),
+        ),
         fatigue: {
             first_third_ex_ratio: first.ex_ratio,
             last_third_ex_ratio: last.ex_ratio,
@@ -203,11 +246,27 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
 
 export type PlayMetrics = ReturnType<typeof computePlayMetrics>
 
+/** How the run ended, read off its trace: played to its end, ended by an empty gauge, or left before its end (Escape, quit). */
+export const RUN_END = { FINISHED: 'finished', GAUGE_EMPTY: 'gauge_empty', LEFT: 'left' } as const
+export type RunEnd = (typeof RUN_END)[keyof typeof RUN_END]
+
+/** What one gauge says about the run: it would have cleared, it failed (or would have), or the log cannot tell. */
+export const GAUGE_OUTCOME = { CLEARED: 'cleared', FAILED: 'failed', UNKNOWN: 'unknown' } as const
+
+/** One gauge's history as the client logs it: a value every `intervalMs`, between `min` and `max`, clearing at `border` or above. */
+export type GaugeCurve = { intervalMs: number; values: readonly number[]; min: number; max: number; border: number }
+
+/** The run a set of gauge histories belongs to: how it ended, when an empty gauge ended it, and which gauge was played. */
+export type GaugeRun = { end: RunEnd; failedAtMs: number | null; selected: number }
+
 /**
- * One gauge's history as the client logs it: a value every `intervalMs`, between `min` and `max`, clearing at `border` or above.
- * `failedAtMs` is the play's `failed_at_ms` when the gauge was the one played; a gauge that was not played has none.
+ * The samples of a curve the run really logged. A run ended by an empty gauge has every gauge filled with zeros from the failure on
+ * (`GaugeLogRecorder::closed`, rbms-play), so only the samples up to and including the failure instant are values.
  */
-export type GaugeCurve = { intervalMs: number; values: readonly number[]; min: number; max: number; border: number; failedAtMs?: number | null }
+export const liveGaugeValues = (curve: GaugeCurve, run: Pick<GaugeRun, 'end' | 'failedAtMs'>) => {
+    if (run.end !== RUN_END.GAUGE_EMPTY || run.failedAtMs === null) return curve.values
+    return curve.values.slice(0, Math.floor(run.failedAtMs / curve.intervalMs) + 1)
+}
 
 /**
  * Where the gauge fell GAUGE_DROP_MIN_RATIO of its range or more inside GAUGE_DROP_WINDOW_MS. Neighbouring samples that each close
@@ -237,21 +296,39 @@ export const findGaugeDrops = (curve: GaugeCurve) => {
 
 const isSurvivalGauge = (curve: GaugeCurve) => curve.min === 0 && curve.border === 0
 
+const gaugeOutcomeOf = (curve: GaugeCurve, live: readonly number[], run: GaugeRun, index: number) => {
+    if (run.end === RUN_END.LEFT) return GAUGE_OUTCOME.FAILED
+    const reachedMin = live.some((value) => value <= curve.min)
+    if (run.end === RUN_END.GAUGE_EMPTY) {
+        if (index === run.selected || (isSurvivalGauge(curve) && reachedMin)) return GAUGE_OUTCOME.FAILED
+        return GAUGE_OUTCOME.UNKNOWN
+    }
+    const end = live.at(-1) ?? curve.min
+    const isAlive = isSurvivalGauge(curve) ? end > 0 : end >= curve.border
+    return isAlive ? GAUGE_OUTCOME.CLEARED : GAUGE_OUTCOME.FAILED
+}
+
 /**
- * How each logged gauge ended, for "what if another gauge" (plan 4.3): its last value, whether that clears and whether it hit the
- * bottom. A survival gauge (HARD, EXHARD, HAZARD and the CLASS gauges have min 0 and border 0, `gauge_tables.rs`) clears when it
- * ends above 0, the others when they end at `border` or above. A recorded `failedAtMs` decides first: that play failed.
+ * How each logged gauge ended, for "what if another gauge" (plan 4.3). The server reads the client's curves and never runs a gauge.
+ * A run played to its end: a survival gauge (HARD, EXHARD, HAZARD and the CLASS gauges have min 0 and border 0, `gauge_tables.rs`)
+ * clears when it ends above 0, the others when they end at `border` or above. A run left before its end is stored as FAILED, so no
+ * gauge clears. A run ended by an empty gauge is read up to the failure only (`liveGaugeValues`): the played gauge failed, a survival
+ * gauge that had already emptied would have failed too, and every other gauge is `unknown` (`cleared: null`), its `end` the value at
+ * the failure.
  */
-export const summarizeGaugeCurves = (curves: readonly GaugeCurve[]) =>
-    curves.map((curve) => {
-        const end = curve.values.at(-1) ?? curve.min
-        const isAlive = isSurvivalGauge(curve) ? end > 0 : end >= curve.border
+export const summarizeGaugeCurves = (curves: readonly GaugeCurve[], run: GaugeRun) =>
+    curves.map((curve, index) => {
+        const live = liveGaugeValues(curve, run)
+        const outcome = gaugeOutcomeOf(curve, live, run, index)
         return {
-            end: roundRatio(end),
-            cleared: typeof curve.failedAtMs !== 'number' && isAlive,
-            reached_min: curve.values.some((value) => value <= curve.min),
+            end: roundRatio(live.at(-1) ?? curve.min),
+            cleared: outcome === GAUGE_OUTCOME.UNKNOWN ? null : outcome === GAUGE_OUTCOME.CLEARED,
+            reached_min: live.some((value) => value <= curve.min),
+            outcome,
         }
     })
+
+export type GaugeCurveSummary = ReturnType<typeof summarizeGaugeCurves>[number]
 
 /**
  * A green number as plan Q11 shows it, worked out from a score row: its `options.green_number` is the lane travel time in whole

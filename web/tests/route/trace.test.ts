@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { DrizzleQueryError } from 'drizzle-orm/errors'
 import { TRACE_MAX_BYTES, TRACE_UPLOAD_RATE_LIMIT } from '@server/dto/trace'
 import type { AuthUser } from '@server/lib/auth-context'
 import { resetRateLimits } from '@server/lib/with-rate-limit'
-import { createTraceRoutes } from '@server/route/trace'
+import { createTraceRoutes, type TraceRouteDeps } from '@server/route/trace'
 import { countTraceJudgements } from '@server/service/domain/trace/trace-check'
 import { OTHER_USER_ID, TRACE_USER_ID, createMemoryTraceDb, createMemoryTraceService, readContractTrace, scoreRowFor } from '../support/trace-fixture'
 
@@ -21,7 +22,7 @@ const ORIGIN = 'http://localhost:3000'
 const WEB_ROOT = join(import.meta.dirname, '..', '..')
 const NORMAL = readContractTrace('trace-normal.json')
 
-const createRoutes = () => {
+const createRoutes = (overrides: Partial<TraceRouteDeps['traceService']> = {}) => {
     const memory = createMemoryTraceDb([scoreRowFor(NORMAL, countTraceJudgements(NORMAL))], { [TRACE_USER_ID]: 'tracer' })
     const { service } = createMemoryTraceService(memory)
     const routes = createTraceRoutes(
@@ -30,7 +31,7 @@ const createRoutes = () => {
                 resolveApiTokenUser: async (plain) => TOKENS.get(plain) ?? null,
                 resolveSessionUser: async (request) => SESSIONS.get(request.headers.get('cookie') ?? '') ?? null,
             },
-            traceService: service,
+            traceService: { ...service, ...overrides },
         }),
         async () => undefined,
     )
@@ -144,20 +145,103 @@ describe('GET /api/fe/me/traces/usage 와 GET /api/admin/traces/usage', () => {
     })
 })
 
+describe('GET·PUT /api/fe/me/traces/sharing 와 POST /api/admin/traces/recompute', () => {
+    const sharing = (method: string, headers: Record<string, string>, body?: unknown) =>
+        new Request(`${ORIGIN}/api/fe/me/traces/sharing`, {
+            method,
+            headers: { 'content-type': 'application/json', ...headers },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        })
+
+    test('공유 설정은 세션으로만 읽고 쓰며 기본은 꺼짐이고, 값은 boolean 만 받는다', async () => {
+        const { routes, memory } = createRoutes()
+        expect((await routes.sharingView(sharing('GET', bearer('rbms_player')), undefined)).status).toBe(401)
+        expect((await routes.sharingPut(sharing('PUT', bearer('rbms_player'), { rival_segments: true }), undefined)).status).toBe(401)
+        const initial = await routes.sharingView(sharing('GET', { cookie: 'player-session' }), undefined)
+        expect(initial.headers.get('cache-control')).toBe('private, no-store')
+        expect((await initial.json()).data).toEqual({ rival_segments: false, updated_at: null })
+        expect((await routes.sharingPut(sharing('PUT', { cookie: 'player-session' }, { rival_segments: 'yes' }), undefined)).status).toBe(400)
+        const saved = await routes.sharingPut(sharing('PUT', { cookie: 'player-session' }, { rival_segments: true }), undefined)
+        expect((await saved.json()).data).toMatchObject({ rival_segments: true })
+        expect(memory.shares.get(TRACE_USER_ID)?.rivalSegments).toBe(true)
+    })
+
+    test('재계산은 관리자 API 토큰만 받고 한 배치의 수치만 돌려준다', async () => {
+        const { routes } = createRoutes()
+        await upload(routes, NORMAL, bearer('rbms_player'))
+        const recompute = (headers: Record<string, string>, body: unknown = {}) =>
+            routes.adminRecompute(
+                new Request(`${ORIGIN}/api/admin/traces/recompute`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', ...headers },
+                    body: JSON.stringify(body),
+                }),
+                undefined,
+            )
+        expect((await recompute({})).status).toBe(401)
+        expect((await recompute(bearer('rbms_player'))).status).toBe(403)
+        expect((await recompute(bearer('rbms_admin'), { limit: 0 })).status).toBe(400)
+        const response = await recompute(bearer('rbms_admin'))
+        expect(response.status).toBe(200)
+        expect((await response.json()).data).toMatchObject({ examined: 0, recomputed: 0, skipped: [], next_after: null, remaining: 0 })
+    })
+})
+
+describe('trace 라우트의 예상 밖 오류', () => {
+    test('DB 오류의 쿼리 값(trace 본문)은 로그·응답에 남지 않고 오류 종류와 드라이버 코드만 남는다', async () => {
+        const marker = 'trace-body-marker-7f3a'
+        const queryError = new DrizzleQueryError(
+            'insert into `play_trace` values (?)',
+            [marker],
+            Object.assign(new Error(marker), { code: 'ER_DATA_TOO_LONG' }),
+        )
+        const failing = async () => {
+            throw queryError
+        }
+        const errors = spyOn(console, 'error').mockImplementation(() => undefined)
+        try {
+            const { routes } = createRoutes({ upload: failing, usageOf: failing, adminUsage: failing })
+            const responses = [
+                await upload(routes, NORMAL, bearer('rbms_player')),
+                await routes.mine(new Request(`${ORIGIN}/api/fe/me/traces/usage`, { headers: { cookie: 'player-session' } }), undefined),
+                await routes.adminUsage(new Request(`${ORIGIN}/api/admin/traces/usage`, { headers: bearer('rbms_admin') }), undefined),
+            ]
+            for (const response of responses) {
+                expect(response.status).toBe(500)
+                const text = await response.text()
+                expect(text).not.toContain(marker)
+                expect(JSON.parse(text).error.code).toBe('INTERNAL_ERROR')
+            }
+            const logged = JSON.stringify(errors.mock.calls.map((call) => call.map((value) => (value instanceof Error ? `${value.message}` : value))))
+            expect(logged).not.toContain(marker)
+            expect(errors.mock.calls.map((call) => call[1])).toEqual(
+                Array.from({ length: 3 }, () => ({ error_name: 'Error', error_code: 'ER_DATA_TOO_LONG' })),
+            )
+        } finally {
+            errors.mockRestore()
+        }
+    })
+})
+
 describe('trace 읽기 공개 경로 없음', () => {
     const routeFiles = [...new Bun.Glob('src/app/**/route.ts').scanSync({ cwd: WEB_ROOT })].toSorted()
     const sourceFiles = [...new Bun.Glob('src/**/*.{ts,tsx}').scanSync({ cwd: WEB_ROOT })]
     const read = (path: string) => readFileSync(join(WEB_ROOT, path), 'utf8')
 
-    test('trace 라우트는 업로드 POST 하나와 보관량 GET 둘뿐이다', async () => {
+    test('trace 라우트는 업로드 POST, 보관량 GET 둘, 관리자 재계산 POST, 공유 설정 GET·PUT 뿐이고 trace 를 돌려주지 않는다', async () => {
         const traceRoutes = routeFiles.filter((path) => read(path).includes('createTraceRoutes'))
         expect(traceRoutes).toEqual([
+            'src/app/api/admin/traces/recompute/route.ts',
             'src/app/api/admin/traces/usage/route.ts',
             'src/app/api/charts/[hash]/traces/route.ts',
+            'src/app/api/fe/me/traces/sharing/route.ts',
             'src/app/api/fe/me/traces/usage/route.ts',
         ])
-        const exportsOf = async (path: string) => Object.keys(await import(join(WEB_ROOT, path))).toSorted()
-        expect(await Promise.all(traceRoutes.map(exportsOf))).toEqual([['GET'], ['POST'], ['GET']])
+        const exportsOf = async (path: string) =>
+            Object.keys(await import(join(WEB_ROOT, path)))
+                .filter((name) => name !== 'maxDuration')
+                .toSorted()
+        expect(await Promise.all(traceRoutes.map(exportsOf))).toEqual([['POST'], ['GET'], ['POST'], ['GET', 'PUT'], ['GET']])
     })
 
     test('play_trace·play_analysis 표는 compose 만 읽고, 저장된 trace 를 푸는 곳은 서비스뿐이다', () => {
@@ -165,6 +249,8 @@ describe('trace 읽기 공개 경로 없음', () => {
         expect(tableUsers.map((path) => relative('src', path))).toEqual(['server/compose/trace.ts'])
         const readers = sourceFiles.filter((path) => /\b(findStoredTrace|readAnalysis)\b/.test(read(path)))
         expect(readers.toSorted()).toEqual(['src/server/compose/trace.ts', 'src/server/service/domain/trace/trace.service.ts'])
-        expect(read('src/server/route/trace.ts')).toContain("Pick<TraceService, 'upload' | 'usageOf' | 'adminUsage'>")
+        expect(read('src/server/route/trace.ts')).toContain(
+            "Pick<TraceService, 'upload' | 'usageOf' | 'adminUsage' | 'shareSettingOf' | 'putShareSetting' | 'recomputeStale'>",
+        )
     })
 })

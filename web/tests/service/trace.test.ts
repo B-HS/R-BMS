@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { gunzipSync } from 'node:zlib'
 import { TRACE_NOTE_KIND, TRACE_NOTE_STATE, TRACE_QUOTA_LEVEL, TRACE_USER_QUOTA, type TraceUploadInput } from '@server/dto/trace'
-import { ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
+import { ANALYSIS_VERSION, PLAY_ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
 import { countTraceJudgements, findTraceMismatch } from '@server/service/domain/trace/trace-check'
 import {
+    PLAY_ANALYSIS_READ_RECOMPUTE_MAX,
     TRACE_ANALYSIS_STATE,
     TRACE_UPLOAD_OUTCOME,
     toTraceStorage,
@@ -118,6 +119,25 @@ describe('findTraceMismatch — 점수 행과의 일관성(허용 오차 없음)
         expect(findTraceMismatch({ trace, pathHash: trace.chart.md5, score: { ...score, emptyPoor: 1 } })?.field).toBe('judge.empty_poor')
     })
 
+    test('모드·LN 종류·RANDOM·SCRATCH AUTO 가 점수 행과 다르면 그 칸 이름으로 어긋난다', () => {
+        const score = scoreOf(NORMAL)
+        const fieldOf = (trace: TraceUploadInput, row: typeof score) => findTraceMismatch({ trace, pathHash: trace.chart.md5, score: row })?.field
+        expect(fieldOf(NORMAL, score)).toBeUndefined()
+        expect(fieldOf(NORMAL, { ...score, mode: 'BEAT_14K' })).toBe('mode')
+        expect(fieldOf(NORMAL, { ...score, lntype: NORMAL.lntype + 1 })).toBe('lntype')
+        expect(fieldOf(NORMAL, { ...score, random: 'Mirror' })).toBe('random')
+        expect(fieldOf(NORMAL, { ...score, scratchAuto: true })).toBe('auto_lanes')
+        const autoTrace = { ...NORMAL, auto_lanes: [false, false, false, false, false, false, false, true] }
+        expect(fieldOf(autoTrace, score)).toBe('auto_lanes')
+        expect(fieldOf(autoTrace, { ...score, scratchAuto: true })).toBeUndefined()
+    })
+
+    test('9키 예외는 점수 행의 모드를 따르고, trace 의 모드가 점수와 다르면 판정 칸보다 먼저 mode 로 어긋난다', () => {
+        const trace = { ...NORMAL, mode: 'BEAT_7K' }
+        const score = scoreOf(trace, { mode: 'POPN_9K' })
+        expect(findTraceMismatch({ trace, pathHash: trace.chart.md5, score: { ...score, bad: score.bad + 1 } })?.field).toBe('mode')
+    })
+
     test('본문의 차트와 경로의 해시가 점수의 차트여야 한다. 경로는 sha256 이어도 되고, 점수에 md5 가 없으면 본문의 md5 로 잇는다', () => {
         const score = scoreOf(NORMAL)
         expect(findTraceMismatch({ trace: NORMAL, pathHash: NORMAL.chart.sha256, score })).toBeNull()
@@ -154,7 +174,7 @@ describe('traceService.upload', () => {
             storedSize: row.data.length,
         })
         expect(row.storedSize).toBeLessThan(row.byteSize)
-        expect(memory.analyses.get('tr_1')).toMatchObject({ analysisVersion: ANALYSIS_VERSION, patternJoin: 'absent' })
+        expect(memory.analyses.get('tr_1')).toMatchObject({ analysisVersion: PLAY_ANALYSIS_VERSION, patternJoin: 'absent' })
     })
 
     test('다른 사용자의 점수에 붙인 trace 는 없는 점수와 같게 거절하고 아무것도 저장하지 않는다', async () => {
@@ -252,15 +272,15 @@ describe('traceService.readAnalysis', () => {
         await service.upload({ input: NORMAL, pathHash: NORMAL.chart.md5, userId: TRACE_USER_ID })
         const stored = memory.analyses.get('tr_1')
         expect(await service.readAnalysis({ traceId: 'tr_1', userId: OTHER_USER_ID })).toBeNull()
-        expect(await service.readAnalysis({ traceId: 'tr_1', userId: TRACE_USER_ID })).toEqual(stored?.summary ?? null)
+        expect<unknown>(await service.readAnalysis({ traceId: 'tr_1', userId: TRACE_USER_ID })).toEqual(stored?.summary ?? null)
 
         memory.analyses.delete('tr_1')
-        expect(await service.readAnalysis({ traceId: 'tr_1', userId: TRACE_USER_ID })).toEqual(stored?.summary ?? null)
+        expect<unknown>(await service.readAnalysis({ traceId: 'tr_1', userId: TRACE_USER_ID })).toEqual(stored?.summary ?? null)
         expect(memory.analyses.has('tr_1')).toBe(true)
 
-        if (stored) memory.analyses.set('tr_1', { ...stored, analysisVersion: ANALYSIS_VERSION - 1, computedAt: 0 })
+        if (stored) memory.analyses.set('tr_1', { ...stored, analysisVersion: PLAY_ANALYSIS_VERSION - 1, computedAt: 0 })
         await service.readAnalysis({ traceId: 'tr_1', userId: TRACE_USER_ID })
-        expect(memory.analyses.get('tr_1')?.analysisVersion).toBe(ANALYSIS_VERSION)
+        expect(memory.analyses.get('tr_1')?.analysisVersion).toBe(PLAY_ANALYSIS_VERSION)
     })
 })
 
@@ -279,7 +299,225 @@ describe('traceService.adminUsage', () => {
             accounts_near: 0,
             accounts_over: 0,
             top: [{ login_id: 'tracer', traces: 1, level: TRACE_QUOTA_LEVEL.OK }],
-            analysis: { analysis_version: ANALYSIS_VERSION, missing: 1, stale: 0 },
+            analysis: { analysis_version: PLAY_ANALYSIS_VERSION, missing: 1, stale: 0 },
         })
+    })
+})
+
+describe('traceService — 판별 분석 읽기(W5)', () => {
+    const uploadMany = async (count: number) => {
+        const scores = Array.from({ length: count }, (_, index) => scoreOf({ ...NORMAL, score_id: `sc_${index}` }, { playedAt: index }))
+        const memory = createMemoryTraceDb(scores)
+        const patternLoads = { count: 0 }
+        const { service, failures } = createMemoryTraceService(memory, {
+            loadPattern: async () => {
+                patternLoads.count += 1
+                return null
+            },
+        })
+        for (const score of scores)
+            await service.upload({ input: { ...NORMAL, score_id: score.id }, pathHash: NORMAL.chart.md5, userId: TRACE_USER_ID })
+        return { memory, service, failures, patternLoads }
+    }
+
+    const breakTrace = (memory: ReturnType<typeof createMemoryTraceDb>, traceId: string) => {
+        const row = memory.traces.get(traceId)
+        if (row) memory.traces.set(traceId, { ...row, data: Buffer.from('not gzip') })
+    }
+
+    test('최근 판을 최신순으로 읽고, 낮은 분석 버전은 한 번에 정해진 수만 다시 계산하며 나머지는 stale 로 센다', async () => {
+        const { memory, service } = await uploadMany(PLAY_ANALYSIS_READ_RECOMPUTE_MAX + 2)
+        for (const [id, row] of memory.analyses) memory.analyses.set(id, { ...row, analysisVersion: PLAY_ANALYSIS_VERSION - 1 })
+        const { plays, stale } = await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(plays).toHaveLength(PLAY_ANALYSIS_READ_RECOMPUTE_MAX)
+        expect(stale).toBe(2)
+        expect(plays.map((play) => play.playedAt)).toEqual(plays.map((play) => play.playedAt).toSorted((a, b) => b - a))
+        expect(plays.every((play) => play.summary.analysis_version === PLAY_ANALYSIS_VERSION)).toBe(true)
+        expect(await service.recentAnalyzedPlays({ userId: OTHER_USER_ID, limit: 100 })).toEqual({ plays: [], stale: 0, failed: 0 })
+    })
+
+    test('관리자 재계산은 id 순서로 limit 만큼 낮은 버전을 다시 계산하고, 이어 부를 자리를 돌려준다', async () => {
+        const { memory, service } = await uploadMany(3)
+        for (const [id, row] of memory.analyses) memory.analyses.set(id, { ...row, analysisVersion: PLAY_ANALYSIS_VERSION - 1 })
+        const first = await service.recomputeStale({ limit: 2, after: null })
+        expect(first).toMatchObject({
+            analysis_version: PLAY_ANALYSIS_VERSION,
+            examined: 2,
+            recomputed: 2,
+            skipped: [],
+            next_after: 'tr_2',
+            remaining: 1,
+        })
+        const second = await service.recomputeStale({ limit: 2, after: first.next_after })
+        expect(second).toMatchObject({ examined: 1, next_after: 'tr_3', remaining: 0 })
+        expect(await service.recomputeStale({ limit: 2, after: second.next_after })).toMatchObject({ examined: 0, next_after: null })
+    })
+
+    test('읽을 수 없는 trace 는 skipped 에 적고 다음 호출이 되풀이하지 않는다', async () => {
+        const { memory, service } = await uploadMany(1)
+        memory.analyses.clear()
+        const row = memory.traces.get('tr_1')
+        if (row) memory.traces.set('tr_1', { ...row, data: Buffer.from('not gzip') })
+        const result = await service.recomputeStale({ limit: 5, after: null })
+        expect(result).toMatchObject({ examined: 1, recomputed: 0, skipped: ['tr_1'], next_after: 'tr_1', remaining: 0 })
+        expect(await service.recomputeStale({ limit: 5, after: result.next_after })).toMatchObject({ examined: 0, remaining: 0 })
+        expect(await service.recomputeStale({ limit: 5, after: null })).toMatchObject({ examined: 0, skipped: [] })
+    })
+
+    test('다시 계산이 실패한 trace 하나만 실패로 표시하고 나머지로 답하며, 다음 읽기는 그 trace 를 다시 계산하지 않는다', async () => {
+        const { memory, service, failures } = await uploadMany(3)
+        memory.analyses.clear()
+        breakTrace(memory, 'tr_2')
+        const first = await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(first.plays.map((play) => play.scoreId).toSorted()).toEqual(['sc_0', 'sc_2'])
+        expect([first.stale, first.failed]).toEqual([0, 1])
+        expect(failures).toHaveLength(1)
+        expect(memory.analyses.get('tr_2')).toMatchObject({
+            analysisVersion: PLAY_ANALYSIS_VERSION,
+            patternJoin: 'failed',
+            summary: { failed: true, analysis_version: PLAY_ANALYSIS_VERSION, pattern_analysis_version: ANALYSIS_VERSION },
+        })
+
+        const second = await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect([second.plays.length, second.stale, second.failed]).toEqual([2, 0, 1])
+        expect(failures).toHaveLength(1)
+        expect(await service.adminUsage()).toMatchObject({ analysis: { missing: 0, stale: 0 } })
+    })
+
+    test('한 판을 읽는 경로도 실패한 trace 에서 던지지 않고 없는 판처럼 null 이다', async () => {
+        const { memory, service } = await uploadMany(1)
+        memory.analyses.clear()
+        breakTrace(memory, 'tr_1')
+        expect(await service.analyzedPlayOfScore({ userId: TRACE_USER_ID, scoreId: 'sc_0' })).toBeNull()
+        expect(await service.readAnalysis({ traceId: 'tr_1', userId: TRACE_USER_ID })).toBeNull()
+        expect(
+            await service.bestAnalyzedPlayOnChart({
+                userId: TRACE_USER_ID,
+                chartSha256: NORMAL.chart.sha256,
+                scratchAuto: false,
+                excludeScoreId: null,
+            }),
+        ).toBeNull()
+    })
+
+    test('실패 표시는 분석 버전이 오르면 풀리고 그때 한 번 다시 계산한다', async () => {
+        const { memory, service, failures } = await uploadMany(1)
+        memory.analyses.clear()
+        breakTrace(memory, 'tr_1')
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        const marker = memory.analyses.get('tr_1')
+        expect(failures).toHaveLength(1)
+
+        if (marker) memory.analyses.set('tr_1', { ...marker, analysisVersion: PLAY_ANALYSIS_VERSION - 1 })
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(failures).toHaveLength(2)
+
+        if (marker) memory.analyses.set('tr_1', { ...marker, summary: { ...marker.summary, pattern_analysis_version: ANALYSIS_VERSION - 1 } })
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(failures).toHaveLength(3)
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(failures).toHaveLength(3)
+    })
+
+    test('실패 표시를 저장하지 못해도 읽기는 던지지 않는다', async () => {
+        const { memory, service } = await uploadMany(2)
+        memory.analyses.clear()
+        breakTrace(memory, 'tr_2')
+        const saveFailure = memory.db.saveAnalysisFailure
+        memory.db.saveAnalysisFailure = async () => {
+            throw new Error('database is down')
+        }
+        const result = await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(result.plays.map((play) => play.scoreId)).toEqual(['sc_0'])
+        expect(result.failed).toBe(1)
+        memory.db.saveAnalysisFailure = saveFailure
+    })
+
+    test('판 분석 버전과 곡별 분류 버전 중 하나라도 낮은 분석은 읽을 때 다시 계산하고, 둘 다 현재면 그대로 둔다', async () => {
+        const { memory, service, patternLoads } = await uploadMany(1)
+        const current = memory.analyses.get('tr_1')
+        const loadsAfterUpload = patternLoads.count
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(patternLoads.count).toBe(loadsAfterUpload)
+
+        if (!current) throw new Error('the upload stores an analysis')
+        const olderPattern = { ...current, summary: { ...current.summary, pattern_analysis_version: ANALYSIS_VERSION - 1 } }
+        memory.analyses.set('tr_1', olderPattern)
+        const { plays } = await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(patternLoads.count).toBe(loadsAfterUpload + 1)
+        expect(plays[0].summary.pattern_analysis_version).toBe(ANALYSIS_VERSION)
+        expect(memory.analyses.get('tr_1')?.summary.pattern_analysis_version).toBe(ANALYSIS_VERSION)
+
+        const withoutPatternVersion = Object.fromEntries(Object.entries(current.summary).filter(([key]) => key !== 'pattern_analysis_version'))
+        memory.analyses.set('tr_1', { ...current, summary: withoutPatternVersion })
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(patternLoads.count).toBe(loadsAfterUpload + 2)
+
+        memory.analyses.set('tr_1', { ...current, analysisVersion: PLAY_ANALYSIS_VERSION - 1 })
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(patternLoads.count).toBe(loadsAfterUpload + 3)
+
+        memory.analyses.set('tr_1', { ...current, summary: { ...current.summary, analysis_version: PLAY_ANALYSIS_VERSION - 1 } })
+        await service.recentAnalyzedPlays({ userId: TRACE_USER_ID, limit: 100 })
+        expect(patternLoads.count).toBe(loadsAfterUpload + 4)
+    })
+
+    test('관리자 수치와 일괄 재계산도 곡별 분류 버전이 낮은 분석을 뒤처진 것으로 센다', async () => {
+        const { memory, service } = await uploadMany(2)
+        const current = memory.analyses.get('tr_2')
+        if (!current) throw new Error('the upload stores an analysis')
+        memory.analyses.set('tr_2', { ...current, summary: { ...current.summary, pattern_analysis_version: ANALYSIS_VERSION - 1 } })
+        expect(await service.adminUsage()).toMatchObject({
+            analysis: { analysis_version: PLAY_ANALYSIS_VERSION, pattern_analysis_version: ANALYSIS_VERSION, missing: 0, stale: 1 },
+        })
+        const result = await service.recomputeStale({ limit: 10, after: null })
+        expect(result).toMatchObject({ examined: 1, recomputed: 1, skipped: [], remaining: 0, pattern_analysis_version: ANALYSIS_VERSION })
+        expect(memory.analyses.get('tr_2')?.summary.pattern_analysis_version).toBe(ANALYSIS_VERSION)
+    })
+
+    test('공유 설정은 행이 없으면 꺼짐이고, 켠 값을 그 시각과 함께 저장한다', async () => {
+        const { service } = await uploadMany(0)
+        expect(await service.shareSettingOf(TRACE_USER_ID)).toEqual({ rival_segments: false, updated_at: null })
+        expect(await service.putShareSetting({ userId: TRACE_USER_ID, rivalSegments: true })).toEqual({
+            rival_segments: true,
+            updated_at: 1_791_970_080_000,
+        })
+        expect(await service.shareSettingOf(TRACE_USER_ID)).toMatchObject({ rival_segments: true })
+    })
+
+    test('한쪽만 라이벌로 등록했으면 공유를 켜도 구간 요약을 내보내지 않는다', async () => {
+        const { memory, service } = await uploadMany(1)
+        const params = { requesterId: OTHER_USER_ID, rivalId: TRACE_USER_ID, chartSha256: NORMAL.chart.sha256, scratchAuto: false }
+        await service.putShareSetting({ userId: TRACE_USER_ID, rivalSegments: true })
+        expect(await service.rivalSegmentsOnChart(params)).toEqual({ allowed: false })
+        memory.rivals.add(`${OTHER_USER_ID}>${TRACE_USER_ID}`)
+        expect(await service.rivalSegmentsOnChart(params)).toEqual({ allowed: false })
+        memory.rivals.delete(`${OTHER_USER_ID}>${TRACE_USER_ID}`)
+        memory.rivals.add(`${TRACE_USER_ID}>${OTHER_USER_ID}`)
+        expect(await service.rivalSegmentsOnChart(params)).toEqual({ allowed: false })
+    })
+
+    test('서로 라이벌이어도 공유를 끈 사용자의 구간 요약은 내보내지 않는다', async () => {
+        const { memory, service } = await uploadMany(1)
+        const params = { requesterId: OTHER_USER_ID, rivalId: TRACE_USER_ID, chartSha256: NORMAL.chart.sha256, scratchAuto: false }
+        memory.rivals.add(`${OTHER_USER_ID}>${TRACE_USER_ID}`)
+        memory.rivals.add(`${TRACE_USER_ID}>${OTHER_USER_ID}`)
+        expect(await service.rivalSegmentsOnChart(params)).toEqual({ allowed: false })
+        await service.putShareSetting({ userId: TRACE_USER_ID, rivalSegments: false })
+        expect(await service.rivalSegmentsOnChart(params)).toEqual({ allowed: false })
+    })
+
+    test('라이벌의 구간 요약은 서로 라이벌이고 그 라이벌이 허용했을 때만, 구간 수치만 내보낸다', async () => {
+        const { memory, service } = await uploadMany(1)
+        const params = { requesterId: OTHER_USER_ID, rivalId: TRACE_USER_ID, chartSha256: NORMAL.chart.sha256, scratchAuto: false }
+        memory.rivals.add(`${OTHER_USER_ID}>${TRACE_USER_ID}`)
+        memory.rivals.add(`${TRACE_USER_ID}>${OTHER_USER_ID}`)
+        await service.putShareSetting({ userId: TRACE_USER_ID, rivalSegments: true })
+        const shared = await service.rivalSegmentsOnChart(params)
+        expect(shared.allowed).toBe(true)
+        const play = shared.allowed ? shared.play : null
+        expect(Object.keys(play?.segments[0] ?? {}).toSorted()).toEqual(['bp', 'chart_notes', 'ex_score', 'id', 'notes'])
+        expect(JSON.stringify(play)).not.toContain('err_us')
+        expect(await service.rivalSegmentsOnChart({ ...params, scratchAuto: true })).toEqual({ allowed: true, play: null })
     })
 })

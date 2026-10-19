@@ -1,4 +1,3 @@
-import { unstable_rethrow } from 'next/navigation'
 import { NextResponse, connection } from 'next/server'
 import { compose } from '@server/compose'
 import {
@@ -22,24 +21,29 @@ import {
     aiWeekQuerySchema,
     type AiFailureKind,
 } from '@server/dto/ai'
+import { aiCompareQuerySchema, aiScoreParamSchema } from '@server/dto/ai-play'
 import { FOLDER_LIMIT } from '@server/dto/folder'
 import { successResponse } from '@server/lib/api-response'
 import type { AuthUser } from '@server/lib/auth-context'
-import { createAppError, isAppError } from '@server/lib/error'
+import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
-import { summarizeError } from '@server/lib/error-summary'
+import { withSummarizedErrors } from '@server/lib/with-summarized-errors'
 import { parseLimitedJsonBody, parseSearchParams } from '@server/lib/parse-request'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { RATE_LIMIT, enforceUserRateLimit } from '@server/lib/with-rate-limit'
 import { withAdmin, withSession } from '@server/lib/with-session'
 import type { AiServiceFailure, AiServiceResult } from '@server/service/domain/ai/ai.type'
 import type { AiCredentialService } from '@server/service/domain/ai/credential.service'
+import type { AiGaugeAdviceService } from '@server/service/domain/ai/gauge-advice.service'
 import type { AiGoalFailure, AiGoalService } from '@server/service/domain/ai/goal-plan.service'
 import type { AiJudgeHabitService } from '@server/service/domain/ai/judge-habit.service'
+import type { AiPlayCompareService } from '@server/service/domain/ai/play-compare.service'
+import type { AiPlayReportService } from '@server/service/domain/ai/play-report.service'
 import type { AiPracticeFolderService, AiPracticeSourceFailure } from '@server/service/domain/ai/practice-folder.service'
 import type { AiRecommendService } from '@server/service/domain/ai/recommend.service'
 import type { AiWeeklySummaryService } from '@server/service/domain/ai/weekly-summary.service'
 import type { AiRecordQueryService } from '@server/service/domain/ai/record-query.service'
+import type { AiReplayCoachService } from '@server/service/domain/ai/replay-coach.service'
 import type { AiSettingsService } from '@server/service/domain/ai/settings.service'
 import type { AiUsageService } from '@server/service/domain/ai/usage.service'
 import type { AuthService } from '@server/service/domain/auth/auth.service'
@@ -119,23 +123,8 @@ const parseProvider = async (context: ProviderContext) => {
 
 type SessionDeps = { authService: Pick<AuthService, 'resolveSessionUser'> }
 
-/**
- * Keeps unexpected errors of AI routes out of `withErrorHandling`, which logs the raw error: a database error there carries the
- * query and its bound values (ciphertext, wrapped data key, prompt output). Only the error's class and driver code are logged.
- */
-const withSafeAiErrors =
-    <TContext>(run: (request: Request, context: TContext) => Promise<Response>) =>
-    async (request: Request, context: TContext) => {
-        try {
-            return await run(request, context)
-        } catch (error) {
-            if (isAppError(error)) throw error
-            unstable_rethrow(error)
-            const summary = summarizeError(error)
-            console.error('AI route failed', summary)
-            throw createAppError(ERROR_CODE.INTERNAL_ERROR, summary)
-        }
-    }
+/** Unexpected errors of AI routes are logged by class and driver code only: a database error there carries ciphertext, a wrapped data key or prompt output. */
+const withSafeAiErrors = withSummarizedErrors('AI route failed')
 
 const createAiRouteWrappers = <TDeps extends SessionDeps>(resolveDeps: () => TDeps, waitForRequest: () => Promise<void>) => {
     const withUser = <TContext>(handler: AiHandler<TContext, TDeps>) =>
@@ -428,6 +417,82 @@ export const createAiScoreFeatureRoutes = (
 
         judgeHabitInterpret: withLimited<unknown>('ai-judge-habit-run', async (_request, _context, user, deps) =>
             ok(unwrapAiResult(await deps.aiJudgeHabitService.interpret(user.id))),
+        ),
+    }
+}
+
+export type AiPlayFeatureRouteDeps = SessionDeps & {
+    aiPlayReportService: Pick<AiPlayReportService, 'view' | 'interpret'>
+    aiReplayCoachService: Pick<AiReplayCoachService, 'view' | 'interpret'>
+    aiPlayCompareService: Pick<AiPlayCompareService, 'view' | 'interpret'>
+    aiGaugeAdviceService: Pick<AiGaugeAdviceService, 'view' | 'interpret'>
+}
+
+type ScoreContext = { params: Promise<{ scoreId: string }> }
+
+const parseScoreId = async (context: ScoreContext) => {
+    const parsed = aiScoreParamSchema.safeParse(await context.params)
+    if (!parsed.success) throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'scoreId' })
+    return parsed.data.scoreId
+}
+
+/** An own play the account does not have answers as a missing score, whoever's score the id is. */
+const requirePlay = <T>(value: T | null) => {
+    if (value === null) throw createAppError(ERROR_CODE.IR_SCORE_NOT_FOUND, { field: 'score_id' })
+    return value
+}
+
+/**
+ * Features 1, 2, 3, 4's trace part (through the judge-habit routes) and 8: they read the session user's own play analyses only, a
+ * rival's segment totals only when that rival shares them. Each GET returns the deterministic result with the latest stored AI answer
+ * and never calls a provider; each POST is the user's "AI 해석 만들기" press and calls the shared runner once (no automatic retry).
+ */
+export const createAiPlayFeatureRoutes = (resolveDeps: () => AiPlayFeatureRouteDeps = compose, waitForRequest: () => Promise<void> = connection) => {
+    const { withUser } = createAiRouteWrappers(resolveDeps, waitForRequest)
+
+    const withLimited = <TContext>(scope: string, handler: AiHandler<TContext, AiPlayFeatureRouteDeps>) =>
+        withUser<TContext>(async (request, context, user, deps) => {
+            enforceUserRateLimit(scope, user.id, RATE_LIMIT.TABLE_RECORDS)
+            return handler(request, context, user, deps)
+        })
+
+    const ok = (data: unknown) => aiPrivateJson(successResponse(data))
+
+    return {
+        reportView: withLimited<unknown>('ai-report', async (_request, _context, user, deps) => ok(await deps.aiPlayReportService.view(user.id))),
+
+        reportInterpret: withLimited<unknown>('ai-report-run', async (_request, _context, user, deps) =>
+            ok(unwrapAiResult(await deps.aiPlayReportService.interpret(user.id))),
+        ),
+
+        coachView: withLimited<ScoreContext>('ai-coach', async (_request, context, user, deps) => {
+            const scoreId = await parseScoreId(context)
+            return ok(requirePlay(await deps.aiReplayCoachService.view({ userId: user.id, scoreId })))
+        }),
+
+        coachInterpret: withLimited<ScoreContext>('ai-coach-run', async (_request, context, user, deps) => {
+            const scoreId = await parseScoreId(context)
+            return ok(unwrapAiResult(requirePlay(await deps.aiReplayCoachService.interpret({ userId: user.id, scoreId }))))
+        }),
+
+        compareView: withLimited<ScoreContext>('ai-compare', async (request, context, user, deps) => {
+            const scoreId = await parseScoreId(context)
+            const query = parseSearchParams(request, aiCompareQuerySchema)
+            return ok(requirePlay(await deps.aiPlayCompareService.view({ userId: user.id, scoreId, query })))
+        }),
+
+        compareInterpret: withLimited<ScoreContext>('ai-compare-run', async (request, context, user, deps) => {
+            const scoreId = await parseScoreId(context)
+            const query = await parseLimitedJsonBody(request, aiCompareQuerySchema, AI_LIMIT.WRITE_MAX_BYTES)
+            return ok(unwrapAiResult(requirePlay(await deps.aiPlayCompareService.interpret({ userId: user.id, scoreId, query }))))
+        }),
+
+        gaugeAdviceView: withLimited<unknown>('ai-gauge-advice', async (_request, _context, user, deps) =>
+            ok(await deps.aiGaugeAdviceService.view(user.id)),
+        ),
+
+        gaugeAdviceInterpret: withLimited<unknown>('ai-gauge-advice-run', async (_request, _context, user, deps) =>
+            ok(unwrapAiResult(await deps.aiGaugeAdviceService.interpret(user.id))),
         ),
     }
 }
