@@ -50,6 +50,20 @@
       "when": 1792415754670,
       "tag": "0006_admin_seed",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1792423286917,
+      "tag": "0007_chart_pattern",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1792425088225,
+      "tag": "0008_ai_goal",
+      "breakpoints": true
     }
   ]
 }

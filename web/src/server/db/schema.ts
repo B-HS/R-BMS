@@ -2,6 +2,7 @@ import {
     bigint,
     boolean,
     char,
+    customType,
     double,
     float,
     index,
@@ -518,3 +519,57 @@ export const aiUserSetting = mysqlTable('ai_user_setting', {
     defaultProvider: varchar('default_provider', { length: 16 }),
     updatedAt: bigint('updated_at', { mode: 'number' }).default(0).notNull(),
 })
+
+const mediumBlob = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'mediumblob' })
+
+export const chartPattern = mysqlTable(
+    'chart_pattern',
+    {
+        md5: char('md5', { length: 32 }).primaryKey(),
+        sha256: char('sha256', { length: 64 }).notNull(),
+        mode: varchar('mode', { length: 16 }).notNull(),
+        formatVersion: int('format_version').notNull(),
+        parserVersion: int('parser_version').notNull(),
+        playableNotes: int('playable_notes').default(0).notNull(),
+        noteCount: int('note_count').default(0).notNull(),
+        contentHash: char('content_hash', { length: 64 }).notNull(),
+        byteSize: int('byte_size').default(0).notNull(),
+        data: mediumBlob('data').notNull(),
+        features: json('features'),
+        featuresVersion: int('features_version').default(0).notNull(),
+        uploadedBy: varchar('uploaded_by', { length: 36 }),
+        createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+        updatedAt: bigint('updated_at', { mode: 'number' }).default(0).notNull(),
+    },
+    (table) => [index('chart_pattern_sha256_idx').on(table.sha256)],
+)
+
+export const aiGoal = mysqlTable(
+    'ai_goal',
+    {
+        id: varchar('id', { length: 36 }).primaryKey(),
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        kind: varchar('kind', { length: 32 }).notNull(),
+        params: json('params').notNull(),
+        createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+        archivedAt: bigint('archived_at', { mode: 'number' }),
+    },
+    (table) => [index('ai_goal_user_idx').on(table.userId, table.archivedAt)],
+)
+
+export const aiPracticeFolder = mysqlTable(
+    'ai_practice_folder',
+    {
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        previewHash: char('preview_hash', { length: 64 }).notNull(),
+        folderId: varchar('folder_id', { length: 36 })
+            .notNull()
+            .references(() => userFolder.id, { onDelete: 'cascade' }),
+        createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.previewHash] })],
+)
