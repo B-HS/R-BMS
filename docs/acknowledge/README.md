@@ -1,12 +1,12 @@
 # docs/acknowledge — 결정 기록 색인
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리
 
 사용자 결정, 합의, 전제를 둔다. 2026-10-14 부터 새 결정은 결정 1건 = 파일 1개의 ADR(`YYYY-MM-DD-adr-<슬러그>.md`, 머리: `최종 갱신 · 대응 커밋` 과 `상태 · 결정일 · 결정자 · 커밋`, 절: 배경 / 결정 / 이유 / 기각된 대안 / 영향과 관련 파일 / 날짜와 사용자 원문)로 쓴다. 그 전의 파일은 여러 결정을 한 파일의 표로 묶는다. 결정이 바뀌면 옛 파일의 결정 문장은 고치지 않고, 바뀐 행 끝에 "대체됨: <새 파일>" 을 더하고 그 파일의 상태 줄과 이 색인의 상태를 함께 바꾼다.
 
 상태: 유효 = 지금 코드와 운영의 근거. 일부 대체됨 = 파일 안의 표시된 행만 대체됨. 대체됨 = 이력으로만 둔다.
 
-## 2026-10-12 ~ 10-15 세션의 ADR
+## 2026-10-12 ~ 10-19 세션의 ADR
 
 결정일 순서. 같은 날은 결정이 나온 순서에 가깝게 둔다.
 
@@ -15,7 +15,7 @@
 | [2026-10-14-adr-scratch-auto-rule.md](2026-10-14-adr-scratch-auto-rule.md) | SCRATCH AUTO: 턴테이블 노트는 초록·판정에서 빠진 없는 노트, 그 판도 최고 기록·이력·리플레이·전송, 램프 LIGHT ASSIST(2026-10-14 사용자 확인), 규칙 세대 3, 옛 세대의 SCRATCH AUTO 판(사용자 DB 37판)은 램프·이력만 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-save-and-send-every-played-run.md](2026-10-14-adr-save-and-send-every-played-run.md) | 사람이 친 판은 어시스트와 상관없이 전부 저장·리플레이·전송. 넓힌 판정 판은 최고 기록·순위만 제외(2026-10-14 사용자 확인) | 2026-10-14 | 유효 |
 | [2026-10-14-adr-assisted-course-submission.md](2026-10-14-adr-assisted-course-submission.md) | 어시스트 곡이 낀 코스도 코스로 보낸다(`scratch_auto`·`assist` 선택 필드), 서버는 단일 곡과 같은 정책 | 2026-10-14 | 유효 |
-| [2026-10-14-adr-scratch-auto-ranking-toggle.md](2026-10-14-adr-scratch-auto-ranking-toggle.md) | SCRATCH AUTO 판도 순위에 올림. 최고 기록을 SCRATCH AUTO 여부로 나눔(마이그레이션 0002), 목록은 기본 숨김 + `include_scratch_auto` 토글, `A-SCR` 표지 | 2026-10-14 | 유효 |
+| [2026-10-14-adr-scratch-auto-ranking-toggle.md](2026-10-14-adr-scratch-auto-ranking-toggle.md) | SCRATCH AUTO 판도 순위에 올림. 최고 기록을 SCRATCH AUTO 여부로 나눔(마이그레이션 0002), 서버 API 의 목록은 기본 숨김 + `include_scratch_auto` 토글(클라이언트가 파라미터를 싣지 않아 그대로), 웹 화면의 토글은 2026-10-19 부터 기본 켬, `A-SCR` 표지 | 2026-10-14, 화면 기본값 변경 2026-10-19 | 유효(웹 화면의 기본값은 켬으로 바뀜: [웹 클리어·플레이 기록](2026-10-19-adr-web-clear-and-play-history.md)) |
 | [2026-10-14-adr-score-target-fallback.md](2026-10-14-adr-score-target-fallback.md) | 목표 점수가 없을 때의 TARGET FALLBACK(기본 RATE AAA)과 RATE CUSTOM, 화면이 실제 목표를 말함 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-settings-enter-next-value.md](2026-10-14-adr-settings-enter-next-value.md) | 설정 화면의 스위치·선택 행 Enter = 다음 값, 닫기는 Esc 만 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-same-layout-retry.md](2026-10-14-adr-same-layout-retry.md) | 결과 화면에서 파란 건반 + START = 같은 시드·옵션으로 다시 | 2026-10-14 | 유효 |
@@ -32,7 +32,7 @@
 | [2026-10-14-adr-ir-error-field-display.md](2026-10-14-adr-ir-error-field-display.md) | 서버는 운영에서도 오류 `details` 의 `field`·`reason` 만 내고, 결과 화면 `IR ERROR:` 줄과 기록 상세가 코드·필드·이유를 보인다 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-v0-1-4-release.md](2026-10-14-adr-v0-1-4-release.md) | `v0.1.0`·`v0.1.3` draft 는 두고, 다음 릴리스는 S19 고도화까지 넣은 `v0.1.4`(2026-10-15 게시됨) | 2026-10-14 | 유효 |
 | [2026-10-14-adr-record-sync.md](2026-10-14-adr-record-sync.md) | 로컬 이력 전체를 서버로 동기화(자동+수동, 리플레이 포함), 판별 서버 상태 기록, 거절 판은 다시, 옛 SCRATCH AUTO 제외, 서버는 같은 초 멱등 | 2026-10-14 | 일부 대체됨: 결정 2 의 거절 재전송 시점 → [거절 재전송](2026-10-15-adr-record-sync-refusal-resend.md) |
-| [2026-10-14-adr-abandoned-run-saved.md](2026-10-14-adr-abandoned-run-saved.md) | Esc 중도 포기 판도 FAILED 로 저장·전송(남은 노트는 놓침) | 2026-10-14 | 일부 대체됨: 결정 2(판정 없는 판 제외)·결정 3 의 코스 부분(코스 도중 Esc 무기록) → [Esc 판은 모두 저장](2026-10-15-adr-escape-keeps-every-run.md) |
+| [2026-10-14-adr-abandoned-run-saved.md](2026-10-14-adr-abandoned-run-saved.md) | Esc 중도 포기 판도 FAILED 로 저장·전송(남은 노트는 놓침) | 2026-10-14 | 일부 대체됨: 결정 2(판정 없는 판 제외)·결정 3 의 코스 부분(코스 도중 Esc 무기록) → [Esc 판 ADR](2026-10-15-adr-escape-keeps-every-run.md). 결정 2 는 2026-10-19 에 사용자가 "노트를 하나도 치지 않은 판"이라는 새 기준으로 되살렸다(그 ADR 의 결정 7) |
 | [2026-10-14-adr-play-hitch-criteria.md](2026-10-14-adr-play-hitch-criteria.md) | 플레이 중 렉의 기준: 프레임 스레드에 I/O·큰 할당·잠금·동기 네트워크 없음, 헤드리스 프레임 처리 p99 1 ms 미만, 오디오 언더런 0, 로딩·결과 진입 끊김 없음 | 2026-10-14 | 유효 |
 | [2026-10-15-adr-avgjudge-reference-definition.md](2026-10-15-adr-avgjudge-reference-definition.md) | `avgjudge` 는 원본 정의(평균 절대 오차, 놓친 노트 1초), 치우침은 `extra.mean_offset_us`, 본문에 `extra.rule_version`. 규칙 세대 4, 옛 행 값은 최고 기록에서 빼고 재전송은 0 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-event-time-judging.md](2026-10-15-adr-event-time-judging.md) | 입력은 들어온 시각(키는 받은 순간, 컨트롤러는 gilrs 시각)으로, 스윕·지연 릴리스·지뢰·HCN 틱·GAS 는 그 시각 순서로. HCN 틱은 경과 시간, 게이지가 빈 순간 판정 멈춤, 리플레이 `clock` 세대(EVENT/FRAME) | 2026-10-15 | 유효(배경의 원본 서술은 정정 표기 있음. 결정 6 의 컨트롤러 버튼 디바운스 방식은 [키보드 시각](2026-10-15-adr-keyboard-input-timing.md) 남은 한계 4 가 대체, 남은 한계 PERF-2 는 같은 ADR 이 해소) |
@@ -42,13 +42,15 @@
 | [2026-10-15-adr-full-combo-condition.md](2026-10-15-adr-full-combo-condition.md) | 풀콤 = 끝에 남은 콤보가 지나간 노트 수(원본 `BMSPlayer.java:868`). 5K·PMS 의 마지막 노트 뒤 空POOR 는 풀콤을 깬다 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-long-note-body-notes.md](2026-10-15-adr-long-note-body-notes.md) | 같은 레인 롱노트 몸통 안의 일반 노트는 원본처럼 레인에서 빼 배경음으로(지뢰는 버림), 머리 칸·삼킴 규칙도 원본대로. 곡 DB `PARSER_VERSION` 3(지금은 5) | 2026-10-15 | 유효 |
 | [2026-10-15-adr-unpaired-long-note-heads.md](2026-10-15-adr-unpaired-long-note-heads.md) | 끝나지 않은 롱노트 머리는 디코더가 지우고 노트 수 정의를 `rbms-model` 한 곳에. 판정 엔진 `total_notes` 와 같은 값 | 2026-10-15 | 유효 |
-| [2026-10-15-adr-escape-keeps-every-run.md](2026-10-15-adr-escape-keeps-every-run.md) | Esc 판은 판정 수와 상관없이 FAILED 저장·전송. 코스 도중 Esc 는 남은 노트가 없으면 정상 판정, 있으면 곡 기록 + FAILED 코스 기록까지. 앱 종료·코스 스테이지 사이에서 나감도 같은 규칙 | 2026-10-15 | 유효 |
+| [2026-10-15-adr-escape-keeps-every-run.md](2026-10-15-adr-escape-keeps-every-run.md) | Esc 판은 노트를 하나라도 쳤으면 FAILED 저장·전송, 노트를 하나도 치지 않은 판(PG·GR·GD·BD 0, 쥔 롱노트 없음, 지나간 노트의 POOR·빈 POOR 만 있어도)은 저장·전송하지 않음(결정 7, 2026-10-19 사용자 지시). 코스 도중 Esc 는 남은 노트가 없으면 정상 판정, 있으면 곡 기록 + FAILED 코스 기록까지(그 스테이지에서 친 노트가 없으면 그 곡은 뺌). 앱 종료·코스 스테이지 사이에서 나감도 같은 규칙 | 2026-10-15, 결정 7 추가 2026-10-19 | 유효 |
 | [2026-10-15-adr-record-sync-refusal-resend.md](2026-10-15-adr-record-sync-refusal-resend.md) | 저절로 시작한 동기화는 같은 클라이언트·서버 빌드에서 이미 거절된 판을 다시 보내지 않는다. 빌드가 바뀌거나 SYNC RECORDS NOW 면 다시 | 2026-10-15 | 유효(사용자 미확인) |
 | [2026-10-15-adr-app-icon.md](2026-10-15-adr-app-icon.md) | 앱 아이콘: 스크립트로 만든 무채색 레인 그림, macOS `.icns`, Windows 는 `rc.exe` + `build.rs`(새 의존성 없음), 창 아이콘, 웹 파비콘 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-keyboard-input-timing.md](2026-10-15-adr-keyboard-input-timing.md) | 화면 대기(present)를 전용 스레드로 떼어 이벤트 루프가 키를 오는 즉시 받고 그 순간으로 판정(LR2·beatoraja·osu! 의 원리). KEY DEBOUNCE·PAD DEBOUNCE(기본 16 ms, LR2 `inputinterval` 형: 누름은 즉시, 누른 뒤 창 안의 뗌만 미룸), 아날로그 턴테이블은 원본 양방향 잠금 유지 | 2026-10-15 | 유효(기본값 16 ms·컨트롤러 LR2 형·턴테이블 잠금 유지는 사용자 확인 끝. 메뉴의 PAD DEBOUNCE 는 확인 대기) |
 | [2026-10-15-adr-wgpu-metal-main-thread.md](2026-10-15-adr-wgpu-metal-main-thread.md) | THR2-1: present 스레드의 wgpu Metal 획득이 AppKit 메인 스레드 API 를 읽는 위반은 구조를 유지하고 알려진 위험으로, 상류 gfx-rs/wgpu#10627 을 기다린다 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-accidental-sync-records-kept.md](2026-10-15-adr-accidental-sync-records-kept.md) | 감사 에이전트의 실수로 운영 서버에 간 판 49개(리플레이 43 대기)는 지우지 않고 둔다. 재발 방지는 scratch HOME 규칙과 `--help`·`--version` 처리 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-bga-resident-texture-cap.md](2026-10-15-adr-bga-resident-texture-cap.md) | BGA 상주 텍스처 상한 `RESIDENT_BYTES` 256 MiB 유지(메모리보다 플레이 프레임 p99) | 2026-10-15 | 유효 |
+| [2026-10-19-adr-web-clear-and-play-history.md](2026-10-19-adr-web-clear-and-play-history.md) | 웹: 클리어 = NO PLAY·FAILED 가 아닌 모든 램프(ASSIST·L-ASSIST 포함, `MIN_CLEAR_LAMP_ID`), 화면의 SCRATCH AUTO 포함 토글은 기본 켬(서버 API 기본은 끔 그대로: Rust 클라이언트가 파라미터를 싣지 않음), 플레이어 페이지 "플레이 기록"을 `?page=` 로 나눠 전체 판을 보임(`GET /api/fe/players/{id}/recent?page&limit`) | 2026-10-19 | 유효 |
+| [2026-10-19-adr-record-target-follows-its-run.md](2026-10-19-adr-record-target-follows-its-run.md) | 구동기: LOCAL BEST·이 기기에서 친 IR BEST 목표와 스킨 BEST 칸의 진행 중 값은 그 기록 판의 리플레이를 다시 판정한 노트별 판정(원본 passnotes 기준)을 따르고, 얻지 못하면(리플레이 없음, 다른 차트·노트 수·PG/GR, 옛 FRAME 시계 리플레이, 연습) 선형 비례로 물러남. 결과 화면의 값은 그대로. 조사: [record-target-pace.md](../reference/record-target-pace.md) | 2026-10-19 | 유효(요청과 물러남 규칙만 사용자 확인. 나머지 여섯 질문은 아래 미확인 목록 7번) |
 
 ## 그 전의 결정 파일
 
@@ -75,7 +77,8 @@
 4. **기록 동기화의 거절 재전송 좁힘.** 저절로 시작한 동기화는 같은 빌드끼리 이미 거절된 판을 다시 보내지 않는다(수동과 빌드 변경 때는 보낸다). [거절 재전송 ADR](2026-10-15-adr-record-sync-refusal-resend.md).
 5. **메뉴 입력의 PAD DEBOUNCE.** 컨트롤러 디바운스가 LR2 형이 되면서 메뉴에서도 뗌 뒤 2~16 ms 튀는 버튼이 두 번 눌린 것이 될 수 있다. 메뉴에만 옛 양방향 잠금을 둘지. [키보드 시각 ADR](2026-10-15-adr-keyboard-input-timing.md) 남은 한계 4, 테스트 부채 3.71.
 6. **연습 판의 게이지 사망.** 지금은 게이지 잠금으로 구간 끝까지 판정한다(NONE 을 CONTINUE 로). 원본은 연습 패널로 돌아간다. A 원본대로 / B 지금대로 두고 ADR 로 남긴다. `reference-divergences.md` "연습과 #TOTAL" 절, `docs/play-options.md` 9절.
+7. **기록 목표의 진행 중 값 여섯 질문(2026-10-19).** 지금 동작은 메인이 원본 의미로 정했다: 기준은 판정된 노트 수, 스킨 BEST 칸도 로컬 최고 판의 리플레이를 따름, RIVAL·다른 기기 IR BEST 는 비례, 비례로 물러날 때 화면 표시 없음, 같은 EX 가 여럿이면 처음 낸 판, 고스트가 늦으면 로딩이 기다림. 각 선택지는 [조사 문서](../reference/record-target-pace.md) 9절, [ADR](2026-10-19-adr-record-target-follows-its-run.md).
 
-확인받은 것(2026-10-14): SCRATCH AUTO 램프 LIGHT ASSIST 유지, 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외(추천안 A), `v0.1.0` draft 는 둔다, `v0.1.3` draft 도 두고 다음은 `v0.1.4`. 확인받은 것(2026-10-15): Esc 포기 판의 두 예외 거부([Esc 판은 모두 저장](2026-10-15-adr-escape-keeps-every-run.md)), 키 디바운스 기본 16 ms·컨트롤러 LR2 형·PAD DEBOUNCE 설정·턴테이블 원본 잠금([키보드 시각](2026-10-15-adr-keyboard-input-timing.md)), 코스 램프 원본 규칙([코스 곡별 콤보](2026-10-15-adr-course-stage-combo.md)), BGA 상주 256 MiB([BGA 상주 상한](2026-10-15-adr-bga-resident-texture-cap.md)), THR2-1 구조 유지([wgpu Metal 메인 스레드](2026-10-15-adr-wgpu-metal-main-thread.md)), 사고 49개 유지([사고 기록 유지](2026-10-15-adr-accidental-sync-records-kept.md)).
+확인받은 것(2026-10-14): SCRATCH AUTO 램프 LIGHT ASSIST 유지, 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외(추천안 A), `v0.1.0` draft 는 둔다, `v0.1.3` draft 도 두고 다음은 `v0.1.4`. 확인받은 것(2026-10-15): Esc 포기 판의 두 예외 거부([Esc 판은 모두 저장](2026-10-15-adr-escape-keeps-every-run.md)), 키 디바운스 기본 16 ms·컨트롤러 LR2 형·PAD DEBOUNCE 설정·턴테이블 원본 잠금([키보드 시각](2026-10-15-adr-keyboard-input-timing.md)), 코스 램프 원본 규칙([코스 곡별 콤보](2026-10-15-adr-course-stage-combo.md)), BGA 상주 256 MiB([BGA 상주 상한](2026-10-15-adr-bga-resident-texture-cap.md)), THR2-1 구조 유지([wgpu Metal 메인 스레드](2026-10-15-adr-wgpu-metal-main-thread.md)), 사고 49개 유지([사고 기록 유지](2026-10-15-adr-accidental-sync-records-kept.md)). 확인받은 것(2026-10-19): 노트를 하나도 치지 않은 판은 Esc·앱 종료에서 저장·전송하지 않음([Esc 판 ADR](2026-10-15-adr-escape-keeps-every-run.md) 결정 7. 10-15 에 거부한 "판정 없는 판 제외"와 달리 사용자 본인의 지시), 웹의 클리어 기준·SCRATCH AUTO 포함 화면 기본 켬·플레이 기록 페이지([웹 ADR](2026-10-19-adr-web-clear-and-play-history.md)), 기록 목표를 기록 판의 노트별 판정으로 따라가되 못 얻으면 비례([목표 ADR](2026-10-19-adr-record-target-follows-its-run.md)).
 
 사용자 실기 확인으로 남은 것(결정이 아님): v0.1.4 의 IR: RANK·SYNC RECORDS NOW·키 입력 체감·JUDGE OFFSET 재조정·PAD DEBOUNCE 확인(게시는 2026-10-15 07:27 UTC 에 끝남), 사고 때 개발 빌드가 다시 쓴 설정이 의도대로인지. 오래된 질문(웹 rate limit 지속형 저장소, `user.rank_points` 처리)은 `docs/HANDOFF.md` 와 웹 문서에 있다.

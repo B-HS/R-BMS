@@ -1,6 +1,6 @@
-# HANDOFF — 2026-10-15 세션 스냅샷
+# HANDOFF — 2026-10-19 세션 갱신
 
-최종 갱신 2026-10-15 · 대응 커밋 `ea698a9` + 인수인계 문서 작업 트리(커밋 전). 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-10-14-handoff-snapshot.md`(그 앞 `2026-10-11`, `2026-10-09`).
+최종 갱신 2026-10-19 · 대응 커밋 `46d0a01` + 문서 작업 트리(2026-10-19 갱신은 2절·3.2절·6절 11~12·8절 0 만, 나머지는 2026-10-15 스냅샷 그대로). 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-10-14-handoff-snapshot.md`(그 앞 `2026-10-11`, `2026-10-09`).
 
 복기 신뢰도: 이 세션(2026-10-14 저녁 ~ 10-15)은 대화 압축 없이 원문 기준으로 복기했다(높음). 하위 에이전트가 보고한 세부 수치(계측, 테스트 수)는 그 보고를 옮긴 것이고, 메인이 직접 다시 확인한 것은 운영 DB 마이그레이션 상태, chart-notes 개수, v0.1.4 산출물 점검, CI 결과, 운영 `/api/version`·표 응답이다. 사실이 의심되면 이 문서보다 코드와 `git log` 를 믿는다.
 
@@ -11,7 +11,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 ## 2. 현재 목표
 
 - 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹(순위, 발광 난이도표, 내 폴더). 사용자는 "더 이상 구현하거나 버그가 없도록" 남은 일을 정확히 끝내길 원하고, "가끔씩" 실패하는 테스트도 없어야 한다고 했다.
-- 현재 마일스톤: 클라이언트 `v0.1.4` 게시 완료(2026-10-15 07:27 UTC, 사용자가 게시. `v0.1.0`·`v0.1.3` 은 draft 로 남김). 웹 운영 배포 `51f3a1e`, 운영 DB 마이그레이션 0000~0004 적용. 진행 중인 작업 없음.
+- 현재 마일스톤: 클라이언트 `v0.1.4` 게시 완료(2026-10-15 07:27 UTC, 사용자가 게시. `v0.1.0`·`v0.1.3` 은 draft 로 남김). 웹 운영 배포 `51f3a1e`, 운영 DB 마이그레이션 0000~0004 적용. 진행 중인 작업 없음. 2026-10-19: 웹 3건(`b302db3`), 노트를 하나도 치지 않은 판의 Esc·종료 미저장(`84e1dc7`), 기록 목표의 리플레이 따라가기(`46d0a01`), 클라이언트 `v0.1.5` 태그와 release draft(PROCESS 의 2026-10-19 체크리스트).
 - 직전 작업(이 세션): (1) 점수 제출 400(空POOR) 근본 수리, (2) 로컬 기록 서버 동기화, (3) 계약 교차 테스트·작은 수리(S18), (4) 잠재 버그 전수 감사 4회와 수리·입력 시각 판정·렉 최적화(S19), (5) 앱 아이콘·파비콘, (6) 발광 표의 다른 사이트 흔적 제거, (7) v0.1.4 릴리스와 산출물 점검, (8) 이 인수인계.
 
 ## 3. 완료 / 진행 중 / 미착수
@@ -38,7 +38,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ### 3.2 진행 중
 
-없음. 다음 한 줄: 사용자가 게시된 v0.1.4 로 한 판 쳐서 6절 1번을 확인해 준 결과를 받는다.
+2026-10-19 체크리스트(PROCESS.md)의 마지막 항목: v0.1.5 draft 를 사용자가 확인·게시. 다음 한 줄: 사용자가 v0.1.5 로 기록 목표(LOCAL BEST)와 Esc 를 쳐 보고 6절 11·12 에 답한다.
 
 ### 3.3 미착수
 
@@ -53,7 +53,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 | 판정 수 검사 | 노트를 소비한 판정만(9K BAD 제외) | 검사 삭제 — 과다 판정을 막는 검사가 사라짐 | `judge-count-consumed-notes` |
 | 결과 화면 오류 | field·reason 표시 | 미표시 — 원인이 "요청 형식"으로만 보여 이번 사고를 늦게 찾음 | `ir-error-field-display` |
 | 기록 동기화 | 로컬 이력 전체를 보내고 실패한 판만 다룸(사용자 원문 "그냥 서버에 전체 보내서 실패하면 실패한거만 잘 처리해놔"), 서버 멱등(같은 초) | 수락 미확인만 선별(메인 추천) — 사용자가 전체 전송 택. 클라이언트만으로 중복 거르기 — 다른 기기 판을 모름 | `record-sync`, `record-sync-refusal-resend` |
-| Esc·종료·코스 포기 | 판정 수와 상관없이 FAILED 로 저장·전송, 남은 노트 없으면 결과로 | 판정 없는 판 미저장·코스 기록 미전송(메인 제안) — 사용자 "실패기록도 다 서버로 보내야지" | `abandoned-run-saved`, `escape-keeps-every-run` |
+| Esc·종료·코스 포기 | 노트를 하나라도 쳤으면 FAILED 로 저장·전송, 남은 노트 없으면 결과로. 노트를 하나도 치지 않은 판(PG·GR·GD·BD 0, 쥔 롱노트 없음. 빈 POOR·지나간 노트의 POOR 만 있어도)은 저장·전송하지 않음(2026-10-19 사용자 지시, `escape-keeps-every-run` 결정 7) | 판정 없는 판 미저장·코스 기록 미전송(메인 제안, 2026-10-15) — 사용자 "실패기록도 다 서버로 보내야지". 판정 없는 판의 제외는 10-19 에 사용자가 직접 지시한 "노트를 하나도 치지 않은 판"으로만 들어왔다 | `abandoned-run-saved`, `escape-keeps-every-run` |
 | 판정 의미 9건 | 원본(beatoraja)에 맞춤 | 지금대로(B) — 원본과 다름 | 2026-10-15 ADR 9건(avgjudge, event-time, total-override, failed-run-bp, course-stage-combo, full-combo, long-note-body, unpaired-heads, escape) |
 | 입력 시각 | 이벤트 시각 판정 + 시각 단위 엔진 진행, 키보드는 present 대기 분리 스레드(IIDX·LR2·beatoraja·osu! 의 공통 원리) | 프레임 기준 유지 — 리플레이 비결정. Mailbox — Metal 드로어블 풀 때문에 효과 없음. 처리 시각 유지. OS 이벤트 시각 — unsafe·새 의존성. 게임 로직 스레드 분리 — `SkinLibrary`(Lua `Rc`) 가 Send 아님 | `event-time-judging`, `keyboard-input-timing` |
 | 디바운스 | LR2 방식(누름 즉시, 창 안 뗌만 미룸), 기본 16 ms, 키보드·컨트롤러 모두 설정에서 조절, 턴테이블은 원본 잠금 | 양방향 잠금 — 정상 연타 늦춤. 턴테이블 LR2 — 감도가 원본과 달라짐 | `keyboard-input-timing` |
@@ -72,7 +72,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 - workflow 를 쓰면: Workflow 도구만, Fable·Haiku 금지(이 프로젝트), Opus 는 effort high 까지, Sonnet 은 xhigh 까지, 모든 agent 에 model·effort 명시. 에이전트는 커밋·푸시하지 않는다. 에이전트가 `rbms-player` 를 실행하면 반드시 scratch HOME 과 `--server http://127.0.0.1:9`(2026-10-15 사고, [feedback](feedback/2026-10-15-run-the-player-with-a-scratch-home.md)).
 - 근본 원인을 고친다(증상 가리기·허용 오차·재시도로 덮기 금지). 실제 측정·캡처·내려받은 산출물로 확인한 뒤 됐다고 한다. 떠는 테스트는 0 이어야 한다.
 - 판정·입력은 원본(beatoraja)·IIDX·LR2 와 같게. 판정·점수 의미가 원본과 달라지는 수정은 고치기 전에 사용자 확인.
-- 기록: 사람이 친 판은 실패·포기·종료 포함 전부 저장·전송. 메인이 제외 조건을 추천하지 않는다(필요해 보이면 질문으로)([feedback](feedback/2026-10-15-do-not-exclude-runs.md)).
+- 기록: 사람이 친 판은 실패·포기·종료 포함 전부 저장·전송. 제외: 노트를 하나도 치지 않은 판(사용자 지시 2026-10-19). 메인이 제외 조건을 추천하지 않는다(필요해 보이면 질문으로)([feedback](feedback/2026-10-15-do-not-exclude-runs.md)).
 - 외부 게시(다른 저장소 이슈·댓글·PR)는 초안 전문을 보여 주고 명시적 승인 뒤에만. 추천안 선택은 게시 승인이 아니다([feedback](feedback/2026-10-15-confirm-before-external-posts.md)).
 - 지우라는 요청은 무엇이 함께 사라지는지(예: 다운로드 링크) 분명히 확인하고 지운다([feedback](feedback/2026-10-15-delete-requests-keep-what-works.md)). 다른 사이트의 흔적을 싫어한다.
 - Git: Conventional Commits, 한국어 설명, author 사용자 단독, AI 트레일러 금지, 선별 스테이징(`git add -A` 금지), force push 금지. 게이트 통과 뒤 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 3 OS CI 와 web CI 를 확인한다.
@@ -93,6 +93,8 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 7. **연습 판의 게이지 사망**: 지금은 게이지 잠금으로 구간 끝까지 판정, 원본은 연습 패널로 돌아감. 원본대로 / 지금대로.
 8. **램프 이름 두 가지**: 앱 화면(`format.rs`)은 "LIGHT ASSIST"·"ASSIST EASY", 기본 스킨(`assets/skins/rbms-default/lua/theme.lua`)은 "LIGHT ASSIST CLEAR"·"ASSIST CLEAR". 통일할지.
 9. **TOTAL 행 경고**: 설정의 TOTAL 행이 "직접 정하면 어시스트(최고 기록 없음)"라고 말하지 않는다(`apps/rbms-player/src/stage/settings/info.rs` 의 `CUSTOM_JUDGE_CAUTION` 은 JUDGE WIDTH·LN MARGIN 만). KNOWN ISSUE, 고칠지.
+11. **기록 목표 설계 선택(2026-10-19, 메인이 원본 기준으로 구현, 사용자 미확인)**: 기준 인덱스는 시각이 아니라 판정된 노트 수(원본 `passnotes`), 스킨 BEST 칸도 같은 기준, RIVAL·다른 기기 IR BEST 는 비례, 같은 EX 여럿이면 처음 낸 판, 고스트를 로딩이 기다림. 상세와 근거는 [ADR](acknowledge/2026-10-19-adr-record-target-follows-its-run.md), [reference/record-target-pace.md](reference/record-target-pace.md), acknowledge/README 미확인 7.
+12. **비례로 물러날 때 화면 표시**: 리플레이가 없거나 다시 판정이 기록과 다르면 범례가 따로 말하지 않는다(test-debt 3.78). 2026-10-14 ADR 원칙대로 `LOCAL BEST (NO REPLAY)` 처럼 표시할지. 또 앱 종료도 Esc 와 같은 "친 노트 0 이면 남기지 않음"을 따르게 했다(Esc ADR 결정 7, 사용자 원문은 Esc 만 말함).
 10. 오래된 것: 웹 rate limit 지속형 저장소(Vercel Firewall / Upstash / 지금대로), `user.rank_points`(항상 0) 처리.
 
 ## 7. 환경 & 전제
@@ -111,6 +113,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 8. 다음 세션 TODO(우선순위)
 
+0. v0.1.5 draft 게시(사용자) 뒤 6절 11·12 답을 받아 반영한다.
 1. 사용자 확인(6절 1)을 받고 실기에서 나온 문제를 고친다. 6절 2~9 는 사용자가 답하면 해당 ADR 을 쓰고 구현한다(질문은 한 번에 묶어서).
 2. 실제 창 QA: `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` 맨 위 "먼저 확인할 것", 3.18 의 K1~K8(키 입력·present 스레드·가림·Main Thread Checker), 나머지 표(미체크 126줄). Windows·Linux 실기(test-debt 3.3·3.4). 사람이 해야 하므로 결과를 받아 고친다.
 3. 테스트 부채 정리([quality-assurance/2026-10-14-test-debt.md](quality-assurance/2026-10-14-test-debt.md) 3절): 우선 데이터·정확성에 닿는 것 — 3.72(같은 판 동시 중복 제출 `ER_DUP_ENTRY` 500, 재시도 밖 쓰기), 3.74(관리자 표 저장 중복 키 500), 3.55(키보드·컨트롤러 섞어 칠 때 순서), 3.56(옛 FRAME 리플레이 재생), 3.12(서버 응답 → Rust 반대 방향 계약), 3.73(`rbms-cli config` 쓰기 부작용), 3.37(번들 표 없는 id 200). 그다음 실기 의존 항목.

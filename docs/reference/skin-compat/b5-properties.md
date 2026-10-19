@@ -1,6 +1,15 @@
 # b5. beatoraja 속성 id 전수 목록과 R-BMS 대조
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 8B(기본 스킨 화면 전부) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리 · 대응 단계: 2026-10-19 기록 목표의 진행 중 값(152·153·112·114 행), 웨이브 8B(기본 스킨 화면 전부) 반영 · 본문은 작성 시점 서술이며, 아래 "반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 2026-10-19 반영 사항 (기록 목표의 진행 중 값)
+
+플레이 중 BEST 칸과 목표 칸의 "지금까지" 값이 그 기록 판의 노트별 판정(원본의 ghost)을 따르게 된 뒤의 상태다. 판정 규칙은 그대로이고, 결과 화면은 최종 값 그대로다. 조사와 구현: [../record-target-pace.md](../record-target-pace.md), 결정: [ADR](../../acknowledge/2026-10-19-adr-record-target-follows-its-run.md).
+
+- 152(`NUMBER_DIFF_HIGHSCORE`)·172: `nowEX - nowBestScore` 의 nowBestScore 가 로컬 최고 판의 리플레이를 다시 판정한 노트별 판정(`JudgeEngine::vanished`)이 있으면 그 판이 지금까지 판정한 노트 수만큼 판정했을 때의 EX 다. 없으면 최고 EX 의 통과 노트 수 비례다. 원본(`ScoreDataProperty.java:114-121`)과 같아졌다. 3장 NUMBER 표의 152·153 행은 이 줄에 맞춰 고쳤고, 16장 10번 행의 "불일치"는 웨이브 6 에서 해소된 뒤 이 줄로 마저 정리된다.
+- 153(`NUMBER_DIFF_TARGETSCORE`)·108·128: nowRivalScore 가 목표(`ResolvedTarget::used`)가 LOCAL BEST 면 같은 고스트, 이 기기에서 친 같은 판이 있는 IR BEST 면 그 판의 고스트이고, 그 밖의 목표는 목표 EX 의 통과 노트 수 비례다. 원본의 목표(rival) 칸은 늘 비례이므로(`BMSPlayer.java:453`) 앞의 두 목표는 R-BMS 확장이다.
+- 112(`RATE_BESTSCORE_NOW`)·114(`RATE_TARGETSCORE_NOW`): 위 두 값을 전체 노트 수의 만점으로 나눈 비율이다(`now_best_rate`, `now_rival_rate`). 두 id 는 이제 플레이 화면에서 값을 채운다. 5-A 표의 112·114 행은 이 줄에 맞춰 고쳤고, 15장 "MAIN.GRAPH 중 R-BMS가 값을 채우지 않는 사용 id" 표의 112·114 행("등록만")은 이 줄이 우선한다. Lua `main_state.rate_best()` 의 rate 도 같은 값이다(`exscore_best()` 는 최고 EX 그대로).
+- 고스트를 얻지 못하면(리플레이 없음, 다른 차트·노트 수·PGREAT/GREAT, 옛 FRAME 시계 리플레이, 연습, RIVAL, 다른 기기에서 친 IR BEST) 두 칸 모두 예전처럼 비례다. 결과 화면은 고스트를 붙이지 않는다(`PacedScores::EVEN`).
 
 ## 웨이브 8B 반영 사항 (2026-10-11)
 
@@ -308,8 +317,8 @@ R-BMS 열: `구현(플/선/결/결정/키)` = 해당 화면의 `SkinStateSource:
 | 136 | NUMBER_TARGET_TOTAL_RATE_AFTERDOT | target_total_rate_afterdot | 공통 | getRivalRateAfterDot() (123과 동일) | - | 등록만(ScoreResult) |  |
 | 150 | NUMBER_HIGHSCORE | highscore | 공통 | 결과=oldScore.exscore, 그 외 getBestScore() | - | 구현(플,결) |  |
 | 151 | NUMBER_TARGET_SCORE2 | target_score2 | 공통 | getRivalScore() | - | 등록만(ScoreResult) |  |
-| 152 | NUMBER_DIFF_HIGHSCORE | diff_highscore | 플레이,결과 | nowEXScore-nowBestScore | - | 구현(플,결) **불일치: R-BMS=ex-best_ex(전체 최고기록), beatoraja=nowEX-nowBestScore(통과 노트 수 비례 환산). 불일치** | 5회 [Play,Root] (ref4,other1) |
-| 153 | NUMBER_DIFF_TARGETSCORE | diff_targetscore | 플레이,결과 | nowEXScore-nowRivalScore | - | 구현(플,결) **불일치: R-BMS 플레이=hud.pace.delta(정의 미확인), 결과=ex-target.ex. beatoraja 플레이=nowEX-nowRivalScore(통과 비례)** | 5회 [Play,Root] (ref4,other1) |
+| 152 | NUMBER_DIFF_HIGHSCORE | diff_highscore | 플레이,결과 | nowEXScore-nowBestScore | - | 구현(플,결). nowBestScore = 로컬 최고 판의 노트별 판정(고스트)이 있으면 판이 지금까지 판정한 노트 수만큼의 그 EX, 없으면 최고 EX 의 통과 노트 수 비례(`ScoreStanding::of`, `PacedScores`). 결과 화면은 고스트 없이 최고 EX 그대로. 원본과 같다(2026-10-19) | 5회 [Play,Root] (ref4,other1) |
+| 153 | NUMBER_DIFF_TARGETSCORE | diff_targetscore | 플레이,결과 | nowEXScore-nowRivalScore | - | 구현(플,결). nowRivalScore = 목표가 LOCAL BEST 나 이 기기에서 친 IR BEST 면 그 기록 판의 노트별 판정(고스트), 그 밖의 목표는 목표 EX 의 통과 노트 수 비례(`standing.now_rival_score`). 앞의 두 목표는 원본에 없는 R-BMS 확장(원본 목표 칸은 늘 비례). 결과 화면은 끝난 판의 EX 와 목표 EX 의 차(2026-10-19) | 5회 [Play,Root] (ref4,other1) |
 | 154 | NUMBER_DIFF_NEXTRANK | diff_nextrank | 플레이,결과 | ScoreDataProperty.getNextRank(): 다음 3단위 랭크 경계(27분할 중 i%3==0)까지 필요한 EX, 없으면 (notes*2)-ex | - | 등록만(ScoreResult) |  |
 | 155 | NUMBER_SCORE_RATE2 | score_rate2 | 공통 | 115와 동일 (getRateInt) | - | 등록만(ScoreResult) |  |
 | 156 | NUMBER_SCORE_RATE_AFTERDOT2 | score_rate_afterdot2 | 공통 | 116과 동일 | - | 등록만(ScoreResult) |  |
@@ -873,9 +882,9 @@ R-BMS 열: `구현(플/선/결/결정/키)` = 해당 화면의 `SkinStateSource:
 | 109 | RATE_LEVEL_INSANE,BARGRAPH_LEVEL_INSANE | level_insane | 선곡 | difficulty==5일 때만 | - | 등록만(SongSelect) |  |
 | 110 | RATE_SCORE,BARGRAPH_SCORERATE | scorerate | 플레이,결과 | ScoreDataProperty.getRate() = ex/(scoreData.notes*2) (totalnotes==0이면 1.0) | - | 등록만(PlaySession) | GRAPH 2회 [Play] (type2) |
 | 111 | RATE_SCORE_FINAL,BARGRAPH_SCORERATE_FINAL | scorerate_final | 플레이,결과 | ScoreDataProperty.getNowRate() = ex/(통과노트*2) | - | 등록만(PlaySession) | GRAPH 2회 [Play] (type2) |
-| 112 | RATE_BESTSCORE_NOW,BARGRAPH_BESTSCORERATE_NOW | bestscorerate_now | 플레이 | getNowBestScoreRate() (베스트 고스트/비례 진행값) | - | 등록만(ScoreResult) | GRAPH 2회 [Play] (type2) |
+| 112 | RATE_BESTSCORE_NOW,BARGRAPH_BESTSCORERATE_NOW | bestscorerate_now | 플레이 | getNowBestScoreRate() (베스트 고스트/비례 진행값) | - | 구현(플): `now_best_rate` = 위 152 의 nowBestScore 를 전체 노트 수의 만점으로 나눈 값. 로컬 최고 판의 고스트가 있으면 그 EX, 없으면 비례(2026-10-19) | GRAPH 2회 [Play] (type2) |
 | 113 | RATE_BESTSCORE,BARGRAPH_BESTSCORERATE | bestscorerate | 공통 | getBestScoreRate() = bestscore/(totalnotes*2) | - | 구현(플,선,결) | GRAPH 4회 [Play,Root] (script2,type2) |
-| 114 | RATE_TARGETSCORE_NOW,BARGRAPH_TARGETSCORERATE_NOW | targetscorerate_now | 플레이 | getNowRivalScoreRate() | - | 등록만(ScoreResult) | GRAPH 2회 [Play] (type2) |
+| 114 | RATE_TARGETSCORE_NOW,BARGRAPH_TARGETSCORERATE_NOW | targetscorerate_now | 플레이 | getNowRivalScoreRate() | - | 구현(플): `now_rival_rate` = 위 153 의 nowRivalScore 를 전체 노트 수의 만점으로 나눈 값. LOCAL BEST·이 기기에서 친 IR BEST 면 그 기록 판의 고스트, 그 밖은 비례(2026-10-19) | GRAPH 2회 [Play] (type2) |
 | 115 | RATE_TARGETSCORE,BARGRAPH_TARGETSCORERATE | targetscorerate | 공통 | getRivalScoreRate() | - | 구현(플,결) | GRAPH 2회 [Play] (type2) |
 | 140 | RATE_PGREAT,BARGRAPH_RATE_PGREAT | rate_pgreat | 선곡 | 선택바 SongBar/GradeBar score.judgeCount(0)/songNotes (곡 노트 수; 코스는 전곡 노트 합). 그 외 0 | - | 구현(플,결) **불일치: beatoraja=선곡 전용(선택바 score/노트). R-BMS는 플레이/결과 판정 비율을 응답** | GRAPH 1회 [Select] (value1) |
 | 141 | RATE_GREAT,BARGRAPH_RATE_GREAT | rate_great | 선곡 | judgeCount(1)/notes | - | 구현(플,결) **불일치: 위와 같음** | GRAPH 1회 [Select] (value1) |

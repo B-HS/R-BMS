@@ -1,6 +1,6 @@
 # R-BMS — PROCESS (작업 체크리스트와 상태)
 
-최종 갱신 2026-10-15 · 대응 커밋 `ea698a9`
+최종 갱신 2026-10-19 · 대응 커밋 `e2c829f`
 
 이 문서는 체크리스트와 현재 상태만 둔다. 끝난 구간의 세부 결과, 웨이브 기록, 사용자 결정 원문은 `docs/history/` 로 옮긴다(ai-process 2.1). 옛 0~9절과 Phase 0~7 로드맵도 같은 곳에 있다(아래 "아카이브").
 
@@ -14,7 +14,19 @@
 
 - 클라이언트 `v0.1.4` 는 2026-10-15 07:27 UTC 에 게시됐다(release run 38696475211, 버전 커밋 `87eacd0`). `v0.1.3`·`v0.1.0` draft 는 게시하지 않고 남겨 뒀다. 릴리스 이력은 [ci-release.md](ci-release.md) 2.3절.
 - 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0004 적용(`web/drizzle/`, 실행은 `web-db.yml`).
-- 진행 중인 작업은 없다. 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
+- 진행 중: 아래 "웹 기록 표시와 구동기 Esc·목표 보완"(2026-10-19). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
+
+## 체크리스트 — 웹 기록 표시와 구동기 Esc·목표 보완 (2026-10-19)
+
+사용자 지시(2026-10-19) 원문 요지. 웹: (1) L-ASSIST 가 클리어로 세어지지 않는다, FAILED 가 아닌 램프는 모두 클리어, (2) SCRATCH AUTO 포함 토글의 기본값을 켬으로, (3) 플레이어의 최근 기록이 20개까지만 보인다, 페이지로 전체 플레이 기록을 보이고 제목을 "플레이 기록"으로. 구동기: (4) 노트를 하나도 치지 않고 Esc 를 누른 판은 저장하지 않는다, (5) LOCAL BEST·IR BEST(MY BEST) 같은 기록 목표는 퍼센트 비례가 아니라 그 기록의 리플레이를 같은 시점·노트 단위로 따라간다. 사용자 결정: workflow 사용, 리플레이가 없는 기록 목표는 지금처럼 퍼센트로 대체. 추가 지시(같은 날): "빈 poor도 사실상 안친거니까 그것도 저장안하는걸로", 놓친 노트의 POOR 도 "말그대로 아무것도 안쳤을때 ... 그것도 너가 판단해봐" → 메인 판단: 입력으로 판정된 노트가 0 이면(빈 POOR·지나간 노트의 POOR 만 있어도) 저장하지 않는다. 다음 클라이언트 버전은 v0.1.5, 태그 + release draft 까지.
+
+- [x] W1. 웹 클리어 기준 — `MIN_CLEAR_LAMP_ID` 를 FAILED 다음(ASSIST)부터로, 화면의 클리어 집계 전부
+- [x] W2. 웹 SCRATCH AUTO 포함 기본 켬 — 화면 토글·URL 파라미터·서버 읽기 기본값
+- [x] W3. 웹 플레이 기록 페이지네이션 — 플레이어 전체 판, 제목 "플레이 기록" (W1~W3 `b302db3`, [ADR](acknowledge/2026-10-19-adr-web-clear-and-play-history.md))
+- [x] P1. 구동기 판정 0 판의 Esc — 저장·전송하지 않음, Esc ADR 갱신 (`84e1dc7`, 기준: PG·GR·GD·BD 0 이고 쥔 롱노트 없음, [Esc ADR 결정 7](acknowledge/2026-10-15-adr-escape-keeps-every-run.md))
+- [x] P2. 구동기 기록 목표의 리플레이 따라가기 — 조사·설계 뒤 구현, 목표 ADR 갱신 (`46d0a01`, [ADR](acknowledge/2026-10-19-adr-record-target-follows-its-run.md), [조사](reference/record-target-pace.md), 미확인 선택은 HANDOFF 6절 11·12)
+- [ ] G. 게이트(fmt·clippy·cargo test·웹 verify·format:check), 커밋·푸시, CI 확인, 문서 정리 — workflow 게이트 Rust 6,044 통과·0 실패, 웹 676 통과·0 실패, DB 통합 62 통과(작업자). 리뷰 뒤 수정은 rbms-player lib 2,559 통과·clippy 0
+- [ ] R. 클라이언트 v0.1.5 — 버전 커밋, 태그, release draft(산출물 내려받아 점검, 본문 사실 확인). 게시는 사용자
 
 ## 체크리스트 — 웹 배포 준비와 클라이언트 보완 (2026-10-14 ~ 10-15)
 
