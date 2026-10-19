@@ -155,6 +155,7 @@ export const chartBest = mysqlTable(
     (table) => [
         primaryKey({ columns: [table.chartSha256, table.userId, table.scratchAuto] }),
         index('chart_best_rank_idx').on(table.chartSha256, table.scratchAuto, table.clear, table.exScore),
+        index('chart_best_user_idx').on(table.userId, table.scratchAuto),
     ],
 )
 
@@ -423,3 +424,97 @@ export const userFolderItem = mysqlTable(
         index('user_folder_item_md5_idx').on(table.md5),
     ],
 )
+
+export const aiCredential = mysqlTable(
+    'ai_credential',
+    {
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        provider: varchar('provider', { length: 16 }).notNull(),
+        ciphertext: varchar('ciphertext', { length: 1024 }).notNull(),
+        iv: varchar('iv', { length: 24 }).notNull(),
+        authTag: varchar('auth_tag', { length: 32 }).notNull(),
+        wrappedDek: varchar('wrapped_dek', { length: 64 }).notNull(),
+        dekIv: varchar('dek_iv', { length: 24 }).notNull(),
+        dekTag: varchar('dek_tag', { length: 32 }).notNull(),
+        kekVersion: varchar('kek_version', { length: 32 }).notNull(),
+        keyHint: varchar('key_hint', { length: 8 }).notNull(),
+        model: varchar('model', { length: 128 }),
+        createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+        updatedAt: bigint('updated_at', { mode: 'number' }).default(0).notNull(),
+        lastValidatedAt: bigint('last_validated_at', { mode: 'number' }),
+        lastErrorKind: varchar('last_error_kind', { length: 32 }),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.provider] })],
+)
+
+export const aiUsage = mysqlTable(
+    'ai_usage',
+    {
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        day: char('day', { length: 10 }).notNull(),
+        calls: int('calls').default(0).notNull(),
+        inputTokens: bigint('input_tokens', { mode: 'number' }).default(0).notNull(),
+        outputTokens: bigint('output_tokens', { mode: 'number' }).default(0).notNull(),
+        cachedInputTokens: bigint('cached_input_tokens', { mode: 'number' }).default(0).notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.day] })],
+)
+
+export const aiInflight = mysqlTable(
+    'ai_inflight',
+    {
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        slot: int('slot').notNull(),
+        runId: varchar('run_id', { length: 36 }).notNull(),
+        expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.slot] })],
+)
+
+export const aiResult = mysqlTable(
+    'ai_result',
+    {
+        id: varchar('id', { length: 36 }).primaryKey(),
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        feature: varchar('feature', { length: 32 }).notNull(),
+        subjectKey: varchar('subject_key', { length: 128 }).notNull(),
+        inputHash: char('input_hash', { length: 64 }).notNull(),
+        analysisVersion: int('analysis_version').default(0).notNull(),
+        promptVersion: int('prompt_version').default(0).notNull(),
+        provider: varchar('provider', { length: 16 }).notNull(),
+        model: varchar('model', { length: 128 }).notNull(),
+        output: json('output').notNull(),
+        usage: json('usage').notNull(),
+        createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+    },
+    (table) => [
+        uniqueIndex('ai_result_input_uniq').on(table.userId, table.feature, table.subjectKey, table.inputHash),
+        index('ai_result_recent_idx').on(table.userId, table.feature, table.createdAt),
+    ],
+)
+
+export const aiSetting = mysqlTable('ai_setting', {
+    id: varchar('id', { length: 16 }).primaryKey(),
+    dailyCalls: int('daily_calls').notNull(),
+    concurrentRuns: int('concurrent_runs').notNull(),
+    defaultMonthlyTokenLimit: bigint('default_monthly_token_limit', { mode: 'number' }),
+    updatedAt: bigint('updated_at', { mode: 'number' }).default(0).notNull(),
+    updatedBy: varchar('updated_by', { length: 36 }),
+})
+
+export const aiUserSetting = mysqlTable('ai_user_setting', {
+    userId: varchar('user_id', { length: 36 })
+        .primaryKey()
+        .references(() => user.id, { onDelete: 'cascade' }),
+    monthlyTokenLimit: bigint('monthly_token_limit', { mode: 'number' }),
+    defaultProvider: varchar('default_provider', { length: 16 }),
+    updatedAt: bigint('updated_at', { mode: 'number' }).default(0).notNull(),
+})

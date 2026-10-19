@@ -1,0 +1,1 @@
+UPDATE `user` SET `role` = 'admin' WHERE `email` = 'hs@gumyo.net' AND `role` <> 'admin';

@@ -46,6 +46,14 @@ describe('운영 DB workflow 의 차트 노트 수 동작', () => {
         for (const step of sqlSteps) expect(files.has(step.script)).toBe(true)
     })
 
+    test('관리자 지정 사전 확인 동작은 세기 SQL 만 돌린다', () => {
+        expect(actions).toContain('admin-seed-count')
+        expect(sqlSteps.filter((step) => step.script === 'admin-seed.count.sql')).toEqual([
+            { condition: "inputs.action == 'admin-seed-count'", script: 'admin-seed.count.sql' },
+        ])
+        expect(sqlSteps.filter((step) => step.condition.includes('admin-seed'))).toHaveLength(1)
+    })
+
     test('바꾸는 동작은 앞뒤로 세기를 돌린다', () => {
         const counts = sqlSteps.filter((step) => step.script === 'chart-notes.count.sql')
         expect(counts.map((step) => step.condition)).toEqual([

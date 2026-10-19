@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again'
+        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again / admin-seed-count: count the rows the admin seed migration (0006) would change'
         type: choice
-        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup]
+        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup, admin-seed-count]
         default: status
 
 permissions:
@@ -86,3 +86,6 @@ jobs:
       - name: Count the chart notes again
         if: startsWith(inputs.action, 'chart-notes-') && inputs.action != 'chart-notes-count'
         run: bun scripts/run-sql.ts chart-notes.count.sql
+      - name: Count the admin seed target
+        if: inputs.action == 'admin-seed-count'
+        run: bun scripts/run-sql.ts admin-seed.count.sql

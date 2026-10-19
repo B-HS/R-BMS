@@ -36,6 +36,20 @@
       "when": 1792027422523,
       "tag": "0004_course_score_judge_totals",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1792415745356,
+      "tag": "0005_ai_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1792415754670,
+      "tag": "0006_admin_seed",
+      "breakpoints": true
     }
   ]
 }
