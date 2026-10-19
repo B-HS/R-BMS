@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { assertProductionAuthEnv, findMissingProductionAuthEnv, parseEnv, resolveDatabaseUrl } from '@server/lib/env'
+import { assertProductionAuthEnv, findMissingProductionAuthEnv, parseEnv, readAiCredentialKeyRing, resolveDatabaseUrl } from '@server/lib/env'
 
 describe('parseEnv', () => {
     test('필수 값이 없어도 기본값으로 파싱한다', () => {
@@ -68,5 +68,20 @@ describe('운영 필수 인증 환경 변수', () => {
         expect(findMissingProductionAuthEnv({ NODE_ENV: 'development' })).toEqual([])
         expect(findMissingProductionAuthEnv({ NODE_ENV: 'test' })).toEqual([])
         expect(findMissingProductionAuthEnv({})).toEqual([])
+    })
+})
+
+describe('AI 키 암호화 환경 변수', () => {
+    test('없어도 파싱은 성공하고 값이 이상해도 앱 전체 환경 파싱을 막지 않는다', () => {
+        expect(parseEnv({ NODE_ENV: 'production' }).AI_CREDENTIAL_KEKS).toBeUndefined()
+        expect(() => parseEnv({ NODE_ENV: 'production', AI_CREDENTIAL_KEKS: 'not json', AI_CREDENTIAL_KEK_CURRENT: 'v1' })).not.toThrow()
+    })
+
+    test('사용 시점 검사는 빠진 값과 틀린 값을 사유로만 구분한다', () => {
+        expect(readAiCredentialKeyRing(parseEnv({}))).toEqual({ ok: false, reason: 'ai_credential_kek_missing' })
+        expect(readAiCredentialKeyRing(parseEnv({ AI_CREDENTIAL_KEKS: 'not json', AI_CREDENTIAL_KEK_CURRENT: 'v1' }))).toEqual({
+            ok: false,
+            reason: 'ai_credential_kek_invalid',
+        })
     })
 })

@@ -33,9 +33,14 @@ export const ProfilePanel: FC<{ user: SessionUser }> = ({ user }) => {
             action={
                 <div className='flex items-center gap-2'>
                     {user.role === 'admin' && (
-                        <Link href='/admin/builds' className='text-muted-foreground text-xs underline'>
-                            빌드 관리
-                        </Link>
+                        <>
+                            <Link href='/admin/builds' className='text-muted-foreground text-xs underline'>
+                                빌드 관리
+                            </Link>
+                            <Link href='/admin/ai' className='text-muted-foreground text-xs underline'>
+                                AI 한도
+                            </Link>
+                        </>
                     )}
                     <Button variant='ghost' size='sm' disabled={logout.isPending} onClick={handleSignOut}>
                         로그아웃

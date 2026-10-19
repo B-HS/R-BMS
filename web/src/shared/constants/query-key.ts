@@ -71,9 +71,17 @@ export const QUERY_KEY = {
         LIST: ['setting', 'list'],
         DETAIL: (playerId: string, key: string) => ['setting', 'detail', playerId, key],
     },
+    AI: {
+        ALL: ['ai'],
+        CREDENTIALS: ['ai', 'credentials'],
+        MODELS: (provider: string) => ['ai', 'models', provider],
+        USAGE: ['ai', 'usage'],
+        SETTINGS: ['ai', 'settings'],
+    },
     ADMIN: {
         ALL: ['admin'],
         BUILDS: ['admin', 'builds'],
+        AI_LIMITS: ['admin', 'ai-limits'],
     },
     SYSTEM: {
         HEALTH: ['system', 'health'],

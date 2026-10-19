@@ -21,16 +21,27 @@ export const paginatedResponse = <T>(data: T[], pagination: Pagination) => ({
     pagination: toPagination(pagination),
 })
 
-const PRODUCTION_DETAIL_KEYS = ['field', 'reason'] as const
+const PRODUCTION_DETAIL_TYPES = {
+    field: 'string',
+    reason: 'string',
+    provider: 'string',
+    request_id: 'string',
+    retry_after_seconds: 'number',
+} as const
 
 /**
  * Chooses the error `details` a response may carry.
- * Outside production they pass through unchanged. In production only a string `field` and a string `reason` survive,
- * because a field name and a fixed reason token are not secrets while the rest (Zod issues, paths, player ids) can echo input.
+ * Outside production they pass through unchanged. In production only the keys of `PRODUCTION_DETAIL_TYPES` with their own type
+ * survive: a field name, a fixed reason token, and for AI errors the provider id, the provider's request id (already reduced to a
+ * safe token) and the seconds to wait. The rest (Zod issues, paths, player ids, provider error types) can echo input.
  */
 export const publicErrorDetails = (details: Record<string, unknown> | undefined, isProduction: boolean) => {
     if (!isProduction || !details) return details
-    const exposed = Object.fromEntries(PRODUCTION_DETAIL_KEYS.filter((key) => typeof details[key] === 'string').map((key) => [key, details[key]]))
+    const exposed = Object.fromEntries(
+        Object.entries(PRODUCTION_DETAIL_TYPES)
+            .filter(([key, type]) => typeof details[key] === type)
+            .map(([key]) => [key, details[key]]),
+    )
     return Object.keys(exposed).length > 0 ? exposed : undefined
 }
 

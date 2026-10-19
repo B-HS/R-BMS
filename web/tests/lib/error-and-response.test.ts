@@ -58,6 +58,26 @@ describe('api-response 헬퍼', () => {
         expect(publicErrorDetails({ field: 'judge', reason: 3 }, true)).toEqual({ field: 'judge' })
     })
 
+    test('프로덕션에서도 AI 오류의 provider·request_id·retry_after_seconds 는 남기고 나머지는 버린다', () => {
+        const details = {
+            reason: 'rate_limited',
+            provider: 'anthropic',
+            request_id: 'req_1',
+            retry_after_seconds: 17,
+            http_status: 429,
+            provider_error_type: 'rate_limit_error',
+            api_key: 'sk-secret',
+            body: 'provider body',
+        }
+        expect(publicErrorDetails(details, true)).toEqual({
+            reason: 'rate_limited',
+            provider: 'anthropic',
+            request_id: 'req_1',
+            retry_after_seconds: 17,
+        })
+        expect(publicErrorDetails({ retry_after_seconds: '17', request_id: 5, provider: null }, true)).toBeUndefined()
+    })
+
     test('프로덕션에서 field·reason 이 없으면 details 를 싣지 않는다', () => {
         expect(publicErrorDetails({ player: 'p' }, true)).toBeUndefined()
         expect(publicErrorDetails(undefined, true)).toBeUndefined()

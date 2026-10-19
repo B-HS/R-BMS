@@ -34,7 +34,7 @@
 
 - KEK(`AI_CREDENTIAL_KEKS`, `AI_CREDENTIAL_KEK_CURRENT`)는 사용자가 Vercel 환경변수(Sensitive)로 넣는다. 에이전트는 값을 만들거나 보지 않는다. 없으면 AI 경로만 503.
 - 관리자 지정(`hs@gumyo.net`)은 운영 DB 쓰기다. 사용자 지시(2026-10-19)를 승인으로 보고, 대상 행 수(1이어야 함)를 먼저 확인해 보고한 뒤 한 행만 바꾼다.
-- 곡별 패턴 업로드는 관리자 API 토큰이 필요하므로 사용자가 실행한다(추출은 SSD 연결 뒤 에이전트도 가능).
+- 곡별 패턴 업로드: 사용자가 `bhs`(hs@gumyo.net) 계정의 API 토큰을 macOS 키체인(계정 `rbms-admin`, 서비스 `rbms-pattern-upload`, 2026-10-19 13:17:32 UTC 저장)에 넣었다. 업로드 스크립트가 실행 중에 `security find-generic-password -w` 로 직접 읽어 Authorization 헤더에만 쓰고, 값을 출력·로그·파일·대화에 남기지 않는다. 사용자가 에이전트의 직접 업로드를 요청했다(2026-10-19 "너가 직접 업로드하는건 ?"). 토큰은 관리자 지정 뒤부터 관리자 경로에 유효하다.
 
 ## 날짜와 사용자 원문
 

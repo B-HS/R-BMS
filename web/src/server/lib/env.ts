@@ -21,6 +21,8 @@ const envSchema = z.object({
     SERVER_VERSION: z.string().min(1).optional(),
     SERVER_COMMIT: z.string().min(1).optional(),
     VERCEL_GIT_COMMIT_SHA: z.string().min(1).optional(),
+    AI_CREDENTIAL_KEKS: z.string().min(1).optional(),
+    AI_CREDENTIAL_KEK_CURRENT: z.string().min(1).optional(),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 })
 
@@ -53,6 +55,35 @@ export const findMissingProductionAuthEnv = (source: Record<string, string | und
 export const assertProductionAuthEnv = (source: Record<string, string | undefined> = process.env) => {
     const missing = findMissingProductionAuthEnv(source)
     if (missing.length > 0) throw new Error(`Missing required production environment variables: ${missing.join(', ')}`)
+}
+
+const KEK_BYTES = 32
+const KEK_BASE64_PATTERN = /^[A-Za-z0-9+/]{43}=$/
+const KEK_VERSION_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
+
+const kekMapSchema = z.record(z.string().regex(KEK_VERSION_PATTERN), z.string().regex(KEK_BASE64_PATTERN))
+
+const parseJsonOrNull = (text: string): unknown => {
+    try {
+        return JSON.parse(text)
+    } catch {
+        return null
+    }
+}
+
+/**
+ * Reads the key-encryption keys for stored AI credentials from `AI_CREDENTIAL_KEKS` (a JSON object of version to base64 of 32 bytes)
+ * and `AI_CREDENTIAL_KEK_CURRENT`. Both stay optional in the schema so a build with no environment still succeeds; callers check
+ * the result when a credential is first sealed or opened. A failure names only the reason, never a key value.
+ */
+export const readAiCredentialKeyRing = (env: Pick<Env, 'AI_CREDENTIAL_KEKS' | 'AI_CREDENTIAL_KEK_CURRENT'>) => {
+    if (!env.AI_CREDENTIAL_KEKS || !env.AI_CREDENTIAL_KEK_CURRENT) return { ok: false as const, reason: 'ai_credential_kek_missing' as const }
+    const parsed = kekMapSchema.safeParse(parseJsonOrNull(env.AI_CREDENTIAL_KEKS))
+    const entries = parsed.success ? Object.entries(parsed.data).map(([version, value]) => [version, Buffer.from(value, 'base64')] as const) : []
+    const keys = new Map(entries)
+    const isValid = entries.length > 0 && entries.every(([, key]) => key.length === KEK_BYTES) && keys.has(env.AI_CREDENTIAL_KEK_CURRENT)
+    if (!isValid) return { ok: false as const, reason: 'ai_credential_kek_invalid' as const }
+    return { ok: true as const, ring: { current: env.AI_CREDENTIAL_KEK_CURRENT, keys } }
 }
 
 export const resolveDatabaseUrl = (env: Env) => {

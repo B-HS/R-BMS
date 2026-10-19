@@ -39,6 +39,7 @@ export const config = {
         '/settings/:path*',
         '/admin/:path*',
         '/folders/:path*',
+        '/ai/:path*',
         '/charts/:hash',
         '/players/:playerId',
         '/courses/:courseHash',

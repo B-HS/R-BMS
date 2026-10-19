@@ -235,10 +235,18 @@ rbms-cli chart-pattern <라이브러리 폴더> --table <data.json 경로> --out
 
 | 웨이브 | 마이그레이션(번호는 적용 순서로 정함, 현재 0000~0004) | 표 · 변경 |
 |---|---|---|
-| W1 | `0005_ai_foundation` | `ai_credential`(PK `(user_id, provider)`; `ciphertext`, `iv`, `auth_tag`, `wrapped_dek`, `dek_iv`, `dek_tag`, `kek_version`, `key_hint`, `model`, `created_at`, `last_validated_at`, `last_error_kind`; FK `user.id` cascade) · `ai_usage`(PK `(user_id, day)`; `calls`, `input_tokens`, `output_tokens`, `inflight_until`) · `ai_result`(PK `id`; `user_id`, `feature`, `subject_key`, `input_hash`, `analysis_version`, `prompt_version`, `provider`, `model`, `output` json, `usage` json, `created_at`; uniq `(user_id, feature, subject_key, input_hash)`; idx `(user_id, feature, created_at)`) · `chart_best` 에 `(user_id, scratch_auto)` 색인(Q16) |
+| W1 | `0005_ai_foundation`, `0006_admin_seed` | `ai_credential`(PK `(user_id, provider)`; `ciphertext`, `iv`, `auth_tag`, `wrapped_dek`, `dek_iv`, `dek_tag`, `kek_version`, `key_hint`, `model`, `created_at`, `updated_at`, `last_validated_at`, `last_error_kind`; FK `user.id` cascade) · `ai_usage`(PK `(user_id, day)`; `calls`, `input_tokens`, `output_tokens`, `cached_input_tokens`) · `ai_inflight`(PK `(user_id, slot)`; `run_id`, `expires_at`; FK cascade) · `ai_result`(PK `id`; `user_id`, `feature`, `subject_key`, `input_hash`, `analysis_version`, `prompt_version`, `provider`, `model`, `output` json, `usage` json, `created_at`; uniq `(user_id, feature, subject_key, input_hash)`; idx `(user_id, feature, created_at)`) · `ai_setting`(PK `id`, 행 하나 `global`; `daily_calls`, `concurrent_runs`, `default_monthly_token_limit`, `updated_at`, `updated_by`) · `ai_user_setting`(PK `user_id`; `monthly_token_limit`, `default_provider`, `updated_at`; FK cascade) · `chart_best` 에 `(user_id, scratch_auto)` 색인(Q16). `0006` 은 `hs@gumyo.net` 한 행을 `role='admin'` 으로 바꾸는 UPDATE 뿐이다(Q12) |
 | W2 | `0006_ai_goal` | `ai_goal`(PK `id`; `user_id`, `kind`, `params` json, `created_at`, `archived_at`) |
 | W3 | `0007_chart_pattern` | `chart_pattern`(PK `md5`; `sha256` idx, `mode`, `parser_version`, `playable_notes`, `content_hash`, `data`, `features` json, `features_version`, `uploaded_by`, `updated_at`) |
 | W4 | `0008_play_trace` | `play_trace`(PK `id`; uniq `score_id`; `user_id`, `chart_sha256`, `chart_md5`, `played_at`, `format_version`, `note_count`, `byte_size`, `data`, `created_at`; idx `(user_id, played_at)`, `(chart_sha256, user_id)`) · `play_analysis`(PK `trace_id`; `analysis_version`, `summary` json, `pattern_join`, `computed_at`) |
+
+W1 구현에서 이 표 초안과 달라진 점(2026-10-19, 작업 트리 기준):
+
+- 동시 실행은 `ai_usage.inflight_until` 한 칸 대신 `ai_inflight` 표로 잡는다. 운영자가 동시 실행 수(Q12, 1~5)를 바꿀 수 있어 사용자당 자리 번호(`slot`)마다 한 행을 두고, 잡을 때는 `INSERT IGNORE` 또는 만료된 행만 `UPDATE`(조건부 쓰기 한 번)로, 풀 때는 자기 `run_id` 행만 지운다. 함수가 죽어 풀지 못한 자리는 `expires_at`(`AI_RUN_HOLD_MS`=300초, 호출 시간 상한 240초보다 길다) 뒤 다른 실행이 가져간다.
+- 운영자 한도(Q12 의 "운영자가 화면에서 바꾼다")를 `ai_setting` 한 행에, 사용자의 월 토큰 상한과 기본 공급자를 `ai_user_setting` 에 둔다. 행이 없으면 기본값(하루 30회, 동시 1건, 월 상한 없음, 기본 공급자 없음)이다.
+- `default_provider`(6.8 "기본 공급자 하나 고르기")는 `ai_user_setting` 열이다. 기능 호출은 기본 공급자의 키를 쓰고, 그 키가 없으면 가장 먼저 등록한 키를 쓴다.
+- `ai_usage` 에 `cached_input_tokens` 를 더했다(6.7 의 "캐시 K" 표시). `input_tokens` 는 캐시 부분을 포함한 값이다.
+- `ai_credential.last_error_kind` 에는 6.5 의 `forbidden`(403, 키는 인증됨)도 들어간다. 이때 `last_validated_at` 은 검증 시각으로 남는다.
 
 `data` 열의 자료형(mediumtext JSON 또는 압축 바이트)은 Q17 과 Drizzle mysql-core 문서 확인 뒤 정한다. 리플레이 선례는 mediumtext(최대 16,777,215 B, `schema.ts` replay.data)다. 운영 DB 의 `max_allowed_packet` 은 확인하지 못했다(server.md unknowns 2) — W3 첫 업로드 전에 가장 큰 곡(약 125 KB 추정)과 5만 노트 trace(약 1.1 MB 추정)로 로컬 Docker DB(`mysql:8.4.11`)에서 확인하고, 운영은 `web-db.yml` 의 `status` 결과와 첫 실제 업로드로 확인한다.
 
@@ -508,7 +516,7 @@ A 의 이유: 요청 본문·헤더·오류 본문을 정확히 통제해 키가
 |---|---|---|---|
 | 호출 | `POST https://api.anthropic.com/v1/messages`, `x-api-key`, `anthropic-version: 2023-06-01` | `POST https://api.openai.com/v1/responses`, `Authorization: Bearer` | `POST https://ollama.com/api/chat`, `Authorization: Bearer` |
 | 구조화 출력 | `output_config.format = { type: "json_schema", schema }` (native) | `text.format = { type: "json_schema", strict: true, schema }` (native) | 문서상 클라우드 미지원 → 스키마를 시스템 프롬프트에 싣고 JSON 파싱 + Zod 검증 (best_effort). 화면에 "형식 보장 없음" 표시 |
-| 요청 고정값 | `output_config.effort` 를 기능별 상수로 명시(Opus 5.5 기본 medium, thinking 은 끌 수 없음 — `thinking` 파라미터를 보내지 않는다). `tool_choice` 강제는 쓰지 않는다(일부 모델 400) | `store: false`(기본 true 면 최소 30일 저장) | `stream: false` |
+| 요청 고정값 | effort 는 기능별 상수로 정하지만(기능 9 는 `AI_RECORD_QUERY_EFFORT='low'`, 결과 캐시 키에 들어간다) **아직 보내지 않는다**(2026-10-19 W1 리뷰): effort 를 받지 않는 모델(Haiku 4.5·Sonnet 4.5)은 400 이고, 저장한 모델 선택에 `capabilities.effort` 를 담지 않아 구분할 수 없다. 대신 `max_tokens` 를 넉넉히 준다(기능 9 는 16,000). 모델 목록의 `capabilities.effort` 를 모델 선택과 함께 저장하면 그때 보낸다. thinking 은 끌 수 없음 — `thinking` 파라미터를 보내지 않는다. `tool_choice` 강제는 쓰지 않는다(일부 모델 400) | `store: false`(기본 true 면 최소 30일 저장) | `stream: false` |
 | 거절·잘림 | `stop_reason: "refusal"` → `refused`, `"max_tokens"` → `truncated` | `refusal` 항목 → `refused`, `status: "incomplete"` → `truncated` | `done_reason` 이 정상 종료가 아니면 `truncated` |
 | 사용량 | `usage.input_tokens`·`output_tokens`·`cache_read_input_tokens` | `usage.input_tokens`·`output_tokens`·`input_tokens_details.cached_tokens` | `prompt_eval_count`·`eval_count`·`prompt_eval_cached_count` |
 | 키 확인 | `POST /v1/messages/count_tokens`(문서상 무료) | `GET /v1/models` | `GET https://ollama.com/api/balance`(10회/분) |
@@ -523,17 +531,20 @@ A 의 이유: 요청 본문·헤더·오류 본문을 정확히 통제해 키가
 
 | `AiFailureKind` | 근거 신호(providers.md) | 사용자 문구 방향 | 에러 코드 |
 |---|---|---|---|
-| `invalid_key` | 401(셋 공통), Anthropic `authentication_error` | 키가 맞지 않거나 취소됨 → 설정에서 다시 등록 | `AI_CREDENTIAL_INVALID` |
+| `invalid_key` | 401(셋 공통)만, Anthropic `authentication_error` | 키가 맞지 않거나 취소됨 → 설정에서 다시 등록. 저장된 키 카드에 "거부됨"을 남긴다 | `AI_CREDENTIAL_INVALID` |
+| `forbidden` | 403(Anthropic `permission_error`, OpenAI 지역·프로젝트 권한, Ollama) | 키 권한 또는 모델 접근을 확인하세요. 키는 인증된 것으로 보고 등록·다시 검증은 경고와 함께 성공하며, 키를 거부됨으로 표시하지 않는다. 모델 목록이 403 이면 화면에서 모델 id 를 직접 적어 고를 수 있다 | `AI_PROVIDER_FORBIDDEN`(403) |
+| `model_unavailable` | 404(셋 공통), 오류 종류 `not_found_error`(Anthropic)·`model_not_found`(OpenAI, 400 으로 와도) | 고른 모델이 없거나 은퇴함 → "설정에서 모델을 다시 고르세요"와 AI 설정 링크 | `AI_MODEL_UNAVAILABLE`(422) |
 | `quota` | Anthropic 402·`enforced_spend_limit_reached`, OpenAI 429 `insufficient_quota`·`*_spend_limit_exceeded`·`credit_balance_exhausted` | 공급자 계정의 잔액·지출 한도 | `AI_PROVIDER_QUOTA` |
 | `rate_limited` | 429 + `retry-after` | 잠시 뒤 다시(남은 초 표시) | `AI_PROVIDER_RATE_LIMITED` |
 | `unavailable` | 5xx, Anthropic 529, OpenAI 503, Ollama 502, 시간 초과, 스트림 아닌데 연결 끊김 | 공급자 장애 | `AI_PROVIDER_UNAVAILABLE` |
 | `refused` | 6.4 거절 신호 | 모델이 답을 거절 | `AI_PROVIDER_REFUSED` |
 | `truncated` | 6.4 잘림 신호 | 출력이 잘림(출력 상한) | `AI_OUTPUT_TRUNCATED` |
 | `invalid_output` | JSON 파싱 실패, Zod 실패, key·md5 검증 후 남은 항목 없음 | 해석 생성 실패(형식) | `AI_OUTPUT_INVALID` |
-| `bad_request` | 400(스키마 컴파일 실패 등) | 내부 오류(우리 쪽 문제)로 기록 | `INTERNAL_ERROR` 로 바꾸고 서버 로그 |
+| `bad_request` | 위에 들지 않는 4xx(400 스키마 컴파일 실패, 413 등) | 공급자가 요청을 받지 않음 → 다른 모델 또는 잠시 뒤. 서버 로그에 상태·종류·요청 id 만 남긴다 | `AI_PROVIDER_BAD_REQUEST`(502). 우리 Zod 스키마를 공급자 JSON Schema 로 바꾸지 못한 경우(`provider_error_type=schema_unsupported`, 요청을 보내지 않음)만 `INTERNAL_ERROR` |
 
 - 재시도(Q10, 추천 A): 자동 재시도 없음. 실패를 그대로 보이고 사용자가 "다시 시도"를 누른다. 이유: BYOK 비용이 사용자에게 가고, 재시도로 형식 문제를 덮지 않는다(HANDOFF 5절 "재시도로 덮기 금지").
-- 공급자 오류 본문은 버리고 `status`·`type`(있으면)·`request id` 만 details 에 남긴다. 프로덕션 details 는 기존 정책대로 field·reason 문자열만 나간다(server.md 제약 12).
+- 공급자 오류 본문은 버리고 `status`·`type`(있으면)·`request id` 만 details 에 남긴다. 프로덕션 details 는 `field`·`reason`·`provider`·`request_id`(문자열)와 `retry_after_seconds`(숫자)만 나간다(`publicErrorDetails`, 2026-10-19 에 field·reason 에서 넓힘. 키·암호문·본문·`http_status`·`provider_error_type` 은 나가지 않는다). 화면은 `retry_after_seconds` 를 "N초 뒤에 다시 시도"로 보인다.
+- AI 라우트에서 처리되지 않은 예외는 `withErrorHandling` 이 원본 오류를 그대로 로그에 남기기 전에 오류 종류 이름과 DB 드라이버 코드만 남기는 오류로 바꾼다(DB 오류 메시지에는 쿼리와 바인딩 값, 곧 암호문·감싼 DEK 가 들어 있다). 키 쓰기(`upsertCredential`·`rewrapCredential`)는 compose 에서 먼저 같은 방식으로 바꿔 던진다.
 
 ### 6.6 스트리밍
 
@@ -591,7 +602,8 @@ API 토큰(Bearer)으로는 이 경로와 AI 기능 경로를 부를 수 없다(
 
 ### 7.5 요청 한도와 비용 상한
 
-- 기존 레이트리밋은 인스턴스 로컬 메모리라(server.md 5.2) AI 에는 DB 기반 `ai_usage` 를 쓴다: 하루 호출 수 `AI_DAILY_CALLS`(=30, Q12), 사용자가 정하는 월 토큰 상한(기본 없음 또는 사용자 입력, Q12), 동시 실행 1건(`inflight_until` 을 조건부 갱신으로 잡고 끝나면 비움, 만료는 maxDuration 뒤).
+- 기존 레이트리밋은 인스턴스 로컬 메모리라(server.md 5.2) AI 에는 DB 기반 표를 쓴다: 하루 호출 수(`ai_usage.calls`, 기본 30, Q12), 사용자가 정하는 월 토큰 상한(`ai_user_setting.monthly_token_limit`, 없으면 운영자 기본값, Q12), 동시 실행(`ai_inflight` 의 자리 행, 기본 1건). 하루 호출 수·동시 실행 수·기본 월 상한은 관리자가 `ai_setting` 에서 바꾼다(`/admin/ai`).
+- 잡는 순서는 월 상한 확인(읽기) → 동시 실행 자리 → 하루 호출 수다. 거절되거나 오류가 난 단계는 앞 단계에서 잡은 자리를 돌려준다. 공급자가 답한 뒤의 자리 해제와 결과 저장은 최선 노력이다(해제 실패는 만료가 정리하고, 저장 실패는 본문 없는 로그만 남기고 출력은 그대로 돌려준다).
 - 같은 digest 해시의 캐시가 있으면 호출하지 않는다(중복 요청 방지).
 - 키 등록·검증은 분당 5회(`RATE_LIMIT.AUTH` 와 같은 값, 기존 인스턴스 로컬 방식으로 충분 — 공급자 비용이 없다).
 

@@ -20,6 +20,8 @@ const USER_SCOPED_QUERY_KEYS = [
     QUERY_KEY.TABLE_SNAPSHOT.RECORDS_ALL,
     QUERY_KEY.TOKEN.ALL,
     QUERY_KEY.SETTING.ALL,
+    QUERY_KEY.AI.ALL,
+    QUERY_KEY.ADMIN.AI_LIMITS,
 ]
 
 /** Drops cached queries that belong to the signed-in user so the next account never sees them. */

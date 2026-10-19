@@ -15,6 +15,8 @@ import { searchMd5sInTables } from '@server/service/domain/table-snapshot/table-
 import { resolveBuildTrust } from '@server/service/shared/integrity/build-allowlist'
 import { toChartRow } from '@server/compose/chart-row'
 import { composeAdmin } from '@server/compose/admin'
+import { composeAi } from '@server/compose/ai'
+import { composeAiRecordQuery } from '@server/compose/ai-record-query'
 import { composeCourse } from '@server/compose/course'
 import { composeFe } from '@server/compose/fe'
 import { composeReplay } from '@server/compose/replay'
@@ -346,6 +348,7 @@ const composeAll = () => {
 
     const { courseService } = composeCourse(db)
     const tableSnapshot = composeTableSnapshot(db)
+    const ai = composeAi(db)
 
     return {
         chartService,
@@ -364,6 +367,8 @@ const composeAll = () => {
         ...composeTable(db, courseService),
         ...tableSnapshot,
         ...composeFolder(db, { tableSnapshotService: tableSnapshot.tableSnapshotService, lookupTableText: findSnapshotTextByMd5 }),
+        ...ai,
+        ...composeAiRecordQuery(db, { aiFeatureRunner: ai.aiFeatureRunner, loadTables: getSnapshotTables }),
         resolveBuildTrust: (sha256: string | null) => resolveBuildTrust(buildAllowlist, sha256),
     }
 }

@@ -24,9 +24,9 @@
 - [x] AI1. 조사 — 웹 서버 데이터·보안 경계, 클라이언트가 판 끝에 아는 것·리플레이·rbms-cli, 공급자 3곳 공식 API(docs/reference/ai-features/ 에 저장, workflow wf_2bde79bf-eeb)
 - [x] AI2. 기획 문서 — docs/plan/2026-10-19-web-ai-features.md(기능 10개, 데이터 계약, 분석 엔진, 공급자 어댑터, 키 암호화, 단계 계획, 사용자 확인 질문)
 - [x] AI3. 메인 검토와 사용자 확인 질문 정리, 결정 ADR([W0 결정](acknowledge/2026-10-19-adr-web-ai-decisions.md))
-- [ ] AI-W1. 기반 + 기능 9(마이그레이션 0005, secret-box, 어댑터 3종, 키 API·설정 탭, 사용량·운영자 한도, 관리자 seed)
+- [x] AI-W1. 기반 + 기능 9(마이그레이션 0005, secret-box, 어댑터 3종, 키 API·설정 탭, 사용량·운영자 한도, 관리자 seed) — 마이그레이션 `c42b00d`(운영 적용 run 39275472038, 관리자 1행 확인 39275562175), 코드는 다음 커밋. 게이트 웹 1,070 통과·DB 81 통과·무작위 순서 5회 0 실패. 사용자 키 실기(Q18)는 마지막에
 - [ ] AI-W2. 점수 기반 기능 5·6·7·10·4 일부(0006)
-- [ ] AI-W3. 곡별 패턴(rbms-cli chart-pattern, 0007, 7K 전체 추출 — SSD·관리자 토큰은 사용자)
+- [ ] AI-W3. 곡별 패턴(rbms-cli chart-pattern, 0007, 7K 전체 추출 — SSD·관리자 토큰은 사용자) — CLI `d3ecf75`, 추출 7,903곡·표 1,035/1,035 매칭·333 MB(`/Users/hyunseokbyun/rbms-chart-patterns`, 저장소 밖). 웹 업로드 경로 남음, 토큰은 키체인 `rbms-admin`/`rbms-pattern-upload`
 - [ ] AI-W4. 판별 trace(0008, 클라이언트 v0.1.6 draft)
 - [ ] AI-W5. 판별 기반 기능 1·2·3·8·4 전체
 - [ ] AI-W6. 과거 판 소급(EVENT 시계 리플레이 재판정)
