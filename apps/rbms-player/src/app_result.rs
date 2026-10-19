@@ -455,9 +455,9 @@ pub(crate) const LEFT_RUN_KEPT: &str = "run left mid-song kept as FAILED";
 /// No result screen is shown: Escape stays the key that leaves at once, and the run is in the
 /// history and on the server like any other. It is sent by a records sync of this one run rather
 /// than by the result screen's submission, which has no screen to report on here. Every run the
-/// player played by hand is kept however few notes it judged, none at all included (the player's
-/// decision of 2026-10-15); the caller leaves out a run the engine played, a replay being watched and
-/// practice.
+/// player played by hand is kept however few notes it judged (the player's decision of 2026-10-15);
+/// the caller leaves out a run that judged nothing at all (the player's decision of 2026-10-19), a
+/// run the engine played, a replay being watched and practice.
 pub(crate) fn record_left_run(state: &PlayState, shared: &mut AppShared) -> RecordedRun {
     let summary = state.session.summary().left_unfinished();
     let recorded = record_run(state, shared, &summary, state.session.record().avg_duration_us);
@@ -510,12 +510,20 @@ pub(crate) const QUIT_RUN_KEPT: &str = "run cut short by quitting kept; it is se
 /// A run with nothing left to play is kept as the result screen keeps it; one left part-way is a
 /// FAILED run whose every note not reached was let pass. A course stage folds into the course,
 /// which is kept: as it stands when that was its last stage or the stage failed, and as a FAILED
-/// course otherwise, the stages after it not being played. Nothing is kept of a run the engine
-/// played, a replay being watched or practice.
+/// course otherwise, the stages after it not being played. A run left part-way that judged nothing
+/// at all is not kept, as Escape does not keep it (the player's decision of 2026-10-19), and the
+/// course it stood in is kept as it stood before the stage ([`abandon_course`]). Nothing is kept of
+/// a run the engine played, a replay being watched or practice.
 pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, shared: &mut AppShared) {
     if state.practice.is_some() || !crate::stage::play::keeps_a_left_run(shared) {
         if shared.course_run.is_some() {
             crate::end_course(shared);
+        }
+        return;
+    }
+    if !ended && state.has_judged_nothing() {
+        if shared.course_run.is_some() {
+            abandon_course(shared, Sending::NextStart);
         }
         return;
     }
@@ -549,11 +557,19 @@ pub(crate) const LEFT_COURSE_KEPT: &str = "course left part-way kept as FAILED";
 /// course, the stages it finished and the one it was left on folded in. The stages it never reached
 /// are not played.
 ///
+/// A stage that has judged nothing at all was never played (the player's decision of 2026-10-19):
+/// it adds nothing, and the course ends where it stands as one left between two stages does
+/// ([`abandon_course`]), kept as a FAILED course of the stages before it, or not at all when it
+/// stood on its first.
+///
 /// A course the engine played or one watched as a replay keeps nothing and simply ends, as before.
 /// No course result screen is shown: Escape still leaves at once.
 pub(crate) fn leave_course(state: &PlayState, shared: &mut AppShared) -> Transition {
     if shared.run_plays_itself() || shared.replay.is_some() || state.practice.is_some() {
         return crate::end_course(shared);
+    }
+    if state.has_judged_nothing() {
+        return abandon_course(shared, Sending::Now);
     }
     let summary = state.session.summary().left_unfinished();
     let recorded = record_left_run(state, shared);

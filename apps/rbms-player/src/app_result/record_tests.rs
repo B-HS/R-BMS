@@ -267,6 +267,11 @@ fn stored(shared: &AppShared) -> (Vec<PlayLog>, Option<BestScore>) {
     (db.history(&key, HISTORY_ROWS).expect("the history reads"), db.best(&key, mode_id(Mode::BEAT_7K.name)).expect("the best reads"))
 }
 
+/// Every row the score database holds, of whatever chart.
+fn every_play(shared: &AppShared) -> Vec<PlayLog> {
+    shared.scoredb.as_ref().expect("the score database opened in the test's folder").all_plays().expect("the history reads")
+}
+
 /// The target the result screen `entered` leads to scores its run against.
 fn result_target_ex(entered: &Transition) -> Option<u32> {
     match entered {
@@ -946,23 +951,95 @@ fn leaving_mid_song_signed_in_sends_the_run() {
     assert_eq!(shared.record_sync_states[&logs[0].id].state, rbms_store::scoredb::SyncState::Accepted);
 }
 
-/// A run left before any note was judged is a run like any other the player left: it is kept as a
-/// FAILED run, every note of it a POOR let pass (the player's decision of 2026-10-15: every run
-/// played by hand is kept and sent, whatever was judged of it).
+/// A run left before any note was judged was never played, and nothing is kept of it (the player's
+/// decision of 2026-10-19, which replaces the one of 2026-10-15 that kept it as a FAILED run): no
+/// row in the history, no best, no replay, and no records sync to send it.
 #[test]
-fn leaving_before_any_note_is_judged_keeps_a_failed_run() {
-    let mut shared = signed_out("left-at-once");
+fn leaving_before_any_note_is_judged_keeps_nothing() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("left-at-once", server.clone());
     let session = run_until(recorded_model(), SessionOptions::default(), &[], 0);
+    assert_eq!(session.summary().counts, [0; 6], "the fixture run has judged nothing");
+    let left = leave_by_escape(&mut shared, session);
+    assert!(!matches!(left, Transition::To(Stage::Result(_)) | Transition::Stay), "Escape still leaves at once");
+    shared.finish_saves();
+    assert_eq!(stored(&shared), (Vec::new(), None), "a run that judged nothing was kept");
+    assert!(every_play(&shared).is_empty(), "a row was stored under some other key");
+    assert_eq!(std::fs::read_dir(&shared.replay_dir).map_or(0, Iterator::count), 0, "a replay of a run that judged nothing was written");
+    assert!(shared.record_sync.is_none(), "a records sync of the run was started");
+    assert!(server.sent_for.lock().expect("the submission log").is_empty(), "the run was sent");
+}
+
+/// The chart's first key note: when it lands and the lane it is on.
+fn first_key_note(model: &rbms_model::Model) -> (i64, usize) {
+    model
+        .timelines
+        .iter()
+        .flat_map(|line| {
+            line.notes.iter().enumerate().filter(|(lane, note)| note.is_some() && !model.mode.is_scratch(*lane)).map(|(lane, _)| (line.time_us, lane))
+        })
+        .min()
+        .expect("the chart has a key note")
+}
+
+/// How far ahead of a note a press lands in the 空POOR band: before the note's own windows, so it
+/// judges no note.
+const EMPTY_POOR_AHEAD_US: i64 = 300_000;
+
+/// A press that reached no note is an empty POOR, which hits nothing: a run left after nothing but
+/// one is a run the player hit nothing in, and is not kept (the player's decision of 2026-10-19).
+#[test]
+fn leaving_after_only_an_empty_poor_keeps_nothing() {
+    let mut shared = signed_out("left-after-empty-poor");
+    let model = recorded_model();
+    let (note_us, lane) = first_key_note(&model);
+    let pressed_us = note_us - EMPTY_POOR_AHEAD_US;
+    let inputs = [(pressed_us, lane, true), (pressed_us + KEY_HELD_US, lane, false)];
+    let session = run_until(model, SessionOptions::default(), &inputs, pressed_us + KEY_HELD_US);
     let summary = session.summary();
-    assert_eq!(summary.total_judged, 0);
+    assert_eq!(
+        (summary.counts[5], summary.counts[..5].iter().sum::<u32>(), summary.total_judged),
+        (1, 0, 0),
+        "the run judged an empty POOR and no note: {summary:?}"
+    );
     leave_by_escape(&mut shared, session);
-    let (logs, best) = stored(&shared);
+    shared.finish_saves();
+    assert_eq!(stored(&shared), (Vec::new(), None), "a run with only an empty POOR was kept");
+    assert!(every_play(&shared).is_empty(), "a row was stored under some other key");
+}
+
+/// A note that went by unhit is a POOR the player did not hit, so a run left after notes went by
+/// and nothing was hit is not kept either (the player's decision of 2026-10-19).
+#[test]
+fn leaving_after_a_note_went_by_unhit_keeps_nothing() {
+    let mut shared = signed_out("left-after-a-miss");
+    let session = run_until(recorded_model(), SessionOptions::default(), &[], LEFT_AT_US);
+    let summary = session.summary();
+    assert_eq!((summary.counts[..4].iter().sum::<u32>(), summary.counts[4] > 0), (0, true), "notes went by unhit and none was hit: {summary:?}");
+    assert!(summary.total_judged < summary.total_notes, "the fixture run is left part-way: {summary:?}");
+    leave_by_escape(&mut shared, session);
+    shared.finish_saves();
+    assert_eq!(stored(&shared), (Vec::new(), None), "a run that hit nothing was kept");
+    assert!(every_play(&shared).is_empty(), "a row was stored under some other key");
+}
+
+/// A plain long note's head counts no judgment until its end is judged, but taking it is a hit: a
+/// run left while holding the chart's first long note is kept as a FAILED run.
+#[test]
+fn leaving_while_holding_the_first_long_note_keeps_a_failed_run() {
+    let chart = b"#PLAYER 1\n#BPM 120\n#WAV01 a.wav\n#00251:01000001\n";
+    let model = rbms_chart::to_model(&rbms_parser::parse_with(chart, Default::default()), Mode::BEAT_7K);
+    let (head_us, lane) = first_key_note(&model);
+    let mut shared = signed_out("left-holding-first-long-note");
+    let session = run_until(model, SessionOptions::default(), &[(head_us, lane, true)], head_us + LEFT_WHILE_HOLDING_US);
+    let summary = session.summary();
+    assert_eq!(summary.counts, [0; 6], "a plain long note's head judges nothing while it is held: {summary:?}");
+    leave_by_escape(&mut shared, session);
+    let logs = shared.scoredb.as_ref().expect("the database").all_plays().expect("the history reads");
     let [log] = logs.as_slice() else {
         panic!("one run was left and {} rows were stored", logs.len());
     };
     assert_eq!(log.clear, clear_type_id(ClearType::Failed));
-    assert_eq!((log.judge.tier(rbms_store::scoredb::JUDGE_POOR), log.minbp), (summary.total_notes, summary.total_notes), "every note is a POOR let pass");
-    assert_eq!(best.map(|best| best.playcount), Some(1));
 }
 
 /// A chart with no note to judge has nothing left to hit from the start: a turntable-only chart

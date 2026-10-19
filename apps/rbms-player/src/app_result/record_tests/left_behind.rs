@@ -171,6 +171,53 @@ fn a_course_stage_the_library_does_not_hold_ends_the_course() {
     assert_eq!(kept_courses(&shared).len(), 1, "what was played of the course was not kept");
 }
 
+/// Escape on a course stage that has judged nothing at all ends the course where it stands (the
+/// player's decision of 2026-10-19): the stage adds nothing, not even as a FAILED chart, and what was
+/// played of the course before it is kept and sent as a FAILED course, as a course left between two
+/// stages is. The settings the course narrowed are the player's own again.
+#[test]
+fn escape_on_a_course_stage_that_judged_nothing_ends_the_course_without_the_stage() {
+    let server = Arc::new(AcceptingServer::default());
+    let (courses, sent) = channel();
+    *server.courses.lock().expect("the course log") = Some(courses);
+    let mut shared = signed_in("course-stage-left-at-once", server);
+    let (own, first) = on_the_second_stage_of_a_course(&mut shared);
+    let session = run_until(recorded_model(), SessionOptions::default(), &[], 0);
+    assert_eq!(session.summary().counts, [0; 6], "the fixture stage has judged nothing");
+
+    let left = leave_by_escape(&mut shared, session);
+
+    assert!(matches!(left, Transition::Back), "Escape leaves at once");
+    assert!(shared.course_run.is_none() && shared.course_settings_backup.is_none(), "the course was left standing");
+    assert_eq!(shared.config.play, own, "the settings the course narrowed were kept");
+    assert!(every_play(&shared).is_empty(), "the stage that judged nothing was kept");
+    let course = sent.recv_timeout(COURSE_SUBMIT_WAIT).expect("the stages played were sent as a course");
+    assert_eq!(course.clear, rbms_ir::ClearLamp::Failed, "a course ended before its last stage is a FAILED course");
+    assert_eq!(
+        (course.ex_score, course.judge.pgreat, course.judge.poor),
+        (first.ex_score, first.counts[0], first.counts[4]),
+        "only the first stage is the course's"
+    );
+    assert_eq!(kept_courses(&shared).len(), 1);
+}
+
+/// Escape on the first stage of a course before any note was judged keeps nothing: no stage, and no
+/// course, as the course has nothing played. The course still ends.
+#[test]
+fn escape_on_the_first_course_stage_that_judged_nothing_keeps_nothing() {
+    let mut shared = signed_in("course-first-stage-left-at-once", Arc::new(AcceptingServer::default()));
+    shared.course_run = Some(two_stage_course(recorded_model().md5));
+    let session = run_until(recorded_model(), SessionOptions::default(), &[], 0);
+
+    let left = leave_by_escape(&mut shared, session);
+
+    assert!(matches!(left, Transition::Back), "Escape leaves at once");
+    assert!(shared.course_run.is_none(), "the course was left standing");
+    assert!(every_play(&shared).is_empty(), "the stage that judged nothing was kept");
+    assert!(kept_courses(&shared).is_empty(), "a course with nothing played was kept");
+    assert!(shared.record_sync.is_none(), "a records sync was started");
+}
+
 /// A course left on its first stage before anything was played keeps nothing.
 #[test]
 fn a_course_left_before_its_first_stage_keeps_nothing() {
@@ -256,6 +303,48 @@ fn quitting_in_the_middle_of_a_run_keeps_it_as_a_failed_run_and_sends_nothing() 
     let db = app.shared.scoredb.as_ref().expect("the score database");
     let walk = SyncWalk { server: SIGNED_IN_SERVER, login_id: ACCOUNT_ID, ..SyncWalk::default() };
     assert_eq!(db.sync_candidates(&walk).expect("the plays to send read").len(), 1, "the next start's sync does not send the run");
+}
+
+/// Quitting before a run has judged anything keeps nothing of it, as Escape keeps nothing of it (the
+/// player's decision of 2026-10-19): no row, no replay, nothing for the next start to send.
+#[test]
+fn quitting_before_any_note_is_judged_keeps_nothing() {
+    let session = run_until(recorded_model(), SessionOptions::default(), &[], 0);
+    assert_eq!(session.summary().counts, [0; 6], "the fixture run has judged nothing");
+    let (mut app, _, _) = playing("quit-at-once", session);
+
+    app.keep_what_quitting_cuts_short();
+    app.shared.finish_saves();
+
+    assert!(every_play(&app.shared).is_empty(), "a run that judged nothing was kept");
+    assert_eq!(std::fs::read_dir(&app.shared.replay_dir).map_or(0, Iterator::count), 0, "a replay of a run that judged nothing was written");
+}
+
+/// Quitting in a course stage that has judged nothing keeps the course as it stood before the stage:
+/// a FAILED course of the stages played, and nothing of the stage. Nothing is sent as the process ends.
+#[test]
+fn quitting_in_a_course_stage_that_judged_nothing_keeps_the_course_without_the_stage() {
+    let session = run_until(recorded_model(), SessionOptions::default(), &[], 0);
+    let (mut app, _, sent) = playing("quit-course-at-once", session);
+    let (own, first) = on_the_second_stage_of_a_course(&mut app.shared);
+
+    app.keep_what_quitting_cuts_short();
+    app.shared.finish_saves();
+
+    assert!(app.shared.course_run.is_none());
+    assert_eq!(app.shared.config.play, own);
+    assert!(every_play(&app.shared).is_empty(), "the stage that judged nothing was kept");
+    let courses = kept_courses(&app.shared);
+    let [course] = courses.as_slice() else {
+        panic!("one course was cut short and {} were kept", courses.len());
+    };
+    assert_eq!(course.clear, rbms_ir::ClearLamp::Failed);
+    assert_eq!(
+        (course.ex_score, course.judge.pgreat, course.judge.poor),
+        (first.ex_score, first.counts[0], first.counts[4]),
+        "only the first stage is the course's"
+    );
+    assert!(sent.recv_timeout(NOTHING_SENT_WAIT).is_err(), "the course was sent as the process ends");
 }
 
 /// The server the signed-in fixture sends to, as the records sync keys it.

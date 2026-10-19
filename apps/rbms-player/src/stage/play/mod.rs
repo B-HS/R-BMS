@@ -619,12 +619,17 @@ impl PlayState {
     /// for a course stage too, which then goes on to the next stage or the course's result as a stage
     /// played to its end does.
     ///
+    /// A run that has judged nothing at all was never played, and nothing is kept of it
+    /// ([`Self::has_judged_nothing`], the player's decision of 2026-10-19): a single chart goes back
+    /// to the browser, and a course ends where it stands, with the stages played before it kept and
+    /// sent as a FAILED course ([`crate::app_result::leave_course`]).
+    ///
     /// Otherwise a run the player was playing by hand is kept and sent as a FAILED run whose notes
     /// not reached were let pass ([`crate::app_result::record_left_run`]), straight on the way out:
-    /// Escape is still the key that leaves at once. That is so however few notes the run judged,
-    /// none at all included (the player's decision of 2026-10-15). A course left part-way keeps the
-    /// stage it was left on that way and is kept and sent as a FAILED course with every stage it
-    /// played ([`crate::app_result::leave_course`]). Nothing is kept of a run the engine played, a
+    /// Escape is still the key that leaves at once. That is so however few notes the run judged
+    /// (the player's decision of 2026-10-15): one note let pass unhit, or one empty POOR, is a
+    /// judgment. A course left part-way keeps the stage it was left on that way and is kept and sent
+    /// as a FAILED course with every stage it played. Nothing is kept of a run the engine played, a
     /// replay being watched or practice.
     fn leave_run(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.esc_down_at = None;
@@ -640,7 +645,7 @@ impl PlayState {
         if ctx.shared.course_run.is_some() {
             return crate::app_result::leave_course(self, ctx.shared);
         }
-        if keeps_a_left_run(ctx.shared) {
+        if keeps_a_left_run(ctx.shared) && !self.has_judged_nothing() {
             crate::app_result::record_left_run(self, ctx.shared);
         }
         ctx.shared.leave_play()
@@ -650,6 +655,16 @@ impl PlayState {
     /// or finished. Leaving such a run ends it on its result rather than as a run left part-way.
     pub(crate) fn has_ended(&self) -> bool {
         self.session.all_notes_resolved() || self.scene.as_ref().is_some_and(PlayScene::is_closing)
+    }
+
+    /// Whether the player has hit nothing in the run: no note, long note head or end has been
+    /// judged PGREAT, GREAT, GOOD or BAD, and no lane holds a long note whose head was taken. A
+    /// note that went by unhit (POOR) and a press that met no note (empty POOR) are not hits, so a
+    /// run that has only those has hit nothing (the player's decision of 2026-10-19).
+    pub(crate) fn has_judged_nothing(&self) -> bool {
+        let judge = self.session.judge();
+        let hit = &judge.counts[..rbms_judge::Judge::Poor as usize];
+        hit.iter().all(|&count| count == 0) && (0..self.session.beam_on().len()).all(|lane| judge.long_note(lane).processing.is_none())
     }
 
     /// Handle an analysis-mode playback key (only while a replay analysis is active): pause/resume,
@@ -1377,9 +1392,9 @@ impl PlayState {
     }
 }
 
-/// Whether a run left before its end is kept: every one the player was playing by hand, however
-/// little of it was judged (the player's decision of 2026-10-15). Only a run the engine played and a
-/// replay being watched are no record.
+/// Whether a run left before its end can be kept: the player was playing it by hand. Only a run the
+/// engine played and a replay being watched are no record. A run of their own that judged nothing
+/// is not kept either ([`PlayState::has_judged_nothing`], the player's decision of 2026-10-19).
 pub(crate) fn keeps_a_left_run(shared: &AppShared) -> bool {
     !shared.run_plays_itself() && shared.replay.is_none()
 }
