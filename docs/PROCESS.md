@@ -23,7 +23,13 @@
 
 - [x] AI1. 조사 — 웹 서버 데이터·보안 경계, 클라이언트가 판 끝에 아는 것·리플레이·rbms-cli, 공급자 3곳 공식 API(docs/reference/ai-features/ 에 저장, workflow wf_2bde79bf-eeb)
 - [x] AI2. 기획 문서 — docs/plan/2026-10-19-web-ai-features.md(기능 10개, 데이터 계약, 분석 엔진, 공급자 어댑터, 키 암호화, 단계 계획, 사용자 확인 질문)
-- [ ] AI3. 메인 검토와 사용자 확인 질문 정리, 결정 ADR
+- [x] AI3. 메인 검토와 사용자 확인 질문 정리, 결정 ADR([W0 결정](acknowledge/2026-10-19-adr-web-ai-decisions.md))
+- [ ] AI-W1. 기반 + 기능 9(마이그레이션 0005, secret-box, 어댑터 3종, 키 API·설정 탭, 사용량·운영자 한도, 관리자 seed)
+- [ ] AI-W2. 점수 기반 기능 5·6·7·10·4 일부(0006)
+- [ ] AI-W3. 곡별 패턴(rbms-cli chart-pattern, 0007, 7K 전체 추출 — SSD·관리자 토큰은 사용자)
+- [ ] AI-W4. 판별 trace(0008, 클라이언트 v0.1.6 draft)
+- [ ] AI-W5. 판별 기반 기능 1·2·3·8·4 전체
+- [ ] AI-W6. 과거 판 소급(EVENT 시계 리플레이 재판정)
 
 ## 체크리스트 — 웹 기록 표시와 구동기 Esc·목표 보완 (2026-10-19)
 
