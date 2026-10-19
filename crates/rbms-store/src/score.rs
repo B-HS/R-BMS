@@ -276,6 +276,17 @@ impl ScoreBook {
         self.scoring_records(md5).filter(|r| Self::comparable_ln_mode(r, ln_mode)).map(|r| r.ex_score).max()
     }
 
+    /// The record of a chart played under `ln_mode` that holds its best EX and has a replay to go
+    /// with it: of the runs that scored that EX, the oldest that kept its replay. The reference keeps
+    /// the run that first reached a best, since a run only replaces it with a higher EX
+    /// (`ScoreData.java:550-564`); a run that reached it with no replay kept (AUTO REPLAY off, a save
+    /// that failed, a replay since pruned) gives way to the next run of the same EX. `None` when no
+    /// run of the best EX has a replay.
+    pub fn best_record_with_replay_in_ln_mode(&self, md5: &str, ln_mode: &str) -> Option<&ScoreRecord> {
+        let best = self.best_ex_for_md5_in_ln_mode(md5, ln_mode)?;
+        self.scoring_records(md5).filter(|r| Self::comparable_ln_mode(r, ln_mode)).find(|r| r.ex_score == best && r.replay_file.is_some())
+    }
+
     /// Best clear-lamp id on a chart (highest `ClearType` id), folded without allocation — used for
     /// the per-row clear-lamp LED in the select list. `None` if the chart has no records.
     ///

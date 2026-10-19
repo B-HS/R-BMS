@@ -162,6 +162,21 @@ impl ScoreSheet {
     }
 }
 
+/// What the two scores a run is held against stood at after as many notes as the run has judged,
+/// for each of them whose run is known note by note: the reference's `nowbestscore` and
+/// `nowrivalscore` read off a ghost (`ScoreDataProperty.java:114-118, 123-127`). `None` is a score
+/// with no such run, which is taken as earned evenly over the chart (`:119-121, 128-130`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PacedScores {
+    pub best: Option<u32>,
+    pub rival: Option<u32>,
+}
+
+impl PacedScores {
+    /// Both scores taken as earned evenly.
+    pub const EVEN: PacedScores = PacedScores { best: None, rival: None };
+}
+
 /// The two scores a run is held against, and how many notes they were set over
 /// (`ScoreDataProperty.setTargetScore`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -172,6 +187,8 @@ pub struct TargetPace {
     pub rival_score: u32,
     /// The notes of the chart those two scores are measured over.
     pub total_notes: u32,
+    /// Where the two stand by now, for a score whose run is known note by note.
+    pub now: PacedScores,
 }
 
 /// What `ScoreDataProperty` works out from one sheet and the two scores it is held against.
@@ -205,8 +222,8 @@ pub struct ScoreStanding {
     pub best_rate: f32,
     pub best_rate_int: i32,
     pub best_rate_after_dot: i32,
-    /// The best score as it would stand by now, had it been earned evenly (`nowbestscore`), and
-    /// its rate.
+    /// The best score as it stands by now (`nowbestscore`): where its run stood after as many notes,
+    /// or, with no such run, where it would stand had it been earned evenly. And its rate.
     pub now_best_score: i32,
     pub now_best_rate: f32,
     /// The target's score, its rate, and the rate's whole percent and digits after the dot.
@@ -261,8 +278,8 @@ impl ScoreStanding {
         let best_rank = steps_reached(best_rate, true);
 
         let pace = |score: i32| if total == 0 { 0 } else { (i64::from(score) * i64::from(pass) / i64::from(total)) as i32 };
-        let now_best_score = pace(best_score);
-        let now_rival_score = pace(rival_score);
+        let now_best_score = target.now.best.map_or_else(|| pace(best_score), |now| now as i32);
+        let now_rival_score = target.now.rival.map_or_else(|| pace(rival_score), |now| now as i32);
         let paced_rate = |score: i32| if total == 0 { 0.0 } else { rate_over(score, total) };
 
         ScoreStanding {

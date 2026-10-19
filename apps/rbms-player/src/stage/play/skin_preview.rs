@@ -65,6 +65,7 @@ use crate::AppShared;
 use crate::skin_host::options::SettingsView;
 use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
 use crate::skin_host::play_timers::{FieldOffsets, PlayingFrame, SceneEvent};
+use crate::skin_host::score::standing::PacedScores;
 use crate::skin_preview::SampleStep;
 use crate::skin_screen::PlayDraw;
 use crate::skin_screen::preview::{PreviewDrawn, PreviewFrame, PreviewScene};
@@ -553,7 +554,7 @@ impl PlaySample {
     /// The scores the run is held against at `now_us`, as the skin's timers read them: no best of
     /// the player's, and the target the run is paced against.
     fn held_against(&self, config: &Config, now_us: i64) -> Standing {
-        Standing { now_us, best_score: 0, target_score: self.told(config).1, carried_combo: 0 }
+        Standing { now_us, best_score: 0, target_score: self.told(config).1, paced_now: PacedScores::EVEN, carried_combo: 0 }
     }
 
     /// Which lanes the hand has down, in lane order.
@@ -732,6 +733,7 @@ impl PlaySample {
             kind,
             best_score: 0,
             target_score,
+            paced_now: PacedScores::EVEN,
             judgements: self.feed.trace().sides(),
             lanes: LaneSettings {
                 hispeed,

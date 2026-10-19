@@ -2,6 +2,7 @@
 //! clock and the timing instrumentation. The PLAY screen itself lives in `stage::play`.
 #![allow(clippy::wildcard_imports)]
 use crate::assets::{bga_jobs, spawn_bga_decode};
+use crate::ghost::{GhostJob, GhostLoad, GhostSources};
 use crate::skin_host::overview::ChartOverview;
 use crate::stage::loading::{BgaLoad, ChartAssets};
 use crate::stage::{KeysoundLoad, LoadingState, PlayState, Stage, StageId, Transition};
@@ -124,6 +125,35 @@ impl PendingChart {
     /// Turn the parsed chart into the screen that plays it, now that its images are in.
     pub(crate) fn into_play(self, bga: std::collections::HashMap<i32, crate::DecodedImage>) -> PlayState {
         PlayState::new(self.session, bga, self.lntype, self.ln_mode_key)
+    }
+}
+
+/// Lay `model`'s notes out as a run of it plays them: its lanes arranged by `random` from `seed`,
+/// and its TOTAL settled, bmson's from its share of the notes now on the chart and the mode's own
+/// for a chart that states none. The long-note flavour has to be resolved first, since it decides
+/// how many notes there are. A TOTAL the run overrides is the caller's to put in afterwards.
+pub(crate) fn lay_out_notes(
+    model: &mut rbms_model::Model,
+    random: NoteOption,
+    seed: u64,
+    bmson: Option<&rbms_parser::bmson::BmsonChart>,
+    mode: &rbms_model::Mode,
+) {
+    rbms_chart::shuffle::apply(model, random, seed);
+    if let Some(chart) = bmson {
+        model.meta.total = chart.total_for_notes(mode, rbms_chart::count_playable_notes(model));
+    }
+    if model.meta.total <= 0.0 {
+        model.meta.total = default_total_for_mode(mode, rbms_chart::count_playable_notes(model));
+    }
+}
+
+/// The lanes SCRATCH AUTO plays by itself on a chart of `mode`: every turntable lane when it is
+/// on, and none when it is off.
+pub(crate) fn scratch_auto_lanes(mode: rbms_model::Mode, scratch_auto: bool) -> Vec<bool> {
+    match scratch_auto {
+        true => (0..mode.key).map(|lane| mode.is_scratch(lane)).collect(),
+        false => Vec::new(),
     }
 }
 
@@ -290,6 +320,9 @@ pub(crate) struct LoadedChart {
     pub(crate) chart: PendingChart,
     pub(crate) bga: Option<BgaLoad>,
     pub(crate) keysounds: Option<KeysoundLoad>,
+    /// The record runs this one is held against, being judged again from their replays
+    /// ([`crate::ghost`]). `None` when there is no such run to judge.
+    pub(crate) ghost: Option<GhostLoad>,
     /// What the chart says about itself, read before any lane option moved a note, for the screen
     /// that shows the chart while its files decode.
     pub(crate) overview: ChartOverview,
@@ -429,12 +462,14 @@ impl AppShared {
         }
         let mut model = decoded.model;
         let ln_mode_decides_flavour = rbms_chart::contains_undefined_long_note(&model);
-        rbms_chart::resolve_long_note_flavour(&mut model, judge_setup.ln_mode.resolve());
         let lntype = run_lntype(decoded.lnmode, judge_setup.ln_mode);
         let ln_mode_key = match ln_mode_decides_flavour {
             true => ln_mode_token(judge_setup.ln_mode).to_string(),
             false => SCORE_LN_MODE_FROM_CHART.to_string(),
         };
+        let ghost_sources = (!self.practice_requested).then(|| crate::ghost::ghost_sources(self, &decoded.md5, &ln_mode_key)).filter(GhostSources::any);
+        let ghost_model = ghost_sources.as_ref().map(|_| model.clone());
+        rbms_chart::resolve_long_note_flavour(&mut model, judge_setup.ln_mode.resolve());
         if self.practice_requested {
             self.practice_chart = Some(Box::new(PracticeChart {
                 model: model.clone(),
@@ -448,13 +483,7 @@ impl AppShared {
             }));
         }
         let mut overview = ChartOverview::of_model(&model);
-        rbms_chart::shuffle::apply(&mut model, random, seed);
-        if let Some(chart) = &decoded.bmson {
-            model.meta.total = chart.total_for_notes(&mode, rbms_chart::count_playable_notes(&model));
-        }
-        if model.meta.total <= 0.0 {
-            model.meta.total = default_total_for_mode(&mode, rbms_chart::count_playable_notes(&model));
-        }
+        lay_out_notes(&mut model, random, seed, decoded.bmson.as_deref(), &mode);
         overview.total = model.meta.total;
         let cancel = Arc::new(AtomicBool::new(false));
         self.audio_dead_at.set(None);
@@ -532,7 +561,11 @@ impl AppShared {
             }
         }
 
-        let auto_lanes: Vec<bool> = if self.config.play.scratch_auto { (0..mode.key).map(|lane| mode.is_scratch(lane)).collect() } else { Vec::new() };
+        let auto_lanes = scratch_auto_lanes(mode, self.config.play.scratch_auto);
+        let ghost = ghost_sources.zip(ghost_model).map(|(sources, model)| {
+            GhostJob { model, bmson: decoded.bmson, mode, md5: decoded.md5, replay_dir: self.replay_dir.clone(), sources, settled: self.saves.settled() }
+                .spawn()
+        });
         let options = SessionOptions {
             autoplay: self.run_plays_itself() && self.replay.is_none(),
             gauge: self.config.play.gauge,
@@ -548,7 +581,7 @@ impl AppShared {
         };
         let mut session = PlaySession::new(model, options);
         session.set_judge_setup(judge_setup);
-        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds, overview })
+        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds, ghost, overview })
     }
 
     /// Whether a skin can draw the play screen of a chart of `mode`: one is chosen for the mode, and
@@ -606,6 +639,11 @@ impl AppShared {
                 assets.mark_announced();
             }
             return assets.enter_preloading(self);
+        }
+        if loaded.bga.is_none() && loaded.keysounds.is_none() && loaded.ghost.is_some() {
+            let mut assets = ChartAssets::of(loaded);
+            assets.mark_announced();
+            return Stage::Loading(LoadingState::waiting_on(Box::new(assets)));
         }
         if loaded.bga.is_none() && loaded.keysounds.is_none() {
             let mut images = std::collections::HashMap::new();
@@ -1120,7 +1158,13 @@ pub(crate) fn loaded_chart_for_tests(bytes: &[u8], name: &str) -> LoadedChart {
     let decoded = decode_chart(bytes, name).expect("the fixture is a chart");
     let overview = ChartOverview::of_model(&decoded.model);
     let session = PlaySession::new(decoded.model, SessionOptions::default());
-    LoadedChart { chart: PendingChart { session, lntype: 0, ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string() }, bga: None, keysounds: None, overview }
+    LoadedChart {
+        chart: PendingChart { session, lntype: 0, ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string() },
+        bga: None,
+        keysounds: None,
+        ghost: None,
+        overview,
+    }
 }
 
 #[cfg(test)]

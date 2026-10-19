@@ -12,6 +12,7 @@ use rbms_skin::timer::{TIMER_OFF, TimerState};
 use super::*;
 use crate::skin_host::options::PlayedOptions;
 use crate::skin_host::score::GaugeReading;
+use crate::skin_host::score::standing::PacedScores;
 use crate::skin_host::{Cluster, INDEX_TIMING_AUTO_ADJUST, IdSpace, ROUTES, ScreenHost, clusters_of};
 
 /// Four notes on one key lane at 2.0, 2.5, 3.0 and 3.5 seconds, judged at the mode's stock widths.
@@ -51,6 +52,7 @@ fn live() -> PlayLive {
         kind: PlayKind::Play,
         best_score: 4,
         target_score: 6,
+        paced_now: PacedScores::EVEN,
         judgements: [Some(Judgement { judge: 2, timing_ms: -100 }), None, None],
         lanes: LaneSettings {
             hispeed: 2.0,

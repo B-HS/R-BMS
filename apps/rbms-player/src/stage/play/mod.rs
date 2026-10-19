@@ -66,10 +66,12 @@ mod trace;
 use crate::app_input::{ControlContext, ControlEffect, FixedSpeed, green_for_hispeed};
 use crate::app_play::schedule_position_us;
 use crate::app_result::{enter_result, run_target};
+use crate::ghost::{GhostPace, RunGhosts};
 use crate::keyconfig::{Shortcut, ShortcutScreen, mode_config_key};
 use crate::skin_host::options::SettingsView;
 use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
 use crate::skin_host::play_timers::{CHART_PREVIEW, FieldOffsets, PlayingFrame, SceneEvent};
+use crate::skin_host::score::standing::PacedScores;
 use crate::skin_screen::PlayDraw;
 use crate::stage::loading::ChartLoads;
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
@@ -77,7 +79,7 @@ use crate::target::ResolvedTarget;
 use crate::*;
 use controls::HeldControls;
 use field::FieldChart;
-use rbms_config::FixHiSpeed;
+use rbms_config::{FixHiSpeed, ScoreTarget};
 use rbms_render::playfield::LaneShade;
 use rbms_render::skin_render::frame::{
     BgaExpand, BgaPlayhead, BgaPreloadOrder, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS, GaugeScale, LaneNotes, first_lane_rect, lane_offsets,
@@ -246,6 +248,16 @@ pub(crate) struct PlayState {
     /// The best EX score the player had on the chart when that target was settled, which is what
     /// a skin's play screen holds the run against beside the target.
     best_score: u32,
+    /// The record runs of the chart judged again from their replays, until they are put to the
+    /// best and the target above ([`PlayState::attach_ghosts`]).
+    ghosts: Option<RunGhosts>,
+    /// The run of that best, note by note, when it could be judged again: the best then stands at
+    /// what that run had after as many notes as this one has judged, as the reference's ghost does
+    /// (`ScoreDataProperty.java:114-118`). `None` paces it evenly.
+    best_ghost: Option<Arc<GhostPace>>,
+    /// The same for the target: the run of a LOCAL BEST, or of an IR BEST played on this machine.
+    /// Every other target is paced evenly.
+    target_ghost: Option<Arc<GhostPace>>,
     /// The practice slice this run is, when it is one. The run ends at the slice's end time rather
     /// than at the last note, and an emptied gauge does not stop it ([`PlayState::set_practice`]).
     pub(crate) practice: Option<crate::practice::PracticeSession>,
@@ -329,6 +341,9 @@ impl PlayState {
             shade_moved_us: None,
             pace_target: None,
             best_score: 0,
+            ghosts: None,
+            best_ghost: None,
+            target_ghost: None,
             practice: None,
             scene: None,
             loads: None,
@@ -347,9 +362,13 @@ impl PlayState {
         }
     }
 
-    /// Hand this screen the decodes of its chart that are still running. A screen a skin draws
-    /// waits for them in its own loading state; they are polled from the frame it is entered on.
-    pub(crate) fn wait_for(&mut self, loads: ChartLoads) {
+    /// Hand this screen the decodes of its chart that are still running, and the record runs that
+    /// have been judged again already. A screen a skin draws waits for the rest in its own loading
+    /// state; they are polled from the frame it is entered on.
+    pub(crate) fn wait_for(&mut self, mut loads: ChartLoads) {
+        if let Some(ghosts) = loads.take_ghosts() {
+            self.ghosts = Some(ghosts);
+        }
         self.loads = (!loads.is_done()).then_some(loads);
     }
 
@@ -449,6 +468,58 @@ impl PlayState {
         let best = shared.scores.best_ex_for_md5_in_ln_mode(&md5, &self.ln_mode_key);
         self.best_score = best.unwrap_or_default();
         self.pace_target = Some(run_target(shared, &md5, total_notes, best));
+        self.attach_ghosts();
+    }
+
+    /// Put the record runs judged again to the best and the target, once both are in hand. Both
+    /// arrive before the chart starts -- the target is settled on the first frame, and the chart is
+    /// not started while the runs are still being judged -- so neither changes during the run.
+    ///
+    /// A run counts only when it is of this run's note count, as the reference uses its ghost only
+    /// then (`ScoreDataProperty.java:171-172`), and finished on the very score it stands for, so a
+    /// best or a ranking that moved after the chart was read is paced evenly rather than by another
+    /// run. A LOCAL BEST target is the best's own run; an IR BEST target the account's run, which is
+    /// the best's own when IR BEST stood in for it. A practice slice is paced evenly, as the
+    /// reference gives practice no ghost (`BMSPlayer.java:441-442`).
+    fn attach_ghosts(&mut self) {
+        let Some(target) = self.pace_target.as_ref() else {
+            return;
+        };
+        let Some(ghosts) = self.ghosts.take() else {
+            return;
+        };
+        if self.practice.is_some() {
+            return;
+        }
+        let total_notes = self.session.judge().total_notes();
+        let run_of =
+            |ghost: &Option<Arc<GhostPace>>, ex: u32| ghost.as_ref().filter(|ghost| ghost.total_notes() == total_notes && ghost.final_ex() == ex).cloned();
+        self.best_ghost = run_of(&ghosts.best, self.best_score);
+        self.target_ghost = match target.used {
+            ScoreTarget::LocalBest => run_of(&ghosts.best, target.ex),
+            ScoreTarget::IrBest => run_of(&ghosts.account, target.ex),
+            _ => None,
+        };
+    }
+
+    /// Where the best and the target stand after the notes judged so far, for each whose run is
+    /// known note by note.
+    fn paced_now(&self) -> PacedScores {
+        let judged = self.session.judge().total_judged();
+        PacedScores {
+            best: self.best_ghost.as_ref().map(|ghost| ghost.ex_after(judged)),
+            rival: self.target_ghost.as_ref().map(|ghost| ghost.ex_after(judged)),
+        }
+    }
+
+    /// The EX the target stands at after the notes judged so far: its run's, when it is known note
+    /// by note, and its final EX earned evenly otherwise.
+    fn target_ex_now(&self, target: &ResolvedTarget) -> i64 {
+        let judge = self.session.judge();
+        match &self.target_ghost {
+            Some(ghost) => i64::from(ghost.ex_after(judge.total_judged())),
+            None => pace_ex_at(target.ex, judge.total_judged(), judge.total_notes()),
+        }
     }
 
     /// The tempo this run's green number is held at ([`BpmStats::held`]), or `None` for a run that
@@ -836,6 +907,7 @@ impl PlayState {
             now_us: shared.skin_now_us(),
             best_score: self.best_score,
             target_score: self.pace_target.as_ref().map_or(0, |target| target.ex),
+            paced_now: self.paced_now(),
             carried_combo: self.carried_combo,
         }
     }
@@ -973,6 +1045,7 @@ impl PlayState {
             kind: self.kind(shared),
             best_score: standing.best_score,
             target_score: standing.target_score,
+            paced_now: standing.paced_now,
             judgements: feed.trace().sides(),
             lanes: LaneSettings {
                 hispeed: frame.hispeed as f32,
@@ -1251,11 +1324,16 @@ impl PlayState {
 
     /// Take in whatever the chart's decodes have finished since the last frame.
     fn poll_loads(&mut self, shared: &mut AppShared) {
-        if let Some(mut loads) = self.loads.take()
-            && !loads.poll(shared, &mut self.bga)
-        {
-            self.loads = Some(loads);
+        if let Some(mut loads) = self.loads.take() {
+            let done = loads.poll(shared, &mut self.bga);
+            if let Some(ghosts) = loads.take_ghosts() {
+                self.ghosts = Some(ghosts);
+            }
+            if !done {
+                self.loads = Some(loads);
+            }
         }
+        self.attach_ghosts();
     }
 
     /// How fast the chart is running against the scene clock, in percent: full speed, or whatever a
@@ -1461,6 +1539,7 @@ impl StageHandler for PlayState {
         if self.scene.is_some() {
             return self.update_scene(ctx);
         }
+        self.ensure_pace_target(ctx.shared);
         let song = self.tick_run(ctx);
         if self.run_is_over(song) {
             return enter_result(self, ctx.shared);
@@ -1608,10 +1687,7 @@ impl StageHandler for PlayState {
             judge_text_y: ctx.shared.config.display.judge_text_y,
             max_ex: j.total_notes() * 2,
             best_ex,
-            pace: self
-                .pace_target
-                .as_ref()
-                .map(|target| HudPace { name: &target.name, delta: j.ex_score as i64 - pace_ex_at(target.ex, j.total_judged(), j.total_notes()) }),
+            pace: self.pace_target.as_ref().map(|target| HudPace { name: &target.name, delta: j.ex_score as i64 - self.target_ex_now(target) }),
         };
         let playfield = PlayfieldView {
             timelines: self.session.field_timelines(),

@@ -25,6 +25,7 @@ use super::trace::{LaneHand, LongSpan, RunTrace, Seen, lane_long};
 use crate::skin_host::overview::ChartOverview;
 use crate::skin_host::play_timers::{HcnPass, Judgement, LaneKeys, PlaySetup, PlayTimerDriver, Reached, SceneEvent, judge_regions};
 use crate::skin_host::score::RunScore;
+use crate::skin_host::score::standing::PacedScores;
 use crate::stage::result::judge_area;
 
 /// How many of the run's latest judgements are kept for the strips a skin plots its timing on, which
@@ -78,6 +79,8 @@ pub(super) struct Standing {
     /// The best EX score the player had on the chart, and the target's.
     pub(super) best_score: u32,
     pub(super) target_score: u32,
+    /// Where those two stand by now, for one whose run is known note by note.
+    pub(super) paced_now: PacedScores,
     /// The combo the run began its chart with: what a course carried over from the stage before.
     pub(super) carried_combo: u32,
 }
@@ -228,7 +231,7 @@ impl SkinFeed {
         if seen.is_empty() {
             return false;
         }
-        let run = RunScore::of_session(session, standing.best_score, standing.target_score);
+        let run = RunScore::of_session(session, standing.best_score, standing.target_score, standing.paced_now);
         let stage_combo = self.trace.stage_combo(judge.combo, standing.carried_combo);
         let reached = Reached::of(&run.standing, judge.total_judged(), judge.total_notes(), stage_combo);
         let lane_count = self.driver.lanes().len();

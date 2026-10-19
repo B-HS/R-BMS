@@ -35,7 +35,7 @@ use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT, ScoreSlot, ScoreSnapshot
 
 use super::ClusterState;
 use super::result::snapshot::FinishedRun;
-use standing::{CUMULATIVE_RANK_STEPS, RANK_COUNT, ScoreSheet, ScoreStanding, TargetPace};
+use standing::{CUMULATIVE_RANK_STEPS, PacedScores, RANK_COUNT, ScoreSheet, ScoreStanding, TargetPace};
 
 pub mod standing;
 
@@ -104,12 +104,12 @@ impl RunScore {
     }
 
     /// The run so far of a live session, held against the best EX score the player had and the
-    /// target's. It is a plain value of the judge engine's tally and allocates nothing, so a play
-    /// screen can make it every frame.
-    pub fn of_session(session: &PlaySession, best_score: u32, rival_score: u32) -> RunScore {
+    /// target's, which stand by now where `now` says. It is a plain value of the judge engine's
+    /// tally and allocates nothing, so a play screen can make it every frame.
+    pub fn of_session(session: &PlaySession, best_score: u32, rival_score: u32, now: PacedScores) -> RunScore {
         let judge = session.judge();
         let sheet = ScoreSheet::of_engine(judge, session.model().mode);
-        let target = TargetPace { best_score, rival_score, total_notes: sheet.notes };
+        let target = TargetPace { best_score, rival_score, total_notes: sheet.notes, now };
         if judge.counts.iter().any(|count| *count > 0) { RunScore::in_progress(sheet, judge.total_judged(), target) } else { RunScore::unscored(sheet, target) }
     }
 }

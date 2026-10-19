@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::app_play::{LoadedChart, PendingChart};
+use crate::ghost::{GhostLoad, RunGhosts};
 use crate::stage::{Canvas, FrameCtx, KeyInput, PlayState, Stage, StageHandler, Transition};
 use crate::tablesrc::{TableStore, read_and_match_all};
 use crate::*;
@@ -95,7 +96,8 @@ pub(crate) struct BgaLoad {
 }
 
 /// The decodes of a parsed chart that are still running: its keysounds, its background images, or
-/// both. Either is `None` once it has finished, or when the chart named nothing of that kind.
+/// both, and the record runs it is held against being judged again ([`crate::ghost`]). Each is
+/// `None` once it has finished, or when the chart had nothing of that kind.
 ///
 /// Whichever screen is up while they run owns this: the LOADING screen, the decide scene, or the
 /// play screen itself while a skin draws its loading state.
@@ -103,12 +105,25 @@ pub(crate) struct BgaLoad {
 pub(crate) struct ChartLoads {
     bga: Option<BgaLoad>,
     keysounds: Option<KeysoundLoad>,
+    ghost: Option<GhostLoad>,
+    /// The record runs once they have been judged again, for the play screen to take.
+    ghosts: Option<RunGhosts>,
 }
 
 impl ChartLoads {
     /// The decodes a chart load started.
     pub(crate) fn new(bga: Option<BgaLoad>, keysounds: Option<KeysoundLoad>) -> ChartLoads {
-        ChartLoads { bga, keysounds }
+        ChartLoads { bga, keysounds, ghost: None, ghosts: None }
+    }
+
+    /// The same, waiting for the record runs being judged again too.
+    pub(crate) fn with_ghost(self, ghost: Option<GhostLoad>) -> ChartLoads {
+        ChartLoads { ghost, ..self }
+    }
+
+    /// The record runs, judged again, once they have arrived. They are handed over once.
+    pub(crate) fn take_ghosts(&mut self) -> Option<RunGhosts> {
+        self.ghosts.take()
     }
 
     /// Take everything that has arrived since the last frame: the keysounds into the audio bank and
@@ -124,12 +139,19 @@ impl ChartLoads {
         {
             self.bga = Some(load);
         }
+        if let Some(load) = self.ghost.take() {
+            match load.rx.try_recv() {
+                Ok(ghosts) => self.ghosts = Some(ghosts),
+                Err(TryRecvError::Empty) => self.ghost = Some(load),
+                Err(TryRecvError::Disconnected) => {}
+            }
+        }
         self.is_done()
     }
 
     /// Whether nothing is outstanding.
     pub(crate) fn is_done(&self) -> bool {
-        self.keysounds.is_none() && self.bga.is_none()
+        self.keysounds.is_none() && self.bga.is_none() && self.ghost.is_none()
     }
 
     /// Whether keysounds are still decoding.
@@ -191,13 +213,19 @@ impl ChartLoads {
         if let Some(load) = self.bga.as_ref() {
             steps.push(format!("{} / {} images", load.progress.load(Ordering::Relaxed).min(load.total), load.total));
         }
+        if self.ghost.is_some() {
+            steps.push("record run".to_string());
+        }
         steps.join("   ")
     }
 
-    /// Stop both decodes. The workers check between files, so an abandoned chart stops promptly
-    /// rather than decoding hundreds of samples nobody is going to hear.
+    /// Stop both decodes, and the judging of the record runs. The workers check between files, so an
+    /// abandoned chart stops promptly rather than decoding hundreds of samples nobody is going to
+    /// hear.
     pub(crate) fn stop(&self) {
-        for cancel in [self.keysounds.as_ref().map(|load| &load.cancel), self.bga.as_ref().map(|load| &load.cancel)].into_iter().flatten() {
+        let cancels =
+            [self.keysounds.as_ref().map(|load| &load.cancel), self.bga.as_ref().map(|load| &load.cancel), self.ghost.as_ref().map(|load| &load.cancel)];
+        for cancel in cancels.into_iter().flatten() {
             cancel.store(true, Ordering::Relaxed);
         }
     }
@@ -254,7 +282,8 @@ pub(crate) struct ChartAssets {
 impl ChartAssets {
     /// The load of a chart that has just been parsed, with nothing of it in yet.
     pub(crate) fn of(loaded: LoadedChart) -> ChartAssets {
-        ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), loads: ChartLoads::new(loaded.bga, loaded.keysounds), announced: false }
+        let loads = ChartLoads::new(loaded.bga, loaded.keysounds).with_ghost(loaded.ghost);
+        ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), loads, announced: false }
     }
 
     /// Note that the decide cue has been played for this chart, so the screen that starts the run
@@ -280,7 +309,9 @@ impl ChartAssets {
 
     /// The screen that plays this chart, now that everything it named is in.
     fn into_play(self) -> PlayState {
-        self.chart.into_play(self.images)
+        let mut play = self.chart.into_play(self.images);
+        play.wait_for(self.loads);
+        play
     }
 
     fn take_images(&mut self) -> std::collections::HashMap<i32, crate::DecodedImage> {

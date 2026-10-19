@@ -11,7 +11,7 @@ use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState, timer_i
 
 use super::*;
 use crate::skin_host::ScreenHost;
-use crate::skin_host::score::standing::{PointFamily, ScoreSheet, ScoreStanding, TargetPace};
+use crate::skin_host::score::standing::{PacedScores, PointFamily, ScoreSheet, ScoreStanding, TargetPace};
 
 /// A second on the scene clock.
 const SECOND_US: i64 = 1_000_000;
@@ -1083,7 +1083,7 @@ fn sheet(perfects: u32) -> ScoreSheet {
 
 #[test]
 fn what_a_run_has_reached_is_read_off_its_standing_the_way_the_reference_reads_it() {
-    let pace = TargetPace { best_score: 12, rival_score: 16, total_notes: 10 };
+    let pace = TargetPace { best_score: 12, rival_score: 16, total_notes: 10, now: PacedScores::EVEN };
     let cases = [
         (0, Reached { ..NO_REACH }),
         (6, Reached { best: true, ..NO_REACH }),
@@ -1101,7 +1101,7 @@ fn what_a_run_has_reached_is_read_off_its_standing_the_way_the_reference_reads_i
 
 #[test]
 fn a_full_combo_needs_every_note_gone_by_and_a_combo_as_long_as_the_chart() {
-    let standing = ScoreStanding::of(&sheet(10), 10, TargetPace { best_score: 0, rival_score: 0, total_notes: 10 });
+    let standing = ScoreStanding::of(&sheet(10), 10, TargetPace { best_score: 0, rival_score: 0, total_notes: 10, now: PacedScores::EVEN });
 
     assert!(Reached::of(&standing, 10, 10, 10).full_combo);
     assert!(!Reached::of(&standing, 10, 10, 9).full_combo, "a broken combo");
@@ -1110,7 +1110,7 @@ fn a_full_combo_needs_every_note_gone_by_and_a_combo_as_long_as_the_chart() {
 
 #[test]
 fn a_run_with_no_best_and_no_target_has_reached_both_from_its_first_judgement() {
-    let standing = ScoreStanding::of(&sheet(0), 1, TargetPace { best_score: 0, rival_score: 0, total_notes: 10 });
+    let standing = ScoreStanding::of(&sheet(0), 1, TargetPace { best_score: 0, rival_score: 0, total_notes: 10, now: PacedScores::EVEN });
 
     let reached = Reached::of(&standing, 1, 10, 0);
 

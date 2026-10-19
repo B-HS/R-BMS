@@ -6,7 +6,7 @@ use rbms_render::result::TargetView;
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT, NameSpace, ScoreSlot, ScoreSnapshot, reference_implements};
 
-use super::standing::{PointFamily, ScoreSheet, TargetPace};
+use super::standing::{PacedScores, PointFamily, ScoreSheet, TargetPace};
 use super::*;
 use crate::skin_host::ResultScene;
 use crate::skin_host::result::snapshot::{FinishedRun, GaugeEnds, PreviousScore, ResultInput, ResultSnapshot};
@@ -320,7 +320,7 @@ fn without_a_run_nothing_is_answered() {
 #[test]
 fn a_run_in_progress_is_rated_against_the_notes_gone_by() {
     let sheet = ScoreSheet { early: [2, 0, 0, 0, 0, 0], late: [1, 1, 0, 0, 0, 0], notes: 10, max_combo: 4, ..ScoreSheet::default() };
-    let run = RunScore::in_progress(sheet, 4, TargetPace { best_score: 11, rival_score: 14, total_notes: 10 });
+    let run = RunScore::in_progress(sheet, 4, TargetPace { best_score: 11, rival_score: 14, total_notes: 10, now: PacedScores::EVEN });
     let state = ScoreState { run: Some(&run), gauge: None };
 
     assert_eq!((state.integer(NUMBER_SCORE_RATE), state.integer(NUMBER_SCORE_RATE_AFTERDOT)), (Some(87), Some(50)), "87.5% of the notes gone by");
@@ -369,7 +369,7 @@ fn every_id_the_reference_implements_in_a_run_routed_to_this_cluster_is_answered
 #[test]
 fn the_ids_that_read_score_data_are_absent_until_the_first_judgement_and_a_fresh_field_reads_zero() {
     let sheet = ScoreSheet { notes: 10, ..ScoreSheet::default() };
-    let run = RunScore::unscored(sheet, TargetPace { best_score: 11, rival_score: 14, total_notes: 10 });
+    let run = RunScore::unscored(sheet, TargetPace { best_score: 11, rival_score: 14, total_notes: 10, now: PacedScores::EVEN });
     let state = ScoreState::of_play(&run, GaugeReading { value: 20.0, max: 100.0, kind: 2, live: true });
 
     let absent = [
@@ -420,11 +420,11 @@ fn a_live_session_makes_the_run_so_far_without_waiting_for_the_end() {
     let model = rbms_chart::to_model(&rbms_parser::parse(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n"), rbms_model::Mode::BEAT_7K);
     let mut session = PlaySession::new(model, rbms_play::SessionOptions::default());
     session.tick(rbms_play::SessionClock::at(1_000_000), &mut rbms_play::NullSink);
-    assert!(!RunScore::of_session(&session, 0, 0).scored);
+    assert!(!RunScore::of_session(&session, 0, 0, PacedScores::EVEN).scored);
 
     session.press(0, 2_000_000, &mut rbms_play::NullSink);
     session.press(0, 2_500_000 - 40_000, &mut rbms_play::NullSink);
-    let run = RunScore::of_session(&session, 3, 5);
+    let run = RunScore::of_session(&session, 3, 5, PacedScores::EVEN);
     let gauge = GaugeReading::of_engine(session.judge());
     let state = ScoreState::of_play(&run, gauge);
 

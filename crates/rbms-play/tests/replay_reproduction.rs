@@ -357,6 +357,30 @@ fn assert_frame_rate_does_not_matter(judge: JudgeSetup) {
     }
 }
 
+/// A replay played out in one step judges every note as the run it recorded did, in the same order:
+/// the same tally, the same judgments and the same list of consumed notes as a reproduction stepped
+/// at 1 ms and one stepped at 60 Hz. The gauge history is not compared: it runs to wherever the
+/// clock was stopped, and the stepped runs go on past the tail the one step stops at.
+#[test]
+fn playing_a_replay_out_in_one_step_judges_it_as_playing_it_frame_by_frame() {
+    let judge = JudgeSetup::default();
+    let (_, recorded) = play_on_frames(&frames(&[FRAME_STEPS_US[0]]), judge);
+    let mut played_out = PlaySession::new(frame_model(), SessionOptions { replay: Some(replay_of(recorded.clone())), ..options() });
+    played_out.set_judge_setup(judge);
+    played_out.play_out();
+    assert!(played_out.judge().vanished().len() >= 3, "the run must consume several notes");
+    for step_us in [FRAME_STEPS_US[0], FRAME_STEPS_US[2]] {
+        let mut stepped = PlaySession::new(frame_model(), SessionOptions { replay: Some(replay_of(recorded.clone())), ..options() });
+        stepped.set_judge_setup(judge);
+        for frame_us in frames(&[step_us]) {
+            stepped.tick(SessionClock::at(frame_us), &mut NullSink);
+        }
+        assert_eq!(played_out.summary(), stepped.summary(), "stepped every {step_us} us");
+        assert_eq!(played_out.judge().judged(), stepped.judge().judged(), "stepped every {step_us} us");
+        assert_eq!(played_out.judge().vanished(), stepped.judge().vanished(), "stepped every {step_us} us");
+    }
+}
+
 #[test]
 fn a_run_judges_the_same_at_every_frame_rate_and_so_does_its_replay() {
     assert_frame_rate_does_not_matter(JudgeSetup::default());

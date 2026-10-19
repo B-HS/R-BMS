@@ -814,6 +814,16 @@ impl PlaySession {
         self.analysis.position_us = target_us;
     }
 
+    /// Play the rest of the run out in one step, silently: every replay input still to come judged
+    /// at its own instant, then the clock settled past the last note and the tail after it. Since
+    /// nothing a run is judged by depends on where frames fall ([`PlaySession::tick`]), a replay
+    /// played out this way judges every note as it did when it was recorded, which is how a saved
+    /// run is judged again with no screen and no sound.
+    pub fn play_out(&mut self) {
+        let end_us = self.last_time_us() + PLAY_TAIL_US;
+        self.tick(SessionClock::at(end_us), &mut NullSink);
+    }
+
     /// Whether the run is over and the result is due: every note has gone past and the tail silence
     /// has elapsed. An analysis run never ends on its own — the player is scrubbing it.
     pub fn is_finished(&self, song_us: i64) -> bool {

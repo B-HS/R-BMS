@@ -32,6 +32,8 @@ pub(crate) struct RankingRow {
     pub(crate) lamp_color: Color,
     pub(crate) fast_slow: Option<(u32, u32)>,
     pub(crate) replay_id: Option<String>,
+    /// When the run was played, in milliseconds since the epoch, as the run itself reported it.
+    pub(crate) played_at: i64,
 }
 
 /// One chart's panel content: the leaderboard, the local player's row, and one row per rival
@@ -173,6 +175,7 @@ fn row_from_record(record: &ScoreRecord, fallback_rank: Option<u32>, replays: &H
         lamp_color,
         fast_slow: record.judge.as_ref().map(|judge| (judge.fast, judge.slow)),
         replay_id: replays.get(record.player.id.as_str()).map(|id| (*id).to_string()),
+        played_at: record.played_at,
     }
 }
 

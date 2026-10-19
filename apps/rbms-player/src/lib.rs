@@ -64,6 +64,7 @@ mod dialog;
 mod favorites;
 mod format;
 mod gamepad;
+mod ghost;
 mod gpu;
 mod input_debounce;
 mod ir_ext;

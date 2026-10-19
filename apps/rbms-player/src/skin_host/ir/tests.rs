@@ -191,7 +191,7 @@ fn every_number_and_option_the_reference_defines_in_a_run_routed_to_this_cluster
 
 fn row(lamp: ClearType, rank: Option<u32>) -> RankingRow {
     let (label, color) = clear_label_color(lamp);
-    RankingRow { rank, player: "Player".to_string(), ex_score: 100, lamp: label, lamp_color: color, fast_slow: None, replay_id: None }
+    RankingRow { rank, player: "Player".to_string(), ex_score: 100, lamp: label, lamp_color: color, fast_slow: None, replay_id: None, played_at: 0 }
 }
 
 /// A fetched board of seven scores: three failed, one clear, two hard clears and one max, with the

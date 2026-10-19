@@ -1800,7 +1800,7 @@ fn a_run_with_an_empty_poor_beside_every_note_never_grows_the_engines_lists() {
     const EMPTY_POOR_AFTER_US: i64 = 20_000;
     let notes: Vec<(usize, i64, NoteKind)> = (0..NOTES).map(|i| ((i % LANES) as usize, 1_000_000 + i * STEP_US, NoteKind::Normal)).collect();
     let mut e = JudgeEngine::from_model_for_mode(&lane_model(Mode::BEAT_7K, notes));
-    let (judged, touched) = (e.judged().as_ptr(), e.touched().as_ptr());
+    let (judged, touched, vanished) = (e.judged().as_ptr(), e.touched().as_ptr(), e.vanished().as_ptr());
     for i in 0..NOTES {
         let (lane, at_us) = ((i % LANES) as usize, 1_000_000 + i * STEP_US);
         e.press(lane, at_us);
@@ -1813,6 +1813,8 @@ fn a_run_with_an_empty_poor_beside_every_note_never_grows_the_engines_lists() {
     assert_eq!(e.judged().len() as i64, 2 * NOTES);
     assert_eq!(e.judged().as_ptr(), judged, "the list of judgments was grown during the run");
     assert_eq!(e.touched().as_ptr(), touched, "the list of touched notes was grown during the run");
+    assert_eq!(e.vanished().len() as i64, NOTES, "an empty POOR consumes nothing");
+    assert_eq!(e.vanished().as_ptr(), vanished, "the list of consumed notes was grown during the run");
 }
 
 /// A chart whose long notes state no flavour, played as charge notes, judges each head and each end
@@ -1835,11 +1837,13 @@ fn undefined_long_notes_played_as_charge_notes_never_grow_the_engines_lists() {
             .collect();
         let mut e = JudgeEngine::from_model_for_mode(&lane_model(Mode::BEAT_7K, notes));
         e.set_ln_mode(mode);
-        let (judged, touched) = (e.judged().as_ptr(), e.touched().as_ptr());
+        let (judged, touched, vanished) = (e.judged().as_ptr(), e.touched().as_ptr(), e.vanished().as_ptr());
         e.update(1_000_000 + LONG_NOTES * STEP_US + 1_000_000);
         assert_eq!(e.total_judged(), e.total_notes(), "{mode:?}: every head and end went by and was judged");
         assert_eq!(e.judged().as_ptr(), judged, "{mode:?}: the list of judgments was grown during the run");
         assert_eq!(e.touched().as_ptr(), touched, "{mode:?}: the list of touched notes was grown during the run");
+        assert_eq!(e.vanished().len() as u32, e.total_notes(), "{mode:?}: every head and end was consumed");
+        assert_eq!(e.vanished().as_ptr(), vanished, "{mode:?}: the list of consumed notes was grown during the run");
     }
 }
 
@@ -1921,4 +1925,39 @@ fn a_hell_charge_note_held_at_half_speed_ticks_on_the_players_time() {
         expected.update_with_rate(Judge::Great, ln::HCN_GAUGE_TICK_RATE);
     }
     assert_eq!(e.gauge.value(), expected.value(), "{TICKS} ticks of 200 ms of the player's time");
+}
+
+/// A run lists every note it consumed with the judgment that consumed it, in the order it did, as the
+/// reference keeps its ghost (`JudgeManager.java:641-644`): a PGREAT, a GREAT, a note let pass and
+/// a last PGREAT, and not the empty POOR pressed between them, which consumed nothing.
+#[test]
+fn a_run_lists_every_note_it_consumed_in_the_order_it_did() {
+    use rbms_model::{Mode, NoteKind};
+    const GREAT_LATE_US: i64 = 30_000;
+    const EMPTY_POOR_AFTER_US: i64 = 100_000;
+    const RUN_END_US: i64 = 6_000_000;
+    let notes = [1_000_000, 2_000_000, 3_000_000, 4_000_000].map(|at_us| (0, at_us, NoteKind::Normal)).to_vec();
+    let mut e = JudgeEngine::from_model_for_mode(&lane_model(Mode::BEAT_7K, notes));
+    assert_eq!(e.press(0, 1_000_000).map(|result| result.judge), Some(Judge::PerfectGreat));
+    assert_eq!(e.press(0, 1_000_000 + EMPTY_POOR_AFTER_US).map(|result| result.judge), Some(Judge::Miss));
+    assert_eq!(e.press(0, 2_000_000 + GREAT_LATE_US).map(|result| result.judge), Some(Judge::Great));
+    e.update(3_500_000);
+    assert_eq!(e.press(0, 4_000_000).map(|result| result.judge), Some(Judge::PerfectGreat));
+    e.update(RUN_END_US);
+    assert_eq!(e.vanished(), [Judge::PerfectGreat, Judge::Great, Judge::Poor, Judge::PerfectGreat]);
+    assert_eq!(e.vanished().len() as u32, e.total_judged());
+    let counted: Vec<Judge> = e.judged().iter().map(|judged| judged.judge).collect();
+    assert_eq!(counted, [Judge::PerfectGreat, Judge::Miss, Judge::Great, Judge::Poor, Judge::PerfectGreat], "the empty POOR is counted but consumes nothing");
+}
+
+/// Under [`MissCondition::One`] a note that took a pop'n BAD and then went by is consumed by a POOR
+/// the run does not count (`JudgeManager.java:641-649`): it is not among the judgments counted, and it
+/// still takes its place among the notes consumed.
+#[test]
+fn a_consumed_poor_that_is_not_counted_still_takes_its_place() {
+    let mut e = pms_note(1_000_000);
+    assert_eq!(e.press(0, 850_000).map(|result| result.judge), Some(Judge::Bad));
+    e.update(5_000_000);
+    assert_eq!(e.judged().iter().map(|judged| judged.judge).collect::<Vec<_>>(), [Judge::Bad]);
+    assert_eq!(e.vanished(), [Judge::Poor]);
 }

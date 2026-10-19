@@ -740,3 +740,23 @@ fn the_serialized_book_carries_only_the_record_list() {
     assert!(s.trim_start().starts_with("(\n    records: ["), "the file shape is unchanged: {s}");
     assert!(!s.contains("index"), "the md5 lookup index never reaches the file: {s}");
 }
+
+#[test]
+fn the_best_with_a_replay_is_the_oldest_run_of_the_best_score() {
+    let with_replay = |played_at: i64, ex: u32, file: Option<&str>| ScoreRecord { replay_file: file.map(str::to_string), ..rec("AA", played_at, ex) };
+    let mut book = ScoreBook::default();
+    book.push(with_replay(1, 30, Some("weaker.ron")));
+    book.push(with_replay(2, 40, None));
+    book.push(ScoreRecord { assisted: true, ..with_replay(3, 40, Some("assisted.ron")) });
+    book.push(ScoreRecord { ln_mode: "CN".into(), ..with_replay(4, 40, Some("charge.ron")) });
+    book.push(with_replay(5, 40, Some("second.ron")));
+    book.push(with_replay(6, 40, Some("third.ron")));
+    let best = book.best_record_with_replay_in_ln_mode("aa", SCORE_LN_MODE_FROM_CHART).and_then(|r| r.replay_file.as_deref());
+    assert_eq!(best, Some("second.ron"), "the first run of the best score kept no replay, so the next one of the same score stands in");
+    assert_eq!(book.best_record_with_replay_in_ln_mode("AA", "CN").and_then(|r| r.replay_file.as_deref()), Some("charge.ron"));
+    assert!(book.best_record_with_replay_in_ln_mode("BB", SCORE_LN_MODE_FROM_CHART).is_none());
+    let mut no_replay = ScoreBook::default();
+    no_replay.push(with_replay(1, 30, Some("weaker.ron")));
+    no_replay.push(with_replay(2, 40, None));
+    assert!(no_replay.best_record_with_replay_in_ln_mode("AA", SCORE_LN_MODE_FROM_CHART).is_none(), "a weaker run's replay is no stand-in for the best");
+}

@@ -7,11 +7,12 @@
 //! plays, a replay being watched and a stage of a course.
 
 use rbms_config::ScoreTarget;
-use rbms_play::SessionOptions;
+use rbms_play::{NullSink, SessionClock, SessionOptions};
 
 use super::*;
 use crate::app_result::record_tests::{HAND_OFFSETS_US, end_run, played_by_hand, recorded_model};
 use crate::skin_host::score::RunScore;
+use crate::skin_host::score::standing::PacedScores;
 use crate::target::{band_target_ex, max_ex};
 use crate::{App, Config, LaunchOptions};
 
@@ -59,7 +60,7 @@ fn a_run_with_no_local_best_is_paced_against_the_fallback_in_every_figure_the_sk
 
     let standing = state.standing(&app.shared);
     assert_eq!((standing.target_score, standing.best_score), (paced.ex, 0), "the timers are told another target than the HUD");
-    let run = RunScore::of_session(&state.session, standing.best_score, standing.target_score);
+    let run = RunScore::of_session(&state.session, standing.best_score, standing.target_score, standing.paced_now);
     assert_eq!(run.standing.rival_score, i32::try_from(paced.ex).expect("a small score"), "the figure over the judgement is of another target");
     assert!((run.standing.rival_rate - paced.ex as f32 / max_ex(total) as f32).abs() < 1e-6, "the score graph's bar is of another target");
 
@@ -131,3 +132,109 @@ fn autoplay_a_replay_and_a_course_stage_settle_the_target_as_a_run_by_hand_does(
     stage.shared.course_run = Some(rbms_course::CourseRun::new(rbms_course::Course { charts: vec![chart.clone(), chart], ..Default::default() }, 0.0));
     assert_eq!(paced_by(&mut run_of_the_recorded_chart(false), &stage), hand, "course");
 }
+
+/// Where the chart is stopped for the runs below to have judged some of its notes and not all.
+const PART_WAY_US: i64 = 3_600_000;
+
+/// The record runs of the recorded chart in `app`, judged again as the load judges them.
+fn ghosts_of(app: &App) -> crate::ghost::RunGhosts {
+    let model = recorded_model();
+    let sources = crate::ghost::ghost_sources(&app.shared, &model.md5, SCORE_LN_MODE_FROM_CHART);
+    let job = crate::ghost::GhostJob {
+        md5: model.md5.clone(),
+        mode: model.mode,
+        model,
+        bmson: None,
+        replay_dir: app.shared.replay_dir.clone(),
+        sources,
+        settled: app.shared.saves.settled(),
+    };
+    job.spawn().rx.recv().expect("the thread answers")
+}
+
+/// The recorded chart's run as the play screen takes it, with the record runs judged again handed to
+/// it as a load hands them over, and its target settled.
+fn run_paced_by_its_record_runs(app: &App) -> (PlayState, crate::target::ResolvedTarget) {
+    let mut state = run_of_the_recorded_chart(false);
+    state.ghosts = Some(ghosts_of(app));
+    let paced = paced_by(&mut state, app);
+    (state, paced)
+}
+
+/// Let the chart run up to [`PART_WAY_US`] with nobody playing, and answer how many notes it judged.
+fn let_part_of_it_go_by(state: &mut PlayState) -> u32 {
+    state.session.tick(SessionClock::at(PART_WAY_US), &mut NullSink);
+    let judge = state.session.judge();
+    assert!(judge.total_judged() > 0 && judge.total_judged() < judge.total_notes(), "the run must be part-way: {}", judge.total_judged());
+    judge.total_judged()
+}
+
+/// A run paced against its LOCAL BEST holds the best, in the HUD's score difference and in every
+/// figure the skin reads, at what the best run had scored after as many notes as this run has
+/// judged, rather than at its final score earned evenly; and a fixed target is still paced evenly
+/// beside a best that is not.
+#[test]
+fn a_run_paced_against_its_local_best_reads_the_best_runs_score_note_by_note() {
+    let mut app = app("ghost-best");
+    let best_run = played_by_hand(&HAND_OFFSETS_US, false);
+    let ghost = crate::ghost::GhostPace::of_judges(best_run.judge().vanished(), best_run.judge().total_notes());
+    end_run(&mut app.shared, best_run);
+
+    let (mut state, paced) = run_paced_by_its_record_runs(&app);
+    assert_eq!((paced.used, paced.ex), (ScoreTarget::LocalBest, ghost.final_ex()));
+    let judged = let_part_of_it_go_by(&mut state);
+    let total = state.session.judge().total_notes();
+    let best_by_now = ghost.ex_after(judged);
+    assert_ne!(i64::from(best_by_now), pace_ex_at(paced.ex, judged, total), "the fixture must tell the two paces apart");
+    assert_eq!(state.target_ex_now(&paced), i64::from(best_by_now), "the HUD's score difference");
+    let standing = state.standing(&app.shared);
+    assert_eq!(standing.paced_now, PacedScores { best: Some(best_by_now), rival: Some(best_by_now) });
+    let run = RunScore::of_session(&state.session, standing.best_score, standing.target_score, standing.paced_now);
+    assert_eq!((run.standing.now_best_score, run.standing.now_rival_score), (best_by_now as i32, best_by_now as i32));
+
+    app.shared.config.judge.target = ScoreTarget::RateAaa;
+    let (mut fixed, paced) = run_paced_by_its_record_runs(&app);
+    assert_eq!(paced.used, ScoreTarget::RateAaa);
+    let judged = let_part_of_it_go_by(&mut fixed);
+    assert_eq!(fixed.target_ex_now(&paced), pace_ex_at(paced.ex, judged, total), "a fixed target is earned evenly");
+    assert_eq!(fixed.standing(&app.shared).paced_now, PacedScores { best: Some(ghost.ex_after(judged)), rival: None });
+}
+
+/// A best whose run was not of this run's note count -- played with SCRATCH AUTO, which leaves the
+/// turntable notes out -- is paced evenly, as the reference uses a ghost only of the chart's own
+/// note count (`ScoreDataProperty.java:171-172`).
+#[test]
+fn a_scratch_auto_best_is_no_ghost_for_a_run_played_whole() {
+    let mut app = app("ghost-scratch-auto");
+    app.shared.config.play.scratch_auto = true;
+    end_run(&mut app.shared, played_by_hand(&HAND_OFFSETS_US, true));
+    app.shared.config.play.scratch_auto = false;
+    let ghosts = ghosts_of(&app);
+    let best = ghosts.best.clone().expect("the best run is judged again on its own notes");
+    let mut state = run_of_the_recorded_chart(false);
+    assert_ne!(best.total_notes(), state.session.judge().total_notes());
+    state.ghosts = Some(ghosts);
+    assert_eq!(paced_by(&mut state, &app).used, ScoreTarget::LocalBest);
+    assert!(state.best_ghost.is_none() && state.target_ghost.is_none());
+    assert_eq!(state.standing(&app.shared).paced_now, PacedScores::EVEN);
+}
+
+/// A practice slice is paced evenly whatever runs stand, as the reference gives practice no ghost
+/// (`BMSPlayer.java:441-442`).
+#[test]
+fn practice_is_never_paced_against_a_ghost() {
+    let mut app = app("ghost-practice");
+    end_run(&mut app.shared, played_by_hand(&HAND_OFFSETS_US, false));
+    let ghosts = ghosts_of(&app);
+    assert!(ghosts.best.is_some());
+    let mut state = run_of_the_recorded_chart(false);
+    let mut panel = crate::practice::PracticePanel::new(recorded_model().md5, rbms_model::Mode::BEAT_7K, PRACTICE_CHART_MS, None, PRACTICE_TOTAL);
+    state.set_practice(panel.start());
+    state.ghosts = Some(ghosts);
+    paced_by(&mut state, &app);
+    assert!(state.best_ghost.is_none() && state.target_ghost.is_none());
+}
+
+/// How long the practice panel above is told the chart is, and its TOTAL.
+const PRACTICE_CHART_MS: i32 = 8_000;
+const PRACTICE_TOTAL: f64 = 300.0;

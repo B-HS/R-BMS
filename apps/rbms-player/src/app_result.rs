@@ -1094,7 +1094,16 @@ mod tests {
     }
 
     fn ranking_row(player: &str, ex: u32) -> RankingRow {
-        RankingRow { rank: None, player: player.to_string(), ex_score: ex, lamp: "CLEAR", lamp_color: Color::GREEN, fast_slow: None, replay_id: None }
+        RankingRow {
+            rank: None,
+            player: player.to_string(),
+            ex_score: ex,
+            lamp: "CLEAR",
+            lamp_color: Color::GREEN,
+            fast_slow: None,
+            replay_id: None,
+            played_at: 0,
+        }
     }
 
     #[test]

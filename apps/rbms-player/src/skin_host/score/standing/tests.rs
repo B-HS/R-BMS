@@ -19,7 +19,7 @@ fn partial_sheet() -> ScoreSheet {
 }
 
 /// The best score the player had before, the target's, and the notes both were set over.
-const PACE: TargetPace = TargetPace { best_score: 11, rival_score: 14, total_notes: 10 };
+const PACE: TargetPace = TargetPace { best_score: 11, rival_score: 14, total_notes: 10, now: PacedScores::EVEN };
 
 #[test]
 fn a_sheet_adds_the_early_and_late_sides_and_scores_two_for_a_perfect_and_one_for_a_great() {
@@ -75,7 +75,7 @@ fn a_run_in_progress_is_rated_against_the_notes_gone_by_and_the_scores_are_paced
 #[test]
 fn a_rate_is_cut_not_rounded() {
     let sheet = ScoreSheet { early: [1, 0, 0, 0, 0, 0], late: [0; JUDGEMENT_KINDS], notes: 3, ..ScoreSheet::default() };
-    let standing = ScoreStanding::of(&sheet, 3, TargetPace { best_score: 3, rival_score: 4, total_notes: 3 });
+    let standing = ScoreStanding::of(&sheet, 3, TargetPace { best_score: 3, rival_score: 4, total_notes: 3, now: PacedScores::EVEN });
 
     assert_eq!((standing.rate_int, standing.rate_after_dot), (33, 33), "two EX over six is 33.33%");
     assert_eq!((standing.rival_rate_int, standing.rival_rate_after_dot), (66, 66), "and four over six is 66.66%, not 67");

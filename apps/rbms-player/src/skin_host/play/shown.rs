@@ -17,6 +17,7 @@ use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState, timer_id};
 
 use crate::skin_host::loading::{LoadingScreen, LoadingState};
 use crate::skin_host::options::PlayedOptions;
+use crate::skin_host::score::standing::PacedScores;
 use crate::skin_host::score::{GaugeReading, RunScore};
 
 /// How many sides a judgement is kept for: the first and second player's and the third's
@@ -158,6 +159,8 @@ pub struct PlayLive {
     /// The best EX score the player had on the chart before this run, and the target's.
     pub best_score: u32,
     pub target_score: u32,
+    /// Where those two stand by now, for one whose run is known note by note.
+    pub paced_now: PacedScores,
     /// The last judgement of each side, `None` for one that has not been judged yet. The third side
     /// is a third player's, which a run here never has.
     ///
@@ -209,7 +212,7 @@ impl PlayShown {
         let judge = session.judge();
         PlayShown {
             live: *live,
-            run: RunScore::of_session(session, live.best_score, live.target_score),
+            run: RunScore::of_session(session, live.best_score, live.target_score, live.paced_now),
             gauge: GaugeReading::of_engine(judge),
             qualified: judge.gauge.selected().is_cleared(),
             play_time_ms: i32::try_from(session.play_time_ms()).unwrap_or(i32::MAX),

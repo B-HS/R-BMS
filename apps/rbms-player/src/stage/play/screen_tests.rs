@@ -22,6 +22,7 @@ use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
 use super::scene::{PlayTimes, elapsed_ms};
 use super::*;
 use crate::app_play::{LoadedChart, loaded_chart_for_tests};
+use crate::ghost::RunGhosts;
 use crate::stage::capture::{app_in, at_a_stopped_instant, settings_of};
 use crate::stage::render_tests::FRAME_DT;
 use crate::stage::select::tests::{entry, press, release};
@@ -196,6 +197,14 @@ fn chart_still_loading() -> (LoadedChart, Arc<AtomicBool>, Arc<AtomicUsize>) {
     (LoadedChart { keysounds: Some(keysounds), ..loaded_chart_for_tests(CHART, CHART_NAME) }, cancel, progress)
 }
 
+/// The fixture chart parsed with nothing to decode, its record runs still being judged again, and
+/// what hands them over.
+fn chart_judging_its_record_runs() -> (LoadedChart, std::sync::mpsc::Sender<RunGhosts>) {
+    let (sender, rx) = std::sync::mpsc::channel();
+    let ghost = crate::ghost::GhostLoad { rx, cancel: Arc::new(AtomicBool::new(false)) };
+    (LoadedChart { ghost: Some(ghost), ..loaded_chart_for_tests(CHART, CHART_NAME) }, sender)
+}
+
 /// Enter the play screen the way the application does.
 fn enter(app: &mut App, play: PlayState) {
     app.switch(Transition::To(Stage::Play(Box::new(play))));
@@ -335,6 +344,49 @@ fn without_a_play_skin_a_chart_waits_on_the_loading_screen_and_starts_at_once() 
     app.switch(Transition::To(stage));
     assert_eq!(phase(&app), None, "a run no skin draws was given a scene");
     assert!(!app.shared.skin_timers.is_on(timer_id::READY));
+}
+
+/// A chart whose record runs are still being judged again waits for them on the LOADING screen,
+/// however little else it has to wait for, and the run starts with them in hand: the run is never
+/// held against them part of the way. It starts as a chart with nothing to decode does, with no
+/// decide cue of its own.
+#[test]
+fn without_a_play_skin_a_chart_waits_on_the_loading_screen_for_its_record_runs() {
+    let mut app = crate::stage::render_tests::app();
+    let mut pixels = canvas();
+    let (loading, sender) = chart_judging_its_record_runs();
+    let stage = app.shared.enter_loaded_chart(loading);
+    let Stage::Loading(waiting) = &stage else {
+        panic!("a chart whose record runs are being judged again started at once");
+    };
+    assert!(!waiting.plays_the_decide_cue());
+    app.switch(Transition::To(stage));
+    for _ in 0..SKIN_FRAMES {
+        assert!(matches!(frame(&mut app, &mut pixels), Transition::Stay), "the run started before its record runs were in");
+    }
+    sender.send(RunGhosts::default()).expect("the screen is waiting");
+    let Transition::To(Stage::Play(started)) = frame(&mut app, &mut pixels) else {
+        panic!("the run did not start once its record runs were in");
+    };
+    assert!(started.ghosts.is_some(), "the run started without its record runs");
+}
+
+/// With one, the play screen's own loading state waits for them as it waits for the files.
+#[test]
+fn with_a_play_skin_a_chart_loads_until_its_record_runs_are_in() {
+    let mut app = app_with_play_skin("record-runs");
+    let mut pixels = canvas();
+    let (loading, sender) = chart_judging_its_record_runs();
+    let stage = app.shared.enter_loaded_chart(loading);
+    assert!(matches!(stage, Stage::Play(_)));
+    app.switch(Transition::To(stage));
+    run_until_drawn(&mut app, &mut pixels);
+    stay_after(&mut app, &mut pixels, TIMES.loadend_ms * 3);
+    assert_eq!(phase(&app), Some(PlayPhase::Preload), "the chart became ready with its record runs still being judged");
+
+    sender.send(RunGhosts::default()).expect("the screen is waiting");
+    stay(&mut app, &mut pixels);
+    assert_eq!(phase(&app), Some(PlayPhase::Ready), "the chart did not become ready once its record runs were in");
 }
 
 /// With one, a chart goes to the play screen as soon as it is parsed, files still decoding or not,

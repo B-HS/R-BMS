@@ -53,7 +53,7 @@ fn pace_of_the_next_run(shared: &AppShared, total_notes: u32) -> crate::target::
 }
 
 fn ranking_row(player: &str, ex: u32) -> RankingRow {
-    RankingRow { rank: None, player: player.to_string(), ex_score: ex, lamp: "CLEAR", lamp_color: Color::GREEN, fast_slow: None, replay_id: None }
+    RankingRow { rank: None, player: player.to_string(), ex_score: ex, lamp: "CLEAR", lamp_color: Color::GREEN, fast_slow: None, replay_id: None, played_at: 0 }
 }
 
 /// Put a ranking of the recorded chart into the cache, as the browser's panel leaves one.

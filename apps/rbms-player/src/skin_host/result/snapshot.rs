@@ -20,7 +20,7 @@ use rbms_store::{ScoreBook, ScoreRecord};
 
 use crate::skin_host::ResultScene;
 use crate::skin_host::options::PlayedOptions;
-use crate::skin_host::score::standing::{PointFamily, ScoreSheet, TargetPace};
+use crate::skin_host::score::standing::{PacedScores, PointFamily, ScoreSheet, TargetPace};
 use crate::skin_host::score::{GaugeReading, RunScore};
 
 /// The first of the judgements that count as bad-poor, in the order a score keeps its counts: BAD,
@@ -219,6 +219,7 @@ impl ResultSnapshot {
             best_score: input.previous.ex_score,
             rival_score: input.target.as_ref().map_or(0, |target| target.ex),
             total_notes: input.sheet.notes,
+            now: PacedScores::EVEN,
         };
         ResultSnapshot {
             score: RunScore::finished(input.sheet, pace),

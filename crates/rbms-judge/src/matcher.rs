@@ -381,6 +381,11 @@ pub struct JudgeEngine {
     pass_notes: u32,
     /// Every judgment counted so far, oldest first. Nothing in the engine reads it back.
     judged: Vec<JudgedNote>,
+    /// The judgment of every note the run has consumed so far, in the order it consumed them: the
+    /// reference's `JudgeManager.ghost` (`JudgeManager.java:641-644`), written before a consumed
+    /// 見逃し POOR is left uncounted. Made room for one judgment per note object when the engine is
+    /// built, which is as many as a run can consume. Nothing in the engine reads it back.
+    vanished: Vec<Judge>,
     /// Every note whose marks may have changed since the engine was built, oldest first, once for
     /// each time. Nothing in the engine reads it back.
     ///
@@ -431,6 +436,7 @@ impl JudgeEngine {
             .collect();
         let total_notes = count_notes(&lanes);
         let room = judgment_room(&lanes);
+        let objects = count_objects(&lanes);
         let gauge_set = GaugeSetId::default();
         let gauge_total = DEFAULT_GAUGE_TOTAL;
         let gauge = GrooveGauge::new(gauge_set, GaugeKind::Normal, gauge_total, total_notes as usize);
@@ -479,6 +485,7 @@ impl JudgeEngine {
             pass_notes: 0,
             judged: Vec::with_capacity(room),
             touched: Vec::with_capacity(room),
+            vanished: Vec::with_capacity(objects),
         }
     }
 
@@ -776,6 +783,15 @@ impl JudgeEngine {
     /// Every judgment the run has counted, in the order it counted them. See [`JudgedNote`].
     pub fn judged(&self) -> &[JudgedNote] {
         &self.judged
+    }
+
+    /// The judgment of every note the run has consumed, in the order it consumed them: one for each
+    /// of the first [`total_judged`](Self::total_judged) notes, as the reference keeps them for its
+    /// ghost (`JudgeManager.java:641-644`). It differs from [`judged`](Self::judged) in what is
+    /// counted: a 空POOR consumes nothing and is not here, and a 見逃し POOR that consumed a note
+    /// it does not count, under [`MissCondition::One`], is.
+    pub fn vanished(&self) -> &[Judge] {
+        &self.vanished
     }
 
     /// The long notes `lane` has in hand right now. A lane the chart does not have has none.
@@ -1394,6 +1410,7 @@ impl JudgeEngine {
         let note = &mut self.lanes[lane].notes[idx];
         if vanish {
             self.pass_notes += 1;
+            self.vanished.push(judge);
             let state = judge as u8 + 1;
             if on_end {
                 note.end_state = state;
