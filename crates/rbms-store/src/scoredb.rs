@@ -11,6 +11,8 @@
 //! * `play_submission` and `ir_sync` — the submission body each play was finished with, and where
 //!   it stands with each score server it was sent to ([`SyncState`]). A play with no `ir_sync` row
 //!   for a server has never been confirmed there.
+//! * `play_trace` — what each play was note by note, kept with the play and sent once a server took
+//!   its score; where it stands with each server is in `ir_sync` beside the replay's state.
 //! * `course_submission` and `course_sync` — the same for a finished course: the body it was sent
 //!   as, and what each server answered ([`KeptCourse`]).
 //!
@@ -62,7 +64,9 @@ use schema::MODE_POPN_9K;
 pub use schema::{GAUGE_UNKNOWN, MODE_UNKNOWN, RANDOM_OFF, SCORE_DB_SCHEMA_VERSION, gauge_id, gauge_token, mode_id, mode_name, random_id, random_token};
 
 use crate::REFERENCE_RECORD_RULE_VERSION;
-pub use sync::{IrSyncRow, KeptSubmission, ReplayAnswer, ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, SyncCandidate, SyncState, SyncWalk};
+pub use sync::{
+    IrSyncRow, KeptSubmission, ReplayAnswer, ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, SyncCandidate, SyncState, SyncWalk, TraceAnswer, TraceState,
+};
 
 /// Everything that can go wrong reading or writing the score database.
 #[derive(Debug, thiserror::Error)]
@@ -418,6 +422,13 @@ impl ScoreDb {
         accumulate_day(&tx, log)?;
         tx.commit()?;
         Ok(id)
+    }
+
+    /// Keep `body`, a play trace with no score linked to it yet, as what the play `log_id` was note
+    /// by note, replacing one it had. It is a write of its own, after the play's
+    /// ([`ScoreDb::record_play_kept`]): a trace that cannot be kept costs the play nothing.
+    pub fn keep_trace(&mut self, log_id: i64, body: &str) -> Result<(), ScoreDbError> {
+        sync::insert_trace(&self.conn, log_id, body)
     }
 
     /// The stored bests of one chart in one long-note flavour.

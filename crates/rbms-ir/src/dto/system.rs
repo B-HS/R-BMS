@@ -18,6 +18,9 @@ pub struct ServerCapabilities {
     pub folders: bool,
     /// Account creation and login over the IR itself (`/auth/register`, `/auth/login`).
     pub accounts: bool,
+    /// What a run was note by note, taken with `/charts/{hash}/traces` once its score is stored. A
+    /// client sends a trace only to a server that lists the flag.
+    pub traces: bool,
     /// The server also speaks the legacy LR2IR wire format.
     pub lr2ir_compat: bool,
 }
@@ -90,6 +93,9 @@ mod tests {
         let with_folders: ServerCapabilities = serde_json::from_value(json!({ "folders": true })).unwrap();
         assert!(with_folders.folders);
         assert!(!c.lr2ir_compat);
+        assert!(!c.traces, "a server that does not list the flag takes no traces");
+        let with_traces: ServerCapabilities = serde_json::from_value(json!({ "traces": true })).unwrap();
+        assert!(with_traces.traces);
     }
 
     #[test]

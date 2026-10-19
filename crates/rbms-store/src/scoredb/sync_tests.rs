@@ -427,3 +427,118 @@ fn every_state_reads_back_from_its_token_and_an_unknown_one_is_sent_again() {
     assert_eq!(SyncState::from_token("future"), SyncState::Retry);
     assert_eq!(ReplayState::from_token("future"), ReplayState::Pending);
 }
+
+/// The trace lines of the `ir_sync` DDL, which a database written before traces were kept lacks.
+const TRACE_COLUMNS_DDL: &str =
+    "    trace_state     TEXT NOT NULL DEFAULT 'none',\n    trace_id        TEXT,\n    trace_error     TEXT,\n    trace_refused_under TEXT,\n";
+
+#[test]
+fn an_ir_sync_table_that_predates_the_trace_columns_gains_them_with_no_trace_kept() {
+    let dir = std::env::temp_dir().join(format!("rbms_scoredb_trace_columns_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("scoredb.sqlite");
+    {
+        let db = ScoreDb::open(&path).expect("opened");
+        let without = SCHEMA_SQL.replace(TRACE_COLUMNS_DDL, "");
+        assert_ne!(without, SCHEMA_SQL, "the fixture leaves the columns out");
+        db.conn.execute_batch(&without).expect("the older schema applies");
+        db.conn.execute("INSERT INTO scorelog(chart_key, mode, date) VALUES('aa', 7, 10)", []).expect("a play");
+        db.conn.execute("INSERT INTO ir_sync(log_id, server, state) VALUES(1, ?1, 'accepted')", [SERVER]).expect("a taken play");
+    }
+    let mut db = ScoreDb::open(&path).expect("reopened");
+    db.migrate().expect("the columns are added");
+    assert_eq!(db.migrate().expect("a second migration finds them there"), SCORE_DB_SCHEMA_VERSION);
+    let row = db.sync_states(SERVER).expect("reads").remove(&1).expect("the row");
+    assert_eq!((row.state, row.trace_state, row.trace_id), (SyncState::Accepted, ReplayState::None, None));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Store `log` and then `trace` as what it was note by note, as the player does.
+fn traced(db: &mut ScoreDb, log: &PlayLog, trace: &str) -> i64 {
+    let id = db.record_play_kept(log, true, None).expect("stored");
+    db.keep_trace(id, trace).expect("its trace kept");
+    id
+}
+
+#[test]
+fn a_trace_that_cannot_be_kept_leaves_the_play_it_belongs_to() {
+    let mut db = fresh();
+    db.conn.execute_batch("CREATE TRIGGER refuse_traces BEFORE INSERT ON play_trace BEGIN SELECT RAISE(ABORT, 'no traces'); END").expect("trigger");
+    let refused = db.record_play_kept(&play("aa", 10), true, None).expect("the play is stored on its own");
+    assert!(db.keep_trace(refused, "{}").is_err(), "the trace is refused");
+    assert_eq!(ids_of_plays(&db), [refused], "the play stays in the history without its trace");
+    assert_eq!(db.trace_body(refused).expect("reads"), None);
+
+    db.conn.execute_batch("DROP TRIGGER refuse_traces").expect("dropped");
+    db.keep_trace(refused, "{}").expect("kept once the database takes it");
+    let traced = traced(&mut db, &play("aa", 20), "{\"format\":\"rbms-trace\"}");
+    let plain = stored(&mut db, &play("bb", 30));
+    assert_eq!(db.trace_body(traced).expect("reads").as_deref(), Some("{\"format\":\"rbms-trace\"}"));
+    assert_eq!(db.trace_body(plain).expect("reads"), None);
+    let candidates = db.sync_candidates(&every(SERVER)).expect("reads");
+    let has_trace: Vec<(i64, bool)> = candidates.iter().map(|candidate| (candidate.log.id, candidate.has_trace)).collect();
+    assert_eq!(has_trace, [(refused, true), (traced, true), (plain, false)]);
+}
+
+fn ids_of_plays(db: &ScoreDb) -> Vec<i64> {
+    db.all_plays().expect("reads").iter().map(|log| log.id).collect()
+}
+
+#[test]
+fn trace_candidates_are_accepted_rows_with_a_trace_still_to_send() {
+    let mut db = fresh();
+    let pending = traced(&mut db, &play("aa", 10), "{}");
+    let failed = traced(&mut db, &play("bb", 20), "{}");
+    let uploaded = traced(&mut db, &play("cc", 30), "{}");
+    let untraced = stored(&mut db, &play("dd", 40));
+    let refused_score = traced(&mut db, &play("ee", 50), "{}");
+    let unsent = traced(&mut db, &play("ff", 60), "{}");
+    let written_late = traced(&mut db, &play("gg", 70), "{}");
+    let skipped = traced(&mut db, &play("hh", 80), "{}");
+    for (id, state) in [
+        (pending, ReplayState::Pending),
+        (failed, ReplayState::Failed),
+        (uploaded, ReplayState::Uploaded),
+        (untraced, ReplayState::Pending),
+        (written_late, ReplayState::None),
+        (skipped, ReplayState::Skipped),
+    ] {
+        db.put_sync_state(&IrSyncRow { score_id: Some(format!("sc_{id}")), trace_state: state, ..IrSyncRow::new(id, SERVER, ACCOUNT, SyncState::Accepted) })
+            .expect("written");
+    }
+    answered(&mut db, refused_score, SERVER, SyncState::Rejected);
+    let candidates = db.trace_candidates(&every(SERVER)).expect("reads");
+    assert_eq!(
+        ids(&candidates),
+        [pending, failed, written_late],
+        "{unsent} has no score on the server to link a trace to; {written_late} was taken before its trace was written"
+    );
+    assert_eq!(candidates[0].score_id.as_deref(), Some(format!("sc_{pending}").as_str()));
+    assert_eq!(candidates[1].trace_state, Some(ReplayState::Failed));
+    assert_eq!(ids(&db.trace_candidates(&SyncWalk { only: Some(&[failed]), ..every(SERVER) }).expect("reads")), [failed]);
+    assert!(db.trace_candidates(&SyncWalk { login_id: OTHER_ACCOUNT, ..every(SERVER) }).expect("reads").is_empty());
+}
+
+#[test]
+fn a_trace_refused_under_the_same_builds_is_not_sent_again_and_its_answer_leaves_the_rest() {
+    let mut db = fresh();
+    let id = traced(&mut db, &play("aa", 10), "{}");
+    let row = IrSyncRow {
+        score_id: Some("sc_1".into()),
+        replay_state: ReplayState::Uploaded,
+        replay_id: Some("rp_1".into()),
+        trace_state: ReplayState::Pending,
+        ..IrSyncRow::new(id, SERVER, ACCOUNT, SyncState::Accepted)
+    };
+    db.put_sync_state(&row).expect("written");
+    let refused = TraceAnswer { state: ReplayState::Rejected, trace_id: None, error: Some("mismatch"), refused_under: Some(BUILDS) };
+    db.put_trace_state(id, SERVER, &refused).expect("written");
+    assert!(db.trace_candidates(&SyncWalk { refused_under: Some(BUILDS), ..every(SERVER) }).expect("reads").is_empty());
+    assert_eq!(ids(&db.trace_candidates(&SyncWalk { refused_under: Some(NEXT_CLIENT_BUILDS), ..every(SERVER) }).expect("reads")), [id]);
+    let uploaded = TraceAnswer { state: ReplayState::Uploaded, trace_id: Some("tr_1"), error: None, refused_under: None };
+    db.put_trace_state(id, SERVER, &uploaded).expect("written");
+    let row = db.sync_states(SERVER).expect("reads").remove(&id).expect("the row");
+    assert_eq!((row.trace_state, row.trace_id.as_deref()), (ReplayState::Uploaded, Some("tr_1")));
+    assert_eq!((row.state, row.replay_id.as_deref()), (SyncState::Accepted, Some("rp_1")), "the score's and the replay's answers stand");
+    assert!(db.trace_candidates(&every(SERVER)).expect("reads").is_empty());
+}

@@ -66,10 +66,15 @@ const NETWORK_SECTIONS: &[Section] = &[
             SettingId::Login,
             SettingId::Register,
             SettingId::Logout,
+            SettingId::SyncSettings,
+            SettingId::UploadSettings,
+            SettingId::DownloadSettings,
         ],
     },
-    Section { heading: "SETTINGS SYNC", rows: &[SettingId::SyncSettings, SettingId::UploadSettings, SettingId::DownloadSettings] },
-    Section { heading: "SCORES", rows: &[SettingId::SyncRecords, SettingId::AutoUploadReplay, SettingId::Rivals, SettingId::IrProfiles] },
+    Section {
+        heading: "SCORES",
+        rows: &[SettingId::SyncRecords, SettingId::AutoUploadReplay, SettingId::AutoUploadTrace, SettingId::Rivals, SettingId::IrProfiles],
+    },
 ];
 
 const AUDIO_SECTIONS: &[Section] = &[
@@ -233,6 +238,9 @@ pub(crate) fn description(id: SettingId) -> &'static str {
             "Sends every run kept on this machine that the score server has not taken yet, with its replay. It also runs at start and on sign-in while you are signed in."
         }
         SettingId::AutoUploadReplay => "Sends the replay of a run to the score server after a score that was ranked.",
+        SettingId::AutoUploadTrace => {
+            "Sends what each run was note by note, its judgments, gauges and scroll changes, after the score server took its score. You see it, a rival you allow sees only its summary by section, and nobody else sees it. Every run keeps it on this machine either way."
+        }
         SettingId::Rivals => "The players shown beside you on a ranking. ENTER opens the list to add and remove them.",
         SettingId::IrProfiles => "More score servers every run is also sent to. ENTER opens the list to add, switch off and remove them.",
         SettingId::MasterVolume => "The volume of everything the player sounds, applied after the three below are mixed.",

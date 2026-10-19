@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use super::sync::KeptSubmission;
@@ -27,6 +28,11 @@ pub struct PendingRun {
     pub body: Option<String>,
     #[serde(default)]
     pub played_as: Option<String>,
+    /// What the play was note by note ([`ScoreDb::keep_trace`]). A file that holds a play the
+    /// history already has is there for its trace alone: the player keeps one on the side when the
+    /// trace of a stored play could not be written.
+    #[serde(default)]
+    pub trace: Option<String>,
 }
 
 impl PendingRun {
@@ -57,10 +63,12 @@ pub struct PendingImport {
 
 impl ScoreDb {
     /// Read every play kept on the side in `dir` into the database, oldest file name first, each in
-    /// the transaction [`ScoreDb::record_play_kept`] writes a play in, and remove its file once it is
-    /// in. A play the database already holds (its file was read in before but could not be removed)
-    /// is not read in again, only its file removed. A play the database refuses is reported and its
-    /// file left; the ones after it are still read in. A missing directory is nothing to import.
+    /// the transaction [`ScoreDb::record_play_kept`] writes a play in and its trace after it
+    /// ([`ScoreDb::keep_trace`]), and remove its file once both are in. A play the database already
+    /// holds (its file was read in before but could not be removed, or the file was kept for the
+    /// trace of a stored play) is not read in again: only its trace is kept, and its file removed. A
+    /// play or a trace the database refuses is reported and its file left, so the next import tries
+    /// again; the ones after it are still read in. A missing directory is nothing to import.
     pub fn import_pending_runs(&mut self, dir: &Path) -> Result<PendingImport, ScoreDbError> {
         let mut report = PendingImport::default();
         let entries = match std::fs::read_dir(dir) {
@@ -83,19 +91,31 @@ impl ScoreDb {
                 }
             };
             let kept = run.body.as_deref().map(|body| KeptSubmission { body, played_as: run.played_as.as_deref() });
-            let held = match self.holds_play(&run.log) {
+            let held = match self.held_play(&run.log) {
                 Ok(held) => held,
                 Err(e) => {
                     report.refused.push((file, e.to_string()));
                     continue;
                 }
             };
-            if !held {
-                if let Err(e) = self.record_play_kept(&run.log, run.updates_best, kept) {
-                    report.refused.push((file, e.to_string()));
-                    continue;
-                }
-                report.imported += 1;
+            let id = match held {
+                Some(id) => id,
+                None => match self.record_play_kept(&run.log, run.updates_best, kept) {
+                    Ok(id) => {
+                        report.imported += 1;
+                        id
+                    }
+                    Err(e) => {
+                        report.refused.push((file, e.to_string()));
+                        continue;
+                    }
+                },
+            };
+            if let Some(trace) = run.trace.as_deref()
+                && let Err(e) = self.keep_trace(id, trace)
+            {
+                report.refused.push((file, e.to_string()));
+                continue;
             }
             if std::fs::remove_file(&file).is_err() {
                 report.stuck.push(file);
@@ -104,13 +124,17 @@ impl ScoreDb {
         Ok(report)
     }
 
-    /// Whether the history already holds `log`: a play of the same chart, play mode and long-note
-    /// flavour that ended in the same second. Two plays of one chart cannot end in one second.
-    fn holds_play(&self, log: &PlayLog) -> Result<bool, ScoreDbError> {
-        Ok(self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM scorelog WHERE chart_key = ?1 AND mode = ?2 AND ln_mode = ?3 AND date = ?4)",
-            rusqlite::params![log.chart_key, log.mode, log.ln_mode, log.date],
-            |row| row.get(0),
-        )?)
+    /// The play of the history that `log` is, if it holds one: a play of the same chart, play mode
+    /// and long-note flavour that ended in the same second. Two plays of one chart cannot end in one
+    /// second.
+    fn held_play(&self, log: &PlayLog) -> Result<Option<i64>, ScoreDbError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM scorelog WHERE chart_key = ?1 AND mode = ?2 AND ln_mode = ?3 AND date = ?4 ORDER BY id LIMIT 1",
+                rusqlite::params![log.chart_key, log.mode, log.ln_mode, log.date],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 }

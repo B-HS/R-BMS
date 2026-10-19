@@ -98,7 +98,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let previous = PreviousScore::of_book(&shared.scores, &md5, &state.ln_mode_key);
     let standing_best_ex = shared.scores.best_ex_for_md5_in_ln_mode(&md5, &state.ln_mode_key);
 
-    let recorded = record_run(state, shared, &summary, record.avg_duration_us);
+    let recorded = record_run(state, shared, &summary, &record);
     let lamp = recorded.lamp;
     let (label, color) = clear_label_color(lamp);
     println!(
@@ -146,7 +146,8 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             let replay = recorded.recorded_replay.as_ref().and_then(|rp| shared.replay_upload_payload(rp, &chart, state.lntype));
             shared.spawn_profile_submits(&recorded.sub);
             if shared.multi_ir.legacy_index().is_some() {
-                let played = recorded.log_id.map(|log_id| (log_id, recorded.replay_plan));
+                let played =
+                    recorded.log_id.map(|log_id| crate::app_ranking::PlayedRun { log_id, replay_plan: recorded.replay_plan, trace_kept: recorded.trace_kept });
                 shared.spawn_score_submit(recorded.sub, replay, played);
             } else {
                 shared.ir_status = IrStatus::Sending;
@@ -187,6 +188,8 @@ pub(crate) struct RecordedRun {
     /// The `scorelog` row the run was stored as; `None` for a run that is no record (autoplay, a
     /// replay being watched, practice) or that could not be stored.
     log_id: Option<i64>,
+    /// Whether that row was stored with the run's trace ([`crate::play_trace`]).
+    trace_kept: bool,
     replay_file: Option<String>,
     recorded_replay: Option<Replay>,
     /// What is to become of the replay once the server takes the run ([`crate::app_ranking::LiveSubmit`]).
@@ -197,7 +200,8 @@ pub(crate) struct RecordedRun {
 }
 
 /// Keep a run that has just ended, as `summary` says it went: build its submission, save its replay,
-/// and store it in the history with the submission it is to be sent as.
+/// and store it in the history with the submission it is to be sent as and its play trace
+/// ([`crate::play_trace`]), which goes up once the server holds the score.
 ///
 /// The local record is written for every real interactive run, so history and replays survive
 /// without a score server; autoplay, a replay being watched and practice are excluded. The book the
@@ -213,8 +217,9 @@ pub(crate) struct RecordedRun {
 /// A run played on a TOTAL of the player's own is eased the way a widened judge eases it
 /// ([`crate::judged_wider`]): its lamp is an assist lamp and it sets no best, and its replay records
 /// the TOTAL so playback moves the gauge as the run did.
-fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::PlaySummary, avg_duration_us: i64) -> RecordedRun {
+fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::PlaySummary, record: &rbms_play::PlayRecord) -> RecordedRun {
     let play = &state.session;
+    let avg_duration_us = record.avg_duration_us;
     let chart = ChartRun {
         md5: play.model().md5.clone(),
         sha256: play.model().sha256.clone(),
@@ -355,6 +360,7 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         recorded_replay = Some(rp);
     }
     let mut log_id = None;
+    let mut trace_kept = false;
     if shared.replay.is_none() && !shared.run_plays_itself() && !practice {
         let finished = crate::scoredb_store::FinishedPlay {
             md5: &chart.md5,
@@ -376,15 +382,27 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         };
         let mut log = crate::scoredb_store::play_log(&finished);
         let body = submission_body(&sub);
+        let trace = trace_source(state, shared, record, sub.options.random);
         let played_as = shared.session.is_logged_in().then(|| shared.session.login_id()).flatten().map(str::to_string);
         let kept = body.as_deref().map(|body| KeptSubmission { body, played_as: played_as.as_deref() });
         log_id = shared.scoredb.as_mut().and_then(|db| crate::scoredb_store::record_finished_play(db, &log, scores_count, kept));
-        if log_id.is_none() {
-            let run = PendingRun { log: log.clone(), updates_best: scores_count, body, played_as };
-            if !keep_on_the_side(shared, &run, &format!("{played_ms}-{stem}{PENDING_RUN_SUFFIX}")) {
-                staged_replay = None;
-                replay_file = None;
-                log.replay_file = None;
+        let side_name = format!("{played_ms}-{stem}{PENDING_RUN_SUFFIX}");
+        let config_dir = shared.settings_path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+        match log_id {
+            Some(log_id) => {
+                trace_kept = true;
+                let run = PendingRun { log: log.clone(), updates_best: scores_count, body: None, played_as: None, trace: None };
+                let (db_path, _, _) = crate::scoredb_store::score_paths(&config_dir);
+                let on_the_side = crate::scoredb_store::pending_runs_dir(&config_dir).join(side_name);
+                shared.saves.keep_trace(trace, crate::save_worker::StoredRun { log_id, db_path, on_the_side, run });
+            }
+            None => {
+                let run = PendingRun { log: log.clone(), updates_best: scores_count, body, played_as, trace: None };
+                if !keep_on_the_side(shared, run, &side_name, trace) {
+                    staged_replay = None;
+                    replay_file = None;
+                    log.replay_file = None;
+                }
             }
         }
         log.id = log_id.unwrap_or_default();
@@ -399,7 +417,17 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         shared.saves.save_replay(file.clone(), rp.clone(), staged);
     }
 
-    RecordedRun { lamp, sub, log_id, replay_file, recorded_replay, replay_plan, block_reason, scratch_auto, custom_judge }
+    RecordedRun { lamp, sub, log_id, trace_kept, replay_file, recorded_replay, replay_plan, block_reason, scratch_auto, custom_judge }
+}
+
+/// What the trace of the run `state` holds is made of, whose record is `record`, with the lane
+/// option named as its submission names it: copied off the run here, laid out and written on the
+/// save thread ([`crate::play_trace::TraceSource`]).
+fn trace_source(state: &PlayState, shared: &AppShared, record: &rbms_play::PlayRecord, random: rbms_ir::RandomOption) -> crate::play_trace::TraceSource {
+    let play = &state.session;
+    let speed_end = crate::play_trace::speed_now(shared, play.model().init_bpm);
+    let run = crate::play_trace::TraceRun { mode: shared.mode.name, lntype: state.lntype, random, speed: &state.speed_log, speed_end };
+    crate::play_trace::TraceSource::of(play, record, run)
 }
 
 /// The submission a stored run is to be sent as, kept beside it so a later records sync sends
@@ -420,14 +448,14 @@ pub(crate) const RUN_KEPT_ON_THE_SIDE: &str = "score database not open: this run
 
 /// Keep a run the score database could not take in a file of its own, read in the next time the
 /// database opens ([`crate::scoredb_store::import_pending_runs`]), and say so: a run is never lost
-/// with the session. Returns whether the run was handed to the save thread; when it was not, the
-/// caller writes no replay for it and names none on its record, since no row will point at one.
-fn keep_on_the_side(shared: &AppShared, run: &PendingRun, name: &str) -> bool {
+/// with the session. Its trace is laid out and added to the file on the save thread. Returns
+/// whether the run was handed to the save thread; when it was not, the caller writes no replay for
+/// it and names none on its record, since no row will point at one.
+fn keep_on_the_side(shared: &AppShared, run: PendingRun, name: &str, trace: crate::play_trace::TraceSource) -> bool {
     let dir = crate::scoredb_store::pending_runs_dir(shared.settings_path.parent().unwrap_or_else(|| Path::new(".")));
     match run.to_ron() {
         Ok(text) => {
-            let path = dir.join(name);
-            shared.saves.save_text(crate::save_worker::Saving::PendingRun { file: path.clone() }, path, text);
+            shared.saves.keep_run_on_the_side(dir.join(name), run, text, trace);
             notify(Level::Error, RUN_KEPT_ON_THE_SIDE);
             true
         }
@@ -460,7 +488,7 @@ pub(crate) const LEFT_RUN_KEPT: &str = "run left mid-song kept as FAILED";
 /// run the engine played, a replay being watched and practice.
 pub(crate) fn record_left_run(state: &PlayState, shared: &mut AppShared) -> RecordedRun {
     let summary = state.session.summary().left_unfinished();
-    let recorded = record_run(state, shared, &summary, state.session.record().avg_duration_us);
+    let recorded = record_run(state, shared, &summary, &state.session.record());
     send_without_a_screen(shared, &recorded);
     notify(Level::Info, LEFT_RUN_KEPT);
     recorded
@@ -528,7 +556,7 @@ pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, sha
         return;
     }
     let summary = if ended { state.session.summary() } else { state.session.summary().left_unfinished() };
-    let recorded = record_run(state, shared, &summary, state.session.record().avg_duration_us);
+    let recorded = record_run(state, shared, &summary, &state.session.record());
     notify(Level::Info, QUIT_RUN_KEPT);
     if shared.course_run.is_none() {
         return;
@@ -598,7 +626,7 @@ pub(crate) fn record_retried_run(state: &PlayState, shared: &mut AppShared) {
         return;
     }
     let summary = state.session.summary();
-    let recorded = record_run(state, shared, &summary, state.session.record().avg_duration_us);
+    let recorded = record_run(state, shared, &summary, &state.session.record());
     send_without_a_screen(shared, &recorded);
     notify(Level::Info, RETRIED_RUN_KEPT);
 }

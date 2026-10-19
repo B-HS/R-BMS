@@ -297,6 +297,9 @@ pub(crate) struct PlayState {
     /// The chart as a skin's note field is shown it while CONSTANT or LEGACY NOTE is on, made over
     /// the first time a frame asks for it and again when either setting moves.
     field: Option<FieldChart>,
+    /// What the scroll settings did while the chart played, looked at once a frame, for the trace
+    /// the run keeps ([`crate::play_trace`]).
+    pub(crate) speed_log: crate::play_trace::SpeedLog,
 }
 
 /// The frame `PlaySession::bga_frame` reports before the chart's first background event, which is
@@ -359,6 +362,7 @@ impl PlayState {
             drawn: false,
             carried_combo,
             field: None,
+            speed_log: crate::play_trace::SpeedLog::default(),
         }
     }
 
@@ -1291,7 +1295,8 @@ impl PlayState {
 
 impl PlayState {
     /// Move the run on by one frame of the song clock: read the clock, hand the session what the
-    /// clock has reached, and answer where the chart now stands.
+    /// clock has reached, look at the scroll settings for the run's trace, and answer where the chart
+    /// now stands.
     ///
     /// In manual analysis the displayed song time comes from the virtual clock (pausable,
     /// rate-scaled); otherwise it follows the real (audio) clock, and analysis mirrors it so a
@@ -1319,6 +1324,7 @@ impl PlayState {
             (false, Some(audio)) => self.session.tick(clock, &mut PlayAudioSink::new(audio, anchor, practice_clock)),
             _ => self.session.tick(clock, &mut NullSink),
         }
+        self.speed_log.observe(crate::play_trace::speed_now(ctx.shared, self.session.model().init_bpm), whole_ms(song));
         song
     }
 

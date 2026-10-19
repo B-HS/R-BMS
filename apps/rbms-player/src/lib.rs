@@ -85,6 +85,7 @@ mod main_tests;
 mod notify;
 mod number_row;
 mod play_sink;
+mod play_trace;
 mod pointer;
 mod practice;
 mod record_sync;

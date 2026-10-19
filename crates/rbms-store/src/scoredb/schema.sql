@@ -132,10 +132,19 @@ CREATE TABLE IF NOT EXISTS ir_sync (
     replay_error    TEXT,
     refused_under   TEXT,
     replay_refused_under TEXT,
+    trace_state     TEXT NOT NULL DEFAULT 'none',
+    trace_id        TEXT,
+    trace_error     TEXT,
+    trace_refused_under TEXT,
     PRIMARY KEY (log_id, server)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ir_sync_server_state ON ir_sync(server, state);
+
+CREATE TABLE IF NOT EXISTS play_trace (
+    log_id INTEGER PRIMARY KEY,
+    body   TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS course_submission (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

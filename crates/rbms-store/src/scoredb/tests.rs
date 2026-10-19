@@ -663,7 +663,13 @@ fn replay_gc_keeps_a_replay_still_to_go_up() {
 fn plays_kept_on_the_side_are_read_in_and_their_files_removed() {
     let dir = temp_dir("pending");
     let mut db = fresh();
-    let run = PendingRun { log: play("aa", 10, 100), updates_best: true, body: Some("{\"kept\":1}".into()), played_as: Some(HOLD_ACCOUNT.into()) };
+    let run = PendingRun {
+        log: play("aa", 10, 100),
+        updates_best: true,
+        body: Some("{\"kept\":1}".into()),
+        played_as: Some(HOLD_ACCOUNT.into()),
+        trace: Some("{\"format\":\"rbms-trace\"}".into()),
+    };
     std::fs::write(dir.join(format!("10000-aa{PENDING_RUN_SUFFIX}")), run.to_ron().expect("serialises")).expect("written");
     std::fs::write(dir.join(format!("20000-bad{PENDING_RUN_SUFFIX}")), "<<< not ron >>>").expect("written");
     std::fs::write(dir.join("30000-aa.ron.1.2.tmp"), "a temp file").expect("written");
@@ -675,7 +681,10 @@ fn plays_kept_on_the_side_are_read_in_and_their_files_removed() {
     assert_eq!(history.len(), 1);
     assert_eq!(PlayLog { id: 0, ..history[0].clone() }, run.log);
     let walk = SyncWalk { server: HOLD_SERVER, login_id: HOLD_ACCOUNT, ..SyncWalk::default() };
-    assert_eq!(db.sync_candidates(&walk).expect("reads")[0].body.as_deref(), Some("{\"kept\":1}"));
+    let candidate = db.sync_candidates(&walk).expect("reads").remove(0);
+    assert_eq!(candidate.body.as_deref(), Some("{\"kept\":1}"));
+    assert!(candidate.has_trace, "the play is read in with its trace");
+    assert_eq!(db.trace_body(candidate.log.id).expect("reads").as_deref(), Some("{\"format\":\"rbms-trace\"}"));
     assert!(!dir.join(format!("10000-aa{PENDING_RUN_SUFFIX}")).exists());
     assert_eq!(db.import_pending_runs(&dir.join("absent")).expect("nothing").imported, 0);
     let _ = std::fs::remove_dir_all(&dir);
@@ -693,7 +702,7 @@ fn a_kept_play_the_database_refuses_does_not_hold_back_the_ones_after_it() {
     let poison = dir.join(format!("10000-poison{PENDING_RUN_SUFFIX}"));
     let later = dir.join(format!("20000-aa{PENDING_RUN_SUFFIX}"));
     for (path, chart) in [(&poison, "poison"), (&later, "aa")] {
-        let run = PendingRun { log: play(chart, 10, 100), updates_best: true, body: None, played_as: None };
+        let run = PendingRun { log: play(chart, 10, 100), updates_best: true, body: None, played_as: None, trace: None };
         std::fs::write(path, run.to_ron().expect("serialises")).expect("written");
     }
     let report = db.import_pending_runs(&dir).expect("the import goes on past a refused play");
@@ -712,7 +721,7 @@ fn a_kept_play_already_read_in_is_not_read_in_twice() {
     let dir = temp_dir("pending_twice");
     let mut db = fresh();
     let file = dir.join(format!("10000-aa{PENDING_RUN_SUFFIX}"));
-    let run = PendingRun { log: play("aa", 10, 100), updates_best: true, body: None, played_as: None };
+    let run = PendingRun { log: play("aa", 10, 100), updates_best: true, body: None, played_as: None, trace: None };
     let text = run.to_ron().expect("serialises");
     std::fs::write(&file, &text).expect("written");
     assert_eq!(db.import_pending_runs(&dir).expect("imported").imported, 1);
@@ -722,6 +731,31 @@ fn a_kept_play_already_read_in_is_not_read_in_twice() {
     assert_eq!(report.imported, 0, "the play was already in");
     assert_eq!(db.history("aa", 10).expect("reads").len(), 1, "the history holds the play once");
     assert_eq!(db.day_stats(i64::MIN, i64::MAX).expect("reads"), day, "the day's totals count it once");
+    assert!(!file.exists(), "its file is removed");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The trace of a stored play that could not be written goes on the side in a file of its play,
+/// and the import keeps the trace alone: the play is not read in twice. A trace the database still
+/// refuses leaves its file for the next import.
+#[test]
+fn the_trace_of_a_stored_play_kept_on_the_side_is_read_in_alone() {
+    let dir = temp_dir("pending_trace");
+    let mut db = fresh();
+    let log = play("aa", 10, 100);
+    let id = db.record_play_kept(&log, true, None).expect("the play is stored");
+    let file = dir.join(format!("10000-aa{PENDING_RUN_SUFFIX}"));
+    let run = PendingRun { log, updates_best: true, body: None, played_as: None, trace: Some("{\"format\":\"rbms-trace\"}".into()) };
+    std::fs::write(&file, run.to_ron().expect("serialises")).expect("written");
+    db.conn.execute_batch("CREATE TRIGGER refuse_traces BEFORE INSERT ON play_trace BEGIN SELECT RAISE(ABORT, 'no traces'); END").expect("trigger");
+    let refused = db.import_pending_runs(&dir).expect("the import goes on");
+    assert_eq!((refused.imported, refused.refused.len()), (0, 1), "the trace is refused and the play was already in");
+    assert!(file.exists(), "the file stays for the next import");
+    db.conn.execute_batch("DROP TRIGGER refuse_traces").expect("dropped");
+    let report = db.import_pending_runs(&dir).expect("imported");
+    assert_eq!((report.imported, report.refused.len()), (0, 0));
+    assert_eq!(db.history("aa", 10).expect("reads").len(), 1, "the history holds the play once");
+    assert_eq!(db.trace_body(id).expect("reads").as_deref(), Some("{\"format\":\"rbms-trace\"}"), "the trace is the stored play's");
     assert!(!file.exists(), "its file is removed");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -18,6 +18,10 @@ const CREATED: &str = "201 Created";
 const OK: &str = "200 OK";
 const NOT_FOUND: &str = "404 Not Found";
 
+/// What the capturing server says it is on `/health`: the deployment's own answer, with the flag that
+/// says it takes traces.
+const HEALTH: &str = r#"{"name":"rbms-ir","version":"0.1.0","ir_compat":"superset-1","capabilities":{"ranking":true,"player_best":true,"rivals":true,"courses":true,"replays":true,"tables":true,"settings_sync":true,"folders":true,"accounts":true,"lr2ir_compat":false,"traces":true}}"#;
+
 /// The `updated_at` the capturing server says it stored a settings blob under.
 const STORED_SETTINGS_STAMP: i64 = 1;
 
@@ -38,8 +42,9 @@ pub(super) struct Request {
     pub(super) body: String,
 }
 
-/// A score server on loopback. It takes every score, course and replay as new, stores every
-/// settings blob, knows nothing else, and hands on each request it was sent in the order they came.
+/// A score server on loopback. It says it takes traces, takes every score, course, replay and trace
+/// as new, stores every settings blob, knows nothing else, and hands on each request it was sent in
+/// the order they came.
 pub(super) struct CaptureServer {
     pub(super) base: String,
     requests: Receiver<Request>,
@@ -120,6 +125,8 @@ fn answer(request: &Request, nth: u32) -> String {
         ("POST", path) if path.starts_with("/charts/") && path.ends_with("/replays") => {
             (CREATED, format!(r#"{{"id":"rp_{nth}","url":"/replays/rp_{nth}","event_count":0}}"#))
         }
+        ("POST", path) if path.starts_with("/charts/") && path.ends_with("/traces") => (CREATED, format!(r#"{{"id":"tr_{nth}"}}"#)),
+        ("GET", "/health") => (OK, HEALTH.to_owned()),
         ("PUT", path) if path.contains("/settings/") => (OK, format!(r#"{{"updated_at":{STORED_SETTINGS_STAMP}}}"#)),
         _ => (NOT_FOUND, r#"{"success":false,"error":{"code":"NOT_FOUND","message":"not found"}}"#.to_owned()),
     };

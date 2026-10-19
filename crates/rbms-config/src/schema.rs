@@ -790,6 +790,10 @@ pub struct NetworkOptions {
     pub sync_settings: bool,
     /// Upload the saved replay of a ranked submission right after the score lands.
     pub auto_upload_replay: bool,
+    /// Upload what each run was note by note (its judgments, gauges and scroll changes) once the
+    /// server holds its score, for the analyses the account alone reads. The run keeps it on this
+    /// machine either way.
+    pub auto_upload_trace: bool,
     /// Cached rival player ids, refreshed from the server on login and after a rival edit.
     pub rivals: Vec<String>,
     /// Extra score servers a score is submitted to alongside `server_url`. Empty keeps the
@@ -827,6 +831,7 @@ impl Default for NetworkOptions {
             ir_email: None,
             sync_settings: false,
             auto_upload_replay: true,
+            auto_upload_trace: true,
             rivals: Vec::new(),
             ir_profiles: Vec::new(),
         }

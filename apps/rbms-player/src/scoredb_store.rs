@@ -218,7 +218,8 @@ pub(crate) fn play_log(play: &FinishedPlay<'_>) -> PlayLog {
 /// Record a finished run with the submission it is to be sent as, in one transaction, reporting
 /// rather than propagating a write failure: a score that cannot be stored must not cost the player
 /// the result screen. Returns the `scorelog` id the run was stored under, or `None` when it was not
-/// stored.
+/// stored. The run's trace is kept after it, on the save thread
+/// ([`crate::save_worker::SaveWorker::keep_trace`]).
 ///
 /// `updates_best` is decision 12's score flag — `crate::updates_score` — and is passed rather than
 /// re-derived. The book reads the same answer back off the row ([`rbms_store::sets_best`] of its

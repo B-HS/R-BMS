@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use rusqlite::types::Value;
-use rusqlite::{Row, params, params_from_iter};
+use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use super::migrate::ASSIST_UNRECORDED;
 use super::rows::{log_columns_of, log_from_row};
@@ -116,6 +116,14 @@ impl ReplayState {
     }
 }
 
+/// Where a play's trace stands with one score server: the same states a replay goes through
+/// ([`ReplayState`]), read for the trace. [`ReplayState::None`] is a play the server took while it
+/// had no trace kept (none at all, or one the save thread had not written yet, which a later sync
+/// still sends), [`ReplayState::Pending`] one still to go up (the upload switched off, or the server
+/// not taking traces yet, included), and [`ReplayState::Skipped`] one that is never sent: too large
+/// to send, or taken by a server that named no score to link it to.
+pub type TraceState = ReplayState;
+
 /// One `ir_sync` row: what one score server last answered about one play.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrSyncRow {
@@ -150,6 +158,13 @@ pub struct IrSyncRow {
     pub refused_under: Option<String>,
     /// The same for a refusal of the replay.
     pub replay_refused_under: Option<String>,
+    pub trace_state: TraceState,
+    /// The id the server stored the trace under.
+    pub trace_id: Option<String>,
+    /// The last thing that went wrong with the trace.
+    pub trace_error: Option<String>,
+    /// The builds a refusal of the trace was given under.
+    pub trace_refused_under: Option<String>,
 }
 
 impl IrSyncRow {
@@ -172,6 +187,10 @@ impl IrSyncRow {
             replay_error: None,
             refused_under: None,
             replay_refused_under: None,
+            trace_state: ReplayState::None,
+            trace_id: None,
+            trace_error: None,
+            trace_refused_under: None,
         }
     }
 
@@ -193,6 +212,10 @@ impl IrSyncRow {
             replay_error: row.get("replay_error")?,
             refused_under: row.get("refused_under")?,
             replay_refused_under: row.get("replay_refused_under")?,
+            trace_state: ReplayState::from_token(&row.get::<_, String>("trace_state")?),
+            trace_id: row.get("trace_id")?,
+            trace_error: row.get("trace_error")?,
+            trace_refused_under: row.get("trace_refused_under")?,
         })
     }
 }
@@ -208,6 +231,12 @@ pub struct KeptSubmission<'a> {
 /// Keep `kept` as the body the play `log_id` is sent as, replacing one it had.
 pub(super) fn insert_submission(conn: &rusqlite::Connection, log_id: i64, kept: KeptSubmission<'_>) -> Result<(), ScoreDbError> {
     conn.execute("INSERT OR REPLACE INTO play_submission(log_id, body, played_as) VALUES(?1, ?2, ?3)", params![log_id, kept.body, kept.played_as])?;
+    Ok(())
+}
+
+/// Keep `body` as the trace of the play `log_id`, replacing one it had.
+pub(super) fn insert_trace(conn: &rusqlite::Connection, log_id: i64, body: &str) -> Result<(), ScoreDbError> {
+    conn.execute("INSERT OR REPLACE INTO play_trace(log_id, body) VALUES(?1, ?2)", params![log_id, body])?;
     Ok(())
 }
 
@@ -243,6 +272,10 @@ pub struct SyncCandidate {
     pub state: Option<SyncState>,
     pub score_id: Option<String>,
     pub replay_state: Option<ReplayState>,
+    /// Whether the play kept a trace ([`ScoreDb::keep_trace`]); the trace itself is read when it is
+    /// sent ([`ScoreDb::trace_body`]).
+    pub has_trace: bool,
+    pub trace_state: Option<TraceState>,
 }
 
 impl SyncCandidate {
@@ -254,6 +287,8 @@ impl SyncCandidate {
             state: row.get::<_, Option<String>>("sync_state")?.as_deref().map(SyncState::from_token),
             score_id: row.get("sync_score_id")?,
             replay_state: row.get::<_, Option<String>>("sync_replay_state")?.as_deref().map(ReplayState::from_token),
+            has_trace: row.get("has_trace")?,
+            trace_state: row.get::<_, Option<String>>("sync_trace_state")?.as_deref().map(ReplayState::from_token),
         })
     }
 }
@@ -340,6 +375,56 @@ impl ScoreDb {
         self.query_candidates(&sql, bound)
     }
 
+    /// The plays the server holds whose trace is still to go up to it: taken under the walk's
+    /// account, with a trace kept, and an upload pending, failed or refused, or none asked for yet
+    /// because the trace was written after the server took the play ([`TraceState`]) — but for one
+    /// the server refused under the builds the walk sends under ([`SyncWalk::refused_under`]). A walk
+    /// narrowed to some plays ([`SyncWalk::only`]) picks among them alone.
+    pub fn trace_candidates(&self, walk: &SyncWalk<'_>) -> Result<Vec<SyncCandidate>, ScoreDbError> {
+        let still_to_send: Vec<&str> =
+            ReplayState::ALL.into_iter().filter(|state| state.still_to_send() || *state == ReplayState::None).map(ReplayState::as_token).collect();
+        let mut bound: Vec<Value> =
+            vec![Value::from(walk.server.to_string()), Value::from(SyncState::Accepted.as_token().to_string()), Value::from(walk.login_id.to_string())];
+        let states = placeholders_from(bound.len() + 1, still_to_send.len());
+        bound.extend(still_to_send.into_iter().map(|token| Value::from(token.to_string())));
+        let mut narrowed = String::new();
+        if let Some(ids) = walk.only {
+            let first = bound.len() + 1;
+            bound.extend(ids.iter().map(|id| Value::from(*id)));
+            narrowed.push_str(&format!(" AND l.id IN ({})", placeholders_from(first, ids.len())));
+        }
+        if let Some(up_to) = walk.up_to {
+            bound.push(Value::from(up_to));
+            narrowed.push_str(&format!(" AND l.id <= ?{}", bound.len()));
+        }
+        if let Some(key) = walk.refused_under {
+            bound.push(Value::from(ReplayState::Rejected.as_token().to_string()));
+            bound.push(Value::from(key.to_string()));
+            narrowed.push_str(&format!(" AND NOT COALESCE(y.trace_state = ?{} AND y.trace_refused_under = ?{}, 0)", bound.len() - 1, bound.len()));
+        }
+        let sql = format!(
+            "{} WHERE y.state = ?2 AND y.login_id = ?3 AND EXISTS(SELECT 1 FROM play_trace t WHERE t.log_id = l.id) AND y.trace_state IN ({states}){narrowed} \
+             ORDER BY l.date ASC, l.id ASC",
+            candidate_select(),
+        );
+        self.query_candidates(&sql, bound)
+    }
+
+    /// The trace kept for the play `log_id`, as it was kept: with no score linked to it yet.
+    pub fn trace_body(&self, log_id: i64) -> Result<Option<String>, ScoreDbError> {
+        Ok(self.conn.query_row("SELECT body FROM play_trace WHERE log_id = ?1", params![log_id], |row| row.get(0)).optional()?)
+    }
+
+    /// Write what a server answered about a play's trace, leaving the score's and the replay's
+    /// columns as they are.
+    pub fn put_trace_state(&mut self, log_id: i64, server: &str, answer: &TraceAnswer<'_>) -> Result<(), ScoreDbError> {
+        self.conn.execute(
+            "UPDATE ir_sync SET trace_state = ?3, trace_id = ?4, trace_error = ?5, trace_refused_under = ?6 WHERE log_id = ?1 AND server = ?2",
+            params![log_id, server, answer.state.as_token(), answer.trace_id, answer.error, answer.refused_under],
+        )?;
+        Ok(())
+    }
+
     fn query_candidates(&self, sql: &str, bound: Vec<Value>) -> Result<Vec<SyncCandidate>, ScoreDbError> {
         let mut stmt = self.conn.prepare(sql)?;
         let rows = stmt.query_map(params_from_iter(bound), SyncCandidate::from_row)?;
@@ -351,13 +436,16 @@ impl ScoreDb {
     pub fn put_sync_state(&mut self, row: &IrSyncRow) -> Result<(), ScoreDbError> {
         self.conn.execute(
             "INSERT INTO ir_sync(log_id, server, login_id, state, score_id, http_status, error_code, error_field, error_reason, attempts, \
-             last_attempt_at, replay_state, replay_id, replay_error, refused_under, replay_refused_under) \
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13, ?14, ?15) \
+             last_attempt_at, replay_state, replay_id, replay_error, refused_under, replay_refused_under, trace_state, trace_id, trace_error, \
+             trace_refused_under) \
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) \
              ON CONFLICT(log_id, server) DO UPDATE SET login_id = excluded.login_id, state = excluded.state, score_id = excluded.score_id, \
              http_status = excluded.http_status, error_code = excluded.error_code, error_field = excluded.error_field, \
              error_reason = excluded.error_reason, attempts = ir_sync.attempts + 1, last_attempt_at = excluded.last_attempt_at, \
              replay_state = excluded.replay_state, replay_id = excluded.replay_id, replay_error = excluded.replay_error, \
-             refused_under = excluded.refused_under, replay_refused_under = excluded.replay_refused_under",
+             refused_under = excluded.refused_under, replay_refused_under = excluded.replay_refused_under, \
+             trace_state = excluded.trace_state, trace_id = excluded.trace_id, trace_error = excluded.trace_error, \
+             trace_refused_under = excluded.trace_refused_under",
             params![
                 row.log_id,
                 row.server,
@@ -374,6 +462,10 @@ impl ScoreDb {
                 row.replay_error,
                 row.refused_under,
                 row.replay_refused_under,
+                row.trace_state.as_token(),
+                row.trace_id,
+                row.trace_error,
+                row.trace_refused_under,
             ],
         )?;
         Ok(())
@@ -433,11 +525,22 @@ pub struct ReplayAnswer<'a> {
     pub refused_under: Option<&'a str>,
 }
 
-/// The select every candidate query starts from: the play's own columns, its kept body, and its row
-/// for the server bound to `?1`.
+/// What a server answered about one play's trace ([`ScoreDb::put_trace_state`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TraceAnswer<'a> {
+    pub state: TraceState,
+    pub trace_id: Option<&'a str>,
+    pub error: Option<&'a str>,
+    /// The builds a refusal was given under ([`IrSyncRow::trace_refused_under`]).
+    pub refused_under: Option<&'a str>,
+}
+
+/// The select every candidate query starts from: the play's own columns, its kept body, whether it
+/// kept a trace, and its row for the server bound to `?1`.
 fn candidate_select() -> String {
     format!(
-        "SELECT {}, s.body AS body, s.played_as AS played_as, y.state AS sync_state, y.score_id AS sync_score_id, y.replay_state AS sync_replay_state \
+        "SELECT {}, s.body AS body, s.played_as AS played_as, y.state AS sync_state, y.score_id AS sync_score_id, y.replay_state AS sync_replay_state, \
+         y.trace_state AS sync_trace_state, EXISTS(SELECT 1 FROM play_trace t WHERE t.log_id = l.id) AS has_trace \
          FROM scorelog l LEFT JOIN play_submission s ON s.log_id = l.id LEFT JOIN ir_sync y ON y.log_id = l.id AND y.server = ?1",
         log_columns_of("l")
     )

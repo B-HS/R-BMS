@@ -249,6 +249,7 @@ pub enum SettingId {
     DownloadSettings,
     SyncRecords,
     AutoUploadReplay,
+    AutoUploadTrace,
     Rivals,
     IrProfiles,
     MasterVolume,
@@ -266,7 +267,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 92;
+pub const SETTING_COUNT: usize = 93;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -349,6 +350,7 @@ impl SettingId {
         SettingId::DownloadSettings,
         SettingId::SyncRecords,
         SettingId::AutoUploadReplay,
+        SettingId::AutoUploadTrace,
         SettingId::Rivals,
         SettingId::IrProfiles,
         SettingId::MasterVolume,
@@ -823,6 +825,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     row(SettingId::DownloadSettings, SettingTab::Network, "DOWNLOAD SETTINGS NOW", SettingKind::Action, "Take the account's settings"),
     row(SettingId::SyncRecords, SettingTab::Network, "SYNC RECORDS NOW", SettingKind::Action, "Send the runs the score server lacks"),
     row(SettingId::AutoUploadReplay, SettingTab::Network, "AUTO UPLOAD REPLAY", SettingKind::Toggle, "Send the replay after a ranked score"),
+    row(SettingId::AutoUploadTrace, SettingTab::Network, "AUTO UPLOAD TRACE", SettingKind::Toggle, "Send each run's note-by-note record after its score"),
     row(SettingId::Rivals, SettingTab::Network, "RIVALS", SettingKind::Action, "Players shown next to you on the ranking"),
     row(SettingId::IrProfiles, SettingTab::Network, "IR PROFILES", SettingKind::Action, "Extra score servers this play is also sent to"),
     row(
@@ -1118,6 +1121,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::Password => UNSET_VALUE.to_string(),
         SettingId::SyncSettings => on_off(config.network.sync_settings),
         SettingId::AutoUploadReplay => on_off(config.network.auto_upload_replay),
+        SettingId::AutoUploadTrace => on_off(config.network.auto_upload_trace),
         SettingId::Rivals => config.network.rivals.len().to_string(),
         SettingId::IrProfiles => config.network.ir_profiles.len().to_string(),
         SettingId::MasterVolume => gain_value(config.audio.master, id),
@@ -1334,6 +1338,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         }
         SettingId::SyncSettings => toggle(&mut config.network.sync_settings),
         SettingId::AutoUploadReplay => toggle(&mut config.network.auto_upload_replay),
+        SettingId::AutoUploadTrace => toggle(&mut config.network.auto_upload_trace),
         SettingId::GuideSe => toggle(&mut config.audio.guide_se),
         SettingId::MasterVolume => {
             let next = step_volume(config.audio.master, delta);
@@ -2271,6 +2276,7 @@ mod tests {
                 SettingId::DownloadSettings,
                 SettingId::SyncRecords,
                 SettingId::AutoUploadReplay,
+                SettingId::AutoUploadTrace,
                 SettingId::Rivals,
                 SettingId::IrProfiles,
             ]

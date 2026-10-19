@@ -266,6 +266,23 @@ fn already_judged_note_is_not_rematched_but_yields_an_empty_poor() {
     assert_eq!(e.counts[5], 1);
 }
 
+/// A note keeps the timing of the judgment that took it apart from the play time an empty POOR
+/// taken on it afterwards overwrites, and the empty POOR names the note it was taken against.
+#[test]
+fn an_empty_poor_on_a_judged_note_leaves_the_judged_timing_and_names_the_note() {
+    let mut e = note(1_000_000);
+    e.press(0, 990_000).unwrap();
+    e.press(0, 1_005_000).unwrap();
+    let mark = e.note_marks().next().expect("the note's mark");
+    assert_eq!(mark.state, Judge::PerfectGreat as u8 + 1);
+    assert_eq!(mark.judged_us, 10_000, "the PGREAT's own timing");
+    assert_eq!(mark.play_time_us, -5_000, "the reference's play time is the empty POOR's");
+    let empty = e.judged().last().expect("the empty POOR");
+    assert_eq!(empty.judge, Judge::Miss);
+    assert_eq!(empty.note_us, 1_000_000);
+    assert_eq!(empty.note_us - empty.delta_us, 1_005_000, "the press came at the note's time less its timing");
+}
+
 #[test]
 fn press_late_bad_lower_edge_is_consumed() {
     let mut e = note(100_000);

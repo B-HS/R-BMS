@@ -110,6 +110,11 @@ struct JNote {
     head_play_time_us: i64,
     /// `Note.playtime` of the paired end object, which only a charge note ever judges separately.
     end_play_time_us: i64,
+    /// The signed timing of the judgment that consumed the head object, in the player's time: the
+    /// one its state is the code of. An empty POOR, which consumes nothing, leaves it alone.
+    head_judged_us: i64,
+    /// The same for the paired end object.
+    end_judged_us: i64,
     /// Judgment the paired end object took, the reference's `getPair().getState() - 1`. Read by the
     /// hell-charge tick to decide whether a released note still gains gauge.
     end_judge: Option<Judge>,
@@ -142,6 +147,10 @@ pub struct NoteMark {
     /// `Note.getMicroPlayTime()`: the signed timing of the last judgment the object took, positive
     /// when the input came early. An empty POOR overwrites it without consuming the object.
     pub play_time_us: i64,
+    /// The signed timing of the judgment that consumed the object, positive when the input came
+    /// early: the one `state` is the code of, which an empty POOR taken on the object afterwards
+    /// does not overwrite. 0 while nothing has consumed it.
+    pub judged_us: i64,
 }
 
 /// One note of the chart, by its lane and its place among that lane's notes in chart order: the
@@ -166,6 +175,10 @@ pub struct JudgedNote {
     /// The signed timing the judgment was counted with, positive when the input came early
     /// (`mfast`).
     pub delta_us: i64,
+    /// Chart time of the object the judgment was taken on: its head's, or its end's for a judgment
+    /// of a long note's end. An empty POOR names the note it was taken against, so the press that
+    /// drew it came at this time less `delta_us`.
+    pub note_us: i64,
     /// The combo once this judgment was counted, carried across the stages of a course
     /// (`JudgeManager.getCourseCombo`).
     pub combo: u32,
@@ -267,8 +280,24 @@ fn worse(a: Judge, b: Judge) -> Judge {
 /// The marks of `note`, in `lane`: its head's, and its end's when it is a long note.
 fn marks_of(lane: usize, note: &JNote) -> impl Iterator<Item = NoteMark> {
     let charge = is_charge(note.ln);
-    let head = NoteMark { lane, time_us: note.head_us, long_end: false, charge, state: note.head_state, play_time_us: note.head_play_time_us };
-    let end = note.end_us.map(|end_us| NoteMark { lane, time_us: end_us, long_end: true, charge, state: note.end_state, play_time_us: note.end_play_time_us });
+    let head = NoteMark {
+        lane,
+        time_us: note.head_us,
+        long_end: false,
+        charge,
+        state: note.head_state,
+        play_time_us: note.head_play_time_us,
+        judged_us: note.head_judged_us,
+    };
+    let end = note.end_us.map(|end_us| NoteMark {
+        lane,
+        time_us: end_us,
+        long_end: true,
+        charge,
+        state: note.end_state,
+        play_time_us: note.end_play_time_us,
+        judged_us: note.end_judged_us,
+    });
     std::iter::once(head).chain(end)
 }
 
@@ -424,6 +453,8 @@ impl JudgeEngine {
                             holding: false,
                             head_play_time_us: 0,
                             end_play_time_us: 0,
+                            head_judged_us: 0,
+                            end_judged_us: 0,
                             end_judge: None,
                             head_state: UNJUDGED_STATE,
                             end_state: UNJUDGED_STATE,
@@ -1408,14 +1439,17 @@ impl JudgeEngine {
         let delta_us = self.playback.real_span_us(delta_us);
         self.touched.push(NoteAt { lane, index: idx });
         let note = &mut self.lanes[lane].notes[idx];
+        let note_us = if on_end { note.end_us.unwrap_or(note.head_us) } else { note.head_us };
         if vanish {
             self.pass_notes += 1;
             self.vanished.push(judge);
             let state = judge as u8 + 1;
             if on_end {
                 note.end_state = state;
+                note.end_judged_us = delta_us;
             } else {
                 note.head_state = state;
+                note.head_judged_us = delta_us;
             }
         }
         let played = if on_end { note.end_play_time_us } else { note.head_play_time_us };
@@ -1429,7 +1463,7 @@ impl JudgeEngine {
         }
         self.apply(judge);
         self.record_timing(judge, delta_us);
-        self.judged.push(JudgedNote { lane, judge, delta_us, combo: self.combo });
+        self.judged.push(JudgedNote { lane, judge, delta_us, note_us, combo: self.combo });
     }
 
     fn apply(&mut self, judge: Judge) {

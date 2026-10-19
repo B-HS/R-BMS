@@ -115,13 +115,26 @@ fn java_round_to_int(value: f64) -> i32 {
     (value + ROUND_HALF).floor() as i64 as i32
 }
 
+/// How long a note takes to cross the part of the lane `cover` leaves open, when it takes
+/// `region_ms` to cross the whole lane, in whole milliseconds as a skin is shown it
+/// (`LaneRenderer.currentduration`): the cover's open share is taken in single precision first.
+pub(crate) fn covered_duration_ms(region_ms: f64, cover: f32) -> i32 {
+    java_round_to_int(region_ms * f64::from(1.0_f32 - cover))
+}
+
+/// The GREEN number a skin shows for a duration from [`covered_duration_ms`]: three fifths of it,
+/// cut to a whole number (`IntegerPropertyFactory.duration_green`).
+pub(crate) fn duration_green(duration_ms: i32) -> i32 {
+    duration_ms.wrapping_mul(GREEN_NUMERATOR) / GREEN_DENOMINATOR
+}
+
 impl PlayShown {
     /// How long a note takes to cross the lane with the cover over it, in milliseconds
     /// (`LaneRenderer.currentduration`).
     fn current_duration(&self) -> i32 {
         let lanes = &self.live.lanes;
         let cover = if lanes.lane_cover_on { lanes.lane_cover } else { 0.0 };
-        java_round_to_int(self.live.scroll.region_ms * f64::from(1.0_f32 - cover))
+        covered_duration_ms(self.live.scroll.region_ms, cover)
     }
 
     /// The duration at one of the four tempos, with the cover counted or not and the green number or
@@ -240,7 +253,7 @@ impl ClusterState for PlayState<'_> {
             NUMBER_HISPEED => lanes.hispeed as i32,
             NUMBER_HISPEED_AFTERDOT => (lanes.hispeed * HISPEED_SCALE) as i32 % HISPEED_DIGITS_MODULUS,
             NUMBER_DURATION => shown.current_duration(),
-            NUMBER_DURATION_GREEN => shown.current_duration().wrapping_mul(GREEN_NUMERATOR) / GREEN_DENOMINATOR,
+            NUMBER_DURATION_GREEN => duration_green(shown.current_duration()),
             NUMBER_DURATION_LANECOVER_ON..=NUMBER_MAXBPM_DURATION_GREEN_LANECOVER_OFF => shown.duration_at(id),
             NUMBER_LANECOVER1 => (lanes.lane_cover * LANE_FIGURE_SCALE).round() as i32,
             NUMBER_LIFT1 => (lanes.lift * LANE_FIGURE_SCALE).round() as i32,

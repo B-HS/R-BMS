@@ -57,7 +57,14 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<u32, ScoreDbError> {
 /// under. `CREATE TABLE IF NOT EXISTS` leaves a table that predates one as it was, so the column is
 /// added to it here; the generation stays where it is, since a build that predates the column reads
 /// the table by name and never sees it.
-const ADDED_COLUMNS: &[(&str, &str, &str)] = &[("ir_sync", "refused_under", "TEXT"), ("ir_sync", "replay_refused_under", "TEXT")];
+const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
+    ("ir_sync", "refused_under", "TEXT"),
+    ("ir_sync", "replay_refused_under", "TEXT"),
+    ("ir_sync", "trace_state", "TEXT NOT NULL DEFAULT 'none'"),
+    ("ir_sync", "trace_id", "TEXT"),
+    ("ir_sync", "trace_error", "TEXT"),
+    ("ir_sync", "trace_refused_under", "TEXT"),
+];
 
 /// Add every [`ADDED_COLUMNS`] entry its table does not have yet.
 fn add_missing_columns(conn: &Connection) -> Result<(), ScoreDbError> {

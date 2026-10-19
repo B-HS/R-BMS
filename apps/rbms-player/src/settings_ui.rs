@@ -477,6 +477,7 @@ mod tests {
         (SettingId::DownloadSettings, "DOWNLOAD SETTINGS NOW", ">"),
         (SettingId::SyncRecords, "SYNC RECORDS NOW", ">"),
         (SettingId::AutoUploadReplay, "AUTO UPLOAD REPLAY", "ON"),
+        (SettingId::AutoUploadTrace, "AUTO UPLOAD TRACE", "ON"),
         (SettingId::Rivals, "RIVALS", "0"),
         (SettingId::IrProfiles, "IR PROFILES", "0"),
         (SettingId::MasterVolume, "MASTER VOL", "100%"),

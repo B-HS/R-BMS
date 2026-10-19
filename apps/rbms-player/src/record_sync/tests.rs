@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use rbms_ir::{CourseSubmission, IrError, PlayerProfile, ReplayData, ServerInfo, SubmitResponse, VersionInfo};
+use rbms_ir::{CourseSubmission, IrError, PlayTrace, PlayerProfile, ReplayData, ServerCapabilities, ServerInfo, SubmitResponse, VersionInfo};
 use rbms_store::scoredb::{ASSIST_UNRECORDED, JudgeCounts, SEED_UNRECORDED, mode_id};
 
 use super::*;
@@ -24,8 +24,13 @@ const SYNC_POLL: Duration = Duration::from_millis(2);
 const CANCEL_LOOK: Duration = Duration::from_millis(1);
 
 /// No waiting at all, so a sync of many plays runs at once.
-const NO_PACING: SyncPacing =
-    SyncPacing { score_interval: Duration::ZERO, replay_interval: Duration::ZERO, rate_limit_wait: Duration::ZERO, cancel_check: CANCEL_LOOK };
+const NO_PACING: SyncPacing = SyncPacing {
+    score_interval: Duration::ZERO,
+    replay_interval: Duration::ZERO,
+    trace_interval: Duration::ZERO,
+    rate_limit_wait: Duration::ZERO,
+    cancel_check: CANCEL_LOOK,
+};
 
 /// The status a server failing on its own side answers with.
 const SERVER_FAILURE_STATUS: u16 = 500;
@@ -58,6 +63,12 @@ struct ScriptedServer {
     /// Holds the server's answer to which build it runs until the test lets go, which is the first
     /// thing a sync the app starts asks.
     version_gate: Mutex<Option<Receiver<()>>>,
+    /// Whether the server says it takes traces.
+    takes_traces: Mutex<bool>,
+    /// How many times the server was asked what it takes.
+    health_asked: Mutex<usize>,
+    traces_answers: Mutex<VecDeque<Result<String, IrError>>>,
+    traced: Mutex<Vec<(ChartId, PlayTrace)>>,
 }
 
 impl ScriptedServer {
@@ -73,6 +84,15 @@ impl ScriptedServer {
 
     fn uploaded(&self) -> Vec<(ChartId, ReplayData)> {
         self.uploaded.lock().expect("the upload log").clone()
+    }
+
+    fn traced(&self) -> Vec<(ChartId, PlayTrace)> {
+        self.traced.lock().expect("the trace log").clone()
+    }
+
+    fn taking_traces(self: Arc<Self>) -> Arc<Self> {
+        *self.takes_traces.lock().expect("the capability") = true;
+        self
     }
 }
 
@@ -93,7 +113,20 @@ fn judge_refusal() -> IrError {
 
 impl ScoreServer for ScriptedServer {
     fn health(&self) -> Result<ServerInfo, IrError> {
-        Err(IrError::Unsupported)
+        *self.health_asked.lock().expect("the health count") += 1;
+        if !*self.takes_traces.lock().expect("the capability") {
+            return Err(IrError::Unsupported);
+        }
+        let capabilities = ServerCapabilities { traces: true, ..ServerCapabilities::default() };
+        Ok(ServerInfo { name: "rbms-ir".into(), version: "0.1.0".into(), ir_compat: "superset-1".into(), capabilities })
+    }
+    fn upload_trace(&self, chart: &ChartId, trace: &PlayTrace) -> Result<String, IrError> {
+        let count = {
+            let mut log = self.traced.lock().expect("the trace log");
+            log.push((chart.clone(), trace.clone()));
+            log.len()
+        };
+        self.traces_answers.lock().expect("the trace script").pop_front().unwrap_or_else(|| Ok(format!("tr_{count}")))
     }
     fn version(&self) -> Result<VersionInfo, IrError> {
         if let Some(gate) = self.version_gate.lock().expect("the version gate").take() {
@@ -170,7 +203,7 @@ fn play(id: i64, md5: &str, date: i64, counts: [u32; JUDGE_TIER_COUNT], notes: u
 }
 
 fn candidate(log: PlayLog) -> SyncCandidate {
-    SyncCandidate { log, body: None, played_as: None, state: None, score_id: None, replay_state: None }
+    SyncCandidate { log, body: None, played_as: None, state: None, score_id: None, replay_state: None, has_trace: false, trace_state: None }
 }
 
 fn job(scores: Vec<SyncCandidate>) -> SyncJob {
@@ -178,7 +211,10 @@ fn job(scores: Vec<SyncCandidate>) -> SyncJob {
         login_id: ACCOUNT_ID.into(),
         scores,
         courses: Vec::new(),
+        traces: Vec::new(),
         replays: Vec::new(),
+        upload_traces: false,
+        db_path: std::env::temp_dir().join("rbms-record-sync-no-database.sqlite"),
         upload_replays: true,
         replay_dir: std::env::temp_dir(),
         saves_settled: None,
@@ -270,7 +306,10 @@ fn a_stored_body_is_sent_under_the_signed_in_account() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].player.id, ACCOUNT_ID, "a body kept as a guest goes under the account that syncs it");
     assert_eq!((sent[0].skin.as_str(), sent[0].options.hispeed), ("KEPT", 3.5), "the kept body is sent as it was");
-    assert_eq!(score_outcomes(&events), [(1, ScoreOutcome::Accepted { score_id: Some("sc_1".into()), already: false, replay: ReplayState::None })]);
+    assert_eq!(
+        score_outcomes(&events),
+        [(1, ScoreOutcome::Accepted { score_id: Some("sc_1".into()), already: false, replay: ReplayState::None, trace: ReplayState::None })]
+    );
     assert_eq!(finished(&events), None);
 }
 
@@ -354,7 +393,10 @@ fn a_replay_goes_up_after_its_score_with_the_score_id() {
     sync.replay_dir.clone_from(&folder);
     let server = ScriptedServer::answering(vec![Ok(taken("sc_seven"))]);
     let events = run(Arc::clone(&server), sync);
-    assert_eq!(score_outcomes(&events), [(7, ScoreOutcome::Accepted { score_id: Some("sc_seven".into()), already: false, replay: ReplayState::Pending })]);
+    assert_eq!(
+        score_outcomes(&events),
+        [(7, ScoreOutcome::Accepted { score_id: Some("sc_seven".into()), already: false, replay: ReplayState::Pending, trace: ReplayState::None })]
+    );
     let uploads = server.uploaded();
     assert_eq!(uploads.len(), 1);
     assert_eq!(uploads[0].1.score_id.as_deref(), Some("sc_seven"), "the replay is linked to the score the server holds");
@@ -389,7 +431,10 @@ fn a_rate_limit_is_waited_out_and_the_same_run_sent_again() {
     let server = ScriptedServer::answering(vec![Err(IrError::RateLimited(String::new())), Ok(taken("sc_a"))]);
     let events = run(Arc::clone(&server), job(vec![candidate(play(1, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1))]));
     assert_eq!(server.submitted().len(), 2, "the same run went twice");
-    assert_eq!(score_outcomes(&events), [(1, ScoreOutcome::Accepted { score_id: Some("sc_a".into()), already: false, replay: ReplayState::None })]);
+    assert_eq!(
+        score_outcomes(&events),
+        [(1, ScoreOutcome::Accepted { score_id: Some("sc_a".into()), already: false, replay: ReplayState::None, trace: ReplayState::None })]
+    );
     assert_eq!(finished(&events), None);
 }
 
@@ -448,7 +493,10 @@ fn a_refused_play_is_written_down_with_its_reason_and_the_sync_goes_on() {
         (row.http_status, row.error_code.as_deref(), row.error_field.as_deref(), row.error_reason.as_deref()),
         (Some(400), Some("VALIDATION_ERROR"), Some("judge"), Some("judge count exceeds total_notes"))
     );
-    assert_eq!(outcomes[1], (2, ScoreOutcome::Accepted { score_id: Some("sc_old".into()), already: true, replay: ReplayState::None }));
+    assert_eq!(
+        outcomes[1],
+        (2, ScoreOutcome::Accepted { score_id: Some("sc_old".into()), already: true, replay: ReplayState::None, trace: ReplayState::None })
+    );
     assert_eq!(finished(&events), None);
 }
 
@@ -834,8 +882,13 @@ fn a_play_in_a_live_submission_is_left_out_of_the_walk() {
     let mut shared = signed_in("live-submit", Arc::clone(&server));
     let live = store(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1));
     let other = store(&mut shared, &play(0, "bb", PLAYED_SECOND + 1, [1, 0, 0, 0, 0, 0], 1));
-    shared.submit_log =
-        Some(crate::app_ranking::LiveSubmit { log_id: live, server: server_key(SERVER_URL), login_id: ACCOUNT_ID.into(), replay_plan: ReplayState::None });
+    shared.submit_log = Some(crate::app_ranking::LiveSubmit {
+        log_id: live,
+        server: server_key(SERVER_URL),
+        login_id: ACCOUNT_ID.into(),
+        replay_plan: ReplayState::None,
+        trace_kept: false,
+    });
 
     assert!(shared.start_record_sync(SyncScope::All));
     poll_to_the_end(&mut shared);
@@ -872,4 +925,219 @@ fn a_sync_of_named_plays_leaves_the_states_the_screens_read_as_they_are() {
     assert_eq!(server.submitted().len(), 1, "nothing else is left to send");
     shared.reload_record_sync_states();
     assert_eq!(shared.record_sync_states[&old].error_code.as_deref(), Some(SKIPPED_OLD_SCRATCH_AUTO_RULE), "reading the states names why it is held back");
+}
+
+/// A trace as a play keeps it: `notes` judged objects of the chart `md5`, every one a PGREAT.
+fn trace_body(md5: &str, notes: usize) -> String {
+    let trace = PlayTrace {
+        format: rbms_ir::TRACE_FORMAT.into(),
+        version: rbms_ir::TRACE_FORMAT_VERSION,
+        score_id: None,
+        chart: ChartId { md5: md5.into(), sha256: format!("sha-of-{md5}") },
+        mode: Mode::BEAT_7K.name.into(),
+        lntype: 0,
+        random: rbms_ir::RandomOption::Off,
+        auto_lanes: Vec::new(),
+        notes: rbms_ir::TraceNotes {
+            time_us: (0..notes as i64).collect(),
+            lane: vec![1; notes],
+            kind: vec![rbms_ir::TRACE_KIND_NORMAL; notes],
+            state: vec![1; notes],
+            err_us: vec![0; notes],
+        },
+        empty_poors: rbms_ir::TraceEmptyPoors::default(),
+        gauge: rbms_ir::TraceGauge::default(),
+        gauge_bounds: Vec::new(),
+        failed_at_ms: None,
+        play_time_ms: 0,
+        speed: rbms_ir::TraceSpeeds::default(),
+        tempo: Vec::new(),
+    };
+    trace.to_json().expect("the trace serialises")
+}
+
+/// Store `log` with the trace [`trace_body`] makes of it.
+fn store_traced(shared: &mut AppShared, log: &PlayLog, notes: usize) -> i64 {
+    let trace = trace_body(&log.md5, notes);
+    let db = shared.scoredb.as_mut().expect("the score database opened in the test's folder");
+    let id = db.record_play_kept(log, true, None).expect("stored");
+    db.keep_trace(id, &trace).expect("its trace kept");
+    id
+}
+
+fn sync_row_of(shared: &AppShared, log_id: i64) -> IrSyncRow {
+    shared.scoredb.as_ref().expect("the database").sync_states(&server_key(SERVER_URL)).expect("reads").remove(&log_id).expect("the play's row")
+}
+
+/// How many judged objects a trace has to hold to be larger than the server takes.
+const TRACE_NOTES_PAST_THE_CAP: usize = rbms_ir::TRACE_MAX_BYTES / 8;
+
+#[test]
+fn a_play_the_server_takes_sends_its_trace_linked_to_the_score() {
+    let server = ScriptedServer::answering(vec![Ok(taken("sc_linked"))]).taking_traces();
+    let mut shared = signed_in("trace-linked", Arc::clone(&server));
+    let traced = store_traced(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1), 1);
+    let plain = store(&mut shared, &play(0, "bb", PLAYED_SECOND + 1, [1, 0, 0, 0, 0, 0], 1));
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    let sent = server.traced();
+    assert_eq!(sent.len(), 1, "only the play that kept a trace sends one");
+    assert_eq!((sent[0].0.md5.as_str(), sent[0].1.score_id.as_deref()), ("aa", Some("sc_linked")));
+    let row = sync_row_of(&shared, traced);
+    assert_eq!((row.trace_state, row.trace_id.as_deref()), (ReplayState::Uploaded, Some("tr_1")));
+    assert_eq!(sync_row_of(&shared, plain).trace_state, ReplayState::None);
+    assert_eq!(shared.net_status, "records: 2 sent; traces: 1 uploaded");
+    assert_eq!(shared.record_sync_states[&traced].trace_state, ReplayState::Uploaded, "the record screens read what was written");
+
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.traced().len(), 1, "a trace the server holds is not sent again");
+}
+
+/// An older server says nothing of traces: none is sent to it, every one stays to be sent, and a
+/// sync after the server starts taking them sends them for the plays it took before.
+#[test]
+fn a_server_that_takes_no_traces_is_sent_none_until_it_does() {
+    let server = ScriptedServer::answering(Vec::new());
+    let mut shared = signed_in("trace-old-server", Arc::clone(&server));
+    let traced = store_traced(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1), 1);
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().len(), 1);
+    assert!(server.traced().is_empty(), "a server that does not take traces is sent none");
+    assert_eq!(sync_row_of(&shared, traced).trace_state, ReplayState::Pending);
+
+    *server.takes_traces.lock().expect("the capability") = true;
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().len(), 1, "the score is not sent again");
+    assert_eq!(server.traced().iter().map(|(_, trace)| trace.score_id.clone()).collect::<Vec<_>>(), [Some("sc_1".to_string())]);
+    assert_eq!(sync_row_of(&shared, traced).trace_state, ReplayState::Uploaded);
+}
+
+#[test]
+fn auto_upload_trace_off_keeps_every_trace_on_the_machine_to_send_later() {
+    let server = ScriptedServer::answering(Vec::new()).taking_traces();
+    let mut shared = signed_in("trace-off", Arc::clone(&server));
+    shared.config.network.auto_upload_trace = false;
+    let traced = store_traced(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1), 1);
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert!(server.traced().is_empty());
+    assert_eq!(sync_row_of(&shared, traced).trace_state, ReplayState::Pending, "switched off, the trace waits");
+    assert!(shared.scoredb.as_ref().expect("the database").trace_body(traced).expect("reads").is_some(), "and stays on the machine");
+
+    shared.config.network.auto_upload_trace = true;
+    shared.sync_records_now();
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.traced().len(), 1);
+}
+
+/// The server refusing a trace (it does not add up to the score, say) is written down under the
+/// builds, as a refused replay is: a sync on its own leaves it out, by hand it goes again.
+#[test]
+fn a_refused_trace_is_not_sent_again_by_an_automatic_sync() {
+    let server = ScriptedServer::answering(Vec::new()).taking_traces();
+    let mismatch = r#"{"success":false,"error":{"code":"IR_TRACE_MISMATCH","message":"m","details":{"field":"notes.state"}}}"#;
+    *server.traces_answers.lock().expect("the trace script") = vec![Err(IrError::Server(400, mismatch.into()))].into();
+    let mut shared = signed_in("trace-refused", Arc::clone(&server));
+    let traced = store_traced(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1), 1);
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    let row = sync_row_of(&shared, traced);
+    assert_eq!(row.trace_state, ReplayState::Rejected);
+    assert!(row.trace_refused_under.is_some() && row.trace_error.as_deref().is_some_and(|error| error.contains("IR_TRACE_MISMATCH")), "{row:?}");
+    assert!(shared.net_status.contains("traces: 1 failed"), "{}", shared.net_status);
+
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.traced().len(), 1, "a sync on its own does not send a refused trace again");
+    shared.sync_records_now();
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.traced().len(), 2, "by hand it goes again");
+    assert_eq!(sync_row_of(&shared, traced).trace_state, ReplayState::Uploaded);
+}
+
+#[test]
+fn a_trace_larger_than_the_server_takes_is_kept_and_not_sent() {
+    let server = ScriptedServer::answering(Vec::new()).taking_traces();
+    let mut shared = signed_in("trace-too-large", Arc::clone(&server));
+    let traced = store_traced(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1), TRACE_NOTES_PAST_THE_CAP);
+    assert!(trace_body("aa", TRACE_NOTES_PAST_THE_CAP).len() > rbms_ir::TRACE_MAX_BYTES, "the fixture is past the cap");
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert!(server.traced().is_empty());
+    let row = sync_row_of(&shared, traced);
+    assert_eq!((row.trace_state, row.trace_error.as_deref()), (ReplayState::Skipped, Some(TRACE_TOO_LARGE)));
+    assert!(shared.scoredb.as_ref().expect("the database").trace_body(traced).expect("reads").is_some(), "the run keeps its trace");
+}
+
+/// The result screen sends the score and the replay; once the server took the score, the trace of
+/// that run goes up by a sync of that one run.
+#[test]
+fn a_run_the_result_screen_sent_has_its_trace_sent_by_a_sync_of_that_run() {
+    let server = ScriptedServer::answering(Vec::new()).taking_traces();
+    let mut shared = signed_in("trace-live", Arc::clone(&server));
+    let live = store_traced(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1), 1);
+    let other = store_traced(&mut shared, &play(0, "bb", PLAYED_SECOND + 1, [1, 0, 0, 0, 0, 0], 1), 1);
+    let submit = crate::app_ranking::LiveSubmit {
+        log_id: live,
+        server: server_key(SERVER_URL),
+        login_id: ACCOUNT_ID.into(),
+        replay_plan: ReplayState::None,
+        trace_kept: true,
+    };
+    shared.write_live_outcome(&submit, &rbms_ir::SubmitOutcome { submit: Ok(taken("sc_live")), replay: None });
+    assert!(shared.record_sync.is_some(), "a sync of the run was started for its trace");
+    let status = shared.net_status.clone();
+    poll_to_the_end(&mut shared);
+    assert_eq!(shared.net_status, status, "the trace of a run the result screen reported on goes up without a word");
+    assert!(server.submitted().is_empty(), "the score the server took is not sent again, and no other play is");
+    assert_eq!(server.traced().iter().map(|(_, trace)| trace.score_id.clone()).collect::<Vec<_>>(), [Some("sc_live".to_string())]);
+    assert_eq!(sync_row_of(&shared, live).trace_state, ReplayState::Uploaded);
+    assert!(!shared.record_sync_states.contains_key(&other), "the other play waits for a sync of its own");
+}
+
+/// A sync with no trace to send does not ask the server whether it takes traces: the question
+/// would only hold up the scores. One with a trace of a play it is to send asks once.
+#[test]
+fn the_server_is_asked_whether_it_takes_traces_only_when_there_is_one_to_send() {
+    let server = ScriptedServer::answering(Vec::new()).taking_traces();
+    let mut shared = signed_in("trace-health", Arc::clone(&server));
+    store(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1));
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().len(), 1);
+    assert_eq!(*server.health_asked.lock().expect("the health count"), 0, "no trace, no question");
+
+    store_traced(&mut shared, &play(0, "bb", PLAYED_SECOND + 1, [1, 0, 0, 0, 0, 0], 1), 1);
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(*server.health_asked.lock().expect("the health count"), 1, "a play to send with a trace asks once");
+    assert_eq!(server.traced().len(), 1);
+}
+
+/// A trace the database cannot be read for just then is one to send on a later sync, not one gone
+/// for good; one whose row is gone is missing.
+#[test]
+fn a_trace_the_database_could_not_read_is_tried_again_and_a_gone_one_is_missing() {
+    let candidate = |id| SyncCandidate {
+        log: PlayLog { id, ..play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1) },
+        body: None,
+        played_as: None,
+        state: Some(SyncState::Accepted),
+        score_id: Some("sc_1".into()),
+        replay_state: None,
+        has_trace: true,
+        trace_state: Some(ReplayState::Pending),
+    };
+    let unreadable = ScoreDb::open_in_memory().expect("a database with no tables");
+    let (state, reason) = trace_upload_of(&unreadable, &candidate(1)).expect_err("nothing reads");
+    assert_eq!(state, ReplayState::Failed, "a read that failed is tried again");
+    assert!(reason.as_deref().is_some_and(|reason| reason.starts_with(TRACE_NOT_READ)), "{reason:?}");
+    assert!(state.still_to_send());
+
+    let mut db = ScoreDb::open_in_memory().expect("opens");
+    db.migrate().expect("the schema applies");
+    assert_eq!(trace_upload_of(&db, &candidate(1)).expect_err("no row"), (ReplayState::Missing, None));
 }

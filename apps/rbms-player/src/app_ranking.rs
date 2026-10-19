@@ -33,6 +33,17 @@ pub(crate) struct LiveSubmit {
     /// [`ReplayState::None`] for a run that kept no replay, [`ReplayState::Skipped`] for one the
     /// upload cannot state the widths of, and [`ReplayState::Pending`] otherwise.
     pub(crate) replay_plan: ReplayState,
+    /// Whether the play was stored with its trace, which goes up once the server takes the score.
+    pub(crate) trace_kept: bool,
+}
+
+/// The stored play a run handed to the main server is: its row, what is to become of its replay,
+/// and whether it was stored with its trace ([`LiveSubmit`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PlayedRun {
+    pub(crate) log_id: i64,
+    pub(crate) replay_plan: ReplayState,
+    pub(crate) trace_kept: bool,
 }
 
 /// A finished course on its way to the main server: where its answer comes back, and the kept
@@ -136,16 +147,24 @@ impl AppShared {
     /// on a failed submission. A player who has the server set and has not signed in -- which is
     /// every new install, the server being set by default -- sees the run skipped for that reason.
     ///
-    /// `played` names the stored play the run is and what its replay plan is, so the server's answer
-    /// is written down against it ([`AppShared::poll_submit`]); a run that was not stored has none.
-    pub(crate) fn spawn_score_submit(&mut self, submission: ScoreSubmission, replay: Option<ReplayData>, played: Option<(i64, ReplayState)>) {
+    /// `played` names the stored play the run is, what its replay plan is and whether it kept a
+    /// trace, so the server's answer is written down against it ([`AppShared::poll_submit`]); a run
+    /// that was not stored has none.
+    pub(crate) fn spawn_score_submit(&mut self, submission: ScoreSubmission, replay: Option<ReplayData>, played: Option<PlayedRun>) {
         self.submit_log = None;
         if !self.session.is_logged_in() {
             self.ir_status = IrStatus::Skipped(NOT_SIGNED_IN);
             return;
         }
-        self.submit_log =
-            played.and_then(|(log_id, replay_plan)| self.record_sync_target().map(|(server, login_id)| LiveSubmit { log_id, server, login_id, replay_plan }));
+        self.submit_log = played.and_then(|played| {
+            self.record_sync_target().map(|(server, login_id)| LiveSubmit {
+                log_id: played.log_id,
+                server,
+                login_id,
+                replay_plan: played.replay_plan,
+                trace_kept: played.trace_kept,
+            })
+        });
         self.ir_status = IrStatus::Sending;
         self.submit_rx = Some(spawn_submit(self.server.clone(), SubmitJob { submission, replay }));
     }
@@ -265,6 +284,10 @@ impl AppShared {
     /// Write down what the main server said of a run just played, as a records sync writes down what
     /// it said of a play sent again, so the next sync sends the run only if the server does not hold
     /// it. A failure that would stop a sync is a run to send again here.
+    ///
+    /// A run the server took with its trace kept has the trace still to go up, and a records sync of
+    /// that run alone sends it, while AUTO UPLOAD TRACE is on: the result screen's submission carries
+    /// the score and the replay, and the trace follows the score it is linked to.
     pub(crate) fn write_live_outcome(&mut self, live: &LiveSubmit, outcome: &rbms_ir::SubmitOutcome) {
         let score = match submit_verdict(&outcome.submit) {
             SubmitVerdict::Accepted { score_id, already, replay_warranted } => {
@@ -277,7 +300,8 @@ impl AppShared {
                     (None, ReplayState::Pending) if !replay_warranted => ReplayState::Skipped,
                     (None, plan) => plan,
                 };
-                ScoreOutcome::Accepted { score_id, already, replay }
+                let trace = if live.trace_kept { ReplayState::Pending } else { ReplayState::None };
+                ScoreOutcome::Accepted { score_id, already, replay, trace }
             }
             SubmitVerdict::Rejected(rejection) => ScoreOutcome::Rejected(rejection),
             SubmitVerdict::RateLimited => ScoreOutcome::Retry { detail: RATE_LIMITED_DETAIL.to_string() },
@@ -290,7 +314,11 @@ impl AppShared {
             Some(Err(error)) => row.replay_error = Some(error.to_string()),
             None => {}
         }
+        let trace_to_send = row.trace_state == ReplayState::Pending && self.config.network.auto_upload_trace;
         self.write_sync_row(row);
+        if trace_to_send {
+            self.start_record_sync(crate::record_sync::SyncScope::Logs(vec![live.log_id]));
+        }
     }
 }
 

@@ -32,7 +32,7 @@ const UPDATE_HINT: &str = "if the change is meant, run `RBMS_UPDATE_CONTRACT=1 c
      `bun test tests/dto/client-requests.test.ts` in web/, and commit the files with the change";
 
 /// Every file the contract folder holds, one per test below.
-const CONTRACT_FILES: [&str; 15] = [
+const CONTRACT_FILES: [&str; 19] = [
     "course-normal",
     "course-scratch-auto",
     "replay-long",
@@ -48,6 +48,10 @@ const CONTRACT_FILES: [&str; 15] = [
     "score-sync-resend",
     "score-widened-judge",
     "settings-blob",
+    "trace-abandoned",
+    "trace-normal",
+    "trace-random",
+    "trace-scratch-auto",
 ];
 
 /// The clock a new run's layout seed is taken from, in nanoseconds: the one `app_play`'s own test
@@ -69,6 +73,13 @@ const FIXED_MOMENT_MS: i64 = 1_791_970_074_354;
 const FIXED_CLIENT: &str = "rbms/0.0.0";
 const FIXED_BUILD_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const FIXED_PLATFORM: &str = "macos-aarch64";
+
+/// What a trace's link to its score is written as: the id the capturing server numbers by the
+/// requests it was sent, which the health checks the app makes on a timer of its own can move.
+const FIXED_SCORE_ID: &str = "sc_contract";
+
+/// The prefix every score id the capturing server answers with starts with.
+const SCORE_ID_PREFIX: &str = "sc_";
 
 /// What a build hash is: SHA-256, as lower-case hexadecimal.
 const SHA256_HEX_LENGTH: usize = 64;
@@ -132,6 +143,7 @@ const WORK_WAIT: Duration = Duration::from_secs(20);
 const UNPACED: crate::record_sync::SyncPacing = crate::record_sync::SyncPacing {
     score_interval: Duration::ZERO,
     replay_interval: Duration::ZERO,
+    trace_interval: Duration::ZERO,
     rate_limit_wait: Duration::ZERO,
     cancel_check: Duration::from_millis(1),
 };
@@ -243,6 +255,36 @@ fn sent_from_the_result_screen(shared: &mut AppShared, server: &CaptureServer, s
     (score, replay)
 }
 
+/// End `session` as the result screen does, let the app take the server's answer as it does frame
+/// by frame, and answer the score it sent and the trace a records sync of the run sent after it.
+fn traced_from_the_result_screen(shared: &mut AppShared, server: &CaptureServer, session: PlaySession) -> (wire::Request, wire::Request) {
+    let md5 = session.model().md5.clone();
+    let entered = end_named_run(shared, session, RECORDED_CHART_NAME);
+    assert!(matches!(entered, Transition::To(Stage::Result(_))), "the run did not reach the result screen");
+    let deadline = std::time::Instant::now() + WORK_WAIT;
+    while shared.submit_rx.is_some() {
+        assert!(std::time::Instant::now() < deadline, "the submission did not come back");
+        shared.poll_ir_jobs(crate::stage::StageId::Result);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    sync_finished(shared);
+    let score = server.next("POST", "/scores");
+    let trace = server.next("POST", &format!("/charts/{md5}/traces"));
+    (score, trace)
+}
+
+/// Hold a trace that went up to the score that went up before it: linked to the id the server
+/// answered the score with, on the same chart, and as many judged objects as the score counts.
+fn linked_to_its_score(trace: &wire::Request, score: &wire::Request) {
+    let trace = rbms_ir::PlayTrace::from_json(&trace.body).expect("the trace body reads as a trace");
+    let score = ScoreSubmission::from_json(&score.body).expect("the score body reads as a submission");
+    assert!(trace.score_id.as_deref().is_some_and(|id| id.starts_with(SCORE_ID_PREFIX)), "the trace is linked to the score: {:?}", trace.score_id);
+    assert_eq!(trace.chart, score.chart.id);
+    let judged = trace.notes.kind.iter().filter(|kind| **kind != rbms_ir::TRACE_KIND_LONG_END).count();
+    assert_eq!(judged as u32, score.total_notes);
+    assert_eq!(trace.random, score.options.random);
+}
+
 /// Wait for a records sync to end.
 fn sync_finished(shared: &mut AppShared) {
     let deadline = std::time::Instant::now() + WORK_WAIT;
@@ -260,6 +302,7 @@ enum Kind {
     Course,
     Replay,
     Settings,
+    Trace,
 }
 
 impl Kind {
@@ -269,6 +312,7 @@ impl Kind {
             Some("course") => Kind::Course,
             Some("replay") => Kind::Replay,
             Some("settings") => Kind::Settings,
+            Some("trace") => Kind::Trace,
             _ => panic!("{name} names no kind of request"),
         }
     }
@@ -282,6 +326,7 @@ impl Kind {
             Kind::Course => &["trophy"],
             Kind::Replay => &["id", "chart", "score_id", "random", "random_p2", "seed", "gauge", "client_build_sha256", "event_count", "duration_us", "size"],
             Kind::Settings => &["name", "updated_at", "base_updated_at"],
+            Kind::Trace => &["failed_at_ms"],
         }
     }
 
@@ -306,6 +351,10 @@ impl Kind {
             Kind::Course => replace(body, "played_at", moment, is_moment),
             Kind::Replay => replace(body, "client_build_sha256", Json::Text(FIXED_BUILD_SHA256.to_owned()), is_build),
             Kind::Settings => replace(body, "updated_at", moment, is_moment),
+            Kind::Trace => {
+                let is_score_id = |value: &Json| value.text().is_some_and(|id| id.starts_with(SCORE_ID_PREFIX));
+                replace(body, "score_id", Json::Text(FIXED_SCORE_ID.to_owned()), is_score_id);
+            }
         }
     }
 }
@@ -539,6 +588,45 @@ fn a_run_left_mid_song() {
     sync_finished(&mut shared);
     let score = server.next("POST", "/scores");
     check_contract("score-abandoned", &score.body);
+    let trace = server.next("POST", &format!("/charts/{}/traces", contract_model().md5));
+    linked_to_its_score(&trace, &score);
+    check_contract("trace-abandoned", &trace.body);
+}
+
+/// A run played to its end, sent from the result screen, and its trace, which a records sync of
+/// the run sends once the server has taken the score.
+#[test]
+fn a_finished_run_and_its_trace() {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, "trace-normal");
+    let session = played(&shared, contract_model(), &HAND_OFFSETS_US);
+    let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
+    linked_to_its_score(&trace, &score);
+    check_contract("trace-normal", &trace.body);
+}
+
+/// The same on RANDOM: the trace holds the lanes the run was laid out on.
+#[test]
+fn a_random_run_and_its_trace() {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, "trace-random");
+    shared.config.play.random = NoteOption::Random;
+    let session = played(&shared, contract_model(), &HAND_OFFSETS_US);
+    let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
+    linked_to_its_score(&trace, &score);
+    check_contract("trace-random", &trace.body);
+}
+
+/// The same with SCRATCH AUTO playing the turntable: its notes are not in the trace.
+#[test]
+fn a_scratch_auto_run_and_its_trace() {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, "trace-scratch-auto");
+    shared.config.play.scratch_auto = true;
+    let session = played(&shared, contract_model(), &HAND_OFFSETS_US);
+    let (score, trace) = traced_from_the_result_screen(&mut shared, &server, session);
+    linked_to_its_score(&trace, &score);
+    check_contract("trace-scratch-auto", &trace.body);
 }
 
 /// A run stored by a client that kept no body for it, as every run before 0.1.4 was: the records
@@ -579,7 +667,7 @@ fn an_autoplay_run() {
     shared.replay = None;
     let summary = session.summary();
     let ended = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_owned());
-    let recorded = crate::app_result::record_run(&ended, &mut shared, &summary, ended.session.record().avg_duration_us);
+    let recorded = crate::app_result::record_run(&ended, &mut shared, &summary, &ended.session.record());
     assert_eq!(recorded.block_reason, Some("autoplay"), "an autoplay run is held back");
     let mut sub = recorded.sub;
     assert!(sub.options.autoplay);

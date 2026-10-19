@@ -288,6 +288,34 @@ fn the_duration_is_the_travel_time_under_the_cover_and_the_green_number_three_fi
     assert_eq!(state_with(false), (Some(800), Some(480)), "and with the cover off");
 }
 
+/// A tempo at which the lane takes 768 ms to cross at a scroll speed of 1: three fifths of it is
+/// 460.8, which the skin cuts to 460 where rounding would give 461.
+const TEMPO_OF_A_GREEN_CUT_SHORT: f64 = 312.5;
+
+/// The GREEN number a play trace keeps is the one the skin shows at the chart's first tempo, cut
+/// the way the skin cuts it, with the cover off and on and at a speed that is not whole in single
+/// precision.
+#[test]
+fn the_green_number_of_a_play_trace_is_the_one_the_skin_shows() {
+    for (hispeed, bpm, lane_cover, lane_cover_on) in
+        [(1.0, TEMPO_OF_A_GREEN_CUT_SHORT, 0.25, false), (1.0, TEMPO_OF_A_GREEN_CUT_SHORT, 0.3, true), (2.37, 150.0, 0.123, true), (3.1, 177.7, 0.0, true)]
+    {
+        let lanes = LaneSettings { hispeed: hispeed as f32, lane_cover, lane_cover_on, ..live().lanes };
+        let scroll = Scroll { now_bpm: bpm, region_ms: travel_region_ms(bpm, hispeed as f32, 1.0), ..live().scroll };
+        let shown = shown_with(PlayLive { lanes, scroll, ..live() });
+        let mut config = rbms_config::Config::default();
+        config.play.hispeed = hispeed;
+        config.play.constant_speed = false;
+        let shown_cover = if lane_cover_on { lane_cover } else { 0.0 };
+        let traced = crate::play_trace::speed_of(&config, shown_cover, 0.0, 0.0, bpm);
+        assert_eq!(Some(traced.green), state(&shown).integer(NUMBER_DURATION_GREEN), "hi-speed {hispeed} at {bpm} with the cover at {shown_cover}");
+    }
+    let mut config = rbms_config::Config::default();
+    config.play.hispeed = 1.0;
+    let cut_short = crate::play_trace::speed_of(&config, 0.0, 0.0, 0.0, TEMPO_OF_A_GREEN_CUT_SHORT);
+    assert_eq!((cut_short.green_ms, cut_short.green), (768, 460), "the travel time rounds and its three fifths are cut");
+}
+
 #[test]
 fn the_duration_at_a_tempo_counts_the_cover_when_the_id_says_so_whether_or_not_it_is_on() {
     let shown = shown_with(PlayLive { lanes: LaneSettings { lane_cover_on: false, ..live().lanes }, ..live() });

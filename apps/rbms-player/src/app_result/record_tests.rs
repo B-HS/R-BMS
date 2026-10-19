@@ -725,7 +725,7 @@ fn a_run_with_a_total_override_is_assisted_and_never_a_best() {
     shared.chart_path = RECORDED_CHART_NAME.to_owned();
     let summary = session.summary();
     let ended = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_owned());
-    let recorded = record_run(&ended, &mut shared, &summary, ended.session.record().avg_duration_us);
+    let recorded = record_run(&ended, &mut shared, &summary, &ended.session.record());
     assert_eq!(recorded.sub.options.total_override, OWN_TOTAL, "the submission says so, which the server ranks as unranked");
     let replay = recorded.recorded_replay.expect("the run's replay is kept");
     assert_eq!(replay.judge.total_override, OWN_TOTAL, "the replay records the TOTAL it was played on");
@@ -933,6 +933,7 @@ fn leaving_mid_song_signed_in_sends_the_run() {
     shared.record_sync_pacing = crate::record_sync::SyncPacing {
         score_interval: Duration::ZERO,
         replay_interval: Duration::ZERO,
+        trace_interval: Duration::ZERO,
         rate_limit_wait: Duration::ZERO,
         cancel_check: Duration::from_millis(1),
     };
@@ -1285,6 +1286,7 @@ fn unpaced() -> crate::record_sync::SyncPacing {
     crate::record_sync::SyncPacing {
         score_interval: Duration::ZERO,
         replay_interval: Duration::ZERO,
+        trace_interval: Duration::ZERO,
         rate_limit_wait: Duration::ZERO,
         cancel_check: Duration::from_millis(1),
     }
@@ -1336,8 +1338,9 @@ fn a_replay_the_save_thread_could_not_write_is_let_go() {
     assert_eq!(shared.scores.for_md5(&recorded_model().md5)[0].replay_file, None);
 }
 
-/// Neither the result screen's replay nor its settings are written on the frame thread: both are
-/// handed to the save thread, and land once it gets to them.
+/// Neither the result screen's replay, its settings nor the run's trace are written on the frame
+/// thread: all three are handed to the save thread, and land once it gets to them. The run's row is
+/// in the history already.
 #[test]
 fn entering_the_result_writes_no_file_on_the_frame_thread() {
     let mut shared = signed_out("result-no-frame-write");
@@ -1348,10 +1351,13 @@ fn entering_the_result_writes_no_file_on_the_frame_thread() {
     let (logs, _) = stored(&shared);
     let replay = shared.replay_dir.join(logs[0].replay_file.as_deref().expect("a replay is named"));
     assert!(!replay.exists() && !shared.settings_path.exists(), "a file was written before the save thread got to it");
+    let trace_of_the_run = |shared: &AppShared| shared.scoredb.as_ref().expect("the score database").trace_body(logs[0].id).expect("reads");
+    assert_eq!(trace_of_the_run(&shared), None, "the trace was written before the save thread got to it");
     drop(gate);
     shared.saves.flush();
     assert!(replay.exists() && shared.settings_path.exists(), "the save thread wrote both");
     Replay::load(&replay).expect("the replay reads back whole");
+    assert!(trace_of_the_run(&shared).as_deref().and_then(rbms_ir::PlayTrace::from_json).is_some(), "the save thread kept the trace");
 }
 
 /// A run played while the score database cannot take it is kept on the side, its replay with it,
@@ -1382,6 +1388,76 @@ fn a_run_played_while_the_score_database_is_unavailable_is_kept_and_read_in_late
     assert_eq!(logs[0].replay_file.as_deref(), Some(replay.as_str()));
     assert_eq!(std::fs::read_dir(&pending).expect("the folder stays").count(), 0, "and its file is gone");
     assert_eq!(reopened.scores.for_md5(&recorded_model().md5).len(), 1, "the book reads it too");
+}
+
+/// The trace a stored run was kept with, read back.
+fn kept_trace(shared: &AppShared, log_id: i64) -> rbms_ir::PlayTrace {
+    let body = shared.scoredb.as_ref().expect("the score database").trace_body(log_id).expect("reads").expect("the run kept its trace");
+    rbms_ir::PlayTrace::from_json(&body).expect("the kept trace reads as one")
+}
+
+/// What a kept trace's states say the run judged: per tier from PGREAT to POOR, every judged object
+/// nothing consumed counted a POOR let pass, as the summary the run is kept with counts it.
+fn traced_counts(trace: &rbms_ir::PlayTrace) -> [u32; 5] {
+    let mut counts = [0; 5];
+    for (state, kind) in trace.notes.state.iter().zip(&trace.notes.kind) {
+        match (state, *kind == rbms_ir::TRACE_KIND_LONG_END) {
+            (_, true) => {}
+            (0, false) => counts[rbms_judge::Judge::Poor as usize] += 1,
+            (state, false) => counts[usize::from(*state) - 1] += 1,
+        }
+    }
+    counts
+}
+
+/// Every run kept is kept with its trace, written after its row, whether or not anybody is
+/// signed in: one the result screen keeps and one left with Escape alike. No score server is asked
+/// for anything to keep it.
+#[test]
+fn every_run_kept_keeps_its_trace_with_it() {
+    let mut shared = signed_out("trace-kept");
+    let (_, summary) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+    let (logs, _) = stored(&shared);
+    let finished = kept_trace(&shared, logs[0].id);
+    assert_eq!(traced_counts(&finished)[..], summary.counts[..5], "the finished run's trace adds up to what it was kept as");
+    assert_eq!(finished.chart.md5, recorded_model().md5);
+    assert_eq!(finished.score_id, None, "nothing is linked before a server takes the score");
+
+    let model = recorded_model();
+    let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_AT_US);
+    let left = session.summary().left_unfinished();
+    leave_by_escape(&mut shared, session);
+    let (logs, _) = stored(&shared);
+    assert_eq!(logs.len(), 2);
+    let left_trace = kept_trace(&shared, logs[0].id);
+    assert_eq!(traced_counts(&left_trace)[..], left.counts[..5], "the left run's trace adds up to the FAILED run it was kept as");
+    assert!(left_trace.notes.state.contains(&0), "the notes it never reached are not judged in the trace");
+}
+
+/// A run the score database could not take carries its trace in the file it is kept in, and is
+/// read in with it.
+#[test]
+fn a_run_kept_on_the_side_keeps_its_trace_in_its_file() {
+    let mut shared = signed_out("trace-on-the-side");
+    shared.scoredb = None;
+    crate::notify::exclusive(|| {
+        end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+        crate::notify::drain(&mut Vec::new());
+    });
+    let pending = crate::scoredb_store::pending_runs_dir(shared.settings_path.parent().expect("a folder"));
+    let file = std::fs::read_dir(&pending).expect("the run is kept on the side").next().expect("one file").expect("an entry").path();
+    let run = rbms_store::scoredb::PendingRun::from_ron(&std::fs::read_to_string(file).expect("reads")).expect("parses");
+    assert!(run.trace.as_deref().and_then(rbms_ir::PlayTrace::from_json).is_some(), "the file holds the run's trace");
+}
+
+/// A run nobody played by hand keeps nothing, so it keeps no trace either.
+#[test]
+fn a_run_the_engine_played_keeps_no_trace() {
+    let mut shared = signed_out("trace-autoplay");
+    shared.config.play.autoplay = true;
+    let session = run_to_its_end(SessionOptions { autoplay: true, ..SessionOptions::default() }, &[]);
+    end_run(&mut shared, session);
+    assert!(every_play(&shared).is_empty(), "an autoplay run is no record");
 }
 
 /// A run that failed and is started again at once with START or SELECT is kept first, as its result

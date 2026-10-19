@@ -18,6 +18,11 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// worker that makes them.
 pub const FOLDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Wall-clock budget for one play trace upload. A trace of a long chart is a few hundred kilobytes,
+/// which a slow line does not move inside [`REQUEST_TIMEOUT`]; only the records sync's own worker
+/// waits on it.
+pub const TRACE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The largest answer read for a player's folders. The server holds a folder to 2,000 charts of a
 /// few hundred bytes each, so this is about twice the largest folder it can send; an answer past
 /// it is refused rather than read into memory without end.
@@ -146,6 +151,12 @@ impl HttpScoreServer {
         Self::decode(Self::succeeding(resp)?)
     }
 
+    /// A `POST` whose body may be large, given [`TRACE_REQUEST_TIMEOUT`].
+    fn post_large<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T, IrError> {
+        let resp = self.send(self.client()?.post(self.url(path)).json(body).timeout(TRACE_REQUEST_TIMEOUT))?;
+        Self::decode(Self::succeeding(resp)?)
+    }
+
     fn put<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T, IrError> {
         let resp = self.send(self.client()?.put(self.url(path)).json(body))?;
         Self::decode(Self::succeeding(resp)?)
@@ -184,6 +195,11 @@ impl ScoreServer for HttpScoreServer {
     fn upload_replay(&self, chart: &ChartId, replay: &ReplayData) -> Result<String, IrError> {
         let uploaded: ReplayUploadResponse = self.post(&format!("/charts/{}/replays", chart.md5), replay)?;
         Ok(uploaded.id)
+    }
+
+    fn upload_trace(&self, chart: &ChartId, trace: &PlayTrace) -> Result<String, IrError> {
+        let stored: TraceUploadResponse = self.post_large(&format!("/charts/{}/traces", chart.md5), trace)?;
+        Ok(stored.id)
     }
 
     fn course_ranking(&self, course_hash: &str, limit: u32) -> Result<Vec<ScoreRecord>, IrError> {

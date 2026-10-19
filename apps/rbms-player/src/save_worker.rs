@@ -4,7 +4,8 @@
 //! that flush costs milliseconds on a fast disk and tens of them on a slow one or under a virus
 //! scanner. The result screen, Escape out of a run, a run started again, and the answers the network
 //! brings in mid-run all save something, and none of them may stall a frame on it. So they hand the
-//! write here and go on.
+//! write here and go on. A run's play trace is laid out and serialised here too, not only written:
+//! the frame thread hands over what it is made of ([`SaveWorker::keep_trace`]).
 //!
 //! One thread takes every write, in the order they were handed over, so two writes of one file never
 //! race each other's temp file. A settings save that a later one replaces before the thread reaches
@@ -20,10 +21,25 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
+use rbms_store::scoredb::{PendingRun, ScoreDb};
 use rbms_store::{Replay, StagedWrite};
 
 use crate::notify::{Level, notify};
+use crate::play_trace::TraceSource;
 use crate::*;
+
+/// What a failed trace write says when the trace made no body.
+const TRACE_NOT_SERIALISED: &str = "it does not serialise";
+
+/// Where the trace of a stored run is kept: the run's row and the database it is in, and the file
+/// it goes on the side in, holding `run`, when the database does not take it.
+pub(crate) struct StoredRun {
+    pub(crate) log_id: i64,
+    pub(crate) db_path: PathBuf,
+    pub(crate) on_the_side: PathBuf,
+    /// The run as a file kept on the side holds it, without its trace, which is added there.
+    pub(crate) run: PendingRun,
+}
 
 /// What a write that failed was writing, which decides what the frame thread does about it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +50,8 @@ pub(crate) enum Saving {
     Replay { file: String },
     /// A run kept on the side while the score database could not take it.
     PendingRun { file: PathBuf },
+    /// The trace of a run whose row is stored ([`crate::play_trace`]).
+    Trace { log_id: i64 },
 }
 
 /// One write that failed, and why.
@@ -171,12 +189,44 @@ impl SaveWorker {
         });
     }
 
-    /// Write `contents` to `path`, a file nothing else writes.
-    pub(crate) fn save_text(&self, what: Saving, path: PathBuf, contents: String) {
+    /// Write what `contents` makes, made on the thread, to `path`, a file nothing else writes.
+    pub(crate) fn save_text(&self, what: Saving, path: PathBuf, contents: impl FnOnce() -> String + Send + 'static) {
         self.hand_over(Job {
             what,
             replaces: None,
-            work: Box::new(move || rbms_store::write_atomic(&path, &contents).map_err(|e| format!("{e} ({})", path.display()))),
+            work: Box::new(move || rbms_store::write_atomic(&path, &contents()).map_err(|e| format!("{e} ({})", path.display()))),
+        });
+    }
+
+    /// Lay out the trace `source` makes, write its body and keep it beside the stored run `stored`
+    /// names. A database that does not take it leaves the run's row as it is, and the trace goes on
+    /// the side instead, in a file of its run the next opening of the database reads it in from
+    /// ([`rbms_store::scoredb::ScoreDb::import_pending_runs`]); the failure is reported either way.
+    pub(crate) fn keep_trace(&self, source: TraceSource, stored: StoredRun) {
+        self.hand_over(Job {
+            what: Saving::Trace { log_id: stored.log_id },
+            replaces: None,
+            work: Box::new(move || {
+                let body = source.body().ok_or_else(|| TRACE_NOT_SERIALISED.to_string())?;
+                let refused = match ScoreDb::open(&stored.db_path).and_then(|mut db| db.keep_trace(stored.log_id, &body)) {
+                    Ok(()) => return Ok(()),
+                    Err(e) => e.to_string(),
+                };
+                let path = stored.on_the_side;
+                let run = PendingRun { trace: Some(body), ..stored.run };
+                let text = run.to_ron().map_err(|e| format!("{refused}; not kept on the side either: {e}"))?;
+                rbms_store::write_atomic(&path, &text).map_err(|e| format!("{refused}; not kept on the side either: {e} ({})", path.display()))?;
+                Err(format!("{refused}; kept on the side until the score database takes it ({})", path.display()))
+            }),
+        });
+    }
+
+    /// Write `run`, a run the score database could not take, to `path`, a file nothing else writes,
+    /// with the body of the trace `source` makes laid out here. `text` is the run as it stands
+    /// without the trace, written when the trace makes no body.
+    pub(crate) fn keep_run_on_the_side(&self, path: PathBuf, run: PendingRun, text: String, source: TraceSource) {
+        self.save_text(Saving::PendingRun { file: path.clone() }, path, move || {
+            source.body().and_then(|body| PendingRun { trace: Some(body), ..run }.to_ron().ok()).unwrap_or(text)
         });
     }
 
@@ -280,6 +330,7 @@ fn failure_line(failure: &SaveFailure) -> String {
         Saving::Settings => format!("settings save failed: {}", failure.error),
         Saving::Replay { .. } => format!("replay not saved: {}", failure.error),
         Saving::PendingRun { .. } => format!("run not kept: {}", failure.error),
+        Saving::Trace { .. } => format!("trace of the run not stored: {}", failure.error),
     }
 }
 

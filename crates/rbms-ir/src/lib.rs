@@ -17,10 +17,12 @@ mod mock_http;
 pub use dto::{
     AuthRequest, AuthResponse, ChartId, ChartRankingQuery, ChartReplayQuery, ClearLamp, CourseSubmission, DEFAULT_PAGE, DEFAULT_PAGE_LIMIT,
     DUPLICATE_SUBMISSION_MESSAGE, FALLBACK_GAUGE_VALUE, GaugeType, JudgeBreakdown, MAX_PLAYER_SCORES_LIMIT, MAX_RANKING_LIMIT, MAX_REPLAY_LIST_LIMIT,
-    MIN_PLAYED_AT_MS, PlayOptions, PlayerId, PlayerProfile, PlayerScoresQuery, RECONSTRUCTED_EXTRA_KEY, RandomOption, ReplayData, ReplayEvent, ReplayMeta,
-    ReplayUploadResponse, RivalPutRequest, ScoreFlag, ScoreRecord, ScoreSubmission, ServerCapabilities, ServerInfo, SettingsBlob, SettingsConflict,
-    SettingsPutRequest, SettingsPutResponse, SettingsPutResult, SubmitResponse, SubmittedChart, UserFolder, UserFolderIndex, UserFolderItem, UserFolderSummary,
-    VersionInfo, is_path_safe_folder_id,
+    MIN_PLAYED_AT_MS, PlayOptions, PlayTrace, PlayerId, PlayerProfile, PlayerScoresQuery, RECONSTRUCTED_EXTRA_KEY, RandomOption, ReplayData, ReplayEvent,
+    ReplayMeta, ReplayUploadResponse, RivalPutRequest, ScoreFlag, ScoreRecord, ScoreSubmission, ServerCapabilities, ServerInfo, SettingsBlob, SettingsConflict,
+    SettingsPutRequest, SettingsPutResponse, SettingsPutResult, SubmitResponse, SubmittedChart, TRACE_FORMAT, TRACE_FORMAT_VERSION, TRACE_KIND_CHARGE_END,
+    TRACE_KIND_LONG_END, TRACE_KIND_LONG_HEAD, TRACE_KIND_NORMAL, TRACE_MAX_BYTES, TRACE_MAX_SPEED_CHANGES, TRACE_MAX_TEMPO_POINTS, TRACE_SPEED_FIELDS,
+    TraceEmptyPoors, TraceGauge, TraceGaugeBounds, TraceNotes, TraceSpeed, TraceSpeedChange, TraceSpeeds, TraceTempo, TraceUploadResponse, UserFolder,
+    UserFolderIndex, UserFolderItem, UserFolderSummary, VersionInfo, is_path_safe_folder_id,
 };
 pub use error::{ErrorBody, ErrorEnvelope, IrError, ServerReason};
 pub use http::HttpScoreServer;
@@ -112,6 +114,12 @@ pub trait ScoreServer: Send + Sync {
     /// Replays stored for a chart, without their events; download one with
     /// [`ScoreServer::download_replay`].
     fn chart_replays(&self, _chart: &ChartId, _query: &ChartReplayQuery) -> Result<Vec<ReplayMeta>, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// Upload what a run was note by note, linked to the score the server took it as by
+    /// [`PlayTrace::score_id`]; answers the id the server stores it under. A client sends one only
+    /// to a server that advertises [`ServerCapabilities::traces`].
+    fn upload_trace(&self, _chart: &ChartId, _trace: &PlayTrace) -> Result<String, IrError> {
         Err(IrError::Unsupported)
     }
     /// Contract version and build of the deployment.

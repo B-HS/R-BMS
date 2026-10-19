@@ -11,6 +11,11 @@
 //! A finished course is kept and sent the same way ([`ScoreDb::course_candidates`]), after the
 //! plays.
 //!
+//! A play's trace, what it was note by note ([`crate::play_trace`]), goes up after the courses
+//! once the server took the play's score, linked to that score: only to a server that advertises
+//! it takes traces ([`rbms_ir::ServerCapabilities::traces`]) and only while AUTO UPLOAD TRACE is on.
+//! Until then the trace stays pending, and a later sync sends it.
+//!
 //! The picking and the sending happen on a worker thread, paced under the server's rate limits. The
 //! worker reads the database through a connection of its own that only reads, so picking the plays
 //! out of a history of tens of thousands never stalls a frame; the frame thread hands it what it
@@ -34,10 +39,12 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use rbms_ir::mapping::{AUTO_SCRATCH_FLAG, CUSTOM_JUDGE_FLAG};
-use rbms_ir::{ChartId, CourseSubmission, IrError, Rejection, SubmitResponse, SubmitVerdict, UploadVerdict, submit_verdict, upload_verdict};
+use rbms_ir::{
+    ChartId, CourseSubmission, IrError, PlayTrace, Rejection, SubmitResponse, SubmitVerdict, TRACE_MAX_BYTES, UploadVerdict, submit_verdict, upload_verdict,
+};
 use rbms_store::scoredb::{
     CourseSyncRow, IrSyncRow, JUDGE_BAD, JUDGE_GOOD, JUDGE_GREAT, JUDGE_MISS, JUDGE_PGREAT, JUDGE_POOR, JUDGE_TIER_COUNT, KeptCourse, PlayLog, ReplayAnswer,
-    ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, ScoreDb, SyncCandidate, SyncState, SyncWalk, UNSET_MINIMUM, charged_minbp, gauge_token, mode_name,
+    ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, ScoreDb, SyncCandidate, SyncState, SyncWalk, TraceAnswer, UNSET_MINIMUM, charged_minbp, gauge_token, mode_name,
     random_token,
 };
 use rbms_store::{REFERENCE_RECORD_RULE_VERSION, SCRATCH_AUTO_ASSIST};
@@ -52,6 +59,9 @@ pub(crate) const SCORE_SEND_INTERVAL: Duration = Duration::from_millis(1_500);
 /// Gap between the starts of two replay uploads. The server takes 10 a minute from an account; this
 /// sends 8, leaving the rest to the runs played while a sync goes on.
 pub(crate) const REPLAY_SEND_INTERVAL: Duration = Duration::from_millis(7_500);
+/// Gap between the starts of two trace uploads. The server is to take 30 a minute from an account;
+/// this sends 24, leaving the rest to the runs played while a sync goes on.
+pub(crate) const TRACE_SEND_INTERVAL: Duration = Duration::from_millis(2_500);
 /// How long a sync waits after a rate limit: the server's window.
 pub(crate) const RATE_LIMIT_WAIT: Duration = Duration::from_secs(60);
 /// How many times a sync waits out a rate limit on one request. A request still rate limited after
@@ -122,6 +132,7 @@ pub(crate) fn server_build_of(server: &dyn ScoreServer) -> String {
 pub(crate) struct SyncPacing {
     pub(crate) score_interval: Duration,
     pub(crate) replay_interval: Duration,
+    pub(crate) trace_interval: Duration,
     pub(crate) rate_limit_wait: Duration,
     pub(crate) cancel_check: Duration,
 }
@@ -130,6 +141,7 @@ impl SyncPacing {
     pub(crate) const GAME: SyncPacing = SyncPacing {
         score_interval: SCORE_SEND_INTERVAL,
         replay_interval: REPLAY_SEND_INTERVAL,
+        trace_interval: TRACE_SEND_INTERVAL,
         rate_limit_wait: RATE_LIMIT_WAIT,
         cancel_check: CANCEL_CHECK_INTERVAL,
     };
@@ -143,12 +155,18 @@ pub(crate) struct ChartFacts {
     pub(crate) level: String,
 }
 
-/// Everything a worker needs to send: the plays, the courses and the replays, and how.
+/// Everything a worker needs to send: the plays, the courses, the traces and the replays, and how.
 pub(crate) struct SyncJob {
     pub(crate) login_id: String,
     pub(crate) scores: Vec<SyncCandidate>,
     pub(crate) courses: Vec<KeptCourse>,
+    pub(crate) traces: Vec<SyncCandidate>,
     pub(crate) replays: Vec<SyncCandidate>,
+    /// Whether traces go up this sync: AUTO UPLOAD TRACE is on and the server takes them. A play
+    /// the server takes during the sync has its trace sent only then.
+    pub(crate) upload_traces: bool,
+    /// The score database file the traces are read from as they are sent.
+    pub(crate) db_path: PathBuf,
     pub(crate) upload_replays: bool,
     pub(crate) replay_dir: PathBuf,
     /// Answered once the save thread has written everything it was handed before the sync began
@@ -162,7 +180,7 @@ pub(crate) struct SyncJob {
 /// What the server said of one play's score, as the worker reports it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ScoreOutcome {
-    Accepted { score_id: Option<String>, already: bool, replay: ReplayState },
+    Accepted { score_id: Option<String>, already: bool, replay: ReplayState, trace: ReplayState },
     Rejected(Rejection),
     Retry { detail: String },
     Skipped { code: &'static str, reason: &'static str },
@@ -191,6 +209,7 @@ pub(crate) enum SyncEvent {
     Started {
         scores: usize,
         courses: usize,
+        traces: usize,
         replays: usize,
     },
     /// A play stored without its chart's SHA-256 has it now.
@@ -206,6 +225,16 @@ pub(crate) enum SyncEvent {
     Course {
         course_id: i64,
         outcome: ScoreOutcome,
+    },
+    /// The trace stage is about to send this many traces.
+    Traces {
+        total: usize,
+    },
+    Trace {
+        log_id: i64,
+        state: ReplayState,
+        trace_id: Option<String>,
+        error: Option<String>,
     },
     /// The replay stage is about to send this many replays.
     Replays {
@@ -280,6 +309,8 @@ pub(crate) struct SyncPlan {
     pub(crate) courses_up_to: Option<i64>,
     /// This client's build ([`refusal_key`]).
     pub(crate) client_build: String,
+    /// AUTO UPLOAD TRACE: whether traces go up to a server that takes them.
+    pub(crate) upload_traces: bool,
     pub(crate) upload_replays: bool,
     pub(crate) replay_dir: PathBuf,
     /// Answered once the save thread has written everything it was handed before the sync began.
@@ -288,9 +319,10 @@ pub(crate) struct SyncPlan {
 }
 
 /// Pick what `plan` names on a worker thread and send it ([`run_record_sync`]), reporting over the
-/// returned channel. The worker asks the server its build, reads the plays, courses and
-/// replays to send, reports them picked ([`SyncEvent::Picked`]) and waits on `charts` for what the
-/// library knows of their charts before it sends.
+/// returned channel. The worker asks the server its build and, when traces are to go up, whether it
+/// takes them, reads the plays, courses, traces and replays to send, reports them picked
+/// ([`SyncEvent::Picked`]) and waits on `charts` for what the library knows of their charts before
+/// it sends.
 pub(crate) fn spawn_planned_sync(
     server: Arc<dyn ScoreServer>,
     plan: SyncPlan,
@@ -302,13 +334,16 @@ pub(crate) fn spawn_planned_sync(
         let mut plan = plan;
         let saves_settled = plan.saves_settled.take();
         let stop = match pick(server.as_ref(), &plan, &tx) {
-            Ok((scores, courses, replays)) => match facts_from(&charts, &cancel, plan.pacing.cancel_check) {
+            Ok(Picked { scores, courses, traces, replays, upload_traces }) => match facts_from(&charts, &cancel, plan.pacing.cancel_check) {
                 Some(charts) => {
                     let job = SyncJob {
                         login_id: plan.login_id.clone(),
                         scores,
                         courses,
+                        traces,
                         replays,
+                        upload_traces,
+                        db_path: plan.db_path.clone(),
                         upload_replays: plan.upload_replays,
                         replay_dir: plan.replay_dir.clone(),
                         saves_settled,
@@ -326,10 +361,27 @@ pub(crate) fn spawn_planned_sync(
     rx
 }
 
-/// What a worker picked to send: plays, courses, replays.
-type Picked = (Vec<SyncCandidate>, Vec<KeptCourse>, Vec<SyncCandidate>);
+/// What a worker picked to send, and whether traces go up this sync at all.
+struct Picked {
+    scores: Vec<SyncCandidate>,
+    courses: Vec<KeptCourse>,
+    traces: Vec<SyncCandidate>,
+    replays: Vec<SyncCandidate>,
+    upload_traces: bool,
+}
+
+/// Whether `server` says it takes traces. A server that does not answer, or that answers without
+/// the flag, takes none: an older server has nowhere to put one.
+fn takes_traces(server: &dyn ScoreServer) -> bool {
+    server.health().is_ok_and(|info| info.capabilities.traces)
+}
 
 /// Ask the server its build, read what `plan` sends, and report it picked.
+///
+/// The traces are those of the plays the server already holds; a sync narrowed to some plays sends
+/// theirs alone, so the trace of a play the result screen sent goes up by a sync of that play. The
+/// server is asked whether it takes traces only when there is one to send: one of a play it holds,
+/// or one of a play this sync is to send.
 fn pick(server: &dyn ScoreServer, plan: &SyncPlan, tx: &Sender<SyncEvent>) -> Result<Picked, rbms_store::scoredb::ScoreDbError> {
     let server_build = server_build_of(server);
     let refused_under = refusal_key(&plan.client_build, &server_build);
@@ -352,9 +404,16 @@ fn pick(server: &dyn ScoreServer, plan: &SyncPlan, tx: &Sender<SyncEvent>) -> Re
         SyncScope::All => (db.course_candidates(&walk)?, if plan.upload_replays { db.replay_candidates(&walk)? } else { Vec::new() }),
         SyncScope::Logs(_) => (Vec::new(), Vec::new()),
     };
+    let mut traces = if plan.upload_traces { db.trace_candidates(&walk)? } else { Vec::new() };
+    traces.retain(|candidate| Some(candidate.log.id) != plan.left_out);
+    let traces_to_send = !traces.is_empty() || scores.iter().any(|candidate| candidate.has_trace);
+    let upload_traces = plan.upload_traces && traces_to_send && takes_traces(server);
+    if !upload_traces {
+        traces.clear();
+    }
     let md5s: HashSet<String> = scores.iter().chain(&replays).map(|candidate| candidate.log.md5.to_ascii_lowercase()).collect();
     let _ = tx.send(SyncEvent::Picked { server_build, md5s: md5s.into_iter().collect() });
-    Ok((scores, courses, replays))
+    Ok(Picked { scores, courses, traces, replays, upload_traces })
 }
 
 /// Wait for the library's facts the frame thread hands back, looking at the cancel flag as it
@@ -379,7 +438,7 @@ pub(crate) fn course_outcome(result: &Result<SubmitResponse, IrError>) -> ScoreO
         return ScoreOutcome::Skipped { code: SKIPPED_NO_COURSE_ENDPOINT, reason: NO_COURSE_ENDPOINT_REASON };
     }
     match submit_verdict(result) {
-        SubmitVerdict::Accepted { score_id, already, .. } => ScoreOutcome::Accepted { score_id, already, replay: ReplayState::None },
+        SubmitVerdict::Accepted { score_id, already, .. } => ScoreOutcome::Accepted { score_id, already, replay: ReplayState::None, trace: ReplayState::None },
         SubmitVerdict::Rejected(rejection) => ScoreOutcome::Rejected(rejection),
         SubmitVerdict::RateLimited => ScoreOutcome::Retry { detail: RATE_LIMITED_DETAIL.to_string() },
         SubmitVerdict::Transient { detail } | SubmitVerdict::StopSync { detail } => ScoreOutcome::Retry { detail },
@@ -455,12 +514,12 @@ fn send_courses(
 pub(crate) const SKIPPED_UNREADABLE_COURSE: &str = "UNREADABLE_COURSE";
 const UNREADABLE_COURSE_REASON: &str = "kept course body unreadable";
 
-/// Send `job`, reporting over `tx`: the plays, then the courses, then the replays. Setting `cancel`
-/// ends the sync at the next play or within [`SyncPacing::cancel_check`] of a wait; a request
-/// already on the wire is let finish. Returns why the sync stopped, if it did.
+/// Send `job`, reporting over `tx`: the plays, then the courses, then the traces, then the replays.
+/// Setting `cancel` ends the sync at the next play or within [`SyncPacing::cancel_check`] of a wait;
+/// a request already on the wire is let finish. Returns why the sync stopped, if it did.
 fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, tx: &Sender<SyncEvent>) -> Option<SyncStop> {
-    let SyncJob { login_id, scores, courses, mut replays, upload_replays, replay_dir, saves_settled, charts, pacing } = job;
-    let _ = tx.send(SyncEvent::Started { scores: scores.len(), courses: courses.len(), replays: replays.len() });
+    let SyncJob { login_id, scores, courses, mut traces, mut replays, upload_traces, db_path, upload_replays, replay_dir, saves_settled, charts, pacing } = job;
+    let _ = tx.send(SyncEvent::Started { scores: scores.len(), courses: courses.len(), traces: traces.len(), replays: replays.len() });
     let mut pacer = Pacer { last_start: None, cancel, check: pacing.cancel_check };
     let mut transient_in_a_row = 0;
     for candidate in scores {
@@ -506,10 +565,16 @@ fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, 
                     (Some(_), false) => ReplayState::Skipped,
                     (Some(_), true) => ReplayState::Pending,
                 };
+                let trace = if candidate.has_trace { ReplayState::Pending } else { ReplayState::None };
+                if trace == ReplayState::Pending && upload_traces {
+                    let accepted =
+                        SyncCandidate { score_id: score_id.clone(), state: Some(SyncState::Accepted), trace_state: Some(trace), ..candidate.clone() };
+                    traces.push(accepted);
+                }
                 if replay == ReplayState::Pending {
                     replays.push(SyncCandidate { score_id: score_id.clone(), state: Some(SyncState::Accepted), replay_state: Some(replay), ..candidate });
                 }
-                ScoreOutcome::Accepted { score_id, already, replay }
+                ScoreOutcome::Accepted { score_id, already, replay, trace }
             }
             SubmitVerdict::Rejected(rejection) => {
                 transient_in_a_row = 0;
@@ -535,6 +600,12 @@ fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, 
         let _ = tx.send(SyncEvent::Score { log_id, outcome });
     }
     if let Some(stop) = send_courses(server, courses, &login_id, &mut pacer, &pacing, &mut transient_in_a_row, tx) {
+        return Some(stop);
+    }
+    if upload_traces
+        && !traces.is_empty()
+        && let Some(stop) = send_traces(server, traces, &db_path, &mut pacer, &pacing, tx)
+    {
         return Some(stop);
     }
     if !upload_replays {
@@ -573,6 +644,107 @@ fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, 
                 return Some(SyncStop::Cancelled);
             }
             match upload_verdict(&server.upload_replay(&chart, &data)) {
+                UploadVerdict::RateLimited if waits < RATE_LIMIT_WAITS_PER_REQUEST => {
+                    waits += 1;
+                    if pacer.wait(pacing.rate_limit_wait) {
+                        return Some(SyncStop::Cancelled);
+                    }
+                }
+                verdict => break verdict,
+            }
+        };
+        match verdict {
+            UploadVerdict::Uploaded { replay_id } => {
+                transient_in_a_row = 0;
+                report(ReplayState::Uploaded, Some(replay_id), None);
+            }
+            UploadVerdict::Rejected(rejection) => {
+                transient_in_a_row = 0;
+                report(ReplayState::Rejected, None, Some(rejection.detail));
+            }
+            UploadVerdict::RateLimited => {
+                report(ReplayState::Failed, None, Some(RATE_LIMITED_DETAIL.to_string()));
+                return Some(SyncStop::RateLimited);
+            }
+            UploadVerdict::Transient { detail } => {
+                transient_in_a_row += 1;
+                report(ReplayState::Failed, None, Some(detail.clone()));
+                if transient_in_a_row >= TRANSIENT_FAILURES_BEFORE_STOP {
+                    return Some(SyncStop::Unreachable(detail));
+                }
+            }
+            UploadVerdict::StopSync { detail } => {
+                report(ReplayState::Failed, None, Some(detail.clone()));
+                return Some(SyncStop::Unauthorized(detail));
+            }
+        }
+    }
+    None
+}
+
+/// `trace_error` of a trace never sent because it is larger than the server takes.
+pub(crate) const TRACE_TOO_LARGE: &str = "trace larger than the server takes";
+/// `trace_error` of a trace never sent because the server took the score without naming it.
+pub(crate) const TRACE_WITHOUT_A_SCORE: &str = "server named no score to link the trace to";
+/// `trace_error` of a kept trace that no longer reads as one.
+pub(crate) const TRACE_UNREADABLE: &str = "kept trace unreadable";
+/// What `trace_error` starts with when the score database could not be read for the trace just
+/// then; the reason follows.
+pub(crate) const TRACE_NOT_READ: &str = "kept trace not read";
+
+/// The trace of a play, ready to upload, or the state and the reason it is not sent: failed when the
+/// database could not be read just then (busy, or a read that failed), which a later sync tries
+/// again; missing when its row is gone; skipped when it cannot be read, has no score to be linked
+/// to, or is larger than [`TRACE_MAX_BYTES`].
+fn trace_upload_of(db: &ScoreDb, candidate: &SyncCandidate) -> Result<PlayTrace, (ReplayState, Option<String>)> {
+    let kept = db.trace_body(candidate.log.id).map_err(|e| (ReplayState::Failed, Some(format!("{TRACE_NOT_READ}: {e}"))))?;
+    let body = kept.ok_or((ReplayState::Missing, None))?;
+    let mut trace = PlayTrace::from_json(&body).ok_or_else(|| (ReplayState::Skipped, Some(TRACE_UNREADABLE.to_string())))?;
+    trace.score_id = Some(candidate.score_id.clone().ok_or_else(|| (ReplayState::Skipped, Some(TRACE_WITHOUT_A_SCORE.to_string())))?);
+    let size = trace.to_json().map_or(usize::MAX, |text| text.len());
+    if size > TRACE_MAX_BYTES {
+        return Err((ReplayState::Skipped, Some(TRACE_TOO_LARGE.to_string())));
+    }
+    Ok(trace)
+}
+
+/// Send the traces of plays the server holds, each linked to its score, by the rules replays are
+/// sent by. Returns why the sync stopped, if it did.
+fn send_traces(
+    server: &dyn ScoreServer,
+    traces: Vec<SyncCandidate>,
+    db_path: &Path,
+    pacer: &mut Pacer<'_>,
+    pacing: &SyncPacing,
+    tx: &Sender<SyncEvent>,
+) -> Option<SyncStop> {
+    let db = match ScoreDb::open_read_only(db_path) {
+        Ok(db) => db,
+        Err(e) => return Some(SyncStop::Unreadable(e.to_string())),
+    };
+    let _ = tx.send(SyncEvent::Traces { total: traces.len() });
+    let mut transient_in_a_row = 0;
+    for candidate in traces {
+        if pacer.cancelled() {
+            return Some(SyncStop::Cancelled);
+        }
+        let log_id = candidate.log.id;
+        let report = |state: ReplayState, trace_id: Option<String>, error: Option<String>| {
+            let _ = tx.send(SyncEvent::Trace { log_id, state, trace_id, error });
+        };
+        let trace = match trace_upload_of(&db, &candidate) {
+            Ok(trace) => trace,
+            Err((state, reason)) => {
+                report(state, None, reason);
+                continue;
+            }
+        };
+        let mut waits = 0;
+        let verdict = loop {
+            if pacer.before_request(pacing.trace_interval) {
+                return Some(SyncStop::Cancelled);
+            }
+            match upload_verdict(&server.upload_trace(&trace.chart, &trace)) {
                 UploadVerdict::RateLimited if waits < RATE_LIMIT_WAITS_PER_REQUEST => {
                     waits += 1;
                     if pacer.wait(pacing.rate_limit_wait) {
@@ -842,6 +1014,8 @@ pub(crate) struct SyncTally {
     pub(crate) skipped: usize,
     pub(crate) replays_uploaded: usize,
     pub(crate) replays_failed: usize,
+    pub(crate) traces_uploaded: usize,
+    pub(crate) traces_failed: usize,
     pub(crate) courses_sent: usize,
     pub(crate) courses_rejected: usize,
     pub(crate) courses_failed: usize,
@@ -875,12 +1049,20 @@ impl SyncTally {
         }
     }
 
+    fn count_trace(&mut self, state: ReplayState) {
+        match state {
+            ReplayState::Uploaded => self.traces_uploaded += 1,
+            ReplayState::Failed | ReplayState::Rejected | ReplayState::Missing => self.traces_failed += 1,
+            ReplayState::None | ReplayState::Pending | ReplayState::Skipped => {}
+        }
+    }
+
     fn scores_done(&self) -> usize {
         self.sent + self.already + self.rejected + self.failed + self.skipped
     }
 
     fn is_troubled(&self) -> bool {
-        self.rejected + self.failed + self.replays_failed + self.courses_rejected + self.courses_failed > 0
+        self.rejected + self.failed + self.replays_failed + self.traces_failed + self.courses_rejected + self.courses_failed > 0
     }
 
     /// The status line of a sync that ran to its end: what happened to the plays and to the
@@ -898,12 +1080,16 @@ impl SyncTally {
         .flatten()
         .collect();
         let replays: Vec<String> = [part(self.replays_uploaded, "uploaded"), part(self.replays_failed, "failed")].into_iter().flatten().collect();
+        let traces: Vec<String> = [part(self.traces_uploaded, "uploaded"), part(self.traces_failed, "failed")].into_iter().flatten().collect();
         let courses: Vec<String> =
             [part(self.courses_sent, "sent"), part(self.courses_rejected, "rejected"), part(self.courses_failed, "failed")].into_iter().flatten().collect();
         let records = if records.is_empty() { NOTHING_SENT.to_string() } else { records.join(", ") };
         let mut line = format!("records: {records}");
         if !courses.is_empty() {
             line.push_str(&format!("; courses: {}", courses.join(", ")));
+        }
+        if !traces.is_empty() {
+            line.push_str(&format!("; traces: {}", traces.join(", ")));
         }
         if !replays.is_empty() {
             line.push_str(&format!("; replays: {}", replays.join(", ")));
@@ -945,9 +1131,14 @@ pub(crate) struct RecordSyncRun {
     refused_under: String,
     /// Whether the player asked for this sync.
     by_hand: bool,
-    /// A sync started on its own that found nothing to send, which says nothing.
+    /// Whether the sync is narrowed to named plays ([`SyncScope::Logs`]).
+    named: bool,
+    /// A sync started on its own that found nothing to send, or a sync of named plays started on its
+    /// own that has only their traces to send, which says nothing but why it stopped.
     quiet: bool,
     scores_total: usize,
+    traces_total: Option<usize>,
+    traces_done: usize,
     replays_total: Option<usize>,
     replays_done: usize,
     tally: SyncTally,
@@ -956,16 +1147,18 @@ pub(crate) struct RecordSyncRun {
 impl RecordSyncRun {
     /// The value of the SYNC RECORDS NOW row while this sync runs.
     pub(crate) fn progress_value(&self) -> String {
-        match self.replays_total {
-            Some(total) => format!("REPLAYS {}/{total}", self.replays_done),
-            None => format!("SENDING {}/{}", self.tally.scores_done(), self.scores_total),
+        match (self.replays_total, self.traces_total) {
+            (Some(total), _) => format!("REPLAYS {}/{total}", self.replays_done),
+            (None, Some(total)) => format!("TRACES {}/{total}", self.traces_done),
+            (None, None) => format!("SENDING {}/{}", self.tally.scores_done(), self.scores_total),
         }
     }
 
     fn progress_line(&self) -> String {
-        match self.replays_total {
-            Some(total) => format!("syncing replays {}/{total}", self.replays_done),
-            None => format!("syncing records {}/{}", self.tally.scores_done(), self.scores_total),
+        match (self.replays_total, self.traces_total) {
+            (Some(total), _) => format!("syncing replays {}/{total}", self.replays_done),
+            (None, Some(total)) => format!("syncing traces {}/{total}", self.traces_done),
+            (None, None) => format!("syncing records {}/{}", self.tally.scores_done(), self.scores_total),
         }
     }
 }
@@ -997,7 +1190,9 @@ fn now_ms() -> i64 {
 pub(crate) fn sync_row(log_id: i64, server: &str, login_id: &str, outcome: &ScoreOutcome, refused_under: &str) -> IrSyncRow {
     let base = |state| IrSyncRow { last_attempt_at_ms: now_ms(), ..IrSyncRow::new(log_id, server, login_id, state) };
     match outcome {
-        ScoreOutcome::Accepted { score_id, replay, .. } => IrSyncRow { score_id: score_id.clone(), replay_state: *replay, ..base(SyncState::Accepted) },
+        ScoreOutcome::Accepted { score_id, replay, trace, .. } => {
+            IrSyncRow { score_id: score_id.clone(), replay_state: *replay, trace_state: *trace, ..base(SyncState::Accepted) }
+        }
         ScoreOutcome::Rejected(rejection) => IrSyncRow {
             http_status: rejection.status,
             error_code: rejection.code.clone(),
@@ -1120,6 +1315,7 @@ impl AppShared {
             }
         };
         let (db_path, _, _) = crate::scoredb_store::score_paths(self.settings_path.parent().unwrap_or_else(|| Path::new(".")));
+        let named = matches!(scope, SyncScope::Logs(_));
         let plan = SyncPlan {
             db_path,
             server_key: server.clone(),
@@ -1130,6 +1326,7 @@ impl AppShared {
             up_to,
             courses_up_to,
             client_build: self.client_build(),
+            upload_traces: self.config.network.auto_upload_trace,
             upload_replays: self.config.network.auto_upload_replay,
             replay_dir: self.replay_dir.clone(),
             saves_settled: self.saves.settled(),
@@ -1147,8 +1344,11 @@ impl AppShared {
             login_id,
             refused_under,
             by_hand,
+            named,
             quiet: false,
             scores_total: 0,
+            traces_total: None,
+            traces_done: 0,
             replays_total: None,
             replays_done: 0,
             tally: SyncTally::default(),
@@ -1207,9 +1407,10 @@ impl AppShared {
                 }
                 self.server_build = Some(server_build);
             }
-            SyncEvent::Started { scores, courses, replays } => {
+            SyncEvent::Started { scores, courses, traces, replays } => {
                 run.scores_total = scores;
-                run.quiet = !run.by_hand && scores + courses + replays == 0;
+                let only_traces = run.named && scores + courses + replays == 0;
+                run.quiet = !run.by_hand && (only_traces || scores + courses + traces + replays == 0);
                 if !run.quiet {
                     self.net_status = run.progress_line();
                 }
@@ -1231,6 +1432,32 @@ impl AppShared {
                 run.tally.count_course(&outcome);
                 let row = course_sync_row(course_id, &server, &login_id, &outcome, &refused_under);
                 self.write_course_sync_row(&row);
+            }
+            SyncEvent::Traces { total } => {
+                run.traces_total = Some(total);
+                if !run.quiet {
+                    self.net_status = run.progress_line();
+                }
+            }
+            SyncEvent::Trace { log_id, state, trace_id, error } => {
+                run.tally.count_trace(state);
+                run.traces_done += 1;
+                if !run.quiet {
+                    self.net_status = run.progress_line();
+                }
+                let trace_refused_under = (state == ReplayState::Rejected).then_some(refused_under);
+                let answer = TraceAnswer { state, trace_id: trace_id.as_deref(), error: error.as_deref(), refused_under: trace_refused_under.as_deref() };
+                if let Some(db) = self.scoredb.as_mut()
+                    && let Err(e) = db.put_trace_state(log_id, &server, &answer)
+                {
+                    notify(Level::Warn, format!("trace state not kept: {e}"));
+                }
+                if let Some(row) = self.record_sync_states.get_mut(&log_id) {
+                    row.trace_state = state;
+                    row.trace_id = trace_id;
+                    row.trace_error = error;
+                    row.trace_refused_under = trace_refused_under;
+                }
             }
             SyncEvent::Replays { total } => {
                 run.replays_total = Some(total);
@@ -1258,7 +1485,10 @@ impl AppShared {
             }
             SyncEvent::Finished { stop } => {
                 let (tally, quiet, by_hand) = (run.tally, run.quiet, run.by_hand);
-                let found_nothing = run.scores_total == 0 && run.replays_total.unwrap_or_default() == 0 && tally == SyncTally::default();
+                let found_nothing = run.scores_total == 0
+                    && run.traces_total.unwrap_or_default() == 0
+                    && run.replays_total.unwrap_or_default() == 0
+                    && tally == SyncTally::default();
                 self.record_sync = None;
                 match &stop {
                     Some(stop) => {

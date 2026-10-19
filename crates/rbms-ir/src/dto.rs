@@ -8,6 +8,7 @@ mod replay;
 mod score;
 mod settings;
 mod system;
+mod trace;
 
 pub use account::*;
 pub use chart::*;
@@ -17,6 +18,7 @@ pub use replay::*;
 pub use score::*;
 pub use settings::*;
 pub use system::*;
+pub use trace::*;
 
 pub(crate) fn current_api_version() -> u32 {
     crate::API_VERSION

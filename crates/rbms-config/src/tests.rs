@@ -69,6 +69,7 @@ fn default_values_are_sane() {
     assert_eq!(c.network.ir_email, None);
     assert!(!c.network.sync_settings, "settings sync is opt-in");
     assert!(c.network.auto_upload_replay, "replay upload rides along with a ranked submit by default");
+    assert!(c.network.auto_upload_trace, "a run's note-by-note record goes up after its score by default (decision Q5 of 2026-10-19)");
     assert!(c.network.rivals.is_empty());
     assert_eq!(c.audio.device, None, "the system default device until one is picked");
     assert_eq!(c.audio.buffer_frames, None);

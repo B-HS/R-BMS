@@ -524,6 +524,61 @@ fn upload_replay_without_a_token_maps_to_unauthorized() {
     assert!(matches!(err, IrError::Unauthorized(_)), "got {err:?}");
 }
 
+fn play_trace() -> PlayTrace {
+    PlayTrace {
+        format: TRACE_FORMAT.into(),
+        version: TRACE_FORMAT_VERSION,
+        score_id: Some("sc_123".into()),
+        chart: chart(),
+        mode: "BEAT_7K".into(),
+        lntype: 0,
+        random: RandomOption::Mirror,
+        auto_lanes: Vec::new(),
+        notes: TraceNotes { time_us: vec![1_000_000], lane: vec![1], kind: vec![TRACE_KIND_NORMAL], state: vec![2], err_us: vec![-25_000] },
+        empty_poors: TraceEmptyPoors::default(),
+        gauge: TraceGauge { interval_ms: 500, selected: 2, series: vec![vec![20.0]] },
+        gauge_bounds: Vec::new(),
+        failed_at_ms: None,
+        play_time_ms: 6_000,
+        speed: TraceSpeeds::default(),
+        tempo: Vec::new(),
+    }
+}
+
+#[test]
+fn upload_trace_sends_the_linked_body_and_returns_the_stored_id() {
+    let server = TestServer::spawn(vec![created(r#"{"id":"tr_9"}"#)]);
+    let id = server.client_with_token(TOKEN).upload_trace(&chart(), &play_trace()).expect("upload succeeds");
+    let captured = server.next_request();
+    assert_eq!(request_line(&captured), "POST /charts/9f8e7d6c5b4a39281706f5e4d3c2b1a0/traces HTTP/1.1");
+    assert_authorized(&captured);
+    let body: PlayTrace = serde_json::from_str(body_of(&captured)).expect("the body is a trace");
+    assert_eq!(body, play_trace(), "the trace goes up as it was handed over");
+    assert_eq!(id, "tr_9");
+}
+
+#[test]
+fn upload_trace_refused_for_a_mismatch_keeps_the_field_the_server_named() {
+    let body = r#"{"success":false,"error":{"code":"IR_TRACE_MISMATCH","message":"m","details":{"field":"notes.state"}}}"#;
+    let server = TestServer::spawn(vec![response("400 Bad Request", body)]);
+    let err = server.client_with_token(TOKEN).upload_trace(&chart(), &play_trace()).expect_err("400 is an error");
+    let _ = server.next_request();
+    let verdict = crate::upload_verdict(&Err(err));
+    let crate::UploadVerdict::Rejected(rejection) = verdict else {
+        panic!("a mismatch is a refusal, got {verdict:?}");
+    };
+    assert_eq!(rejection.code.as_deref(), Some("IR_TRACE_MISMATCH"));
+    assert_eq!(rejection.field.as_deref(), Some("notes.state"));
+}
+
+#[test]
+fn a_server_without_a_trace_endpoint_refuses_the_upload_rather_than_stopping_the_sync() {
+    let server = TestServer::spawn(vec![response("404 Not Found", &error_envelope("NOT_FOUND", "no route"))]);
+    let err = server.client_with_token(TOKEN).upload_trace(&chart(), &play_trace()).expect_err("404 is an error");
+    let _ = server.next_request();
+    assert!(matches!(crate::upload_verdict(&Err(err)), crate::UploadVerdict::Rejected(_)), "an old server's 404 is written down as a refusal");
+}
+
 #[test]
 fn chart_replays_lists_the_stored_metadata() {
     let body = r#"[{"id":"rp_77","url":"/api/replays/rp_77","player":{"id":"gkn"},"player_name":"gkn","chart_sha256":"abc","score_id":"sc_123","format":"rbms-us-v1","mode":"BEAT_7K","seed":7,"lntype":1,"event_count":2,"duration_us":120000,"size":128,"client_build_sha256":null,"created_at":1700000000000}]"#;
