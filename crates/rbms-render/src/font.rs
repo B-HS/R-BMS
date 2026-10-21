@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::hash::Hasher;
 use std::sync::Arc;
 
-use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, Metrics, Shaping, Stretch, Style, SwashCache, Weight, fontdb};
+use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, LayoutGlyph, Metrics, Shaping, Stretch, Style, SwashCache, Weight, fontdb};
 
 use crate::glyph_atlas::{GlyphAtlas, GlyphAtlasBinding, glyph_bitmap, packed_rgb};
 use crate::{BlendMode, Color, QuadParams, Rect, Renderer};
@@ -101,11 +101,90 @@ fn content_digest(data: &[u8]) -> (usize, u64) {
     (data.len(), hasher.finish())
 }
 
+/// The weight of the type a line of UI text is set in, on the usual 1..=1000 scale.
+///
+/// The bundled face is a variable font with a weight axis, so any of these is drawn from it
+/// without another file: shaping and rasterization both follow the weight asked for. A face that
+/// has no such axis is matched to the nearest cut its family has.
+///
+/// A heavier weight sets wider glyphs, so a line drawn at one weight has to be measured at the same
+/// one, which is why it travels with the size in a [`TextStyle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FontWeight(pub u16);
+
+impl FontWeight {
+    pub const REGULAR: FontWeight = FontWeight(Weight::NORMAL.0);
+    pub const MEDIUM: FontWeight = FontWeight(Weight::MEDIUM.0);
+    pub const SEMIBOLD: FontWeight = FontWeight(Weight::SEMIBOLD.0);
+    pub const BOLD: FontWeight = FontWeight(Weight::BOLD.0);
+}
+
+/// How a line of UI text is set: its legacy `scale` (see [`px_for`]) and the weight of its type.
+///
+/// The `*_styled` calls take one of these where the plain ones take a bare `scale`. The plain ones
+/// set the line in the face's own weight, which for the bundled face is [`FontWeight::REGULAR`],
+/// so a regular style draws the same pixels as a plain call.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextStyle {
+    pub scale: f32,
+    pub weight: FontWeight,
+}
+
+impl TextStyle {
+    pub const fn new(scale: f32, weight: FontWeight) -> TextStyle {
+        TextStyle { scale, weight }
+    }
+
+    /// The regular weight at `scale`.
+    pub const fn regular(scale: f32) -> TextStyle {
+        TextStyle::new(scale, FontWeight::REGULAR)
+    }
+}
+
+/// The layout cache's weight level for a line that asked for no weight and so is set in the face's
+/// own. No real weight is zero.
+const OWN_WEIGHT_KEY: u16 = 0;
+
+/// Where a line is kept in the layout cache under its family: its pixel size and the weight it was
+/// set in ([`OWN_WEIGHT_KEY`] for the face's own).
+type LayoutKey = (u32, u16);
+
+fn layout_key(px: f32, weight: Option<FontWeight>) -> LayoutKey {
+    (px as u32, weight.map_or(OWN_WEIGHT_KEY, |w| w.0))
+}
+
+/// The most two axes of a renderer's [`Renderer::device_scale`] may disagree by, in target pixels
+/// across the renderer's longer edge, for text to still be rasterized at the target's resolution.
+///
+/// A letterboxed viewport keeps the screen's shape only to the nearest whole pixel, so its two
+/// scales differ by at most half a pixel over that edge; a window stretched out of shape differs by
+/// more and keeps its text drawn the old way, stretched with the rest of the screen.
+const UNIFORM_SCALE_SLACK_PX: f32 = 1.0;
+
+/// The one factor glyphs are rasterized larger by on `r`, or `None` when text is drawn in `r`'s own
+/// units: a renderer that is its own target, or one whose axes are scaled unlike each other.
+///
+/// The smaller of the two axes is taken, so a line rasterized at the target's resolution never
+/// outgrows the box it was measured into on either axis.
+fn device_text_scale<R: Renderer>(r: &R) -> Option<f32> {
+    let (sx, sy) = r.device_scale();
+    if sx == 1.0 && sy == 1.0 {
+        return None;
+    }
+    let (w, h) = r.size();
+    let across = w.max(h).max(1) as f32;
+    let uniform = (sx - sy).abs() * across < UNIFORM_SCALE_SLACK_PX;
+    (uniform && sx.is_finite() && sy.is_finite() && sx > 0.0 && sy > 0.0).then_some(sx.min(sy))
+}
+
 /// A shaped, laid-out single line: total width plus each glyph's pen position and rasterizer
-/// cache key (relative to the draw origin). Cached per `(text, px)` so a string is shaped once.
+/// cache key (relative to the draw origin), and each glyph as shaped with the baseline of its
+/// line, from which its key at any other size is worked out. Cached per `(text, px, weight)` so a
+/// string is shaped once.
 struct Laid {
     width: f32,
     glyphs: Vec<(i32, i32, CacheKey)>,
+    shaped: Vec<(LayoutGlyph, f32)>,
     used: u64,
 }
 
@@ -147,7 +226,7 @@ const CACHE_RETAIN_PERCENT: usize = 75;
 /// One text context for the (single-threaded) UI: a font database with fallback, a glyph
 /// rasterization cache, the resolved default family, and the per-string layout cache.
 ///
-/// The layout cache is nested `family -> px -> text -> Laid` so a cache hit (the common per-frame
+/// The layout cache is nested `family -> (px, weight) -> text -> Laid` so a cache hit (the common per-frame
 /// case) is looked up by `&str` with no key allocation (`String: Borrow<str>`), unlike a composite
 /// key. Keeping one branch per family lets a skin alternate between fonts without losing either
 /// font's shaped lines; the glyph-run and atlas caches need no family level because a
@@ -160,7 +239,7 @@ pub struct TextContext {
     swash: SwashCache,
     family: String,
     default_family: String,
-    cache: HashMap<String, HashMap<u32, HashMap<String, Laid>>>,
+    cache: HashMap<String, HashMap<LayoutKey, HashMap<String, Laid>>>,
     /// Rasterized, run-length-merged glyph pixels keyed by `(glyph cache key, packed RGB)`. Built
     /// once per glyph+colour and replayed every frame, so the hot draw path neither re-runs
     /// `swash.with_pixels` nor emits one quad per pixel. Survives family changes.
@@ -259,14 +338,14 @@ impl TextContext {
     /// remains, so the next inserts are free again.
     fn evict_layouts(&mut self) {
         let retain = LAYOUT_CACHE_LIMIT * CACHE_RETAIN_PERCENT / 100;
-        let mut ages: Vec<(u64, String, u32, String)> = self
+        let mut ages: Vec<(u64, String, LayoutKey, String)> = self
             .cache
             .iter()
-            .flat_map(|(family, by_px)| by_px.iter().flat_map(move |(px, m)| m.iter().map(move |(t, l)| (l.used, family.clone(), *px, t.clone()))))
+            .flat_map(|(family, by_key)| by_key.iter().flat_map(move |(key, m)| m.iter().map(move |(t, l)| (l.used, family.clone(), *key, t.clone()))))
             .collect();
         ages.sort_unstable_by_key(|e| std::cmp::Reverse(e.0));
-        for (_, family, px, text) in ages.into_iter().skip(retain) {
-            if let Some(m) = self.cache.get_mut(&family).and_then(|by_px| by_px.get_mut(&px)) {
+        for (_, family, key, text) in ages.into_iter().skip(retain) {
+            if let Some(m) = self.cache.get_mut(&family).and_then(|by_key| by_key.get_mut(&key)) {
                 m.remove(&text);
             }
         }
@@ -276,92 +355,103 @@ impl TextContext {
         self.cache.retain(|_, by_px| !by_px.is_empty());
     }
 
-    fn ensure(&mut self, text: &str, px: f32) {
-        let pxu = px as u32;
+    fn ensure(&mut self, text: &str, px: f32, weight: Option<FontWeight>) {
+        let key = layout_key(px, weight);
         self.tick += 1;
         let tick = self.tick;
-        if let Some(entry) = self.cache.get_mut(self.family.as_str()).and_then(|by_px| by_px.get_mut(&pxu)).and_then(|m| m.get_mut(text)) {
+        if let Some(entry) = self.cache.get_mut(self.family.as_str()).and_then(|by_key| by_key.get_mut(&key)).and_then(|m| m.get_mut(text)) {
             entry.used = tick;
             return;
         }
         let face = self.face(&self.family);
+        let attrs = match weight {
+            Some(weight) => face.attrs().weight(Weight(weight.0)),
+            None => face.attrs(),
+        };
         let mut buf = Buffer::new(&mut self.fs, Metrics::new(px, px * 1.2));
         buf.set_size(None, None);
-        buf.set_text(text, &face.attrs(), Shaping::Advanced, None);
+        buf.set_text(text, &attrs, Shaping::Advanced, None);
         buf.shape_until_scroll(&mut self.fs, false);
         let mut width = 0f32;
         let mut glyphs = Vec::new();
+        let mut shaped = Vec::new();
         for run in buf.layout_runs() {
             width = width.max(run.line_w);
             for g in run.glyphs {
                 let p = g.physical((0.0, run.line_y), 1.0);
                 glyphs.push((p.x, p.y, p.cache_key));
+                shaped.push((g.clone(), run.line_y));
             }
         }
-        self.cache.entry(self.family.clone()).or_default().entry(pxu).or_default().insert(text.to_string(), Laid { width, glyphs, used: tick });
+        self.cache.entry(self.family.clone()).or_default().entry(key).or_default().insert(text.to_string(), Laid { width, glyphs, shaped, used: tick });
         if self.layout_len() > LAYOUT_CACHE_LIMIT {
             self.evict_layouts();
         }
     }
 
-    fn laid(&self, text: &str, px: f32) -> Option<&Laid> {
-        self.cache.get(self.family.as_str()).and_then(|by_px| by_px.get(&(px as u32))).and_then(|m| m.get(text))
+    fn laid(&self, text: &str, px: f32, weight: Option<FontWeight>) -> Option<&Laid> {
+        self.cache.get(self.family.as_str()).and_then(|by_key| by_key.get(&layout_key(px, weight))).and_then(|m| m.get(text))
     }
 
-    fn width(&mut self, text: &str, px: f32) -> f32 {
-        self.ensure(text, px);
-        self.laid(text, px).map(|l| l.width).unwrap_or(0.0)
+    fn width(&mut self, text: &str, px: f32, weight: Option<FontWeight>) -> f32 {
+        self.ensure(text, px, weight);
+        self.laid(text, px, weight).map(|l| l.width).unwrap_or(0.0)
     }
 
-    fn draw<R: Renderer>(&mut self, r: &mut R, x: f32, y: f32, color: Color, text: &str, px: f32) {
-        self.ensure(text, px);
+    /// Draw one shaped line with its top left at `(x, y)` in `r`'s units.
+    ///
+    /// On a renderer that is its own target, or one stretched out of shape, every glyph is
+    /// rasterized at `px` and filled in `r`'s units, which is the only way text was ever drawn.
+    /// On one that enlarges both axes alike ([`device_text_scale`]) the same layout is rasterized
+    /// at `px` times that factor and filled on the target's own pixels, with the line's origin put
+    /// on the nearest of them: the glyphs are as sharp as the target allows, and the line keeps the
+    /// width it was measured at. The baseline is the one the small rasterization puts on a whole
+    /// pixel, scaled, so a line sits as high in its row as the screen was laid out to show it.
+    fn draw<R: Renderer>(&mut self, r: &mut R, at: (f32, f32), color: Color, text: &str, px: f32, weight: Option<FontWeight>) {
+        self.ensure(text, px, weight);
         let tick = self.tick;
-        let Some(laid) = self.cache.get(self.family.as_str()).and_then(|by_px| by_px.get(&(px as u32))).and_then(|m| m.get(text)) else {
+        let Some(laid) = self.cache.get(self.family.as_str()).and_then(|by_key| by_key.get(&layout_key(px, weight))).and_then(|m| m.get(text)) else {
             return;
         };
-        let base = CtColor::rgb(color.r, color.g, color.b);
-        let rgb = packed_rgb(color);
-        let (ox, oy) = (x.round() as i32, y.round() as i32);
-        let (fs, swash, runs_cache) = (&mut self.fs, &mut self.swash, &mut self.runs);
-        for &(gx, gy, ck) in &laid.glyphs {
-            let key = (ck, rgb);
-            match runs_cache.entry(key) {
-                std::collections::hash_map::Entry::Occupied(mut slot) => slot.get_mut().used = tick,
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    let mut pixels: Vec<(i32, i32, u8, u8, u8, u8)> = Vec::new();
-                    swash.with_pixels(fs, ck, base, |dx, dy, col| {
-                        let ca = col.a();
-                        if ca != 0 {
-                            pixels.push((dx, dy, col.r(), col.g(), col.b(), ca));
-                        }
-                    });
-                    slot.insert(RunEntry { runs: merge_runs(pixels), used: tick });
-                }
+        let mut painter = GlyphPainter { fs: &mut self.fs, swash: &mut self.swash, runs: &mut self.runs, tick };
+        match device_text_scale(r) {
+            None => {
+                let origin = (at.0.round() as i32, at.1.round() as i32);
+                painter.paint(color, origin, laid.glyphs.iter().copied(), |rect, ink| r.fill_rect(rect, ink));
             }
-            let Some(entry) = runs_cache.get(&key) else {
-                continue;
-            };
-            for run in &entry.runs {
-                let a = ((run.ca as u16 * color.a as u16) / 255) as u8;
-                if a == 0 {
-                    continue;
-                }
-                r.fill_rect(Rect::new((ox + gx + run.dx) as f32, (oy + gy + run.dy) as f32, run.w as f32, 1.0), Color { r: run.r, g: run.g, b: run.b, a });
+            Some(scale) => {
+                let (sx, sy) = r.device_scale();
+                let origin = ((at.0 * sx).round() as i32, (at.1 * sy).round() as i32);
+                let glyphs = laid.shaped.iter().map(|(g, line_y)| {
+                    let p = g.physical((0.0, line_y.trunc() * scale), scale);
+                    (p.x, p.y, p.cache_key)
+                });
+                painter.paint(color, origin, glyphs, |rect, ink| r.fill_rect_device(rect, ink));
             }
         }
-        if runs_cache.len() > RUN_CACHE_LIMIT {
-            evict_runs(runs_cache);
+        if self.runs.len() > RUN_CACHE_LIMIT {
+            evict_runs(&mut self.runs);
         }
     }
 
     /// Width in pixels the string occupies at the given legacy `scale` (see [`px_for`]).
     pub fn text_width(&mut self, text: &str, scale: f32) -> f32 {
-        self.width(text, px_for(scale))
+        self.width(text, px_for(scale), None)
+    }
+
+    /// Width in pixels the string occupies in `style`.
+    pub fn text_width_styled(&mut self, text: &str, style: TextStyle) -> f32 {
+        self.width(text, px_for(style.scale), Some(style.weight))
     }
 
     /// Draw a left-aligned string with its top-left near `(x, y)`.
     pub fn draw_text<R: Renderer>(&mut self, r: &mut R, x: f32, y: f32, scale: f32, color: Color, text: &str) {
-        self.draw(r, x, y, color, text, px_for(scale));
+        self.draw(r, (x, y), color, text, px_for(scale), None);
+    }
+
+    /// Draw a left-aligned string in `style` with its top-left near `(x, y)`.
+    pub fn draw_text_styled<R: Renderer>(&mut self, r: &mut R, x: f32, y: f32, style: TextStyle, color: Color, text: &str) {
+        self.draw(r, (x, y), color, text, px_for(style.scale), Some(style.weight));
     }
 
     /// Draw a string horizontally centred on `center_x`.
@@ -370,24 +460,45 @@ impl TextContext {
         self.draw_text(r, center_x - w * 0.5, y, scale, color, text);
     }
 
+    /// Draw a string in `style` horizontally centred on `center_x`.
+    pub fn draw_text_centered_styled<R: Renderer>(&mut self, r: &mut R, center_x: f32, y: f32, style: TextStyle, color: Color, text: &str) {
+        let w = self.text_width_styled(text, style);
+        self.draw_text_styled(r, center_x - w * 0.5, y, style, color, text);
+    }
+
     /// Draw a string whose right edge lands on `right_x`.
     pub fn draw_text_right<R: Renderer>(&mut self, r: &mut R, right_x: f32, y: f32, scale: f32, color: Color, text: &str) {
         let w = self.text_width(text, scale);
         self.draw_text(r, right_x - w, y, scale, color, text);
     }
 
+    /// Draw a string in `style` whose right edge lands on `right_x`.
+    pub fn draw_text_right_styled<R: Renderer>(&mut self, r: &mut R, right_x: f32, y: f32, style: TextStyle, color: Color, text: &str) {
+        let w = self.text_width_styled(text, style);
+        self.draw_text_styled(r, right_x - w, y, style, color, text);
+    }
+
     /// Truncate `text` so it fits within `max_width` px at `scale`, appending an ellipsis when
     /// clipped; returns the original when it already fits.
     pub fn fit_text(&mut self, text: &str, scale: f32, max_width: f32) -> String {
-        if max_width <= 0.0 || self.text_width(text, scale) <= max_width {
+        self.fit(text, px_for(scale), None, max_width)
+    }
+
+    /// [`TextContext::fit_text`] for a string in `style`, measured in it.
+    pub fn fit_text_styled(&mut self, text: &str, style: TextStyle, max_width: f32) -> String {
+        self.fit(text, px_for(style.scale), Some(style.weight), max_width)
+    }
+
+    fn fit(&mut self, text: &str, px: f32, weight: Option<FontWeight>, max_width: f32) -> String {
+        if max_width <= 0.0 || self.width(text, px, weight) <= max_width {
             return text.to_string();
         }
-        let ell_w = self.text_width(ELLIPSIS, scale);
+        let ell_w = self.width(ELLIPSIS, px, weight);
         let mut out = String::new();
         let mut acc = 0.0;
         let mut buf = [0u8; 4];
         for ch in text.chars() {
-            let w = self.text_width(ch.encode_utf8(&mut buf), scale);
+            let w = self.width(ch.encode_utf8(&mut buf), px, weight);
             if acc + w + ell_w > max_width {
                 break;
             }
@@ -500,8 +611,8 @@ impl TextContext {
     /// the coverage arithmetic the fill path does by hand.
     pub fn draw_text_atlas<R: Renderer>(&mut self, r: &mut R, binding: &mut GlyphAtlasBinding, at: (f32, f32), scale: f32, color: Color, text: &str) {
         let px = px_for(scale);
-        self.ensure(text, px);
-        let Some(glyphs) = self.laid(text, px).map(|l| l.glyphs.clone()) else {
+        self.ensure(text, px, None);
+        let Some(glyphs) = self.laid(text, px, None).map(|l| l.glyphs.clone()) else {
             return;
         };
         let base = CtColor::rgb(color.r, color.g, color.b);
@@ -544,6 +655,56 @@ fn evict_runs(runs: &mut HashMap<(CacheKey, u32), RunEntry>) {
     ages.sort_unstable_by_key(|e| std::cmp::Reverse(e.0));
     for (_, k) in ages.into_iter().skip(retain) {
         runs.remove(&k);
+    }
+}
+
+/// What drawing a line's glyphs borrows from a [`TextContext`]: the rasterizer and the glyph-run
+/// cache, with the access stamp the line's entries are marked with.
+struct GlyphPainter<'a> {
+    fs: &'a mut FontSystem,
+    swash: &'a mut SwashCache,
+    runs: &'a mut HashMap<(CacheKey, u32), RunEntry>,
+    tick: u64,
+}
+
+impl GlyphPainter<'_> {
+    /// Rasterize each of `glyphs` -- a pen position relative to `origin` and the key it is
+    /// rasterized under -- through the glyph-run cache, and hand every run of lit pixels to `fill`
+    /// as a one pixel tall rectangle in the same units as `origin`, in `color` with the run's
+    /// coverage folded into its alpha.
+    ///
+    /// The cache is not swept here: a sweep in the middle of a line could drop a glyph the same
+    /// line still has to draw ([`evict_runs`]).
+    fn paint(&mut self, color: Color, origin: (i32, i32), glyphs: impl Iterator<Item = (i32, i32, CacheKey)>, mut fill: impl FnMut(Rect, Color)) {
+        let base = CtColor::rgb(color.r, color.g, color.b);
+        let rgb = packed_rgb(color);
+        let (ox, oy) = origin;
+        for (gx, gy, ck) in glyphs {
+            let key = (ck, rgb);
+            match self.runs.entry(key) {
+                std::collections::hash_map::Entry::Occupied(mut slot) => slot.get_mut().used = self.tick,
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    let mut pixels: Vec<(i32, i32, u8, u8, u8, u8)> = Vec::new();
+                    self.swash.with_pixels(self.fs, ck, base, |dx, dy, col| {
+                        let ca = col.a();
+                        if ca != 0 {
+                            pixels.push((dx, dy, col.r(), col.g(), col.b(), ca));
+                        }
+                    });
+                    slot.insert(RunEntry { runs: merge_runs(pixels), used: self.tick });
+                }
+            }
+            let Some(entry) = self.runs.get(&key) else {
+                continue;
+            };
+            for run in &entry.runs {
+                let a = ((run.ca as u16 * color.a as u16) / 255) as u8;
+                if a == 0 {
+                    continue;
+                }
+                fill(Rect::new((ox + gx + run.dx) as f32, (oy + gy + run.dy) as f32, run.w as f32, 1.0), Color { r: run.r, g: run.g, b: run.b, a });
+            }
+        }
     }
 }
 
@@ -613,6 +774,31 @@ pub fn draw_text_right<R: Renderer>(r: &mut R, right_x: f32, y: f32, scale: f32,
 /// Keeps long titles inside a panel instead of overflowing. Returns the original when it already fits.
 pub fn fit_text(text: &str, scale: f32, max_width: f32) -> String {
     with_text_context(|e| e.fit_text(text, scale, max_width))
+}
+
+/// Width in pixels the string occupies in `style`, measured at its weight.
+pub fn text_width_styled(text: &str, style: TextStyle) -> f32 {
+    with_text_context(|e| e.text_width_styled(text, style))
+}
+
+/// [`draw_text`] in `style`.
+pub fn draw_text_styled<R: Renderer>(r: &mut R, x: f32, y: f32, style: TextStyle, color: Color, text: &str) {
+    with_text_context(|e| e.draw_text_styled(r, x, y, style, color, text));
+}
+
+/// [`draw_text_centered`] in `style`.
+pub fn draw_text_centered_styled<R: Renderer>(r: &mut R, center_x: f32, y: f32, style: TextStyle, color: Color, text: &str) {
+    with_text_context(|e| e.draw_text_centered_styled(r, center_x, y, style, color, text));
+}
+
+/// [`draw_text_right`] in `style`.
+pub fn draw_text_right_styled<R: Renderer>(r: &mut R, right_x: f32, y: f32, style: TextStyle, color: Color, text: &str) {
+    with_text_context(|e| e.draw_text_right_styled(r, right_x, y, style, color, text));
+}
+
+/// [`fit_text`] in `style`, measured at its weight.
+pub fn fit_text_styled(text: &str, style: TextStyle, max_width: f32) -> String {
+    with_text_context(|e| e.fit_text_styled(text, style, max_width))
 }
 
 /// Register an extra font (e.g. a user-chosen TTF/OTF read from disk or fetched as bytes) with
@@ -983,6 +1169,111 @@ mod tests {
         for system in ["zh-TW", "zh-HK", "zh-CN", "zh-Hant-TW", "zh", "ZH-tw"] {
             assert_eq!(han_locale(system), system, "a Chinese host keeps the font of its own region");
         }
+    }
+
+    /// Lines of a busy built-in menu: a title, tabs, a column of names and a column of values, and
+    /// hints, in the sizes and colours the built-in screens use.
+    const MENU: &[(f32, &str)] = &[
+        (2.4, "PLAY OPTIONS"),
+        (1.5, "PLAY  JUDGE  DISPLAY  INPUT  AUDIO  ONLINE"),
+        (1.3, "HI-SPEED"),
+        (1.4, "FIX 1.50x / GREEN 300"),
+        (1.3, "LANE COVER"),
+        (1.4, "SUDDEN+ 245 / LIFT 0"),
+        (1.3, "GAUGE"),
+        (1.4, "ASSIST EASY / EASY / NORMAL / HARD / EX-HARD"),
+        (1.3, "RANDOM"),
+        (1.4, "OFF / MIRROR / RANDOM / R-RANDOM / S-RANDOM"),
+        (1.3, "SCRATCH AUTO"),
+        (1.4, "ON"),
+        (1.3, "JUDGE ALGORITHM"),
+        (1.4, "COMBO / DURATION / LOWEST"),
+        (1.3, "TARGET SCORE"),
+        (1.4, "AAA 0123456789 +-%"),
+        (1.2, "SCROLL / ARROWS: MOVE  ENTER: CHANGE  ESC: BACK"),
+        (1.2, "abcdefghijklmnopqrstuvwxyz"),
+        (1.1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+        (1.6, "Status: saved"),
+        (1.8, "SETTINGS"),
+        (1.0, "v0.1.6"),
+    ];
+
+    /// The colours the menu's lines take turns in.
+    const MENU_INKS: [Color; 3] = [Color::WHITE, Color::GRAY, Color::CYAN];
+
+    /// The size the menu is laid out for.
+    const MENU_SPACE: (u32, u32) = (1280, 720);
+
+    /// Draw [`MENU`] on a fresh engine through the built-in screens' adapter onto a target `factor`
+    /// times [`MENU_SPACE`], and answer the occupancy of both caches.
+    fn menu_cache_use(factor: u32) -> (usize, usize) {
+        use_embedded_fonts_only();
+        let row = MENU_SPACE.1 as f32 / MENU.len() as f32;
+        let mut target = CpuCanvas::new(MENU_SPACE.0 * factor, MENU_SPACE.1 * factor);
+        let mut ui = crate::ScaledRenderer::new(&mut target, MENU_SPACE);
+        for (i, (scale, line)) in MENU.iter().enumerate() {
+            draw_text(&mut ui, 8.0, i as f32 * row, *scale, MENU_INKS[i % MENU_INKS.len()], line);
+        }
+        cache_stats()
+    }
+
+    /// Text drawn at the target's resolution is laid out once in the screen's own units, so it adds
+    /// no layout entries, and it rasterizes each glyph once per colour and pen position just as the
+    /// small rasterization does, so a whole menu at three times the size still leaves most of the
+    /// glyph-run bound free: the per-frame strings of a screen are not swept out of the cache by
+    /// their own frame.
+    #[test]
+    fn an_enlarged_menu_fits_both_caches_as_the_small_one_does() {
+        let small = menu_cache_use(1);
+        for factor in [2, 3] {
+            let large = menu_cache_use(factor);
+            assert_eq!(large.0, small.0, "at {factor}x the menu shaped {} lines, at 1x {}", large.0, small.0);
+            assert!(large.1 * 4 <= RUN_CACHE_LIMIT, "at {factor}x the menu holds {} glyph runs of {RUN_CACHE_LIMIT}", large.1);
+            assert!(large.1 <= small.1 * 2, "at {factor}x the menu holds {} glyph runs, at 1x {}", large.1, small.1);
+        }
+    }
+
+    /// A regular style is the plain call: the same layout, the same pixels.
+    #[test]
+    fn a_regular_style_draws_what_the_plain_call_draws() {
+        use_embedded_fonts_only();
+        let mut plain = CpuCanvas::new(200, 32);
+        plain.clear(Color::BLACK);
+        draw_text(&mut plain, 4.0, 6.0, 1.4, Color::WHITE, "HI-SPEED 1.50");
+        let mut styled = CpuCanvas::new(200, 32);
+        styled.clear(Color::BLACK);
+        draw_text_styled(&mut styled, 4.0, 6.0, TextStyle::regular(1.4), Color::WHITE, "HI-SPEED 1.50");
+        assert_eq!(styled.pixels(), plain.pixels());
+        assert_eq!(text_width_styled("HI-SPEED 1.50", TextStyle::regular(1.4)), text_width("HI-SPEED 1.50", 1.4));
+    }
+
+    /// The sum of the red channel over a canvas: how much ink a white line on black put down.
+    fn ink(canvas: &CpuCanvas) -> u64 {
+        canvas.pixels().chunks_exact(crate::BYTES_PER_PIXEL).map(|pixel| u64::from(pixel[0])).sum()
+    }
+
+    /// The bundled face's weight axis is reached: a bold line is wider and puts down more ink than a
+    /// regular one, and each weight keeps a layout of its own, so measuring one never answers with
+    /// the other's width.
+    #[test]
+    fn a_heavier_weight_sets_a_wider_and_darker_line_with_a_layout_of_its_own() {
+        clear_caches();
+        let text = "HI-SPEED FIX";
+        let regular = TextStyle::regular(2.4);
+        let bold = TextStyle::new(2.4, FontWeight::BOLD);
+        let paint = |style: TextStyle| {
+            let mut c = CpuCanvas::new(240, 40);
+            c.clear(Color::BLACK);
+            draw_text_styled(&mut c, 4.0, 6.0, style, Color::WHITE, text);
+            c
+        };
+        let (thin, heavy) = (paint(regular), paint(bold));
+        assert_eq!(cache_stats().0, 2, "each weight shaped the line once under its own key");
+        assert!(text_width_styled(text, bold) > text_width_styled(text, regular), "bold advances further");
+        assert!(ink(&heavy) * 4 > ink(&thin) * 5, "bold puts down at least a quarter more ink ({} against {})", ink(&heavy), ink(&thin));
+
+        let fitted = fit_text_styled(text, bold, text_width_styled(text, regular));
+        assert!(fitted.ends_with(ELLIPSIS), "a bold line is measured bold, so the regular width does not hold it");
     }
 
     #[test]

@@ -9,6 +9,11 @@
 //! is drawn on it is scaled out to the target, so those screens keep their place and their size
 //! whatever the window does. [`Canvas::native`] is the same target in its own pixels, which is what
 //! a skin screen draws on. Both feed one frame, in the order they are drawn.
+//!
+//! Text is laid out in [`UI_SIZE`] like everything else on [`Canvas`], but its glyphs are not
+//! enlarged with it: the canvas reports how much larger its target is ([`Renderer::device_scale`])
+//! and takes rectangles on the target's own pixels ([`Renderer::fill_rect_device`]), so the text
+//! engine rasterizes them at the size they really cover.
 
 use std::collections::HashMap;
 
@@ -406,6 +411,14 @@ impl Renderer for Canvas<'_> {
         self.scaled(|ui| ui.fill_rect(rect, color));
     }
 
+    fn device_scale(&self) -> (f32, f32) {
+        scale_between(UI_SIZE, self.native_size())
+    }
+
+    fn fill_rect_device(&mut self, rect: Rect, color: Color) {
+        self.native().fill_rect(rect, color);
+    }
+
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.native().register_texture(key, rgba, width, height)
     }
@@ -572,6 +585,67 @@ mod tests {
 
         canvas.release_bga_textures(&mut textures);
         assert_eq!(canvas.native().texture_size(base), None, "the textures were not handed back");
+    }
+
+    /// A line of the kind the built-in menus draw, and where and how large it is drawn in
+    /// [`UI_SIZE`] coordinates.
+    const LINE: &str = "JUDGE ALGORITHM / Sgaq";
+    const LINE_AT: (f32, f32) = (100.0, 50.0);
+    const LINE_SCALE: f32 = 1.4;
+
+    /// The line drawn on `r`, on a black frame.
+    fn line<R: Renderer>(r: &mut R) {
+        r.clear(Color::BLACK);
+        rbms_render::draw_text(r, LINE_AT.0, LINE_AT.1, LINE_SCALE, Color::WHITE, LINE);
+    }
+
+    /// At the size the built-in screens are laid out for, their text is what it always was.
+    #[test]
+    fn text_on_a_target_of_the_ui_size_is_drawn_as_it_always_was() {
+        rbms_render::font::use_embedded_fonts_only();
+        let mut through_canvas = HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+        let mut canvas = Canvas::Headless(&mut through_canvas);
+        assert_eq!(canvas.device_scale(), (1.0, 1.0));
+        line(&mut canvas);
+        let mut direct = HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+        line(&mut direct);
+        assert!(direct.lit_pixels() > 0, "the line drew something");
+        assert_eq!(through_canvas.pixel_checksum(), direct.pixel_checksum());
+    }
+
+    /// On a target twice the size, the canvas reports the enlargement and takes the glyphs on its
+    /// own pixels, so the text is rasterized at the size it covers instead of having each of its
+    /// pixels blown up into a 2x2 block.
+    #[test]
+    fn text_on_an_enlarged_target_is_rasterized_on_the_targets_own_pixels() {
+        rbms_render::font::use_embedded_fonts_only();
+        let mut through_canvas = enlarged();
+        let mut canvas = Canvas::Headless(&mut through_canvas);
+        assert_eq!(canvas.device_scale(), (ENLARGEMENT as f32, ENLARGEMENT as f32));
+        line(&mut canvas);
+
+        let mut through_adapter = enlarged();
+        line(&mut ScaledRenderer::new(&mut through_adapter, UI_SIZE));
+        assert_eq!(through_canvas.pixel_checksum(), through_adapter.pixel_checksum(), "the canvas and the renderer's adapter draw the same text");
+
+        let mut small = HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+        line(&mut small);
+        let (w, h) = (UI_SIZE.0 * ENLARGEMENT, UI_SIZE.1 * ENLARGEMENT);
+        let copied = (0..h).all(|y| (0..w).all(|x| through_canvas.pixel_at(x, y) == small.pixel_at(x / ENLARGEMENT, y / ENLARGEMENT)));
+        assert!(!copied, "the enlarged text is the small text blown up");
+    }
+
+    /// A rectangle given on the target's own pixels lands on exactly those, at a factor that is not
+    /// a whole number.
+    #[test]
+    fn a_device_rectangle_reaches_the_targets_own_pixels_at_one_and_a_half() {
+        const SPOT: (u32, u32) = (301, 157);
+        let mut pixels = HeadlessCanvas::new(UI_SIZE.0 * 3 / 2, UI_SIZE.1 * 3 / 2);
+        let mut canvas = Canvas::Headless(&mut pixels);
+        canvas.clear(Color::BLACK);
+        canvas.fill_rect_device(Rect::new(SPOT.0 as f32, SPOT.1 as f32, 1.0, 1.0), INK);
+        assert_eq!(pixels.lit_pixels(), 1, "one pixel, and nothing beside it");
+        assert_eq!(pixels.pixel_at(SPOT.0, SPOT.1), INK);
     }
 
     #[test]

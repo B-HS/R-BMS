@@ -748,3 +748,184 @@ fn a_page_replaced_mid_frame_is_handed_back_when_the_frame_ends() {
     assert_eq!(binding.retired_count(), 0);
     assert_eq!(canvas.live_texture_count(), 1, "the older page is handed back once the frame is submitted");
 }
+
+/// The fixed space the built-in screens are laid out in, shrunk so a test canvas stays small.
+const UI_SPACE: (u32, u32) = (200, 48);
+
+/// A line of the kind the built-in menus draw, with straight stems, bars and round bowls, so both
+/// a blocky enlargement and a smooth rasterization would show in it.
+const MENU_LINE: &str = "JUDGE ALGORITHM / Sgaq";
+
+/// Where the line is drawn and how large, in [`UI_SPACE`] units.
+const MENU_AT: (f32, f32) = (4.0, 10.0);
+const MENU_SCALE: f32 = 1.4;
+
+/// The region the region test cuts out of the screen, in [`UI_SPACE`] units.
+const MENU_REGION: Rect = Rect { x: 12.0, y: 6.0, w: 120.0, h: 30.0 };
+
+/// How many times larger than [`UI_SPACE`] a doubled target is.
+const DOUBLE: u32 = 2;
+
+/// One and a half, the factor of a 150% display, as a fraction.
+const ONE_AND_A_HALF: (u32, u32) = (3, 2);
+
+const PAPER: Color = Color::rgb(12, 12, 20);
+const LETTERS: Color = Color::rgb(235, 235, 235);
+
+/// The menu line drawn on `r` in [`UI_SPACE`] units.
+fn menu_line<R: Renderer>(r: &mut R) {
+    r.clear(PAPER);
+    rbms_render::draw_text(r, MENU_AT.0, MENU_AT.1, MENU_SCALE, LETTERS, MENU_LINE);
+}
+
+/// The menu line drawn through the adapter the built-in screens use, onto a canvas of `size`.
+fn menu_line_on(size: (u32, u32)) -> CpuCanvas {
+    let mut canvas = CpuCanvas::new(size.0, size.1);
+    menu_line(&mut rbms_render::ScaledRenderer::new(&mut canvas, UI_SPACE));
+    canvas
+}
+
+/// Every pixel position of a canvas of `size`, row by row.
+fn every_pixel(size: (u32, u32)) -> impl Iterator<Item = (u32, u32)> {
+    (0..size.1).flat_map(move |y| (0..size.0).map(move |x| (x, y)))
+}
+
+/// The box `(left, top, right, bottom)`, far edges exclusive, of every pixel that is not paper.
+fn inked_box(canvas: &CpuCanvas) -> (u32, u32, u32, u32) {
+    every_pixel(canvas.size())
+        .filter(|&(x, y)| canvas.pixel_at(x, y) != PAPER)
+        .fold((u32::MAX, u32::MAX, 0, 0), |(l, t, r, b), (x, y)| (l.min(x), t.min(y), r.max(x + 1), b.max(y + 1)))
+}
+
+/// On a target the size the screen is laid out for, the adapter reports no enlargement and text is
+/// drawn exactly as it always was.
+#[test]
+fn text_on_a_target_of_the_laid_out_size_is_drawn_bit_for_bit_through_the_adapter() {
+    rbms_render::font::use_embedded_fonts_only();
+    let mut direct = CpuCanvas::new(UI_SPACE.0, UI_SPACE.1);
+    menu_line(&mut direct);
+    let through = menu_line_on(UI_SPACE);
+    assert!(every_pixel(UI_SPACE).any(|(x, y)| direct.pixel_at(x, y) == LETTERS), "the line drew something");
+    assert_eq!(through.pixels(), direct.pixels());
+}
+
+/// On a target twice the size, the glyphs are rasterized at twice the size rather than having
+/// every pixel of the small rasterization copied into a 2x2 block: the edges carry coverage of
+/// their own, and the line still covers twice the box it covered before.
+#[test]
+fn text_on_a_doubled_target_is_rasterized_at_the_doubled_size_not_blown_up() {
+    rbms_render::font::use_embedded_fonts_only();
+    let mut small = CpuCanvas::new(UI_SPACE.0, UI_SPACE.1);
+    menu_line(&mut small);
+    let large_size = (UI_SPACE.0 * DOUBLE, UI_SPACE.1 * DOUBLE);
+    let large = menu_line_on(large_size);
+
+    let block = |(x, y): (u32, u32)| [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dy)| large.pixel_at(x * DOUBLE + dx, y * DOUBLE + dy));
+    let inked: Vec<[Color; 4]> = every_pixel(UI_SPACE).map(block).filter(|pixels| pixels.iter().any(|p| *p != PAPER)).collect();
+    let uneven = inked.iter().filter(|pixels| pixels.iter().any(|p| *p != pixels[0])).count();
+    assert!(!inked.is_empty(), "the line drew something");
+    assert!(uneven * 2 > inked.len(), "only {uneven} of {} inked 2x2 blocks differ inside: the glyphs were copied up from the small size", inked.len());
+
+    let partly_covered = every_pixel(large_size).filter(|&(x, y)| ![PAPER, LETTERS].contains(&large.pixel_at(x, y))).count();
+    assert!(partly_covered > 0, "the doubled glyphs have edge pixels of partial coverage");
+    let copied = every_pixel(large_size).all(|(x, y)| large.pixel_at(x, y) == small.pixel_at(x / DOUBLE, y / DOUBLE));
+    assert!(!copied, "the doubled line is not the small one enlarged");
+
+    let (small_box, large_box) = (inked_box(&small), inked_box(&large));
+    let doubled = [small_box.0, small_box.1, small_box.2, small_box.3].map(|edge| edge * DOUBLE);
+    for (edge, (got, was)) in [large_box.0, large_box.1, large_box.2, large_box.3].into_iter().zip(doubled).enumerate() {
+        assert!(got.abs_diff(was) <= DOUBLE, "edge {edge} of the inked box is at {got}, twice the small one's is {was}");
+    }
+}
+
+/// A target one and a half times the size is not a whole number of pixels per unit, which is where
+/// enlarging a small rasterization makes stems one and two pixels wide by turns. Rasterized at the
+/// target's size instead, the line is no longer the small one stretched out, and it starts where
+/// its origin was scaled to.
+#[test]
+fn text_on_a_target_one_and_a_half_times_the_size_is_rasterized_at_that_size() {
+    rbms_render::font::use_embedded_fonts_only();
+    let (num, den) = ONE_AND_A_HALF;
+    let size = (UI_SPACE.0 * num / den, UI_SPACE.1 * num / den);
+    let large = menu_line_on(size);
+    let mut small = CpuCanvas::new(UI_SPACE.0, UI_SPACE.1);
+    menu_line(&mut small);
+    let mut stretched = CpuCanvas::new(size.0, size.1);
+    stretched.clear(PAPER);
+    let tex = stretched.register_texture("primitives.small-line", small.pixels(), UI_SPACE.0, UI_SPACE.1);
+    stretched.draw_textured_quad(tex, QuadParams::new(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32)));
+    assert_ne!(large.pixels(), stretched.pixels());
+
+    let factor = num as f32 / den as f32;
+    let (left, top, right, bottom) = inked_box(&large);
+    let (small_left, small_top, small_right, _) = inked_box(&small);
+    assert!(left.abs_diff((small_left as f32 * factor) as u32) <= 1, "the line starts at {left}");
+    assert!(top.abs_diff((small_top as f32 * factor) as u32) <= 1, "the line's top is at {top}");
+    assert!(right.abs_diff((small_right as f32 * factor) as u32) <= DOUBLE, "the line ends at {right}");
+    assert!(bottom > top);
+}
+
+/// A rectangle handed down on whole target pixels lands on exactly those, however fractional the
+/// adapter's factor is: no pixel beside it is touched.
+#[test]
+fn a_device_rectangle_lands_on_exactly_its_own_pixels_at_one_and_a_half() {
+    const SPOTS: [(u32, u32); 4] = [(3, 5), (7, 11), (13, 19), (29, 31)];
+    const RUN: u32 = 5;
+    let (num, den) = ONE_AND_A_HALF;
+    let mut canvas = CpuCanvas::new(UI_SPACE.0 * num / den, UI_SPACE.1 * num / den);
+    canvas.clear(PAPER);
+    {
+        let mut scaled = rbms_render::ScaledRenderer::new(&mut canvas, UI_SPACE);
+        assert_eq!(scaled.device_scale(), (num as f32 / den as f32, num as f32 / den as f32));
+        for (x, y) in SPOTS {
+            scaled.fill_rect_device(Rect::new(x as f32, y as f32, RUN as f32, 1.0), LETTERS);
+        }
+    }
+    for (x, y) in SPOTS {
+        for dx in 0..RUN {
+            assert_eq!(canvas.pixel_at(x + dx, y), LETTERS, "({}, {y})", x + dx);
+        }
+        for (ax, ay) in [(x - 1, y), (x + RUN, y), (x, y - 1), (x, y + 1)] {
+            assert_eq!(canvas.pixel_at(ax, ay), PAPER, "the pixel beside the rectangle at ({ax}, {ay}) was touched");
+        }
+    }
+}
+
+/// A target stretched out of shape keeps its text drawn the old way: rasterized at the laid out
+/// size and stretched with the rest of the screen.
+#[test]
+fn text_on_a_target_stretched_out_of_shape_is_stretched_with_the_screen() {
+    rbms_render::font::use_embedded_fonts_only();
+    let mut small = CpuCanvas::new(UI_SPACE.0, UI_SPACE.1);
+    menu_line(&mut small);
+    let wide = menu_line_on((UI_SPACE.0 * DOUBLE, UI_SPACE.1));
+    for (x, y) in every_pixel(wide.size()) {
+        assert_eq!(wide.pixel_at(x, y), small.pixel_at(x / DOUBLE, y), "pixel ({x}, {y})");
+    }
+}
+
+/// A region cut out of an enlarged screen moves the text drawn in it by its corner, in the target's
+/// pixels, and draws it as sharply as the screen around it.
+#[test]
+fn text_in_a_region_of_an_enlarged_screen_is_the_same_text_moved_by_the_regions_corner() {
+    rbms_render::font::use_embedded_fonts_only();
+    let size = (UI_SPACE.0 * DOUBLE, UI_SPACE.1 * DOUBLE);
+    let mut through_region = CpuCanvas::new(size.0, size.1);
+    through_region.clear(PAPER);
+    {
+        let mut scaled = rbms_render::ScaledRenderer::new(&mut through_region, UI_SPACE);
+        let mut region = rbms_render::RegionRenderer::new(&mut scaled, MENU_REGION);
+        assert_eq!(region.device_scale(), (DOUBLE as f32, DOUBLE as f32));
+        rbms_render::draw_text(&mut region, MENU_AT.0, MENU_AT.1, MENU_SCALE, LETTERS, MENU_LINE);
+    }
+    let mut direct = CpuCanvas::new(size.0, size.1);
+    direct.clear(PAPER);
+    {
+        let mut scaled = rbms_render::ScaledRenderer::new(&mut direct, UI_SPACE);
+        scaled.push_clip(MENU_REGION);
+        rbms_render::draw_text(&mut scaled, MENU_AT.0 + MENU_REGION.x, MENU_AT.1 + MENU_REGION.y, MENU_SCALE, LETTERS, MENU_LINE);
+        scaled.pop_clip();
+    }
+    assert!(every_pixel(size).any(|(x, y)| through_region.pixel_at(x, y) == LETTERS), "the region drew the line");
+    assert_eq!(through_region.pixels(), direct.pixels());
+}

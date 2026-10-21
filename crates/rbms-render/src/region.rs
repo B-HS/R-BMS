@@ -44,6 +44,10 @@ fn snapped(rect: Rect) -> Rect {
 /// what the renderer underneath has drawn outside the rectangle, and its own frame, are untouched.
 /// The colour is filled like any other, so a translucent one is laid over what was there.
 ///
+/// A rectangle handed over in the target's own pixels ([`Renderer::fill_rect_device`]) is moved by
+/// the region's corner measured in those pixels and rounded to a whole one, so a rectangle given on
+/// the pixel grid stays on it.
+///
 /// Textures are not a matter of coordinates and pass straight through. A rotated quad keeps its
 /// angle and its rotation centre, which is measured from the quad's own corner.
 pub struct RegionRenderer<'a, R: Renderer> {
@@ -100,6 +104,16 @@ impl<R: Renderer> Renderer for RegionRenderer<'_, R> {
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
         self.inner.fill_rect(self.place(rect), color);
+    }
+
+    fn device_scale(&self) -> (f32, f32) {
+        self.inner.device_scale()
+    }
+
+    fn fill_rect_device(&mut self, rect: Rect, color: Color) {
+        let (sx, sy) = self.inner.device_scale();
+        let (left, top) = ((self.rect.x * sx).round(), (self.rect.y * sy).round());
+        self.inner.fill_rect_device(Rect::new(rect.x + left, rect.y + top, rect.w, rect.h), color);
     }
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {

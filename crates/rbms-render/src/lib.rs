@@ -21,8 +21,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 pub use cpu::{CpuCanvas, apply_blend, apply_tint, distance_field_fragment};
 pub use ctx::{RenderCtx, with_render_ctx};
 pub use font::{
-    LAYOUT_CACHE_LIMIT, RUN_CACHE_LIMIT, TextContext, cache_stats, draw_text, draw_text_centered, draw_text_right, fit_text, load_font, reset_ui_family,
-    set_ui_family, text_width, with_text_context,
+    FontWeight, LAYOUT_CACHE_LIMIT, RUN_CACHE_LIMIT, TextContext, TextStyle, cache_stats, draw_text, draw_text_centered, draw_text_centered_styled,
+    draw_text_right, draw_text_right_styled, draw_text_styled, fit_text, fit_text_styled, load_font, reset_ui_family, set_ui_family, text_width,
+    text_width_styled, with_text_context,
 };
 pub use glyph_atlas::{ATLAS_MAX_DIM, ATLAS_TEXTURE_KEY, AtlasEntry, GlyphAtlas, GlyphAtlasBinding};
 pub use golden::{GOLDEN_UPDATE_ENV, GoldenDiff, GoldenImage, GoldenOptions, PngCodec, assert_golden_png};
@@ -428,6 +429,33 @@ pub trait Renderer {
 
     fn fill_rect(&mut self, rect: Rect, color: Color);
 
+    /// How many pixels of the target at the bottom of this renderer one of its own units spans,
+    /// per axis.
+    ///
+    /// A backend draws on its own pixels and answers one, which is the default. An adapter that
+    /// multiplies coordinates on the way down answers its factor times the one underneath, so the
+    /// text engine can rasterize glyphs at the size they will really cover instead of at this
+    /// renderer's size and having them blown up afterwards. An adapter that would rather keep text
+    /// drawn in its own units -- and so keep every pixel it has always produced -- leaves the
+    /// default, which is always a correct answer: text is then drawn through
+    /// [`Renderer::fill_rect`] like everything else.
+    fn device_scale(&self) -> (f32, f32) {
+        (1.0, 1.0)
+    }
+
+    /// Fill `rect`, given in the pixels of the target at the bottom of this renderer rather than in
+    /// this renderer's own units: no adapter on the way multiplies it, so a rectangle on whole
+    /// target pixels stays on them instead of picking up a rounding error that a backend's edge
+    /// rule could turn into a one pixel seam. An adapter that moves its origin still moves the
+    /// rectangle, by that move measured in target pixels.
+    ///
+    /// The default divides by [`Renderer::device_scale`] and fills in this renderer's units, which
+    /// is exactly [`Renderer::fill_rect`] when the scale is one.
+    fn fill_rect_device(&mut self, rect: Rect, color: Color) {
+        let (sx, sy) = self.device_scale();
+        self.fill_rect(Rect::new(rect.x / sx, rect.y / sy, rect.w / sx, rect.h / sy), color);
+    }
+
     /// Take ownership of `width` x `height` RGBA8 pixels (not premultiplied) under `key`.
     ///
     /// Registering a `key` that is already known replaces its pixels and returns the handle it
@@ -523,6 +551,10 @@ pub fn scale_rect(rect: Rect, scale: (f32, f32)) -> Rect {
 /// Where the two sizes agree every coordinate is multiplied by exactly one, so what comes out is
 /// bit for bit what would have been drawn without the adapter.
 ///
+/// It reports its factor through [`Renderer::device_scale`] and hands
+/// [`Renderer::fill_rect_device`] down untouched, so the text drawn through it is rasterized at the
+/// target's own resolution rather than at the fixed space's and then enlarged.
+///
 /// Textures are not a matter of coordinates and pass straight through. A rotated quad keeps its
 /// angle and has its destination and rotation centre scaled, which is exact when both axes scale
 /// alike and turns a rectangle of the stretched size, rather than shearing it, when they do not.
@@ -556,6 +588,15 @@ impl<R: Renderer> Renderer for ScaledRenderer<'_, R> {
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
         self.inner.fill_rect(scale_rect(rect, self.scale), color);
+    }
+
+    fn device_scale(&self) -> (f32, f32) {
+        let (sx, sy) = self.inner.device_scale();
+        (sx * self.scale.0, sy * self.scale.1)
+    }
+
+    fn fill_rect_device(&mut self, rect: Rect, color: Color) {
+        self.inner.fill_rect_device(rect, color);
     }
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {

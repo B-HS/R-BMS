@@ -90,6 +90,12 @@ impl WholeOffset {
 /// A rotated quad keeps its angle and has its destination and rotation centre stretched, as
 /// [`crate::ScaledRenderer`] does: exact when both axes stretch alike, and a turned rectangle of the
 /// stretched size rather than a sheared one when they do not.
+///
+/// It leaves [`Renderer::device_scale`] at one, whatever it stretches by: the text a skin draws
+/// through the engine's own glyphs here -- a stand-in for a font that did not load, a note field's
+/// labels -- is rasterized in the skin's own pixels and stretched with the rest of the screen,
+/// exactly as the reference's transform stretches its batch, rather than sharpened to the
+/// stretched size.
 pub(super) struct OffsetRenderer<'a, R: Renderer> {
     inner: &'a mut R,
     /// How far everything moves, in the target's pixels: right, and up.
@@ -274,5 +280,31 @@ mod tests {
             moved.draw_textured_quad(texture, QuadParams::new(MARK));
         }
         assert_eq!(inked(&canvas), Some((40, 50, 80, 70)));
+    }
+
+    /// A stretch of the whole screen stretches the engine's own glyphs with it, pixel for pixel,
+    /// instead of rasterizing them again at the stretched size.
+    #[test]
+    fn text_drawn_through_a_stretch_is_the_unstretched_text_enlarged() {
+        const DOUBLE: u32 = 2;
+        const AT: (f32, f32) = (5.0, 10.0);
+        let doubled = offset(0.0, 0.0, PERCENT, PERCENT);
+        let mut small = CpuCanvas::new(TARGET.0 / DOUBLE, TARGET.1 / DOUBLE);
+        small.clear(BACKDROP);
+        crate::draw_text(&mut small, AT.0, AT.1, 1.4, INK, "AB");
+
+        let mut large = CpuCanvas::new(TARGET.0, TARGET.1);
+        large.clear(BACKDROP);
+        {
+            let mut stretched = doubled.over(&mut large);
+            assert_eq!(stretched.device_scale(), (1.0, 1.0));
+            let lifted = AT.1 + (TARGET.1 / DOUBLE) as f32;
+            crate::draw_text(&mut stretched, AT.0, lifted, 1.4, INK, "AB");
+        }
+        for y in 0..TARGET.1 {
+            for x in 0..TARGET.0 {
+                assert_eq!(large.pixel_at(x, y), small.pixel_at(x / DOUBLE, y / DOUBLE), "pixel ({x}, {y})");
+            }
+        }
     }
 }
