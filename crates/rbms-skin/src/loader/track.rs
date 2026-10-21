@@ -267,6 +267,7 @@ pub(crate) fn build_track(destination: &Destination, context: &mut TrackContext<
         draw_conditions,
         mouse_rect: destination.mouse_rect.map(|rect| MouseRect { x: rect.x as f32, y: rect.y as f32, w: rect.w as f32, h: rect.h as f32 }),
         stretch: destination.stretch,
+        tint: destination.tint.filter(|id| *id >= 0),
     };
     Ok(BuiltTrack { track, options })
 }

@@ -4,7 +4,7 @@ use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::{GaugeAutoShift, clamp_bottom_shiftable};
 use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
-use rbms_skin::dst::{OffsetSource, SkinOffset};
+use rbms_skin::dst::{OffsetSource, SkinColor, SkinOffset};
 use rbms_skin::loader::SkinUserConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -318,13 +318,20 @@ pub struct SkinCustomisation {
     pub filepaths: BTreeMap<String, String>,
     /// Offset id to the nudge applied to it.
     pub offsets: BTreeMap<i32, SkinOffset>,
+    /// Colour id to the colour the player set it to. An id with no entry is a colour the player has
+    /// not set, and a file written before colours existed has none.
+    pub colors: BTreeMap<i32, SkinColor>,
 }
 
-/// The nudges a document's own offset ids resolve to, which is how the renderer reads what the
-/// player moved without knowing anything about the settings file.
+/// The nudges and colours a document's own ids resolve to, which is how the renderer reads what the
+/// player changed without knowing anything about the settings file.
 impl OffsetSource for SkinCustomisation {
     fn offset(&self, id: i32) -> Option<SkinOffset> {
         self.offsets.get(&id).copied()
+    }
+
+    fn color(&self, id: i32) -> Option<SkinColor> {
+        self.colors.get(&id).copied()
     }
 }
 
@@ -403,6 +410,7 @@ impl SkinOptions {
             properties: stored.map(|entry| entry.properties.clone()).unwrap_or_default(),
             filepaths: stored.map(|entry| entry.filepaths.clone()).unwrap_or_default(),
             offsets: stored.map(|entry| entry.offsets.clone()).unwrap_or_default(),
+            colors: stored.map(|entry| entry.colors.clone()).unwrap_or_default(),
         }
     }
 

@@ -12,14 +12,14 @@ use std::path::{Path, PathBuf};
 
 use rbms_model::Mode;
 use rbms_skin::SkinError;
-use rbms_skin::dst::{Acc, DrawCondition, LOOP_ONCE, OffsetSource, SkinOffset, SkinRect, TimerRef, resolve};
+use rbms_skin::dst::{Acc, DrawCondition, LOOP_ONCE, OffsetSource, SkinColor, SkinOffset, SkinRect, TimerRef, resolve};
 use rbms_skin::loader::{
     DEFAULT_MAX_DOCUMENT_BYTES, Filtering, LoadedSkin, MAX_INCLUDE_DEPTH, OPTION_RANDOM_VALUE, ParserKind, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG,
     SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT, SkinLoadOptions, SkinUserConfig, StretchKind, enabled_options, filtering_for,
     is_supported_skin_type, load_header, load_skin, load_skin_with_host, mode_skin_type, parse_document, read_document, selected_option, skin_type_mode,
     stretch_rect,
 };
-use rbms_skin::model::{Destination, PropertyDef, PropertyItem, PropertyRef};
+use rbms_skin::model::{Destination, NO_TINT, PropertyDef, PropertyItem, PropertyRef};
 use rbms_skin::property::generated::{OPTION_7KEYSONG, OPTION_AUTOPLAYON, OPTION_BGAOFF, OPTION_BGAON};
 use rbms_skin::property::{MapHost, StaticScreen};
 use rbms_skin::timer::{TimerId, TimerState};
@@ -195,6 +195,21 @@ fn a_header_reads_what_the_configuration_screen_lists_without_loading_the_docume
     assert_eq!(header.offsets.len(), 1);
     assert_eq!(header.custom_files.len(), 1);
     assert_eq!(header.custom_files[0].candidates, vec!["Random", "groove.png", "hard.png", "shell.png"]);
+    let colors: Vec<(&str, &str, &str, i32)> = header.colors.iter().map(|row| (row.category.as_str(), row.name.as_str(), row.display_name(), row.id)).collect();
+    assert_eq!(colors, vec![("layout", "Frame color", "Frame", 5), ("", "Veil", "Veil", 6)]);
+    assert_eq!(header.colors[0].default_color(), SkinColor::rgba(0x30, 0xE0, 0x50, u8::MAX));
+    assert_eq!(header.colors[1].default_color(), SkinColor::rgba(0, 0, 0, 0x80));
+}
+
+#[test]
+fn a_document_without_colour_rows_declares_none_and_loads_as_it_always_did() {
+    let scratch = Scratch::new("no-colours");
+    let path = scratch.write("skin.json", r#"{ "type": 5, "destination": [{ "id": "plain", "dst": [{ "time": 0 }] }] }"#);
+    let user = SkinUserConfig::default();
+    assert!(load_header(&path, seeded(scratch.path(), &user)).expect("the header should load").colors.is_empty());
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    assert!(skin.def.color.is_empty() && skin.warnings.is_empty());
+    assert_eq!(track(&skin, "plain").tint, None);
 }
 
 #[test]
@@ -483,6 +498,79 @@ fn a_positive_offset_r_turns_an_object_the_way_a_larger_document_angle_does() {
     let written = resolve(track(&skin, "written"), 0, &TimerState::new(), &user, None).expect("the written object draws");
     assert_eq!(nudged.angle_deg, written.angle_deg, "`angle: 30` with `r: 15` is `angle: 45`, because the reference adds the two in the document's own space");
     assert_eq!(nudged.angle_deg, -45.0, "counter-clockwise in the document is negative on a screen that turns clockwise");
+}
+
+#[test]
+fn a_destination_carries_the_colour_slot_it_names_and_a_negative_one_names_none() {
+    let skin = load_minimal(&SkinUserConfig::default());
+    assert_eq!(track(&skin, "frame").tint, Some(5));
+    assert_eq!(skin.def.color.iter().map(|row| row.id).collect::<Vec<_>>(), vec![5, 6]);
+    assert!(skin.warnings.is_empty(), "sound colour rows cost nothing: {:?}", skin.warnings);
+
+    let scratch = Scratch::new("tint-ids");
+    let path = scratch.write(
+        "skin.json",
+        r#"{ "type": 5, "destination": [
+            { "id": "named", "tint": 3, "dst": [{ "time": 0 }] },
+            { "id": "none", "tint": -1, "dst": [{ "time": 0 }] },
+            { "id": "unnamed", "dst": [{ "time": 0 }] }
+        ] }"#,
+    );
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    assert_eq!((track(&skin, "named").tint, track(&skin, "none").tint, track(&skin, "unnamed").tint), (Some(3), None, None));
+}
+
+#[test]
+fn a_note_set_lists_the_colour_each_lane_is_tinted_by() {
+    let path = Path::new("skin.json");
+    let (def, _) = parse_document(path, r#"{ "type": 0, "note": { "id": "notes", "tint": [4, -1, 9] } }"#).expect("the document should parse");
+    let note = def.note.expect("the document has a note set");
+    assert_eq!(note.tint, vec![4, NO_TINT, 9]);
+
+    let (def, _) = parse_document(path, r#"{ "type": 0, "note": { "id": "notes" } }"#).expect("the document should parse");
+    assert!(def.note.expect("the document has a note set").tint.is_empty(), "a note set that names no colour tints no lane");
+}
+
+#[test]
+fn a_stored_colour_tints_the_object_that_names_it_on_the_next_frame_and_no_other() {
+    let scratch = Scratch::new("tint-resolve");
+    let path = scratch.write(
+        "skin.json",
+        r#"{ "type": 5, "color": [{ "name": "Lane", "id": 3 }], "destination": [
+            { "id": "tinted", "tint": 3, "dst": [{ "time": 0, "r": 255, "g": 255, "b": 255 }] },
+            { "id": "plain", "dst": [{ "time": 0, "r": 255, "g": 255, "b": 255 }] }
+        ] }"#,
+    );
+    let mut user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    let at = |user: &SkinUserConfig, id: &str| resolve(track(&skin, id), 0, &TimerState::new(), user, None).expect("the object draws").color;
+
+    assert_eq!(at(&user, "tinted"), SkinColor::WHITE, "a colour nobody set leaves the object in its own");
+    user.colors.insert(3, SkinColor::rgba(250, 10, 20, 128));
+    assert_eq!(at(&user, "tinted"), SkinColor::rgba(250, 10, 20, 128), "the loaded skin is not read again for the new colour to show");
+    assert_eq!(at(&user, "plain"), SkinColor::WHITE);
+    user.colors.clear();
+    assert_eq!(at(&user, "tinted"), SkinColor::WHITE, "and clearing it brings the object back");
+}
+
+#[test]
+fn a_colour_row_that_cannot_work_is_reported_and_costs_the_document_nothing() {
+    let scratch = Scratch::new("bad-colours");
+    let path = scratch.write(
+        "skin.json",
+        r#"{ "type": 5, "color": [
+            { "name": "Lane", "id": 3 },
+            { "name": "Lane", "id": 3, "def": "nope" },
+            { "name": "Lost", "id": -1 }
+        ], "destination": [] }"#,
+    );
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    assert_eq!(skin.warnings.len(), 4, "{:?}", skin.warnings);
+    for expected in ["repeats the id 3", "repeats the name", "not RRGGBB or RRGGBBAA", "no `tint` can name"] {
+        assert!(skin.warnings.iter().any(|warning| warning.contains(expected)), "no warning says {expected:?}: {:?}", skin.warnings);
+    }
 }
 
 #[test]
@@ -1177,6 +1265,7 @@ fn a_players_choices_survive_a_round_trip_through_the_settings_file() {
     user.properties.insert("Panel".to_owned(), PANEL_OFF);
     user.filepaths.insert("Gauge".to_owned(), "hard.png".to_owned());
     user.offsets.insert(20, SkinOffset { x: 4.0, y: -8.0, w: 1.5, h: 0.0, r: 90.0, a: 0.5 });
+    user.colors.insert(5, SkinColor::rgba(1, 2, 3, 4));
 
     let text = serde_json::to_string(&user).expect("the choices should serialise");
     let restored: SkinUserConfig = serde_json::from_str(&text).expect("the choices should deserialise");
@@ -1185,6 +1274,16 @@ fn a_players_choices_survive_a_round_trip_through_the_settings_file() {
     assert_eq!(restored.properties, user.properties);
     assert_eq!(restored.filepaths, user.filepaths);
     assert_eq!(restored.offsets, user.offsets);
+    assert_eq!(restored.colors, user.colors);
+}
+
+#[test]
+fn a_stored_colour_with_no_alpha_is_opaque_and_one_with_no_channel_is_zero_there() {
+    let restored: SkinUserConfig =
+        serde_json::from_str(r#"{ "colors": { "5": { "r": 200 }, "6": { "r": 1, "g": 2, "b": 3, "a": 4 } } }"#).expect("the choices should deserialise");
+    assert_eq!(restored.colors.get(&5), Some(&SkinColor::rgba(200, 0, 0, u8::MAX)), "a hand-written red is a visible one");
+    assert_eq!(restored.colors.get(&6), Some(&SkinColor::rgba(1, 2, 3, 4)));
+    assert!(serde_json::from_str::<SkinUserConfig>(r#"{ "path": "old.json", "properties": {} }"#).expect("a file from before colours loads").colors.is_empty());
 }
 
 #[test]
@@ -1194,6 +1293,15 @@ fn a_stored_nudge_reaches_the_interpolator_through_the_offset_source() {
 
     assert_eq!(user.offset(20), Some(SkinOffset { x: 4.0, y: -8.0, ..SkinOffset::default() }));
     assert_eq!(user.offset(21), None, "a slot nobody nudged offers nothing");
+}
+
+#[test]
+fn a_stored_colour_reaches_the_interpolator_through_the_offset_source() {
+    let mut user = SkinUserConfig::default();
+    user.colors.insert(5, SkinColor::rgba(9, 8, 7, 6));
+
+    assert_eq!(user.color(5), Some(SkinColor::rgba(9, 8, 7, 6)));
+    assert_eq!(user.color(6), None, "a colour nobody set offers nothing, which leaves the object in its own");
 }
 
 /// A list nested inside a list is still a chain of guarded clauses picking one record, because that

@@ -42,6 +42,19 @@ impl SkinRect {
     }
 }
 
+/// Half of the largest channel value, which is what rounds a division by it to nearest.
+const CHANNEL_HALF_STEP: u32 = (u8::MAX / 2) as u32;
+
+/// Hex digits that spell one channel.
+const HEX_CHANNEL_DIGITS: usize = 2;
+
+/// Hex digits of a colour with no alpha, and of one with it.
+const HEX_RGB_DIGITS: usize = 3 * HEX_CHANNEL_DIGITS;
+const HEX_RGBA_DIGITS: usize = 4 * HEX_CHANNEL_DIGITS;
+
+/// The radix a colour's digits are written in.
+const HEX_RADIX: u32 = 16;
+
 /// A straight 8-bit colour. The reference carries these as floats and only quantises when it hands
 /// them to the GPU, so an interpolated channel here is that float rounded to nearest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -53,10 +66,43 @@ pub struct SkinColor {
 }
 
 impl SkinColor {
+    /// The colour that changes nothing it is multiplied into.
+    pub const WHITE: Self = Self::rgba(u8::MAX, u8::MAX, u8::MAX, u8::MAX);
+
     /// A colour from its four channels.
     pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
     }
+
+    /// Reads `RRGGBB` or `RRGGBBAA`, with or without a leading `#`, in either case. Six digits are
+    /// opaque. Anything else is `None`.
+    pub fn from_hex(text: &str) -> Option<Self> {
+        let digits = text.strip_prefix('#').unwrap_or(text);
+        if !digits.bytes().all(|digit| digit.is_ascii_hexdigit()) || (digits.len() != HEX_RGB_DIGITS && digits.len() != HEX_RGBA_DIGITS) {
+            return None;
+        }
+        let channel = |at: usize| digits.get(at..at + HEX_CHANNEL_DIGITS).and_then(|pair| u8::from_str_radix(pair, HEX_RADIX).ok());
+        let alpha = if digits.len() == HEX_RGBA_DIGITS { channel(HEX_RGB_DIGITS)? } else { u8::MAX };
+        Some(Self::rgba(channel(0)?, channel(HEX_CHANNEL_DIGITS)?, channel(2 * HEX_CHANNEL_DIGITS)?, alpha))
+    }
+
+    /// The colour as `RRGGBBAA` in upper case, which [`Self::from_hex`] reads back unchanged.
+    pub fn to_hex(self) -> String {
+        format!("{:02X}{:02X}{:02X}{:02X}", self.r, self.g, self.b, self.a)
+    }
+
+    /// This colour multiplied channel by channel by `tint`, each product rounded to nearest. White
+    /// leaves a channel as it was and black takes it to zero, so a white destination tinted by a
+    /// colour comes out as exactly that colour.
+    pub fn tinted(self, tint: Self) -> Self {
+        Self::rgba(multiply_channel(self.r, tint.r), multiply_channel(self.g, tint.g), multiply_channel(self.b, tint.b), multiply_channel(self.a, tint.a))
+    }
+}
+
+/// The product of two 8-bit channels read as fractions of one, rounded to nearest.
+fn multiply_channel(base: u8, factor: u8) -> u8 {
+    let product = u32::from(base) * u32::from(factor);
+    ((product + CHANNEL_HALF_STEP) / u32::from(u8::MAX)) as u8
 }
 
 /// A live nudge to a destination, addressed by offset id (`SkinObject.SkinOffset`).
@@ -74,10 +120,19 @@ pub struct SkinOffset {
     pub a: f32,
 }
 
-/// Where a destination reads its live offsets from.
+/// Where a destination reads its live offsets and colours from.
 pub trait OffsetSource {
     /// The offset registered under `id`, or `None` when the game sets none.
     fn offset(&self, id: i32) -> Option<SkinOffset>;
+
+    /// The colour the player set under `id` (an R-BMS extension, named by a destination's `tint`), or
+    /// `None` when none is set, which leaves a destination drawn in its own colour.
+    ///
+    /// It is asked on every frame a tinted destination is resolved, so an answer that changes takes
+    /// effect on the next frame without the skin being read again.
+    fn color(&self, _id: i32) -> Option<SkinColor> {
+        None
+    }
 }
 
 /// The game state a draw condition consults.
@@ -329,6 +384,9 @@ pub struct DestinationTrack {
     pub mouse_rect: Option<MouseRect>,
     /// The document's `stretch`, or [`STRETCH_UNSPECIFIED`].
     pub stretch: i32,
+    /// The colour slot the track is multiplied by ([`OffsetSource::color`]), if the document named
+    /// one. This is an R-BMS extension that the reference never reads.
+    pub tint: Option<i32>,
 }
 
 impl Default for DestinationTrack {
@@ -348,6 +406,7 @@ impl Default for DestinationTrack {
             draw_conditions: Vec::new(),
             mouse_rect: None,
             stretch: STRETCH_UNSPECIFIED,
+            tint: None,
         }
     }
 }
@@ -513,6 +572,11 @@ pub fn shifted_alpha(alpha: u8, shifts: impl IntoIterator<Item = f32>) -> u8 {
 ///
 /// `lua` is what a track timed by a function asks for its start; such a track read without one is
 /// off.
+///
+/// A track with a [`DestinationTrack::tint`] whose colour `offsets` answers is multiplied by it, all
+/// four channels, before the offsets' alpha shifts are added; the shifts stay additive and the tint
+/// stays a product, so the two never mix. A track with no tint, or one `offsets` answers no colour
+/// for, resolves exactly as it would without the extension.
 pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offsets: &dyn OffsetSource, lua: Option<&dyn LuaDrawEval>) -> Option<Resolved> {
     let last = track.frames.len().checked_sub(1)?;
     let mut time = now_us / MICROS_PER_MILLI;
@@ -561,6 +625,9 @@ pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offse
     let clip = clip.filter(|clip| clip.w > 0.0 && clip.h > 0.0);
 
     let mut color = if interpolated { lerp_color(frame.color, track.frames[index + 1].color, rate) } else { frame.color };
+    if let Some(tint) = track.tint.and_then(|id| offsets.color(id)) {
+        color = color.tinted(tint);
+    }
     color.a = shifted_alpha(color.a, applied.iter().map(|offset| offset.a));
 
     let mut angle_deg = if interpolated { (frame.angle_deg + (track.frames[index + 1].angle_deg - frame.angle_deg) * rate).trunc() } else { frame.angle_deg };

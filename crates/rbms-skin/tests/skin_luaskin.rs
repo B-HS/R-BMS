@@ -14,14 +14,14 @@ use std::path::{Path, PathBuf};
 use mlua::FromLuaMulti;
 use rbms_model::Mode;
 use rbms_skin::SkinError;
-use rbms_skin::dst::{DrawCondition, SkinOffset, TimerRef, prepare};
+use rbms_skin::dst::{DrawCondition, SkinColor, SkinOffset, TimerRef, prepare};
 use rbms_skin::loader::lua_skin::{LuaSkinOptions, load_lua_skin};
 use rbms_skin::loader::{
     DEFAULT_MAX_DOCUMENT_BYTES, LoadedSkin, OPTION_RANDOM_VALUE, ParserKind, PlayTimings, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_SKIN_SELECT,
     SkinLoadOptions, SkinUserConfig, automatic_offsets, is_known_skin_type, is_lua_skin, load_header, load_skin, load_skin_with_host, skin_resolution,
 };
 use rbms_skin::lua::{LoadBudget, LuaBudget};
-use rbms_skin::model::{Destination, PropertyRef, SkinDef};
+use rbms_skin::model::{Destination, NO_TINT, PropertyRef, SkinDef};
 use rbms_skin::property::generated::{
     OPTION_1P_80_89, OPTION_1P_AA, OPTION_7KEYSONG, OPTION_AA, OPTION_BANNER, OPTION_BEST_AA_1P, OPTION_BGA, OPTION_BGAOFF, OPTION_BGAON, OPTION_CLEAR_GROOVE,
     OPTION_CLEAR_NORMAL, OPTION_GOOD_EXIST, OPTION_GREAT_EXIST, OPTION_JUDGE_NORMAL, OPTION_NO_BACKBMP, OPTION_NO_BPMCHANGE, OPTION_NO_LN,
@@ -488,6 +488,91 @@ fn the_header_is_read_without_building_the_screen() {
     let offsets: Vec<(&str, i32)> = header.offsets.iter().map(|offset| (offset.name.as_str(), offset.id)).collect();
     assert_eq!(offsets, vec![("Shift", 40), ("All offset(%)", 10), ("Notes offset", 30), ("Judge offset", 32), ("Judge Detail offset", 33)]);
     assert!(header.offsets[0].x && header.offsets[0].y && !header.offsets[0].w, "an axis the skin wrote, even as zero, is one the player may move");
+
+    let colors: Vec<(&str, i32, &str, &str)> = header.colors.iter().map(|row| (row.name.as_str(), row.id, row.display_name(), row.category.as_str())).collect();
+    assert_eq!(
+        colors,
+        vec![("Lane", 3, "Lane", "3"), ("Veil", 7, "Cover veil", "")],
+        "a colour row shows its label when it has one, and its name when it has not"
+    );
+    assert_eq!(header.colors[0].default_color(), SkinColor::rgba(0x11, 0x22, 0x33, u8::MAX), "six digits are opaque");
+    assert_eq!(header.colors[1].default_color(), SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 0x80));
+}
+
+#[test]
+fn a_colour_row_a_destination_and_a_note_set_are_read_from_the_tables_a_skin_returns() {
+    let skin = load_mini(&SkinUserConfig::default(), &host());
+
+    assert_eq!(skin.def.color.iter().map(|row| row.id).collect::<Vec<_>>(), vec![3, 7], "the rows are the header pass's, like the other customisation rows");
+    let background = skin.destinations.iter().find(|named| named.id == "bg").expect("the object is assembled");
+    assert_eq!(background.track.tint, Some(3));
+    assert!(
+        skin.destinations.iter().filter(|named| named.id != "bg").all(|named| named.track.tint.is_none()),
+        "an object that names no colour is tinted by none"
+    );
+    let note = skin.def.note.as_ref().expect("the skin has a note set");
+    assert_eq!(note.tint, vec![3, NO_TINT, 7], "a lane the list gives no colour keeps its place in it");
+    assert!(skin.warnings.iter().all(|warning| !warning.contains("colour")), "the fixture's colour rows are sound: {:?}", skin.warnings);
+}
+
+#[test]
+fn skin_config_publishes_each_colour_the_player_set_or_the_rows_default() {
+    let mut user = SkinUserConfig::default();
+    user.colors.insert(3, SkinColor::rgba(250, 10, 20, 30));
+    let skin = load_mini(&user, &host());
+
+    assert_eq!(
+        eval::<(i32, i32, i32, i32, bool)>(&skin, "local lane = skin_config.color.Lane return lane.r, lane.g, lane.b, lane.a, lane.custom"),
+        (250, 10, 20, 30, true),
+        "a colour the player set is published as it was stored"
+    );
+    assert_eq!(
+        eval::<(i32, i32, i32, i32, bool)>(&skin, "local veil = skin_config.color.Veil return veil.r, veil.g, veil.b, veil.a, veil.custom"),
+        (255, 255, 255, 128, false),
+        "one nobody set is the row's default, and says it is not the player's"
+    );
+    assert_eq!(eval::<i32>(&skin, "local count = 0 for _ in pairs(skin_config.color) do count = count + 1 end return count"), 2);
+    assert!(eval::<bool>(&skin, "return skin_config.color.Missing == nil"), "a name no row declares has no entry");
+}
+
+#[test]
+fn a_skin_that_declares_no_colour_publishes_an_empty_colour_table() {
+    let scratch = Scratch::new("no-colours");
+    let skin = load_scratch(&scratch, "return { type = 5, destination = {} }").expect("the skin should load");
+
+    assert!(skin.def.color.is_empty());
+    assert_eq!(eval::<String>(&skin, "return type(skin_config.color)"), "table");
+    assert_eq!(eval::<i32>(&skin, "local count = 0 for _ in pairs(skin_config.color) do count = count + 1 end return count"), 0);
+}
+
+#[test]
+fn a_colour_row_that_cannot_work_is_reported_and_costs_the_skin_nothing() {
+    let scratch = Scratch::new("bad-colours");
+    let skin = load_scratch(
+        &scratch,
+        r#"return {
+            type = 5,
+            color = {
+                { name = "Lane", id = 3, def = "112233" },
+                { name = "Lane", id = 4 },
+                { name = "Beam", id = 3, def = "not a colour" },
+                { name = "Lost", id = -2 },
+            },
+            destination = {},
+        }"#,
+    )
+    .expect("the skin should load");
+
+    assert_eq!(skin.warnings.len(), 4, "{:?}", skin.warnings);
+    assert!(skin.warnings.iter().any(|warning| warning.contains("\"Lane\"") && warning.contains("repeats the name")), "{:?}", skin.warnings);
+    assert!(skin.warnings.iter().any(|warning| warning.contains("\"Beam\"") && warning.contains("repeats the id 3")), "{:?}", skin.warnings);
+    assert!(skin.warnings.iter().any(|warning| warning.contains("\"Beam\"") && warning.contains("not a colour")), "{:?}", skin.warnings);
+    assert!(skin.warnings.iter().any(|warning| warning.contains("\"Lost\"") && warning.contains("no `tint` can name")), "{:?}", skin.warnings);
+    assert_eq!(
+        eval::<(i32, i32, i32, i32)>(&skin, "local beam = skin_config.color.Beam return beam.r, beam.g, beam.b, beam.a"),
+        (255, 255, 255, 255),
+        "a default that is not a colour starts at white"
+    );
 }
 
 #[test]

@@ -26,7 +26,7 @@ use std::fmt;
 use serde::Deserialize;
 use serde::de::{self, Visitor};
 
-use crate::dst::{LuaFnId, TimerRef};
+use crate::dst::{LuaFnId, SkinColor, TimerRef};
 use crate::timer::TimerId;
 
 /// The width a document is authored against when it names none.
@@ -318,6 +318,41 @@ pub struct OffsetDef {
     pub a: bool,
 }
 
+/// The colour id that names no colour. A `tint` below zero tints nothing, and it is how a note
+/// set's lane-by-lane `tint` list skips a lane.
+pub const NO_TINT: i32 = -1;
+
+/// One colour slot the player may change, which a destination or a note set names with its `tint`.
+///
+/// This is an R-BMS extension: the reference ignores the `color` list and the `tint` keys, so a
+/// document that carries them draws in its authored colours there. The ids are a space of their own,
+/// apart from the offset ids; a row's id has to be zero or more and unique among the colour rows.
+/// `name` is what the stored choice is addressed by, as with the other customisation rows.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ColorDef {
+    pub category: String,
+    pub name: String,
+    /// The text a menu shows for the row, or empty to show `name`.
+    pub label: String,
+    pub id: i32,
+    /// The colour the row starts at, as `RRGGBB` or `RRGGBBAA` ([`SkinColor::from_hex`]).
+    pub def: Option<String>,
+}
+
+impl ColorDef {
+    /// The colour the row starts at: `def` as written, and opaque white when it is missing or is not a
+    /// colour.
+    pub fn default_color(&self) -> SkinColor {
+        self.def.as_deref().and_then(SkinColor::from_hex).unwrap_or(SkinColor::WHITE)
+    }
+
+    /// The text a menu shows for the row.
+    pub fn display_name(&self) -> &str {
+        if self.label.is_empty() { &self.name } else { &self.label }
+    }
+}
+
 /// An image file the document's objects draw from.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -486,6 +521,8 @@ pub struct Destination {
     pub dst: Vec<Animation>,
     #[serde(rename = "mouseRect")]
     pub mouse_rect: Option<RectDef>,
+    /// The id of the [`ColorDef`] this destination is multiplied by, or none. A negative id is none.
+    pub tint: Option<i32>,
 }
 
 impl Default for Destination {
@@ -504,6 +541,7 @@ impl Default for Destination {
             draw: None,
             dst: Vec::new(),
             mouse_rect: None,
+            tint: None,
         }
     }
 }
@@ -552,6 +590,7 @@ pub struct SkinDef {
     pub property: Vec<PropertyDef>,
     pub filepath: Vec<Filepath>,
     pub offset: Vec<OffsetDef>,
+    pub color: Vec<ColorDef>,
     pub source: Vec<Source>,
     pub font: Vec<FontDef>,
     pub image: Vec<ImageDef>,
@@ -608,6 +647,7 @@ impl Default for SkinDef {
             property: Vec::new(),
             filepath: Vec::new(),
             offset: Vec::new(),
+            color: Vec::new(),
             source: Vec::new(),
             font: Vec::new(),
             image: Vec::new(),

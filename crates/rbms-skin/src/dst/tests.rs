@@ -23,6 +23,7 @@ const DOCUMENT_QUARTER_TURN: f32 = 90.0;
 struct FakeState {
     options: HashMap<i32, bool>,
     offsets: HashMap<i32, SkinOffset>,
+    colors: HashMap<i32, SkinColor>,
     offset_reads: Cell<u32>,
 }
 
@@ -36,12 +37,21 @@ impl FakeState {
         self.offsets.insert(id, offset);
         self
     }
+
+    fn with_color(mut self, id: i32, color: SkinColor) -> Self {
+        self.colors.insert(id, color);
+        self
+    }
 }
 
 impl OffsetSource for FakeState {
     fn offset(&self, id: i32) -> Option<SkinOffset> {
         self.offset_reads.set(self.offset_reads.get() + 1);
         self.offsets.get(&id).copied()
+    }
+
+    fn color(&self, id: i32) -> Option<SkinColor> {
+        self.colors.get(&id).copied()
     }
 }
 
@@ -352,6 +362,107 @@ fn an_alpha_offset_clamps() {
 
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: -500.0, ..SkinOffset::default() });
     assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color.a, 0);
+}
+
+/// The colour slot the tint tests name.
+const TINT_ID: i32 = 7;
+
+#[test]
+fn a_tinted_white_track_comes_out_as_exactly_the_colour_the_player_set() {
+    let track = DestinationTrack { tint: Some(TINT_ID), ..coloured_track(SkinColor::WHITE, SkinColor::WHITE) };
+    let chosen = SkinColor::rgba(30, 144, 255, 200);
+    let state = FakeState::default().with_color(TINT_ID, chosen);
+    assert_eq!(resolve(&track, us(500), &TimerState::new(), &state, None).expect("it draws").color, chosen);
+}
+
+#[test]
+fn a_tint_multiplies_every_channel_of_the_colour_the_track_is_drawn_in() {
+    let drawn_in = SkinColor::rgba(102, 102, 102, 128);
+    let track = DestinationTrack { tint: Some(TINT_ID), ..coloured_track(drawn_in, drawn_in) };
+    let state = FakeState::default().with_color(TINT_ID, SkinColor::rgba(255, 128, 0, 255));
+    assert_eq!(
+        resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color,
+        SkinColor::rgba(102, 51, 0, 128),
+        "white leaves a channel, black empties it, and a half takes half of it"
+    );
+}
+
+#[test]
+fn a_tint_with_no_colour_behind_it_changes_nothing() {
+    let drawn_in = SkinColor::rgba(10, 20, 30, 40);
+    let track = DestinationTrack { tint: Some(TINT_ID), ..coloured_track(drawn_in, drawn_in) };
+    let untinted = DestinationTrack { tint: None, ..track.clone() };
+    let set_elsewhere = FakeState::default().with_color(TINT_ID + 1, SkinColor::rgba(0, 0, 0, 0));
+    for state in [FakeState::default(), set_elsewhere] {
+        let expected = resolve(&untinted, us(0), &TimerState::new(), &state, None).expect("it draws");
+        assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws"), expected, "a colour nobody set tinted the track");
+    }
+}
+
+#[test]
+fn a_track_that_names_no_tint_ignores_every_colour_the_player_set() {
+    let drawn_in = SkinColor::rgba(10, 20, 30, 40);
+    let track = coloured_track(drawn_in, drawn_in);
+    let state = FakeState::default().with_color(TINT_ID, SkinColor::rgba(0, 0, 0, 0));
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color, drawn_in);
+}
+
+/// The tint is a product and the offsets' alpha shifts are sums, and the shift comes last, so the
+/// two never trade places: a half-clear tint over an opaque track is 128 before the shift is added.
+#[test]
+fn the_tints_alpha_is_a_product_taken_before_the_alpha_offsets_are_added() {
+    const OFFSET_ID: i32 = 2;
+    let half_clear = SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 128);
+    let state = FakeState::default().with_color(TINT_ID, half_clear).with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
+    let track = DestinationTrack { tint: Some(TINT_ID), offsets: vec![OFFSET_ID], ..coloured_track(SkinColor::WHITE, SkinColor::WHITE) };
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color.a, 178);
+
+    let clear = FakeState::default().with_color(TINT_ID, SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 0));
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &clear, None).expect("it draws").color.a, 0, "a tint with no alpha hides the track");
+}
+
+#[test]
+fn a_tint_follows_the_colour_the_track_interpolates_through() {
+    let track = DestinationTrack { tint: Some(TINT_ID), ..coloured_track(SkinColor::rgba(0, 0, 0, 255), SkinColor::rgba(200, 200, 200, 255)) };
+    let state = FakeState::default().with_color(TINT_ID, SkinColor::rgba(128, 255, 0, 255));
+    assert_eq!(resolve(&track, us(500), &TimerState::new(), &state, None).expect("it draws").color, SkinColor::rgba(50, 100, 0, 255));
+}
+
+#[test]
+fn a_colour_answered_differently_on_the_next_frame_tints_the_next_frame() {
+    let track = DestinationTrack { tint: Some(TINT_ID), ..coloured_track(SkinColor::WHITE, SkinColor::WHITE) };
+    let first = FakeState::default().with_color(TINT_ID, SkinColor::rgba(255, 0, 0, 255));
+    let second = FakeState::default().with_color(TINT_ID, SkinColor::rgba(0, 0, 255, 255));
+    let timers = TimerState::new();
+    assert_eq!(resolve(&track, us(0), &timers, &first, None).expect("it draws").color, SkinColor::rgba(255, 0, 0, 255));
+    assert_eq!(resolve(&track, us(16), &timers, &second, None).expect("it draws").color, SkinColor::rgba(0, 0, 255, 255));
+}
+
+#[test]
+fn a_colour_multiplies_channel_by_channel_and_rounds_to_nearest() {
+    for value in 0..=u8::MAX {
+        let shade = SkinColor::rgba(value, value, value, value);
+        assert_eq!(shade.tinted(SkinColor::WHITE), shade, "white changed {value}");
+        assert_eq!(SkinColor::WHITE.tinted(shade), shade, "{value} was not kept");
+        assert_eq!(shade.tinted(SkinColor::rgba(0, 0, 0, 0)), SkinColor::rgba(0, 0, 0, 0), "black kept {value}");
+    }
+    assert_eq!(
+        SkinColor::rgba(1, 2, 3, 4).tinted(SkinColor::rgba(128, 128, 128, 128)),
+        SkinColor::rgba(1, 1, 2, 2),
+        "0.502, 1.004, 1.506 and 2.008 round to nearest"
+    );
+}
+
+#[test]
+fn a_colour_is_read_from_six_or_eight_hex_digits_and_written_as_eight() {
+    assert_eq!(SkinColor::from_hex("30E050"), Some(SkinColor::rgba(0x30, 0xE0, 0x50, u8::MAX)));
+    assert_eq!(SkinColor::from_hex("#30e05080"), Some(SkinColor::rgba(0x30, 0xE0, 0x50, 0x80)));
+    for malformed in ["", "#", "30E05", "30E0508", "30E050801", "30E05G", "+f0000", "#-10000", " 30E050", "30E050 ", "ÀÀÀ", "#30E0 50"] {
+        assert_eq!(SkinColor::from_hex(malformed), None, "{malformed:?} was read as a colour");
+    }
+    let colour = SkinColor::rgba(1, 171, 255, 16);
+    assert_eq!(colour.to_hex(), "01ABFF10");
+    assert_eq!(SkinColor::from_hex(&colour.to_hex()), Some(colour));
 }
 
 fn angled_track(first: f32, second: f32) -> DestinationTrack {

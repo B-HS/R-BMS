@@ -29,6 +29,12 @@ local function main()
     for _ in pairs(skin_config.offset["Title"]) do
         skin.title_fields = skin.title_fields + 1
     end
+    skin.lane_alpha = skin_config.color["Lane"].a
+    skin.lane_custom = skin_config.color["Lane"].custom
+    skin.lane_fields = 0
+    for _ in pairs(skin_config.color["Lane"]) do
+        skin.lane_fields = skin.lane_fields + 1
+    end
     skin.resolved = skin_config.get_path("data/notes.txt")
     skin.part = dofile(skin.resolved_part or "parts/part.lua").value
     skin.loads = main_loads

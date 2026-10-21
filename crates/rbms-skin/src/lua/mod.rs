@@ -59,7 +59,7 @@ use crate::property::{NameSpace, SkinHost};
 use crate::resolve;
 use crate::timer::TIMER_OFF;
 pub use budget::{BUDGET_EXHAUSTED, FrameBudget, LoadBudget, LuaBudget, Meter, Phase};
-pub use env::{SKIN_CONFIG_GLOBAL, SkinConfigGlobal};
+pub use env::{SKIN_CONFIG_GLOBAL, SkinConfigColor, SkinConfigGlobal};
 pub use os::{LocalTime, local_time};
 
 /// Distinct printed lines the log keeps. Later ones are counted but not stored.

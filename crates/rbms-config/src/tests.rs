@@ -17,7 +17,7 @@ use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
 
 use super::*;
-use rbms_skin::dst::{OffsetSource, SkinOffset};
+use rbms_skin::dst::{OffsetSource, SkinColor, SkinOffset};
 
 /// The `SkinType` id of the song browser, used to prove that two screens keep their own choices.
 const MUSIC_SELECT_SCREEN: i32 = 5;
@@ -344,6 +344,7 @@ fn ron_round_trip_preserves_every_field() {
     custom.properties.insert("LANE COVER".into(), 902);
     custom.filepaths.insert("BACKGROUND".into(), "night.png".into());
     custom.offsets.insert(12, SkinOffset { x: -4.0, y: 8.0, w: 0.0, h: 0.0, r: 90.0, a: -32.0 });
+    custom.colors.insert(5, SkinColor::rgba(48, 224, 80, 128));
 
     let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
     assert_eq!(back, c, "every field survives the round trip");
@@ -361,6 +362,34 @@ fn a_stored_customisation_answers_the_offset_ids_it_holds() {
     let stored = c.skin.customisation("browser.json").expect("the document has choices");
     assert_eq!(stored.offset(12), Some(nudge));
     assert_eq!(stored.offset(13), None, "an id nothing was nudged under reported a nudge");
+}
+
+/// A colour is read the way a nudge is: by the id the document declared, answering nothing for an id
+/// nothing was set under, which is what leaves that destination in the colour its author gave it.
+#[test]
+fn a_stored_customisation_answers_the_colour_ids_it_holds() {
+    let mut c = Config::default();
+    let chosen = SkinColor::rgba(48, 224, 80, 128);
+    c.skin.customise("play.json").colors.insert(5, chosen);
+
+    let stored = c.skin.customisation("play.json").expect("the document has choices");
+    assert_eq!(stored.color(5), Some(chosen));
+    assert_eq!(stored.color(6), None, "an id nothing was set under reported a colour");
+    assert_eq!(c.skin.user_config("play.json").colors.get(&5), Some(&chosen), "the loader is handed the colour");
+    assert!(c.skin.user_config("select.json").colors.is_empty(), "one document's colour reached another");
+}
+
+/// A settings file from before colours existed holds no `colors`, and a hand-written colour that
+/// names no alpha is a visible one.
+#[test]
+fn a_skin_customisation_without_colours_loads_and_one_without_alpha_is_opaque() {
+    let before: Config = ron::from_str(r#"(skin: (custom: { "play.json": (properties: { "NOTE": 15 }) }))"#).expect("a file from before colours loads");
+    let stored = before.skin.customisation("play.json").expect("the document has choices");
+    assert_eq!(stored.properties.get("NOTE"), Some(&15));
+    assert!(stored.colors.is_empty());
+
+    let written: Config = ron::from_str(r#"(skin: (custom: { "play.json": (colors: { 3: (r: 200, g: 10) }) }))"#).expect("a hand-written colour loads");
+    assert_eq!(written.skin.user_config("play.json").colors.get(&3), Some(&SkinColor::rgba(200, 10, 0, u8::MAX)));
 }
 
 /// The screen a customisation belongs to is addressed by the `SkinType` id the document writes, so

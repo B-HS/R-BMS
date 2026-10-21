@@ -18,6 +18,10 @@
     ],
     "filepath": [{ "category": "layout", "name": "Gauge", "path": "gauge/*.png", "def": "Random" }],
     "offset": [{ "category": "layout", "name": "Panel offset", "id": 20, "x": true, "y": true }],
+    "color": [
+        { "category": "layout", "name": "Frame color", "label": "Frame", "id": 5, "def": "30e050" },
+        { "name": "Veil", "id": 6, "def": "00000080" }
+    ],
     "source": [
         { "id": "0", "path": "images/frame.png" },
         { "id": "1", "path": "gauge/*.png" }
@@ -34,6 +38,7 @@
             "center": 4,
             "offset": 20,
             "offsets": [21],
+            "tint": 5,
             "stretch": 1,
             "op": [901, -902, 0],
             "mouseRect": { "x": 0, "y": 0, "w": 32, "h": 32 },

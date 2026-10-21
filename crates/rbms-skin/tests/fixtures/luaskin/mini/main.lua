@@ -30,6 +30,10 @@ local header = {
 	offset = {
 		{ name = "Shift", category = 3, id = 40, x = 0, y = 0 },
 	},
+	color = {
+		{ name = "Lane", category = 3, id = 3, def = "112233" },
+		{ name = "Veil", label = "Cover veil", id = 7, def = "FFFFFF80" },
+	},
 }
 
 local function main()
@@ -66,9 +70,9 @@ local function main()
 			end,
 		},
 	}
-	skin.note = { id = "notes" }
+	skin.note = { id = "notes", tint = { 3, -1, 7 } }
 	skin.destination = {
-		{ id = "bg", dst = { { x = 0, y = 0, w = 1920, h = 1080 } } },
+		{ id = "bg", tint = 3, dst = { { x = 0, y = 0, w = 1920, h = 1080 } } },
 		{ id = "panel", op = { 900 }, dst = { { x = 0, y = 0, w = 64, h = 64 } } },
 		{ id = "panel", op = { 901 }, dst = { { x = 100, y = 0, w = 64, h = 64 } } },
 		{

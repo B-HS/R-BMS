@@ -52,8 +52,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::SkinError;
-use crate::dst::{DestinationTrack, DrawCondition, OffsetSource, SkinOffset};
-use crate::model::{Category, DEFAULT_SKIN_HEIGHT, DEFAULT_SKIN_WIDTH, Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef, SourceKind};
+use crate::dst::{DestinationTrack, DrawCondition, OffsetSource, SkinColor, SkinOffset};
+use crate::model::{
+    Category, ColorDef, DEFAULT_SKIN_HEIGHT, DEFAULT_SKIN_WIDTH, Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef, SourceKind,
+};
 use crate::property::generated::{OFFSET_ALL, OFFSET_JUDGE_1P, OFFSET_JUDGEDETAIL_1P, OFFSET_NOTES_1P};
 use crate::property::{DefaultState, NameSpace, SkinHost, id_of_name};
 #[cfg(feature = "lua")]
@@ -120,6 +122,39 @@ impl<'de> Deserialize<'de> for SkinOffset {
     }
 }
 
+/// The field mirror behind [`SkinColor`]'s serde support, for the same reason as
+/// [`SkinOffsetFields`]. A channel left out reads as zero and an alpha left out as opaque, so a
+/// hand-written `(r: 255, g: 0, b: 0)` is a visible red.
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "SkinColor")]
+struct SkinColorFields {
+    #[serde(default)]
+    r: u8,
+    #[serde(default)]
+    g: u8,
+    #[serde(default)]
+    b: u8,
+    #[serde(default = "opaque_alpha")]
+    a: u8,
+}
+
+/// The alpha a stored colour has when it names none.
+const fn opaque_alpha() -> u8 {
+    u8::MAX
+}
+
+impl Serialize for SkinColor {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SkinColorFields::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SkinColor {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        SkinColorFields::deserialize(deserializer)
+    }
+}
+
 /// What one player chose for one skin.
 ///
 /// Rows are addressed by the names the document gave them, so a document that gains or loses a row
@@ -135,11 +170,19 @@ pub struct SkinUserConfig {
     pub filepaths: BTreeMap<String, String>,
     /// Offset id to the nudge applied to it.
     pub offsets: BTreeMap<i32, SkinOffset>,
+    /// Colour id to the colour the player set it to. A colour with no entry is one the player has
+    /// not set: a destination tinted by it is drawn in its own colour, and `skin_config.color`
+    /// publishes the row's default for it.
+    pub colors: BTreeMap<i32, SkinColor>,
 }
 
 impl OffsetSource for SkinUserConfig {
     fn offset(&self, id: i32) -> Option<SkinOffset> {
         self.offsets.get(&id).copied()
+    }
+
+    fn color(&self, id: i32) -> Option<SkinColor> {
+        self.colors.get(&id).copied()
     }
 }
 
@@ -394,6 +437,8 @@ pub struct SkinHeader {
     /// The offsets the skin declares, followed by the ones every play skin has
     /// ([`automatic_offsets`]).
     pub offsets: Vec<OffsetDef>,
+    /// The colour rows the skin declares, which only an R-BMS skin has.
+    pub colors: Vec<ColorDef>,
     pub custom_files: Vec<CustomFile>,
 }
 
@@ -808,6 +853,8 @@ pub(crate) struct MergedHeader {
     pub selections: BTreeMap<i32, bool>,
     /// The declared offsets followed by the automatic ones.
     pub offsets: Vec<OffsetDef>,
+    /// The declared colour rows.
+    pub colors: Vec<ColorDef>,
     pub custom_files: Vec<CustomFile>,
     pub filemap: BTreeMap<String, String>,
     /// Resolves this load's patterns. Shared, because a Lua skin's `skin_config.get_path` goes on
@@ -828,6 +875,7 @@ pub(crate) struct HeaderRows<'a> {
     pub properties: &'a [PropertyDef],
     pub filepath: &'a [Filepath],
     pub offsets: &'a [OffsetDef],
+    pub colors: &'a [ColorDef],
 }
 
 /// The declared offsets of a skin of `skin_type` followed by its automatic ones.
@@ -860,6 +908,7 @@ pub(crate) fn merge_header(rows: &HeaderRows<'_>, directory: &Path, root: &Path,
         options: selected,
         declared: declared_options(rows.properties),
         offsets: header_offsets(rows.skin_type, rows.offsets),
+        colors: rows.colors.to_vec(),
         custom_files,
         resolver: Rc::new(RefCell::new(FileResolver::new(root, filemap.clone(), draw))),
         filemap,
@@ -879,7 +928,8 @@ fn file_path_text(path: &str) -> String {
 /// the second, so the path it hands back is one `dofile`, `io.open` and the audio calls accept.
 ///
 /// Offsets are stored by id here, where the reference stores them by name, so the value published
-/// under an offset's name is the one stored under its id.
+/// under an offset's name is the one stored under its id. A colour is published the same way: the
+/// colour the player stored under a row's id, or the row's own default when there is none.
 #[cfg(feature = "lua")]
 pub(crate) fn skin_config_global(merged: &MergedHeader, user: &SkinUserConfig, pattern_base: &Path, lua_root: &Path) -> crate::lua::SkinConfigGlobal {
     let resolver = Rc::clone(&merged.resolver);
@@ -889,12 +939,44 @@ pub(crate) fn skin_config_global(merged: &MergedHeader, user: &SkinUserConfig, p
         options: merged.options.clone(),
         file_paths: user.filepaths.iter().map(|(name, path)| (name.clone(), path.clone())).collect(),
         offsets: merged.offsets.iter().map(|offset| (offset.name.clone(), user.offsets.get(&offset.id).copied().unwrap_or_default())).collect(),
+        colors: merged
+            .colors
+            .iter()
+            .map(|row| {
+                let stored = user.colors.get(&row.id).copied();
+                crate::lua::SkinConfigColor { name: row.name.clone(), color: stored.unwrap_or_else(|| row.default_color()), custom: stored.is_some() }
+            })
+            .collect(),
         get_path: Box::new(move |relative: &str| {
             let located = resolver.borrow_mut().path_text(&pattern_for(Path::new(&base), relative));
             let tail = located.strip_prefix(base.as_str()).unwrap_or(&located);
             file_path_text(&format!("{root}{tail}"))
         }),
     }
+}
+
+/// What is wrong with a document's colour rows without costing the skin anything: a colour no `tint`
+/// can name, a default that is not a colour, and a row that repeats the id or the name of an earlier
+/// one, which would make two rows edit one colour.
+fn color_warnings(path: &Path, colors: &[ColorDef]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for (at, row) in colors.iter().enumerate() {
+        let earlier = &colors[..at];
+        let mut complain = |what: String| warnings.push(format!("{}: colour {:?} {what}", path.display(), row.name));
+        if row.id < 0 {
+            complain(format!("has the id {}, which no `tint` can name", row.id));
+        }
+        if earlier.iter().any(|other| other.id == row.id) {
+            complain(format!("repeats the id {} of an earlier colour", row.id));
+        }
+        if earlier.iter().any(|other| other.name == row.name) {
+            complain("repeats the name of an earlier colour".to_owned());
+        }
+        if row.def.as_deref().is_some_and(|def| SkinColor::from_hex(def).is_none()) {
+            complain(format!("has the default {:?}, which is not RRGGBB or RRGGBBAA, so it starts at white", row.def.as_deref().unwrap_or_default()));
+        }
+    }
+    warnings
 }
 
 /// Everything the two kinds of skin hand to the part of a load they share.
@@ -915,7 +997,8 @@ pub(crate) struct Assembly {
 ///
 /// `host` is that screen. It is asked once, after everything is built, for each condition it says
 /// holds still there, so its state has to be settled before a skin is loaded against it.
-pub(crate) fn assemble(parts: Assembly, host: &dyn SkinHost) -> Result<LoadedSkin, SkinError> {
+pub(crate) fn assemble(mut parts: Assembly, host: &dyn SkinHost) -> Result<LoadedSkin, SkinError> {
+    parts.warnings.extend(color_warnings(&parts.path, &parts.merged.colors));
     let mut skin = LoadedSkin {
         resolution: skin_resolution(parts.def.w, parts.def.h),
         play: PlayTimings::of(&parts.def),
@@ -1029,6 +1112,7 @@ fn load_document_header(path: &Path, options: SkinLoadOptions<'_>) -> Result<Ski
         categories: header_list(&value, "category"),
         properties: header_list(&value, "property"),
         offsets: header_offsets(skin_type, &declared),
+        colors: header_list(&value, "color"),
         custom_files: enumerate_custom_files(&document, &directory, options.root),
         path,
     })
@@ -1120,7 +1204,9 @@ fn load_document(path: &Path, options: SkinLoadOptions<'_>, host: &dyn SkinHost)
     let properties: Vec<PropertyDef> = header_list(&value, "property");
     let filepath: Vec<Filepath> = header_list(&value, "filepath");
     let offsets: Vec<OffsetDef> = header_list(&value, "offset");
-    let merged = merge_header(&HeaderRows { skin_type, properties: &properties, filepath: &filepath, offsets: &offsets }, &directory, options.root, &options);
+    let colors: Vec<ColorDef> = header_list(&value, "color");
+    let rows = HeaderRows { skin_type, properties: &properties, filepath: &filepath, offsets: &offsets, colors: &colors };
+    let merged = merge_header(&rows, &directory, options.root, &options);
     let enabled = merged.enabled();
     let mut warnings: Vec<String> = Vec::new();
 

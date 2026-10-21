@@ -1570,7 +1570,13 @@ impl SkinLibrary {
         let document = Path::new(path);
         let root = self.reading_root(document);
         let chosen = self.customisation(config, path).cloned().unwrap_or_default();
-        let user = SkinUserConfig { path: path.to_owned(), properties: chosen.properties, filepaths: chosen.filepaths, offsets: chosen.offsets };
+        let user = SkinUserConfig {
+            path: path.to_owned(),
+            properties: chosen.properties,
+            filepaths: chosen.filepaths,
+            offsets: chosen.offsets,
+            colors: chosen.colors,
+        };
         let overlay = skin_overlay_folder(&self.settings_path, document);
         let mode = skin_type_mode(screen).unwrap_or(crate::MODE);
         let options = SkinLoadOptions { rng_seed: read.seed, write_overlay: Some(&overlay), ..SkinLoadOptions::new(root, &user, mode) };
@@ -1703,6 +1709,7 @@ fn merged(given: &SkinCustomisation, own: Option<&SkinCustomisation>) -> SkinCus
         merged.properties.extend(own.properties.iter().map(|(name, op)| (name.clone(), *op)));
         merged.filepaths.extend(own.filepaths.iter().map(|(name, file)| (name.clone(), file.clone())));
         merged.offsets.extend(own.offsets.iter().map(|(id, offset)| (*id, *offset)));
+        merged.colors.extend(own.colors.iter().map(|(id, color)| (*id, *color)));
     }
     merged
 }

@@ -49,7 +49,7 @@ use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Table, Value, Variadic};
 
 use super::{LuaShared, SkinPaths, coerce, error_message, package, pattern};
-use crate::dst::SkinOffset;
+use crate::dst::{SkinColor, SkinOffset};
 use crate::resolve::Draw;
 
 /// The global the body pass finds its configuration under. It is `nil` during the header pass, which
@@ -70,6 +70,13 @@ const CONFIG_ENABLED_OPTIONS: &str = "enabled_options";
 
 /// The field of `skin_config` that maps an offset's name to its six values.
 const CONFIG_OFFSET: &str = "offset";
+
+/// The field of `skin_config` that maps a colour row's name to its four channels and whether the
+/// player set it.
+const CONFIG_COLOR: &str = "color";
+
+/// The field of a published colour that says the player set it.
+const CONFIG_COLOR_CUSTOM: &str = "custom";
 
 /// The name the base glue carries in the interpreter's own messages.
 const BASE_GLUE_CHUNK_NAME: &str = "=[skin base]";
@@ -224,6 +231,18 @@ debug = { getmetatable = getmetatable }
 return debug
 "##;
 
+/// One colour row as `skin_config.color` publishes it: the colour in force and whether the player set
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkinConfigColor {
+    /// The row's name.
+    pub name: String,
+    /// The colour the player set, or the row's own default when none is set.
+    pub color: SkinColor,
+    /// Whether `color` is the player's choice and not the row's default.
+    pub custom: bool,
+}
+
 /// The contents of the `skin_config` global (`SkinLuaAccessor.exportSkinProperty`).
 ///
 /// Built by the loader between the two passes, from the header the first pass produced and the
@@ -238,6 +257,11 @@ pub struct SkinConfigGlobal {
     /// `skin_config.offset`: offset name to its stored value, zeros when nothing is stored. Published
     /// as a table of the six fields `x`, `y`, `w`, `h`, `r`, `a`.
     pub offsets: Vec<(String, SkinOffset)>,
+    /// `skin_config.color`: colour row name to a table of the five fields `r`, `g`, `b`, `a` and
+    /// `custom`. This is an R-BMS extension, so a skin that runs under the reference as well guards it
+    /// with `(skin_config.color or {})`. It is read when the skin loads and is not updated while the
+    /// skin is shown.
+    pub colors: Vec<SkinConfigColor>,
     /// `skin_config.get_path`: a skin-relative path, wildcards included, to the absolute path it
     /// resolves to. It answers for a path that does not exist as well, and it is called during
     /// frames, long after loading, so it owns whatever it needs.
@@ -251,6 +275,7 @@ impl std::fmt::Debug for SkinConfigGlobal {
             .field("options", &self.options)
             .field("file_paths", &self.file_paths)
             .field("offsets", &self.offsets)
+            .field("colors", &self.colors)
             .finish_non_exhaustive()
     }
 }
@@ -410,6 +435,17 @@ pub(crate) fn set_skin_config(lua: &Lua, config: SkinConfigGlobal) -> mlua::Resu
         offsets.set(name, values)?;
     }
     table.set(CONFIG_OFFSET, offsets)?;
+
+    let colors = lua.create_table()?;
+    for SkinConfigColor { name, color, custom } in config.colors {
+        let values = lua.create_table()?;
+        for (field, value) in [("r", color.r), ("g", color.g), ("b", color.b), ("a", color.a)] {
+            values.set(field, value)?;
+        }
+        values.set(CONFIG_COLOR_CUSTOM, custom)?;
+        colors.set(name, values)?;
+    }
+    table.set(CONFIG_COLOR, colors)?;
 
     lua.globals().set(SKIN_CONFIG_GLOBAL, table)
 }

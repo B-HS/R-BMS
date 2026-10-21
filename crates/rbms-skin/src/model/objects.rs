@@ -368,6 +368,11 @@ pub struct NoteSet {
     pub dst2: Option<i32>,
     pub expansionrate: Vec<i32>,
     pub size: Vec<f32>,
+    /// The [`ColorDef`](super::ColorDef) id each lane's notes are multiplied by, lane for lane as
+    /// [`Self::dst`] is. A lane this list does not reach, or one it gives [`NO_TINT`](super::NO_TINT),
+    /// is not tinted.
+    /// This is an R-BMS extension that the reference never reads.
+    pub tint: Vec<i32>,
     pub group: Vec<Destination>,
     pub bpm: Vec<Destination>,
     pub stop: Vec<Destination>,
@@ -400,6 +405,7 @@ impl Default for NoteSet {
             dst2: None,
             expansionrate: vec![FULL_EXPANSION_PERCENT, FULL_EXPANSION_PERCENT],
             size: Vec::new(),
+            tint: Vec::new(),
             group: Vec::new(),
             bpm: Vec::new(),
             stop: Vec::new(),

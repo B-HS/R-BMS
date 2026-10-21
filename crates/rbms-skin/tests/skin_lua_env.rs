@@ -15,8 +15,10 @@ use std::time::Duration;
 
 use mlua::{FromLuaMulti, Function, Table, Value};
 use rbms_skin::SkinError;
-use rbms_skin::dst::SkinOffset;
-use rbms_skin::lua::{FrameBudget, LoadBudget, LuaBudget, LuaFnKind, LuaMode, LuaPass, SkinConfigGlobal, SkinLua, SkinLuaConfig, SkinPaths, error_location};
+use rbms_skin::dst::{SkinColor, SkinOffset};
+use rbms_skin::lua::{
+    FrameBudget, LoadBudget, LuaBudget, LuaFnKind, LuaMode, LuaPass, SkinConfigColor, SkinConfigGlobal, SkinLua, SkinLuaConfig, SkinPaths, error_location,
+};
 use rbms_skin::property::DefaultState;
 use rbms_skin::timer::TIMER_OFF;
 
@@ -686,6 +688,7 @@ fn the_two_passes_share_one_interpreter_and_the_second_reads_skin_config() {
             options: vec![("Backdrop".to_owned(), 901), ("Unused".to_owned(), 910)],
             file_paths: vec![("Frame".to_owned(), "plain.txt".to_owned())],
             offsets: vec![("Title".to_owned(), SkinOffset { x: 12.0, y: -4.0, w: 0.0, h: 0.0, r: 0.0, a: 0.0 })],
+            colors: vec![SkinConfigColor { name: "Lane".to_owned(), color: SkinColor::rgba(17, 34, 51, 200), custom: true }],
             get_path: Box::new(move |relative| format!("{}/{relative}", root.to_string_lossy())),
         })
         .expect("skin_config is published");
@@ -698,6 +701,9 @@ fn the_two_passes_share_one_interpreter_and_the_second_reads_skin_config() {
     assert_eq!(skin.get::<String>("frame").expect("the file choice is read"), "plain.txt");
     assert_eq!(skin.get::<String>("title_x").expect("the offset is read"), "12");
     assert_eq!(skin.get::<i64>("title_fields").expect("the offset is counted"), 6);
+    assert_eq!(skin.get::<i64>("lane_alpha").expect("the colour is read"), 200);
+    assert!(skin.get::<bool>("lane_custom").expect("the colour says whether it is the player's"));
+    assert_eq!(skin.get::<i64>("lane_fields").expect("the colour is counted"), 5, "r, g, b, a and custom");
     assert!(skin.get::<String>("resolved").expect("the path is resolved").ends_with("/data/notes.txt"));
     assert_eq!(skin.get::<i64>("part").expect("the part ran"), 1);
     assert_eq!(skin.get::<i64>("loads").expect("the count is read"), 1, "the module the header pass loaded was not run again");

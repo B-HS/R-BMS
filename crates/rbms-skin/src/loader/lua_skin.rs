@@ -150,6 +150,7 @@ pub fn load_lua_header(path: &Path, options: &LuaSkinOptions<'_>) -> Result<Skin
         parser: ParserKind::Lua,
         offsets: header_offsets(header.skin_type, &header.offset),
         custom_files: enumerate_custom_files(&header, &program.root, &program.root),
+        colors: header.color,
         name: header.name,
         author: header.author,
         categories: header.category,
@@ -171,7 +172,8 @@ pub fn load_lua_skin(path: &Path, options: &LuaSkinOptions<'_>, host: &dyn SkinH
     let (_, header) = program.pass(LuaPass::Header, host, &mut warnings)?;
     check_skin_type(header.skin_type)?;
 
-    let rows = HeaderRows { skin_type: header.skin_type, properties: &header.property, filepath: &header.filepath, offsets: &header.offset };
+    let rows =
+        HeaderRows { skin_type: header.skin_type, properties: &header.property, filepath: &header.filepath, offsets: &header.offset, colors: &header.color };
     let merged = merge_header(&rows, &program.root, &program.root, load);
     program.runtime.set_skin_config(skin_config_global(&merged, load.user, &program.root, &program.root))?;
 
@@ -192,6 +194,7 @@ pub fn load_lua_skin(path: &Path, options: &LuaSkinOptions<'_>, host: &dyn SkinH
     def.property = header.property;
     def.filepath = header.filepath;
     def.offset = header.offset;
+    def.color = header.color;
 
     let resolution = skin_resolution(def.w, def.h);
     if resolution != (def.w, def.h) {
