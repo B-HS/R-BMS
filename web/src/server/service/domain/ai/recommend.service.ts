@@ -1,5 +1,6 @@
 import { AI_TEXT_LIMIT, aiRecommendOutputSchema, type AiEffort, type AiRecommendOutput, type AiRecommendView } from '@server/dto/ai'
 import {
+    ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     collectDigestKeys,
@@ -28,7 +29,7 @@ import {
 } from '@server/service/domain/ai/table-progress'
 
 export const AI_RECOMMEND_FEATURE = 'recommend'
-export const AI_RECOMMEND_PROMPT_VERSION = 1
+export const AI_RECOMMEND_PROMPT_VERSION = 2
 export const AI_RECOMMEND_MAX_OUTPUT_TOKENS = 8_000
 export const AI_RECOMMEND_EFFORT = 'low' satisfies AiEffort
 
@@ -39,6 +40,7 @@ export const AI_RECOMMEND_SYSTEM_PROMPT = [
     `Pick up to ${RECOMMEND_PICKS} charts from \`candidates\` only, in the order you would play them, each identified by its \`md5\`.`,
     'For each pick give one short Korean sentence `reason` and a `focus_key` naming the digest item the reason rests on (the chart key, a level key or `frontier`).',
     'Chart `tags` describe the chart layout with no lane option (layout "original"), not how the player plays it.',
+    ASSIST_GRADE_RULE,
     DIGEST_KEY_RULE,
     '`summary` is two Korean sentences at most about where the player stands in the table.',
 ].join('\n')

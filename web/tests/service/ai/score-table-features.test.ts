@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { FOLDER_LIMIT } from '@server/dto/folder'
-import { DIGEST_IS_DATA_RULE } from '@server/service/domain/ai/ai-digest'
+import { ASSIST_GRADE_RULE, DIGEST_IS_DATA_RULE } from '@server/service/domain/ai/ai-digest'
 import { AI_GOAL_SYSTEM_PROMPT, computeGoalProgress, refineGoalPlanOutput } from '@server/service/domain/ai/goal-plan.service'
 import { AI_PRACTICE_SYSTEM_PROMPT, refinePracticeOutput } from '@server/service/domain/ai/practice-folder.service'
 import { AI_RECOMMEND_FEATURE, AI_RECOMMEND_SYSTEM_PROMPT, refineRecommendOutput } from '@server/service/domain/ai/recommend.service'
@@ -335,6 +335,23 @@ describe('목표 계획 (기능 7)', () => {
         )
         expect(lamp.progress).toEqual({ label: '★2 에서 Hard 이상 3곡', target: 3, achieved: 1, done: false, remaining: 2, recent_updates: 4 })
         expect(lamp.remainingCharts.map((chart) => chart.md5)).toEqual([md5Of(202), md5Of(203), md5Of(201)])
+        const graded = readTableProgress(table, {
+            [md5Of(200)]: recordOf('Hard'),
+            [md5Of(201)]: { ...recordOf('LightAssistEasy', 70), assist_grade: 1 as const },
+            [md5Of(202)]: { ...recordOf('LightAssistEasy', 70), assist_grade: 4 as const },
+            [md5Of(203)]: { ...recordOf('LightAssistEasy', 70), assist_grade: 0 as const },
+        })
+        const behindGrade = computeGoalProgress(
+            { kind: 'lamp_count_at_level', table: 'insane1', level: '2', lamp: 'Hard', count: 4 },
+            table,
+            graded.charts,
+            SCORE_NOW,
+        )
+        expect(behindGrade.remainingCharts.map((chart) => [chart.md5, chart.assistGrade])).toEqual([
+            [md5Of(202), 4],
+            [md5Of(201), 1],
+            [md5Of(203), 0],
+        ])
         const clearAll = computeGoalProgress({ kind: 'clear_all_level', table: 'insane1', level: '2' }, table, charts, SCORE_NOW)
         expect(clearAll.progress).toMatchObject({ target: 4, achieved: 3, remaining: 1, done: false })
         const ex = computeGoalProgress({ kind: 'ex_rate_on_chart', table: 'insane1', md5: md5Of(200), ex_rate: 90 }, table, charts, SCORE_NOW)
@@ -421,5 +438,14 @@ describe('목표 계획 (기능 7)', () => {
             [2, '둘째 주 첫째'],
         ])
         expect(new Set(steps.map((step) => step.week_index)).size).toBe(steps.length)
+    })
+})
+
+describe('어시스트 등급 프롬프트', () => {
+    test('등급이 든 digest 를 받는 기능의 프롬프트는 같은 등급 규칙 문장을 싣는다', () => {
+        for (const prompt of [AI_RECOMMEND_SYSTEM_PROMPT, AI_GOAL_SYSTEM_PROMPT, AI_PRACTICE_SYSTEM_PROMPT])
+            expect(prompt).toContain(ASSIST_GRADE_RULE)
+        expect(ASSIST_GRADE_RULE).toContain('1 (ASSIST EASY), 2 (ASSIST CLEAR), 3 (ASSIST HARD), 4 (ASSIST EXHARD)')
+        expect(ASSIST_GRADE_RULE).toContain('LightAssistEasy')
     })
 })

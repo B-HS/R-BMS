@@ -1,10 +1,11 @@
 import type { FC } from 'react'
-import { CLEAR_LAMP_LABEL, LAMP_BACKGROUND, type ClearLamp } from '@shared/constants/clear-lamp'
+import { lampBackground, lampKey, lampLabel, type AssistGrade, type ClearLamp } from '@shared/constants/clear-lamp'
 import { cn } from '@shared/lib/cn'
 import { formatCount } from '@shared/lib/format'
 
 export type LampCount = {
     lamp: ClearLamp
+    assistGrade?: AssistGrade
     count: number
 }
 
@@ -16,12 +17,16 @@ type LampStackBarProps = {
 export const LampStackBar: FC<LampStackBarProps> = ({ lamps, className }) => (
     <div
         role='img'
-        aria-label={lamps.map(({ lamp, count }) => `${CLEAR_LAMP_LABEL[lamp]} ${formatCount(count)}`).join(', ')}
+        aria-label={lamps.map(({ lamp, assistGrade, count }) => `${lampLabel(lamp, assistGrade)} ${formatCount(count)}`).join(', ')}
         className={cn('bg-foreground/40 flex h-3 min-w-0 gap-px overflow-hidden p-px', className)}>
         {lamps
             .filter(({ count }) => count > 0)
-            .map(({ lamp, count }) => (
-                <span key={lamp} className='min-w-0.5 basis-0' style={{ flexGrow: count, background: LAMP_BACKGROUND[lamp] }} />
+            .map(({ lamp, assistGrade, count }) => (
+                <span
+                    key={lampKey(lamp, assistGrade)}
+                    className='min-w-0.5 basis-0'
+                    style={{ flexGrow: count, background: lampBackground(lamp, assistGrade) }}
+                />
             ))}
     </div>
 )

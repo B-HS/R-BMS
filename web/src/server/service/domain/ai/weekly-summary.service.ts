@@ -1,6 +1,7 @@
 import { AI_TEXT_LIMIT, aiWeeklyOutputSchema, type AiEffort, type AiWeeklyOutput, type AiWeeklyView } from '@server/dto/ai'
-import { clearLampFromId } from '@server/dto/common'
+import { clearLampFromId, NO_ASSIST_GRADE, type AssistGrade } from '@server/dto/common'
 import {
+    ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     collectDigestKeys,
@@ -24,7 +25,7 @@ import { isClearLampId } from '@server/service/domain/ai/table-progress'
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
 
 export const AI_WEEKLY_FEATURE = 'weekly_summary'
-export const AI_WEEKLY_PROMPT_VERSION = 1
+export const AI_WEEKLY_PROMPT_VERSION = 2
 export const AI_WEEKLY_MAX_OUTPUT_TOKENS = 8_000
 export const AI_WEEKLY_EFFORT = 'low' satisfies AiEffort
 export const AI_WEEKLY_HIGHLIGHTS_MAX = 6
@@ -43,6 +44,8 @@ export const AI_WEEKLY_SYSTEM_PROMPT = [
     DIGEST_IS_DATA_RULE,
     '`metrics` holds this week (`week.*`) and the week before (`prev.*`); `lamp_changes` and `ex_changes` list charts whose best went up this week; `levels` groups this week by difficulty table level.',
     'If `week.in_progress` is true the week has not ended; say so instead of judging the whole week.',
+    'In `lamp_changes` and `ex_changes`, `from_assist_grade` and `to_assist_grade` are the `assist_grade` of `from_lamp` and `to_lamp`.',
+    ASSIST_GRADE_RULE,
     `Write at most ${AI_WEEKLY_HIGHLIGHTS_MAX} \`highlights\`, each with the \`key\` of the digest item it rests on, a short Korean \`title\`, one or two Korean sentences \`body\` and a \`tone\`.`,
     DIGEST_KEY_RULE,
     '`headline` is one Korean sentence; `next_week` one or two Korean sentences of what to try next week.',
@@ -65,6 +68,7 @@ export type WeeklyScoreRow = {
     chartMd5: string | null
     title: string
     clear: number
+    assistGrade: AssistGrade
     exScore: number
     maxExScore: number
     playedAt: number
@@ -77,12 +81,12 @@ export type WeeklyScoreRow = {
     ruleVersion: number | null
 }
 
-export type PriorBestRow = { chartSha256: string; scratchAuto: boolean; clear: number; exScore: number }
+export type PriorBestRow = { chartSha256: string; scratchAuto: boolean; clear: number; assistGrade: AssistGrade; exScore: number }
 
 export type AiWeeklySummaryServiceDb = {
     /** The user's plays with `from <= played_at < to`, autoplay left out. */
     listScoresBetween: (params: { userId: string; from: number; to: number }) => Promise<WeeklyScoreRow[]>
-    /** The best lamp and EX of each chart (and SCRATCH AUTO or not) among the user's plays before `before`. */
+    /** The best EX of each chart (and SCRATCH AUTO or not) at each lamp and gauge among the user's plays before `before`. */
     listPriorBests: (params: { userId: string; chartSha256s: readonly string[]; before: number }) => Promise<PriorBestRow[]>
 }
 
@@ -123,7 +127,32 @@ const roundTo = (value: number, decimals: number) => {
 
 const exRateOf = (exScore: number, maxExScore: number) => (maxExScore > 0 ? roundTo((exScore / maxExScore) * PERCENT, PERCENT_DECIMALS) : null)
 
+type LampWithGrade = { clear: number; assistGrade: AssistGrade }
+
+const UNPLAYED_LAMP = { clear: 0, assistGrade: NO_ASSIST_GRADE } satisfies LampWithGrade
+
+/** Whether `to` is a higher lamp than `from`: a higher lamp id, or the same id with a higher assist grade. */
+const isLampHigher = (to: LampWithGrade, from: LampWithGrade) =>
+    to.clear > from.clear || (to.clear === from.clear && to.assistGrade > from.assistGrade)
+
 const bestKey = (chartSha256: string, scratchAuto: boolean) => `${chartSha256}|${scratchAuto ? 1 : 0}`
+
+/** The best lamp (with its assist grade) and the best EX of each chart, and the first row it came from; plays with and without SCRATCH AUTO stay apart. */
+const foldBests = <Row extends Pick<WeeklyScoreRow, 'chartSha256' | 'scratchAuto' | 'clear' | 'assistGrade' | 'exScore'>>(rows: readonly Row[]) => {
+    const bests = new Map<string, { row: Row; clear: number; assistGrade: AssistGrade; exScore: number }>()
+    for (const row of rows) {
+        const key = bestKey(row.chartSha256, row.scratchAuto)
+        const current = bests.get(key)
+        const lamp = current !== undefined && !isLampHigher(row, current) ? current : row
+        bests.set(key, {
+            row: current?.row ?? row,
+            clear: lamp.clear,
+            assistGrade: lamp.assistGrade,
+            exScore: Math.max(current?.exScore ?? 0, row.exScore),
+        })
+    }
+    return bests
+}
 
 /**
  * The deterministic summary of one week (plan 5.10): plays, charts, days played, charts first played, charts whose best lamp went
@@ -135,18 +164,8 @@ export const summarizeWeek = (params: {
     priors: readonly PriorBestRow[]
     levelLabelOf: (md5: string) => string | null
 }) => {
-    const prior = new Map(params.priors.map((row) => [bestKey(row.chartSha256, row.scratchAuto), row]))
-    const bests = new Map<string, { row: WeeklyScoreRow; clear: number; exScore: number }>()
-    for (const row of params.rows) {
-        const key = bestKey(row.chartSha256, row.scratchAuto)
-        const current = bests.get(key)
-        bests.set(key, {
-            row: current?.row ?? row,
-            clear: Math.max(current?.clear ?? 0, row.clear),
-            exScore: Math.max(current?.exScore ?? 0, row.exScore),
-        })
-    }
-    const changes = [...bests.entries()].map(([key, best]) => {
+    const prior = foldBests(params.priors)
+    const changes = [...foldBests(params.rows).entries()].map(([key, best]) => {
         const before = prior.get(key)
         const md5 = best.row.chartMd5
         const change = {
@@ -154,12 +173,14 @@ export const summarizeWeek = (params: {
             title: best.row.title,
             level: md5 ? params.levelLabelOf(md5) : null,
             from_lamp: clearLampFromId(before?.clear ?? 0),
+            from_assist_grade: before?.assistGrade ?? NO_ASSIST_GRADE,
             to_lamp: clearLampFromId(best.clear),
+            to_assist_grade: best.assistGrade,
             from_ex_rate: before ? exRateOf(before.exScore, best.row.maxExScore) : null,
             to_ex_rate: exRateOf(best.exScore, best.row.maxExScore),
             scratch_auto: best.row.scratchAuto,
         }
-        const isLampUp = best.clear > (before?.clear ?? 0) && isClearLampId(best.clear)
+        const isLampUp = isClearLampId(best.clear) && isLampHigher(best, before ?? UNPLAYED_LAMP)
         return {
             change,
             isFirst: !before,
@@ -202,7 +223,12 @@ export const summarizeWeek = (params: {
             mean_offset_ms: timedNotes > 0 ? roundTo(weightedOffset / timedNotes / MICROS_PER_MILLI, MILLIS_DECIMALS) : null,
         },
         lamp_changes: lampUps
-            .toSorted((left, right) => right.toClear - left.toClear || left.change.title.localeCompare(right.change.title))
+            .toSorted(
+                (left, right) =>
+                    right.toClear - left.toClear ||
+                    right.change.to_assist_grade - left.change.to_assist_grade ||
+                    left.change.title.localeCompare(right.change.title),
+            )
             .slice(0, WEEKLY_LIST_MAX)
             .map((entry) => entry.change),
         ex_changes: changes

@@ -92,6 +92,30 @@ const registerKey = async (context: ReturnType<typeof setup>) => {
 }
 
 describe('기록 질문 서비스 (가짜 공급자)', () => {
+    test('LIGHT ASSIST 행은 끝난 게이지로 assist_grade 를 싣고 필터는 램프 id 순서 그대로이며 digest 가 등급 이름을 준다', async () => {
+        const context = setup({
+            rows: {
+                scores: [
+                    record({ scoreId: 'score-a', clear: clearLampToId('LightAssistEasy'), gauge: gaugeTypeToId('Hard'), scratchAuto: true }),
+                    record({ scoreId: 'score-b', clear: clearLampToId('LightAssistEasy'), gauge: gaugeTypeToId('AssistEasy'), scratchAuto: true }),
+                    record({ scoreId: 'score-c', clear: clearLampToId('Hard'), gauge: gaugeTypeToId('Hard') }),
+                ],
+            },
+        })
+        await registerKey(context)
+        const result = await context.service.ask({ userId: USER, question: '클리어한 판' })
+        expect(result.ok && result.value.result?.rows.map((row) => [row.score_id, row.lamp, row.assist_grade])).toEqual([
+            ['score-a', 'LightAssistEasy', 3],
+            ['score-b', 'LightAssistEasy', 0],
+            ['score-c', 'Hard', 0],
+        ])
+        expect(context.recordDb.calls[0]?.params).toMatchObject({ conditions: [{ field: 'lamp', op: 'gte', values: [clearLampToId('Normal')] }] })
+        const digest = JSON.parse(context.anthropic.generateCalls[0]?.input ?? '{}')
+        expect(digest.assist_grades).toEqual(['LIGHT ASSIST', 'ASSIST EASY', 'ASSIST CLEAR', 'ASSIST HARD', 'ASSIST EXHARD'])
+        expect(digest.lamps).toHaveLength(11)
+        expect(digest.fields.find((field: { field: string }) => field.field === 'lamp').value).toContain('assist_grades')
+    })
+
     test('질문을 필터로 바꿔 본인 기록에서만 실행하고 limit 을 잘라 결과와 사용량을 돌려준다', async () => {
         const context = setup({ rows: { scores: [record({})] } })
         await registerKey(context)

@@ -1,4 +1,4 @@
-import { clearLampToId } from '@server/dto/common'
+import { clearLampToId, NO_ASSIST_GRADE, type AssistGrade } from '@server/dto/common'
 import type { CourseMetaInput, CourseSubmissionInput } from '@server/dto/course'
 import type { SubmitResponseOutput } from '@server/dto/score'
 import { deriveExScore, deriveMinbp, effectiveJudgeCounts, EX_PER_PGREAT, isBetterBest } from '@server/service/domain/score/best-policy'
@@ -99,18 +99,21 @@ export type CourseServiceDb = {
         courseHash: string
         userId: string
         scratchAuto: boolean
-    }) => Promise<{ clear: number; exScore: number; minbp: number } | null>
+    }) => Promise<{ clear: number; assistGrade: AssistGrade; exScore: number; minbp: number } | null>
     upsertCourseBestIfBetter: (row: {
         courseHash: string
         userId: string
         scratchAuto: boolean
         courseScoreId: string
         clear: number
+        assistGrade: AssistGrade
         exScore: number
         minbp: number
         maxCombo: number
     }) => Promise<boolean>
-    countBetterCourseBests: (params: BestScope & { courseHash: string; clear: number; exScore: number; minbp: number }) => Promise<number>
+    countBetterCourseBests: (
+        params: BestScope & { courseHash: string; clear: number; assistGrade: AssistGrade; exScore: number; minbp: number },
+    ) => Promise<number>
     getCourseRanking: (params: BestScope & { courseHash: string; limit: number; offset: number; userIds?: string[] }) => Promise<ScoreRankedRow[]>
     getCourseBestByLoginId: (params: BestScope & { courseHash: string; loginId: string }) => Promise<ScoreRankingRow | null>
     getRivalUserIds: (loginId: string) => Promise<string[]>
@@ -136,6 +139,12 @@ export const toCourseMeta = (row: CourseRow, charts: CourseChartRow[]): CourseMe
  * leaves its note to be judged again.
  */
 const COURSE_BAD_TAKES_NOTE = false
+
+/**
+ * A course body names no gauge and the course keeps none, so a course run has no assist grade: its SCRATCH AUTO clear is one LIGHT
+ * ASSIST whatever gauge the course ran on.
+ */
+const COURSE_ASSIST_GRADE = NO_ASSIST_GRADE
 
 /**
  * The first reason a course body can not be what a real run sends, or null. Only the body is read: the judgements that
@@ -243,14 +252,16 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
         const exScore = input.ex_score > 0 ? input.ex_score : deriveExScore(input.judge)
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
+        const assistGrade = COURSE_ASSIST_GRADE
         const flags = [...assistFlags(input), ...buildTrustFlags(params.buildTrust)]
         const ranked = rankBlockingFlags(flags).length === 0 && !isBuildBlockingRank(params.buildTrust, params.requireTrustedBuild)
         const scratchAuto = isScratchAutoPlay(input)
 
-        const countRank = async (run: { clear: number; exScore: number; minbp: number; scratchAuto: boolean }) =>
+        const countRank = async (run: { clear: number; assistGrade: AssistGrade; exScore: number; minbp: number; scratchAuto: boolean }) =>
             (await deps.db.countBetterCourseBests({
                 courseHash: input.course_hash,
                 clear: run.clear,
+                assistGrade: run.assistGrade,
                 exScore: run.exScore,
                 minbp: run.minbp,
                 includeScratchAuto: run.scratchAuto,
@@ -269,6 +280,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                     scratchAuto: stored.scratchAuto,
                     courseScoreId: stored.id,
                     clear: stored.clear,
+                    assistGrade: stored.assistGrade,
                     exScore: stored.exScore,
                     minbp: stored.minbp,
                     maxCombo: stored.maxCombo,
@@ -295,19 +307,20 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
 
         const isNewBest =
             ranked &&
-            isBetterBest({ clear, exScore, minbp }, previous) &&
+            isBetterBest({ clear, assistGrade, exScore, minbp }, previous) &&
             (await deps.db.upsertCourseBestIfBetter({
                 courseHash: input.course_hash,
                 userId: user.id,
                 scratchAuto,
                 courseScoreId,
                 clear,
+                assistGrade,
                 exScore,
                 minbp,
                 maxCombo: input.max_combo,
             }))
 
-        const rank = ranked ? await countRank({ clear, exScore, minbp, scratchAuto }) : null
+        const rank = ranked ? await countRank({ clear, assistGrade, exScore, minbp, scratchAuto }) : null
 
         const response: SubmitResponseOutput = {
             accepted: true,
@@ -343,6 +356,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             (await deps.db.countBetterCourseBests({
                 courseHash: params.courseHash,
                 clear: row.clear,
+                assistGrade: row.assistGrade,
                 exScore: row.exScore,
                 minbp: row.minbp,
                 includeScratchAuto: params.includeScratchAuto,

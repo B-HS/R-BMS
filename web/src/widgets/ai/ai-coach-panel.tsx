@@ -44,8 +44,9 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                     <section aria-label='판' className='flex flex-col gap-1 text-xs tabular-nums'>
                         <p className='text-sm font-medium break-keep'>{view.play.chart.title || view.play.chart.sha256}</p>
                         <p className='text-muted-foreground'>
-                            <LampLabel lamp={view.play.lamp} /> · EX {formatCount(view.play.ex_score)}/{formatCount(view.play.max_ex_score)} · BP{' '}
-                            {formatCount(view.play.minbp)} · {view.play.random} · {formatDateTime(view.play.played_at)}
+                            <LampLabel lamp={view.play.lamp} assistGrade={view.play.assist_grade} /> · EX {formatCount(view.play.ex_score)}/
+                            {formatCount(view.play.max_ex_score)} · BP {formatCount(view.play.minbp)} · {view.play.random} ·{' '}
+                            {formatDateTime(view.play.played_at)}
                             {analysis && ` · ${AI_RUN_END_LABEL[analysis.run_end]}`}
                         </p>
                     </section>

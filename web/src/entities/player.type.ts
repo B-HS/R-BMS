@@ -1,4 +1,4 @@
-import type { ClearLamp } from '@shared/constants/clear-lamp'
+import type { AssistGrade, ClearLamp } from '@shared/constants/clear-lamp'
 import type { ActivityRow } from '@entities/stats.type'
 
 export type PlayerProfile = {
@@ -19,6 +19,6 @@ export type PlayerRecentParams = {
 export type PlayerStats = {
     total_plays: number
     cleared: number
-    lamps: { clear: ClearLamp; count: number }[]
+    lamps: { clear: ClearLamp; assist_grade: AssistGrade; count: number }[]
     scratch_auto_charts: number
 }

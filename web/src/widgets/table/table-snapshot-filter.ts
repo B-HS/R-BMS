@@ -1,6 +1,14 @@
 import type { LampCount } from '@features/lamp/lamp-stack-bar'
 import type { TableSnapshotEntry, TableSnapshotLevel, TableSnapshotRecord } from '@entities/table-snapshot.type'
-import { CLEAR_LAMPS, MIN_CLEAR_LAMP, type ClearLamp } from '@shared/constants/clear-lamp'
+import {
+    CLEAR_LAMPS,
+    DISPLAY_LAMPS,
+    MIN_CLEAR_LAMP,
+    displayLampRank,
+    isSameDisplayLamp,
+    type ClearLamp,
+    type LampWithGrade,
+} from '@shared/constants/clear-lamp'
 import { getMaxExScore } from '@shared/lib/format'
 import { serializeSearchParams } from '@shared/lib/search-params'
 
@@ -97,6 +105,14 @@ export const countActiveTableFilters = (filter: TableFilterState) =>
 
 const entryLamp = (entry: TableSnapshotEntry, records: TableRecordMap | null): ClearLamp => records?.[entry.md5]?.clear ?? 'NoPlay'
 
+const recordLamp = (record: TableSnapshotRecord | undefined): LampWithGrade =>
+    record ? { lamp: record.clear, assistGrade: record.assist_grade } : { lamp: 'NoPlay', assistGrade: 0 }
+
+const entryDisplayRank = (entry: TableSnapshotEntry, records: TableRecordMap) => {
+    const { lamp, assistGrade } = recordLamp(records[entry.md5])
+    return displayLampRank(lamp, assistGrade)
+}
+
 const entryRate = (entry: TableSnapshotEntry, records: TableRecordMap | null) => {
     const record = records?.[entry.md5]
     if (!record) return UNPLAYED_RATE
@@ -120,7 +136,7 @@ const matchesLamp = (lamp: ClearLamp, filter: TableLampFilter) => {
 
 const sortEntries = (entries: TableSnapshotEntry[], sort: TableSort, records: TableRecordMap | null) => {
     if (sort === 'title') return entries.toSorted((left, right) => TITLE_COLLATOR.compare(left.title, right.title))
-    if (sort === 'lamp' && records) return entries.toSorted((left, right) => lampRank(entryLamp(left, records)) - lampRank(entryLamp(right, records)))
+    if (sort === 'lamp' && records) return entries.toSorted((left, right) => entryDisplayRank(left, records) - entryDisplayRank(right, records))
     if (sort === 'rate' && records) return entries.toSorted((left, right) => entryRate(left, records) - entryRate(right, records))
     return entries
 }
@@ -163,8 +179,11 @@ export const filterTableLevels = (levels: readonly TableSnapshotLevel[], filter:
 
 /** Counts lamps from the best lamp down to NO PLAY, so a stacked bar fills from the left like progress. */
 export const countTableLamps = (entries: readonly TableSnapshotEntry[], records: TableRecordMap): LampCount[] => {
-    const lamps = entries.map((entry) => entryLamp(entry, records))
-    return CLEAR_LAMPS.toReversed().map((lamp) => ({ lamp, count: lamps.filter((candidate) => candidate === lamp).length }))
+    const lamps = entries.map((entry) => recordLamp(records[entry.md5]))
+    return DISPLAY_LAMPS.toReversed().map((displayed) => ({
+        ...displayed,
+        count: lamps.filter((candidate) => isSameDisplayLamp(candidate, displayed)).length,
+    }))
 }
 
 export const countPlayedEntries = (entries: readonly TableSnapshotEntry[], records: TableRecordMap) =>
@@ -172,13 +191,13 @@ export const countPlayedEntries = (entries: readonly TableSnapshotEntry[], recor
 
 /** Summarises a whole table from its record map alone; the server returns records only for this table's md5s. */
 export const summariseTableRecords = (records: TableRecordMap, total: number) => {
-    const lamps = Object.values(records).map((record) => record.clear)
+    const lamps = Object.values(records).map(recordLamp)
     const unplayed = Math.max(total - lamps.length, 0)
     return {
         played: lamps.length,
-        lamps: CLEAR_LAMPS.toReversed().map((lamp) => ({
-            lamp,
-            count: lamps.filter((candidate) => candidate === lamp).length + (lamp === 'NoPlay' ? unplayed : 0),
+        lamps: DISPLAY_LAMPS.toReversed().map((displayed) => ({
+            ...displayed,
+            count: lamps.filter((candidate) => isSameDisplayLamp(candidate, displayed)).length + (displayed.lamp === 'NoPlay' ? unplayed : 0),
         })),
     }
 }

@@ -28,6 +28,7 @@ const entry = (md5Seed: string, level: string, title: string, artist = 'artist')
 
 const record = (clear: TableSnapshotRecord['clear'], exScore: number, totalNotes = 1000): TableSnapshotRecord => ({
     clear,
+    assist_grade: 0,
     ex_score: exScore,
     minbp: 3,
     max_combo: 500,
@@ -122,10 +123,10 @@ describe('발광 표 걸러내기', () => {
     test('램프 분포는 좋은 램프부터 세고 기록 없는 곡을 NO PLAY 로 센다', () => {
         const lamps = countTableLamps(LEVELS[0].entries, RECORDS)
         expect(lamps[0].lamp).toBe('Max')
-        expect(lamps.at(-1)).toEqual({ lamp: 'NoPlay', count: 1 })
+        expect(lamps.at(-1)).toEqual({ lamp: 'NoPlay', assistGrade: 0, count: 1 })
         expect(lamps.find((item) => item.lamp === 'Hard')?.count).toBe(1)
         expect(summariseTableRecords(RECORDS, 6)).toMatchObject({ played: 2 })
-        expect(summariseTableRecords(RECORDS, 6).lamps.at(-1)).toEqual({ lamp: 'NoPlay', count: 4 })
+        expect(summariseTableRecords(RECORDS, 6).lamps.at(-1)).toEqual({ lamp: 'NoPlay', assistGrade: 0, count: 4 })
     })
 })
 

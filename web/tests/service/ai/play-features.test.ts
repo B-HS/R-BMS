@@ -14,7 +14,7 @@ import {
     refinePlayReportOutput,
     toPlayReportDigest,
 } from '@server/service/domain/ai/play-report.service'
-import { computeCoachAnalysis, refineCoachOutput, toCoachDigest, type PlayScoreRow } from '@server/service/domain/ai/replay-coach.service'
+import { computeCoachAnalysis, refineCoachOutput, toCoachDigest, toPlayView, type PlayScoreRow } from '@server/service/domain/ai/replay-coach.service'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import { GAUGE_OUTCOME, RUN_END } from '@server/service/domain/analysis/play-metrics'
 import type { TraceUploadInput } from '@server/dto/trace'
@@ -190,6 +190,17 @@ const scoreRow = (overrides: Partial<PlayScoreRow> = {}): PlayScoreRow => ({
 })
 
 describe('리플레이 코치(기획 5.2)', () => {
+    test('판 보기는 LIGHT ASSIST 판에 끝난 게이지의 어시스트 등급을 싣고 다른 램프는 0 이다', () => {
+        const lightAssist = (gauge: number) => toPlayView(scoreRow({ clear: 3, gauge, scratchAuto: true }))
+        expect([lightAssist(0), lightAssist(2), lightAssist(3), lightAssist(4)].map((view) => [view.lamp, view.assist_grade])).toEqual([
+            ['LightAssistEasy', 0],
+            ['LightAssistEasy', 2],
+            ['LightAssistEasy', 3],
+            ['LightAssistEasy', 4],
+        ])
+        expect(toPlayView(scoreRow({ clear: 6, gauge: 3 })).assist_grade).toBe(0)
+    })
+
     test('문제 구간은 BP 큰 순서(같으면 앞 구간)이고 구간마다 게이지 끝값과 FAST/SLOW 를 남긴다', () => {
         const analysis = computeCoachAnalysis(analyzedPlayOf(NORMAL))
         expect(analysis?.segments).toHaveLength(32)

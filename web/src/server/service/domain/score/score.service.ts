@@ -4,10 +4,12 @@ import {
     gaugeTypeToId,
     INT_COLUMN_MAX,
     isIntColumnValue,
+    type AssistGrade,
     type ClearLamp,
     type JudgeBreakdownInput,
 } from '@server/dto/common'
 import type { ScoreRecordOutput, ScoreSubmissionInput, SubmitResponseOutput } from '@server/dto/score'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import {
     deriveExScore,
     deriveMinbp,
@@ -32,6 +34,7 @@ export type ScoreRankingRow = {
     loginId: string
     playerName: string
     clear: number
+    assistGrade: AssistGrade
     exScore: number
     maxCombo: number
     minbp: number
@@ -54,6 +57,7 @@ export type ScoreInsertRow = ReturnType<typeof buildScoreRow>
 export type StoredRunForBest = {
     id: string
     clear: number
+    assistGrade: AssistGrade
     exScore: number
     minbp: number
     maxCombo: number
@@ -73,7 +77,7 @@ export type ScoreServiceDb = {
         chartSha256: string
         userId: string
         scratchAuto: boolean
-    }) => Promise<{ clear: number; exScore: number; minbp: number } | null>
+    }) => Promise<{ clear: number; assistGrade: AssistGrade; exScore: number; minbp: number } | null>
     /**
      * Makes this run the player's best only when it beats the stored one, as one atomic statement pair, and says whether it did.
      * Two runs racing for the same row can not leave the weaker one behind.
@@ -84,11 +88,14 @@ export type ScoreServiceDb = {
         scratchAuto: boolean
         scoreId: string
         clear: number
+        assistGrade: AssistGrade
         exScore: number
         minbp: number
         maxCombo: number
     }) => Promise<boolean>
-    countBetterBests: (params: BestScope & { chartSha256: string; clear: number; exScore: number; minbp: number; lnmode?: number }) => Promise<number>
+    countBetterBests: (
+        params: BestScope & { chartSha256: string; clear: number; assistGrade: AssistGrade; exScore: number; minbp: number; lnmode?: number },
+    ) => Promise<number>
     getRanking: (
         params: BestScope & { chartSha256: string; limit: number; offset: number; lnmode?: number; userIds?: string[] },
     ) => Promise<ScoreRankedRow[]>
@@ -207,6 +214,7 @@ export const toScoreRecord = (row: ScoreRankingRow, rank: number | null): ScoreR
     player: { id: row.loginId },
     player_name: row.playerName,
     clear: clearLampFromId(row.clear),
+    assist_grade: row.assistGrade,
     ex_score: row.exScore,
     max_combo: row.maxCombo,
     minbp: row.minbp,
@@ -327,10 +335,12 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         const exScore = input.ex_score > 0 ? input.ex_score : deriveExScore(input.judge)
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
-        const countRank = async (run: { clear: number; exScore: number; minbp: number; scratchAuto: boolean }) =>
+        const assistGrade = deriveAssistGrade({ clear, gauge: gaugeTypeToId(input.options.gauge) })
+        const countRank = async (run: { clear: number; assistGrade: AssistGrade; exScore: number; minbp: number; scratchAuto: boolean }) =>
             (await deps.db.countBetterBests({
                 chartSha256: params.chartSha256,
                 clear: run.clear,
+                assistGrade: run.assistGrade,
                 exScore: run.exScore,
                 minbp: run.minbp,
                 includeScratchAuto: run.scratchAuto,
@@ -353,6 +363,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
                     scratchAuto: stored.scratchAuto,
                     scoreId: stored.id,
                     clear: stored.clear,
+                    assistGrade: stored.assistGrade,
                     exScore: stored.exScore,
                     minbp: stored.minbp,
                     maxCombo: stored.maxCombo,
@@ -392,19 +403,20 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         const isNewBest =
             user !== null &&
             ranked &&
-            isBetterBest({ clear, exScore, minbp }, previous) &&
+            isBetterBest({ clear, assistGrade, exScore, minbp }, previous) &&
             (await deps.db.upsertChartBestIfBetter({
                 chartSha256: params.chartSha256,
                 userId: user.id,
                 scratchAuto,
                 scoreId,
                 clear,
+                assistGrade,
                 exScore,
                 minbp,
                 maxCombo: input.max_combo,
             }))
 
-        const rank = ranked && user ? await countRank({ clear, exScore, minbp, scratchAuto }) : null
+        const rank = ranked && user ? await countRank({ clear, assistGrade, exScore, minbp, scratchAuto }) : null
 
         await deps.db
             .insertAudit({
@@ -502,6 +514,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             (await deps.db.countBetterBests({
                 chartSha256: params.chartSha256,
                 clear: row.clear,
+                assistGrade: row.assistGrade,
                 exScore: row.exScore,
                 minbp: row.minbp,
                 lnmode: params.lnmode,

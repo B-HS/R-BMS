@@ -10,6 +10,7 @@ const activityRow = (overrides: Partial<ActivityRow> = {}): ActivityRow => ({
     loginId: 'alice',
     playerName: 'Alice',
     clear: clearLampToId('Hard'),
+    assistGrade: 0,
     exScore: 100,
     minbp: 1,
     maxCombo: 10,
@@ -23,8 +24,14 @@ const activityRow = (overrides: Partial<ActivityRow> = {}): ActivityRow => ({
     ...overrides,
 })
 
-const lampRow = (lamp: Parameters<typeof clearLampToId>[0], count: number, scratchAuto = false): LampCountRow => ({
+const lampRow = (
+    lamp: Parameters<typeof clearLampToId>[0],
+    count: number,
+    scratchAuto = false,
+    assistGrade: LampCountRow['assistGrade'] = 0,
+): LampCountRow => ({
     clear: clearLampToId(lamp),
+    assistGrade,
     scratchAuto,
     count,
 })
@@ -91,6 +98,26 @@ describe('feService.playerStats 의 클리어 수', () => {
         expect(stats.cleared).toBe(2 + 4 + 1 + 6)
         expect(stats.scratch_auto_charts).toBe(4)
         expect(stats.lamps.map((entry) => entry.clear)).toEqual(['NoPlay', 'Failed', 'AssistEasy', 'LightAssistEasy', 'Easy', 'Max'])
+    })
+
+    test('LIGHT ASSIST 는 어시스트 등급마다 따로 세고 일반 칸과 SCRATCH AUTO 칸의 같은 램프는 합친다', async () => {
+        const service = createFeService({
+            db: stubDb({
+                countLampsByUser: async () => [
+                    lampRow('LightAssistEasy', 2, true, 3),
+                    lampRow('LightAssistEasy', 1, false, 3),
+                    lampRow('LightAssistEasy', 4, true, 0),
+                    lampRow('LightAssistEasy', 1, true, 4),
+                ],
+            }),
+        })
+        const stats = await service.playerStats({ userId: 'u_alice', totalPlays: 8 })
+        expect(stats.lamps).toEqual([
+            { clear: 'LightAssistEasy', assist_grade: 3, count: 3 },
+            { clear: 'LightAssistEasy', assist_grade: 0, count: 4 },
+            { clear: 'LightAssistEasy', assist_grade: 4, count: 1 },
+        ])
+        expect(stats.cleared).toBe(8)
     })
 
     test('FAILED 만 있으면 클리어는 0 이다', async () => {

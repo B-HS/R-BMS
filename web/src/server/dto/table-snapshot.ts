@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { clearLampSchema, isMd5Hash } from '@server/dto/common'
+import { assistGradeSchema, clearLampSchema, isMd5Hash } from '@server/dto/common'
 
 const MAX_SEARCH_LIMIT = 100
 const DEFAULT_SEARCH_LIMIT = 50
@@ -76,6 +76,7 @@ export const tableDetailOutputSchema = z.object({
 
 export const tableRecordOutputSchema = z.object({
     clear: clearLampSchema,
+    assist_grade: assistGradeSchema,
     ex_score: z.number().int(),
     minbp: z.number().int(),
     max_combo: z.number().int(),

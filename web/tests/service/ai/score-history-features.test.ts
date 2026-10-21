@@ -27,6 +27,7 @@ const play = (overrides: Partial<WeeklyScoreRow>): WeeklyScoreRow => ({
     chartMd5: md5Of(1),
     title: 'Alpha',
     clear: clearLampToId('Easy'),
+    assistGrade: 0,
     exScore: 1500,
     maxExScore: 2000,
     playedAt: MONDAY + DAY,
@@ -102,9 +103,9 @@ describe('주간 성장 요약 (기능 10)', () => {
             play({ chartSha256: SHA.charlie, chartMd5: md5Of(3), title: 'Charlie', autoOffset: true, meanOffsetUs: 9000, ruleVersion: 4 }),
         ]
         const priors: PriorBestRow[] = [
-            { chartSha256: SHA.alpha, scratchAuto: false, clear: clearLampToId('Easy'), exScore: 1600 },
-            { chartSha256: SHA.bravo, scratchAuto: false, clear: clearLampToId('Failed'), exScore: 900 },
-            { chartSha256: SHA.charlie, scratchAuto: false, clear: clearLampToId('Hard'), exScore: 1900 },
+            { chartSha256: SHA.alpha, scratchAuto: false, clear: clearLampToId('Easy'), assistGrade: 0, exScore: 1600 },
+            { chartSha256: SHA.bravo, scratchAuto: false, clear: clearLampToId('Failed'), assistGrade: 0, exScore: 900 },
+            { chartSha256: SHA.charlie, scratchAuto: false, clear: clearLampToId('Hard'), assistGrade: 0, exScore: 1900 },
         ]
         const summary = summarizeWeek({ rows, priors, levelLabelOf: (md5) => (md5 === md5Of(1) ? '★12' : null) })
         expect(summary.totals).toEqual({
@@ -130,6 +131,30 @@ describe('주간 성장 요약 (기능 10)', () => {
             ['Alpha', 80, 90],
         ])
         expect(summary.levels).toEqual([{ key: 'level.★12', level: '★12', plays: 2, lamp_ups: 1 }])
+    })
+
+    test('같은 LIGHT ASSIST 안에서 어시스트 등급이 오르면 램프가 오른 것으로 세고 등급을 from, to 로 알린다', () => {
+        const lightAssist = clearLampToId('LightAssistEasy')
+        const rows = [
+            play({ chartSha256: SHA.alpha, scratchAuto: true, clear: lightAssist, assistGrade: 2, exScore: 1500 }),
+            play({ chartSha256: SHA.alpha, scratchAuto: true, clear: lightAssist, assistGrade: 4, exScore: 1400, playedAt: MONDAY + 2 * DAY }),
+            play({ chartSha256: SHA.bravo, chartMd5: null, title: 'Bravo', scratchAuto: true, clear: lightAssist, assistGrade: 3 }),
+            play({ chartSha256: SHA.charlie, chartMd5: md5Of(3), title: 'Charlie', clear: clearLampToId('Easy'), assistGrade: 0 }),
+        ]
+        const priors: PriorBestRow[] = [
+            { chartSha256: SHA.alpha, scratchAuto: true, clear: lightAssist, assistGrade: 2, exScore: 1300 },
+            { chartSha256: SHA.alpha, scratchAuto: true, clear: lightAssist, assistGrade: 0, exScore: 1900 },
+            { chartSha256: SHA.bravo, scratchAuto: true, clear: lightAssist, assistGrade: 3, exScore: 1000 },
+            { chartSha256: SHA.charlie, scratchAuto: false, clear: lightAssist, assistGrade: 4, exScore: 1000 },
+        ]
+        const summary = summarizeWeek({ rows, priors, levelLabelOf: () => null })
+        expect(summary.totals).toMatchObject({ lamp_ups: 2, new_clears: 0 })
+        expect(
+            summary.lamp_changes.map((change) => [change.title, change.from_lamp, change.from_assist_grade, change.to_lamp, change.to_assist_grade]),
+        ).toEqual([
+            ['Charlie', 'LightAssistEasy', 4, 'Easy', 0],
+            ['Alpha', 'LightAssistEasy', 2, 'LightAssistEasy', 4],
+        ])
     })
 
     test('그 주와 앞 주를 [시작, 끝) 으로 읽고, 판이 없으면 AI 를 부르지 않으며 진행 중인 주를 알린다', async () => {

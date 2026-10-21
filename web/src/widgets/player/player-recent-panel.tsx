@@ -64,6 +64,7 @@ export const PlayerRecentPanel: FC<PlayerRecentPanelProps> = ({ playerId, params
                             title={formatChartTitle(row.chart)}
                             subtitle={row.chart.artist || undefined}
                             lamp={row.clear}
+                            assistGrade={row.assist_grade}
                             exScore={row.ex_score}
                             minBp={row.minbp}
                             playedAt={row.played_at}

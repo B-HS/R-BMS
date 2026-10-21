@@ -186,10 +186,10 @@ describe.skipIf(!hasDatabase)('SCRATCH AUTO 순위 (임시 MySQL)', () => {
 
     test('플레이어 통계와 표의 내 기록은 더 높은 쪽을 SCRATCH AUTO 표시와 함께 쓴다', async () => {
         const stats = await compose().feService.playerStats({ userId: userId('alice'), totalPlays: 3 })
-        expect(stats.lamps).toEqual([{ clear: 'ExHard', count: 1 }])
+        expect(stats.lamps).toEqual([{ clear: 'ExHard', assist_grade: 0, count: 1 }])
         expect(stats.scratch_auto_charts).toBe(1)
         const daveStats = await compose().feService.playerStats({ userId: userId('dave'), totalPlays: 2 })
-        expect([daveStats.lamps, daveStats.scratch_auto_charts]).toEqual([[{ clear: 'Easy', count: 1 }], 0])
+        expect([daveStats.lamps, daveStats.scratch_auto_charts]).toEqual([[{ clear: 'Easy', assist_grade: 0, count: 1 }], 0])
     })
 
     test('홈 최근 활동은 SCRATCH AUTO 판을 빼고 플레이어 플레이 기록은 표시와 함께 넣는다', async () => {

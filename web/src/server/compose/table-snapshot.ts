@@ -15,6 +15,7 @@ export const composeTableSnapshot = (db: Database) => {
                     .select({
                         md5: chart.md5,
                         clear: chartBest.clear,
+                        assistGrade: chartBest.assistGrade,
                         exScore: chartBest.exScore,
                         minbp: chartBest.minbp,
                         maxCombo: chartBest.maxCombo,

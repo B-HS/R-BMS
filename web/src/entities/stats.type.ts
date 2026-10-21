@@ -1,4 +1,4 @@
-import type { ClearLamp } from '@shared/constants/clear-lamp'
+import type { AssistGrade, ClearLamp } from '@shared/constants/clear-lamp'
 import type { PlayerProfile } from '@entities/player.type'
 import type { PlayerId } from '@entities/score.type'
 
@@ -21,6 +21,7 @@ export type ActivityRow = {
     player: PlayerId
     player_name: string
     clear: ClearLamp
+    assist_grade: AssistGrade
     ex_score: number
     minbp: number
     max_combo: number

@@ -56,7 +56,7 @@ const RANKING_COLUMNS: DataTableColumn<ScoreRecord>[] = [
             </span>
         ),
     },
-    { key: 'clear', label: '램프', width: 128, cell: (row) => <LampLabel lamp={row.clear} /> },
+    { key: 'clear', label: '램프', width: 144, cell: (row) => <LampLabel lamp={row.clear} assistGrade={row.assist_grade} /> },
     { key: 'ex_score', label: 'EX', width: 96, align: 'right', cell: (row) => formatCount(row.ex_score) },
     { key: 'minbp', label: 'BP', width: 80, align: 'right', cell: (row) => formatCount(row.minbp) },
     { key: 'played_at', label: '기록', width: 144, align: 'right', cell: (row) => formatDateTime(row.played_at) },

@@ -10,7 +10,7 @@ import {
     type AiRecordQueryRowOutput,
     type AiRecordQueryRunInput,
 } from '@server/dto/ai'
-import { CLEAR_LAMPS, GAUGE_TYPES, RANDOM_OPTIONS, clearLampFromId, gaugeTypeFromId } from '@server/dto/common'
+import { ASSIST_GRADE_NAMES, CLEAR_LAMPS, GAUGE_TYPES, NO_ASSIST_GRADE, RANDOM_OPTIONS, clearLampFromId, gaugeTypeFromId } from '@server/dto/common'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import {
     NO_PLAY_LAMP_ID,
@@ -24,9 +24,10 @@ import {
     type RecordQueryTable,
 } from '@server/service/domain/ai/record-query.compiler'
 import { hashAiInput } from '@server/service/domain/ai/result.service'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 
 export const AI_RECORD_QUERY_FEATURE = 'record_query'
-export const AI_RECORD_QUERY_PROMPT_VERSION = 1
+export const AI_RECORD_QUERY_PROMPT_VERSION = 2
 export const AI_RECORD_QUERY_ANALYSIS_VERSION = 1
 /** Room for the filters plus the thinking a model may spend first, since effort is not sent and some models think by default. */
 export const AI_RECORD_QUERY_MAX_OUTPUT_TOKENS = 16_000
@@ -51,7 +52,7 @@ export const AI_RECORD_QUERY_SYSTEM_PROMPT = [
 
 const VALUE_FORMAT = {
     level: 'a level from tables[].levels, without the table symbol; `in` takes levels separated by commas; gte and lte follow the table level order',
-    lamp: 'a name from lamps; `in` takes names separated by commas; gte and lte follow the order of lamps (NoPlay lowest, Max highest)',
+    lamp: 'a name from lamps; `in` takes names separated by commas; gte and lte follow the order of lamps (NoPlay lowest, Max highest); LightAssistEasy holds every assist grade in `assist_grades` and a filter can not tell them apart',
     ex_rate: 'EX score percent from 0 to 100 with at most two decimals, for example 90 or 85.5',
     bp: 'a whole number of BP (miss count) of 0 or more',
     played_at: 'a UTC date YYYY-MM-DD (gte means from the start of that day, lte through the end of it) or an ISO 8601 date-time with offset',
@@ -113,6 +114,7 @@ const toAnswerRow = (row: RecordQueryRecordRow, levelLabel: string | null): AiRe
     artist: row.artist,
     table_level: levelLabel,
     lamp: clearLampFromId(row.clear),
+    assist_grade: deriveAssistGrade(row),
     ex_score: row.exScore,
     ex_rate: toExRate(row.exScore, row.maxExScore),
     bp: row.minbp,
@@ -130,6 +132,7 @@ const toUnplayedRow = (entry: RecordQueryScopeEntry): AiRecordQueryRowOutput => 
     artist: entry.artist,
     table_level: entry.levelLabel,
     lamp: clearLampFromId(NO_PLAY_LAMP_ID),
+    assist_grade: NO_ASSIST_GRADE,
     ex_score: null,
     ex_rate: null,
     bp: null,
@@ -219,6 +222,7 @@ export const createAiRecordQueryService = (deps: AiRecordQueryServiceDeps) => {
         fields: AI_RECORD_QUERY_FIELDS.map((field) => ({ field, ops: AI_RECORD_QUERY_ALLOWED_OPS[field], value: VALUE_FORMAT[field] })),
         tables: deps.loadTables().map((table) => ({ id: table.id, symbol: table.symbol, levels: table.levels })),
         lamps: CLEAR_LAMPS,
+        assist_grades: ASSIST_GRADE_NAMES,
         randoms: RANDOM_OPTIONS,
         gauges: GAUGE_TYPES,
         sort_fields: AI_RECORD_QUERY_SORT_FIELDS,

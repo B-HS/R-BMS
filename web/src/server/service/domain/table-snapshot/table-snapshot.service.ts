@@ -1,4 +1,4 @@
-import { clearLampFromId } from '@server/dto/common'
+import { clearLampFromId, type AssistGrade } from '@server/dto/common'
 import type {
     SnapshotEntry,
     TableDetailOutput,
@@ -13,6 +13,7 @@ import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-
 export type BestRecordRow = {
     md5: string
     clear: number
+    assistGrade: AssistGrade
     exScore: number
     minbp: number
     maxCombo: number
@@ -128,6 +129,7 @@ export const searchTableEntries = (table: SnapshotTable, query: TableEntriesQuer
 
 export const toTableRecord = (row: BestRecordRow): TableRecordOutput => ({
     clear: clearLampFromId(row.clear),
+    assist_grade: row.assistGrade,
     ex_score: row.exScore,
     minbp: row.minbp,
     max_combo: row.maxCombo,

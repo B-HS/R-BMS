@@ -65,6 +65,7 @@ describe('순위 항목의 replay_id', () => {
         loginId: 'alice',
         playerName: 'Alice',
         clear: 5,
+        assistGrade: 0 as const,
         exScore: 10,
         maxCombo: 5,
         minbp: 1,

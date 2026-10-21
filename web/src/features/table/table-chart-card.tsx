@@ -1,7 +1,7 @@
 import type { FC } from 'react'
 import { LampStrip } from '@features/lamp/lamp-strip'
 import type { TableSnapshotEntry, TableSnapshotRecord } from '@entities/table-snapshot.type'
-import { CLEAR_LAMP_LABEL } from '@shared/constants/clear-lamp'
+import { lampLabel } from '@shared/constants/clear-lamp'
 import { SCRATCH_AUTO_BADGE_LABEL, SCRATCH_AUTO_BADGE_TITLE } from '@shared/constants/scratch-auto'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
@@ -30,7 +30,7 @@ export const TableChartCard: FC<TableChartCardProps> = ({ entry, symbol, record,
                 title,
                 entry.artist,
                 `${symbol}${entry.level}`,
-                CLEAR_LAMP_LABEL[lamp],
+                lampLabel(lamp, record?.assist_grade),
                 rank,
                 record?.scratch_auto && SCRATCH_AUTO_BADGE_TITLE,
             ]
@@ -38,7 +38,7 @@ export const TableChartCard: FC<TableChartCardProps> = ({ entry, symbol, record,
                 .join(' · ')}
             onClick={(event) => onOpen(entry, event.currentTarget)}
             className='bg-card hover:bg-muted/50 focus-visible:ring-ring flex h-14 w-full min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset'>
-            <LampStrip lamp={isRecordPending ? 'NoPlay' : lamp} />
+            <LampStrip lamp={isRecordPending ? 'NoPlay' : lamp} assistGrade={record?.assist_grade} />
             <span className='flex min-w-0 flex-1 flex-col justify-between gap-0.5 py-1.5 pr-1.5 pl-2'>
                 <span className={cn('text-2xs line-clamp-2 leading-tight font-medium wrap-anywhere', !entry.title && 'text-muted-foreground')}>
                     {title}

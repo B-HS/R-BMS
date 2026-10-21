@@ -181,6 +181,7 @@ describe('내 기록', () => {
                 {
                     md5: entries[0].md5,
                     clear: 6,
+                    assistGrade: 0,
                     exScore: 1234,
                     minbp: 7,
                     maxCombo: 321,
@@ -188,7 +189,7 @@ describe('내 기록', () => {
                     playedAt: 1_760_000_000_000,
                     scratchAuto: true,
                 },
-                { md5: '0'.repeat(32), clear: 4, exScore: 1, minbp: 1, maxCombo: 1, totalNotes: 1, playedAt: 1, scratchAuto: false },
+                { md5: '0'.repeat(32), clear: 4, assistGrade: 0, exScore: 1, minbp: 1, maxCombo: 1, totalNotes: 1, playedAt: 1, scratchAuto: false },
             ],
             (md5s) => asked.push(md5s),
         )
@@ -199,6 +200,7 @@ describe('내 기록', () => {
         expect(Object.keys(records?.records ?? {})).toEqual([entries[0].md5])
         expect(records?.records[entries[0].md5]).toEqual({
             clear: 'Hard',
+            assist_grade: 0,
             ex_score: 1234,
             minbp: 7,
             max_combo: 321,
@@ -218,6 +220,7 @@ describe('내 기록', () => {
         const rows = entries.map((entry) => ({
             md5: entry.md5,
             clear: 10,
+            assistGrade: 0 as const,
             exScore: 99_999,
             minbp: 99_999,
             maxCombo: 99_999,

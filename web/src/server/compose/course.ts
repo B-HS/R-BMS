@@ -2,6 +2,7 @@ import { and, asc, count, eq, inArray } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chart, course, courseBest, courseChart, courseScore, rival } from '@server/db/schema'
+import { NO_ASSIST_GRADE, type AssistGrade } from '@server/dto/common'
 import { newId } from '@server/lib/token'
 import { withLockRetry } from '@server/lib/with-lock-retry'
 import { createCourseService } from '@server/service/domain/course/course.service'
@@ -14,6 +15,7 @@ const courseRankingSelection = {
     loginId: user.loginId,
     playerName: user.name,
     clear: courseScore.clear,
+    assistGrade: courseBest.assistGrade,
     exScore: courseScore.exScore,
     maxCombo: courseScore.maxCombo,
     minbp: courseScore.minbp,
@@ -48,6 +50,7 @@ type CourseRankingSelectionRow = {
     loginId: string
     playerName: string
     clear: number
+    assistGrade: AssistGrade
     exScore: number
     maxCombo: number
     minbp: number
@@ -82,6 +85,7 @@ const toCourseRankingRow = (row: CourseRankingSelectionRow): ScoreRankingRow => 
     loginId: row.loginId,
     playerName: row.playerName,
     clear: row.clear,
+    assistGrade: row.assistGrade,
     exScore: row.exScore,
     maxCombo: row.maxCombo,
     minbp: row.minbp,
@@ -175,14 +179,14 @@ export const composeCourse = (db: Database) => {
                     .from(courseScore)
                     .where(and(eq(courseScore.userId, userId), eq(courseScore.courseHash, courseHash), eq(courseScore.playedAt, playedAt)))
                     .limit(1)
-                return row ?? null
+                return row ? { ...row, assistGrade: NO_ASSIST_GRADE } : null
             },
             insertCourseScore: withLockRetry(async (row) => {
                 await db.insert(courseScore).values(row)
             }),
             getCourseBest: async ({ courseHash, userId, scratchAuto }) => {
                 const [row] = await db
-                    .select({ clear: courseBest.clear, exScore: courseBest.exScore, minbp: courseBest.minbp })
+                    .select({ clear: courseBest.clear, assistGrade: courseBest.assistGrade, exScore: courseBest.exScore, minbp: courseBest.minbp })
                     .from(courseBest)
                     .where(and(eq(courseBest.courseHash, courseHash), eq(courseBest.userId, userId), eq(courseBest.scratchAuto, scratchAuto)))
                     .limit(1)
@@ -193,7 +197,14 @@ export const composeCourse = (db: Database) => {
                 if (inserted.affectedRows > 0) return true
                 const [replaced] = await db
                     .update(courseBest)
-                    .set({ courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo })
+                    .set({
+                        courseScoreId: row.courseScoreId,
+                        clear: row.clear,
+                        assistGrade: row.assistGrade,
+                        exScore: row.exScore,
+                        minbp: row.minbp,
+                        maxCombo: row.maxCombo,
+                    })
                     .where(
                         and(
                             eq(courseBest.courseHash, row.courseHash),
@@ -204,7 +215,7 @@ export const composeCourse = (db: Database) => {
                     )
                 return replaced.affectedRows > 0
             }),
-            countBetterCourseBests: async ({ courseHash, clear, exScore, minbp, includeScratchAuto }) => {
+            countBetterCourseBests: async ({ courseHash, clear, assistGrade, exScore, minbp, includeScratchAuto }) => {
                 const [row] = await db
                     .select({ value: count() })
                     .from(courseBest)
@@ -212,7 +223,7 @@ export const composeCourse = (db: Database) => {
                         and(
                             eq(courseBest.courseHash, courseHash),
                             courseBestScope(db, includeScratchAuto),
-                            isRankedAheadOf(courseBest, { clear, exScore, minbp }),
+                            isRankedAheadOf(courseBest, { clear, assistGrade, exScore, minbp }),
                         ),
                     )
                 return row?.value ?? 0

@@ -18,7 +18,7 @@ import { AddToFolderMenu } from '@widgets/folder/add-to-folder-menu'
 import { useChartLeaderboard } from '@entities/chart.query'
 import type { ChartLeaderboardParams } from '@entities/chart.type'
 import type { ScoreRecord } from '@entities/score.type'
-import { CLEAR_LAMPS, CLEAR_LAMP_LABEL } from '@shared/constants/clear-lamp'
+import { displayLampRank, lampLabel } from '@shared/constants/clear-lamp'
 import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/constants/scratch-auto'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
@@ -50,7 +50,7 @@ const COLUMNS: DataTableColumn<ScoreRecord>[] = [
             </span>
         ),
     },
-    { key: 'clear', label: '램프', width: 128, cell: (row) => <LampLabel lamp={row.clear} /> },
+    { key: 'clear', label: '램프', width: 144, cell: (row) => <LampLabel lamp={row.clear} assistGrade={row.assist_grade} /> },
     {
         key: 'dj_rank',
         label: '랭크',
@@ -132,9 +132,12 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
     const chartLevel = chart.level === null ? undefined : String(chart.level)
     const folderLevel = primaryMembership ? `${primaryMembership.symbol}${primaryMembership.level}` : chartLevel
     const bestExScore = ranking.reduce((best, row) => Math.max(best, row.ex_score), 0)
-    const bestClear = ranking.reduce<ScoreRecord['clear']>(
-        (best, row) => (CLEAR_LAMPS.indexOf(row.clear) > CLEAR_LAMPS.indexOf(best) ? row.clear : best),
-        'NoPlay',
+    const bestLamp = ranking.reduce<Pick<ScoreRecord, 'clear' | 'assist_grade'>>(
+        (best, row) =>
+            displayLampRank(row.clear, row.assist_grade) > displayLampRank(best.clear, best.assist_grade)
+                ? { clear: row.clear, assist_grade: row.assist_grade }
+                : best,
+        { clear: 'NoPlay', assist_grade: 0 },
     )
 
     return (
@@ -210,7 +213,7 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
 
             <div className='grid grid-cols-2 gap-px md:grid-cols-4'>
                 <StatTile label='최고 EX' value={formatCount(bestExScore)} />
-                <StatTile label='최고 램프' value={CLEAR_LAMP_LABEL[bestClear]} />
+                <StatTile label='최고 램프' value={lampLabel(bestLamp.clear, bestLamp.assist_grade)} />
                 <StatTile label='순위 내 플레이어' value={formatCount(new Set(ranking.map((row) => row.player.id)).size)} hint={RANKING_SCOPE_HINT} />
                 <StatTile label='순위 표시' value={formatCount(ranking.length)} hint={RANKING_SCOPE_HINT} />
             </div>

@@ -2,6 +2,7 @@ import type { JudgeBreakdownInput } from '@server/dto/common'
 
 export type BestCandidate = {
     clear: number
+    assistGrade: number
     exScore: number
     minbp: number
 }
@@ -39,6 +40,7 @@ export const deriveMinbp = (judge: JudgeCountFields) => {
 export const isBetterBest = (candidate: BestCandidate, current: BestCandidate | null) => {
     if (!current) return true
     if (candidate.clear !== current.clear) return candidate.clear > current.clear
+    if (candidate.assistGrade !== current.assistGrade) return candidate.assistGrade > current.assistGrade
     if (candidate.exScore !== current.exScore) return candidate.exScore > current.exScore
     return candidate.minbp < current.minbp
 }

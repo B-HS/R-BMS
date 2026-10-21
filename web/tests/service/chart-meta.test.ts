@@ -150,6 +150,7 @@ describe('표 제목으로 읽을 때 보강', () => {
             loginId: 'p1',
             playerName: 'P1',
             clear: 5,
+            assistGrade: 0,
             exScore: 1,
             minbp: 1,
             maxCombo: 1,

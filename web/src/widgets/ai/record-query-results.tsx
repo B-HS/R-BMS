@@ -34,7 +34,7 @@ const COLUMNS: DataTableColumn<AiRecordQueryRow>[] = [
         ),
     },
     { key: 'level', label: '레벨', width: 64, cell: (row) => row.table_level ?? MISSING },
-    { key: 'lamp', label: '램프', width: 112, cell: (row) => <LampLabel lamp={row.lamp} /> },
+    { key: 'lamp', label: '램프', width: 144, cell: (row) => <LampLabel lamp={row.lamp} assistGrade={row.assist_grade} /> },
     {
         key: 'ex',
         label: 'EX',

@@ -9,6 +9,7 @@ import { withLockRetry } from '@server/lib/with-lock-retry'
 import { createAuthService } from '@server/service/domain/auth/auth.service'
 import { createChartService } from '@server/service/domain/chart/chart.service'
 import { createPlayerService } from '@server/service/domain/player/player.service'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import { createScoreService, type ScoreRankedRow, type ScoreRankingRow } from '@server/service/domain/score/score.service'
 import { findSnapshotTextByMd5, getSnapshotTables } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { searchMd5sInTables } from '@server/service/domain/table-snapshot/table-snapshot.service'
@@ -63,6 +64,7 @@ const rankingSelection = {
     loginId: user.loginId,
     playerName: user.name,
     clear: score.clear,
+    gauge: score.gauge,
     exScore: score.exScore,
     maxCombo: score.maxCombo,
     minbp: score.minbp,
@@ -80,6 +82,7 @@ type RankingSelectionRow = JudgeColumns & {
     loginId: string
     playerName: string
     clear: number
+    gauge: number
     exScore: number
     maxCombo: number
     minbp: number
@@ -96,6 +99,7 @@ const toRankingRow = (row: RankingSelectionRow): ScoreRankingRow => ({
     loginId: row.loginId,
     playerName: row.playerName,
     clear: row.clear,
+    assistGrade: deriveAssistGrade(row),
     exScore: row.exScore,
     maxCombo: row.maxCombo,
     minbp: row.minbp,
@@ -178,6 +182,7 @@ const composeAll = () => {
                     .select({
                         id: score.id,
                         clear: score.clear,
+                        gauge: score.gauge,
                         exScore: score.exScore,
                         minbp: score.minbp,
                         maxCombo: score.maxCombo,
@@ -188,14 +193,14 @@ const composeAll = () => {
                     .where(and(eq(score.userId, userId), eq(score.chartSha256, chartSha256), between(score.playedAt, playedAtFrom, playedAtTo)))
                     .orderBy(asc(score.playedAt))
                     .limit(1)
-                return row ?? null
+                return row ? { ...row, assistGrade: deriveAssistGrade(row) } : null
             },
             insertScore: withLockRetry(async (row) => {
                 await db.insert(score).values(row)
             }),
             getChartBest: async ({ chartSha256, userId, scratchAuto }) => {
                 const [row] = await db
-                    .select({ clear: chartBest.clear, exScore: chartBest.exScore, minbp: chartBest.minbp })
+                    .select({ clear: chartBest.clear, assistGrade: chartBest.assistGrade, exScore: chartBest.exScore, minbp: chartBest.minbp })
                     .from(chartBest)
                     .where(and(eq(chartBest.chartSha256, chartSha256), eq(chartBest.userId, userId), eq(chartBest.scratchAuto, scratchAuto)))
                     .limit(1)
@@ -206,7 +211,14 @@ const composeAll = () => {
                 if (inserted.affectedRows > 0) return true
                 const [replaced] = await db
                     .update(chartBest)
-                    .set({ scoreId: row.scoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo })
+                    .set({
+                        scoreId: row.scoreId,
+                        clear: row.clear,
+                        assistGrade: row.assistGrade,
+                        exScore: row.exScore,
+                        minbp: row.minbp,
+                        maxCombo: row.maxCombo,
+                    })
                     .where(
                         and(
                             eq(chartBest.chartSha256, row.chartSha256),
@@ -217,14 +229,14 @@ const composeAll = () => {
                     )
                 return replaced.affectedRows > 0
             }),
-            countBetterBests: async ({ chartSha256, clear, exScore, minbp, lnmode, includeScratchAuto }) => {
+            countBetterBests: async ({ chartSha256, clear, assistGrade, exScore, minbp, lnmode, includeScratchAuto }) => {
                 const base = db.select({ value: count() }).from(chartBest).$dynamic()
                 const [row] = await (lnmode === undefined ? base : base.innerJoin(score, eq(score.id, chartBest.scoreId))).where(
                     and(
                         eq(chartBest.chartSha256, chartSha256),
                         chartBestScope(db, includeScratchAuto),
                         lnmode === undefined ? undefined : eq(score.lntype, lnmode),
-                        isRankedAheadOf(chartBest, { clear, exScore, minbp }),
+                        isRankedAheadOf(chartBest, { clear, assistGrade, exScore, minbp }),
                     ),
                 )
                 return row?.value ?? 0

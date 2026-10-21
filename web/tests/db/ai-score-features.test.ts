@@ -212,8 +212,8 @@ describe.skipIf(!hasDatabase)('점수 기반 AI 기능 DB (임시 MySQL)', () =>
         expect(rows[1]).toMatchObject({ meanOffsetUs: null, ruleVersion: null })
         const priors = await weekly.listPriorBests({ userId: OWNER, chartSha256s: [CHARTS.alpha.sha256, CHARTS.bravo.sha256], before: MONDAY })
         expect(priors.toSorted((left, right) => Number(left.scratchAuto) - Number(right.scratchAuto))).toEqual([
-            { chartSha256: CHARTS.alpha.sha256, scratchAuto: false, clear: clearLampToId('Hard'), exScore: 1800 },
-            { chartSha256: CHARTS.alpha.sha256, scratchAuto: true, clear: clearLampToId('Normal'), exScore: 1500 },
+            { chartSha256: CHARTS.alpha.sha256, scratchAuto: false, clear: clearLampToId('Hard'), gauge: 0, assistGrade: 0, exScore: 1800 },
+            { chartSha256: CHARTS.alpha.sha256, scratchAuto: true, clear: clearLampToId('Normal'), gauge: 0, assistGrade: 0, exScore: 1500 },
         ])
         expect(await weekly.listPriorBests({ userId: OWNER, chartSha256s: [], before: MONDAY })).toEqual([])
     })

@@ -29,6 +29,7 @@ const candidate = (md5: string, title: string) => ({
     artist: 'artist',
     level: '12',
     lamp: 'Failed' as const,
+    assist_grade: 0 as const,
     ex_rate: 82.5,
     bp: 40,
     tags: [{ tag: 'trill', ratio: 0.3 }],

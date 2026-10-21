@@ -37,6 +37,7 @@ export const makeTable = (perLevel = 4): ProgressTable => {
 
 export const recordOf = (lamp: ClearLamp, exRatePercent = 80, playedAt = SCORE_NOW - 86_400_000, minbp = 10): TableRecordOutput => ({
     clear: lamp,
+    assist_grade: 0,
     ex_score: Math.round((exRatePercent / 100) * NOTES * 2),
     minbp,
     max_combo: 0,

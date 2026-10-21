@@ -15,6 +15,7 @@ import type { ChartTagLoad, ProgressTable } from '@server/service/domain/ai/tabl
 import { createAiWeeklySummaryService, type AiWeeklySummaryServiceDb } from '@server/service/domain/ai/weekly-summary.service'
 import type { ChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
 import type { FolderService } from '@server/service/domain/folder/folder.service'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { orderedLevels, type TableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import type { TraceService } from '@server/service/domain/trace/trace.service'
@@ -116,6 +117,7 @@ export const createAiWeeklySummaryDb = (db: Database) =>
                     chartMd5: sql<string | null>`coalesce(${score.chartMd5}, ${chart.md5})`,
                     title: chart.title,
                     clear: score.clear,
+                    gauge: score.gauge,
                     exScore: score.exScore,
                     maxExScore: exScoreDenominator().mapWith(Number),
                     playedAt: score.playedAt,
@@ -133,8 +135,9 @@ export const createAiWeeklySummaryDb = (db: Database) =>
                 .leftJoin(chart, eq(chart.sha256, score.chartSha256))
                 .where(and(eq(score.userId, userId), gte(score.playedAt, from), lt(score.playedAt, to), eq(score.autoplay, false)))
                 .orderBy(asc(score.playedAt), asc(score.id))
-            return rows.map(({ pgreat, great, good, bad, extra, title, ...row }) => ({
+            return rows.map(({ pgreat, great, good, bad, extra, title, gauge, ...row }) => ({
                 ...row,
+                assistGrade: deriveAssistGrade({ clear: row.clear, gauge }),
                 title: title ?? '',
                 judgedNotes: pgreat + great + good + bad,
                 ...timingExtraOf(extra),
@@ -144,7 +147,13 @@ export const createAiWeeklySummaryDb = (db: Database) =>
         listPriorBests: async ({ userId, chartSha256s, before }) => {
             if (chartSha256s.length === 0) return []
             const rows = await db
-                .select({ chartSha256: score.chartSha256, scratchAuto: score.scratchAuto, clear: max(score.clear), exScore: max(score.exScore) })
+                .select({
+                    chartSha256: score.chartSha256,
+                    scratchAuto: score.scratchAuto,
+                    clear: score.clear,
+                    gauge: score.gauge,
+                    exScore: max(score.exScore),
+                })
                 .from(score)
                 .where(
                     and(
@@ -154,8 +163,8 @@ export const createAiWeeklySummaryDb = (db: Database) =>
                         eq(score.autoplay, false),
                     ),
                 )
-                .groupBy(score.chartSha256, score.scratchAuto)
-            return rows.map((row) => ({ ...row, clear: row.clear ?? 0, exScore: row.exScore ?? 0 }))
+                .groupBy(score.chartSha256, score.scratchAuto, score.clear, score.gauge)
+            return rows.map((row) => ({ ...row, assistGrade: deriveAssistGrade(row), exScore: row.exScore ?? 0 }))
         },
     }) satisfies AiWeeklySummaryServiceDb
 

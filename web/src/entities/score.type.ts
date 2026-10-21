@@ -1,4 +1,4 @@
-import type { ClearLamp } from '@shared/constants/clear-lamp'
+import type { AssistGrade, ClearLamp } from '@shared/constants/clear-lamp'
 
 export type JudgeBreakdown = {
     pgreat: number
@@ -32,6 +32,7 @@ export type ScoreRecord = {
     player: PlayerId
     player_name: string
     clear: ClearLamp
+    assist_grade: AssistGrade
     ex_score: number
     max_combo: number
     minbp: number

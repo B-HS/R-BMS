@@ -7,7 +7,7 @@ import { DashboardPanelLoading } from '@features/dashboard/dashboard-panel-loadi
 import { LampDistribution } from '@features/lamp/lamp-distribution'
 import { StatTile } from '@features/shell/stat-tile'
 import { usePlayerStats } from '@entities/player.query'
-import { CLEAR_LAMPS } from '@shared/constants/clear-lamp'
+import { DISPLAY_LAMPS, isSameDisplayLamp } from '@shared/constants/clear-lamp'
 import { formatCount, formatPercent } from '@shared/lib/format'
 
 const NO_PLAY_LAMP = 'NoPlay'
@@ -30,9 +30,12 @@ export const PlayerStatsPanel: FC<{ playerId: string }> = ({ playerId }) => {
         )
 
     const playedCharts = data.lamps.reduce((sum, entry) => sum + entry.count, 0)
-    const lamps = CLEAR_LAMPS.filter((lamp) => lamp !== NO_PLAY_LAMP)
+    const lamps = DISPLAY_LAMPS.filter(({ lamp }) => lamp !== NO_PLAY_LAMP)
         .toReversed()
-        .map((lamp) => ({ lamp, count: data.lamps.find((entry) => entry.clear === lamp)?.count ?? 0 }))
+        .map((displayed) => ({
+            ...displayed,
+            count: data.lamps.find((entry) => isSameDisplayLamp(displayed, { lamp: entry.clear, assistGrade: entry.assist_grade }))?.count ?? 0,
+        }))
 
     return (
         <>

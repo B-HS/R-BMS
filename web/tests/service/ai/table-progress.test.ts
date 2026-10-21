@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
     findFrontierIndex,
+    toCandidate,
     rankChallengeCandidates,
     readTableProgress,
     summarizeLevels,
@@ -96,5 +97,24 @@ describe('다음 도전 후보 점수', () => {
             { tag: 'chord_2', ratio: 0.1 },
         ])
         expect(topTagsOf(undefined)).toEqual([])
+    })
+})
+
+describe('어시스트 등급', () => {
+    test('기록의 등급을 차트 진행도와 후보에 싣고 기록이 없으면 0 이다', () => {
+        const records = { [md5Of(100)]: { ...recordOf('LightAssistEasy'), assist_grade: 3 as const } }
+        const charts = toChartProgress(table, records)
+        expect(charts.find((chart) => chart.md5 === md5Of(100))).toMatchObject({ lamp: 'LightAssistEasy', lampId: 3, assistGrade: 3 })
+        expect(charts.find((chart) => chart.md5 === md5Of(101))).toMatchObject({ lamp: 'NoPlay', assistGrade: 0 })
+        const candidate = toCandidate(charts[0], new Map())
+        expect([candidate.lamp, candidate.assist_grade]).toEqual(['LightAssistEasy', 3])
+    })
+
+    test('등급이 달라도 램프 id 는 같아 클리어 수와 HARD 이상 수는 그대로다', () => {
+        const records = {
+            [md5Of(100)]: { ...recordOf('LightAssistEasy'), assist_grade: 4 as const },
+            [md5Of(101)]: { ...recordOf('LightAssistEasy'), assist_grade: 0 as const },
+        }
+        expect(readTableProgress(table, records).levels[0]).toMatchObject({ played: 2, cleared: 2, hard_or_better: 0 })
     })
 })

@@ -1,4 +1,4 @@
-import { CLEAR_LAMPS, MIN_CLEAR_LAMP_ID, clearLampToId, type ClearLamp } from '@server/dto/common'
+import { CLEAR_LAMPS, MIN_CLEAR_LAMP_ID, NO_ASSIST_GRADE, clearLampToId, type AssistGrade, type ClearLamp } from '@server/dto/common'
 import type { AiChartCandidate, AiLevelProgress } from '@server/dto/ai'
 import type { TableRecordOutput } from '@server/dto/table-snapshot'
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
@@ -41,6 +41,7 @@ export type ChartProgress = {
     levelIndex: number
     lamp: ClearLamp
     lampId: number
+    assistGrade: AssistGrade
     exRate: number | null
     bp: number | null
     playedAt: number | null
@@ -81,6 +82,7 @@ export const toChartProgress = (table: ProgressTable, records: ProgressRecords) 
                 levelIndex: levelIndex.get(entry.level) ?? table.levels.length,
                 lamp,
                 lampId: clearLampToId(lamp),
+                assistGrade: record?.assist_grade ?? NO_ASSIST_GRADE,
                 exRate: record ? toExRatePercent(record.ex_score, record.total_notes) : null,
                 bp: record ? record.minbp : null,
                 playedAt: record ? record.played_at : null,
@@ -143,6 +145,7 @@ export const toCandidate = (chart: ChartProgress, tags: ChartTagShares) =>
         artist: chart.artist,
         level: chart.level,
         lamp: chart.lamp,
+        assist_grade: chart.assistGrade,
         ex_rate: chart.exRate,
         bp: chart.bp,
         tags: topTagsOf(tags.get(chart.md5)),

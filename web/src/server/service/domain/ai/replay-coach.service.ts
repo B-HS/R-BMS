@@ -15,6 +15,7 @@ import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.s
 import { COACH_PROBLEM_SEGMENTS, PLAY_FEATURE_ANALYSIS_VERSION } from '@server/service/domain/ai/play-feature.constants'
 import { exRatioOf, isShownTag, segmentKey } from '@server/service/domain/ai/play-digest'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { AnalyzedPlay, TraceService } from '@server/service/domain/trace/trace.service'
 
 export const AI_REPLAY_COACH_FEATURE = 'replay_coach'
@@ -84,6 +85,7 @@ export const toPlayView = (row: PlayScoreRow) => ({
     played_at: row.playedAt,
     chart: { sha256: row.chartSha256, md5: row.chartMd5, title: row.title, artist: row.artist },
     lamp: clearLampFromId(row.clear),
+    assist_grade: deriveAssistGrade(row),
     ex_score: row.exScore,
     max_ex_score: row.maxExScore,
     minbp: row.minbp,

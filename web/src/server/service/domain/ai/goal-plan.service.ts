@@ -11,6 +11,7 @@ import {
 } from '@server/dto/ai'
 import { clearLampToId } from '@server/dto/common'
 import {
+    ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     collectDigestKeys,
@@ -33,7 +34,7 @@ import {
 import { isClearLampId, readTableProgress, toCandidate, type ChartProgress, type ProgressTable } from '@server/service/domain/ai/table-progress'
 
 export const AI_GOAL_FEATURE = 'goal_plan'
-export const AI_GOAL_PROMPT_VERSION = 1
+export const AI_GOAL_PROMPT_VERSION = 2
 export const AI_GOAL_MAX_OUTPUT_TOKENS = 8_000
 export const AI_GOAL_EFFORT = 'low' satisfies AiEffort
 export const AI_GOAL_ID_PREFIX = 'aig_'
@@ -46,6 +47,7 @@ export const AI_GOAL_SYSTEM_PROMPT = [
     '`goal` is the goal and where the player stands, `pace` how many charts of the goal had a new best in the last weeks, `remaining` the charts still short of the goal.',
     `Write at most ${AI_GOAL_LIMIT.MAX_WEEKS} steps, one per week, with \`week_index\` from 1 to \`max_weeks\` in order.`,
     'Each step has one Korean sentence `focus`, the `md5` values of the charts to play that week taken from `remaining` only (`chart_md5s`), and a `check_key` naming the digest item that tells whether the step worked.',
+    ASSIST_GRADE_RULE,
     DIGEST_KEY_RULE,
     '`summary` is two Korean sentences at most.',
 ].join('\n')
@@ -87,6 +89,7 @@ export type AiGoalFailure =
 
 const compareRemaining = (left: ChartProgress, right: ChartProgress) =>
     right.lampId - left.lampId ||
+    right.assistGrade - left.assistGrade ||
     (right.exRate ?? -1) - (left.exRate ?? -1) ||
     left.levelIndex - right.levelIndex ||
     left.title.localeCompare(right.title) ||

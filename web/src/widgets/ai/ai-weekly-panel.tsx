@@ -116,9 +116,9 @@ export const AiWeeklyPanel: FC = () => {
                                 <li key={`${change.key}-${String(change.scratch_auto)}`} className='flex flex-wrap items-center gap-2'>
                                     {change.level && <Badge variant='outline'>{change.level}</Badge>}
                                     <span className='truncate'>{change.title || '제목 미등록'}</span>
-                                    <LampLabel lamp={change.from_lamp} />
+                                    <LampLabel lamp={change.from_lamp} assistGrade={change.from_assist_grade} />
                                     <span aria-hidden>→</span>
-                                    <LampLabel lamp={change.to_lamp} />
+                                    <LampLabel lamp={change.to_lamp} assistGrade={change.to_assist_grade} />
                                     {change.scratch_auto && <Badge variant='secondary'>SCRATCH AUTO</Badge>}
                                 </li>
                             ))}

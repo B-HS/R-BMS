@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+    assistGradeSchema,
     buildHashSchema,
     chartIdSchema,
     CLIENT_PLATFORM_LENGTH,
@@ -73,6 +74,7 @@ export const scoreRecordSchema = z.object({
     player: playerIdSchema,
     player_name: z.string(),
     clear: clearLampSchema,
+    assist_grade: assistGradeSchema.default(0),
     ex_score: z.number().int().min(0),
     max_combo: z.number().int().min(0),
     minbp: z.number().int().min(0),

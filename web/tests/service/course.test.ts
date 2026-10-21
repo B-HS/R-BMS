@@ -33,6 +33,7 @@ const LOCK_DEADLOCK = Object.assign(new Error('Deadlock found when trying to get
 
 const storedRun = (overrides: Partial<StoredRunForBest> & { id: string }): StoredRunForBest => ({
     clear: clearLampToId('Normal'),
+    assistGrade: 0,
     exScore: 5000,
     minbp: 30,
     maxCombo: 3000,
@@ -44,7 +45,7 @@ const storedRun = (overrides: Partial<StoredRunForBest> & { id: string }): Store
 const createService = (
     options: {
         existing?: StoredRunForBest
-        best?: { clear: number; exScore: number; minbp: number }
+        best?: { clear: number; assistGrade: 0; exScore: number; minbp: number }
         winsBest?: boolean
         remembersInserted?: boolean
         bestFailures?: number
@@ -65,7 +66,7 @@ const createService = (
             replaceCourseCharts: async () => undefined,
             findCourseScoreByIdempotency: async () => {
                 const [row] = inserted
-                if (options.remembersInserted && row) return row
+                if (options.remembersInserted && row) return { ...row, assistGrade: 0 }
                 return options.existing ?? null
             },
             insertCourseScore: async (row) => {
@@ -137,7 +138,7 @@ describe('courseService.submit', () => {
     })
 
     test('기존 베스트가 더 좋으면 베스트를 갱신하지 않는다', async () => {
-        const { service, bests } = createService({ best: { clear: 6, exScore: 5400, minbp: 10 } })
+        const { service, bests } = createService({ best: { clear: 6, assistGrade: 0, exScore: 5400, minbp: 10 } })
         await service.submit({ input: submission(), user: USER, ...TRUSTED })
         expect(bests).toHaveLength(0)
     })
@@ -153,7 +154,7 @@ describe('courseService.submit', () => {
     })
 
     test('FAILED 코스는 더 높은 램프의 최고 기록을 밀어내지 않는다', async () => {
-        const { service, bests } = createService({ best: { clear: clearLampToId('Normal'), exScore: 100, minbp: 999 } })
+        const { service, bests } = createService({ best: { clear: clearLampToId('Normal'), assistGrade: 0, exScore: 100, minbp: 999 } })
         const result = await service.submit({ input: submission({ clear: 'Failed', ex_score: 4000, minbp: 10 }), user: USER, ...TRUSTED })
         expect(result.response.is_new_best).toBe(false)
         expect(bests).toHaveLength(0)

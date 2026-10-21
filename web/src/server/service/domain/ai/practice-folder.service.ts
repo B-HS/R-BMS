@@ -12,6 +12,7 @@ import {
 import { clearLampToId } from '@server/dto/common'
 import { FOLDER_LIMIT } from '@server/dto/folder'
 import {
+    ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     cleanLine,
@@ -37,7 +38,7 @@ import { PATTERN_TAGS } from '@server/service/domain/analysis/pattern-tags'
 import type { FolderService } from '@server/service/domain/folder/folder.service'
 
 export const AI_PRACTICE_FEATURE = 'practice_folder'
-export const AI_PRACTICE_PROMPT_VERSION = 1
+export const AI_PRACTICE_PROMPT_VERSION = 2
 export const AI_PRACTICE_MAX_OUTPUT_TOKENS = 8_000
 export const AI_PRACTICE_EFFORT = 'low' satisfies AiEffort
 
@@ -53,6 +54,7 @@ export const AI_PRACTICE_SYSTEM_PROMPT = [
     `Choose at most \`limits.max_items\` charts from \`candidates\` only, by \`md5\`, in the order to play them, each with a Korean \`memo\` of at most \`limits.memo_max\` characters on one line.`,
     '`name_suffix` is a short Korean folder name of at most `limits.name_suffix_max` characters; `description` one Korean sentence of at most `limits.description_max` characters.',
     'Chart `tags` describe the chart layout with no lane option (layout "original").',
+    ASSIST_GRADE_RULE,
     DIGEST_KEY_RULE,
 ].join('\n')
 

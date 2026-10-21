@@ -30,6 +30,7 @@ const recentRow = (scoreId: string): RecentRow => ({
     player: { id: PLAYER_ID },
     player_name: 'Alice',
     clear: 'LightAssistEasy',
+    assist_grade: 3,
     ex_score: 1200,
     minbp: 4,
     max_combo: 300,

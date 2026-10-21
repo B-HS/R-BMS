@@ -58,6 +58,10 @@
     --rbms-lamp-failed: #ff0000;
     --rbms-lamp-assist: #ff63fd;
     --rbms-lamp-light-assist: #6563ff;
+    --rbms-lamp-assist-easy: #3ad19f;
+    --rbms-lamp-assist-clear: #c4a796;
+    --rbms-lamp-assist-hard: #afb8ef;
+    --rbms-lamp-assist-exhard: #ca76a9;
     --rbms-lamp-easy: #00ff24;
     --rbms-lamp-normal: #ffbb00;
     --rbms-lamp-hard: #dfdfdf;

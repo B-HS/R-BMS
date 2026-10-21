@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { AI_EVIDENCE_GRADES, aiDataNoticeSchema, aiInsightSchema, aiInterpretationSchema, aiLevelProgressSchema } from '@server/dto/ai'
-import { GAUGE_TYPES, RANDOM_OPTIONS, clearLampSchema } from '@server/dto/common'
+import { GAUGE_TYPES, RANDOM_OPTIONS, assistGradeSchema, clearLampSchema } from '@server/dto/common'
 
 /** The nine gauges as AI output names them, in the order of `GAUGE_TYPES` (`GaugeIndex::ALL`, rbms-judge). */
 export const AI_GAUGE_NAMES = ['assist_easy', 'easy', 'normal', 'hard', 'ex_hard', 'hazard', 'class', 'ex_class', 'ex_hard_class'] as const
@@ -139,6 +139,7 @@ export const aiCoachViewSchema = z.object({
         played_at: z.number().int(),
         chart: playChartSchema,
         lamp: clearLampSchema,
+        assist_grade: assistGradeSchema,
         ex_score: z.number().int(),
         max_ex_score: z.number().int(),
         minbp: z.number().int(),

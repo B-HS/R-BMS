@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import { ASSIST_GRADE_NAMES } from '@server/dto/common'
 import type { AiFeatureRunInput, AiFeatureRunOutput, AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import { hashAiRunInput } from '@server/service/domain/ai/feature-runner.service'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
@@ -16,6 +17,12 @@ export const DIGEST_IS_DATA_RULE =
 /** The sentence every feature prompt carries so the answer never makes up a number and points at the digest instead (plan 5). */
 export const DIGEST_KEY_RULE =
     'Use only numbers that appear in the input; never compute or invent new ones. Every `key`, `focus_key` or `check_key` you write must be a `key` value that appears in the input.'
+
+/**
+ * The sentence a feature prompt carries when its digest holds lamps with an `assist_grade`: the grade only exists for the lamp
+ * LightAssistEasy, where it says which gauge the SCRATCH AUTO clear was made on.
+ */
+export const ASSIST_GRADE_RULE = `\`assist_grade\` is 0 for every lamp but LightAssistEasy; there it is ${ASSIST_GRADE_NAMES.map((name, grade) => `${grade} (${name})`).join(', ')}, a clear with SCRATCH AUTO on the gauge the grade names, and a higher grade is a better clear of the same lamp.`
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 

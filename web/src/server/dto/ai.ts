@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { clearLampSchema, gaugeTypeSchema } from '@server/dto/common'
+import { assistGradeSchema, clearLampSchema, gaugeTypeSchema } from '@server/dto/common'
 
 export const AI_PROVIDER_IDS = ['anthropic', 'openai', 'ollama'] as const
 export const aiProviderIdSchema = z.enum(AI_PROVIDER_IDS)
@@ -221,6 +221,7 @@ export const aiRecordQueryRowSchema = z.object({
     artist: z.string(),
     table_level: z.string().nullable(),
     lamp: clearLampSchema,
+    assist_grade: assistGradeSchema,
     ex_score: z.number().int().nullable(),
     ex_rate: z.number().nullable(),
     bp: z.number().int().nullable(),
@@ -307,6 +308,7 @@ export const aiChartCandidateSchema = z.object({
     artist: z.string(),
     level: z.string(),
     lamp: clearLampSchema,
+    assist_grade: assistGradeSchema,
     ex_rate: z.number().nullable(),
     bp: z.number().int().nullable(),
     tags: z.array(z.object({ tag: z.string(), ratio: z.number() })),
@@ -480,7 +482,9 @@ const weeklyChartChangeSchema = z.object({
     title: z.string(),
     level: z.string().nullable(),
     from_lamp: clearLampSchema,
+    from_assist_grade: assistGradeSchema,
     to_lamp: clearLampSchema,
+    to_assist_grade: assistGradeSchema,
     from_ex_rate: z.number().nullable(),
     to_ex_rate: z.number().nullable(),
     scratch_auto: z.boolean(),

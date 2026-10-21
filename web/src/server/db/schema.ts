@@ -17,6 +17,7 @@ import {
     timestamp,
 } from 'drizzle-orm/mysql-core'
 import { user } from '@server/db/auth-schema'
+import type { AssistGrade } from '@server/dto/common'
 
 export const chart = mysqlTable(
     'chart',
@@ -144,6 +145,7 @@ export const chartBest = mysqlTable(
         userId: varchar('user_id', { length: 36 }).notNull(),
         scoreId: varchar('score_id', { length: 36 }).notNull(),
         clear: tinyint('clear').default(0).notNull(),
+        assistGrade: tinyint('assist_grade').$type<AssistGrade>().default(0).notNull(),
         exScore: int('ex_score').default(0).notNull(),
         minbp: int('minbp').default(0).notNull(),
         maxCombo: int('max_combo').default(0).notNull(),
@@ -156,6 +158,7 @@ export const chartBest = mysqlTable(
     (table) => [
         primaryKey({ columns: [table.chartSha256, table.userId, table.scratchAuto] }),
         index('chart_best_rank_idx').on(table.chartSha256, table.scratchAuto, table.clear, table.exScore),
+        index('chart_best_rank_grade_idx').on(table.chartSha256, table.scratchAuto, table.clear, table.assistGrade, table.exScore),
         index('chart_best_user_idx').on(table.userId, table.scratchAuto),
     ],
 )
@@ -306,6 +309,7 @@ export const courseBest = mysqlTable(
         userId: varchar('user_id', { length: 36 }).notNull(),
         courseScoreId: varchar('course_score_id', { length: 36 }).notNull(),
         clear: tinyint('clear').default(0).notNull(),
+        assistGrade: tinyint('assist_grade').$type<AssistGrade>().default(0).notNull(),
         exScore: int('ex_score').default(0).notNull(),
         minbp: int('minbp').default(0).notNull(),
         maxCombo: int('max_combo').default(0).notNull(),

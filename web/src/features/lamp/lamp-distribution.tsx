@@ -1,7 +1,7 @@
 import type { FC } from 'react'
 import { LampStackBar, type LampCount } from '@features/lamp/lamp-stack-bar'
 import { LampSwatch } from '@features/lamp/lamp-swatch'
-import { CLEAR_LAMP_LABEL } from '@shared/constants/clear-lamp'
+import { lampKey, lampLabel } from '@shared/constants/clear-lamp'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 import { cn } from '@shared/lib/cn'
 import { formatCount } from '@shared/lib/format'
@@ -31,11 +31,11 @@ export const LampDistribution: FC<LampDistributionProps> = ({ lamps, played, tot
         </dl>
         <LampStackBar lamps={lamps} />
         <ul className='grid min-w-0 grid-cols-2 gap-x-4 gap-y-0.5 text-xs'>
-            {lamps.map(({ lamp, count }) => (
-                <li key={lamp} className='flex min-w-0 items-center justify-between gap-2'>
+            {lamps.map(({ lamp, assistGrade, count }) => (
+                <li key={lampKey(lamp, assistGrade)} className='flex min-w-0 items-center justify-between gap-2'>
                     <span className='flex min-w-0 items-center gap-1.5'>
-                        <LampSwatch lamp={lamp} />
-                        <span className='truncate'>{CLEAR_LAMP_LABEL[lamp]}</span>
+                        <LampSwatch lamp={lamp} assistGrade={assistGrade} />
+                        <span className='truncate'>{lampLabel(lamp, assistGrade)}</span>
                     </span>
                     <span className={cn('shrink-0 tabular-nums', count === 0 ? 'text-muted-foreground' : 'font-medium')}>{formatCount(count)}</span>
                 </li>

@@ -4,6 +4,7 @@ import { user } from '@server/db/auth-schema'
 import { apiToken, chart, chartBest, score } from '@server/db/schema'
 import { MIN_CLEAR_LAMP_ID } from '@server/dto/common'
 import { createFeService, type ActivityRow, type LeaderboardRow } from '@server/service/domain/fe/fe.service'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toChartRow } from '@server/compose/chart-row'
 import { chartBestScope } from '@server/compose/best-scope'
@@ -15,6 +16,7 @@ const activitySelection = {
     loginId: user.loginId,
     playerName: user.name,
     clear: score.clear,
+    gauge: score.gauge,
     exScore: score.exScore,
     minbp: score.minbp,
     maxCombo: score.maxCombo,
@@ -27,11 +29,15 @@ const activitySelection = {
     level: chart.level,
 }
 
-const toActivityRow = (row: {
+const toActivityRow = ({
+    gauge,
+    ...row
+}: {
     scoreId: string
     loginId: string | null
     playerName: string | null
     clear: number
+    gauge: number
     exScore: number
     minbp: number
     maxCombo: number
@@ -44,6 +50,7 @@ const toActivityRow = (row: {
     level: number | null
 }): ActivityRow => ({
     ...row,
+    assistGrade: deriveAssistGrade({ clear: row.clear, gauge }),
     title: row.title ?? '',
     artist: row.artist ?? '',
 })
@@ -182,11 +189,11 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
 
             countLampsByUser: async (userId) => {
                 const rows = await db
-                    .select({ clear: chartBest.clear, scratchAuto: chartBest.scratchAuto, value: count() })
+                    .select({ clear: chartBest.clear, assistGrade: chartBest.assistGrade, scratchAuto: chartBest.scratchAuto, value: count() })
                     .from(chartBest)
                     .where(and(eq(chartBest.userId, userId), chartBestScope(db, true)))
-                    .groupBy(chartBest.clear, chartBest.scratchAuto)
-                return rows.map((row) => ({ clear: row.clear, scratchAuto: row.scratchAuto, count: row.value }))
+                    .groupBy(chartBest.clear, chartBest.assistGrade, chartBest.scratchAuto)
+                return rows.map((row) => ({ clear: row.clear, assistGrade: row.assistGrade, scratchAuto: row.scratchAuto, count: row.value }))
             },
 
             summarise: async () => {
@@ -225,6 +232,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
                 loginId: user.loginId,
                 playerName: user.name,
                 clear: score.clear,
+                gauge: score.gauge,
                 exScore: score.exScore,
                 maxCombo: score.maxCombo,
                 minbp: score.minbp,
@@ -274,6 +282,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
             loginId: row.loginId,
             playerName: row.playerName,
             clear: row.clear,
+            assistGrade: deriveAssistGrade(row),
             exScore: row.exScore,
             maxCombo: row.maxCombo,
             minbp: row.minbp,

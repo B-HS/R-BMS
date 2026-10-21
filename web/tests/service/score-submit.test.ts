@@ -55,6 +55,7 @@ const submission = (overrides: Partial<Record<string, unknown>> = {}): ScoreSubm
 
 const storedRun = (overrides: Partial<StoredRunForBest> & { id: string }): StoredRunForBest => ({
     clear: clearLampToId('Hard'),
+    assistGrade: 0,
     exScore: 1488,
     minbp: 15,
     maxCombo: 540,
@@ -78,7 +79,7 @@ type Recorder = {
 const createStub = (
     options: {
         existingRun?: StoredRunForBest | null
-        currentBest?: { clear: number; exScore: number; minbp: number } | null
+        currentBest?: { clear: number; assistGrade: 0 | 1 | 2 | 3 | 4; exScore: number; minbp: number } | null
         winsBest?: boolean
         rankedRows?: ScoreRankedRow[]
         remembersInserted?: boolean
@@ -101,7 +102,7 @@ const createStub = (
             recorder.idempotencyLookups += 1
             recorder.idempotencyWindows.push({ playedAtFrom, playedAtTo })
             const [inserted] = recorder.inserted
-            if (options.remembersInserted && inserted) return inserted
+            if (options.remembersInserted && inserted) return { ...inserted, assistGrade: 0 }
             return options.existingRun ?? null
         },
         insertScore: async (row) => {
@@ -338,7 +339,7 @@ describe('scoreService.submit', () => {
     })
 
     test('기존 베스트보다 램프가 높으면 chart_best 를 갱신한다', async () => {
-        const { recorder, service } = createStub({ currentBest: { clear: 5, exScore: 1600, minbp: 1 } })
+        const { recorder, service } = createStub({ currentBest: { clear: 5, assistGrade: 0, exScore: 1600, minbp: 1 } })
         await service.submit({
             input: submission(),
             chartSha256: CHART_SHA,
@@ -354,7 +355,7 @@ describe('scoreService.submit', () => {
     })
 
     test('기존 베스트보다 램프가 낮으면 chart_best 를 갱신하지 않는다', async () => {
-        const { recorder, service } = createStub({ currentBest: { clear: 8, exScore: 1000, minbp: 0 } })
+        const { recorder, service } = createStub({ currentBest: { clear: 8, assistGrade: 0, exScore: 1000, minbp: 0 } })
         const result = await service.submit({
             input: submission(),
             chartSha256: CHART_SHA,
@@ -518,6 +519,7 @@ describe('최고 기록 경합 (IR-1)', () => {
         loginId: 'alice',
         playerName: 'Alice',
         clear: 6,
+        assistGrade: 0,
         exScore: 1000,
         maxCombo: 100,
         minbp: 10,
@@ -551,7 +553,7 @@ describe('최고 기록 경합 (IR-1)', () => {
     })
 
     test('같은 차트에 동시에 들어온 두 판 중 높은 판만 최고 기록으로 남는다', async () => {
-        const stored: { exScore: number; clear: number; minbp: number; scoreId: string }[] = []
+        const stored: { exScore: number; clear: number; assistGrade: number; minbp: number; scoreId: string }[] = []
         const sequence = { value: 0 }
         let readsDone = 0
         let release: () => void = () => undefined
@@ -570,7 +572,13 @@ describe('최고 기록 경합 (IR-1)', () => {
             upsertChartBestIfBetter: async (row) => {
                 const [current] = stored
                 if (current && !isBetterBest(row, current)) return false
-                stored.splice(0, stored.length, { exScore: row.exScore, clear: row.clear, minbp: row.minbp, scoreId: row.scoreId })
+                stored.splice(0, stored.length, {
+                    exScore: row.exScore,
+                    clear: row.clear,
+                    assistGrade: row.assistGrade,
+                    minbp: row.minbp,
+                    scoreId: row.scoreId,
+                })
                 return true
             },
             countBetterBests: async () => 0,

@@ -25,6 +25,7 @@ const row = (overrides: Partial<Row> = {}): Row => ({
     artist: 'Artist A',
     table_level: '★12',
     lamp: 'Hard',
+    assist_grade: 0,
     ex_score: 1800,
     ex_rate: 90,
     bp: 5,

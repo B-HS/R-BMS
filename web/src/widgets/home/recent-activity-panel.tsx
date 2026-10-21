@@ -41,6 +41,7 @@ export const RecentActivityPanel: FC = () => {
                             subtitle={row.player_name}
                             subtitleHref={`/players/${encodeURIComponent(row.player.id)}`}
                             lamp={row.clear}
+                            assistGrade={row.assist_grade}
                             exScore={row.ex_score}
                             minBp={row.minbp}
                             playedAt={row.played_at}

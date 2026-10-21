@@ -28,7 +28,7 @@ export const AiChartCandidateList: FC<AiChartCandidateListProps> = ({ label, sym
                     <span className='text-muted-foreground truncate'>{candidate.artist}</span>
                 </span>
                 <span className='text-muted-foreground flex flex-wrap items-center gap-3'>
-                    <LampLabel lamp={candidate.lamp} />
+                    <LampLabel lamp={candidate.lamp} assistGrade={candidate.assist_grade} />
                     <span className='tabular-nums'>EX {candidate.ex_rate === null ? MISSING : `${candidate.ex_rate.toFixed(EX_RATE_DIGITS)}%`}</span>
                     <span className='tabular-nums'>BP {candidate.bp === null ? MISSING : formatCount(candidate.bp)}</span>
                     {candidate.tags.map((tag) => (

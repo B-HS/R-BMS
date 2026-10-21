@@ -1,4 +1,4 @@
-import { MIN_CLEAR_LAMP_ID, clearLampFromId } from '@server/dto/common'
+import { MIN_CLEAR_LAMP_ID, clearLampFromId, type AssistGrade } from '@server/dto/common'
 import { fillBlankText, toChartMeta, type ChartRow, type TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toPlayerProfile, type PlayerRow } from '@server/service/domain/player/player.service'
 import type { ChartSearchQuery, PlayerLeaderboardQuery } from '@server/dto/fe'
@@ -8,6 +8,7 @@ export type ActivityRow = {
     loginId: string | null
     playerName: string | null
     clear: number
+    assistGrade: AssistGrade
     exScore: number
     minbp: number
     maxCombo: number
@@ -22,6 +23,7 @@ export type ActivityRow = {
 
 export type LampCountRow = {
     clear: number
+    assistGrade: AssistGrade
     scratchAuto: boolean
     count: number
 }
@@ -51,6 +53,7 @@ const buildActivityItem = (row: ActivityRow) => ({
     player: { id: row.loginId ?? '' },
     player_name: row.playerName ?? '',
     clear: clearLampFromId(row.clear),
+    assist_grade: row.assistGrade,
     ex_score: row.exScore,
     minbp: row.minbp,
     max_combo: row.maxCombo,
@@ -64,11 +67,14 @@ export const toActivityItem = (row: ActivityRow, lookupTableText?: TableTextLook
     return buildActivityItem({ ...row, title: text.title, artist: text.artist })
 }
 
-export const toLampDistribution = (rows: LampCountRow[]) =>
-    [...new Set(rows.map((row) => row.clear))].map((clear) => ({
-        clear: clearLampFromId(clear),
-        count: rows.filter((row) => row.clear === clear).reduce((sum, row) => sum + row.count, 0),
-    }))
+export const toLampDistribution = (rows: LampCountRow[]) => {
+    const counts = new Map<string, Omit<LampCountRow, 'scratchAuto'>>()
+    for (const row of rows) {
+        const key = `${row.clear}:${row.assistGrade}`
+        counts.set(key, { clear: row.clear, assistGrade: row.assistGrade, count: (counts.get(key)?.count ?? 0) + row.count })
+    }
+    return [...counts.values()].map((entry) => ({ clear: clearLampFromId(entry.clear), assist_grade: entry.assistGrade, count: entry.count }))
+}
 
 export const toLeaderboardItem = (row: LeaderboardRow) => ({
     ...toPlayerProfile(row, row.plays),

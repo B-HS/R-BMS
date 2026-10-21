@@ -16,7 +16,17 @@ const createRoutes = () =>
             loadTables: getSnapshotTables,
             db: {
                 listBestByMd5: async ({ md5s }) => [
-                    { md5: md5s[0], clear: 5, exScore: 100, minbp: 3, maxCombo: 50, totalNotes: 80, playedAt: 1_760_000_000_000, scratchAuto: false },
+                    {
+                        md5: md5s[0],
+                        clear: 5,
+                        assistGrade: 0,
+                        exScore: 100,
+                        minbp: 3,
+                        maxCombo: 50,
+                        totalNotes: 80,
+                        playedAt: 1_760_000_000_000,
+                        scratchAuto: false,
+                    },
                 ],
             },
         }),

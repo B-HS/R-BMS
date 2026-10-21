@@ -67,6 +67,7 @@ const coachView = (): CoachView => ({
         played_at: 0,
         chart: { sha256: 'a'.repeat(64), md5: 'b'.repeat(32), title: '<b>Chart</b>', artist: 'Artist' },
         lamp: 'Normal',
+        assist_grade: 0,
         ex_score: 41,
         max_ex_score: 64,
         minbp: 3,

@@ -37,6 +37,24 @@ export const gaugeTypeToId = (gauge: GaugeType) => GAUGE_TYPES.indexOf(gauge)
 
 export const gaugeTypeFromId = (id: number) => GAUGE_TYPES[id] ?? GAUGE_TYPES[0]
 
+/**
+ * The assist grade of a SCRATCH AUTO clear: 0 is a plain LIGHT ASSIST, 1 to 4 are the grade of the gauge it cleared on
+ * (ASSIST EASY, ASSIST CLEAR, ASSIST HARD, ASSIST EXHARD). Only the lamp LightAssistEasy carries a grade; every other lamp is 0.
+ */
+export const ASSIST_GRADES = [0, 1, 2, 3, 4] as const
+
+export type AssistGrade = (typeof ASSIST_GRADES)[number]
+
+export const assistGradeSchema = z.literal(ASSIST_GRADES)
+
+/** The display name of each assist grade of the lamp LightAssistEasy, indexed by grade. */
+export const ASSIST_GRADE_NAMES = ['LIGHT ASSIST', 'ASSIST EASY', 'ASSIST CLEAR', 'ASSIST HARD', 'ASSIST EXHARD'] as const satisfies Record<
+    AssistGrade,
+    string
+>
+
+export const NO_ASSIST_GRADE = ASSIST_GRADES[0]
+
 export const MD5_LENGTH = 32
 export const SHA256_LENGTH = 64
 
