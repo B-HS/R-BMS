@@ -37,9 +37,9 @@
 use std::cell::Cell;
 
 use rbms_model::{LnKind, NoteKind, TimeLine};
-use rbms_skin::dst::{DestinationTrack, DrawStateSource, SkinOffset, SkinRect, prepare};
+use rbms_skin::dst::{DestinationTrack, DrawStateSource, SkinColor, SkinOffset, SkinRect, prepare};
 use rbms_skin::loader::{LoadedSkin, NamedTrack, StretchKind};
-use rbms_skin::model::{Animation, NoteSet};
+use rbms_skin::model::{Animation, NO_TINT, NoteSet};
 use rbms_skin::timer::MICROS_PER_MILLI;
 
 use super::draw::{ImageSelect, Placement};
@@ -482,6 +482,9 @@ pub(crate) struct NoteLane {
     pub(crate) mine: NoteImage,
     pub(crate) hidden: NoteImage,
     pub(crate) processed: NoteImage,
+    /// The colour id the lane's notes are multiplied by (`note.tint`, an R-BMS extension), or `None`
+    /// for a lane drawn in its images' own colours.
+    pub(crate) tint: Option<i32>,
 }
 
 impl NoteLane {
@@ -495,6 +498,7 @@ impl NoteLane {
             mine: NoteImage::Solid(PLACEHOLDER_MINE),
             hidden: NoteImage::Outline(PLACEHOLDER_HIDDEN),
             processed: NoteImage::Outline(PLACEHOLDER_PROCESSED),
+            tint: None,
         }
     }
 
@@ -667,6 +671,7 @@ fn build_lane(skin: &LoadedSkin, def: &NoteSet, names: &[&[String]; LONG_IMAGES]
         note,
         long: std::array::from_fn(|slot| image(names[slot], NoteImage::Solid(PLACEHOLDER_LONG))),
         mine: image(&def.mine, NoteImage::Solid(PLACEHOLDER_MINE)),
+        tint: def.tint.get(lane).copied().filter(|id| *id != NO_TINT),
         ..NoteLane::placeholder(animation_rect(&def.dst[lane]), def.size.get(lane).copied().unwrap_or(cell_height))
     }
 }
@@ -751,17 +756,30 @@ impl Output {
     }
 }
 
-/// One lane as a frame draws it: its rectangle and its note height in output pixels.
+/// One lane as a frame draws it: its rectangle and its note height in output pixels, and the colour
+/// the player set for its notes this frame.
 struct Lane<'a> {
     region: SkinRect,
     scale: f32,
     images: &'a NoteLane,
     long: LaneLong,
+    /// What the host answers for the lane's colour id, or `None` for a lane that names none or whose
+    /// colour nobody set, which is drawn exactly as it would be without the extension.
+    tint: Option<SkinColor>,
 }
 
 /// A colour with its alpha scaled by the batch's.
 fn faded(color: Color, alpha: u8) -> Color {
     Color { a: ((u16::from(color.a) * u16::from(alpha)) / u16::from(u8::MAX)) as u8, ..color }
+}
+
+/// `color` faded to the batch's `alpha` and then multiplied, all four channels, by a lane's colour
+/// when it has one ([`SkinColor::tinted`]): a white image comes out in exactly that colour, and the
+/// colour's alpha takes the note down as a share of what it was. Without a colour this is
+/// [`faded`] alone.
+fn lane_tinted(color: Color, alpha: u8, tint: Option<SkinColor>) -> Color {
+    let faded = faded(color, alpha);
+    tint.map_or(faded, |tint| SkinColor::rgba(faded.r, faded.g, faded.b, faded.a).tinted(tint).into())
 }
 
 /// What the CONSTANT option does to one timeline.
@@ -908,7 +926,12 @@ impl Field<'_> {
     /// here it fades the field as it fades any other object, which is what lets a player take the
     /// notes down with the offset a skin declares for them. A field with no alpha left draws no
     /// note at all.
-    fn put<R: Renderer>(&self, r: &mut R, image: &NoteImage, at: (f32, f32, f32, f32), alpha: f32) -> bool {
+    ///
+    /// `tint` is the colour of the lane the note is in, for the images a lane's colour reaches: a
+    /// note, a long note's head, body and end. A mine, a hidden or an already judged note, the body
+    /// of a hell charge note that is draining and anything SCRATCH AUTO draws are handed none, so
+    /// what they say by their colour is kept.
+    fn put<R: Renderer>(&self, r: &mut R, image: &NoteImage, at: (f32, f32, f32, f32), alpha: f32, tint: Option<SkinColor>) -> bool {
         let (x, y, w, h) = at;
         if self.opacity <= 0.0 {
             return false;
@@ -927,7 +950,7 @@ impl Field<'_> {
                 let params = QuadParams {
                     dst,
                     src: UvRect::new(u0, v0, u1, v1),
-                    tint: Color { a: alpha, ..BATCH_WHITE },
+                    tint: lane_tinted(BATCH_WHITE, alpha, tint),
                     blend: BlendMode::Alpha,
                     filter: TextureFilter::Nearest,
                     angle_deg: 0.0,
@@ -935,7 +958,7 @@ impl Field<'_> {
                 };
                 r.draw_textured_quad(sprite.tex, params);
             }
-            NoteImage::Solid(color) => r.fill_rect(dst, faded(*color, alpha)),
+            NoteImage::Solid(color) => r.fill_rect(dst, lane_tinted(*color, alpha, tint)),
             NoteImage::Outline(color) => {
                 let (across, down) = (dst.w * PLACEHOLDER_BORDER / PLACEHOLDER_W, dst.h * PLACEHOLDER_BORDER / PLACEHOLDER_H);
                 let color = faded(*color, alpha);
@@ -995,7 +1018,7 @@ impl Field<'_> {
                     match note.kind {
                         NoteKind::Normal if notes.plays_itself(lane_index) => {
                             if ahead {
-                                drawn |= self.put(r, &AUTO_NOTE_IMAGE, at, alpha);
+                                drawn |= self.put(r, &AUTO_NOTE_IMAGE, at, alpha, None);
                             }
                         }
                         NoteKind::Normal => {
@@ -1003,8 +1026,9 @@ impl Field<'_> {
                             let unjudged = state == NOTE_UNJUDGED;
                             let shown = if falls { ahead && (unjudged || state >= NOTE_STATE_BAD) } else { ahead || (notes.show.past_notes && unjudged) };
                             if shown {
-                                let image = if notes.show.mark_processed && !unjudged { &lane.images.processed } else { &lane.images.note };
-                                drawn |= self.put(r, image, at, alpha);
+                                let (image, tint) =
+                                    if notes.show.mark_processed && !unjudged { (&lane.images.processed, None) } else { (&lane.images.note, lane.tint) };
+                                drawn |= self.put(r, image, at, alpha, tint);
                             }
                         }
                         NoteKind::LongStart { ln } => {
@@ -1015,13 +1039,13 @@ impl Field<'_> {
                         NoteKind::LongEnd { .. } => {}
                         NoteKind::Mine { .. } => {
                             if ahead {
-                                drawn |= self.put(r, &lane.images.mine, at, alpha);
+                                drawn |= self.put(r, &lane.images.mine, at, alpha, None);
                             }
                         }
                     }
                 }
                 if notes.show.hidden_notes && ahead && timeline.hidden.get(lane_index).is_some_and(Option::is_some) {
-                    drawn |= self.put(r, &lane.images.hidden, (lane.region.x, y as f32, lane.region.w, lane.scale), alpha);
+                    drawn |= self.put(r, &lane.images.hidden, (lane.region.x, y as f32, lane.region.w, lane.scale), alpha, None);
                 }
             }
             index += 1;
@@ -1063,7 +1087,7 @@ impl Field<'_> {
         let foot = lane.region.y - grown;
         let height = (if y < foot { f64::from(y - foot) } else { span }) as f32;
         let end_y = (f64::from(y) + span) as f32;
-        let images = if self.notes.plays_itself(lane_index) { &AUTO_LONG_IMAGES } else { &lane.images.long };
+        let (images, tint) = if self.notes.plays_itself(lane_index) { (&AUTO_LONG_IMAGES, None) } else { (&lane.images.long, lane.tint) };
         let held = lane.long.processing == Some(head_us);
         let body_at = (x, end_y - height + scale, w, height - scale);
         let end_at = (x, end_y, w, scale);
@@ -1078,18 +1102,18 @@ impl Field<'_> {
                     (false, true, false) => HELL_BODY_DRAINING,
                     (false, false, _) => HELL_BODY_IDLE,
                 };
-                let body = self.put(r, &images[slot], body_at, alpha);
-                let end = self.put(r, &images[HELL_END], end_at, alpha);
-                self.put(r, &images[HELL_START], start_at, alpha) | body | end
+                let body = self.put(r, &images[slot], body_at, alpha, if slot == HELL_BODY_DRAINING { None } else { tint });
+                let end = self.put(r, &images[HELL_END], end_at, alpha, tint);
+                self.put(r, &images[HELL_START], start_at, alpha, tint) | body | end
             }
             LnKind::Cn => {
-                let body = self.put(r, &images[if held { LONG_BODY_HELD } else { LONG_BODY_IDLE }], body_at, alpha);
-                let end = self.put(r, &images[LONG_END], end_at, alpha);
-                self.put(r, &images[LONG_START], start_at, alpha) | body | end
+                let body = self.put(r, &images[if held { LONG_BODY_HELD } else { LONG_BODY_IDLE }], body_at, alpha, tint);
+                let end = self.put(r, &images[LONG_END], end_at, alpha, tint);
+                self.put(r, &images[LONG_START], start_at, alpha, tint) | body | end
             }
             LnKind::Ln => {
-                let body = self.put(r, &images[if held { LONG_BODY_HELD } else { LONG_BODY_IDLE }], body_at, alpha);
-                self.put(r, &images[LONG_START], start_at, alpha) | body
+                let body = self.put(r, &images[if held { LONG_BODY_HELD } else { LONG_BODY_IDLE }], body_at, alpha, tint);
+                self.put(r, &images[LONG_START], start_at, alpha, tint) | body
             }
             LnKind::Undefined => false,
         }
@@ -1147,7 +1171,7 @@ impl Field<'_> {
                 if (state == NOTE_UNJUDGED || state >= NOTE_STATE_BAD) && timeline.time_us <= microtime && y >= floor {
                     let (x, at_y, w, h) = self.swollen((lane.region.x, y as f32, lane.region.w, lane.scale), lane);
                     let row = if y > origin { (origin - f64::from((h - lane.scale) / 2.0)) as f32 } else { at_y };
-                    drawn |= self.put(r, &lane.images.note, (x, row, w, h), 1.0);
+                    drawn |= self.put(r, &lane.images.note, (x, row, w, h), 1.0, lane.tint);
                 }
             }
             next = index.checked_sub(1);
@@ -1209,6 +1233,7 @@ pub(crate) fn draw_note<R: Renderer>(
             scale: images.height * out.scale_y,
             images,
             long: notes.longs.get(lane).copied().unwrap_or_default(),
+            tint: images.tint.and_then(|id| frame.state.color(id)),
         })
         .collect();
     let Some(first) = lanes.first().map(|lane| lane.region) else {

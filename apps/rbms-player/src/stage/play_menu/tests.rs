@@ -1370,6 +1370,7 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
     assert_ne!(menu.capture_at("play-menu-pack-7k-held-100", RUN_SECONDS), PreviewStatus::Loading);
 }
 
+mod colors;
 mod numbers;
 mod shared;
 mod skin_offsets;

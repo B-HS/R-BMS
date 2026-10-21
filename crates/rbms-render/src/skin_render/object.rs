@@ -306,7 +306,8 @@ fn place_part(track: &DestinationTrack, frame: &SkinFrame<'_>) -> Option<Resolve
 /// A destination with no `dst` adds almost nothing. The reference's loader applies a destination's
 /// timer, loop, blend, filter, centre, conditions and pointer rectangle once per keyframe it reads
 /// (`JSONSkinLoader.setDestination`), so with no keyframe to read none of them are applied at all;
-/// only the offsets and the stretch, which it sets after that loop, reach the object. That is how
+/// only the offsets and the stretch, which it sets after that loop, reach the object -- and the colour
+/// id an R-BMS document names (`tint`), which the reference has no notion of. That is how
 /// `{ id = "notes", offset = 30 }` draws a note field: the object is always there, and the lists
 /// nested under it say where everything goes.
 ///
@@ -319,6 +320,7 @@ fn self_placed_track(declared: &DestinationTrack) -> DestinationTrack {
             offsets: declared.offsets.clone(),
             relative: declared.relative,
             stretch: declared.stretch,
+            tint: declared.tint,
             frames: vec![SELF_PLACED_KEYFRAME],
             ..DestinationTrack::default()
         };

@@ -106,7 +106,7 @@ use rbms_render::font::with_text_context;
 use rbms_render::skin_render::textures::{SkinTexturePool, TextureStats, referenced_movie_files, referenced_source_files};
 use rbms_render::skin_render::{PreparedFrame, SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinTextWriter, SkinWriter};
 use rbms_render::{Color, FrameData, Renderer, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext, with_render_ctx};
-use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinOffset};
+use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinColor, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
 use rbms_skin::lua::{BoundFrame, SkinLua};
 use rbms_skin::property::generated::OFFSET_ALL;
@@ -277,6 +277,11 @@ impl OffsetSource for DocumentOffsets<'_> {
         }
         let (across, down) = self.units_per_pixel;
         Some(SkinOffset { x: stored.x * across, y: stored.y * down, w: stored.w * across, h: stored.h * down, ..stored })
+    }
+
+    /// A colour is no length, so it is answered as stored whatever size the document is drawn at.
+    fn color(&self, id: i32) -> Option<SkinColor> {
+        self.document.and_then(|stored| stored.color(id))
     }
 }
 

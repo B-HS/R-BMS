@@ -116,15 +116,21 @@ fn note_object(body: NoteBody) -> SkinObject {
     SkinObject { stretch: StretchKind::from_id(track.stretch), track, body: Body::Note(body) }
 }
 
-/// A game that answers nothing but one offset.
+/// A game that answers nothing but one offset and one colour.
 #[derive(Debug, Default, Clone, Copy)]
 struct Host {
     nudge: Option<SkinOffset>,
+    /// The colour id the player set, and the colour set for it.
+    color: Option<(i32, SkinColor)>,
 }
 
 impl OffsetSource for Host {
     fn offset(&self, id: i32) -> Option<SkinOffset> {
         self.nudge.filter(|_| id == NUDGE_OFFSET)
+    }
+
+    fn color(&self, id: i32) -> Option<SkinColor> {
+        self.color.filter(|(set, _)| *set == id).map(|(_, color)| color)
     }
 }
 
@@ -451,7 +457,7 @@ fn a_hidden_note_is_drawn_only_on_request_and_ignores_the_note_offsets() {
     let timelines = chart(vec![carrier]);
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let object = note_object(field(&mut canvas));
-    let host = Host { nudge: Some(SkinOffset { x: 300.0, y: 50.0, ..SkinOffset::default() }) };
+    let host = Host { nudge: Some(SkinOffset { x: 300.0, y: 50.0, ..SkinOffset::default() }), ..Host::default() };
     let authored = (CANVAS.0 as f32, CANVAS.1 as f32);
 
     assert!(!draw_with(&mut canvas, &object, &playing(&timelines, 500), &host, authored), "not asked for, not drawn");
@@ -638,7 +644,7 @@ fn the_note_objects_offsets_move_and_resize_every_note() {
     let timelines = chart(vec![note_at(1_000, 0.5, 0)]);
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let object = note_object(field(&mut canvas));
-    let host = Host { nudge: Some(SkinOffset { x: 5.0, y: -12.0, w: 10.0, h: 4.0, ..SkinOffset::default() }) };
+    let host = Host { nudge: Some(SkinOffset { x: 5.0, y: -12.0, w: 10.0, h: 4.0, ..SkinOffset::default() }), ..Host::default() };
     draw_with(&mut canvas, &object, &playing(&timelines, 500), &host, (CANVAS.0 as f32, CANVAS.1 as f32));
     assert_eq!(span(&canvas, 105, shade(NOTE_RED)), Some((188, 202)), "twelve lower and four taller");
     assert_eq!(span(&canvas, 154, shade(NOTE_RED)), Some((188, 202)), "five to the right and ten wider");
@@ -791,7 +797,7 @@ fn over_black(ink: Color, alpha: u8) -> Color {
 
 /// A host whose one offset shifts the alpha of whatever names it.
 fn fading(shift: f32) -> Host {
-    Host { nudge: Some(SkinOffset { a: shift, ..SkinOffset::default() }) }
+    Host { nudge: Some(SkinOffset { a: shift, ..SkinOffset::default() }), ..Host::default() }
 }
 
 /// The alpha of an offset the note object's destination names fades every note of the field: a
@@ -876,4 +882,123 @@ fn a_measure_line_fades_with_its_own_destination_and_not_with_the_notes() {
     assert!(draw_with(&mut canvas, &line_fades, &notes, &fading(WHOLE_SHIFT), size));
     assert_eq!(span(&canvas, middle(1), shade(SECTION_RED)), None, "a line with no alpha left is drawn");
     assert_eq!(pixel(&canvas, middle(0), note_row), shade(NOTE_RED));
+}
+
+/// The colour id the lanes of the tinted test field name.
+const LANE_COLOR: i32 = 7;
+
+/// A colour a player could set for it, opaque and at about half.
+const PLAYER_COLOR: SkinColor = SkinColor::rgba(40, 120, 200, 255);
+const PLAYER_COLOR_AT_HALF: SkinColor = SkinColor::rgba(40, 120, 200, 128);
+
+/// What the canvas shows where a white image tinted by an opaque colour is drawn.
+fn shown(color: SkinColor) -> Color {
+    Color { r: color.r, g: color.g, b: color.b, a: u8::MAX }
+}
+
+/// The test field with every image of every lane white, which a colour comes out on exactly, and
+/// with the lanes `tinted` names multiplied by [`LANE_COLOR`].
+fn white_field(canvas: &mut CpuCanvas, tinted: [bool; 4]) -> NoteBody {
+    let white = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
+    let lanes = LANES
+        .iter()
+        .zip(tinted)
+        .enumerate()
+        .map(|(lane, (rect, tinted))| NoteLane {
+            note: NoteImage::Sprite(solid(canvas, &format!("white-note{lane}"), white)),
+            long: std::array::from_fn(|slot| NoteImage::Sprite(solid(canvas, &format!("white-long{lane}.{slot}"), white))),
+            mine: NoteImage::Sprite(solid(canvas, &format!("white-mine{lane}"), white)),
+            tint: tinted.then_some(LANE_COLOR),
+            ..NoteLane::placeholder(*rect, NOTE_H)
+        })
+        .collect();
+    NoteBody::new(lanes)
+}
+
+/// A host that answers [`LANE_COLOR`] with `color`.
+fn colored(color: SkinColor) -> Host {
+    Host { color: Some((LANE_COLOR, color)), ..Host::default() }
+}
+
+/// A lane that names a colour draws its notes in it once the player set one, and as its images are
+/// until then; a lane that names none is drawn as its images are whatever is set. The colour's
+/// alpha takes the note down with it.
+#[test]
+fn a_lane_that_names_a_colour_draws_its_notes_in_the_colour_the_player_set() {
+    let timelines = chart(vec![with(note_at(1_000, 0.5, 0), 1, NoteKind::Normal)]);
+    let size = (CANVAS.0 as f32, CANVAS.1 as f32);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(white_field(&mut canvas, [true, false, false, false]));
+    let notes = playing(&timelines, 500);
+    let white = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
+    let row = 205;
+
+    assert!(draw_with(&mut canvas, &object, &notes, &Host::default(), size));
+    assert_eq!((pixel(&canvas, middle(0), row), pixel(&canvas, middle(1), row)), (white, white), "a colour nobody set changed a note");
+
+    assert!(draw_with(&mut canvas, &object, &notes, &colored(PLAYER_COLOR), size));
+    assert_eq!(pixel(&canvas, middle(0), row), shown(PLAYER_COLOR), "the lane's note is not in the colour set for it");
+    assert_eq!(pixel(&canvas, middle(1), row), white, "a lane that names no colour took one");
+
+    assert!(draw_with(&mut canvas, &object, &notes, &Host { color: Some((LANE_COLOR + 1, PLAYER_COLOR)), ..Host::default() }, size));
+    assert_eq!(pixel(&canvas, middle(0), row), white, "a colour set under another id reached the lane");
+
+    assert!(draw_with(&mut canvas, &object, &notes, &colored(PLAYER_COLOR_AT_HALF), size));
+    assert_eq!(pixel(&canvas, middle(0), row), over_black(shown(PLAYER_COLOR), PLAYER_COLOR_AT_HALF.a), "the colour's alpha does not fade the note");
+}
+
+/// The colour reaches every part of a long note: its start, its body and its end.
+#[test]
+fn a_lanes_colour_reaches_every_part_of_a_long_note() {
+    let timelines = long_chart(LnKind::Cn, 2_000, 1.0);
+    let notes = LaneNotes { ln_mode: LnKind::Cn, ..playing(&timelines, 500) };
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(white_field(&mut canvas, [true; 4]));
+    assert!(draw_with(&mut canvas, &object, &notes, &colored(PLAYER_COLOR), (CANVAS.0 as f32, CANVAS.1 as f32)));
+    assert_eq!(span(&canvas, middle(0), shown(PLAYER_COLOR)), Some((200, 410)), "from the foot of the start to the top of the end");
+}
+
+/// What a note says by its colour is kept: a mine, a hidden note, an already judged note and the
+/// body of a hell charge note that is draining are drawn as they always are in a lane with a
+/// colour, and SCRATCH AUTO's green wins over it.
+#[test]
+fn a_mine_a_hidden_a_judged_a_draining_and_an_automatic_note_keep_their_own_colours() {
+    let white = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
+    let size = (CANVAS.0 as f32, CANVAS.1 as f32);
+    let host = colored(PLAYER_COLOR);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(white_field(&mut canvas, [true; 4]));
+
+    let mut carrier = with(with(at(1_000, 0.5), 0, NoteKind::Normal), 1, NoteKind::Mine { damage: 1.0 });
+    carrier.hidden[2] = Some(Note::normal(0, carrier.time_us, carrier.section));
+    let timelines = chart(vec![carrier]);
+    let shown_hidden = NoteDisplay { hidden_notes: true, ..NoteDisplay::default() };
+    assert!(draw_with(&mut canvas, &object, &LaneNotes { show: shown_hidden, ..playing(&timelines, 500) }, &host, size));
+    assert_eq!(pixel(&canvas, middle(0), 205), shown(PLAYER_COLOR), "the note beside them is not in the lane's colour");
+    assert_eq!(pixel(&canvas, middle(1), 205), white, "a mine took the lane's colour");
+    assert_eq!(pixel(&canvas, LANES[2].x as u32, 200), PLACEHOLDER_HIDDEN, "a hidden note took the lane's colour");
+
+    let hit = Judged(&[(0, 1_000, 1)]);
+    let marked = NoteDisplay { mark_processed: true, ..NoteDisplay::default() };
+    assert!(draw_with(&mut canvas, &object, &LaneNotes { states: &hit, show: marked, ..playing(&timelines, 500) }, &host, size));
+    assert_eq!(pixel(&canvas, LANES[0].x as u32, 200), PLACEHOLDER_PROCESSED, "a judged note took the lane's colour");
+
+    let auto = [true];
+    assert!(draw_with(&mut canvas, &object, &LaneNotes { auto_lanes: &auto, ..playing(&timelines, 500) }, &host, size));
+    assert_eq!(pixel(&canvas, middle(0), 205), super::AUTO_LANE_NOTE, "SCRATCH AUTO's green lost to the lane's colour");
+
+    let hell = long_chart(LnKind::Hcn, 2_000, 1.0);
+    let head_us = 1_000 * MICROS_PER_MILLI;
+    let hit: &'static [(usize, i64, u8)] = &[(0, 1_000, 2)];
+    let body_at = |long: LaneLong, canvas: &mut CpuCanvas| {
+        let longs = [long];
+        let judged = Judged(hit);
+        let notes = LaneNotes { ln_mode: LnKind::Hcn, longs: &longs, states: &judged, ..playing(&hell, 500) };
+        draw_with(canvas, &object, &notes, &host, size);
+        (pixel(canvas, middle(0), 300), pixel(canvas, middle(0), 205), pixel(canvas, middle(0), 405))
+    };
+    let draining = LaneLong { passing: Some(head_us), increasing: false, ..LaneLong::default() };
+    assert_eq!(body_at(draining, &mut canvas), (white, shown(PLAYER_COLOR), shown(PLAYER_COLOR)), "only the draining body keeps its own colour");
+    let gaining = LaneLong { passing: Some(head_us), increasing: true, ..LaneLong::default() };
+    assert_eq!(body_at(gaining, &mut canvas).0, shown(PLAYER_COLOR), "a gaining body did not take the lane's colour");
 }

@@ -43,12 +43,12 @@ use std::time::SystemTime;
 use rbms_config::{
     ACTION_VALUE, Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NO_UNIT, NONE_VALUE, NumberSpec, SKIN_SCREEN_LABELS, SkinCustomisation, skin_document_label,
 };
-use rbms_skin::dst::SkinOffset;
+use rbms_skin::dst::{SkinColor, SkinOffset};
 use rbms_skin::loader::{
     LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, automatic_offsets, is_lua_skin, is_supported_skin_type, load_header,
     load_skin_with_host, selected_option, skin_type_mode,
 };
-use rbms_skin::model::{OffsetDef, PropertyDef};
+use rbms_skin::model::{ColorDef, OffsetDef, PropertyDef};
 use rbms_skin::property::{DefaultState, SkinHost};
 use rbms_skin::resolve::{CustomFile, RANDOM_SELECTION, plain_path};
 
@@ -160,6 +160,85 @@ const EXPORT_LABEL: &str = "EXPORT";
 
 /// What separates a row's name from its value where the two are said on one line.
 const ROW_VALUE_SEPARATOR: &str = ": ";
+
+/// How a channel row of a colour is counted: one of the 256 values a channel holds.
+const CHANNEL_STEPS: NumberSpec = NumberSpec::whole(0, u8::MAX as i64, NO_UNIT);
+
+/// What is written before the digits of a colour.
+pub(crate) const HEX_MARK: &str = "#";
+
+/// What the row that shows or hides the channels of every colour is called.
+pub(crate) const COLOR_CHANNELS_LABEL: &str = "COLOR CHANNELS";
+
+/// The colours the arrows of a colour row go round, as red, green and blue: white to black in
+/// greys, then round the hues. The alpha the row stands at is kept as it steps.
+const COLOR_PRESETS: [(u8, u8, u8); 16] = [
+    (0xFF, 0xFF, 0xFF),
+    (0xC0, 0xC0, 0xC0),
+    (0x80, 0x80, 0x80),
+    (0x40, 0x40, 0x40),
+    (0x00, 0x00, 0x00),
+    (0xFF, 0x40, 0x40),
+    (0xFF, 0x90, 0x20),
+    (0xFF, 0xE0, 0x40),
+    (0xA0, 0xFF, 0x40),
+    (0x30, 0xE0, 0x50),
+    (0x40, 0xE0, 0xFF),
+    (0x40, 0xA0, 0xFF),
+    (0x40, 0x60, 0xFF),
+    (0xA0, 0x60, 0xFF),
+    (0xFF, 0x40, 0xC0),
+    (0xFF, 0x90, 0xC0),
+];
+
+/// One channel of a colour row, which the row's channel rows set one at a time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ColorChannel {
+    R,
+    G,
+    B,
+    A,
+}
+
+impl ColorChannel {
+    /// Every channel, in the order the rows are listed.
+    pub(crate) const ALL: [ColorChannel; 4] = [ColorChannel::R, ColorChannel::G, ColorChannel::B, ColorChannel::A];
+
+    /// What the row calls this channel.
+    fn label(self) -> &'static str {
+        match self {
+            ColorChannel::R => "R",
+            ColorChannel::G => "G",
+            ColorChannel::B => "B",
+            ColorChannel::A => "A",
+        }
+    }
+
+    /// The value of this channel of `color`.
+    fn get(self, color: SkinColor) -> u8 {
+        match self {
+            ColorChannel::R => color.r,
+            ColorChannel::G => color.g,
+            ColorChannel::B => color.b,
+            ColorChannel::A => color.a,
+        }
+    }
+
+    /// `color` with this channel at `value`.
+    fn set(self, color: SkinColor, value: u8) -> SkinColor {
+        match self {
+            ColorChannel::R => SkinColor { r: value, ..color },
+            ColorChannel::G => SkinColor { g: value, ..color },
+            ColorChannel::B => SkinColor { b: value, ..color },
+            ColorChannel::A => SkinColor { a: value, ..color },
+        }
+    }
+}
+
+/// A colour as a colour row writes it: `#RRGGBBAA`, which a typed figure is read back from.
+pub(crate) fn hex_color(color: SkinColor) -> String {
+    format!("{HEX_MARK}{}", color.to_hex())
+}
 
 /// One axis of a skin offset, which a document says one by one whether the player may nudge.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -288,6 +367,11 @@ pub(crate) enum SkinRowKind {
     Offset(OffsetAxis),
     /// The one row of an offset that only fades, shown as how opaque it leaves its destinations.
     Opacity,
+    /// A colour slot, shown as its colour: stepped round a list of colours, typed in hex and put
+    /// back to the skin's own.
+    Color,
+    /// One channel of a colour slot, shown as a number from 0 to 255.
+    ColorChannel(ColorChannel),
 }
 
 /// One row the skin library adds to a menu: a customisation row the chosen document declares,
@@ -301,6 +385,13 @@ pub(crate) enum SkinRow {
     File(usize),
     /// One axis of the `offset[]` entry at this index.
     Offset(usize, OffsetAxis),
+    /// The `color[]` entry at this index: a colour the player sets, or leaves to the skin.
+    Color(usize),
+    /// One channel of the `color[]` entry at this index.
+    ColorChannel(usize, ColorChannel),
+    /// The row the skin menu shows or hides the channels of every colour with. No document declares
+    /// it, and the library lists none: the skin menu puts it in place of the channel rows.
+    ColorChannels,
     /// The row that exports the pack in effect with the choices made in it. No document declares
     /// it, and only the skin menu lists it ([`SkinLibrary::can_export`]).
     Export,
@@ -914,8 +1005,8 @@ impl SkinLibrary {
     }
 
     /// The customisation rows the skin menu shows, top to bottom, in the order the chosen document
-    /// declares them: its properties, its file slots, one row per axis it lets the player nudge, and
-    /// then its opacities.
+    /// declares them: its properties, its file slots, its colours and their channels, one row per
+    /// axis it lets the player nudge, and then its opacities.
     pub(crate) fn rows(&self, config: &Config) -> Vec<SkinRow> {
         self.rows_for(config, config.skin.screen)
     }
@@ -926,7 +1017,9 @@ impl SkinLibrary {
     ///
     /// Each kind is listed in the order the document declares it. The opacities come after every
     /// other offset wherever the document declared them, so the rows that move and resize are read
-    /// together and the rows that fade are read together.
+    /// together and the rows that fade are read together. Every colour's one row comes before the
+    /// channel rows of any, which follow colour by colour, so a menu that keeps the channels out of
+    /// sight finds them together.
     pub(crate) fn rows_for(&self, config: &Config, screen: i32) -> Vec<SkinRow> {
         let Some(header) = self.header_of(config, screen) else {
             return Vec::new();
@@ -941,7 +1034,9 @@ impl SkinLibrary {
                 .filter(move |(_, def)| is_opacity(def) == fading)
                 .flat_map(|(at, def)| OffsetAxis::ALL.into_iter().filter(move |axis| axis.allowed(def)).map(move |axis| SkinRow::Offset(at, axis)))
         };
-        properties.chain(files).chain(axes(false)).chain(axes(true)).collect()
+        let colors = (0..header.colors.len()).map(SkinRow::Color);
+        let channels = (0..header.colors.len()).flat_map(|at| ColorChannel::ALL.into_iter().map(move |channel| SkinRow::ColorChannel(at, channel)));
+        properties.chain(files).chain(colors).chain(channels).chain(axes(false)).chain(axes(true)).collect()
     }
 
     /// What kind of row one customisation row of the document one screen is to be drawn with is, or
@@ -955,7 +1050,9 @@ impl SkinLibrary {
                 let def = header.offsets.get(at)?;
                 Some(if is_opacity(def) { SkinRowKind::Opacity } else { SkinRowKind::Offset(axis) })
             }
-            SkinRow::Export => None,
+            SkinRow::Color(at) => header.colors.get(at).map(|_| SkinRowKind::Color),
+            SkinRow::ColorChannel(at, channel) => header.colors.get(at).map(|_| SkinRowKind::ColorChannel(channel)),
+            SkinRow::Export | SkinRow::ColorChannels => None,
         }
     }
 
@@ -986,7 +1083,18 @@ impl SkinLibrary {
     /// The step the row ships on is where the pack's own adjustments put it, and no offset at all
     /// when they say nothing of it, which for an opacity is the whole of it. All of an opacity is
     /// where its slider and its arrows end: only a typed figure takes one further.
+    ///
+    /// A channel of a colour is counted from 0 to 255, and stands where the colour the row shows has
+    /// it: the player's, or the skin's own while the player has set none. It ships where the pack
+    /// put the colour, or the skin's own when the pack says nothing of it.
     pub(crate) fn number_for(&self, config: &Config, screen: i32, row: SkinRow) -> Option<NumberValue> {
+        if let SkinRow::ColorChannel(at, channel) = row {
+            let def = self.header_of(config, screen)?.colors.get(at)?;
+            let (held, _) = self.color_for(config, screen, at)?;
+            let given = self.document_path(config, screen).and_then(|path| self.given(path)).and_then(|given| given.colors.get(&def.id).copied());
+            let shipped = given.unwrap_or_else(|| def.default_color());
+            return Some(NumberValue::of(CHANNEL_STEPS, i64::from(channel.get(held)), i64::from(channel.get(shipped))));
+        }
         let SkinRow::Offset(at, axis) = row else {
             return None;
         };
@@ -1016,7 +1124,20 @@ impl SkinLibrary {
     /// between two steps, or past the row's end, is not rewritten by setting the row to what it
     /// already reads. An offset the player had not stored begins from where the pack's own
     /// adjustments have it, so moving one of its axes keeps the others where they stood.
+    ///
+    /// A channel of a colour moves that channel of the colour the row shows and stores the colour
+    /// whole ([`SkinLibrary::set_color_for`]).
     pub(crate) fn set_number_for(&mut self, config: &mut Config, screen: i32, row: SkinRow, steps: i64) -> bool {
+        if let SkinRow::ColorChannel(at, channel) = row {
+            let (Some(value), Some((held, _))) = (self.number_for(config, screen, row), self.color_for(config, screen, at)) else {
+                return false;
+            };
+            let steps = value.spec.clamp(steps);
+            let Ok(channel_value) = u8::try_from(steps) else {
+                return false;
+            };
+            return steps != value.steps && self.put_color(config, screen, at, Some(channel.set(held, channel_value)));
+        }
         let SkinRow::Offset(at, axis) = row else {
             return false;
         };
@@ -1084,13 +1205,23 @@ impl SkinLibrary {
                 }
                 None => missing_row(),
             },
+            SkinRow::Color(at) => match header.colors.get(at) {
+                Some(def) => (color_label(def), color_value(stored.and_then(|entry| entry.colors.get(&def.id).copied()))),
+                None => missing_row(),
+            },
+            SkinRow::ColorChannel(at, channel) => match (header.colors.get(at), self.color_for(config, screen, at)) {
+                (Some(def), Some((color, _))) => (format!("{} {}", color_label(def), channel.label()), channel.get(color).to_string()),
+                _ => missing_row(),
+            },
+            SkinRow::ColorChannels => (COLOR_CHANNELS_LABEL.to_string(), String::new()),
         }
     }
 
     /// Step one customisation row, and report whether anything moved.
     ///
     /// A property or a file changes what is drawn and which files are read, so the document has to
-    /// be read again; an offset is read live out of the stored choices, so it does not.
+    /// be read again; an offset is read live out of the stored choices, so it does not. A colour is
+    /// read live too, except when it comes to be set or stops being set ([`SkinLibrary::set_color_for`]).
     pub(crate) fn step(&mut self, config: &mut Config, row: SkinRow, delta: i32) -> bool {
         self.step_for(config, config.skin.screen, row, delta)
     }
@@ -1135,12 +1266,91 @@ impl SkinLibrary {
                 self.settle_effective(config);
                 true
             }
-            SkinRow::Offset(_, _) => match self.number_for(config, screen, row) {
+            SkinRow::Offset(_, _) | SkinRow::ColorChannel(_, _) => match self.number_for(config, screen, row) {
                 Some(value) => self.set_number_for(config, screen, row, value.stepped(delta, false)),
                 None => false,
             },
-            SkinRow::Export => false,
+            SkinRow::Color(at) => {
+                let Some((current, _)) = self.color_for(config, screen, at) else {
+                    return false;
+                };
+                let found = COLOR_PRESETS.iter().position(|(r, g, b)| (current.r, current.g, current.b) == (*r, *g, *b));
+                let next = match found {
+                    Some(found) => stepped(Some(found), COLOR_PRESETS.len(), delta),
+                    None if delta < 0 => COLOR_PRESETS.len().checked_sub(1),
+                    None => Some(0),
+                };
+                let Some((r, g, b)) = next.and_then(|next| COLOR_PRESETS.get(next).copied()) else {
+                    return false;
+                };
+                self.put_color(config, screen, at, Some(SkinColor::rgba(r, g, b, current.a)))
+            }
+            SkinRow::Export | SkinRow::ColorChannels => false,
         }
+    }
+
+    /// The colour one colour row of the document `screen` is to be drawn with stands on, and
+    /// whether it is one that is set -- by the player, or by the pack's own adjustments -- rather
+    /// than the skin's own ([`ColorDef::default_color`]). `None` for a row whose declaration is no
+    /// longer there.
+    pub(crate) fn color_for(&self, config: &Config, screen: i32, at: usize) -> Option<(SkinColor, bool)> {
+        let def = self.header_of(config, screen)?.colors.get(at)?;
+        let set = self.customisation_for(config, screen).and_then(|entry| entry.colors.get(&def.id).copied());
+        Some((set.unwrap_or_else(|| def.default_color()), set.is_some()))
+    }
+
+    /// Set one colour row of the document `screen` is to be drawn with to `color`, and report
+    /// whether what is stored moved.
+    ///
+    /// A colour that was set already is read live out of the stored choices, as an offset is, so
+    /// changing it reads nothing again. A colour that was not set is one the skin drew in its own
+    /// colours when it was read -- a part the skin had no reason to tint -- so setting it has the
+    /// document read again, once, for the skin to tint that part from then on.
+    pub(crate) fn set_color_for(&mut self, config: &mut Config, screen: i32, at: usize, color: SkinColor) -> bool {
+        self.put_color(config, screen, at, Some(color))
+    }
+
+    /// Drop the colour the player set for one colour row of the document `screen` is to be drawn
+    /// with, so the row is back on the pack's colour, or the skin's own, and report whether there
+    /// was a colour to drop. A row that is then set by nobody has the document read again, once,
+    /// for the skin to draw that part in its own colours.
+    pub(crate) fn reset_color_for(&mut self, config: &mut Config, screen: i32, at: usize) -> bool {
+        self.put_color(config, screen, at, None)
+    }
+
+    /// Store `color` for one colour row, or drop what the player stored for it with `None`, and
+    /// report whether that moved anything. The document is read again when the row comes to be set
+    /// or stops being set, and not when a set colour changes.
+    fn put_color(&mut self, config: &mut Config, screen: i32, at: usize, color: Option<SkinColor>) -> bool {
+        let Some(path) = self.document_path(config, screen).map(str::to_owned) else {
+            return false;
+        };
+        let Some(id) = self.header_of(config, screen).and_then(|header| header.colors.get(at)).map(|def| def.id) else {
+            return false;
+        };
+        let was_set = self.customisation(config, &path).is_some_and(|entry| entry.colors.contains_key(&id));
+        match color {
+            Some(color) => {
+                if config.skin.customisation(&path).and_then(|entry| entry.colors.get(&id)) == Some(&color) {
+                    return false;
+                }
+                config.skin.customise(&path).colors.insert(id, color);
+            }
+            None => {
+                if config.skin.customisation(&path).is_none_or(|entry| !entry.colors.contains_key(&id)) {
+                    return false;
+                }
+                config.skin.customise(&path).colors.remove(&id);
+                if config.skin.customisation(&path).is_some_and(|entry| *entry == SkinCustomisation::default()) {
+                    config.skin.forget(&path);
+                }
+            }
+        }
+        self.settle_effective(config);
+        if self.customisation(config, &path).is_some_and(|entry| entry.colors.contains_key(&id)) != was_set {
+            self.stale.insert(screen);
+        }
+        true
     }
 
     /// Drop the choice made for one option of the document one screen is to be drawn with, so the
@@ -1199,8 +1409,9 @@ impl SkinLibrary {
     }
 
     /// The other screens whose document declares the row `row` of the document `screen` is to be
-    /// drawn with: an option of the same name, or an offset of the same name that may be moved
-    /// along the same axis. Empty for a file slot, whose files are each document's own.
+    /// drawn with: an option of the same name, an offset of the same name that may be moved along
+    /// the same axis, or a colour of the same name, whichever of its rows `row` is. Empty for a file
+    /// slot, whose files are each document's own.
     ///
     /// Rows are matched by name and nothing else. Two documents of one pack that mean the same
     /// thing by an option call it the same; nothing here ties them together, and each keeps its own
@@ -1226,7 +1437,14 @@ impl SkinLibrary {
                 let declares = |peer: &SkinHeader| peer.offsets.iter().any(|entry| entry.name == def.name && axis.allowed(entry));
                 others().filter(|other| self.header_of(config, *other).is_some_and(declares)).collect()
             }
-            SkinRow::File(_) | SkinRow::Export => Vec::new(),
+            SkinRow::Color(at) | SkinRow::ColorChannel(at, _) => {
+                let Some(def) = header.colors.get(at) else {
+                    return Vec::new();
+                };
+                let declares = |peer: &SkinHeader| peer.colors.iter().any(|entry| entry.name == def.name);
+                others().filter(|other| self.header_of(config, *other).is_some_and(declares)).collect()
+            }
+            SkinRow::File(_) | SkinRow::Export | SkinRow::ColorChannels => Vec::new(),
         }
     }
 
@@ -1235,9 +1453,10 @@ impl SkinLibrary {
     /// to, or `None` for a row no other screen declares.
     ///
     /// An option is put on the item of the same name, and a screen whose option has no item of that
-    /// name is passed over. An offset is moved along the one axis the row is of. Each value is
-    /// stored as the player's own choice for that screen's document, which is read again when its
-    /// screen is next drawn.
+    /// name is passed over. An offset is moved along the one axis the row is of. A colour is put on
+    /// whole from any of its rows, and a colour the player left to the skin is left to each
+    /// screen's skin. Each value is stored as the player's own choice for that screen's document,
+    /// which is read again when its screen is next drawn.
     pub(crate) fn apply_to_peers(&mut self, config: &mut Config, screen: i32, row: SkinRow) -> Option<AppliedToPeers> {
         let peers = self.peers_for(config, screen, row);
         if peers.is_empty() {
@@ -1270,7 +1489,24 @@ impl SkinLibrary {
                         true
                     })
                 }),
-                SkinRow::File(_) | SkinRow::Export => false,
+                SkinRow::Color(at) | SkinRow::ColorChannel(at, _) => header.colors.get(at).is_some_and(|def| {
+                    let chosen = stored.colors.get(&def.id).copied();
+                    let theirs = declared.colors.iter().find(|entry| entry.name == def.name);
+                    theirs.is_some_and(|theirs| {
+                        match chosen {
+                            Some(color) => {
+                                config.skin.customise(&path).colors.insert(theirs.id, color);
+                            }
+                            None => {
+                                if config.skin.customisation(&path).is_some_and(|entry| entry.colors.contains_key(&theirs.id)) {
+                                    config.skin.customise(&path).colors.remove(&theirs.id);
+                                }
+                            }
+                        }
+                        true
+                    })
+                }),
+                SkinRow::File(_) | SkinRow::Export | SkinRow::ColorChannels => false,
             };
             if taken {
                 outcome.applied += 1;
@@ -1694,6 +1930,16 @@ fn labelled(category: &str, name: &str) -> String {
     }
 }
 
+/// What a colour row is called: its category and the name the document shows for it.
+fn color_label(def: &ColorDef) -> String {
+    labelled(&def.category, def.display_name())
+}
+
+/// What a colour row reads: the colour that is set for it, or that the skin's own is in force.
+fn color_value(set: Option<SkinColor>) -> String {
+    set.map_or_else(|| DEFAULT_VALUE.to_string(), hex_color)
+}
+
 /// What the EXPORT row shows.
 fn export_row() -> (String, String) {
     (EXPORT_LABEL.to_string(), ACTION_VALUE.to_string())
@@ -1741,6 +1987,10 @@ fn stepped(at: Option<usize>, len: usize, delta: i32) -> Option<usize> {
     Some((at as i32 + delta).rem_euclid(len as i32) as usize)
 }
 
+#[cfg(test)]
+pub(crate) mod color_fixtures;
+#[cfg(test)]
+mod color_tests;
 #[cfg(test)]
 mod default_pack_tests;
 #[cfg(test)]

@@ -30,6 +30,14 @@
 //! screen keeps drawing and taking keys, says how far the copy has got under the preview, and
 //! Escape calls it off rather than leaving the menu.
 //!
+//! A colour the chosen document lets the player set is one row, read as its colour with a square of
+//! it: the arrows go round a list of colours keeping its alpha, Enter opens it to have a colour typed
+//! in hex, and the zero key gives it back to the skin. Its red, green, blue and alpha are rows of
+//! their own, all of them behind one row, COLOR CHANNELS, that shows or hides them. A colour that
+//! was set already is read where it is stored by every frame, as an offset is; one that comes to be
+//! set, or stops being set, has the document read again once
+//! ([`crate::skin_select::SkinLibrary::set_color_for`]).
+//!
 //! A row of the chosen document that other screens' documents declare too -- an option of the same
 //! name, an offset of the same name -- says so under the preview, and one key ([`APPLY_TO_ALL_KEY`])
 //! puts the value it stands on onto those screens. Nothing ties the screens together otherwise:
@@ -39,7 +47,8 @@
 //! over the screen it was asked for from, which Escape goes back to.
 
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, descriptor};
-use rbms_render::{Renderer, text_width, theme};
+use rbms_render::{Color, Renderer, text_width, theme};
+use rbms_skin::dst::SkinColor;
 use rbms_skin::loader::{
     SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS,
     SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_RESULT,
@@ -49,17 +58,17 @@ use winit::keyboard::KeyCode;
 
 use crate::dialog::{DialogHandle, DialogState, pick_skin_export_folder, pick_skin_pack_folder};
 use crate::notify::{Level, notify};
-use crate::number_row::{EDIT_HINT, EditKey, NumberInput, RowPart};
+use crate::number_row::{EditKey, NumberInput, RowPart};
 use crate::settings_ui::SettingRow;
 use crate::settings_view::SettingsLine;
 use crate::skin_preview::SkinPreview;
 use crate::skin_select::export::{ExportError, ExportJob, ExportStanding, Exported, megabytes};
-use crate::skin_select::{OffsetAxis, SkinRow, SkinRowKind};
+use crate::skin_select::{OffsetAxis, SkinRow, SkinRowKind, hex_color};
 use crate::stage::preview_menu::{
-    INFO_ROW_Y, LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, NumberCell, PREVIOUS_TAB as PREVIOUS_SCREEN, ROW_STEP_BACK,
-    ROW_STEP_FORWARD, RowLook, UTF8_MAX_BYTES, VALUE_SCALE, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_lead, draw_info_note,
-    draw_info_panel, draw_info_row, draw_info_row_noted, draw_list, draw_preview, draw_tabs, fitted_value, last_top, number_part_at, revealed_top, row_room,
-    shift_after, stepped_tab, wheel_scrolled,
+    ColorCell, INFO_ROW_Y, LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, NumberCell, PREVIOUS_TAB as PREVIOUS_SCREEN,
+    ROW_STEP_BACK, ROW_STEP_FORWARD, RowLook, UTF8_MAX_BYTES, VALUE_SCALE, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_lead,
+    draw_info_note, draw_info_panel, draw_info_row, draw_info_row_noted, draw_list, draw_preview, draw_tabs, fitted_value, fold_value, last_top,
+    number_part_at, revealed_top, row_room, shift_after, stepped_tab, wheel_scrolled,
 };
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use crate::{AppShared, Hot};
@@ -143,6 +152,9 @@ const OFFSET_PLACE_HELP: &str =
 const OFFSET_ANGLE_HELP: &str = "An offset of this skin: a turn, in degrees. 0 key resets";
 const OFFSET_ALPHA_HELP: &str = "An offset of this skin: added to the opacity, from -255 (gone) to +255. 0 key resets";
 const OPACITY_HELP: &str = "How opaque this part is: 0% hides it, 100% is the skin's own. Typing past 100% (to 200%) adds alpha. 0 key resets";
+const COLOR_HELP: &str = "Color of this part. Left/right: preset, ENTER: type a hex color, 0: back to the skin default. Alpha multiplies its opacity";
+pub(crate) const CHANNEL_FOLD_HELP: &str = "The red, green, blue and alpha of each color, set one at a time. ENTER shows or hides the rows";
+const CHANNEL_HELP: &str = "One channel of a color of this skin, from 0 to 255. Alpha multiplies the part's opacity. 0 key resets";
 
 /// What is said of a row of an offset the game adds to every play skin, which no document declares:
 /// a row of that name in a skin's own list would be read as the skin's.
@@ -184,6 +196,9 @@ pub(crate) struct SkinMenuState {
     /// What the last export, or the last value put onto the other screens, came to: a heading and
     /// what is said under it. Said under the preview until the next key or press.
     said: Option<(String, String)>,
+    /// Whether the channel rows of the chosen document's colours are on show under COLOR CHANNELS.
+    /// It opens closed, and is the menu's own: it is stored nowhere.
+    channels_open: bool,
 }
 
 impl SkinMenuState {
@@ -204,6 +219,7 @@ impl SkinMenuState {
             open_export_picker: pick_skin_export_folder,
             export: None,
             said: None,
+            channels_open: false,
         }
     }
 
@@ -220,9 +236,13 @@ impl SkinMenuState {
     /// to it.
     fn refresh(&mut self, shared: &AppShared) {
         let focused = self.focused();
-        self.rows = listed_rows(shared);
+        self.rows = listed_rows(shared, self.channels_open);
         self.lines = self.rows.iter().map(|&row| shared.settings_scene_line(row)).collect();
-        if let Some(fixed @ (SettingRow::Fixed(_) | SettingRow::Skin(SkinRow::Export))) = focused
+        let channels = channel_rows(shared).len();
+        if let Some(at) = self.rows.iter().position(|row| *row == SettingRow::Skin(SkinRow::ColorChannels)) {
+            self.lines[at].value = fold_value(self.channels_open, channels);
+        }
+        if let Some(fixed @ (SettingRow::Fixed(_) | SettingRow::Skin(SkinRow::Export | SkinRow::ColorChannels))) = focused
             && let Some(at) = self.rows.iter().position(|row| *row == fixed)
         {
             self.sel = at;
@@ -270,19 +290,58 @@ impl SkinMenuState {
     }
 
     /// Put one row that holds a number on the step `steps`, and tell the preview when that moved
-    /// it. An offset is read where it is stored by every frame, so the frame after shows it.
+    /// it. An offset is read where it is stored by every frame, so the frame after shows it; a
+    /// channel of a colour that was not set has the document read again, as the colour comes to be
+    /// set.
     fn set_number(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, steps: i64) {
         if ctx.shared.set_row_number(row, steps) {
+            if ctx.shared.skin_reload_pending() {
+                ctx.shared.reload_skin();
+            }
             self.settings_moved(ctx);
         }
     }
 
+    /// Set the colour row at `at` of the chosen document to `color`, or give it back to the skin
+    /// with `None`, and tell the preview when that moved it. A colour that comes to be set, or stops
+    /// being set, has the document read again.
+    fn put_color(&mut self, ctx: &mut FrameCtx<'_>, at: usize, color: Option<SkinColor>) {
+        let screen = ctx.shared.config.skin.screen;
+        let config = &mut ctx.shared.config;
+        let moved = match color {
+            Some(color) => ctx.shared.skins.set_color_for(config, screen, at, color),
+            None => ctx.shared.skins.reset_color_for(config, screen, at),
+        };
+        if !moved {
+            return;
+        }
+        if ctx.shared.skin_reload_pending() {
+            ctx.shared.reload_skin();
+        }
+        self.settings_moved(ctx);
+    }
+
+    /// Show the channel rows of the chosen document's colours if they are hidden, and hide them if
+    /// they are on show. The cursor stays on the row that does it.
+    fn toggle_channels(&mut self, shared: &AppShared) {
+        self.channels_open = !self.channels_open;
+        self.refresh(shared);
+        self.reveal_cursor();
+    }
+
     /// Store what was typed into the row being typed into, and close its editor. What is not a
-    /// number is not stored, and the row says so for a while.
+    /// number -- or, typed into a colour row, not a colour -- is not stored, and the row says so for
+    /// a while.
     fn commit_edit(&mut self, ctx: &mut FrameCtx<'_>) {
         let Some((row, typed)) = self.numbers.take_edit() else {
             return;
         };
+        if let SettingRow::Skin(SkinRow::Color(at)) = row {
+            if let Some(color) = self.numbers.typed_color(row, &typed, ctx.now) {
+                self.put_color(ctx, at, Some(color));
+            }
+            return;
+        }
         let Some(value) = ctx.shared.row_number(row) else {
             return;
         };
@@ -341,6 +400,10 @@ impl SkinMenuState {
                 }
                 false
             }
+            SettingRow::Skin(SkinRow::ColorChannels) => {
+                self.toggle_channels(ctx.shared);
+                false
+            }
             SettingRow::Skin(row) => SkinMenuState::step_document_row(ctx.shared, row, delta),
             SettingRow::Fixed(id) => match adjust(&mut ctx.shared.config, id, delta) {
                 AdjustOutcome::Action(action) => self.run_action(ctx.shared, action, delta),
@@ -358,10 +421,11 @@ impl SkinMenuState {
         }
     }
 
-    /// Step a property or a file slot of the chosen document, and report whether it moved.
+    /// Step a property, a file slot or a colour of the chosen document, and report whether it moved.
     ///
-    /// Either changes what is drawn, so the document is read again. An offset is read live out of the
-    /// stored choices and needs no reload, which is why it is not stepped here.
+    /// A property or a file changes what is drawn, so the document is read again, and so does a
+    /// colour that comes to be set. An offset is read live out of the stored choices and needs no
+    /// reload, which is why it is not stepped here.
     fn step_document_row(shared: &mut AppShared, row: SkinRow, delta: i32) -> bool {
         if !shared.step_skin_row(row, delta) {
             return false;
@@ -413,12 +477,17 @@ impl SkinMenuState {
     }
 
     /// Put the focused row back to what the document's author chose, when it is a row that holds a
-    /// number: the one row kind with a value a key can put back rather than cycle. An offset goes
-    /// back to none, which for an opacity is the whole of it.
+    /// number or a colour: the row kinds with a value a key can put back rather than cycle. An
+    /// offset goes back to none, which for an opacity is the whole of it, and a colour to the skin's
+    /// own.
     fn reset_focused_row(&mut self, ctx: &mut FrameCtx<'_>) {
         let Some(row) = self.focused() else {
             return;
         };
+        if let SettingRow::Skin(SkinRow::Color(at)) = row {
+            self.put_color(ctx, at, None);
+            return;
+        }
         if let Some(value) = ctx.shared.row_number(row) {
             self.set_number(ctx, row, value.shipped);
         }
@@ -571,13 +640,20 @@ impl SkinMenuState {
         Transition::Stay
     }
 
-    /// Enter on the row under the cursor: a row that holds a number is opened to be typed into, and
-    /// any other row is stepped forwards, which runs the ones that are run.
+    /// Enter on the row under the cursor: a row that holds a number is opened to be typed into, a
+    /// colour row is opened to have a colour typed in hex, and any other row is stepped forwards,
+    /// which runs the ones that are run.
     fn enter_focused(&mut self, ctx: &mut FrameCtx<'_>) {
         self.reveal_cursor();
         let Some(row) = self.focused() else {
             return;
         };
+        if let SettingRow::Skin(SkinRow::Color(at)) = row {
+            if let Some((color, _)) = ctx.shared.skins.color_for(&ctx.shared.config, ctx.shared.config.skin.screen, at) {
+                self.numbers.begin_hex_edit(row, &hex_color(color));
+            }
+            return;
+        }
         match ctx.shared.row_number(row) {
             Some(value) => self.numbers.begin_edit(row, &value),
             None => self.step(ctx, row, ROW_STEP_FORWARD, false),
@@ -599,9 +675,19 @@ impl SkinMenuState {
     /// room its row's short label leaves. A row that holds a number is drawn with its slider and
     /// reads as its number alone, in the room a number has -- what an opacity past all of it adds
     /// is said under the preview -- or with the figure being typed into it. `now` is what a row that
-    /// refused a typed figure stops saying so against.
+    /// refused a typed figure stops saying so against. A colour row is drawn with a square of its
+    /// colour, or with the colour being typed into it.
     fn draw_rows(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>, now: std::time::Instant) {
         let list = ListWindow { len: self.lines.len(), sel: self.sel, top: self.top };
+        let screen = shared.config.skin.screen;
+        let colors: Vec<Option<Color>> = self
+            .rows
+            .iter()
+            .map(|row| match row {
+                SettingRow::Skin(SkinRow::Color(at)) => shared.skins.color_for(&shared.config, screen, *at).map(|(color, _)| color.into()),
+                _ => None,
+            })
+            .collect();
         let entry = |index: usize| {
             let SettingsLine { label, value, number, .. } = &self.lines[index];
             let row = self.rows.get(index).copied();
@@ -616,7 +702,12 @@ impl SkinMenuState {
                 edit: self.numbers.edit_of(row),
                 refused: self.numbers.is_refused(row, now),
             });
-            ListEntry { label, value, look: RowLook::Plain, number }
+            let color = colors.get(index).copied().flatten().zip(row).map(|(color, row)| ColorCell {
+                color,
+                edit: self.numbers.edit_of(row),
+                refused: self.numbers.is_refused(row, now),
+            });
+            ListEntry { label, value, look: RowLook::Plain, number, color }
         };
         draw_list(shared, canvas, list, entry, Hot::SkinMenuRow);
     }
@@ -652,12 +743,32 @@ impl SkinMenuState {
 
 /// The rows the menu lists: the settings table's, with the chosen document's own between them, and
 /// under them the row that exports the pack while there is one to export.
-fn listed_rows(shared: &AppShared) -> Vec<SettingRow> {
-    let mut rows = shared.settings_rows(SettingTab::Skin);
+///
+/// The channel rows of the document's colours are not listed where the library lists them: the
+/// COLOR CHANNELS row is listed there in their place, and they are listed under it while
+/// `channels_open` says so.
+fn listed_rows(shared: &AppShared, channels_open: bool) -> Vec<SettingRow> {
+    let all = shared.settings_rows(SettingTab::Skin);
+    let is_channel = |row: &SettingRow| matches!(row, SettingRow::Skin(SkinRow::ColorChannel(_, _)));
+    let mut rows: Vec<SettingRow> = Vec::with_capacity(all.len());
+    for row in &all {
+        let first_channel = is_channel(row) && !rows.contains(&SettingRow::Skin(SkinRow::ColorChannels));
+        if first_channel {
+            rows.push(SettingRow::Skin(SkinRow::ColorChannels));
+        }
+        if !is_channel(row) || channels_open {
+            rows.push(*row);
+        }
+    }
     if shared.skins.can_export() {
         rows.push(SettingRow::Skin(SkinRow::Export));
     }
     rows
+}
+
+/// The channel rows of the colours of the document the screen being configured is drawn with.
+fn channel_rows(shared: &AppShared) -> Vec<SkinRow> {
+    shared.skins.rows(&shared.config).into_iter().filter(|row| matches!(row, SkinRow::ColorChannel(_, _))).collect()
 }
 
 /// What is said while an export runs: how many of the pack's files and how much of it are written.
@@ -710,12 +821,15 @@ fn row_help(shared: &AppShared, row: SettingRow) -> &'static str {
     let listed = match row {
         SettingRow::Fixed(id) => return descriptor(id).help,
         SettingRow::Skin(SkinRow::Export) => return EXPORT_HELP,
+        SettingRow::Skin(SkinRow::ColorChannels) => return CHANNEL_FOLD_HELP,
         SettingRow::Skin(listed) => listed,
     };
     let kind = shared.skins.kind(&shared.config, listed).unwrap_or(match listed {
-        SkinRow::Property(_) | SkinRow::Export => SkinRowKind::Property,
+        SkinRow::Property(_) | SkinRow::Export | SkinRow::ColorChannels => SkinRowKind::Property,
         SkinRow::File(_) => SkinRowKind::File,
         SkinRow::Offset(_, axis) => SkinRowKind::Offset(axis),
+        SkinRow::Color(_) => SkinRowKind::Color,
+        SkinRow::ColorChannel(_, channel) => SkinRowKind::ColorChannel(channel),
     });
     match kind {
         SkinRowKind::Offset(axis) if shared.skins.is_automatic_for(&shared.config, shared.config.skin.screen, listed) => automatic_offset_help(axis),
@@ -741,6 +855,8 @@ pub(crate) fn skin_row_help(kind: SkinRowKind) -> &'static str {
         SkinRowKind::Offset(OffsetAxis::R) => OFFSET_ANGLE_HELP,
         SkinRowKind::Offset(OffsetAxis::A) => OFFSET_ALPHA_HELP,
         SkinRowKind::Opacity => OPACITY_HELP,
+        SkinRowKind::Color => COLOR_HELP,
+        SkinRowKind::ColorChannel(_) => CHANNEL_HELP,
     }
 }
 
@@ -912,7 +1028,7 @@ impl StageHandler for SkinMenuState {
         self.draw_rows(ctx.shared, canvas, ctx.now);
         self.draw_info(ctx.shared, canvas);
         draw_preview(&mut self.preview, ctx, canvas);
-        draw_hint(canvas, if self.numbers.editing().is_some() { EDIT_HINT } else { HINT });
+        draw_hint(canvas, self.numbers.edit_hint().unwrap_or(HINT));
     }
 
     /// The browser's lines, and what the preview last left in its rectangle.

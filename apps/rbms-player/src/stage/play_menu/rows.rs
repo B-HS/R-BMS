@@ -10,10 +10,11 @@
 //! own after them, and the rest of its offsets in a group of their own at the end of the list.
 //!
 //! A play skin has more offsets than the list has room to show with everything else, so the rest
-//! are kept in two folds ([`Fold`]): the ones that fade a part of the screen, and the ones the game
-//! adds to every play skin, which move or resize the whole of it, its notes and its judgement. A
-//! fold is one row that says how many rows it holds and is stepped to show or hide them. Which
-//! folds are open is the menu's own and is stored nowhere. An offset a skin declares to move one
+//! are kept in folds ([`Fold`]): the colours it lets the player set, one row each, the red, green,
+//! blue and alpha of each of those colours, the offsets that fade a part of the screen, and the
+//! ones the game adds to every play skin, which move or resize the whole of it, its notes and its
+//! judgement. A fold is one row that says how many rows it holds and is stepped to show or hide
+//! them. Which folds are open is the menu's own and is stored nowhere. An offset a skin declares to move one
 //! part -- where its judgement is written -- is what a player comes to this menu for, and is
 //! listed with the skin's options where it is seen without opening anything.
 //!
@@ -30,9 +31,9 @@ use rbms_config::{
 use crate::AppShared;
 use crate::number_row::NumberValue;
 use crate::skin_preview::target::SpeedReadout;
-use crate::skin_select::{SkinRow, SkinRowKind};
+use crate::skin_select::{COLOR_CHANNELS_LABEL, SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{ONE_STEP, RowLook, SHIFT_STEPS};
-use crate::stage::skin_menu::skin_row_help;
+use crate::stage::skin_menu::{CHANNEL_FOLD_HELP, skin_row_help};
 
 /// The group the rows that are no setting are listed under.
 pub(super) const GROUP_PREVIEW: &str = "PREVIEW";
@@ -45,11 +46,8 @@ const SKIN_OPTIONS_GROUP: SettingTab = SettingTab::PlayLane;
 /// The group the offsets of the previewed play skin are listed under, at the end of the list.
 pub(super) const GROUP_SKIN: &str = "SKIN";
 
-/// What a fold reads while its rows are on show and while they are not, before how many they are.
-const FOLD_OPEN: &str = "SHOWN";
-const FOLD_CLOSED: &str = "HIDDEN";
-
 /// What is said of each fold.
+const COLOR_FOLD_HELP: &str = "The colors of the play skin of this mode, one row each. ENTER shows or hides the rows";
 const OPACITY_FOLD_HELP: &str = "How opaque each part of the play skin of this mode is drawn. ENTER shows or hides the rows";
 const PLACE_FOLD_HELP: &str = "The offsets the game adds to every play skin: its screen, notes and judgement. ENTER shows or hides the rows";
 
@@ -87,9 +85,13 @@ const SKIN_OPTION_HELP: &str = "An option the play skin of this mode declares. I
 const HISPEED_WORKED_OUT_HELP: &str = "Worked out from GREEN NUMBER at the preview tempo. Turn KEEP GREEN NUMBER off to set it";
 const GREEN_NUMBER_WORKED_OUT_HELP: &str = "What HI-SPEED comes to at the preview tempo. Turn KEEP GREEN NUMBER on to set it";
 
-/// One of the two folds the offsets of the previewed play skin are kept in.
+/// One of the folds the colours and the offsets of the previewed play skin are kept in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Fold {
+    /// The colours the skin lets the player set, each one row read as its colour.
+    Color,
+    /// The channels of those colours, each one row read as a number from 0 to 255.
+    ColorChannels,
     /// The offsets that only fade what names them, each one row read as an opacity.
     Opacity,
     /// The offsets the game adds to every play skin, which move or resize the whole screen, the
@@ -98,12 +100,14 @@ pub(super) enum Fold {
 }
 
 impl Fold {
-    /// Both folds, in the order they are listed.
-    pub(super) const ALL: [Fold; 2] = [Fold::Opacity, Fold::Place];
+    /// Every fold, in the order they are listed.
+    pub(super) const ALL: [Fold; 4] = [Fold::Color, Fold::ColorChannels, Fold::Opacity, Fold::Place];
 
     /// What the fold's row is called.
     pub(super) fn label(self) -> &'static str {
         match self {
+            Fold::Color => "COLOR",
+            Fold::ColorChannels => COLOR_CHANNELS_LABEL,
             Fold::Opacity => "OPACITY",
             Fold::Place => "POSITION AND SIZE",
         }
@@ -113,25 +117,32 @@ impl Fold {
     /// offset the game adds rather than one the document declares.
     fn holds(self, kind: SkinRowKind, automatic: bool) -> bool {
         match (self, kind) {
-            (Fold::Opacity, SkinRowKind::Opacity) => true,
+            (Fold::Color, SkinRowKind::Color) | (Fold::ColorChannels, SkinRowKind::ColorChannel(_)) | (Fold::Opacity, SkinRowKind::Opacity) => true,
             (Fold::Place, SkinRowKind::Offset(_)) => automatic,
-            (_, SkinRowKind::Property | SkinRowKind::File | SkinRowKind::Offset(_) | SkinRowKind::Opacity) => false,
+            (
+                _,
+                SkinRowKind::Property | SkinRowKind::File | SkinRowKind::Offset(_) | SkinRowKind::Opacity | SkinRowKind::Color | SkinRowKind::ColorChannel(_),
+            ) => false,
         }
     }
 
     /// What is said of the fold's row.
     fn help(self) -> &'static str {
         match self {
+            Fold::Color => COLOR_FOLD_HELP,
+            Fold::ColorChannels => CHANNEL_FOLD_HELP,
             Fold::Opacity => OPACITY_FOLD_HELP,
             Fold::Place => PLACE_FOLD_HELP,
         }
     }
 }
 
-/// Which folds have their rows on show. Both open closed: the list is then as long as it is with
-/// no skin at all, and a fold says what opening it would show.
+/// Which folds have their rows on show. Every fold opens closed: the list is then as long as it is
+/// with no skin at all, and a fold says what opening it would show.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Folds {
+    color: bool,
+    channels: bool,
     opacity: bool,
     place: bool,
 }
@@ -140,6 +151,8 @@ impl Folds {
     /// Whether one fold's rows are on show.
     pub(super) fn is_open(self, fold: Fold) -> bool {
         match fold {
+            Fold::Color => self.color,
+            Fold::ColorChannels => self.channels,
             Fold::Opacity => self.opacity,
             Fold::Place => self.place,
         }
@@ -147,10 +160,13 @@ impl Folds {
 
     /// Show one fold's rows if they are hidden, and hide them if they are on show.
     pub(super) fn toggle(&mut self, fold: Fold) {
-        match fold {
-            Fold::Opacity => self.opacity = !self.opacity,
-            Fold::Place => self.place = !self.place,
-        }
+        let open = match fold {
+            Fold::Color => &mut self.color,
+            Fold::ColorChannels => &mut self.channels,
+            Fold::Opacity => &mut self.opacity,
+            Fold::Place => &mut self.place,
+        };
+        *open = !*open;
     }
 }
 
@@ -187,8 +203,8 @@ pub(super) struct Line {
 /// The list, top to bottom, for a preview of `screen`: the tempo of the sample chart, then every
 /// group of the play menu with the rows the settings table offers in it and, at the end of the
 /// group they belong with, the options the play skin of that screen declares and the offsets it
-/// declares to move a part of its own ([`declared`]); and last the rest of that skin's offsets,
-/// fold by fold, each fold's rows under it while `open` has it open.
+/// declares to move a part of its own ([`declared`]); and last that skin's colours and the rest of
+/// its offsets, fold by fold, each fold's rows under it while `open` has it open.
 ///
 /// A fold the skin has nothing for is not listed, and neither is the group when it has none. A
 /// document's file slots are not listed: they are the skin menu's.
@@ -223,7 +239,7 @@ pub(super) fn declared(shared: &AppShared, screen: i32) -> Vec<SkinRow> {
     let listed_here = |row: &SkinRow| match skins.kind_for(&shared.config, screen, *row) {
         Some(SkinRowKind::Property) => true,
         Some(SkinRowKind::Offset(_)) => !skins.is_automatic_for(&shared.config, screen, *row),
-        Some(SkinRowKind::File | SkinRowKind::Opacity) | None => false,
+        Some(SkinRowKind::File | SkinRowKind::Opacity | SkinRowKind::Color | SkinRowKind::ColorChannel(_)) | None => false,
     };
     skins.rows_for(&shared.config, screen).into_iter().filter(listed_here).collect()
 }
@@ -236,11 +252,6 @@ pub(super) fn folded(shared: &AppShared, screen: i32, fold: Fold) -> Vec<SkinRow
         skins.kind_for(&shared.config, screen, *row).is_some_and(|kind| fold.holds(kind, automatic))
     };
     skins.rows_for(&shared.config, screen).into_iter().filter(held).collect()
-}
-
-/// What a fold's row reads: whether its rows are on show, and how many they are.
-pub(super) fn fold_value(open: bool, rows: usize) -> String {
-    format!("{} ({rows})", if open { FOLD_OPEN } else { FOLD_CLOSED })
 }
 
 /// Whether a row shows a value worked out from the others, which stepping it does nothing to.
@@ -300,7 +311,7 @@ pub(super) fn help(play: &PlayOptions, row: Row, kind: Option<SkinRowKind>) -> &
         Row::Setting(SettingId::GreenNumber) if !play.keep_green_number => GREEN_NUMBER_WORKED_OUT_HELP,
         Row::Setting(id) => descriptor(id).help,
         Row::Skin(_) => match kind {
-            Some(kind @ (SkinRowKind::Offset(_) | SkinRowKind::Opacity)) => skin_row_help(kind),
+            Some(kind @ (SkinRowKind::Offset(_) | SkinRowKind::Opacity | SkinRowKind::Color | SkinRowKind::ColorChannel(_))) => skin_row_help(kind),
             Some(SkinRowKind::Property | SkinRowKind::File) | None => SKIN_OPTION_HELP,
         },
         Row::Fold(fold) => fold.help(),

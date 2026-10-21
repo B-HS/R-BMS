@@ -33,6 +33,13 @@
 //! reads as its number alone, in the room its slider leaves; what the number comes to -- the white
 //! number of a cover, the travel time of a green number -- is said under the preview.
 //!
+//! A colour the play skin lets the player set is one row in the COLOR fold, read as its colour: the
+//! arrows go round a list of colours keeping its alpha, Enter opens it to have a colour typed in hex,
+//! and the zero key gives it back to the skin. Its red, green, blue and alpha are rows of their own
+//! in the COLOR CHANNELS fold, set as any number is. A colour that was set already is read where it
+//! is stored by every frame; one that comes to be set, or stops being set, has the document read
+//! again once ([`crate::skin_select::SkinLibrary::set_color_for`]).
+//!
 //! A row of the play skin that other screens' skins declare under the same name -- the five play
 //! modes share most of theirs -- says so under the preview, and the key the skin menu has for it
 //! ([`APPLY_TO_ALL_KEY`]) puts the row's value onto those screens here too.
@@ -42,19 +49,20 @@
 
 use rbms_config::{ScoreTarget, SettingId, skin_screen_label};
 use rbms_render::{Color, Renderer, theme};
+use rbms_skin::dst::SkinColor;
 use rbms_skin::loader::{SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS};
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 use crate::notify::{Level, notify};
-use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, RowPart};
+use crate::number_row::{EditKey, NumberInput, NumberValue, RowPart};
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_preview::{PlayTarget, SkinPreview};
-use crate::skin_select::{SkinRow, SkinRowKind};
+use crate::skin_select::{SkinRow, SkinRowKind, hex_color};
 use crate::stage::preview_menu::{
-    INFO_ROW_UNDER_FIGURES_Y, InfoFigure, LIST_RECT, ListEntry, ListWindow, NEXT_TAB, NumberCell, PREVIOUS_TAB, ROW_STEP_BACK, ROW_STEP_FORWARD, RowLook,
-    VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_noted, draw_list, draw_preview, draw_tabs,
-    fitted_value, last_top, number_part_at, revealed_top, shift_after, stepped_tab, wheel_scrolled,
+    ColorCell, INFO_ROW_UNDER_FIGURES_Y, InfoFigure, LIST_RECT, ListEntry, ListWindow, NEXT_TAB, NumberCell, PREVIOUS_TAB, ROW_STEP_BACK, ROW_STEP_FORWARD,
+    RowLook, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_noted, draw_list, draw_preview,
+    draw_tabs, fitted_value, fold_value, last_top, number_part_at, revealed_top, shift_after, stepped_tab, wheel_scrolled,
 };
 use crate::stage::skin_menu::{APPLY_TO_ALL_KEY, automatic_offset_help, shared_row_note};
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
@@ -63,7 +71,7 @@ use crate::{AppShared, Hot};
 mod rows;
 
 use rows::{
-    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, bpm_value, fold_value, folded, help, hispeed_figure, is_read_only, listed, number_figure, number_of,
+    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, bpm_value, folded, help, hispeed_figure, is_read_only, listed, number_figure, number_of,
     reset_setting, setting_value, step_setting,
 };
 
@@ -285,12 +293,19 @@ impl PlayMenuState {
     }
 
     /// Put one row that holds a number on the step `steps`, and tell the preview when that moved
-    /// it. A row whose number is worked out from the others is left as it is.
+    /// it. A row whose number is worked out from the others is left as it is. A channel of a colour
+    /// that was not set has the document read again, as the colour comes to be set.
     fn set_number(&mut self, ctx: &mut FrameCtx<'_>, row: Row, steps: i64) {
         let moved = match row {
             _ if is_read_only(&ctx.shared.config.play, row) => false,
             Row::Setting(id) => ctx.shared.set_row_number(crate::settings_ui::SettingRow::Fixed(id), steps),
-            Row::Skin(skin_row) => ctx.shared.skins.set_number_for(&mut ctx.shared.config, self.target().screen, skin_row, steps),
+            Row::Skin(skin_row) => {
+                let moved = ctx.shared.skins.set_number_for(&mut ctx.shared.config, self.target().screen, skin_row, steps);
+                if moved {
+                    self.reread_skin(ctx.shared);
+                }
+                moved
+            }
             Row::Group(_) | Row::PreviewBpm | Row::Fold(_) => false,
         };
         if moved {
@@ -298,12 +313,35 @@ impl PlayMenuState {
         }
     }
 
+    /// Set the colour row at `at` of the previewed play skin to `color`, or give it back to the skin
+    /// with `None`, and tell the preview when that moved it. A colour that comes to be set, or stops
+    /// being set, has the document read again.
+    fn put_color(&mut self, ctx: &mut FrameCtx<'_>, at: usize, color: Option<SkinColor>) {
+        let screen = self.target().screen;
+        let config = &mut ctx.shared.config;
+        let moved = match color {
+            Some(color) => ctx.shared.skins.set_color_for(config, screen, at, color),
+            None => ctx.shared.skins.reset_color_for(config, screen, at),
+        };
+        if moved {
+            self.reread_skin(ctx.shared);
+            self.preview.settings_changed(ctx.shared);
+        }
+    }
+
     /// Store what was typed into the row being typed into, and close its editor. What is not a
-    /// number is not stored, and the row says so for a while.
+    /// number -- or, typed into a colour row, not a colour -- is not stored, and the row says so for
+    /// a while.
     fn commit_edit(&mut self, ctx: &mut FrameCtx<'_>) {
         let Some((row, typed)) = self.numbers.take_edit() else {
             return;
         };
+        if let Row::Skin(SkinRow::Color(at)) = row {
+            if let Some(color) = self.numbers.typed_color(row, &typed, ctx.now) {
+                self.put_color(ctx, at, Some(color));
+            }
+            return;
+        }
         let Some(value) = self.number_of(ctx.shared, row) else {
             return;
         };
@@ -348,13 +386,19 @@ impl PlayMenuState {
         }
     }
 
-    /// Enter on the row under the cursor: a row that holds a number is opened to be typed into, and
-    /// any other row is stepped forwards.
+    /// Enter on the row under the cursor: a row that holds a number is opened to be typed into, a
+    /// colour row is opened to have a colour typed in hex, and any other row is stepped forwards.
     fn enter_focused(&mut self, ctx: &mut FrameCtx<'_>) {
         self.reveal_cursor();
         let Some(row) = self.focused() else {
             return;
         };
+        if let Row::Skin(SkinRow::Color(at)) = row {
+            if let Some((color, _)) = ctx.shared.skins.color_for(&ctx.shared.config, self.target().screen, at) {
+                self.numbers.begin_hex_edit(row, &hex_color(color));
+            }
+            return;
+        }
         match self.number_of(ctx.shared, row) {
             Some(value) => self.numbers.begin_edit(row, &value),
             None => self.step(ctx, row, ROW_STEP_FORWARD, false),
@@ -421,8 +465,9 @@ impl PlayMenuState {
 
     /// Put the row under the cursor back to what it ships as: a setting to what a fresh
     /// configuration holds, the tempo to the one the menu opens on, an option of the skin to the
-    /// item its author chose, and an offset of it to none -- which for an opacity is all of it. A
-    /// row whose value is worked out from the others is left as it is, and so is a fold.
+    /// item its author chose, an offset of it to none -- which for an opacity is all of it -- a colour
+    /// of it back to the skin's own, and a channel of a colour to where the colour ships. A row
+    /// whose value is worked out from the others is left as it is, and so is a fold.
     fn reset_focused(&mut self, ctx: &mut FrameCtx<'_>) {
         self.reveal_cursor();
         let Some(row) = self.focused().filter(|row| !is_read_only(&ctx.shared.config.play, *row)) else {
@@ -441,12 +486,20 @@ impl PlayMenuState {
                 }
                 moved
             }
-            Row::Skin(offset @ SkinRow::Offset(_, _)) => {
+            Row::Skin(number @ (SkinRow::Offset(_, _) | SkinRow::ColorChannel(_, _))) => {
                 let screen = self.target().screen;
-                let shipped = ctx.shared.skins.number_for(&ctx.shared.config, screen, offset).map(|value| value.shipped);
-                shipped.is_some_and(|shipped| ctx.shared.skins.set_number_for(&mut ctx.shared.config, screen, offset, shipped))
+                let shipped = ctx.shared.skins.number_for(&ctx.shared.config, screen, number).map(|value| value.shipped);
+                let moved = shipped.is_some_and(|shipped| ctx.shared.skins.set_number_for(&mut ctx.shared.config, screen, number, shipped));
+                if moved {
+                    self.reread_skin(ctx.shared);
+                }
+                moved
             }
-            Row::Group(_) | Row::Skin(SkinRow::File(_) | SkinRow::Export) | Row::Fold(_) => false,
+            Row::Skin(SkinRow::Color(at)) => {
+                self.put_color(ctx, at, None);
+                false
+            }
+            Row::Group(_) | Row::Skin(SkinRow::File(_) | SkinRow::Export | SkinRow::ColorChannels) | Row::Fold(_) => false,
         };
         if moved {
             self.preview.settings_changed(ctx.shared);
@@ -566,19 +619,25 @@ impl PlayMenuState {
 
     /// Draw the entries on show ([`draw_list`]), each value cut to the room a value has. A row that
     /// holds a number is drawn with its slider and reads as its number alone ([`number_figure`]),
-    /// or with the figure being typed into it. `now` is what a row that refused a typed figure stops
-    /// saying so against.
+    /// or with the figure being typed into it, and a colour row with a square of its colour or the
+    /// colour being typed into it. `now` is what a row that refused a typed figure stops saying so
+    /// against.
     fn draw_rows(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>, readout: &SpeedReadout, now: std::time::Instant) {
         let list = ListWindow { len: self.rows.len(), sel: self.sel, top: self.top };
         let shown = self.top..(self.top + VISIBLE_ROWS).min(self.rows.len());
         let screen = self.target().screen;
-        let lines: Vec<(Line, Option<NumberValue>)> =
-            self.rows[shown].iter().map(|row| (self.line(shared, readout, *row), number_of(shared, readout, screen, *row))).collect();
+        let color_of = |row: &Row| match row {
+            Row::Skin(SkinRow::Color(at)) => shared.skins.color_for(&shared.config, screen, *at).map(|(color, _)| Color::from(color)),
+            _ => None,
+        };
+        let lines: Vec<(Line, Option<NumberValue>, Option<Color>)> =
+            self.rows[shown].iter().map(|row| (self.line(shared, readout, *row), number_of(shared, readout, screen, *row), color_of(row))).collect();
         let entry = |index: usize| {
-            let (Line { label, value, look }, number) = &lines[index - self.top];
+            let (Line { label, value, look }, number, color) = &lines[index - self.top];
             let row = self.rows[index];
             let Some(number) = number else {
-                return ListEntry { label, value: fitted_value(value), look: *look, number: None };
+                let color = color.map(|color| ColorCell { color, edit: self.numbers.edit_of(row), refused: self.numbers.is_refused(row, now) });
+                return ListEntry { label, value: fitted_value(value), look: *look, number: None, color };
             };
             let cell = NumberCell {
                 fraction: number.fraction(),
@@ -586,7 +645,7 @@ impl PlayMenuState {
                 edit: self.numbers.edit_of(row),
                 refused: self.numbers.is_refused(row, now),
             };
-            ListEntry { label, value: number_figure(row, number), look: *look, number: Some(cell) }
+            ListEntry { label, value: number_figure(row, number), look: *look, number: Some(cell), color: None }
         };
         draw_list(shared, canvas, list, entry, Hot::PlayMenuRow);
     }
@@ -757,7 +816,7 @@ impl StageHandler for PlayMenuState {
         self.draw_rows(ctx.shared, canvas, &readout, ctx.now);
         self.draw_info(ctx.shared, canvas, &readout);
         draw_preview(&mut self.preview, ctx, canvas);
-        draw_hint(canvas, if self.numbers.editing().is_some() { EDIT_HINT } else { HINT });
+        draw_hint(canvas, self.numbers.edit_hint().unwrap_or(HINT));
     }
 
     /// The browser's lines, and what the preview is of and last left in its rectangle.

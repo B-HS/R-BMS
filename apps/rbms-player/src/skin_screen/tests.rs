@@ -69,6 +69,20 @@ fn a_document_nudge_is_read_from_the_choices_stored_for_that_document() {
     assert_eq!(DocumentOffsets::default().offset(46), None, "a document nobody has customised nudges nothing");
 }
 
+/// A colour is read out of the choices stored for the document being drawn, as stored at any size
+/// the document is drawn at, and an id nobody set a colour under answers nothing, which leaves a
+/// destination in its own colour.
+#[test]
+fn a_document_colour_is_read_as_stored_whatever_size_the_document_is_drawn_at() {
+    let color = rbms_skin::dst::SkinColor::rgba(10, 20, 30, 40);
+    let mut document = SkinCustomisation::default();
+    document.colors.insert(120, color);
+    let smaller = DocumentOffsets::drawn_at(Some(&document), (1920.0, 1080.0), (1280, 720));
+    assert_eq!(smaller.color(120), Some(color), "a stored colour was not read, or was scaled like a length");
+    assert_eq!(smaller.color(121), None, "an id nobody set a colour under answered one");
+    assert_eq!(DocumentOffsets::default().color(120), None, "a document nobody has customised has a colour");
+}
+
 /// A nudge is so many pixels of what the screen is drawn on, whatever size the document was authored
 /// at: a document drawn at two thirds of its size is told a nudge half as large again in its own
 /// units, which the drawing then scales back to the pixels that were stored. An angle and an alpha

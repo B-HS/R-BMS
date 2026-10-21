@@ -1470,5 +1470,6 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
     large.capture_at("skin-menu-pack-select", LIST_SECONDS);
 }
 
+mod color;
 mod export;
 mod opacity;

@@ -22,6 +22,10 @@
 //! Enter, or a press on the number itself, opens the row to be typed into: the number it holds is
 //! there and wholly selected, so the first character typed replaces it.
 //!
+//! The same editor takes a colour typed in hex into a colour row ([`NumberEdit::hex`],
+//! [`NumberInput::begin_hex_edit`]): it is drawn, committed and called off as a number is, and a
+//! figure that is no colour is refused the same way, with words of its own ([`COLOR_REFUSAL_NOTE`]).
+//!
 //! A row's slider and its arrows need not reach as far as a typed figure does
 //! ([`NumberValue::slider_max`]): an opacity is dragged and stepped between none of a part and all
 //! of it, and only a figure typed into it goes past all of it, for the part a skin lights by adding
@@ -31,6 +35,7 @@ use std::time::{Duration, Instant};
 
 use rbms_config::NumberSpec;
 use rbms_render::{Rect, Renderer, draw_text, draw_text_right, text_width, theme};
+use rbms_skin::dst::SkinColor;
 use winit::keyboard::KeyCode;
 
 use crate::stage::KeyInput;
@@ -72,13 +77,22 @@ pub(crate) const EDIT_HINT: &str = "TYPE A NUMBER   ENTER SET   ESC CANCEL   UP 
 /// The same while the row being typed into holds a length of time.
 pub(crate) const EDIT_HINT_CLOCK: &str = "TYPE SECONDS OR MIN:SEC   ENTER SET   ESC CANCEL   UP DOWN TAB SET AND MOVE ON";
 
+/// The same while a colour is being typed into a colour row.
+pub(crate) const EDIT_HINT_HEX: &str = "TYPE A HEX COLOR: RRGGBB OR RRGGBBAA   ENTER SET   ESC CANCEL   UP DOWN TAB SET AND MOVE ON";
+
 /// What stands between the minutes and the seconds of a length of time as it is typed.
 const CLOCK_SEPARATOR: char = ':';
+
+/// What may stand before the digits of a colour as it is typed.
+const HEX_PREFIX: char = '#';
 
 /// What a row says in place of its number when what was typed into it was not one, and for how
 /// long it says so.
 pub(crate) const REFUSAL_NOTE: &str = "NOT A NUMBER";
 pub(crate) const REFUSAL_SHOWN_FOR: Duration = Duration::from_millis(1500);
+
+/// What a colour row says in place of its colour when what was typed into it was not one.
+pub(crate) const COLOR_REFUSAL_NOTE: &str = "NOT A COLOR";
 
 /// The number one row holds, as its screen reads it: how the row is counted, the step it stands
 /// on, the step it ships on, how far its slider reaches, and whether it is worked out from other
@@ -207,7 +221,12 @@ pub(crate) fn draw_edit<R: Renderer>(r: &mut R, field: Rect, text_y: f32, scale:
 /// Write, with its right edge at `right`, what a row says in place of its number for a while after
 /// what was typed into it was refused.
 pub(crate) fn draw_refusal<R: Renderer>(r: &mut R, right: f32, text_y: f32, scale: f32) {
-    draw_text_right(r, right, text_y, scale, theme().accent, REFUSAL_NOTE);
+    draw_refusal_note(r, right, text_y, scale, REFUSAL_NOTE);
+}
+
+/// [`draw_refusal`] in the words `note`, for a row that is refused something other than a number.
+pub(crate) fn draw_refusal_note<R: Renderer>(r: &mut R, right: f32, text_y: f32, scale: f32, note: &str) {
+    draw_text_right(r, right, text_y, scale, theme().accent, note);
 }
 
 /// What a key did to a row being typed into.
@@ -225,30 +244,63 @@ pub(crate) enum EditKey {
     CommitThenPass,
 }
 
+/// What a figure being typed into a row is written as, which is what the editor takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditKind {
+    /// A number: digits, a sign and a decimal point.
+    Number,
+    /// A length of time: a number, and the colon between its minutes and its seconds.
+    Clock,
+    /// A colour: hex digits, after a `#` or not.
+    Hex,
+}
+
 /// A figure being typed into a row.
 ///
 /// It opens on the number the row holds, wholly selected: the first character typed replaces it,
 /// a delete empties it, and a move of the caret lets go of the selection and leaves the number to
 /// be corrected. Only what a number is written with is taken -- digits, a sign and a decimal point,
 /// and for a length of time the colon between its minutes and its seconds -- so a unit typed after
-/// it is dropped as it is typed.
+/// it is dropped as it is typed. A colour opened with [`NumberEdit::hex`] takes hex digits and a
+/// `#` in their place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NumberEdit {
     line: TextEdit,
     all_selected: bool,
-    /// Whether the row holds a length of time, which is typed with a colon.
-    clock: bool,
+    kind: EditKind,
 }
 
 impl NumberEdit {
     /// An editor opened on the number a row holds, wholly selected.
     pub(crate) fn over(spec: &NumberSpec, steps: i64) -> NumberEdit {
-        NumberEdit { line: TextEdit::from_text(spec.plain(steps)), all_selected: true, clock: spec.clock }
+        let kind = if spec.clock { EditKind::Clock } else { EditKind::Number };
+        NumberEdit { line: TextEdit::from_text(spec.plain(steps)), all_selected: true, kind }
+    }
+
+    /// An editor opened on the colour a colour row shows, written as `hex`, wholly selected.
+    pub(crate) fn hex(hex: &str) -> NumberEdit {
+        NumberEdit { line: TextEdit::from_text(hex.to_owned()), all_selected: true, kind: EditKind::Hex }
     }
 
     /// Whether the row being typed into holds a length of time.
+    #[cfg(test)]
     pub(crate) fn is_clock(&self) -> bool {
-        self.clock
+        self.kind == EditKind::Clock
+    }
+
+    /// Whether what is being typed is a colour.
+    #[cfg(test)]
+    pub(crate) fn is_hex(&self) -> bool {
+        self.kind == EditKind::Hex
+    }
+
+    /// Whether `ch` is something the figure being typed is written with.
+    fn takes(&self, ch: char) -> bool {
+        match self.kind {
+            EditKind::Number => ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.'),
+            EditKind::Clock => ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | CLOCK_SEPARATOR),
+            EditKind::Hex => ch.is_ascii_hexdigit() || ch == HEX_PREFIX,
+        }
     }
 
     /// What has been typed.
@@ -269,7 +321,7 @@ impl NumberEdit {
     /// Type `text` in at the caret, keeping only what a number is written with, in place of the
     /// whole figure while it is selected.
     fn type_in(&mut self, text: &str) {
-        let typed: String = text.chars().filter(|ch| ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.') || (self.clock && *ch == CLOCK_SEPARATOR)).collect();
+        let typed: String = text.chars().filter(|ch| self.takes(*ch)).collect();
         if typed.is_empty() {
             return;
         }
@@ -360,6 +412,13 @@ impl<K: Copy + PartialEq> NumberInput<K> {
         self.edit.as_mut().map(|(_, edit)| edit.key(key))
     }
 
+    /// Open `row`, a colour row, to have a colour typed into it, on the colour it shows written as
+    /// `hex`.
+    pub(crate) fn begin_hex_edit(&mut self, row: K, hex: &str) {
+        self.refused = None;
+        self.edit = Some((row, NumberEdit::hex(hex)));
+    }
+
     /// Close the editor and drop what was typed.
     pub(crate) fn cancel_edit(&mut self) {
         self.edit = None;
@@ -381,10 +440,25 @@ impl<K: Copy + PartialEq> NumberInput<K> {
         steps
     }
 
+    /// The colour what was typed into `row` writes ([`SkinColor::from_hex`]), or `None` when it is
+    /// not one -- which the row then says for a while, from `now`.
+    pub(crate) fn typed_color(&mut self, row: K, typed: &str, now: Instant) -> Option<SkinColor> {
+        let color = SkinColor::from_hex(typed.trim());
+        if color.is_none() {
+            self.refused = Some((row, now + REFUSAL_SHOWN_FOR));
+        }
+        color
+    }
+
     /// The line of keys a screen writes while a row is being typed into: the one for a length of
-    /// time while the row holds one, and `None` while no row is being typed into.
+    /// time while the row holds one, the one for a colour while a colour is typed, and `None` while
+    /// no row is being typed into.
     pub(crate) fn edit_hint(&self) -> Option<&'static str> {
-        self.edit.as_ref().map(|(_, edit)| if edit.is_clock() { EDIT_HINT_CLOCK } else { EDIT_HINT })
+        self.edit.as_ref().map(|(_, edit)| match edit.kind {
+            EditKind::Number => EDIT_HINT,
+            EditKind::Clock => EDIT_HINT_CLOCK,
+            EditKind::Hex => EDIT_HINT_HEX,
+        })
     }
 
     /// Whether `row` is still saying that what was typed into it was not a number.
@@ -588,6 +662,33 @@ mod tests {
         assert_eq!(input.typed_steps(row, &CLOCK, &text, Instant::now()), Some(900), "seconds alone are not a length of time");
         input.begin_edit(1, &value(40));
         assert_eq!(input.edit_hint(), Some(EDIT_HINT));
+    }
+
+    /// A colour is typed in hex, with its `#` or without, in either case; anything else typed is
+    /// dropped as it is typed, and what is no colour is refused for a while as a number is.
+    #[test]
+    fn a_colour_is_typed_in_hex_and_what_is_no_colour_is_refused() {
+        let now = Instant::now();
+        let mut input: NumberInput<usize> = NumberInput::new();
+        input.begin_hex_edit(2, "#30E050FF");
+        assert_eq!(input.edit_hint(), Some(EDIT_HINT_HEX));
+        let edit = input.edit_of(2).expect("the colour row is being typed into");
+        assert_eq!((edit.text(), edit.is_all_selected(), edit.is_hex()), ("#30E050FF", true, true));
+        for text in ["#", "a", "b", "g", "-", " ", "c", "1", "2", "3"] {
+            assert_eq!(input.edit_key(&typed(text)), Some(EditKey::Taken));
+        }
+        let (row, text) = input.take_edit().expect("a row was being typed into");
+        assert_eq!((row, text.as_str()), (2, "#abc123"));
+        assert_eq!(input.typed_color(row, &text, now), Some(SkinColor::rgba(0xAB, 0xC1, 0x23, u8::MAX)));
+        assert!(!input.is_refused(2, now));
+        assert_eq!(input.typed_color(row, "0000007f", now), Some(SkinColor::rgba(0, 0, 0, 0x7F)), "eight digits are not read with their alpha");
+        assert_eq!(input.typed_color(row, "#12345", now), None);
+        assert!(input.is_refused(2, now) && !input.is_refused(2, now + REFUSAL_SHOWN_FOR), "a figure that is no colour is not said to be");
+
+        let mut number = NumberEdit::over(&PERCENT, 40);
+        number.key(&typed("f"));
+        assert_eq!(number.text(), "40", "a hex digit was typed into a number");
+        assert!(!number.is_hex());
     }
 
     #[test]

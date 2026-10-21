@@ -16,6 +16,9 @@
 //! dragged and typed into is not this module's either ([`crate::number_row`]); it says where on a
 //! row the slider and the number go.
 //!
+//! A row of a colour is drawn with a square of the colour it shows before its value
+//! ([`ListEntry::color`]), and is typed into in hex where its value is.
+//!
 //! Everything is laid out in the fixed space every built-in screen is laid out in
 //! ([`crate::stage::canvas::UI_SIZE`]).
 
@@ -23,7 +26,7 @@ use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_tex
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use crate::number_row::{NumberEdit, RowPart, SliderLook, draw_edit, draw_refusal, draw_slider, hot_rect, row_part};
+use crate::number_row::{COLOR_REFUSAL_NOTE, NumberEdit, RowPart, SliderLook, draw_edit, draw_refusal, draw_refusal_note, draw_slider, hot_rect, row_part};
 pub(crate) use crate::number_row::{ONE_STEP, SHIFT_STEPS};
 use crate::skin_preview::region::with_region;
 use crate::skin_preview::{PreviewStatus, SkinPreview};
@@ -128,6 +131,12 @@ const NUMBER_VALUE_W: f32 = 58.0;
 const SLIDER_W: f32 = 100.0;
 const SLIDER_GAP: f32 = 10.0;
 
+/// The square a colour row shows its colour in before its value: how large it is, how far it is from
+/// the value, and how thick the line round it is, which keeps a dark colour apart from the row.
+const SWATCH_SIZE: f32 = 16.0;
+const SWATCH_GAP: f32 = 8.0;
+const SWATCH_BORDER: f32 = 1.0;
+
 /// The most bytes one character is written in, which is the buffer a character is measured from.
 pub(crate) const UTF8_MAX_BYTES: usize = 4;
 
@@ -193,6 +202,17 @@ pub(crate) const INFO_ROW_UNDER_FIGURES_Y: f32 = 54.0;
 pub(crate) const ROW_STEP_FORWARD: i32 = 1;
 pub(crate) const ROW_STEP_BACK: i32 = -1;
 
+/// What a row that shows or hides other rows reads while they are on show and while they are not,
+/// before how many they are.
+const FOLD_OPEN: &str = "SHOWN";
+const FOLD_CLOSED: &str = "HIDDEN";
+
+/// What a row that shows or hides other rows reads: whether its rows are on show, and how many they
+/// are.
+pub(crate) fn fold_value(open: bool, rows: usize) -> String {
+    format!("{} ({rows})", if open { FOLD_OPEN } else { FOLD_CLOSED })
+}
+
 /// One step along the strip of tabs: forwards, and back.
 pub(crate) const NEXT_TAB: i32 = 1;
 pub(crate) const PREVIOUS_TAB: i32 = -1;
@@ -223,6 +243,19 @@ pub(crate) struct ListEntry<'a> {
     /// The slider of a row that holds a number, or `None` for a row that holds none. The value of
     /// such a row is written in the room a number has ([`number_value_room`]).
     pub(crate) number: Option<NumberCell<'a>>,
+    /// The colour of a colour row, or `None` for a row that is no colour's.
+    pub(crate) color: Option<ColorCell<'a>>,
+}
+
+/// What is drawn on a colour row besides its label and its value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ColorCell<'a> {
+    /// The colour the row shows, which its square is filled with.
+    pub(crate) color: Color,
+    /// The colour being typed into the row, which is drawn in place of the square and the value.
+    pub(crate) edit: Option<&'a NumberEdit>,
+    /// Whether the row is saying that what was typed into it was not a colour.
+    pub(crate) refused: bool,
 }
 
 /// What is drawn on a row that holds a number besides its label and its value.
@@ -517,12 +550,15 @@ pub(crate) fn draw_tabs<'a>(
 /// label has what the slider leaves. The row is clickable as any row is; which part of it a press
 /// landed on is told from where the row was drawn ([`number_part_at`]). While the row is being
 /// typed into, the figure typed is drawn where the slider and the number were.
+///
+/// A colour row has a square of its colour before its value, and the label has what the two leave.
+/// While a colour is typed into it, the colour typed is drawn where a number's would be.
 pub(crate) fn draw_list<'a>(shared: &mut AppShared, canvas: &mut Canvas<'_>, list: ListWindow, entry: impl Fn(usize) -> ListEntry<'a>, hot: fn(usize) -> Hot) {
     let colors = theme();
     canvas.fill_rect(LIST_RECT, colors.panel);
     let shown = list.top..(list.top + VISIBLE_ROWS).min(list.len);
     for (slot, index) in shown.enumerate() {
-        let ListEntry { label, value, look, number } = entry(index);
+        let ListEntry { label, value, look, number, color } = entry(index);
         let rect = row_rect(slot);
         if look == RowLook::Heading {
             draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, colors.accent, &fit_text(label, LABEL_SCALE, row_room()));
@@ -538,6 +574,11 @@ pub(crate) fn draw_list<'a>(shared: &mut AppShared, canvas: &mut Canvas<'_>, lis
             (_, true) => (colors.text, colors.title_focus),
             (_, false) => (colors.text_dim, colors.text),
         };
+        if let Some(cell) = color {
+            draw_color_row(canvas, rect, label, &value, (label_color, value_color), cell);
+            shared.hot.push((rect, hot(index)));
+            continue;
+        }
         let Some(cell) = number else {
             let label = fit_text(label, LABEL_SCALE, row_room() - text_width(&value, VALUE_SCALE) - LABEL_GAP);
             draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, label_color, &label);
@@ -570,6 +611,36 @@ pub(crate) fn draw_list<'a>(shared: &mut AppShared, canvas: &mut Canvas<'_>, lis
     canvas.fill_rect(scroll_thumb(list.top, list.len), colors.text_muted);
     let counter = format!("{} / {}", list.sel + 1, list.len);
     draw_text_right(canvas, LIST_RECT.x + LIST_RECT.w - ROW_PAD, LIST_RECT.y + LIST_RECT.h - COUNTER_RISE, COUNTER_SCALE, colors.text_muted, &counter);
+}
+
+/// Draw a colour row at `rect`: its label, and the colour typed into it, the words that refuse what
+/// was, or a square of its colour before its value. `colors` are the label's and the value's.
+fn draw_color_row(canvas: &mut Canvas<'_>, rect: Rect, label: &str, value: &str, colors: (Color, Color), cell: ColorCell<'_>) {
+    let (label_color, value_color) = colors;
+    let right = rect.x + rect.w - ROW_PAD;
+    if cell.edit.is_some() || cell.refused {
+        draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, label_color, &fit_text(label, LABEL_SCALE, number_label_room()));
+        match cell.edit {
+            Some(edit) => draw_edit(canvas, number_edit_rect(rect), rect.y + VALUE_TEXT_Y, VALUE_SCALE, edit),
+            None => draw_refusal_note(canvas, right, rect.y + VALUE_TEXT_Y, VALUE_SCALE, COLOR_REFUSAL_NOTE),
+        }
+        return;
+    }
+    let value_w = text_width(value, VALUE_SCALE);
+    let square = swatch_rect(rect, value_w);
+    let label = fit_text(label, LABEL_SCALE, square.x - LABEL_GAP - (rect.x + ROW_PAD));
+    draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, label_color, &label);
+    canvas.fill_rect(square, theme().text_dim);
+    let inner = Rect::new(square.x + SWATCH_BORDER, square.y + SWATCH_BORDER, square.w - SWATCH_BORDER * 2.0, square.h - SWATCH_BORDER * 2.0);
+    canvas.fill_rect(inner, theme().bg);
+    canvas.fill_rect(inner, cell.color);
+    draw_text_right(canvas, right, rect.y + VALUE_TEXT_Y, VALUE_SCALE, value_color, value);
+}
+
+/// Where the square of a colour row drawn at `row` goes, before a value `value_w` wide written
+/// against the row's right edge, in the middle of the row's height.
+pub(crate) fn swatch_rect(row: Rect, value_w: f32) -> Rect {
+    Rect::new(row.x + row.w - ROW_PAD - value_w - SWATCH_GAP - SWATCH_SIZE, row.y + ((row.h - SWATCH_SIZE) * 0.5).round(), SWATCH_SIZE, SWATCH_SIZE)
 }
 
 /// Fill the panel under the preview, before anything is written on it.
