@@ -220,7 +220,8 @@ pub(super) fn number_rows(shared: &AppShared) -> Vec<GuideRow> {
     group_rows(shared, ShortcutGroup::SkinBrowser)
 }
 
-/// The lines of the three option panels: the keys held for each, as they are bound now.
+/// The lines of the three option panels: the keys held for each, as they are bound now, then what
+/// the turntable does on each. What keys one to seven do on a panel is the skin's to show.
 pub(super) fn panel_rows(shared: &AppShared) -> Vec<GuideRow> {
     let start = control_label(shared, ControlAction::Start);
     let select = control_label(shared, ControlAction::Select);
@@ -229,6 +230,9 @@ pub(super) fn panel_rows(shared: &AppShared) -> Vec<GuideRow> {
         GuideRow::new(start, "HOLD FOR THE PLAY OPTIONS"),
         GuideRow::new(select, "HOLD FOR THE ASSIST OPTIONS"),
         GuideRow::new(format!("{start} + {select} / {detail}"), "HOLD FOR THE DETAIL OPTIONS"),
+        GuideRow::new(format!("{start} + TURNTABLE"), "TARGET"),
+        GuideRow::new(format!("{select} + TURNTABLE"), "HIDDEN+ ON/OFF"),
+        GuideRow::new(format!("{start}+{select} + TURNTABLE"), "JUDGE ALGORITHM"),
     ]
 }
 

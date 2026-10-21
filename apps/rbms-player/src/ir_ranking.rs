@@ -6,10 +6,11 @@
 use std::collections::HashMap;
 
 use rbms_ir::{ChartId, ChartReplayQuery, ClearLamp, PlayerId, ReplayMeta, ScoreRecord, ScoreServer};
-use rbms_judge::ClearType;
+use rbms_judge::{AssistGrade, ClearType, clear_type_id};
 use rbms_render::Color;
+use rbms_store::RecordLamp;
 
-use crate::format::clear_label_color;
+use crate::format::lamp_label_color;
 use crate::ir_outcome::short_error;
 
 /// Leaderboard rows requested for the panel. Ten fills the panel without paging.
@@ -28,6 +29,11 @@ pub(crate) struct RankingRow {
     pub(crate) rank: Option<u32>,
     pub(crate) player: String,
     pub(crate) ex_score: u32,
+    /// The row's lamp by id, and the assist grade inside it, which is what the ranking's spread of
+    /// lamps counts by.
+    pub(crate) record_lamp: RecordLamp,
+    /// The lamp as it is named and coloured, its assist grade included (ASSIST EASY to ASSIST
+    /// EXHARD for a graded light-assist clear).
     pub(crate) lamp: &'static str,
     pub(crate) lamp_color: Color,
     pub(crate) fast_slow: Option<(u32, u32)>,
@@ -165,12 +171,19 @@ pub(crate) fn clear_type_from_lamp(lamp: ClearLamp) -> ClearType {
 }
 
 /// Build one row. `fallback_rank` is used when the server did not number the row itself.
+///
+/// The lamp is named with the assist grade the server sent beside it, so a graded light-assist
+/// clear reads as the grade (ASSIST HARD) rather than as LIGHT ASSIST. Only that lamp has a grade;
+/// one sent beside any other is no grade.
 fn row_from_record(record: &ScoreRecord, fallback_rank: Option<u32>, replays: &HashMap<&str, &str>) -> RankingRow {
-    let (lamp, lamp_color) = clear_label_color(clear_type_from_lamp(record.clear));
+    let clear = clear_type_from_lamp(record.clear);
+    let grade = if clear == ClearType::LightAssistEasy { AssistGrade::from_id(record.assist_grade) } else { AssistGrade::None };
+    let (lamp, lamp_color) = lamp_label_color(clear, grade);
     RankingRow {
         rank: record.rank.or(fallback_rank),
         player: if record.player_name.trim().is_empty() { record.player.id.clone() } else { record.player_name.clone() },
         ex_score: record.ex_score,
+        record_lamp: RecordLamp { clear: clear_type_id(clear), assist_grade: grade.id() },
         lamp,
         lamp_color,
         fast_slow: record.judge.as_ref().map(|judge| (judge.fast, judge.slow)),
@@ -222,6 +235,7 @@ pub(crate) fn fetch_board(server: &dyn ScoreServer, chart: &ChartId, player: &Pl
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::format::clear_label_color;
     use rbms_ir::{
         AuthRequest, AuthResponse, CourseSubmission, IrError, JudgeBreakdown, PlayerProfile, ReplayData, ScoreSubmission, ServerInfo, SubmitResponse,
     };
@@ -240,6 +254,7 @@ pub(crate) mod tests {
             option: 0,
             total_notes: 500,
             judge: None,
+            assist_grade: 0,
             extra: HashMap::new(),
         }
     }
@@ -399,6 +414,23 @@ pub(crate) mod tests {
         assert_eq!(board.rows[1].rank, Some(9), "the server's own rank wins");
         assert_eq!(board.rows[0].player, "Alice");
         assert_eq!(board.rows[0].lamp, clear_label_color(ClearType::Hard).0);
+    }
+
+    /// A light-assist clear the server graded is named and counted by its grade, and a grade beside
+    /// any other lamp is no grade at all.
+    #[test]
+    fn a_row_is_named_by_the_assist_grade_the_server_sent() {
+        let graded = ScoreRecord { clear: ClearLamp::LightAssistEasy, assist_grade: AssistGrade::Hard.id(), ..record("a", "Alice", 1500, None) };
+        let ungraded = ScoreRecord { clear: ClearLamp::LightAssistEasy, ..record("b", "Bob", 1400, None) };
+        let stray = ScoreRecord { assist_grade: AssistGrade::ExHard.id(), ..record("c", "Carol", 1300, None) };
+        let board = build_board(&[graded, ungraded, stray], None, &[], &[]);
+        let named: Vec<&str> = board.rows.iter().map(|row| row.lamp).collect();
+        assert_eq!(named, ["ASSIST HARD", "LIGHT ASSIST", "HARD"]);
+        let light_assist = clear_type_id(ClearType::LightAssistEasy);
+        assert_eq!(board.rows[0].record_lamp, RecordLamp { clear: light_assist, assist_grade: AssistGrade::Hard.id() });
+        assert_eq!(board.rows[1].record_lamp, RecordLamp { clear: light_assist, assist_grade: AssistGrade::None.id() });
+        assert_eq!(board.rows[2].record_lamp, RecordLamp { clear: clear_type_id(ClearType::Hard), assist_grade: AssistGrade::None.id() });
+        assert_eq!(board.rows[0].lamp_color, lamp_label_color(ClearType::LightAssistEasy, AssistGrade::Hard).1);
     }
 
     #[test]

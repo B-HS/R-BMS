@@ -25,7 +25,7 @@ fn snapshot() -> ResultSnapshot {
     ResultSnapshot::of(ResultInput {
         sheet: sheet(),
         gauge: GaugeEnds { ends },
-        previous: PreviousScore { ex_score: 11, max_combo: 5, min_bp: Some(3), clear: 4 },
+        previous: PreviousScore { ex_score: 11, max_combo: 5, min_bp: Some(3), clear: 4, assist_grade: Some(0) },
         target: Some(TargetView { name: "RIVAL".to_string(), ex: 14 }),
         ..ResultInput::default()
     })

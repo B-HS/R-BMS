@@ -1,13 +1,14 @@
 //! The ranking cluster answers from how the submission of the run stands, and answers the absent
 //! value of its kind for everything the service has not sent.
 
-use rbms_judge::ClearType;
+use rbms_judge::{AssistGrade, ClearType, clear_type_id};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 use rbms_skin::timer::timer_id;
+use rbms_store::RecordLamp;
 
 use super::*;
-use crate::format::clear_label_color;
+use crate::format::lamp_label_color;
 use crate::ir_outcome::{IrReport, IrStatus};
 use crate::ir_ranking::{RankingBoard, RankingRow, RankingState};
 use crate::skin_host::result::snapshot::ReplaySlot;
@@ -190,8 +191,35 @@ fn every_number_and_option_the_reference_defines_in_a_run_routed_to_this_cluster
 }
 
 fn row(lamp: ClearType, rank: Option<u32>) -> RankingRow {
-    let (label, color) = clear_label_color(lamp);
-    RankingRow { rank, player: "Player".to_string(), ex_score: 100, lamp: label, lamp_color: color, fast_slow: None, replay_id: None, played_at: 0 }
+    graded_row(lamp, AssistGrade::None, rank)
+}
+
+/// A row of a ranking on `lamp` with the assist grade `grade` inside it.
+fn graded_row(lamp: ClearType, grade: AssistGrade, rank: Option<u32>) -> RankingRow {
+    let (label, color) = lamp_label_color(lamp, grade);
+    RankingRow {
+        rank,
+        player: "Player".to_string(),
+        ex_score: 100,
+        record_lamp: RecordLamp { clear: clear_type_id(lamp), assist_grade: grade.id() },
+        lamp: label,
+        lamp_color: color,
+        fast_slow: None,
+        replay_id: None,
+        played_at: 0,
+    }
+}
+
+/// A graded light-assist clear is named for its grade and still counted on the light-assist lamp,
+/// as every row is counted by its lamp's id and not by what it is called.
+#[test]
+fn a_graded_light_assist_clear_is_counted_on_the_light_assist_lamp() {
+    let rows = AssistGrade::ALL.into_iter().map(|grade| graded_row(ClearType::LightAssistEasy, grade, None)).chain([row(ClearType::Easy, None)]).collect();
+    let board = RankingState::Ready(Box::new(RankingBoard { rows, you: None, rivals: Vec::new() }));
+    let ir = browsing(Some(&board));
+    assert_eq!(ir.integer(NUMBER_IR_PLAYER_LIGHTASSIST), Some(5), "a row named ASSIST EASY to ASSIST EXHARD fell out of the spread");
+    assert_eq!(ir.integer(NUMBER_IR_PLAYER_EASY), Some(1));
+    assert_eq!(ir.integer(NUMBER_IR_TOTALPLAYER), Some(6));
 }
 
 /// A fetched board of seven scores: three failed, one clear, two hard clears and one max, with the

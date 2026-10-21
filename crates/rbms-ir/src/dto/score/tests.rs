@@ -19,6 +19,7 @@ fn score_record_round_trips_with_rank_some_and_extra() {
         option: 0,
         total_notes: 0,
         judge: None,
+        assist_grade: 0,
         extra,
     };
     let back: ScoreRecord = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
@@ -165,6 +166,7 @@ fn extra_map_round_trips_arbitrary_json() {
         option: 0,
         total_notes: 0,
         judge: None,
+        assist_grade: 0,
         extra: extra.clone(),
     };
     let back: ScoreRecord = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
@@ -183,6 +185,19 @@ fn score_record_basic_payload_defaults_superset_fields_to_zero_and_none() {
     assert_eq!(r.option, 0);
     assert_eq!(r.total_notes, 0);
     assert!(r.judge.is_none());
+    assert_eq!(r.assist_grade, 0, "a server that grades no lamp leaves every row ungraded");
+}
+
+#[test]
+fn score_record_reads_the_assist_grade_a_ranking_row_carries() {
+    let j = json!({
+        "player": {"id": "p"}, "player_name": "Bob", "clear": "LightAssistEasy",
+        "ex_score": 10, "max_combo": 5, "minbp": 2, "rank": 1, "played_at": 7, "assist_grade": 3
+    });
+    let r: ScoreRecord = serde_json::from_value(j).unwrap();
+    assert_eq!((r.clear, r.assist_grade), (ClearLamp::LightAssistEasy, 3));
+    let back: ScoreRecord = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert_eq!(back.assist_grade, 3, "the grade survives a round trip");
 }
 
 #[test]
@@ -200,6 +215,7 @@ fn score_record_superset_fields_round_trip_hcn_and_judge_split() {
         option: 1_048_576,
         total_notes: 812,
         judge: Some(JudgeBreakdown { pgreat: 712, epg: 400, lpg: 312, great: 64, avgjudge: -1500, ..Default::default() }),
+        assist_grade: 0,
         extra: HashMap::new(),
     };
     r.extra.insert("dan".into(), json!("kaiden"));

@@ -605,13 +605,19 @@ fn the_guide_names_the_keys_as_they_are_bound() {
     let panels = panel_rows(shared);
     assert_eq!(
         panels.iter().map(|row| row.keys.as_str()).collect::<Vec<_>>(),
-        ["A", "W", "A + W / 5"],
+        ["A", "W", "A + W / 5", "A + TURNTABLE", "W + TURNTABLE", "A+W + TURNTABLE"],
         "START, SELECT and both are not on the keys they ship on"
+    );
+    assert_eq!(
+        panels.iter().skip(3).map(|row| row.does.as_str()).collect::<Vec<_>>(),
+        ["TARGET", "HIDDEN+ ON/OFF", "JUDGE ALGORITHM"],
+        "the turntable of each panel is not named for what it steps"
     );
 
     shared.keyconfig.set_control(ControlAction::Start, KeyCode::KeyQ);
     assert_eq!(panel_rows(shared)[0].keys, "Q", "a rebound START is not the key the guide names");
     assert_eq!(panel_rows(shared)[2].keys, "Q + W / 5");
+    assert_eq!(panel_rows(shared)[5].keys, "Q+W + TURNTABLE");
 
     shared.keyconfig.set_lane(Mode::BEAT_7K, 3, KeyCode::KeyQ);
     shared.active_keys = shared.keyconfig.lane_keys(Mode::BEAT_7K);

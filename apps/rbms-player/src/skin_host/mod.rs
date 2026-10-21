@@ -22,6 +22,7 @@
 
 pub mod audio;
 pub mod chart;
+pub mod extension;
 pub mod ir;
 pub mod keyconfig;
 pub mod loading;
@@ -40,7 +41,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::path::PathBuf;
 
-use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinOffset};
+use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinColor, SkinOffset};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{
     AudioCommand, FLOAT_ABSENT, HostCall, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, NameSpace, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_EXTENDED_LAST,
@@ -48,6 +49,11 @@ use rbms_skin::property::{
     reference_writes, static_scope,
 };
 use rbms_skin::timer::{TimerId, TimerState};
+
+use extension::{
+    RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_SCRATCH_AUTO, RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST,
+    RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, RBMS_OPTION_SCRATCH_AUTO_ON, RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_options_last,
+};
 
 /// The image index of the browser's difficulty filter (`IndexType.difficulty`), which the reference
 /// numbers without declaring a constant for it.
@@ -371,6 +377,7 @@ pub const ROUTES: &[Route] = &[
     Route::band(IdSpace::Boolean, OPTION_DISABLE_SAVE_SCORE, OPTION_NO_SAVE_CLEAR, Cluster::Options),
     Route::one(IdSpace::Text, STRING_TARGET_NAME, Cluster::Options),
     Route::band(IdSpace::Text, STRING_TARGET_PREVIOUS_FIRST, STRING_TARGET_NEXT_LAST, Cluster::Options),
+    Route::band(IdSpace::Boolean, RBMS_OPTION_SCRATCH_AUTO_ON, RBMS_OPTION_HIDDEN_ON, Cluster::Options),
     Route::band(IdSpace::Boolean, OPTION_FOLDERBAR, OPTION_PLAYABLEBAR, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_PANEL1, OPTION_PANEL3, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_SELECT_BAR_NOT_PLAYED, OPTION_SELECT_BAR_FULL_COMBO_CLEARED, Cluster::Select),
@@ -381,6 +388,12 @@ pub const ROUTES: &[Route] = &[
     Route::band(IdSpace::Boolean, OPTION_NO_REPLAYDATA, OPTION_REPLAYDATA_SAVED, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_NO_REPLAYDATA2, OPTION_REPLAYDATA4_SAVED, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_SELECT_REPLAYDATA, OPTION_SELECT_REPLAYDATA4, Cluster::Select),
+    Route::band(
+        IdSpace::Boolean,
+        RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST,
+        assist_grade_options_last(RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST),
+        Cluster::Select,
+    ),
     Route::band(IdSpace::ImageIndex, BUTTON_FAVORITTE_SONG, BUTTON_FAVORITTE_CHART, Cluster::Select),
     Route::band(IdSpace::ImageIndex, INDEX_CLEAR, INDEX_TARGET_CLEAR, Cluster::Select),
     Route::one(IdSpace::Text, STRING_TITLE, Cluster::Select),
@@ -402,6 +415,13 @@ pub const ROUTES: &[Route] = &[
     Route::band(IdSpace::Boolean, OPTION_UPDATE_SCORE, OPTION_UPDATE_TARGET, Cluster::Result),
     Route::band(IdSpace::Boolean, OPTION_1PWIN, OPTION_DRAW, Cluster::Result),
     Route::band(IdSpace::Boolean, OPTION_DRAW_SCORE, OPTION_DRAW_TARGET, Cluster::Result),
+    Route::band(IdSpace::Boolean, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, assist_grade_options_last(RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST), Cluster::Result),
+    Route::band(
+        IdSpace::Boolean,
+        RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST,
+        assist_grade_options_last(RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST),
+        Cluster::Result,
+    ),
     Route::band(IdSpace::ImageIndex, INDEX_CLEAR, INDEX_TARGET_CLEAR, Cluster::Result),
     Route::band(IdSpace::Boolean, OPTION_GAUGE_GROOVE, OPTION_GAUGE_HARD, Cluster::Result),
     Route::one(IdSpace::Boolean, OPTION_GAUGE_EX, Cluster::Result),
@@ -547,6 +567,7 @@ pub const EVENT_ROUTES: &[EventRoute] = &[
     EventRoute::band(BUTTON_EXTRANOTE, BUTTON_LONGNOTEMODE, Cluster::Options),
     EventRoute::band(BUTTON_SEVENTONINE_PATTERN, BUTTON_SEVENTONINE_TYPE, Cluster::Options),
     EventRoute::one(EVENT_CONSTANT, Cluster::Options),
+    EventRoute::band(RBMS_EVENT_SCRATCH_AUTO, RBMS_EVENT_KEEP_GREEN_NUMBER, Cluster::Options),
     EventRoute::band(BUTTON_PRACTICE_ITEM1, BUTTON_PRACTICE_ITEM16, Cluster::Play),
     EventRoute::band(EVENT_KEY_ASSIGN_FIRST, EVENT_KEY_ASSIGN_FIRST_LAST, Cluster::KeyConfig),
     EventRoute::band(EVENT_KEY_ASSIGN_SECOND, EVENT_KEY_ASSIGN_SECOND_LAST, Cluster::KeyConfig),
@@ -782,7 +803,7 @@ pub struct ScreenHost<'a> {
     /// The scene's timers, which answer every timer read.
     pub timers: &'a TimerState,
     /// The player's own nudges for the document being drawn, asked after the offsets the game
-    /// itself sets.
+    /// itself sets, and the colours the player set, which nothing else holds.
     pub offsets: Option<&'a dyn OffsetSource>,
     /// The offsets the game itself sets on the play screen -- the turntable angles, the lift, the
     /// lane cover and the hidden cover -- asked before anything else for an offset. One it does not
@@ -916,6 +937,12 @@ impl OffsetSource for ScreenHost<'_> {
             .and_then(|play| play.offset(id))
             .or_else(|| self.ask(IdSpace::Offset, id, |cluster| cluster.offset(id)))
             .or_else(|| self.offsets.and_then(|nudges| nudges.offset(id)))
+    }
+
+    /// The colour the player set under `id`, which only the player's own nudges hold: the game sets
+    /// no colour of its own.
+    fn color(&self, id: i32) -> Option<SkinColor> {
+        self.offsets.and_then(|nudges| nudges.color(id))
     }
 }
 

@@ -196,6 +196,11 @@ pub struct ScoreRecord {
     /// Full judge tally for the row when the server exposes it; `None` = ranking-only payload.
     #[serde(default)]
     pub judge: Option<JudgeBreakdown>,
+    /// Assist grade inside the row's lamp: 0 for none, 1 to 4 for a light-assist clear graded by the
+    /// gauge it was cleared on (ASSIST EASY, ASSIST CLEAR, ASSIST HARD, ASSIST EXHARD). A server
+    /// that does not grade lamps leaves it out, which reads as 0.
+    #[serde(default)]
+    pub assist_grade: u8,
     #[serde(default)]
     pub extra: HashMap<String, serde_json::Value>,
 }

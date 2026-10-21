@@ -1130,6 +1130,7 @@ mod tests {
             rank: None,
             player: player.to_string(),
             ex_score: ex,
+            record_lamp: rbms_store::RecordLamp::default(),
             lamp: "CLEAR",
             lamp_color: Color::GREEN,
             fast_slow: None,

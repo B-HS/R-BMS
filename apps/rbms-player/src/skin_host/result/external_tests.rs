@@ -95,7 +95,7 @@ fn snapshot() -> ResultSnapshot {
         sheet: ScoreSheet { early: [3, 1, 0, 0, 0, 0], late: [2, 2, 1, 0, 0, 1], notes: 10, max_combo: 7, min_bp: 1, clear: 5, family: PointFamily::Beat7 },
         gauge: GaugeEnds { ends },
         timing: TimingFigures { average_ms: 2.5, std_dev_ms: 6.0, center_ms: 150, avg_duration_us: 54_321 },
-        previous: PreviousScore { ex_score: 11, max_combo: 9, min_bp: Some(1), clear: 4 },
+        previous: PreviousScore { ex_score: 11, max_combo: 9, min_bp: Some(1), clear: 4, assist_grade: Some(0) },
         target: Some(TargetView { name: "MY BEST".to_string(), ex: 14 }),
         options: PlayedOptions { random: 2, ..PlayedOptions::default() },
         favorite_chart: Some(false),

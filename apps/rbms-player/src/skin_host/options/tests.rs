@@ -319,3 +319,35 @@ fn a_run_in_progress_names_the_target_it_is_really_paced_against() {
     );
     assert_eq!(play_only.text(STRING_TARGET_NEXT_FIRST), None, "only the target's own text is the run's");
 }
+
+/// The browser answers this player's own options of its switches -- SCRATCH AUTO, KEEP GREEN NUMBER
+/// and the three covers -- through the host as a skin's `main_state.option` asks, negated for a
+/// negative id, and a result screen, which shows the settings a run was played with, does not.
+#[test]
+fn the_browser_answers_this_players_own_options_of_its_switches() {
+    use crate::skin_host::ScreenHost;
+    use crate::skin_host::extension::{
+        RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_KEEP_GREEN_NUMBER_ON, RBMS_OPTION_LANE_COVER_ON, RBMS_OPTION_LIFT_ON, RBMS_OPTION_SCRATCH_AUTO_ON,
+    };
+    use rbms_skin::dst::DrawStateSource;
+    use rbms_skin::timer::TimerState;
+
+    let ids = [RBMS_OPTION_SCRATCH_AUTO_ON, RBMS_OPTION_KEEP_GREEN_NUMBER_ON, RBMS_OPTION_LANE_COVER_ON, RBMS_OPTION_LIFT_ON, RBMS_OPTION_HIDDEN_ON];
+    let shipped = settings(&Config::default());
+    assert_eq!(ids.map(|id| shipped.boolean(id)), [Some(false), Some(false), Some(true), Some(false), Some(false)]);
+
+    let mut config = Config::default();
+    config.play.scratch_auto = true;
+    config.play.keep_green_number = true;
+    config.play.enable_cover = false;
+    config.play.enable_lift = true;
+    config.play.enable_hidden = true;
+    let timers = TimerState::new();
+    let mut host = ScreenHost::new(0, &timers);
+    host.options = settings(&config);
+    assert_eq!(ids.map(|id| host.boolean(id)), [Some(true), Some(true), Some(false), Some(true), Some(true)]);
+    assert_eq!(host.boolean(-RBMS_OPTION_SCRATCH_AUTO_ON), Some(false), "a negative id reads the negation");
+
+    let snapshot = snapshot(PlayedOptions::default(), true);
+    assert_eq!(ids.map(|id| on_screen(&snapshot).boolean(id)), [None; 5], "a result screen answered the live settings");
+}

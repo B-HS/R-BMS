@@ -118,6 +118,7 @@ fn the_account_best_is_the_local_run_played_at_the_same_second() {
         rank: None,
         player: "tester".to_string(),
         ex_score,
+        record_lamp: rbms_store::RecordLamp::default(),
         lamp: "CLEAR",
         lamp_color: rbms_render::Color::GREEN,
         fast_slow: None,

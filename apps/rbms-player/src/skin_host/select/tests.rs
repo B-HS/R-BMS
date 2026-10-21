@@ -249,6 +249,29 @@ fn the_lamp_of_the_score_switches_on_its_own_option_only() {
     assert_eq!(state_of(&shown).boolean(OPTION_SELECT_BAR_NOT_PLAYED), Some(true), "a record that never cleared anything is not played either");
 }
 
+/// This player's own five options of the assist grade of the best lamp on the bar: exactly the one
+/// of its grade is on where the bar holds a best, none where it holds none, and through the host
+/// as a skin's `main_state.option` asks.
+#[test]
+fn the_assist_grade_of_the_best_lamp_switches_on_its_own_option_only() {
+    use crate::skin_host::extension::{RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_options_last};
+    use rbms_judge::AssistGrade;
+    let grade_options = RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST..=assist_grade_options_last(RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST);
+    for grade in AssistGrade::ALL {
+        let record = BestScore { assist_grade: grade.id(), ..best(ClearType::LightAssistEasy) };
+        let shown = shown_on(song(), Some(chart_with(Some(&record))));
+        let timers = TimerState::new();
+        let mut host = ScreenHost::new(0, &timers);
+        host.show_select(&shown);
+        let on: Vec<i32> = grade_options.clone().filter(|id| host.boolean(*id) == Some(true)).collect();
+        assert_eq!(on, [RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST + i32::from(grade.id())], "{grade:?}");
+    }
+    let unplayed = shown_on(song(), Some(chart_with(None)));
+    assert!(grade_options.clone().all(|id| state_of(&unplayed).boolean(id) == Some(false)), "a bar with no best has a grade");
+    let folder = shown_on(SongBar::new(BarKind::Folder, ""), None);
+    assert!(grade_options.clone().all(|id| state_of(&folder).boolean(id) == Some(false)), "a folder has a grade");
+}
+
 #[test]
 fn a_bar_that_is_not_a_chart_or_a_course_is_never_a_bar_that_was_not_played() {
     for kind in [BarKind::Folder, BarKind::Table, BarKind::Executable] {

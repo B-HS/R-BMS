@@ -49,7 +49,7 @@ fn a_record_gives_its_sheet_its_gauges_and_its_timing() {
 fn a_snapshot_holds_the_run_against_the_best_and_the_target_it_was_given() {
     let record = autoplayed_record();
     let snapshot = ResultSnapshot::of(ResultInput {
-        previous: PreviousScore { ex_score: 6, max_combo: 3, min_bp: Some(2), clear: 4 },
+        previous: PreviousScore { ex_score: 6, max_combo: 3, min_bp: Some(2), clear: 4, assist_grade: Some(0) },
         target: Some(TargetView { name: "RIVAL".to_string(), ex: 7 }),
         course_titles: vec!["one".to_string()],
         ..ResultInput::from_record(&record, Mode::BEAT_7K, ClearType::Normal)
@@ -151,4 +151,37 @@ fn the_best_is_the_best_of_each_figure_among_the_runs_that_may_set_one() {
 #[test]
 fn a_chart_never_played_has_no_best() {
     assert_eq!(PreviousScore::of_book(&ScoreBook::default(), "abc", "CHART"), PreviousScore::default());
+    assert_eq!(PreviousScore::default().assist_grade, None, "a chart never played has no grade either");
+}
+
+/// The run's lamp is graded by the gauge it finished on, as the stored record is, and only a
+/// light-assist clear has a grade.
+#[test]
+fn a_record_grades_a_light_assist_clear_by_the_gauge_it_finished_on() {
+    let record = autoplayed_record();
+    let graded = ResultInput::from_record(&record, Mode::BEAT_7K, ClearType::LightAssistEasy);
+    assert_eq!(graded.assist_grade, rbms_judge::assist_grade(ClearType::LightAssistEasy, Some(record.finished_gauge)).id());
+    assert_eq!(record.finished_gauge, GaugeIndex::Normal);
+    assert_eq!(graded.assist_grade, rbms_judge::AssistGrade::Clear.id(), "a NORMAL gauge clear is ASSIST CLEAR");
+    assert_eq!(ResultSnapshot::of(graded).assist_grade, rbms_judge::AssistGrade::Clear.id());
+    assert_eq!(ResultInput::from_record(&record, Mode::BEAT_7K, ClearType::Normal).assist_grade, 0);
+}
+
+/// The best the run replaced carries the grade inside its lamp, from the run that set it.
+#[test]
+fn the_best_carries_the_assist_grade_of_its_lamp() {
+    let light_assist = rbms_judge::clear_type_id(ClearType::LightAssistEasy);
+    let mut book = ScoreBook::default();
+    let scratch_auto = |gauge: &str| ScoreRecord {
+        gauge: gauge.to_string(),
+        assist: rbms_store::SCRATCH_AUTO_ASSIST,
+        ..stored("abc", 11, 6, [5, 1, 0, 2, 1, 1], light_assist, false, "CHART")
+    };
+    book.push(scratch_auto("EASY"));
+    book.push(scratch_auto("HARD"));
+    let previous = PreviousScore::of_book(&book, "abc", "CHART");
+    assert_eq!((previous.clear, previous.assist_grade), (light_assist, Some(rbms_judge::AssistGrade::Hard.id())));
+
+    book.push(stored("abc", 9, 9, [4, 1, 0, 0, 1, 0], 5, false, "CHART"));
+    assert_eq!(PreviousScore::of_book(&book, "abc", "CHART").assist_grade, Some(0), "a NORMAL clear outranks every grade and has none");
 }

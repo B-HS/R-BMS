@@ -58,7 +58,7 @@ pub(super) const KEY_FIVE: KeyCode = KeyCode::KeyC;
 pub(super) const KEY_SIX: KeyCode = KeyCode::KeyF;
 pub(super) const KEY_SEVEN: KeyCode = KeyCode::KeyV;
 pub(super) const TURNTABLE_FORWARD: KeyCode = KeyCode::ShiftLeft;
-const TURNTABLE_BACKWARD: KeyCode = KeyCode::ControlLeft;
+pub(super) const TURNTABLE_BACKWARD: KeyCode = KeyCode::ControlLeft;
 const TURNTABLE_LANE: usize = 7;
 const KEY_ONE_LANE: usize = 0;
 

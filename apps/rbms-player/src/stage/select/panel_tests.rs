@@ -13,7 +13,8 @@ use rbms_judge::gauge::{GaugeAutoShift, GaugeKind};
 use rbms_skin::timer::{TimerId, timer_id};
 
 use super::skinned_tests::{
-    Browser, CELL, DOCUMENT_SIZE, KEY_FIVE, KEY_FOUR, KEY_ONE, KEY_SEVEN, KEY_SIX, KEY_THREE, KEY_TWO, SELECT, SHORT_STEP, START, TURNTABLE_FORWARD,
+    Browser, CELL, DOCUMENT_SIZE, KEY_FIVE, KEY_FOUR, KEY_ONE, KEY_SEVEN, KEY_SIX, KEY_THREE, KEY_TWO, SELECT, SHORT_STEP, START, TURNTABLE_BACKWARD,
+    TURNTABLE_FORWARD,
 };
 use super::tests::{entry, press};
 use super::*;
@@ -251,34 +252,100 @@ fn changes_nothing(tag: &str, panel_keys: &[KeyCode], key: KeyCode) -> bool {
     browser.app.shared.config == before
 }
 
-/// The first panel's rows of the key table: keys one and two step the first random option forward
-/// and back, three the gauge, four the double option, five the fixed tempo, and six and seven the
-/// second random option back and forward. Both random options are the one setting here.
+/// The first panel's rows of the key table: keys one and two step the random option forward and
+/// back, three and four the gauge forward and back, five and six the fixed tempo forward and back,
+/// and seven the random option forward. The double option is on no key: no run applies it.
 #[test]
 fn the_keys_of_the_first_panel_step_the_play_options() {
     let random = |key: KeyCode, name: &str| tapped(&format!("panel1-{name}"), &[START], key).play.random;
     assert_eq!(random(KEY_ONE, "one"), NoteOption::Mirror, "OPTION1_DOWN is the next option");
     assert_eq!(random(KEY_TWO, "two"), NoteOption::AllScratch, "OPTION1_UP is the one before, round the end");
     assert_eq!(random(KEY_SEVEN, "seven"), NoteOption::Mirror, "OPTION2_DOWN");
-    assert_eq!(random(KEY_SIX, "six"), NoteOption::AllScratch, "OPTION2_UP");
 
     let defaults = Config::default();
     assert_eq!(defaults.play.gauge, GaugeKind::Normal);
     assert_eq!(tapped("panel1-three", &[START], KEY_THREE).play.gauge, GaugeKind::Hard, "GAUGE_DOWN is the next gauge");
-    assert_eq!(tapped("panel1-four", &[START], KEY_FOUR).play.lane_option, LaneOption::Flip, "OPTIONDP_DOWN");
+    let four = tapped("panel1-four", &[START], KEY_FOUR);
+    assert_eq!(four.play.gauge, GaugeKind::Easy, "GAUGE_UP is the gauge before");
+    assert_eq!(four.play.lane_option, LaneOption::Off, "key four no longer steps the double option");
     assert_eq!(defaults.play.fix_hispeed, FixHiSpeed::MainBpm);
     assert_eq!(tapped("panel1-five", &[START], KEY_FIVE).play.fix_hispeed, FixHiSpeed::MinBpm, "HSFIX_DOWN");
+    let six = tapped("panel1-six", &[START], KEY_SIX);
+    assert_eq!(six.play.fix_hispeed, FixHiSpeed::MaxBpm, "HSFIX_UP is the fixed tempo before");
+    assert_eq!(six.play.random, NoteOption::Off, "key six no longer steps the random option");
 }
 
-/// The second panel's rows: key two is the constant speed and key four the legacy notes. The
-/// other five assists are no setting of this player, and their keys are taken and change nothing.
+/// The second panel's rows: key two is the constant speed and key four the legacy notes, key one the
+/// custom judge window, which is no switch here and changes nothing. Key three switches SCRATCH
+/// AUTO, five KEEP GREEN NUMBER, six the lane cover, seven the lift, and the turntable the HIDDEN+
+/// cover, each the other way from how it ships.
 #[test]
 fn the_keys_of_the_second_panel_flip_the_assists_there_are() {
     assert!(tapped("panel2-two", &[SELECT], KEY_TWO).play.constant_speed, "CONSTANT");
     assert!(tapped("panel2-four", &[SELECT], KEY_FOUR).play.legacy_note, "LEGACYNOTE");
-    for (key, name) in [(KEY_ONE, "one"), (KEY_THREE, "three"), (KEY_FIVE, "five"), (KEY_SIX, "six"), (KEY_SEVEN, "seven")] {
-        assert!(changes_nothing(&format!("panel2-{name}"), &[SELECT], key), "key {name} of the second panel changed a setting");
+    assert!(changes_nothing("panel2-one", &[SELECT], KEY_ONE), "key one of the second panel changed a setting");
+
+    let shipped = Config::default().play;
+    assert!(!shipped.scratch_auto && !shipped.keep_green_number && shipped.enable_cover && !shipped.enable_lift && !shipped.enable_hidden);
+    assert!(tapped("panel2-three", &[SELECT], KEY_THREE).play.scratch_auto, "SCRATCH AUTO");
+    assert!(tapped("panel2-five", &[SELECT], KEY_FIVE).play.keep_green_number, "KEEP GREEN NUMBER");
+    assert!(!tapped("panel2-six", &[SELECT], KEY_SIX).play.enable_cover, "LANE COVER ON");
+    assert!(tapped("panel2-seven", &[SELECT], KEY_SEVEN).play.enable_lift, "LIFT ON");
+    for (key, name) in [(TURNTABLE_FORWARD, "forward"), (TURNTABLE_BACKWARD, "backward")] {
+        assert!(tapped(&format!("panel2-turntable-{name}"), &[SELECT], key).play.enable_hidden, "HIDDEN+ ON with the turntable {name}");
     }
+}
+
+/// The turntable of the third panel steps the judge algorithm round the three the reference lists:
+/// forwards to the one before, backwards to the one after, as the first panel's steps the target.
+#[test]
+fn the_turntable_of_the_third_panel_steps_the_judge_algorithm() {
+    use rbms_judge::JudgeAlgorithm;
+    let both: &[KeyCode] = &[START, SELECT];
+    assert_eq!(Config::default().judge.judge_algorithm, JudgeAlgorithm::Combo);
+    assert_eq!(tapped("panel3-turntable-forward", both, TURNTABLE_FORWARD).judge.judge_algorithm, JudgeAlgorithm::Lowest, "the one before, round the end");
+    assert_eq!(tapped("panel3-turntable-backward", both, TURNTABLE_BACKWARD).judge.judge_algorithm, JudgeAlgorithm::Duration, "the one after");
+    assert_eq!(tapped("panel3-detail-turntable", &[DETAIL_KEY], TURNTABLE_BACKWARD).judge.judge_algorithm, JudgeAlgorithm::Duration);
+
+    let mut browser = holding("panel3-turntable-held", both);
+    browser.hold(TURNTABLE_BACKWARD);
+    browser.frame_after(SHORT_STEP);
+    browser.frame_after(PAST_THE_FIRST_REPEAT);
+    assert_eq!(browser.app.shared.config.judge.judge_algorithm, JudgeAlgorithm::Duration, "a held turntable steps it once");
+    assert_eq!(browser.sel(), 0, "the turntable moved the list under the panel");
+}
+
+/// With the first panel up the key the option overlay is held open by, which ships on the turntable,
+/// is the panel's: the overlay stays shut and the turntable steps the target. With no panel up the
+/// same key opens the overlay as it always has.
+#[test]
+fn the_turntable_steps_the_target_rather_than_open_the_option_overlay_while_a_panel_is_up() {
+    assert_eq!(crate::app_options::HOLD_KEY, TURNTABLE_FORWARD, "the overlay's hold key no longer ships on the turntable");
+    let first = ScoreTarget::ALL[0];
+    let mut browser = holding("panel1-turntable-not-overlay", &[START]);
+    browser.app.shared.config.judge.target = first;
+    browser.hold(TURNTABLE_FORWARD);
+    let now = browser.now;
+    let mut ctx = FrameCtx { shared: &mut browser.app.shared, now, dt: 0.0 };
+    assert!(!crate::app_options::options_key(&mut ctx, StageId::Select, false, &press(TURNTABLE_FORWARD)), "the overlay took the turntable");
+    assert!(!browser.app.shared.options.is_open(), "the overlay opened over the panel");
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(browser.app.shared.config.judge.target, ScoreTarget::ALL[ScoreTarget::ALL.len() - 1], "the turntable did not step the target");
+
+    for held in [SELECT, DETAIL_KEY] {
+        let mut browser = holding("panel-turntable-not-overlay", &[held]);
+        browser.hold(TURNTABLE_FORWARD);
+        let now = browser.now;
+        let mut ctx = FrameCtx { shared: &mut browser.app.shared, now, dt: 0.0 };
+        assert!(!crate::app_options::options_key(&mut ctx, StageId::Select, false, &press(TURNTABLE_FORWARD)), "{held:?}");
+    }
+
+    let mut unpaneled = self::browser("panel-none-overlay");
+    unpaneled.hold(TURNTABLE_FORWARD);
+    let now = unpaneled.now;
+    let mut ctx = FrameCtx { shared: &mut unpaneled.app.shared, now, dt: 0.0 };
+    assert!(crate::app_options::options_key(&mut ctx, StageId::Select, false, &press(TURNTABLE_FORWARD)), "with no panel the key opens the overlay");
+    assert!(unpaneled.app.shared.options.is_open());
 }
 
 /// The third panel's rows: key one is the background animation, two the gauge auto shift, three the

@@ -54,6 +54,8 @@ pub struct BarRecord {
     /// The moment of the last play, in seconds, and the clock it falls on here.
     pub last_played: i64,
     pub last_played_clock: Option<LocalTime>,
+    /// The assist grade inside the best lamp, 0 to 4 (`rbms_judge::AssistGrade::id`).
+    pub assist_grade: u8,
 }
 
 impl BarRecord {
@@ -74,6 +76,7 @@ impl BarRecord {
             clear_count: best.clearcount,
             last_played: best.date,
             last_played_clock: Some(best.date).filter(|date| *date > 0).and_then(local_time),
+            assist_grade: best.assist_grade,
         }
     }
 }

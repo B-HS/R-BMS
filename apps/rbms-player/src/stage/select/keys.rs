@@ -3,11 +3,16 @@
 //!
 //! This is the reference's own table (`MusicSelectKeyProperty`) and its own way of reading it
 //! (`MusicSelectKeyProperty.isPressed`, `BMSPlayerInputProcessor.resetKeyChangedTime`), used when a
-//! skin draws the browser, except that the keys carry no `NEXT_REPLAY`. A key is known by its
-//! index ([`crate::keyconfig::key_index_of`]): keys one to seven are 0 to 6 and the two turntable
-//! directions are 7 and 8, on the keyboard and on a controller alike. Each index carries one role
-//! for the list and one for each option panel, and which of them a key press means is decided by
-//! whether START and SELECT are held ([`Panel::held`]).
+//! skin draws the browser, except that the keys carry no `NEXT_REPLAY` and that the option panels'
+//! keys the reference gives to nothing this player has are given to options it does have
+//! ([`BEAT_TABLE`]). A key is known by its index ([`crate::keyconfig::key_index_of`]): keys one to
+//! seven are 0 to 6 and the two turntable directions are 7 and 8, on the keyboard and on a
+//! controller alike. Each index carries one role for the list and one for each option panel, and
+//! which of them a key press means is decided by whether START and SELECT are held
+//! ([`Panel::held`]).
+//!
+//! A five-key or ten-key mode has no lane on key indices 5 and 6, so in those modes the roles of
+//! those two indices are on no key, of the keyboard or of a controller.
 //!
 //! The reference reads the keys once a frame rather than as they arrive. A role is asked for by
 //! name; the first key that carries it and is down answers, either with "it is down" or with "it
@@ -37,21 +42,22 @@ pub(super) enum SelectKey {
     Option1Down,
     GaugeUp,
     GaugeDown,
-    OptionDpUp,
-    OptionDpDown,
     HsFixUp,
     HsFixDown,
-    Option2Up,
     Option2Down,
     TargetUp,
     TargetDown,
-    JudgeArea,
-    NoMine,
-    BpmGuide,
     LegacyNote,
     Constant,
     JudgeWindowUp,
-    MarkNote,
+    /// This player's own: SCRATCH AUTO, KEEP GREEN NUMBER and the lane cover, the lift and the
+    /// HIDDEN+ cover, each switched on or off, on the second panel's keys the reference gives to
+    /// assists this player has no setting for.
+    ScratchAuto,
+    KeepGreenNumber,
+    LaneCover,
+    Lift,
+    Hidden,
     BgaDown,
     GaugeAutoShiftDown,
     DurationUp,
@@ -59,6 +65,10 @@ pub(super) enum SelectKey {
     NotesDisplayTimingUp,
     NotesDisplayTimingDown,
     NotesDisplayTimingAutoAdjust,
+    /// This player's own: the judge algorithm, the one before and the one after, on the turntable
+    /// of the third panel.
+    JudgeAlgorithmUp,
+    JudgeAlgorithmDown,
 }
 
 /// The roles of each key index, in the order the reference lists them.
@@ -68,66 +78,80 @@ type KeyTable = [&'static [SelectKey]; KEY_INDEX_COUNT];
 /// (`BEAT_14K`) is this one twice, which is what folding both sides onto the same nine indices
 /// comes to.
 ///
-/// It is the reference's with one intended difference: `NEXT_REPLAY` is not on key six. The
-/// replay slot moves on only with the number key `4`, so key six only stars the chart. A click on
-/// one of a skin's replay buttons plays the replay in that button's slot and leaves the selected
-/// slot where it was.
+/// It is the reference's with these intended differences, each on a key whose role in the reference
+/// does nothing that reaches a run here:
+///
+/// - `NEXT_REPLAY` is not on key six. The replay slot moves on only with the number key `4`, so key
+///   six only stars the chart. A click on one of a skin's replay buttons plays the replay in that
+///   button's slot and leaves the selected slot where it was.
+/// - On the first panel key four is the gauge before (`GAUGE_UP`) in place of the double option,
+///   which no run applies, and key six is the fixed tempo before (`HSFIX_UP`) in place of the second
+///   side's random option going back: this player deals both sides by one random option, which keys
+///   one and two already step both ways. Key seven keeps the second side's next random option.
+/// - On the second panel key one keeps the custom judge window and keys two and four keep the
+///   constant speed and the legacy notes. Key three is SCRATCH AUTO in place of the judge area, key
+///   five KEEP GREEN NUMBER in place of the processed note mark, and keys six and seven the lane
+///   cover and the lift switched on or off in place of the BPM guide and no mines, none of which
+///   this player has. The turntable switches the HIDDEN+ cover on or off.
+/// - On the third panel the turntable steps the judge algorithm, the one before forwards and the one
+///   after backwards, as it steps the target on the first.
 const BEAT_TABLE: KeyTable = [
     &[SelectKey::Play, SelectKey::FolderOpen, SelectKey::Option1Down, SelectKey::JudgeWindowUp, SelectKey::BgaDown],
     &[SelectKey::FolderClose, SelectKey::Option1Up, SelectKey::Constant, SelectKey::GaugeAutoShiftDown],
-    &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::GaugeDown, SelectKey::JudgeArea, SelectKey::NotesDisplayTimingAutoAdjust],
-    &[SelectKey::FolderClose, SelectKey::OptionDpDown, SelectKey::LegacyNote, SelectKey::DurationDown],
-    &[SelectKey::FolderOpen, SelectKey::Auto, SelectKey::HsFixDown, SelectKey::MarkNote, SelectKey::NotesDisplayTimingDown],
-    &[SelectKey::Option2Up, SelectKey::BpmGuide, SelectKey::DurationUp],
-    &[SelectKey::FolderOpen, SelectKey::Replay, SelectKey::Option2Down, SelectKey::NoMine, SelectKey::NotesDisplayTimingUp],
-    &[SelectKey::Up, SelectKey::TargetUp],
-    &[SelectKey::Down, SelectKey::TargetDown],
+    &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::GaugeDown, SelectKey::ScratchAuto, SelectKey::NotesDisplayTimingAutoAdjust],
+    &[SelectKey::FolderClose, SelectKey::GaugeUp, SelectKey::LegacyNote, SelectKey::DurationDown],
+    &[SelectKey::FolderOpen, SelectKey::Auto, SelectKey::HsFixDown, SelectKey::KeepGreenNumber, SelectKey::NotesDisplayTimingDown],
+    &[SelectKey::HsFixUp, SelectKey::LaneCover, SelectKey::DurationUp],
+    &[SelectKey::FolderOpen, SelectKey::Replay, SelectKey::Option2Down, SelectKey::Lift, SelectKey::NotesDisplayTimingUp],
+    &[SelectKey::Up, SelectKey::TargetUp, SelectKey::Hidden, SelectKey::JudgeAlgorithmUp],
+    &[SelectKey::Down, SelectKey::TargetDown, SelectKey::Hidden, SelectKey::JudgeAlgorithmDown],
 ];
 
 /// The table of a layout of nine buttons and no turntable (`POPN_9K`). Like [`BEAT_TABLE`] it has
-/// no `NEXT_REPLAY`, which the reference puts on button eight.
+/// no `NEXT_REPLAY`, which the reference puts on button eight, and its panel roles are
+/// [`BEAT_TABLE`]'s on the same indices, buttons eight and nine standing for the turntable.
 const POPN_TABLE: KeyTable = [
     &[SelectKey::Auto, SelectKey::Option1Down, SelectKey::JudgeWindowUp, SelectKey::BgaDown],
     &[SelectKey::Option1Up, SelectKey::Constant, SelectKey::GaugeAutoShiftDown],
-    &[SelectKey::FolderClose, SelectKey::GaugeDown, SelectKey::JudgeArea, SelectKey::NotesDisplayTimingAutoAdjust],
-    &[SelectKey::Down, SelectKey::OptionDpDown, SelectKey::LegacyNote, SelectKey::DurationDown],
-    &[SelectKey::Play, SelectKey::FolderOpen, SelectKey::HsFixDown, SelectKey::MarkNote, SelectKey::NotesDisplayTimingDown],
-    &[SelectKey::Up, SelectKey::Option2Up, SelectKey::BpmGuide, SelectKey::DurationUp],
-    &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::Option2Down, SelectKey::NoMine, SelectKey::NotesDisplayTimingUp],
-    &[SelectKey::TargetUp],
-    &[SelectKey::Replay, SelectKey::TargetDown],
+    &[SelectKey::FolderClose, SelectKey::GaugeDown, SelectKey::ScratchAuto, SelectKey::NotesDisplayTimingAutoAdjust],
+    &[SelectKey::Down, SelectKey::GaugeUp, SelectKey::LegacyNote, SelectKey::DurationDown],
+    &[SelectKey::Play, SelectKey::FolderOpen, SelectKey::HsFixDown, SelectKey::KeepGreenNumber, SelectKey::NotesDisplayTimingDown],
+    &[SelectKey::Up, SelectKey::HsFixUp, SelectKey::LaneCover, SelectKey::DurationUp],
+    &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::Option2Down, SelectKey::Lift, SelectKey::NotesDisplayTimingUp],
+    &[SelectKey::TargetUp, SelectKey::Hidden, SelectKey::JudgeAlgorithmUp],
+    &[SelectKey::Replay, SelectKey::TargetDown, SelectKey::Hidden, SelectKey::JudgeAlgorithmDown],
 ];
 
 /// The roles the first panel takes a press of, in the order the reference asks about them
-/// (`MusicSelectInputProcessor.input`, the START branch). The three it asks about and no table
-/// assigns are kept, so the order stays the reference's.
-const PLAY_PANEL_PRESSES: [SelectKey; 10] = [
-    SelectKey::Option1Down,
-    SelectKey::Option1Up,
-    SelectKey::GaugeDown,
-    SelectKey::GaugeUp,
-    SelectKey::OptionDpDown,
-    SelectKey::OptionDpUp,
-    SelectKey::Option2Down,
-    SelectKey::Option2Up,
-    SelectKey::HsFixDown,
-    SelectKey::HsFixUp,
+/// (`MusicSelectInputProcessor.input`, the START branch), without the double option's two, which
+/// no key carries here.
+const PLAY_PANEL_PRESSES: [SelectKey; 7] =
+    [SelectKey::Option1Down, SelectKey::Option1Up, SelectKey::GaugeDown, SelectKey::GaugeUp, SelectKey::Option2Down, SelectKey::HsFixDown, SelectKey::HsFixUp];
+
+/// The roles the second panel takes a press of (the SELECT branch), the turntable's last.
+const ASSIST_PANEL_PRESSES: [SelectKey; 8] = [
+    SelectKey::JudgeWindowUp,
+    SelectKey::Constant,
+    SelectKey::ScratchAuto,
+    SelectKey::LegacyNote,
+    SelectKey::KeepGreenNumber,
+    SelectKey::LaneCover,
+    SelectKey::Lift,
+    SelectKey::Hidden,
 ];
 
-/// The roles the second panel takes a press of (the SELECT branch).
-const ASSIST_PANEL_PRESSES: [SelectKey; 7] =
-    [SelectKey::JudgeWindowUp, SelectKey::Constant, SelectKey::JudgeArea, SelectKey::LegacyNote, SelectKey::MarkNote, SelectKey::BpmGuide, SelectKey::NoMine];
-
-/// The roles the third panel takes a press of (the START and SELECT branch). The two that change
-/// the note display time are read as held rather than as pressed, so they are not here: a key
-/// held on one of them is still a fresh press to the list when the panel closes, as it is in the
-/// reference.
-const DETAIL_PANEL_PRESSES: [SelectKey; 5] = [
+/// The roles the third panel takes a press of (the START and SELECT branch), the turntable's last.
+/// The two that change the note display time are read as held rather than as pressed, so they are
+/// not here: a key held on one of them is still a fresh press to the list when the panel closes, as
+/// it is in the reference.
+const DETAIL_PANEL_PRESSES: [SelectKey; 7] = [
     SelectKey::BgaDown,
     SelectKey::GaugeAutoShiftDown,
     SelectKey::NotesDisplayTimingDown,
     SelectKey::NotesDisplayTimingUp,
     SelectKey::NotesDisplayTimingAutoAdjust,
+    SelectKey::JudgeAlgorithmUp,
+    SelectKey::JudgeAlgorithmDown,
 ];
 
 /// Which of the reference's key tables is in force.
@@ -306,29 +330,122 @@ mod tests {
         keys
     }
 
-    /// Every role of the reference's tables, index by index, as `MusicSelectKeyProperty.java`
-    /// lists them, with the one intended difference: `NEXT_REPLAY` is on no key.
+    /// The reference's seven-key table (`MusicSelectKeyProperty.BEAT_7K`) index by index, without
+    /// `NEXT_REPLAY`: each role by the reference's own name.
+    const REFERENCE_BEAT: [&[&str]; KEY_INDEX_COUNT] = [
+        &["PLAY", "FOLDER_OPEN", "OPTION1_DOWN", "JUDGEWINDOW_UP", "BGA_DOWN"],
+        &["FOLDER_CLOSE", "OPTION1_UP", "CONSTANT", "GAUGEAUTOSHIFT_DOWN"],
+        &["PRACTICE", "FOLDER_OPEN", "GAUGE_DOWN", "JUDGEAREA", "NOTESDISPLAYTIMING_AUTOADJUST"],
+        &["FOLDER_CLOSE", "OPTIONDP_DOWN", "LEGACYNOTE", "DURATION_DOWN"],
+        &["FOLDER_OPEN", "AUTO", "HSFIX_DOWN", "MARKNOTE", "NOTESDISPLAYTIMING_DOWN"],
+        &["OPTION2_UP", "BPMGUIDE", "DURATION_UP"],
+        &["FOLDER_OPEN", "REPLAY", "OPTION2_DOWN", "NOMINE", "NOTESDISPLAYTIMING_UP"],
+        &["UP", "TARGET_UP"],
+        &["DOWN", "TARGET_DOWN"],
+    ];
+
+    /// The role this player keeps under each of the reference's names, for the names it keeps.
+    const KEPT_ROLES: [(&str, SelectKey); 25] = [
+        ("PLAY", SelectKey::Play),
+        ("AUTO", SelectKey::Auto),
+        ("REPLAY", SelectKey::Replay),
+        ("UP", SelectKey::Up),
+        ("DOWN", SelectKey::Down),
+        ("FOLDER_OPEN", SelectKey::FolderOpen),
+        ("FOLDER_CLOSE", SelectKey::FolderClose),
+        ("PRACTICE", SelectKey::Practice),
+        ("OPTION1_UP", SelectKey::Option1Up),
+        ("OPTION1_DOWN", SelectKey::Option1Down),
+        ("GAUGE_DOWN", SelectKey::GaugeDown),
+        ("HSFIX_DOWN", SelectKey::HsFixDown),
+        ("OPTION2_DOWN", SelectKey::Option2Down),
+        ("TARGET_UP", SelectKey::TargetUp),
+        ("TARGET_DOWN", SelectKey::TargetDown),
+        ("LEGACYNOTE", SelectKey::LegacyNote),
+        ("CONSTANT", SelectKey::Constant),
+        ("JUDGEWINDOW_UP", SelectKey::JudgeWindowUp),
+        ("BGA_DOWN", SelectKey::BgaDown),
+        ("GAUGEAUTOSHIFT_DOWN", SelectKey::GaugeAutoShiftDown),
+        ("DURATION_UP", SelectKey::DurationUp),
+        ("DURATION_DOWN", SelectKey::DurationDown),
+        ("NOTESDISPLAYTIMING_DOWN", SelectKey::NotesDisplayTimingDown),
+        ("NOTESDISPLAYTIMING_UP", SelectKey::NotesDisplayTimingUp),
+        ("NOTESDISPLAYTIMING_AUTOADJUST", SelectKey::NotesDisplayTimingAutoAdjust),
+    ];
+
+    /// Every place the seven-key table differs from the reference's: the key index, the reference's
+    /// role there (empty for a role this player adds past the reference's list) and this player's.
+    const CHANGED_SLOTS: [(usize, &str, SelectKey); 10] = [
+        (2, "JUDGEAREA", SelectKey::ScratchAuto),
+        (3, "OPTIONDP_DOWN", SelectKey::GaugeUp),
+        (4, "MARKNOTE", SelectKey::KeepGreenNumber),
+        (5, "OPTION2_UP", SelectKey::HsFixUp),
+        (5, "BPMGUIDE", SelectKey::LaneCover),
+        (6, "NOMINE", SelectKey::Lift),
+        (7, "", SelectKey::Hidden),
+        (7, "", SelectKey::JudgeAlgorithmUp),
+        (8, "", SelectKey::Hidden),
+        (8, "", SelectKey::JudgeAlgorithmDown),
+    ];
+
+    /// The seven-key table is the reference's with the changes [`CHANGED_SLOTS`] lists and nothing
+    /// else: a role of the reference this player keeps is on its key at its place, a role it gives
+    /// up is replaced where it stood, and what is added comes after the reference's list.
     #[test]
-    fn the_tables_are_the_references_without_next_replay() {
+    fn the_seven_key_table_is_the_references_with_only_the_listed_slots_changed() {
+        let kept = |name: &str| KEPT_ROLES.iter().find(|(kept, _)| *kept == name).map(|(_, role)| *role);
+        for (index, reference) in REFERENCE_BEAT.iter().enumerate() {
+            let mut changes = CHANGED_SLOTS.iter().filter(|(at, ..)| *at == index);
+            let mut expected: Vec<SelectKey> = Vec::new();
+            for name in *reference {
+                match kept(name) {
+                    Some(role) => expected.push(role),
+                    None => {
+                        let (_, replaced, role) = changes.next().unwrap_or_else(|| panic!("{name} on key index {index} is gone and no change says so"));
+                        assert_eq!(replaced, name, "the change on key index {index} names the wrong role");
+                        expected.push(*role);
+                    }
+                }
+            }
+            for (_, replaced, role) in changes {
+                assert!(replaced.is_empty(), "{replaced} on key index {index} is listed as changed and the reference's role is still there");
+                expected.push(*role);
+            }
+            assert_eq!(KeyLayout::Beat.table()[index], expected.as_slice(), "key index {index}");
+        }
+    }
+
+    /// The panel roles of the nine-button table are the seven-key table's on the same indices, and
+    /// its list roles are the reference's (`POPN_9K`) without `NEXT_REPLAY`.
+    #[test]
+    fn the_nine_button_table_has_the_seven_key_panels_and_the_references_list_roles() {
         use SelectKey::*;
-        let beat: [&[SelectKey]; KEY_INDEX_COUNT] = [
-            &[Play, FolderOpen, Option1Down, JudgeWindowUp, BgaDown],
-            &[FolderClose, Option1Up, Constant, GaugeAutoShiftDown],
-            &[Practice, FolderOpen, GaugeDown, JudgeArea, NotesDisplayTimingAutoAdjust],
-            &[FolderClose, OptionDpDown, LegacyNote, DurationDown],
-            &[FolderOpen, Auto, HsFixDown, MarkNote, NotesDisplayTimingDown],
-            &[Option2Up, BpmGuide, DurationUp],
-            &[FolderOpen, Replay, Option2Down, NoMine, NotesDisplayTimingUp],
-            &[Up, TargetUp],
-            &[Down, TargetDown],
-        ];
-        assert_eq!(*KeyLayout::Beat.table(), beat);
+        let list_roles = [Play, Auto, Replay, Up, Down, FolderOpen, FolderClose, Practice];
         let popn_list_roles: [&[SelectKey]; KEY_INDEX_COUNT] =
             [&[Auto], &[], &[FolderClose], &[Down], &[Play, FolderOpen], &[Up], &[Practice, FolderOpen], &[], &[Replay]];
-        let list_roles = [Play, Auto, Replay, Up, Down, FolderOpen, FolderClose, Practice];
+        let panel_roles = |table: &KeyTable, index: usize| table[index].iter().copied().filter(|role| !list_roles.contains(role)).collect::<Vec<_>>();
         for (index, expected) in popn_list_roles.iter().enumerate() {
             let listed: Vec<SelectKey> = KeyLayout::Popn.table()[index].iter().copied().filter(|role| list_roles.contains(role)).collect();
             assert_eq!(listed.as_slice(), *expected, "the list roles of button {index}");
+            assert_eq!(panel_roles(KeyLayout::Popn.table(), index), panel_roles(KeyLayout::Beat.table(), index), "the panel roles of button {index}");
+        }
+    }
+
+    /// Every role a panel takes a press of is on a key of both tables, and every role on a key is
+    /// one the list or a panel reads.
+    #[test]
+    fn every_panel_role_is_on_a_key_and_every_role_on_a_key_is_read() {
+        use SelectKey::*;
+        let read_as_held = [TargetUp, TargetDown, DurationUp, DurationDown];
+        let list_roles = [Play, Auto, Replay, Up, Down, FolderOpen, FolderClose, Practice];
+        let pressed: Vec<SelectKey> = [Panel::Play, Panel::Assist, Panel::Detail].into_iter().flat_map(|panel| panel.presses().iter().copied()).collect();
+        for layout in [KeyLayout::Beat, KeyLayout::Popn] {
+            for role in &pressed {
+                assert!(!layout.indices_of(*role).is_empty(), "{role:?} is on no key of {layout:?}");
+            }
+            for role in layout.table().iter().flat_map(|roles| roles.iter()) {
+                assert!(pressed.contains(role) || read_as_held.contains(role) || list_roles.contains(role), "{role:?} on {layout:?} is read by nothing");
+            }
         }
     }
 
@@ -392,7 +509,7 @@ mod tests {
     #[test]
     fn an_open_panel_takes_the_presses_of_its_own_keys() {
         let mut keys = keys_down(&[KEY_ONE, KEY_FOUR]);
-        assert_eq!(keys.panel_presses(KeyLayout::Beat, Panel::Play), [SelectKey::Option1Down, SelectKey::OptionDpDown]);
+        assert_eq!(keys.panel_presses(KeyLayout::Beat, Panel::Play), [SelectKey::Option1Down, SelectKey::GaugeUp]);
         assert!(!keys.pressed(KeyLayout::Beat, SelectKey::Play, true), "the panel took key one's press");
         assert!(!keys.pressed(KeyLayout::Beat, SelectKey::FolderClose, true), "and key four's");
 

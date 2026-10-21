@@ -443,3 +443,81 @@ fn a_key_is_answered_from_the_keys_that_are_down_and_is_up_when_nobody_knows() {
     assert!(host.key_pressed(GDX_RIGHT));
     assert!(!host.key_pressed(GDX_LEFT));
 }
+
+/// This player's own events reach the settings, and an id of their band that names nothing reaches
+/// nobody.
+#[test]
+fn this_players_own_events_are_routed_to_the_settings() {
+    use super::extension::{EXTENSION_EVENT_FIRST, EXTENSION_EVENT_LAST, RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_SCRATCH_AUTO};
+    assert_eq!(EXTENSION_EVENT_FIRST, RBMS_EVENT_SCRATCH_AUTO);
+    for id in [RBMS_EVENT_SCRATCH_AUTO, RBMS_EVENT_KEEP_GREEN_NUMBER] {
+        assert_eq!(event_clusters(id).collect::<Vec<_>>(), [Cluster::Options], "event {id}");
+    }
+    assert_eq!(event_clusters(EXTENSION_EVENT_LAST).count(), 0);
+}
+
+/// This player's own options are asked of the cluster that has them first.
+#[test]
+fn this_players_own_options_are_routed_to_the_clusters_that_answer_them() {
+    use super::extension::{
+        RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, RBMS_OPTION_SCRATCH_AUTO_ON,
+        RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_options_last,
+    };
+    let first = |id: i32| clusters_of(IdSpace::Boolean, id).next();
+    assert_eq!((first(RBMS_OPTION_SCRATCH_AUTO_ON), first(RBMS_OPTION_HIDDEN_ON)), (Some(Cluster::Options), Some(Cluster::Options)));
+    let selected = RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST;
+    assert_eq!((first(selected), first(assist_grade_options_last(selected))), (Some(Cluster::Select), Some(Cluster::Select)));
+    for run in [RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST] {
+        assert_eq!((first(run), first(assist_grade_options_last(run))), (Some(Cluster::Result), Some(Cluster::Result)));
+    }
+}
+
+/// A colour the player stored is asked of the host's nudges on every frame a tinted object is
+/// resolved, so one stored between two frames tints the second, and the game's own offsets have no
+/// colour to stand in front of it. The document is a small one with one colour row and two objects,
+/// one tinted by that row.
+#[test]
+fn a_stored_colour_tints_the_next_frame_through_the_host() {
+    use rbms_config::SkinCustomisation;
+    use rbms_skin::dst::{SkinColor, resolve};
+    use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
+
+    const FRAME_ID: i32 = 3;
+    let dir = std::env::temp_dir().join(format!("rbms-host-colour-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the scratch folder is made");
+    let path = dir.join("skin.json");
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{ "type": 5, "color": [{{ "name": "Frame", "id": {FRAME_ID}, "def": "FFFFFF" }}], "destination": [
+                {{ "id": "tinted", "tint": {FRAME_ID}, "dst": [{{ "time": 0, "r": 255, "g": 255, "b": 255 }}] }},
+                {{ "id": "plain", "dst": [{{ "time": 0, "r": 255, "g": 255, "b": 255 }}] }}
+            ] }}"#
+        ),
+    )
+    .expect("the document is written");
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, SkinLoadOptions::new(&dir, &user, Mode::BEAT_7K)).expect("the document loads");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(skin.warnings.is_empty(), "{:?}", skin.warnings);
+    let track = |id: &str| &skin.destinations.iter().find(|named| named.id == id).expect("the document has the object").track;
+
+    let timers = TimerState::new();
+    let mut stored = SkinCustomisation::default();
+    let drawn = |stored: &SkinCustomisation, id: &str| {
+        let mut host = ScreenHost::new(NOW_US, &timers);
+        host.offsets = Some(stored);
+        resolve(track(id), NOW_US, &timers, &host, None).expect("the object draws").color
+    };
+
+    assert_eq!(drawn(&stored, "tinted"), SkinColor::WHITE, "a colour nobody stored changed the object");
+    let blue = SkinColor::rgba(30, 144, 255, 200);
+    stored.colors.insert(FRAME_ID, blue);
+    assert_eq!(drawn(&stored, "tinted"), blue, "the stored colour did not reach the next frame");
+    assert_eq!(drawn(&stored, "plain"), SkinColor::WHITE, "an object no colour names was tinted");
+    stored.colors.clear();
+    assert_eq!(drawn(&stored, "tinted"), SkinColor::WHITE, "clearing the colour did not bring the object back");
+
+    let host = ScreenHost::new(NOW_US, &timers);
+    assert_eq!(host.color(FRAME_ID), None, "a host with no nudges holds no colour");
+}

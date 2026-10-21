@@ -28,6 +28,10 @@
 //! The seven assist ids (301 to 307) are no event in the reference: its second panel is driven by
 //! keys alone.
 //!
+//! Two events are this player's own and have no number in the reference: SCRATCH AUTO and KEEP GREEN
+//! NUMBER switched on or off ([`crate::skin_host::extension`]). They are run as every other is, by a
+//! skin's button or script and by the second panel's keys.
+//!
 //! The buttons that leave the browser go where this player keeps the same thing: the key
 //! configuration (13) is its own screen, the skin configuration (14) is the skin menu, practice
 //! (315) is the practice screen, and the four replay slots (19, 316 to 318) are the four newest
@@ -41,6 +45,7 @@ use rbms_store::ScoreBook;
 
 use super::SelectState;
 use super::skinned::FocusedBar;
+use crate::skin_host::extension::{RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_SCRATCH_AUTO};
 use crate::skin_host::options::{JUDGE_ALGORITHMS_NUMBERED, OPTION_GENERAL, random_option_index};
 use crate::skin_host::{Cluster, ClusterRequest};
 use crate::stage::{KeyConfigState, SkinMenuState, Stage, Transition};
@@ -112,6 +117,10 @@ pub(super) enum SettingEvent {
     /// `longnotemode`, and the second panel's key for legacy notes: long notes are drawn as plain
     /// notes or not.
     LongNoteMode,
+    /// This player's own: SCRATCH AUTO on or off.
+    ScratchAuto,
+    /// This player's own: KEEP GREEN NUMBER on or off.
+    KeepGreenNumber,
 }
 
 impl SettingEvent {
@@ -140,6 +149,8 @@ impl SettingEvent {
             SettingEvent::GuideSe => SettingId::GuideSe,
             SettingEvent::ScrollMode => SettingId::SpeedFix,
             SettingEvent::LongNoteMode => SettingId::LegacyNote,
+            SettingEvent::ScratchAuto => SettingId::ScratchAuto,
+            SettingEvent::KeepGreenNumber => SettingId::KeepGreenNumber,
             SettingEvent::Random | SettingEvent::JudgeTiming | SettingEvent::JudgeAlgorithm | SettingEvent::Duration => return None,
         })
     }
@@ -233,7 +244,8 @@ pub(super) enum SelectEvent {
     FavoriteChart,
 }
 
-/// The reference's event table as this browser carries it out, by id.
+/// The reference's event table as this browser carries it out, by id, and this player's own events
+/// after it.
 const EVENTS: &[(i32, SelectEvent)] = &[
     (BUTTON_MODE, SelectEvent::Mode),
     (BUTTON_SORT, SelectEvent::Sort),
@@ -269,6 +281,8 @@ const EVENTS: &[(i32, SelectEvent)] = &[
     (EVENT_GUIDE_SE, SelectEvent::Setting(SettingEvent::GuideSe)),
     (BUTTON_SCROLLMODE, SelectEvent::Setting(SettingEvent::ScrollMode)),
     (BUTTON_LONGNOTEMODE, SelectEvent::Setting(SettingEvent::LongNoteMode)),
+    (RBMS_EVENT_SCRATCH_AUTO, SelectEvent::Setting(SettingEvent::ScratchAuto)),
+    (RBMS_EVENT_KEEP_GREEN_NUMBER, SelectEvent::Setting(SettingEvent::KeepGreenNumber)),
 ];
 
 /// What the event `id` does here, or `None` for an id that does nothing.

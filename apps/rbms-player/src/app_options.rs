@@ -197,11 +197,18 @@ pub(crate) fn options_key(ctx: &mut FrameCtx<'_>, stage: StageId, screen_holds_k
 /// The held one is taken from the browser rather than passed along, so the browser never sees it go
 /// down and never treats it as a modifier. The browser watches both shift keys, so the right one is
 /// what still reaches it as one.
+///
+/// The held one is left to the browser while START, SELECT or the detail options key is down: a
+/// skin's option panel is then up, and the held key ships on the turntable, which steps that
+/// panel's target or switch.
 fn open_key(ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> bool {
     if !key.pressed {
         return false;
     }
     if ctx.shared.is_shortcut(Shortcut::OptionsHold, key.code) {
+        if an_option_panel_is_called_up(ctx.shared) {
+            return false;
+        }
         ctx.shared.options.open_panel(true);
     } else if ctx.shared.is_shortcut(Shortcut::OptionsPin, key.code) {
         ctx.shared.options.open_panel(false);
@@ -210,6 +217,12 @@ fn open_key(ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> bool {
     }
     ctx.shared.play_system_sound(crate::SystemSound::OptionOpen);
     true
+}
+
+/// Whether the keys held call up one of a skin's option panels on the browser: START, SELECT or the
+/// detail options key, the keys `stage::select::keys::Panel::held` reads.
+fn an_option_panel_is_called_up(shared: &AppShared) -> bool {
+    shared.start_pressed() || shared.select_pressed() || shared.shortcut_held(Shortcut::RefDetail)
 }
 
 /// Move the focused row one step and remember that something changed.

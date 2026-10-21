@@ -39,13 +39,11 @@
 
 use std::borrow::Cow;
 
-use rbms_judge::clear_type_from_id;
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 use rbms_skin::timer::{TimerId, timer_id};
 
 use super::{ClusterState, ResultScene, STRING_TARGET_NAME};
-use crate::format::clear_label_color;
 use crate::ir_outcome::IrStatus;
 use crate::ir_ranking::RankingState;
 
@@ -178,9 +176,7 @@ impl IrBrowser {
             RankingState::Ready(board) => {
                 let mut lamps = [0; CLEAR_LAMPS];
                 for row in &board.rows {
-                    let lamp =
-                        lamps.iter_mut().enumerate().find(|(id, _)| u8::try_from(*id).is_ok_and(|id| clear_label_color(clear_type_from_id(id)).0 == row.lamp));
-                    if let Some((_, count)) = lamp {
+                    if let Some(count) = lamps.get_mut(usize::from(row.record_lamp.clear)) {
                         *count += 1;
                     }
                 }

@@ -171,6 +171,7 @@ mod tests {
             option: 0,
             total_notes: 0,
             judge: None,
+            assist_grade: 0,
             extra: Default::default(),
         }
     }

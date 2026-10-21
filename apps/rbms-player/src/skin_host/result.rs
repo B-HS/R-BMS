@@ -19,6 +19,9 @@
 //! `oldscore`, which for a chart never played is a score of nothing with the worst possible
 //! bad-poor count, so a first run updates every figure it improves on that.
 //!
+//! It also answers this player's own options 21120-21124 and 21130-21134, the assist grade inside
+//! the run's lamp and inside the best it replaced ([`super::extension`]).
+//!
 //! A cluster that has no run answers nothing, so the ids fall through to whatever else can.
 //!
 //! A course result reads the same cluster: [`course::CourseTally`] adds a course's stages into the one
@@ -30,6 +33,7 @@ use std::cmp::Ordering;
 use rbms_skin::property::INTEGER_ABSENT;
 use rbms_skin::property::generated::*;
 
+use super::extension::{RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, assist_grade_asked};
 use super::score::whole;
 use super::{ClusterState, INDEX_CLEAR, INDEX_TARGET_CLEAR};
 use snapshot::{FinishedRun, REPLAY_SLOT_COUNT, ReplaySlot};
@@ -110,6 +114,12 @@ impl ClusterState for ResultState<'_> {
         let miss = i64::from(sheet.min_bp).cmp(&run.previous.min_bp.map_or(MISS_COUNT_NEVER_PLAYED, i64::from));
         let rank_rate = standing.now_rate.partial_cmp(&standing.best_rate);
         let gauge = finished.scene.gauge_type as i32;
+        if let Some(grade) = assist_grade_asked(id, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST) {
+            return Some(run.assist_grade == grade);
+        }
+        if let Some(grade) = assist_grade_asked(id, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST) {
+            return Some(run.previous.assist_grade == Some(grade));
+        }
         if let Some((slot, state)) = REPLAY_OPTIONS.iter().enumerate().find_map(|(slot, ids)| Some((slot, ids.iter().position(|option| *option == id)?))) {
             return Some(finished.scene.replay[slot] == REPLAY_STATES[state]);
         }

@@ -36,7 +36,7 @@ fn sheet() -> ScoreSheet {
 fn improved() -> ResultInput {
     ResultInput {
         sheet: sheet(),
-        previous: PreviousScore { ex_score: 11, max_combo: 9, min_bp: Some(1), clear: 4 },
+        previous: PreviousScore { ex_score: 11, max_combo: 9, min_bp: Some(1), clear: 4, assist_grade: Some(0) },
         target: Some(TargetView { name: "RIVAL".to_string(), ex: 14 }),
         ..ResultInput::default()
     }
@@ -95,6 +95,36 @@ fn a_run_is_compared_with_the_best_it_replaced_one_figure_at_a_time() {
     assert_eq!((state.image_index(INDEX_CLEAR), state.image_index(INDEX_TARGET_CLEAR)), (Some(5), Some(4)));
 }
 
+/// This player's own options of the assist grade: one of five on for the run and one for the best it
+/// replaced, read through the host as a skin's `main_state.option` asks, and none of the second five
+/// for a chart never played.
+#[test]
+fn the_assist_grades_of_the_run_and_of_the_best_it_replaced_switch_on_one_option_each() {
+    use crate::skin_host::extension::{RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, assist_grade_options_last};
+    use rbms_judge::AssistGrade;
+    let on = |snapshot: &ResultSnapshot, first: i32| {
+        let timers = TimerState::new();
+        let mut host = ScreenHost::new(0, &timers);
+        host.show_result(FinishedRun::new(snapshot, scene()));
+        (first..=assist_grade_options_last(first)).filter(|id| host.boolean(*id) == Some(true)).collect::<Vec<_>>()
+    };
+    let graded = ResultInput {
+        assist_grade: AssistGrade::Hard.id(),
+        previous: PreviousScore { assist_grade: Some(AssistGrade::Easy.id()), ..improved().previous },
+        ..improved()
+    };
+    let snapshot = snapshot_of(graded);
+    assert_eq!(on(&snapshot, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST), [RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST + i32::from(AssistGrade::Hard.id())]);
+    assert_eq!(
+        on(&snapshot, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST),
+        [RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST + i32::from(AssistGrade::Easy.id())]
+    );
+
+    let first_play = snapshot_of(ResultInput { previous: PreviousScore::default(), ..improved() });
+    assert_eq!(on(&first_play, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST), [RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST], "an ungraded run is grade 0");
+    assert!(on(&first_play, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST).is_empty(), "a chart never played has no grade");
+}
+
 #[test]
 fn a_chart_never_played_is_improved_on_by_everything_and_has_nothing_to_compare_with() {
     let snapshot = snapshot_of(ResultInput { previous: PreviousScore::default(), ..improved() });
@@ -118,7 +148,8 @@ fn a_chart_never_played_is_improved_on_by_everything_and_has_nothing_to_compare_
 
 #[test]
 fn a_run_that_ties_the_best_draws_and_does_not_update() {
-    let snapshot = snapshot_of(ResultInput { previous: PreviousScore { ex_score: 13, max_combo: 7, min_bp: Some(1), clear: 5 }, ..improved() });
+    let snapshot =
+        snapshot_of(ResultInput { previous: PreviousScore { ex_score: 13, max_combo: 7, min_bp: Some(1), clear: 5, assist_grade: Some(0) }, ..improved() });
     let state = on_screen(&snapshot);
 
     for (update, draw) in

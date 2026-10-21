@@ -14,12 +14,14 @@
 //! to 23 answer ([`PanelState::number`]).
 //!
 //! The keys of a panel are the reference's table ([`super::keys`]) and do what its three branches
-//! do ([`press_act`]): the first panel steps the random options, the gauge, the double option and
-//! the fixed tempo by their events and scrolls the target with the turntable and the mouse wheel;
-//! the second flips the assists; the third steps the background animation, the gauge auto shift and
-//! the judge timing, and moves the note display time while its two keys are held. What this player
-//! has no setting for is taken and does nothing: of the seven assists only the constant speed and
-//! the legacy notes are settings here.
+//! do ([`press_act`]): the first panel steps the random option, the gauge and the fixed tempo by
+//! their events and scrolls the target with the turntable and the mouse wheel; the second flips the
+//! assists; the third steps the background animation, the gauge auto shift and the judge timing, and
+//! moves the note display time while its two keys are held. Of the reference's seven assists only
+//! the constant speed and the legacy notes are settings here, and the custom judge window is taken
+//! and does nothing. The keys the reference gives to what this player has not got step what it has
+//! instead: on the second panel SCRATCH AUTO, KEEP GREEN NUMBER and the three covers switched on or
+//! off, and on the third the judge algorithm with the turntable, each by its event.
 //!
 //! The note display time is the travel time a held green number is held at
 //! ([`super::events::step_duration`]). Its keys repeat as the reference's do: a step when a key
@@ -63,35 +65,26 @@ fn timers_of(panel: Panel) -> Option<(TimerId, TimerId)> {
     PANEL_TIMERS.iter().find(|(of, ..)| *of == panel).map(|(_, on, off)| (*on, *off))
 }
 
-/// One of the second panel's switches, which the reference flips in the player's settings directly
-/// rather than by an event.
+/// One of the second panel's switches the reference keeps, which it flips in the player's settings
+/// directly rather than by an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AssistSwitch {
     /// A judge window of the player's own.
     CustomJudge,
     /// A constant scroll speed (`scrollMode` between 0 and 1).
     Constant,
-    /// The judge area shown.
-    JudgeArea,
     /// Long notes drawn as plain notes (`longnoteMode` between 0 and 1).
     LegacyNote,
-    /// Processed notes marked.
-    MarkNote,
-    /// The BPM guide.
-    BpmGuide,
-    /// No mines (`mineMode` between 0 and 1).
-    NoMine,
 }
 
 impl AssistSwitch {
-    /// The row of the settings screen the switch is, or `None` for an assist this player has no
-    /// setting for. A custom judge window is not a switch here: a run is one when any of its judge
-    /// widths has been moved.
+    /// The row of the settings screen the switch is, or `None` for the custom judge window, which is
+    /// not a switch here: a run is one when any of its judge widths has been moved.
     const fn row(self) -> Option<SettingId> {
         match self {
             AssistSwitch::Constant => Some(SettingId::SpeedFix),
             AssistSwitch::LegacyNote => Some(SettingId::LegacyNote),
-            AssistSwitch::CustomJudge | AssistSwitch::JudgeArea | AssistSwitch::MarkNote | AssistSwitch::BpmGuide | AssistSwitch::NoMine => None,
+            AssistSwitch::CustomJudge => None,
         }
     }
 }
@@ -115,25 +108,26 @@ pub(super) fn press_act(role: SelectKey) -> Option<PanelAct> {
     let setting = |event: SettingEvent, arg1: i32| Some(PanelAct::Setting { event, arg1 });
     match role {
         SelectKey::Option1Down | SelectKey::Option2Down => setting(SettingEvent::Random, NEXT),
-        SelectKey::Option1Up | SelectKey::Option2Up => setting(SettingEvent::Random, PREVIOUS),
+        SelectKey::Option1Up => setting(SettingEvent::Random, PREVIOUS),
         SelectKey::GaugeDown => setting(SettingEvent::Gauge, NEXT),
         SelectKey::GaugeUp => setting(SettingEvent::Gauge, PREVIOUS),
-        SelectKey::OptionDpDown => setting(SettingEvent::DoubleOption, NEXT),
-        SelectKey::OptionDpUp => setting(SettingEvent::DoubleOption, PREVIOUS),
         SelectKey::HsFixDown => setting(SettingEvent::FixHiSpeed, NEXT),
         SelectKey::HsFixUp => setting(SettingEvent::FixHiSpeed, PREVIOUS),
         SelectKey::JudgeWindowUp => Some(PanelAct::Assist(AssistSwitch::CustomJudge)),
         SelectKey::Constant => Some(PanelAct::Assist(AssistSwitch::Constant)),
-        SelectKey::JudgeArea => Some(PanelAct::Assist(AssistSwitch::JudgeArea)),
         SelectKey::LegacyNote => Some(PanelAct::Assist(AssistSwitch::LegacyNote)),
-        SelectKey::MarkNote => Some(PanelAct::Assist(AssistSwitch::MarkNote)),
-        SelectKey::BpmGuide => Some(PanelAct::Assist(AssistSwitch::BpmGuide)),
-        SelectKey::NoMine => Some(PanelAct::Assist(AssistSwitch::NoMine)),
+        SelectKey::ScratchAuto => setting(SettingEvent::ScratchAuto, NEXT),
+        SelectKey::KeepGreenNumber => setting(SettingEvent::KeepGreenNumber, NEXT),
+        SelectKey::LaneCover => setting(SettingEvent::LaneCover, NEXT),
+        SelectKey::Lift => setting(SettingEvent::Lift, NEXT),
+        SelectKey::Hidden => setting(SettingEvent::Hidden, NEXT),
         SelectKey::BgaDown => setting(SettingEvent::Bga, NO_ARGUMENT),
         SelectKey::GaugeAutoShiftDown => setting(SettingEvent::GaugeAutoShift, NO_ARGUMENT),
         SelectKey::NotesDisplayTimingDown => setting(SettingEvent::JudgeTiming, PREVIOUS),
         SelectKey::NotesDisplayTimingUp => setting(SettingEvent::JudgeTiming, NO_ARGUMENT),
         SelectKey::NotesDisplayTimingAutoAdjust => setting(SettingEvent::JudgeTimingAuto, NO_ARGUMENT),
+        SelectKey::JudgeAlgorithmUp => setting(SettingEvent::JudgeAlgorithm, PREVIOUS),
+        SelectKey::JudgeAlgorithmDown => setting(SettingEvent::JudgeAlgorithm, NEXT),
         _ => None,
     }
 }
@@ -372,8 +366,8 @@ impl SelectState {
 mod tests {
     use super::*;
 
-    /// The first panel's rows of the reference's key table: every role its START branch asks about,
-    /// the event it runs and the argument it runs it with.
+    /// The first panel's rows of the key table: every role its START branch asks about, the event it
+    /// runs and the argument it runs it with.
     #[test]
     fn the_first_panels_keys_run_the_events_the_reference_runs() {
         let rows = [
@@ -381,10 +375,7 @@ mod tests {
             (SelectKey::Option1Up, SettingEvent::Random, PREVIOUS),
             (SelectKey::GaugeDown, SettingEvent::Gauge, NEXT),
             (SelectKey::GaugeUp, SettingEvent::Gauge, PREVIOUS),
-            (SelectKey::OptionDpDown, SettingEvent::DoubleOption, NEXT),
-            (SelectKey::OptionDpUp, SettingEvent::DoubleOption, PREVIOUS),
             (SelectKey::Option2Down, SettingEvent::Random, NEXT),
-            (SelectKey::Option2Up, SettingEvent::Random, PREVIOUS),
             (SelectKey::HsFixDown, SettingEvent::FixHiSpeed, NEXT),
             (SelectKey::HsFixUp, SettingEvent::FixHiSpeed, PREVIOUS),
         ];
@@ -393,27 +384,36 @@ mod tests {
         }
     }
 
-    /// The second panel's rows: each key flips its own assist.
+    /// The second panel's rows: the three keys the reference's assists keep flip them, and the rest
+    /// switch this player's own options by their events.
     #[test]
     fn the_second_panels_keys_flip_the_assists() {
         let rows = [
             (SelectKey::JudgeWindowUp, AssistSwitch::CustomJudge),
             (SelectKey::Constant, AssistSwitch::Constant),
-            (SelectKey::JudgeArea, AssistSwitch::JudgeArea),
             (SelectKey::LegacyNote, AssistSwitch::LegacyNote),
-            (SelectKey::MarkNote, AssistSwitch::MarkNote),
-            (SelectKey::BpmGuide, AssistSwitch::BpmGuide),
-            (SelectKey::NoMine, AssistSwitch::NoMine),
         ];
         for (role, switch) in rows {
             assert_eq!(press_act(role), Some(PanelAct::Assist(switch)), "{role:?}");
         }
         let settings = rows.map(|(_, switch)| switch.row());
-        assert_eq!(settings, [None, Some(SettingId::SpeedFix), None, Some(SettingId::LegacyNote), None, None, None]);
+        assert_eq!(settings, [None, Some(SettingId::SpeedFix), Some(SettingId::LegacyNote)]);
+
+        let switches = [
+            (SelectKey::ScratchAuto, SettingEvent::ScratchAuto),
+            (SelectKey::KeepGreenNumber, SettingEvent::KeepGreenNumber),
+            (SelectKey::LaneCover, SettingEvent::LaneCover),
+            (SelectKey::Lift, SettingEvent::Lift),
+            (SelectKey::Hidden, SettingEvent::Hidden),
+        ];
+        for (role, event) in switches {
+            assert_eq!(press_act(role), Some(PanelAct::Setting { event, arg1: NEXT }), "{role:?}");
+        }
     }
 
-    /// The third panel's rows: the two events it runs with no argument step to the next value, and
-    /// the judge timing goes down with the one key and up with the other.
+    /// The third panel's rows: the two events it runs with no argument step to the next value, the
+    /// judge timing goes down with the one key and up with the other, and the turntable steps the
+    /// judge algorithm as the first panel's steps the target.
     #[test]
     fn the_third_panels_keys_run_the_events_the_reference_runs() {
         let rows = [
@@ -422,6 +422,8 @@ mod tests {
             (SelectKey::NotesDisplayTimingDown, SettingEvent::JudgeTiming, PREVIOUS),
             (SelectKey::NotesDisplayTimingUp, SettingEvent::JudgeTiming, NO_ARGUMENT),
             (SelectKey::NotesDisplayTimingAutoAdjust, SettingEvent::JudgeTimingAuto, NO_ARGUMENT),
+            (SelectKey::JudgeAlgorithmUp, SettingEvent::JudgeAlgorithm, PREVIOUS),
+            (SelectKey::JudgeAlgorithmDown, SettingEvent::JudgeAlgorithm, NEXT),
         ];
         for (role, event, arg1) in rows {
             assert_eq!(press_act(role), Some(PanelAct::Setting { event, arg1 }), "{role:?}");

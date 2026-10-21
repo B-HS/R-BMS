@@ -42,6 +42,10 @@
 //! player stores one that means anything only while KEEP GREEN NUMBER is on, and shows none while
 //! it is off.
 //!
+//! On the song browser it also answers this player's own options of the switches the reference has
+//! no id for, and of the three covers ([`super::extension`]): SCRATCH AUTO, KEEP GREEN NUMBER, and
+//! the lane cover, the lift and the HIDDEN+ cover switched on.
+//!
 //! A cluster that has no snapshot answers nothing, so the ids fall through to whatever else can.
 
 use std::borrow::Cow;
@@ -53,6 +57,7 @@ use rbms_judge::gauge::{GaugeIndex, GaugeKind};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 
+use super::extension::{RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_KEEP_GREEN_NUMBER_ON, RBMS_OPTION_LANE_COVER_ON, RBMS_OPTION_LIFT_ON, RBMS_OPTION_SCRATCH_AUTO_ON};
 use super::result::snapshot::FinishedRun;
 use super::{
     ClusterState, INDEX_CONSTANT, INDEX_GUIDE_SOUND, INDEX_TARGET_OPTION_FIRST, INDEX_TARGET_OPTION_LAST, INDEX_TIMING_AUTO_ADJUST, STRING_TARGET_NAME,
@@ -154,6 +159,10 @@ pub struct SettingsView {
     pub hidden: bool,
     /// Whether a cue sounds on every judgement (`PlayerConfig.isGuideSE`).
     pub guide_se: bool,
+    /// Whether the turntable plays itself (SCRATCH AUTO) and whether the green number is held from
+    /// chart to chart (KEEP GREEN NUMBER), which the reference has no id for.
+    pub scratch_auto: bool,
+    pub keep_green_number: bool,
     /// The target the player chose.
     pub target: ScoreTarget,
     /// The share, in percent, that the RATE CUSTOM target asks for.
@@ -199,6 +208,8 @@ impl SettingsView {
             lift: play.enable_lift,
             hidden: play.enable_hidden,
             guide_se: config.audio.guide_se,
+            scratch_auto: play.scratch_auto,
+            keep_green_number: play.keep_green_number,
             target: judge.target,
             target_rate_percent: judge.target_rate_percent,
             target_stand_in: None,
@@ -314,6 +325,19 @@ impl SettingsView {
         })
     }
 
+    /// The option under `id` of this player's own: the switches the reference has no id for, and the
+    /// three covers.
+    fn boolean(&self, id: i32) -> Option<bool> {
+        Some(match id {
+            RBMS_OPTION_SCRATCH_AUTO_ON => self.scratch_auto,
+            RBMS_OPTION_KEEP_GREEN_NUMBER_ON => self.keep_green_number,
+            RBMS_OPTION_LANE_COVER_ON => self.lane_cover,
+            RBMS_OPTION_LIFT_ON => self.lift,
+            RBMS_OPTION_HIDDEN_ON => self.hidden,
+            _ => return None,
+        })
+    }
+
     /// The number under `id`: the judge timing, the scroll speed in the three ways it is read
     /// (`createHispeedProperty`) and the held travel time with the green number it reads as
     /// (`IntegerPropertyFactory.duration`, `duration_green`).
@@ -364,6 +388,9 @@ const HISPEED_LR2_SCALE: f32 = 100.0;
 
 impl ClusterState for OptionsState<'_> {
     fn boolean(&self, id: i32) -> Option<bool> {
+        if let Some(settings) = self.settings {
+            return settings.boolean(id);
+        }
         let run = self.result?.snapshot;
         match id {
             OPTION_DISABLE_SAVE_SCORE => Some(!run.updates_score),

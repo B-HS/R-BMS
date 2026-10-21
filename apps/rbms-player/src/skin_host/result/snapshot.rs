@@ -11,8 +11,8 @@
 //! far the ranking is scrolled -- is not in it. The screen owns that and says it in a
 //! [`ResultScene`] each frame.
 
-use rbms_judge::ClearType;
 use rbms_judge::gauge::GaugeIndex;
+use rbms_judge::{ClearType, assist_grade};
 use rbms_model::Mode;
 use rbms_play::{GaugeLog, PlayRecord, TIMING_DISTRIBUTION_RANGE_MS};
 use rbms_render::result::TargetView;
@@ -56,6 +56,9 @@ pub struct PreviousScore {
     pub min_bp: Option<u32>,
     /// The best lamp, as the reference numbers lamps.
     pub clear: u8,
+    /// The assist grade inside that lamp (`rbms_judge::AssistGrade::id`), or `None` for a chart
+    /// never played.
+    pub assist_grade: Option<u8>,
 }
 
 impl PreviousScore {
@@ -68,11 +71,13 @@ impl PreviousScore {
     /// This is read before the run that has just ended is added to the book.
     pub fn of_book(book: &ScoreBook, md5: &str, ln_mode: &str) -> PreviousScore {
         let scoring: Vec<&ScoreRecord> = book.for_md5(md5).into_iter().filter(|record| !record.assisted && record.ln_mode == ln_mode).collect();
+        let lamp = book.best_lamp_for_md5_in_ln_mode(md5, ln_mode);
         PreviousScore {
             ex_score: book.best_ex_for_md5_in_ln_mode(md5, ln_mode).unwrap_or_default(),
             max_combo: scoring.iter().map(|record| record.max_combo).max().unwrap_or_default(),
             min_bp: scoring.iter().map(|record| record.counts[FIRST_BAD_POOR_JUDGEMENT..].iter().sum()).min(),
-            clear: book.best_clear_for_md5_in_ln_mode(md5, ln_mode).unwrap_or_default(),
+            clear: lamp.map(|lamp| lamp.clear).unwrap_or_default(),
+            assist_grade: lamp.map(|lamp| lamp.assist_grade),
         }
     }
 }
@@ -143,6 +148,9 @@ impl TimingFigures {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResultInput {
     pub sheet: ScoreSheet,
+    /// The assist grade inside the run's lamp (`rbms_judge::AssistGrade::id`): the grade of a
+    /// SCRATCH AUTO clear by the gauge it finished on, and 0 for every other run and for a course.
+    pub assist_grade: u8,
     pub gauge: GaugeEnds,
     pub timing: TimingFigures,
     pub previous: PreviousScore,
@@ -166,6 +174,7 @@ impl Default for ResultInput {
     fn default() -> ResultInput {
         ResultInput {
             sheet: ScoreSheet::default(),
+            assist_grade: 0,
             gauge: GaugeEnds::default(),
             timing: TimingFigures::default(),
             previous: PreviousScore::default(),
@@ -181,10 +190,12 @@ impl Default for ResultInput {
 }
 
 impl ResultInput {
-    /// The input of a finished run played in `mode`, reported under the lamp `clear`.
+    /// The input of a finished run played in `mode`, reported under the lamp `clear`, which is graded
+    /// by the gauge the run finished on as the stored record is.
     pub fn from_record(record: &PlayRecord, mode: Mode, clear: ClearType) -> ResultInput {
         ResultInput {
             sheet: ScoreSheet::of_record(record, PointFamily::of_mode(mode), clear),
+            assist_grade: assist_grade(clear, Some(record.finished_gauge)).id(),
             gauge: GaugeEnds::of_log(&record.gauge_log),
             timing: TimingFigures::of_record(record),
             ..ResultInput::default()
@@ -197,6 +208,8 @@ impl ResultInput {
 pub struct ResultSnapshot {
     /// The run's score, held against the best and the target (`ScoreDataProperty`).
     pub score: RunScore,
+    /// The assist grade inside the run's lamp ([`ResultInput::assist_grade`]).
+    pub assist_grade: u8,
     pub previous: PreviousScore,
     pub gauge: GaugeEnds,
     pub timing: TimingFigures,
@@ -223,6 +236,7 @@ impl ResultSnapshot {
         };
         ResultSnapshot {
             score: RunScore::finished(input.sheet, pace),
+            assist_grade: input.assist_grade,
             previous: input.previous,
             gauge: input.gauge,
             timing: input.timing,

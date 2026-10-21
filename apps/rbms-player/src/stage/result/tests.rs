@@ -1135,8 +1135,17 @@ fn the_wheel_scrolls_the_ranking_within_its_rows() {
     };
     assert_eq!(scroll(&mut app, 3.0), 0, "a ranking with nobody in it was scrolled");
 
-    let row =
-        RankingRow { rank: None, player: "p".into(), ex_score: 1, lamp: "CLEAR", lamp_color: Color::GREEN, fast_slow: None, replay_id: None, played_at: 0 };
+    let row = RankingRow {
+        rank: None,
+        player: "p".into(),
+        ex_score: 1,
+        record_lamp: rbms_store::RecordLamp::default(),
+        lamp: "CLEAR",
+        lamp_color: Color::GREEN,
+        fast_slow: None,
+        replay_id: None,
+        played_at: 0,
+    };
     let board = RankingBoard { rows: vec![row; ROWS], you: None, rivals: Vec::new() };
     app.shared.ranking_cache.insert(md5, RankingState::Ready(Box::new(board)));
     assert_eq!(result(&app).scene_facts(&app.shared).ranking_total, ROWS as i32);

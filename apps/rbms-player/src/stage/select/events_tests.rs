@@ -18,6 +18,7 @@ use super::skinned_tests::{Browser, SHORT_STEP, starts_a_chart};
 use super::tests::{app, entry, record};
 use super::*;
 use crate::App;
+use crate::skin_host::extension::{EXTENSION_EVENT_FIRST, EXTENSION_EVENT_LAST, RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_SCRATCH_AUTO};
 use crate::skin_host::{Cluster, ClusterRequest};
 
 /// The argument a left click runs an event with, and the one a right click does.
@@ -165,7 +166,7 @@ fn the_random_events_step_the_one_option_in_the_references_order() {
 fn an_event_of_a_switch_flips_it_either_way() {
     let mut settings = Settings::new();
     type Read = fn(&Config) -> bool;
-    let rows: [(i32, &str, Read); 8] = [
+    let rows: [(i32, &str, Read); 10] = [
         (BUTTON_BGA, "bga", |config| config.display.bga),
         (EVENT_JUDGE_TIMING_AUTO, "notesdisplaytimingautoadjust", |config| config.judge.auto_offset),
         (BUTTON_LANECOVER, "lanecover", |config| config.play.enable_cover),
@@ -174,6 +175,8 @@ fn an_event_of_a_switch_flips_it_either_way() {
         (EVENT_GUIDE_SE, "guidese", |config| config.audio.guide_se),
         (BUTTON_SCROLLMODE, "scrollmode", |config| config.play.constant_speed),
         (BUTTON_LONGNOTEMODE, "longnotemode", |config| config.play.legacy_note),
+        (RBMS_EVENT_SCRATCH_AUTO, "scratch auto", |config| config.play.scratch_auto),
+        (RBMS_EVENT_KEEP_GREEN_NUMBER, "keep green number", |config| config.play.keep_green_number),
     ];
     for (id, name, read) in rows {
         let shipped = read(&Config::default());
@@ -344,6 +347,7 @@ fn an_event_with_nothing_behind_it_does_nothing() {
         BUTTON_SEVENTONINE_TYPE,
         EVENT_CONSTANT,
         EVENT_NOBODY_HAS,
+        EXTENSION_EVENT_LAST,
     ];
     let (mut app, mut state) = browsing();
     let before = app.shared.config.clone();
@@ -489,7 +493,7 @@ fn the_favourite_button_stars_the_chart_under_the_cursor() {
 /// a button of the skin that runs one reaches the browser.
 #[test]
 fn every_event_the_browser_runs_is_one_the_host_routes_to_it() {
-    for id in 0..EVENT_NOBODY_HAS {
+    for id in (0..EVENT_NOBODY_HAS).chain(EXTENSION_EVENT_FIRST..=EXTENSION_EVENT_LAST) {
         if event_of(id).is_none() {
             continue;
         }
