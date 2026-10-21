@@ -13,7 +13,7 @@ pub use data::{
     GaugeModifier, GaugeParams, GaugeSet, GaugeTables, JudgeDataError, JudgePropertyData, JudgeTables, JudgeWindowsData, builtin_gauge_tables,
     builtin_judge_tables, load_gauge_tables, load_judge_tables,
 };
-pub use gauge::{ClearType, Gauge, GaugeKind, clear_lamp, clear_type_from_id, clear_type_id};
+pub use gauge::{AssistGrade, ClearType, Gauge, GaugeKind, assist_grade, clear_lamp, clear_type_from_id, clear_type_id};
 pub use matcher::{JudgeEngine, JudgeResult, JudgedNote, LaneLongNote, NoteAt, NoteMark};
 pub use windows::{JudgeProperty, JudgeWindows, MissCondition, judgerank_for, rank_to_judgerank};
 

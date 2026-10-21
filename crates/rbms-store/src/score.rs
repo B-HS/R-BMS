@@ -65,7 +65,7 @@ pub const REFERENCE_RECORD_RULE_VERSION: u32 = 4;
 
 /// The first rule version this build judges a run played by hand exactly as it did then: the
 /// judge-parity pass, whose assisted lamps are demoted as this build demotes them.
-const JUDGE_PARITY_RULE_VERSION: u32 = 2;
+pub(crate) const JUDGE_PARITY_RULE_VERSION: u32 = 2;
 
 /// The first rule version in which SCRATCH AUTO takes the turntable's notes off the chart a run is
 /// judged on, so that they count for nothing, and in which such a run sets bests like any other. A
@@ -76,6 +76,65 @@ pub const SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION: u32 = 3;
 /// The assist level of a run whose only assist is SCRATCH AUTO (`rbms_ir::mapping::LIGHT_ASSIST`).
 /// Every other non-zero level is a widened judge, or an assist an imported record did not name.
 pub const SCRATCH_AUTO_ASSIST: i32 = 1;
+
+/// Lamp id of `rbms_judge::ClearType::LightAssistEasy`: the lamp of a clear on the ASSIST EASY gauge
+/// and the lamp a SCRATCH AUTO clear is demoted to, the one lamp an assist grade splits. Kept as a
+/// number for the reason [`crate::scoredb`] keeps its lamp ids as numbers.
+pub const LIGHT_ASSIST_CLEAR_ID: u8 = 3;
+
+/// Assist grade id of a record with no grade (`rbms_judge::AssistGrade::None`).
+pub const ASSIST_GRADE_NONE: u8 = 0;
+/// Assist grade id of a light-assist clear demoted from an EASY gauge clear (ASSIST EASY).
+pub const ASSIST_GRADE_EASY: u8 = 1;
+/// Assist grade id of a light-assist clear demoted from a NORMAL or CLASS gauge clear (ASSIST CLEAR).
+pub const ASSIST_GRADE_CLEAR: u8 = 2;
+/// Assist grade id of a light-assist clear demoted from a HARD or EXCLASS gauge clear (ASSIST HARD).
+pub const ASSIST_GRADE_HARD: u8 = 3;
+/// Assist grade id of a light-assist clear demoted from an EX-HARD, HAZARD or EXHARDCLASS gauge clear
+/// (ASSIST EXHARD).
+pub const ASSIST_GRADE_EXHARD: u8 = 4;
+/// How many assist grade ids there are, [`ASSIST_GRADE_NONE`] included.
+pub const ASSIST_GRADE_COUNT: u8 = 5;
+
+/// The grade a demoted clear on each stored gauge id folds to, indexed by the id
+/// ([`crate::scoredb::gauge_id`], the order of `rbms_judge::gauge::GaugeIndex`): the lamp the gauge
+/// awards a clear, full combos left out, as `rbms_judge::assist_grade` folds it. The player's tests
+/// hold the two to the same answer for every gauge.
+pub(crate) const ASSIST_GRADE_OF_GAUGE: [u8; 9] = [
+    ASSIST_GRADE_NONE,
+    ASSIST_GRADE_EASY,
+    ASSIST_GRADE_CLEAR,
+    ASSIST_GRADE_HARD,
+    ASSIST_GRADE_EXHARD,
+    ASSIST_GRADE_EXHARD,
+    ASSIST_GRADE_CLEAR,
+    ASSIST_GRADE_HARD,
+    ASSIST_GRADE_EXHARD,
+];
+
+/// The assist grade of a stored run: the lamp id it was awarded, the gauge id it finished on, its
+/// assist level and its rule version, as `scorelog` holds them.
+///
+/// Only a [`LIGHT_ASSIST_CLEAR_ID`] lamp has one, and then the grade of the gauge
+/// ([`ASSIST_GRADE_OF_GAUGE`]); on the ASSIST EASY gauge, whose own lamp that is, it is none. A run
+/// whose assist level was never recorded ([`crate::scoredb::ASSIST_UNRECORDED`]) and one of a rule
+/// older than the judge-parity pass, which stored lamps nothing demoted, have none either.
+pub fn assist_grade_of(clear: u8, gauge: i32, assist: i32, rule_version: u32) -> u8 {
+    if clear != LIGHT_ASSIST_CLEAR_ID || assist == crate::scoredb::ASSIST_UNRECORDED || is_stale_rule_version(rule_version) {
+        return ASSIST_GRADE_NONE;
+    }
+    usize::try_from(gauge).ok().and_then(|index| ASSIST_GRADE_OF_GAUGE.get(index)).copied().unwrap_or(ASSIST_GRADE_NONE)
+}
+
+/// A best lamp as it is compared: the lamp id first and the assist grade inside it, so an ASSIST
+/// HARD clear outranks an ASSIST CLEAR one and both stay below an EASY clear.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RecordLamp {
+    /// `ClearType` id of the lamp, 0 to 10.
+    pub clear: u8,
+    /// Assist grade id inside that lamp ([`assist_grade_of`]).
+    pub assist_grade: u8,
+}
 
 /// Whether a record was judged under a rule version this build no longer produces for a run played
 /// by hand, so what is shown next to it is the presenting layer's decision rather than this
@@ -133,6 +192,11 @@ pub struct ScoreRecord {
     /// before the field existed default to `false`.
     #[serde(default)]
     pub assisted: bool,
+    /// Assist level of the run as `scorelog.assist` holds it: 0 none, [`SCRATCH_AUTO_ASSIST`] for
+    /// SCRATCH AUTO alone, 2 for a widened judge or a TOTAL of the player's own. A record written
+    /// before the field existed reads as [`crate::scoredb::ASSIST_UNRECORDED`].
+    #[serde(default = "unrecorded_assist")]
+    pub assist: i32,
     /// The `scorelog` row this record was read from or written as, which is how a screen showing the
     /// record finds where the play stands with a score server. `None` for a record that never had a
     /// row (one read from `scores.ron`), and never written to that file.
@@ -142,6 +206,23 @@ pub struct ScoreRecord {
 
 fn chart_ln_mode_key() -> String {
     SCORE_LN_MODE_FROM_CHART.to_string()
+}
+
+fn unrecorded_assist() -> i32 {
+    crate::scoredb::ASSIST_UNRECORDED
+}
+
+impl ScoreRecord {
+    /// The assist grade of the run ([`assist_grade_of`]): 1 to 4 for a light-assist clear graded by
+    /// the gauge it finished on, 0 otherwise.
+    pub fn assist_grade(&self) -> u8 {
+        assist_grade_of(self.clear, crate::scoredb::gauge_id(&self.gauge), self.assist, self.rule_version)
+    }
+
+    /// The run's lamp as bests are compared.
+    pub fn lamp(&self) -> RecordLamp {
+        RecordLamp { clear: self.clear, assist_grade: self.assist_grade() }
+    }
 }
 
 /// Wire shape of `scores.ron`: the record list and nothing else, so the lookup index below never
@@ -288,7 +369,19 @@ impl ScoreBook {
     }
 
     /// Best clear-lamp id on a chart (highest `ClearType` id), folded without allocation — used for
-    /// the per-row clear-lamp LED in the select list. `None` if the chart has no records.
+    /// the per-row clear-lamp LED in the select list. `None` if the chart has no records. The lamp id
+    /// of [`ScoreBook::best_lamp_for_md5`].
+    pub fn best_clear_for_md5(&self, md5: &str) -> Option<u8> {
+        self.best_lamp_for_md5(md5).map(|lamp| lamp.clear)
+    }
+
+    /// Best clear-lamp id among the records of a chart that were played under `ln_mode`.
+    pub fn best_clear_for_md5_in_ln_mode(&self, md5: &str, ln_mode: &str) -> Option<u8> {
+        self.best_lamp_for_md5_in_ln_mode(md5, ln_mode).map(|lamp| lamp.clear)
+    }
+
+    /// Best lamp on a chart, the lamp id first and the assist grade inside it ([`RecordLamp`]).
+    /// `None` if the chart has no records.
     ///
     /// Assisted runs count here, unlike [`ScoreBook::best_ex_for_md5`]: the reference implementation
     /// records the lamp of an assisted run too, having first demoted it to
@@ -296,18 +389,17 @@ impl ScoreBook {
     /// into the record. A demoted lamp can only raise the LED as far as the assist allows — but only
     /// a record this build wrote carries a demoted lamp at all, so an assisted record from an older
     /// rule version is left out rather than allowed to raise the LED with a lamp nothing demoted.
-    pub fn best_clear_for_md5(&self, md5: &str) -> Option<u8> {
-        self.positions(md5).iter().map(|&i| &self.records[i]).filter(|r| !r.assisted || !is_stale_rule_version(r.rule_version)).map(|r| r.clear).max()
+    pub fn best_lamp_for_md5(&self, md5: &str) -> Option<RecordLamp> {
+        self.lamp_records(md5).map(ScoreRecord::lamp).max()
     }
 
-    /// Best clear-lamp id among the records of a chart that were played under `ln_mode`.
-    pub fn best_clear_for_md5_in_ln_mode(&self, md5: &str, ln_mode: &str) -> Option<u8> {
-        self.positions(md5)
-            .iter()
-            .map(|&i| &self.records[i])
-            .filter(|r| !r.assisted || !is_stale_rule_version(r.rule_version))
-            .filter(|r| Self::comparable_ln_mode(r, ln_mode))
-            .map(|r| r.clear)
-            .max()
+    /// Best lamp among the records of a chart that were played under `ln_mode`.
+    pub fn best_lamp_for_md5_in_ln_mode(&self, md5: &str, ln_mode: &str) -> Option<RecordLamp> {
+        self.lamp_records(md5).filter(|r| Self::comparable_ln_mode(r, ln_mode)).map(ScoreRecord::lamp).max()
+    }
+
+    /// Records of a chart whose lamp counts, as [`ScoreBook::best_lamp_for_md5`] describes.
+    fn lamp_records(&self, md5: &str) -> impl Iterator<Item = &ScoreRecord> {
+        self.positions(md5).iter().map(|&i| &self.records[i]).filter(|r| !r.assisted || !is_stale_rule_version(r.rule_version))
     }
 }

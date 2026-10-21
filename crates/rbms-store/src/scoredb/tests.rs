@@ -110,6 +110,7 @@ fn the_score_table_carries_every_column_the_spec_lists() {
         "assist",
         "rule_version",
         "replay_file",
+        "assist_grade",
     ];
     assert_eq!(columns, want, "the score row is exactly the columns the DDL declares");
 }
@@ -440,6 +441,7 @@ fn record(md5: &str, played_at_ms: i64, clear: u8, counts: [u32; 6], assisted: b
         rule_version: SCORE_RULE_VERSION,
         ln_mode: SCORE_LN_MODE_FROM_CHART.into(),
         assisted,
+        assist: ASSIST_UNRECORDED,
         log_id: None,
     }
 }
@@ -912,4 +914,139 @@ fn an_old_popn_play_is_not_charged_for_its_bads() {
     finished.judge = JudgeCounts::from_early_late([10, 0, 0, 2, 0, 0], [0; JUDGE_TIER_COUNT]);
     finished.minbp = 2;
     assert_eq!(charged_minbp(&finished), 2);
+}
+
+/// `ClearType::LightAssistEasy`, the lamp a SCRATCH AUTO clear is demoted to.
+const LAMP_LIGHT_ASSIST: u8 = LIGHT_ASSIST_CLEAR_ID;
+/// `ClearType::Easy`, the lowest lamp above every assist grade.
+const LAMP_EASY: u8 = 4;
+/// A rule older than the judge-parity pass, whose assisted lamps nothing demoted.
+const RULE_BEFORE_JUDGE_PARITY: u32 = 1;
+
+/// A SCRATCH AUTO clear on `gauge`, demoted to the light-assist lamp.
+fn scratch_auto_clear(chart_key: &str, date: i64, pgreat: u32, gauge: &str) -> PlayLog {
+    PlayLog { clear: LAMP_LIGHT_ASSIST, gauge: gauge_id(gauge), assist: crate::SCRATCH_AUTO_ASSIST, ..play(chart_key, date, pgreat) }
+}
+
+#[test]
+fn a_light_assist_clear_is_graded_by_the_gauge_it_finished_on() {
+    let graded = |gauge: &str| assist_grade_of(LAMP_LIGHT_ASSIST, gauge_id(gauge), crate::SCRATCH_AUTO_ASSIST, SCORE_RULE_VERSION);
+    assert_eq!(graded("assist"), ASSIST_GRADE_NONE, "the ASSIST EASY gauge's own lamp is no demoted clear");
+    assert_eq!(graded("easy"), crate::ASSIST_GRADE_EASY);
+    assert_eq!(graded("normal"), crate::ASSIST_GRADE_CLEAR);
+    assert_eq!(graded("hard"), crate::ASSIST_GRADE_HARD);
+    assert_eq!(graded("exhard"), crate::ASSIST_GRADE_EXHARD);
+    assert_eq!(graded("hazard"), crate::ASSIST_GRADE_EXHARD, "HAZARD folds into EXHARD");
+    assert_eq!(graded("class"), crate::ASSIST_GRADE_CLEAR);
+    assert_eq!(graded("exclass"), crate::ASSIST_GRADE_HARD);
+    assert_eq!(graded("exhardclass"), crate::ASSIST_GRADE_EXHARD);
+    let gauge_past_the_last = i32::try_from(ASSIST_GRADE_OF_GAUGE.len()).expect("nine gauges fit");
+    assert_eq!(assist_grade_of(LAMP_LIGHT_ASSIST, gauge_past_the_last, crate::SCRATCH_AUTO_ASSIST, SCORE_RULE_VERSION), ASSIST_GRADE_NONE);
+}
+
+#[test]
+fn only_a_demoted_light_assist_clear_of_a_known_run_has_a_grade() {
+    let hard = gauge_id("hard");
+    for clear in [0, LAMP_FAILED, LAMP_ASSIST_EASY, LAMP_EASY, LAMP_NORMAL, LAMP_HARD] {
+        assert_eq!(assist_grade_of(clear, hard, crate::SCRATCH_AUTO_ASSIST, SCORE_RULE_VERSION), ASSIST_GRADE_NONE, "lamp {clear}");
+    }
+    assert_eq!(assist_grade_of(LAMP_LIGHT_ASSIST, hard, ASSIST_UNRECORDED, SCORE_RULE_VERSION), ASSIST_GRADE_NONE, "an imported run never said");
+    assert_eq!(assist_grade_of(LAMP_LIGHT_ASSIST, hard, crate::SCRATCH_AUTO_ASSIST, RULE_BEFORE_JUDGE_PARITY), ASSIST_GRADE_NONE, "an old rule");
+    assert_eq!(assist_grade_of(LAMP_LIGHT_ASSIST, hard, 0, SCORE_RULE_VERSION), crate::ASSIST_GRADE_HARD, "the lamp alone tells a demoted clear");
+}
+
+#[test]
+fn a_stronger_gauge_raises_the_grade_inside_the_same_lamp_and_an_easy_clear_still_outranks_it() {
+    let mut db = fresh();
+    let mode = mode_id("BEAT_7K");
+    db.record_play(&scratch_auto_clear("aa", 10, 100, "normal"), true).expect("an ASSIST CLEAR");
+    let best = db.best("aa", mode).expect("queried").expect("exists");
+    assert_eq!((best.clear, best.assist_grade, best.gauge), (LAMP_LIGHT_ASSIST, crate::ASSIST_GRADE_CLEAR, gauge_id("normal")));
+
+    db.record_play(&scratch_auto_clear("aa", 20, 50, "hard"), true).expect("an ASSIST HARD");
+    let best = db.best("aa", mode).expect("queried").expect("exists");
+    assert_eq!((best.clear, best.assist_grade, best.gauge), (LAMP_LIGHT_ASSIST, crate::ASSIST_GRADE_HARD, gauge_id("hard")), "a higher grade");
+    assert_eq!(best.assist, crate::SCRATCH_AUTO_ASSIST);
+
+    db.record_play(&scratch_auto_clear("aa", 30, 50, "easy"), true).expect("an ASSIST EASY");
+    let best = db.best("aa", mode).expect("queried").expect("exists");
+    assert_eq!((best.assist_grade, best.gauge), (crate::ASSIST_GRADE_HARD, gauge_id("hard")), "a lower grade leaves the row alone");
+
+    db.record_play(&PlayLog { clear: LAMP_EASY, gauge: gauge_id("easy"), ..play("aa", 40, 50) }, true).expect("an EASY CLEAR");
+    let best = db.best("aa", mode).expect("queried").expect("exists");
+    assert_eq!(best.lamp(), RecordLamp { clear: LAMP_EASY, assist_grade: ASSIST_GRADE_NONE }, "every grade sits below EASY");
+    assert_eq!((best.gauge, best.assist), (gauge_id("easy"), 0));
+}
+
+#[test]
+fn the_folded_bests_compare_the_grade_inside_the_lamp() {
+    let mut db = fresh();
+    db.record_play(&scratch_auto_clear("aa", 10, 100, "exhard"), true).expect("an ASSIST EXHARD in one flavour");
+    db.record_play(&PlayLog { ln_mode: "CN".into(), ..scratch_auto_clear("aa", 20, 200, "easy") }, true).expect("an ASSIST EASY in another");
+    let best = db.best("aa", mode_id("BEAT_7K")).expect("queried").expect("exists");
+    assert_eq!(best.lamp(), RecordLamp { clear: LAMP_LIGHT_ASSIST, assist_grade: crate::ASSIST_GRADE_EXHARD }, "the grade outranks the EX");
+    let folded = db.chart_best("aa").expect("queried").expect("exists");
+    assert_eq!((folded.clear, folded.assist_grade), (LAMP_LIGHT_ASSIST, crate::ASSIST_GRADE_EXHARD));
+    db.record_play(&PlayLog { ln_mode: "CN".into(), clear: LAMP_NORMAL, ..play("aa", 30, 10) }, true).expect("a CLEAR");
+    let folded = db.chart_best("aa").expect("queried").expect("exists");
+    assert_eq!((folded.clear, folded.assist_grade), (LAMP_NORMAL, ASSIST_GRADE_NONE), "a higher lamp carries its own grade");
+}
+
+/// A database written before the grade existed, or rewritten since by a build that predates it,
+/// holds no grade and the gauge of the run that first reached the lamp. Opening it folds the grade
+/// from the plays and keeps the first run of the best grade; a grade that stands is not written.
+#[test]
+fn opening_the_database_folds_the_assist_grade_from_the_plays() {
+    let mut db = fresh();
+    let mode = mode_id("BEAT_7K");
+    db.record_play(&scratch_auto_clear("aa", 10, 100, "normal"), true).expect("an ASSIST CLEAR");
+    let first_hard = db.record_play(&scratch_auto_clear("aa", 20, 100, "hard"), true).expect("an ASSIST HARD");
+    db.record_play(&scratch_auto_clear("aa", 30, 100, "exclass"), true).expect("another ASSIST HARD");
+    db.record_play(&PlayLog { assist: ASSIST_UNRECORDED, ..scratch_auto_clear("bb", 10, 100, "exhard") }, false).expect("an imported assisted clear");
+    db.record_play(&PlayLog { rule_version: RULE_BEFORE_JUDGE_PARITY, assist: 0, ..scratch_auto_clear("cc", 10, 100, "hard") }, true).expect("an old clear");
+    db.record_play(&scratch_auto_clear("dd", 10, 100, "hard"), true).expect("an ASSIST HARD");
+    db.record_play(&PlayLog { clear: LAMP_HARD, gauge: gauge_id("hard"), ..play("dd", 20, 100) }, true).expect("then a HARD CLEAR");
+
+    db.conn.execute("UPDATE score SET assist_grade = 0, gauge = ?1", params![gauge_id("normal")]).expect("an older build rewrote the rows");
+    db.migrate().expect("this build opens the database again");
+    let best = db.best("aa", mode).expect("reads").expect("exists");
+    let first: i32 = db.conn.query_row("SELECT gauge FROM scorelog WHERE id = ?1", [first_hard], |row| row.get(0)).expect("the first run reads");
+    assert_eq!((best.assist_grade, best.gauge), (crate::ASSIST_GRADE_HARD, first), "the first run of the best grade");
+    assert_eq!(best.assist, crate::SCRATCH_AUTO_ASSIST);
+    assert_eq!(db.best("bb", mode).expect("reads").expect("exists").assist_grade, ASSIST_GRADE_NONE, "an imported run never said its assist");
+    assert_eq!(db.best("cc", mode).expect("reads").expect("exists").assist_grade, ASSIST_GRADE_NONE, "an old rule has no grade");
+    let dd = db.best("dd", mode).expect("reads").expect("exists");
+    assert_eq!(
+        (dd.lamp(), dd.gauge),
+        (RecordLamp { clear: LAMP_HARD, assist_grade: ASSIST_GRADE_NONE }, gauge_id("normal")),
+        "an ungraded lamp keeps its gauge"
+    );
+
+    let changes_before = db.conn.total_changes();
+    refold_assist_grades(&db.conn).expect("folds again");
+    assert_eq!(db.conn.total_changes(), changes_before, "a grade that stands is not written again");
+}
+
+#[test]
+fn the_score_book_folds_the_grade_inside_the_lamp() {
+    let graded = |clear: u8, gauge: &str, assist: i32| ScoreRecord { gauge: gauge.into(), assist, ..record("aa", 1, clear, [10, 0, 0, 0, 0, 0], false) };
+    let mut book = ScoreBook::default();
+    book.push(graded(LAMP_LIGHT_ASSIST, "NORMAL", crate::SCRATCH_AUTO_ASSIST));
+    book.push(graded(LAMP_LIGHT_ASSIST, "EXHARD", crate::SCRATCH_AUTO_ASSIST));
+    book.push(graded(LAMP_LIGHT_ASSIST, "ASSIST", 0));
+    assert_eq!(book.best_lamp_for_md5("AA"), Some(RecordLamp { clear: LAMP_LIGHT_ASSIST, assist_grade: crate::ASSIST_GRADE_EXHARD }));
+    assert_eq!(book.best_clear_for_md5("AA"), Some(LAMP_LIGHT_ASSIST));
+    book.push(graded(LAMP_EASY, "EASY", 0));
+    assert_eq!(book.best_lamp_for_md5("AA"), Some(RecordLamp { clear: LAMP_EASY, assist_grade: ASSIST_GRADE_NONE }), "EASY outranks every grade");
+    assert_eq!(graded(LAMP_LIGHT_ASSIST, "HARD", ASSIST_UNRECORDED).assist_grade(), ASSIST_GRADE_NONE, "an imported record never said");
+}
+
+#[test]
+fn a_record_written_before_the_assist_level_existed_reads_it_as_unrecorded() {
+    let written = ron::ser::to_string(&ScoreRecord { assist: 0, ..record("aa", 1, LAMP_LIGHT_ASSIST, [1, 0, 0, 0, 0, 0], false) }).expect("a record writes");
+    let without_assist = written.replace(",assist:0", "");
+    assert_ne!(written, without_assist, "the field was taken out of {written}");
+    let read: ScoreRecord = ron::from_str(&without_assist).expect("an older record reads");
+    assert_eq!(read.assist, ASSIST_UNRECORDED);
+    assert_eq!(read.assist_grade(), ASSIST_GRADE_NONE);
 }

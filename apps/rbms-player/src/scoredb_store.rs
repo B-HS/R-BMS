@@ -263,6 +263,7 @@ pub(crate) fn record_of(log: &PlayLog) -> ScoreRecord {
         rule_version: log.rule_version,
         ln_mode: log.ln_mode.clone(),
         assisted: !rbms_store::sets_best(log.assist, log.rule_version),
+        assist: log.assist,
         log_id: (log.id > 0).then_some(log.id),
     }
 }

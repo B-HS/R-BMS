@@ -32,7 +32,7 @@ const UPDATE_HINT: &str = "if the change is meant, run `RBMS_UPDATE_CONTRACT=1 c
      `bun test tests/dto/client-requests.test.ts` in web/, and commit the files with the change";
 
 /// Every file the contract folder holds, one per test below.
-const CONTRACT_FILES: [&str; 32] = [
+const CONTRACT_FILES: [&str; 33] = [
     "course-normal",
     "course-scratch-auto",
     "replay-long",
@@ -50,6 +50,7 @@ const CONTRACT_FILES: [&str; 32] = [
     "score-normal",
     "score-popn-9k",
     "score-scratch-auto",
+    "score-scratch-auto-hard",
     "score-sync-resend",
     "score-trace-normal",
     "score-widened-judge",
@@ -564,6 +565,27 @@ fn a_scratch_auto_run() {
     assert!(crate::app_result::scratch_auto_played(&session), "SCRATCH AUTO took the turntable");
     let (score, _) = sent_from_the_result_screen(&mut shared, &server, session);
     check_contract("score-scratch-auto", &score.body);
+}
+
+/// A run with SCRATCH AUTO cleared on the HARD gauge. It is sent as the LIGHT ASSIST lamp the
+/// reference demotes it to, with the HARD gauge beside it: the body is no different in kind from
+/// any other SCRATCH AUTO clear, and the ASSIST HARD grade is what both ends derive from the two.
+#[test]
+fn a_scratch_auto_run_cleared_on_hard() {
+    let server = CaptureServer::spawn();
+    let mut shared = signed_in_to(&server, "scratch-auto-hard");
+    shared.config.play.scratch_auto = true;
+    shared.config.play.gauge = GaugeKind::Hard;
+    let session = played(&shared, contract_model(), &HAND_OFFSETS_US);
+    assert!(crate::app_result::scratch_auto_played(&session), "SCRATCH AUTO took the turntable");
+    let summary = session.summary();
+    assert!(!summary.failed && summary.finished_gauge == Some(GaugeKind::Hard), "the fixture run clears on HARD");
+    let md5 = session.model().md5.clone();
+    let (score, _) = sent_from_the_result_screen(&mut shared, &server, session);
+    let kept = shared.scores.best_lamp_for_md5(&md5).expect("the run is kept");
+    let light_assist = rbms_judge::clear_type_id(rbms_judge::ClearType::LightAssistEasy);
+    assert_eq!(kept, rbms_store::RecordLamp { clear: light_assist, assist_grade: rbms_judge::AssistGrade::Hard.id() }, "kept as an ASSIST HARD");
+    check_contract("score-scratch-auto-hard", &score.body);
 }
 
 /// A run judged with the PGREAT window widened to the most JUDGE WIDTH allows.

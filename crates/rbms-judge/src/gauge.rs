@@ -168,6 +168,80 @@ pub fn assist_downgrade(lamp: ClearType, assist: AssistLevel) -> ClearType {
     }
 }
 
+/// How strong a gauge an assisted clear was earned on: an rbms extension that splits the
+/// [`ClearType::LightAssistEasy`] lamp a SCRATCH AUTO clear is demoted to by the lamp the same gauge
+/// would have given without the demotion. The lamp id itself, the wire name and the demotion stay
+/// the reference's; the grade only orders and names clears inside that one lamp, so every grade sits
+/// below [`ClearType::Easy`].
+///
+/// Ids are dense from 0 and increase with the gauge's strength, so a best can be folded as the pair
+/// (lamp id, grade id).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum AssistGrade {
+    /// No grade: any lamp other than a demoted [`ClearType::LightAssistEasy`] clear, a clear on the
+    /// ASSIST EASY gauge itself, or a run whose gauge is not known.
+    #[default]
+    None,
+    /// Demoted from an EASY gauge clear (ASSIST EASY).
+    Easy,
+    /// Demoted from a NORMAL gauge clear, or a CLASS course gauge clear (ASSIST CLEAR).
+    Clear,
+    /// Demoted from a HARD gauge clear, or an EXCLASS course gauge clear (ASSIST HARD).
+    Hard,
+    /// Demoted from an EX-HARD, HAZARD or EXHARDCLASS gauge clear (ASSIST EXHARD).
+    ExHard,
+}
+
+impl AssistGrade {
+    /// How many grades there are, [`AssistGrade::None`] included.
+    pub const COUNT: usize = 5;
+
+    /// Every grade, weakest first.
+    pub const ALL: [AssistGrade; AssistGrade::COUNT] = [AssistGrade::None, AssistGrade::Easy, AssistGrade::Clear, AssistGrade::Hard, AssistGrade::ExHard];
+
+    /// The grade's stored id: 0 for none, 1 to 4 for ASSIST EASY to ASSIST EXHARD.
+    pub fn id(self) -> u8 {
+        match self {
+            AssistGrade::None => 0,
+            AssistGrade::Easy => 1,
+            AssistGrade::Clear => 2,
+            AssistGrade::Hard => 3,
+            AssistGrade::ExHard => 4,
+        }
+    }
+
+    /// Inverse of [`AssistGrade::id`]; an id past the last grade reads as [`AssistGrade::None`].
+    pub fn from_id(id: u8) -> AssistGrade {
+        AssistGrade::ALL.get(usize::from(id)).copied().unwrap_or_default()
+    }
+}
+
+/// The grade of a run awarded `lamp` that finished on `finished_gauge` (`None` when the gauge is not
+/// known).
+///
+/// Only a [`ClearType::LightAssistEasy`] lamp that did not come from the ASSIST EASY gauge has one:
+/// that is a clear the light assist demoted, the one gauge whose own lamp is LightAssistEasy being
+/// ASSIST EASY ([`lamp_for_gauge`]). The grade folds the lamp the gauge awards a clear without the
+/// demotion, full combos left out as the demotion leaves them out: EASY to ASSIST EASY, NORMAL to
+/// ASSIST CLEAR, HARD to ASSIST HARD, and EX-HARD and stronger (HAZARD included) to ASSIST EXHARD.
+/// The course gauges fold by the lamp they award, as [`clear_lamp`] gives it. Every other lamp, a
+/// widened run's [`ClearType::AssistEasy`] among them, has [`AssistGrade::None`].
+pub fn assist_grade(lamp: ClearType, finished_gauge: Option<GaugeIndex>) -> AssistGrade {
+    if lamp != ClearType::LightAssistEasy {
+        return AssistGrade::None;
+    }
+    let Some(gauge) = finished_gauge else {
+        return AssistGrade::None;
+    };
+    match lamp_for_gauge(gauge) {
+        ClearType::Easy => AssistGrade::Easy,
+        ClearType::Normal => AssistGrade::Clear,
+        ClearType::Hard => AssistGrade::Hard,
+        ClearType::ExHard | ClearType::FullCombo | ClearType::Perfect | ClearType::Max => AssistGrade::ExHard,
+        ClearType::NoPlay | ClearType::Failed | ClearType::AssistEasy | ClearType::LightAssistEasy => AssistGrade::None,
+    }
+}
+
 /// The parameters a gauge is built from, read from the bundled `data/gauge.ron`.
 ///
 /// The data file is the source the engine builds gauges from; [`default_params`] is the
@@ -759,6 +833,94 @@ mod gauge_index_tests {
                 assert_eq!(assist_downgrade(lamp, assist), lamp, "{lamp:?} {assist:?}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod assist_grade_tests {
+    use super::*;
+
+    /// The grade each of the nine gauges folds a demoted clear to.
+    const GRADE_OF_GAUGE: [(GaugeIndex, AssistGrade); GaugeIndex::COUNT] = [
+        (GaugeIndex::AssistEasy, AssistGrade::None),
+        (GaugeIndex::Easy, AssistGrade::Easy),
+        (GaugeIndex::Normal, AssistGrade::Clear),
+        (GaugeIndex::Hard, AssistGrade::Hard),
+        (GaugeIndex::ExHard, AssistGrade::ExHard),
+        (GaugeIndex::Hazard, AssistGrade::ExHard),
+        (GaugeIndex::Class, AssistGrade::Clear),
+        (GaugeIndex::ExClass, AssistGrade::Hard),
+        (GaugeIndex::ExHardClass, AssistGrade::ExHard),
+    ];
+
+    /// The lamps a run on `gauge` can be awarded before any demotion: the gauge's own clear lamp and
+    /// the three full-combo lamps that replace it.
+    fn undemoted_clears(gauge: GaugeIndex) -> [ClearType; 4] {
+        [lamp_for_gauge(gauge), ClearType::FullCombo, ClearType::Perfect, ClearType::Max]
+    }
+
+    #[test]
+    fn a_light_assist_clear_is_graded_by_the_gauge_whatever_full_combo_it_reached() {
+        for (gauge, grade) in GRADE_OF_GAUGE {
+            for lamp in undemoted_clears(gauge) {
+                let demoted = assist_downgrade(lamp, AssistLevel::Light);
+                assert_eq!(assist_grade(demoted, Some(gauge)), grade, "{gauge:?} {lamp:?} demoted to {demoted:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_undemoted_clear_has_no_grade() {
+        for (gauge, _) in GRADE_OF_GAUGE {
+            for lamp in undemoted_clears(gauge) {
+                assert_eq!(assist_grade(assist_downgrade(lamp, AssistLevel::None), Some(gauge)), AssistGrade::None, "{gauge:?} {lamp:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_full_assist_clear_keeps_its_single_lamp() {
+        for (gauge, _) in GRADE_OF_GAUGE {
+            for lamp in undemoted_clears(gauge) {
+                assert_eq!(assist_grade(assist_downgrade(lamp, AssistLevel::Full), Some(gauge)), AssistGrade::None, "{gauge:?} {lamp:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_clear_on_the_assist_easy_gauge_is_no_demoted_clear() {
+        assert_eq!(lamp_for_gauge(GaugeIndex::AssistEasy), ClearType::LightAssistEasy);
+        for assist in [AssistLevel::None, AssistLevel::Light] {
+            let lamp = assist_downgrade(lamp_for_gauge(GaugeIndex::AssistEasy), assist);
+            assert_eq!(assist_grade(lamp, Some(GaugeIndex::AssistEasy)), AssistGrade::None, "{assist:?}");
+        }
+    }
+
+    #[test]
+    fn a_run_that_did_not_clear_has_no_grade() {
+        for (gauge, _) in GRADE_OF_GAUGE {
+            for lamp in [ClearType::NoPlay, ClearType::Failed] {
+                assert_eq!(assist_grade(assist_downgrade(lamp, AssistLevel::Light), Some(gauge)), AssistGrade::None, "{gauge:?} {lamp:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_record_whose_gauge_is_not_known_has_no_grade() {
+        assert_eq!(assist_grade(ClearType::LightAssistEasy, None), AssistGrade::None);
+    }
+
+    #[test]
+    fn grade_ids_are_dense_round_trip_and_increase_with_the_gauge() {
+        for (i, grade) in AssistGrade::ALL.into_iter().enumerate() {
+            assert_eq!(usize::from(grade.id()), i, "{grade:?}");
+            assert_eq!(AssistGrade::from_id(grade.id()), grade);
+        }
+        for pair in AssistGrade::ALL.windows(2) {
+            assert!(pair[0] < pair[1], "grades order by id: {pair:?}");
+        }
+        assert_eq!(AssistGrade::from_id(u8::try_from(AssistGrade::COUNT).expect("the count fits a byte")), AssistGrade::None, "an unknown id is no grade");
+        assert_eq!(AssistGrade::from_id(u8::MAX), AssistGrade::None);
     }
 }
 

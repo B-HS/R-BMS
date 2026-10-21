@@ -198,7 +198,8 @@ impl SelectState {
                 let recs = shared.scores.for_md5(&e.md5);
                 let plays = recs.len();
                 let clears = recs.iter().filter(|r| r.clear >= 2).count();
-                let best = recs.iter().max_by(|a, b| a.clear.cmp(&b.clear).then(a.ex_score.cmp(&b.ex_score)));
+                let bad_poors = |r: &ScoreRecord| r.counts[3] + r.counts[4] + r.counts[5];
+                let best = recs.iter().max_by(|a, b| a.lamp().cmp(&b.lamp()).then(a.ex_score.cmp(&b.ex_score)).then(bad_poors(b).cmp(&bad_poors(a))));
                 let rank_bar = best.filter(|_| shared.config.display.score_graph).map(|b| (b.ex_score, b.max_ex));
                 let best = best.map(|b| shared.record_row_view(b, None));
                 let recent = recs.iter().enumerate().map(|(ri, r)| shared.record_row_view(r, recs.get(ri + 1).copied())).collect();
@@ -239,7 +240,7 @@ impl SelectState {
             let e = &shared.library.songs()[si];
             let recs = shared.scores.for_md5(&e.md5);
             let r = recs.get(ri)?;
-            let (clear_label, clear_color) = clear_label_color(clear_type_from_id(r.clear));
+            let (clear_label, clear_color) = crate::format::stored_lamp_label_color(r.lamp());
             let (rank, rank_color) = if shared.config.display.score_graph {
                 let (name, col) = RANK_BANDS[dj_rank(r.ex_score, r.max_ex)];
                 (Some(name), col)

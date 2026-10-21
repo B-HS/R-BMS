@@ -822,11 +822,12 @@ struct SceneStage {
 /// be ([`crate::ir_outcome::IR_LINE_MAX_CHARS`]).
 ///
 /// Both are assists, and both runs are kept, replayed and sent like any other. A SCRATCH AUTO run
-/// sets bests too, but its turntable notes counted for nothing and its lamp is LIGHT ASSIST CLEAR,
-/// which a skin's own numbers do not say. A widened run sets no best score: its EX, judgements,
+/// sets bests too, but its turntable notes counted for nothing and its lamp is an assist lamp named
+/// for the gauge it was cleared on (ASSIST EASY to ASSIST EXHARD), which a skin's own numbers do not
+/// say. A widened run sets no best score: its EX, judgements,
 /// combo and bad-poor count are held against no later run (`ScoreData.update(newscore,
 /// updateScore)`), and a skin is told only that the score was not saved.
-const SCRATCH_AUTO_NOTE: &str = "SCRATCH AUTO: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP";
+const SCRATCH_AUTO_NOTE: &str = "SCRATCH AUTO: TURNTABLE NOT COUNTED, ASSIST LAMP";
 const WIDENED_JUDGE_NOTE: &str = "WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE";
 
 /// What the screen says of a run played on a TOTAL of the player's own, which is eased as a widened

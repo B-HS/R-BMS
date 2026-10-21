@@ -100,7 +100,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
 
     let recorded = record_run(state, shared, &summary, &record);
     let lamp = recorded.lamp;
-    let (label, color) = clear_label_color(lamp);
+    let (label, color) = crate::format::lamp_label_color(lamp, recorded.assist_grade);
     println!(
         "RESULT [{label}]  EX {}/{}  combo {}/{}  gauge {:.1}%  PG/GR/GD/BD/POOR/MISS {:?}  empty-poor {}",
         summary.ex_score, summary.max_ex_score, summary.max_combo, summary.total_notes, summary.gauge_value, summary.counts, summary.empty_poor,
@@ -184,6 +184,9 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
 /// be sent, if it is not.
 pub(crate) struct RecordedRun {
     lamp: ClearType,
+    /// The grade inside that lamp of a SCRATCH AUTO clear, by the gauge the run finished on
+    /// ([`rbms_judge::assist_grade`]).
+    assist_grade: rbms_judge::AssistGrade,
     sub: ScoreSubmission,
     /// The `scorelog` row the run was stored as; `None` for a run that is no record (autoplay, a
     /// replay being watched, practice) or that could not be stored.
@@ -238,6 +241,7 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         !practice && shared.config.play.auto_replay && shared.replay.is_none() && !shared.run_plays_itself() && !play.recorded_events().is_empty();
     let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
     let lamp = assisted_lamp(summary.clear_lamp, assist);
+    let assist_grade = rbms_judge::assist_grade(lamp, Some(record.finished_gauge));
 
     let assist_tags = assist_flags(scratch_auto, custom_judge);
     let finished_gauge = reported_gauge(summary, shared.config.play.gauge);
@@ -417,7 +421,7 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         shared.saves.save_replay(file.clone(), rp.clone(), staged);
     }
 
-    RecordedRun { lamp, sub, log_id, trace_kept, replay_file, recorded_replay, replay_plan, block_reason, scratch_auto, custom_judge }
+    RecordedRun { lamp, assist_grade, sub, log_id, trace_kept, replay_file, recorded_replay, replay_plan, block_reason, scratch_auto, custom_judge }
 }
 
 /// What the trace of the run `state` holds is made of, whose record is `record`, with the lane
@@ -648,7 +652,7 @@ fn send_without_a_screen(shared: &mut AppShared, recorded: &RecordedRun) {
 /// all (9 keys), is played wholly by hand whatever the switch says, and such a run is no assist.
 ///
 /// A run it did play is recorded and sent like any other and sets bests like any other (the
-/// player's decision of 2026-10-14); the assist is what demotes its lamp to LIGHT ASSIST CLEAR, and
+/// player's decision of 2026-10-14); the assist is what demotes its lamp to LIGHT ASSIST, graded by the gauge, and
 /// what the history, the replay and the submission say of it.
 pub(crate) fn scratch_auto_played(session: &PlaySession) -> bool {
     session.has_auto_played_notes()

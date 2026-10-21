@@ -2,9 +2,10 @@
 //! colour palettes and timestamp/duration formatting. Lamp id round-tripping lives in
 //! `rbms_judge::clear_type_id`, next to the `ClearType` it encodes.
 
-use rbms_judge::{ClearType, GaugeKind};
+use rbms_judge::{AssistGrade, ClearType, GaugeKind, clear_type_from_id};
 use rbms_model::Mode;
 use rbms_render::Color;
+use rbms_store::RecordLamp;
 
 /// Short marker appended to a record's timestamp when it was judged under a rule version this
 /// build no longer produces.
@@ -111,13 +112,16 @@ pub(crate) fn mode_short(mode: Mode) -> &'static str {
     }
 }
 
-/// Clear-lamp label + colour. Colours are the reference implementation's official lamp palette
-/// (`select/SkinDistributionGraph.LAMP`, ARGB → RGB).
+/// Clear-lamp label + colour of a lamp with no assist grade. Colours are the reference
+/// implementation's official lamp palette (`select/SkinDistributionGraph.LAMP`, ARGB → RGB).
+///
+/// The widened-judge lamp (id 2) is ASSIST, so that the name ASSIST EASY is left to the grade of a
+/// SCRATCH AUTO clear on the EASY gauge ([`lamp_label_color`]).
 pub(crate) fn clear_label_color(c: ClearType) -> (&'static str, Color) {
     match c {
         ClearType::NoPlay => ("NO PLAY", Color::rgb(64, 64, 64)),
         ClearType::Failed => ("FAILED", Color::rgb(0, 0, 128)),
-        ClearType::AssistEasy => ("ASSIST EASY", Color::rgb(128, 0, 128)),
+        ClearType::AssistEasy => ("ASSIST", Color::rgb(128, 0, 128)),
         ClearType::LightAssistEasy => ("LIGHT ASSIST", Color::rgb(255, 0, 255)),
         ClearType::Easy => ("EASY", Color::rgb(64, 255, 64)),
         ClearType::Normal => ("CLEAR", Color::rgb(0, 192, 240)),
@@ -127,6 +131,28 @@ pub(crate) fn clear_label_color(c: ClearType) -> (&'static str, Color) {
         ClearType::Perfect => ("PERFECT", Color::rgb(136, 136, 255)),
         ClearType::Max => ("MAX", Color::rgb(0, 0, 255)),
     }
+}
+
+/// Label + colour of a lamp and the assist grade inside it ([`rbms_judge::assist_grade`]). A graded
+/// light-assist clear is named for the gauge it was cleared on, ASSIST EASY to ASSIST EXHARD, in
+/// colours of its own; every other lamp is [`clear_label_color`]'s, an ungraded light-assist clear
+/// staying LIGHT ASSIST.
+pub(crate) fn lamp_label_color(c: ClearType, grade: AssistGrade) -> (&'static str, Color) {
+    if c != ClearType::LightAssistEasy {
+        return clear_label_color(c);
+    }
+    match grade {
+        AssistGrade::None => clear_label_color(c),
+        AssistGrade::Easy => ("ASSIST EASY", Color::rgb(160, 96, 255)),
+        AssistGrade::Clear => ("ASSIST CLEAR", Color::rgb(96, 128, 255)),
+        AssistGrade::Hard => ("ASSIST HARD", Color::rgb(224, 192, 255)),
+        AssistGrade::ExHard => ("ASSIST EXHARD", Color::rgb(255, 128, 192)),
+    }
+}
+
+/// [`lamp_label_color`] of a stored lamp: its id and the grade id the score store folded with it.
+pub(crate) fn stored_lamp_label_color(lamp: RecordLamp) -> (&'static str, Color) {
+    lamp_label_color(clear_type_from_id(lamp.clear), AssistGrade::from_id(lamp.assist_grade))
 }
 
 #[cfg(test)]
@@ -341,5 +367,62 @@ mod tests {
     #[test]
     fn clear_label_color_normal_lamp_is_named_clear() {
         assert_eq!(clear_label_color(ClearType::Normal).0, "CLEAR");
+    }
+
+    #[test]
+    fn the_assist_lamps_are_named_as_the_lamp_definition_names_them() {
+        assert_eq!(clear_label_color(ClearType::AssistEasy).0, "ASSIST");
+        assert_eq!(lamp_label_color(ClearType::LightAssistEasy, AssistGrade::None).0, "LIGHT ASSIST");
+        let graded: Vec<&str> = AssistGrade::ALL[1..].iter().map(|&grade| lamp_label_color(ClearType::LightAssistEasy, grade).0).collect();
+        assert_eq!(graded, ["ASSIST EASY", "ASSIST CLEAR", "ASSIST HARD", "ASSIST EXHARD"]);
+    }
+
+    #[test]
+    fn a_grade_names_only_the_light_assist_lamp() {
+        for c in ALL_CLEARS.into_iter().filter(|&c| c != ClearType::LightAssistEasy) {
+            for grade in AssistGrade::ALL {
+                assert_eq!(lamp_label_color(c, grade), clear_label_color(c), "{c:?} {grade:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_graded_lamp_has_a_label_and_colour_of_its_own() {
+        let mut shown: Vec<(&str, Color)> = ALL_CLEARS.iter().map(|&c| clear_label_color(c)).collect();
+        shown.extend(AssistGrade::ALL[1..].iter().map(|&grade| lamp_label_color(ClearType::LightAssistEasy, grade)));
+        for i in 0..shown.len() {
+            for j in (i + 1)..shown.len() {
+                assert_ne!(shown[i].0, shown[j].0, "labels distinct");
+                assert_ne!(shown[i].1, shown[j].1, "colours distinct: {} vs {}", shown[i].0, shown[j].0);
+            }
+        }
+    }
+
+    /// The score store folds a stored run's grade off its gauge id with a table of its own, the
+    /// store keeping clear of the engine; it has to give the engine's answer for every lamp and
+    /// every gauge.
+    #[test]
+    fn the_score_store_grades_every_stored_run_as_the_engine_does() {
+        use rbms_judge::gauge::GaugeIndex;
+        for c in ALL_CLEARS {
+            for gauge in GaugeIndex::ALL {
+                let gauge_id = i32::try_from(gauge.index()).expect("a gauge index fits");
+                let stored =
+                    rbms_store::assist_grade_of(rbms_judge::clear_type_id(c), gauge_id, rbms_store::SCRATCH_AUTO_ASSIST, rbms_store::SCORE_RULE_VERSION);
+                assert_eq!(AssistGrade::from_id(stored), rbms_judge::assist_grade(c, Some(gauge)), "{c:?} on {gauge:?}");
+            }
+        }
+        for grade in AssistGrade::ALL {
+            assert!(grade.id() < rbms_store::ASSIST_GRADE_COUNT, "{grade:?} fits the store's grade ids");
+        }
+        assert_eq!(usize::from(rbms_store::ASSIST_GRADE_COUNT), AssistGrade::COUNT);
+        assert_eq!(rbms_store::LIGHT_ASSIST_CLEAR_ID, rbms_judge::clear_type_id(ClearType::LightAssistEasy));
+    }
+
+    #[test]
+    fn a_stored_lamp_reads_back_with_its_grade() {
+        let lamp = RecordLamp { clear: rbms_judge::clear_type_id(ClearType::LightAssistEasy), assist_grade: AssistGrade::Hard.id() };
+        assert_eq!(stored_lamp_label_color(lamp).0, "ASSIST HARD");
+        assert_eq!(stored_lamp_label_color(RecordLamp::default()).0, "NO PLAY");
     }
 }

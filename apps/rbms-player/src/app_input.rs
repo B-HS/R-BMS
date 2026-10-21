@@ -612,7 +612,7 @@ impl AppShared {
     /// Map a local score record into the renderer's record-row view (owned data, no borrow escapes).
     /// `trend` carries the EX delta versus the next-older play when the score graph is enabled.
     pub(crate) fn record_row_view(&self, r: &ScoreRecord, older: Option<&ScoreRecord>) -> RecordRowView {
-        let (label, color) = clear_label_color(clear_type_from_id(r.clear));
+        let (label, color) = crate::format::stored_lamp_label_color(r.lamp());
         let trend = older.filter(|_| self.config.display.score_graph).map(|o| ex_delta_label(r.ex_score as i64 - o.ex_score as i64));
         let when = format!("{}{}", fmt_datetime(r.played_at), rule_version_mark(r.rule_version));
         RecordRowView { when, lamp: color, lamp_label: label, ex: r.ex_score, max_ex: r.max_ex, bp: r.counts[3] + r.counts[4] + r.counts[5], trend }

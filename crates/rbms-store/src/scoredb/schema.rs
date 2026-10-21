@@ -47,6 +47,7 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<u32, ScoreDbError> {
     tx.execute_batch(SCHEMA_SQL)?;
     add_missing_columns(&tx)?;
     super::refold_reference_bests(&tx)?;
+    super::refold_assist_grades(&tx)?;
     tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?1, ?2)", (META_SCHEMA_VERSION, SCORE_DB_SCHEMA_VERSION.to_string()))?;
     tx.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?1, ?2)", (META_CREATED_AT, now_epoch_seconds().to_string()))?;
     tx.commit()?;
@@ -64,6 +65,7 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("ir_sync", "trace_id", "TEXT"),
     ("ir_sync", "trace_error", "TEXT"),
     ("ir_sync", "trace_refused_under", "TEXT"),
+    ("score", "assist_grade", "INTEGER NOT NULL DEFAULT 0"),
 ];
 
 /// Add every [`ADDED_COLUMNS`] entry its table does not have yet.

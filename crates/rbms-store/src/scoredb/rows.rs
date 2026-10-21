@@ -26,7 +26,7 @@ pub(super) fn log_columns_of(alias: &str) -> String {
 
 /// Columns of one `score` row.
 pub(super) const BEST_COLUMNS: &str = "chart_key, mode, ln_mode, md5, sha256, clear, epg, lpg, egr, lgr, egd, lgd, ebd, lbd, epr, lpr, ems, lms, \
-     notes, combo, minbp, avgjudge, playcount, clearcount, option, seed, random, date, state, gauge, assist, rule_version, replay_file";
+     notes, combo, minbp, avgjudge, playcount, clearcount, option, seed, random, date, state, gauge, assist, rule_version, replay_file, assist_grade";
 
 /// Append one play to `scorelog`, returning its id.
 pub(super) fn insert_log(conn: &Connection, log: &PlayLog) -> Result<i64, ScoreDbError> {
@@ -122,9 +122,9 @@ pub(super) fn write_best(conn: &Connection, best: &BestScore) -> Result<(), Scor
     let judge = best.judge.columns();
     let sql = format!(
         "INSERT OR REPLACE INTO score(chart_key, mode, ln_mode, md5, sha256, clear, epg, lpg, egr, lgr, egd, lgd, ebd, lbd, epr, lpr, ems, lms, \
-         notes, combo, minbp, avgjudge, playcount, clearcount, option, seed, random, date, state, gauge, assist, rule_version, replay_file) \
+         notes, combo, minbp, avgjudge, playcount, clearcount, option, seed, random, date, state, gauge, assist, rule_version, replay_file, assist_grade) \
          VALUES({})",
-        placeholders(33)
+        placeholders(34)
     );
     conn.execute(
         &sql,
@@ -162,6 +162,7 @@ pub(super) fn write_best(conn: &Connection, best: &BestScore) -> Result<(), Scor
             best.assist,
             best.rule_version,
             best.replay_file,
+            best.assist_grade,
         ],
     )?;
     Ok(())

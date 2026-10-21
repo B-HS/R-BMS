@@ -23,6 +23,7 @@ use rbms_library::songdb::{
 };
 use rbms_render::ReferenceImages;
 use rbms_render::skin_render::frame::{LAMP_KINDS, RANK_KINDS};
+use rbms_store::RecordLamp;
 
 use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta};
 use crate::*;
@@ -38,8 +39,9 @@ const UNKNOWN_LEVEL: i64 = i64::MAX;
 /// walk of the score book instead of one walk per comparison.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct ChartRecords {
-    /// Best clear lamp, under the score book's own rules about assisted and stale records.
-    lamp: Option<u8>,
+    /// Best clear lamp and the assist grade inside it, under the score book's own rules about
+    /// assisted and stale records.
+    lamp: Option<RecordLamp>,
     /// Best score rate: EX over the EX ceiling of that run, which is what the reference compares
     /// (`BarSorter.java:159-162` divides the score by its note count).
     rate: Option<f32>,
@@ -54,7 +56,7 @@ impl ChartRecords {
     fn of(scores: &ScoreBook, md5: &str) -> ChartRecords {
         let records = scores.for_md5(md5);
         ChartRecords {
-            lamp: scores.best_clear_for_md5(md5),
+            lamp: scores.best_lamp_for_md5(md5),
             rate: records.iter().filter(|r| r.max_ex > 0).map(|r| r.ex_score as f32 / r.max_ex as f32).max_by(|a, b| a.total_cmp(b)),
             min_breaks: records.iter().map(|r| r.counts[3] + r.counts[4] + r.counts[5]).min(),
             last_played: records.first().map(|r| r.played_at),
@@ -168,7 +170,8 @@ pub(crate) enum ClearFilter {
     /// Charts not yet cleared, which includes the ones nobody has played — the set a player
     /// grinding a folder is looking for.
     Unclear,
-    /// Charts cleared at least once.
+    /// Charts cleared at least once: any lamp but NO PLAY and FAILED, the assist lamps included, as
+    /// the score server counts a clear.
     Cleared,
     /// Charts taken to a full combo or better.
     FullCombo,
@@ -192,13 +195,13 @@ impl ClearFilter {
 
     /// Whether a chart's records let it through.
     fn keeps(self, records: &ChartRecords) -> bool {
-        let lamp = records.lamp.unwrap_or_else(|| clear_type_id(ClearType::NoPlay));
+        let lamp = clear_type_from_id(records.lamp.unwrap_or_default().clear);
         match self {
             ClearFilter::Any => true,
             ClearFilter::Unplayed => !records.played(),
-            ClearFilter::Unclear => lamp < clear_type_id(ClearType::Easy),
-            ClearFilter::Cleared => lamp >= clear_type_id(ClearType::Easy),
-            ClearFilter::FullCombo => lamp >= clear_type_id(ClearType::FullCombo),
+            ClearFilter::Unclear => !lamp.is_cleared(),
+            ClearFilter::Cleared => lamp.is_cleared(),
+            ClearFilter::FullCombo => clear_type_id(lamp) >= clear_type_id(ClearType::FullCombo),
         }
     }
 }
@@ -765,6 +768,7 @@ pub(super) mod tests {
             rule_version: rbms_store::SCORE_RULE_VERSION,
             ln_mode: SCORE_LN_MODE_FROM_CHART.to_string(),
             assisted: false,
+            assist: 0,
             log_id: None,
         }
     }
@@ -872,6 +876,24 @@ pub(super) mod tests {
             assert_eq!(sort_cmp(mode, &low, &unplayed), Ordering::Less, "{mode:?} put a chart with no record before one with a record");
             assert_eq!(sort_cmp(mode, &unplayed, &high), Ordering::Greater, "{mode:?}");
         }
+    }
+
+    /// Two SCRATCH AUTO clears share the LIGHT ASSIST lamp id; the gauge each was cleared on orders
+    /// them, and both stay below an EASY clear.
+    #[test]
+    fn the_clear_ordering_ranks_the_assist_grades_inside_the_light_assist_lamp() {
+        let hard = entry("hard", "a", "5");
+        let normal = entry("normal", "a", "5");
+        let easy = entry("easy", "a", "5");
+        let assisted = |md5: &str, gauge: &str| ScoreRecord {
+            gauge: gauge.to_owned(),
+            assist: rbms_store::SCRATCH_AUTO_ASSIST,
+            ..record(md5, clear_type_id(ClearType::LightAssistEasy), 600, 9, 1_000)
+        };
+        let scores = book(vec![assisted(&hard.md5, "HARD"), assisted(&normal.md5, "NORMAL"), record(&easy.md5, clear_type_id(ClearType::Easy), 100, 9, 1_000)]);
+        let (hard, normal, easy) = (played_row(&hard, &scores), played_row(&normal, &scores), played_row(&easy, &scores));
+        assert_eq!(sort_cmp(SortMode::Clear, &normal, &hard), Ordering::Less, "ASSIST CLEAR before ASSIST HARD");
+        assert_eq!(sort_cmp(SortMode::Clear, &hard, &easy), Ordering::Less, "ASSIST HARD before EASY");
     }
 
     #[test]
@@ -984,22 +1006,27 @@ pub(super) mod tests {
         let failed = entry("failed", "a", "5");
         let cleared = entry("cleared", "a", "5");
         let combo = entry("combo", "a", "5");
+        let assisted = entry("assisted", "a", "5");
         let scores = book(vec![
             record(&failed.md5, clear_type_id(ClearType::Failed), 100, 40, 1_000),
             record(&cleared.md5, clear_type_id(ClearType::Normal), 700, 8, 1_000),
             record(&combo.md5, clear_type_id(ClearType::FullCombo), 900, 0, 1_000),
+            record(&assisted.md5, clear_type_id(ClearType::LightAssistEasy), 600, 9, 1_000),
         ]);
         let rows = [
             (ClearFilter::Unplayed, vec!["unplayed"]),
             (ClearFilter::Unclear, vec!["unplayed", "failed"]),
-            (ClearFilter::Cleared, vec!["cleared", "combo"]),
+            (ClearFilter::Cleared, vec!["cleared", "combo", "assisted"]),
             (ClearFilter::FullCombo, vec!["combo"]),
-            (ClearFilter::Any, vec!["unplayed", "failed", "cleared", "combo"]),
+            (ClearFilter::Any, vec!["unplayed", "failed", "cleared", "combo", "assisted"]),
         ];
         for (clear, expected) in rows {
             let filter = SelectFilter { clear, ..SelectFilter::default() };
-            let kept: Vec<&str> =
-                [&unplayed, &failed, &cleared, &combo].into_iter().filter(|e| filter.keeps(&played_row(e, &scores))).map(|e| e.title.as_str()).collect();
+            let kept: Vec<&str> = [&unplayed, &failed, &cleared, &combo, &assisted]
+                .into_iter()
+                .filter(|e| filter.keeps(&played_row(e, &scores)))
+                .map(|e| e.title.as_str())
+                .collect();
             assert_eq!(kept, expected, "{clear:?}");
         }
     }

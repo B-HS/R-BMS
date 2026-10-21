@@ -139,7 +139,11 @@ fn log_from_record(record: &ScoreRecord) -> PlayLog {
         avgjudge: UNSET_MINIMUM,
         gauge: gauge_id(&record.gauge),
         gauge_value: record.gauge_value,
-        assist: if record.assisted { ASSIST_UNRECORDED } else { 0 },
+        assist: match (record.assist, record.assisted) {
+            (ASSIST_UNRECORDED, true) => ASSIST_UNRECORDED,
+            (ASSIST_UNRECORDED, false) => 0,
+            (recorded, _) => recorded,
+        },
         option: 0,
         seed: SEED_UNRECORDED,
         random: random_id(&record.random),
