@@ -177,6 +177,29 @@ function parts.choice(main_state, id, names, missing)
     end
 end
 
+function parts.assist_grade_drawn(main_state, first, grade)
+    if grade > 0 then
+        return function()
+            return main_state.option(first + grade)
+        end
+    end
+    return function()
+        for other = 1, theme.assist_grade_last do
+            if main_state.option(first + other) then
+                return false
+            end
+        end
+        return true
+    end
+end
+
+function parts.lamp_names(main_state, first, place)
+    for grade = 0, theme.assist_grade_last do
+        local entry = theme.assist_grade[grade]
+        place(entry.name, entry.color, parts.assist_grade_drawn(main_state, first, grade))
+    end
+end
+
 function parts.legend(s, right_edge, top, items, opts)
     local size = theme.type.caption
     local x = right_edge

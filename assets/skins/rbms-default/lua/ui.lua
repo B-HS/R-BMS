@@ -248,11 +248,25 @@ function Builder:image(sprite_name, box, opts)
     return self:place(id, placed, filtered(opts))
 end
 
+function Builder:font_id(weight)
+    if weight ~= "bold" then
+        return theme.font.id
+    end
+    local bold = theme.font.bold
+    for _, font in ipairs(self.skin.font) do
+        if font.id == bold.id then
+            return bold.id
+        end
+    end
+    table.insert(self.skin.font, { id = bold.id, path = bold.path })
+    return bold.id
+end
+
 function Builder:define_text(spec)
     local id = spec.id or self:next_id("txt")
     local text = {
         id = id,
-        font = theme.font.id,
+        font = self:font_id(spec.weight),
         size = spec.size,
         align = TEXT_ALIGN[spec.align or "left"],
         overflow = spec.overflow or props.text_overflow.OVERFLOW,

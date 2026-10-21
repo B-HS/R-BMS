@@ -164,6 +164,17 @@ props.option = {
     CUSTOM_LAST = 999,
 }
 
+props.extension = {
+    SCRATCH_AUTO_ON = 21100,
+    KEEP_GREEN_NUMBER_ON = 21101,
+    LANE_COVER_ON = 21102,
+    LIFT_ON = 21103,
+    HIDDEN_ON = 21104,
+    SELECTED_BEST_ASSIST_GRADE_FIRST = 21110,
+    RESULT_ASSIST_GRADE_FIRST = 21120,
+    RESULT_PREVIOUS_ASSIST_GRADE_FIRST = 21130,
+}
+
 props.number = {
     HISPEED = 310,
     HISPEED_AFTERDOT = 311,
@@ -260,6 +271,8 @@ props.text = {
     RIVAL = 1,
     PLAYER = 2,
     TARGET_NAME = 3,
+    TARGET_AHEAD_FIRST = 200,
+    TARGET_BEHIND_FIRST = 210,
     TITLE = 10,
     SUBTITLE = 11,
     FULLTITLE = 12,
@@ -309,6 +322,8 @@ props.event = {
     SCROLLMODE = 352,
     LONGNOTEMODE = 353,
 }
+
+props.target_reach = 10
 
 props.index = {
     MODE = 11,

@@ -149,6 +149,13 @@ theme.lamp = {
     max = { 234, 243, 0 },
 }
 
+theme.grade_lamp = {
+    easy = { 58, 209, 159 },
+    clear = { 196, 167, 150 },
+    hard = { 175, 184, 239 },
+    exhard = { 202, 118, 169 },
+}
+
 theme.lamp.noplay = theme.color.lamp_off
 
 theme.lamp_cycle = 50
@@ -156,8 +163,8 @@ theme.lamp_cycle = 50
 theme.clear = {
     [0] = { key = "noplay", name = "NO PLAY", color = theme.lamp.noplay, text = theme.color.muted },
     [1] = { key = "failed", name = "FAILED", color = theme.lamp.failed },
-    [2] = { key = "assist", name = "ASSIST CLEAR", color = theme.lamp.assist },
-    [3] = { key = "light_assist", name = "LIGHT ASSIST CLEAR", color = theme.lamp.light_assist },
+    [2] = { key = "assist", name = "ASSIST", color = theme.lamp.assist },
+    [3] = { key = "light_assist", name = "LIGHT ASSIST", color = theme.lamp.light_assist },
     [4] = { key = "easy", name = "EASY CLEAR", color = theme.lamp.easy },
     [5] = { key = "normal", name = "CLEAR", color = theme.lamp.normal },
     [6] = { key = "hard", name = "HARD CLEAR", color = theme.lamp.hard },
@@ -167,6 +174,16 @@ theme.clear = {
     [10] = { key = "max", name = "MAX", color = theme.lamp.max },
 }
 theme.clear_last = 10
+theme.graded_clear = 3
+
+theme.assist_grade = {
+    [0] = { name = theme.clear[theme.graded_clear].name, color = theme.lamp.light_assist },
+    [1] = { name = "ASSIST EASY", color = theme.grade_lamp.easy },
+    [2] = { name = "ASSIST CLEAR", color = theme.grade_lamp.clear },
+    [3] = { name = "ASSIST HARD", color = theme.grade_lamp.hard },
+    [4] = { name = "ASSIST EXHARD", color = theme.grade_lamp.exhard },
+}
+theme.assist_grade_last = 4
 
 theme.rank_name = { "AAA", "AA", "A", "B", "C", "D", "E", "F" }
 
@@ -235,6 +252,27 @@ theme.time = {
 theme.font = {
     id = "inter",
     path = "font/Inter-Regular.ttf",
+    bold = { id = "inter-bold", path = "font/Inter-Bold.ttf" },
+}
+
+theme.panel = {
+    column = {
+        orange = theme.tone.orange,
+        green = theme.tone.green,
+        violet = theme.tone.violet,
+        sky = theme.accent.sky,
+        locked = theme.mono.muted,
+    },
+    pick = { 255, 152, 52 },
+    pick_ink = { 26, 16, 6 },
+    glow = 112,
+    key_white = { 226, 230, 236 },
+    key_black = { 30, 33, 40 },
+    key_white_ink = { 28, 30, 36 },
+    key_black_ink = { 236, 238, 242 },
+    arrow = theme.tone.red,
+    green_number = theme.tone.green,
+    caution = theme.tone.orange,
 }
 
 function theme.column(index, span)

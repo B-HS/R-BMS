@@ -21,7 +21,7 @@ local SETTINGS = {
     { id = "btn.side.keyconfig", label = "KEY CONFIG", act = props.event.KEYCONFIG, fixed = "OPEN" },
     { id = "btn.side.skin", label = "SKIN", act = props.event.SKINSELECT, fixed = "OPEN" },
     { id = "btn.side.lnmode", label = "LN MODE", act = props.event.LNMODE, index = props.index.LNMODE, names = { [0] = "LONG NOTE", "CHARGE NOTE", "HELL CHARGE NOTE" } },
-    { id = "btn.side.bga", label = "BGA", act = props.event.BGA, index = props.index.BGA, names = { [0] = "ON", "AUTOPLAY ONLY", "OFF" } },
+    { id = "btn.side.bga", label = "BGA", act = props.event.BGA, index = props.index.BGA, names = { [0] = "ON", [2] = "OFF" } },
     {
         id = "btn.side.gaugeshift",
         label = "GAUGE AUTO SHIFT",

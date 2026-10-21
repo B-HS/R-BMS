@@ -2,6 +2,7 @@ local theme = require("lua.theme")
 local props = require("lua.props")
 local ui = require("lua.ui")
 local motion = require("lua.motion")
+local parts = require("lua.parts")
 local layout = require("lua.result.layout")
 
 local score = {}
@@ -59,8 +60,16 @@ local function lamp(s, main_state, x, width, course)
         return
     end
     local size = theme.type.heading
-    local name = { text = entry.name, size = size, overflow = props.text_overflow.SHRINK }
-    s:text(name, { x = x, top = theme.text_top(baseline, size), w = width }, layout.appear(order, { color = theme.clear_text(entry) }))
+    local box = { x = x, top = theme.text_top(baseline, size), w = width }
+    local function place(text, color, draw)
+        local name = { text = text, size = size, overflow = props.text_overflow.SHRINK }
+        s:text(name, box, layout.appear(order, { color = color, draw = draw }))
+    end
+    if now == theme.graded_clear then
+        parts.lamp_names(main_state, props.extension.RESULT_ASSIST_GRADE_FIRST, place)
+    else
+        place(entry.name, theme.clear_text(entry))
+    end
     if course then
         return
     end
@@ -86,14 +95,23 @@ end
 local function previous_lamp(s, main_state, box)
     local order = layout.order.rank
     local top, baseline = layout.row(ROW.option)
-    local entry = theme.clear[main_state.event_index(props.index.TARGET_CLEAR)]
+    local previous = main_state.event_index(props.index.TARGET_CLEAR)
+    local entry = theme.clear[previous]
     layout.caption(s, "PREVIOUS CLEAR", { x = box.x, top = top, w = box.w }, order)
     if entry == nil then
         return
     end
     local size = theme.type.label
-    local name = { text = entry.name, size = size, overflow = props.text_overflow.SHRINK }
-    s:text(name, { x = box.x, top = theme.text_top(baseline, size), w = box.w }, layout.appear(order, { color = theme.color.sub }))
+    local line = { x = box.x, top = theme.text_top(baseline, size), w = box.w }
+    local function place(text, color, draw)
+        local name = { text = text, size = size, overflow = props.text_overflow.SHRINK }
+        s:text(name, line, layout.appear(order, { color = color, draw = draw }))
+    end
+    if previous == theme.graded_clear then
+        parts.lamp_names(main_state, props.extension.RESULT_PREVIOUS_ASSIST_GRADE_FIRST, place)
+    else
+        place(entry.name, theme.clear_text(entry))
+    end
 end
 
 local function rank(s, main_state, course)

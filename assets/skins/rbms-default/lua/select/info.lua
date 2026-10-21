@@ -273,16 +273,25 @@ local function rank(s, when)
     s:text({ text = NOTHING, size = cell.size }, box, ui.merge({ color = theme.color.muted }, when.blank))
 end
 
-local function clear(s)
+local function clear(s, main_state)
     local cell = RECORD.clear
     local top = RECORD.rows[cell.row]
     parts.caption(s, "CLEAR", { x = cell.x, top = top, w = cell.width }, { op = { ON_CHART } })
     local size = theme.type.body
     local box = { x = cell.x, top = theme.text_top(top + RECORD.drop, size), w = cell.width }
+    local function place(name, color, op, draw)
+        local spec = { text = name, size = size, overflow = props.text_overflow.SHRINK }
+        s:text(spec, box, kit.arriving({ color = color, op = { ON_CHART, op }, draw = draw }))
+    end
     for index = 0, theme.clear_last do
         local lamp = theme.clear[index]
-        local spec = { text = lamp.name, size = size, overflow = props.text_overflow.SHRINK }
-        s:text(spec, box, kit.arriving({ color = theme.clear_text(lamp), op = { ON_CHART, CLEAR_OPTIONS[index] } }))
+        if index == theme.graded_clear then
+            parts.lamp_names(main_state, props.extension.SELECTED_BEST_ASSIST_GRADE_FIRST, function(name, color, draw)
+                place(name, color, CLEAR_OPTIONS[index], draw)
+            end)
+        else
+            place(lamp.name, theme.clear_text(lamp), CLEAR_OPTIONS[index])
+        end
     end
 end
 
@@ -308,7 +317,7 @@ local function record(s, main_state)
     s:rect({ x = REGION.x, top = RECORD.rule_top, w = REGION.width, h = theme.grid.rule }, theme.color.line, { op = { ON_CHART } })
     local scored = score_shown(main_state)
     rank(s, scored)
-    clear(s)
+    clear(s, main_state)
     record_number(s, RECORD.left, 1, "EX SCORE", props.number.SCORE, scored)
     record_number(s, RECORD.left, 2, "MAX COMBO", props.number.MAXCOMBO, scored)
     record_number(s, RECORD.left, 3, "PLAY COUNT", props.number.PLAYCOUNT, COUNT_SHOWN)

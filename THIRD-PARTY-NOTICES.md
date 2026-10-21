@@ -83,7 +83,7 @@ SOFTWARE.
 
 ## 3. Inter font
 
-The default UI font and the default skin pack embed Inter Regular (`assets/fonts/Inter-Regular.ttf`, copy in `assets/skins/rbms-default/font/`). Inter is licensed under the SIL Open Font License, Version 1.1. The text below is that of `assets/fonts/Inter-OFL.txt`.
+The default UI font and the default skin pack embed Inter Regular (`assets/fonts/Inter-Regular.ttf`, copy in `assets/skins/rbms-default/font/`). The default skin pack also embeds Inter Bold (`assets/skins/rbms-default/font/Inter-Bold.ttf`), the static Bold cut of the official Inter 4.1 release (`Inter-4.1.zip`, `extras/ttf/Inter-Bold.ttf`, unmodified; its name table reads "Copyright 2016 The Inter Project Authors"). Inter is licensed under the SIL Open Font License, Version 1.1, and the release's own `LICENSE.txt` is the same license from the same authors. The text below is that of `assets/fonts/Inter-OFL.txt`, which `assets/skins/rbms-default/font/Inter-OFL.txt` repeats and which covers both cuts.
 
 ```
 Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)

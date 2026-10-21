@@ -133,6 +133,13 @@ pub(crate) fn clear_label_color(c: ClearType) -> (&'static str, Color) {
     }
 }
 
+/// The colours of the four assist grades: the ones the web's ranking pages give them, written there
+/// as hex, which the default skin pack's `theme.lamp` uses too.
+const ASSIST_EASY_COLOR: Color = Color::rgb(0x3a, 0xd1, 0x9f);
+const ASSIST_CLEAR_COLOR: Color = Color::rgb(0xc4, 0xa7, 0x96);
+const ASSIST_HARD_COLOR: Color = Color::rgb(0xaf, 0xb8, 0xef);
+const ASSIST_EXHARD_COLOR: Color = Color::rgb(0xca, 0x76, 0xa9);
+
 /// Label + colour of a lamp and the assist grade inside it ([`rbms_judge::assist_grade`]). A graded
 /// light-assist clear is named for the gauge it was cleared on, ASSIST EASY to ASSIST EXHARD, in
 /// colours of its own; every other lamp is [`clear_label_color`]'s, an ungraded light-assist clear
@@ -143,10 +150,10 @@ pub(crate) fn lamp_label_color(c: ClearType, grade: AssistGrade) -> (&'static st
     }
     match grade {
         AssistGrade::None => clear_label_color(c),
-        AssistGrade::Easy => ("ASSIST EASY", Color::rgb(160, 96, 255)),
-        AssistGrade::Clear => ("ASSIST CLEAR", Color::rgb(96, 128, 255)),
-        AssistGrade::Hard => ("ASSIST HARD", Color::rgb(224, 192, 255)),
-        AssistGrade::ExHard => ("ASSIST EXHARD", Color::rgb(255, 128, 192)),
+        AssistGrade::Easy => ("ASSIST EASY", ASSIST_EASY_COLOR),
+        AssistGrade::Clear => ("ASSIST CLEAR", ASSIST_CLEAR_COLOR),
+        AssistGrade::Hard => ("ASSIST HARD", ASSIST_HARD_COLOR),
+        AssistGrade::ExHard => ("ASSIST EXHARD", ASSIST_EXHARD_COLOR),
     }
 }
 
@@ -375,6 +382,20 @@ mod tests {
         assert_eq!(lamp_label_color(ClearType::LightAssistEasy, AssistGrade::None).0, "LIGHT ASSIST");
         let graded: Vec<&str> = AssistGrade::ALL[1..].iter().map(|&grade| lamp_label_color(ClearType::LightAssistEasy, grade).0).collect();
         assert_eq!(graded, ["ASSIST EASY", "ASSIST CLEAR", "ASSIST HARD", "ASSIST EXHARD"]);
+    }
+
+    /// The grades are drawn in the colours the web's ranking pages give them, written there as hex.
+    #[test]
+    fn the_assist_grades_are_coloured_as_the_web_colours_them() {
+        let web = ["3ad19f", "c4a796", "afb8ef", "ca76a9"];
+        let shown: Vec<String> = AssistGrade::ALL[1..]
+            .iter()
+            .map(|&grade| {
+                let color = lamp_label_color(ClearType::LightAssistEasy, grade).1;
+                format!("{:02x}{:02x}{:02x}", color.r, color.g, color.b)
+            })
+            .collect();
+        assert_eq!(shown, web);
     }
 
     #[test]
