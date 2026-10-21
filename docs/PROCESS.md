@@ -16,6 +16,18 @@
 - 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0004 적용(`web/drizzle/`, 실행은 `web-db.yml`).
 - 2026-10-19 "웹 기록 표시와 구동기 Esc·목표 보완" 완료, 클라이언트 `v0.1.5` draft 게시 대기(사용자). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
 
+## 체크리스트 — 클라이언트 기능 고도화: 옵션 패널·램프·색상·글꼴 (2026-10-22)
+
+사용자 지시(2026-10-22) 요지: (1) SCRATCH AUTO 등 플레이 옵션 토글을 A(START)·A+W 패널에서 바로 바꾸게, (2) A·W·A+W 패널을 IIDX 옵션 화면(키 그림 + 연결선 + 값 전체를 세로로 나열, 고른 값 주황 강조) 처럼, (3) 클리어 램프 세분화(ASSIST HARD·ASSIST EXHARD 등), (4) 레인·노트 색상과 불투명도를 각각 조절, 스킨 세부 조절 확대, (5) 글꼴 가독성(안티에일리어싱, 저화질 느낌 해소). 참고 이미지는 IIDX 옵션 화면 3장. 사용자 결정: workflow 사용(이 프로젝트 규칙: Workflow 도구만, Opus high·Sonnet xhigh 상한, Fable·Haiku 금지).
+
+- [x] E0. 조사 — [option-panels](reference/option-panels.md), [clear-lamps](reference/clear-lamps.md), [skin-color-customization](reference/skin-color-customization.md), [font-rendering](reference/font-rendering.md)(workflow wf_90e33476-4e9, 종합 검토가 코드 대조로 4건 정정)
+- [x] E1. 설계 확정 — 사용자 지시 "끝까지 다 구현해놔"(2026-10-22)에 따라 질문 없이 종합 검토 추천안 L1~L4·P1~P5·C1·C2·F1 을 모두 A(P2 는 A')로 정함. 2026-10-09 사설 id 철거 결정의 일부 변경(불린·이벤트 확장 대역 21000~)은 ADR 로 남기고 보고
+- [ ] E2-1. 1단계(병렬): W1a 글꼴 엔진(내장 UI 물리 px 래스터 + 굵기 API), W1b 램프 등급 클라이언트 코어, W1c 색 데이터 층, W2c 웹 램프 등급
+- [ ] E2-2. 2단계(병렬): W2a 패널 Rust·스킨 호스트(확장 불린·새 이벤트·F1 홀드 키 충돌), W2b 색 렌더와 색 행 메뉴
+- [ ] E2-3. 3단계(병렬): W3a 기본 스킨 IIDX 식 패널·램프 등급 표시·굵은 글꼴, W3b 기본 스킨 색 행과 순백 노트 시트
+- [ ] E2-4. 통합 리뷰(발견→검증)와 수리
+- [ ] G. ADR·문서 갱신, 전체 게이트, 단계별 커밋·푸시, 운영 DB 마이그레이션 0011, CI 확인
+
 ## 체크리스트 — 웹 AI 기능 기획 (2026-10-19)
 
 사용자 지시(2026-10-19): 웹에 AI 기능을 만든다. 먼저 기획. 기능 10개 모두 구현 방향 — 플레이어 리포트(약점·선호 패턴 등 리플레이로 얻을 수 있는 모든 정보 종합), 리플레이 코치, 베스트·라이벌 비교, 판정 습관 진단, 다음 도전 곡 추천, AI 연습 폴더(MY FOLDERS), 목표 계획, 게이지·옵션 조언, 자연어 기록 질문(필터 스키마), 주간 성장 요약. AI 키는 Anthropic(API key), OpenAI(Codex, API key), Ollama Cloud(API key) 셋만.
