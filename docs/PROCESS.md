@@ -22,10 +22,14 @@
 
 - [x] E0. 조사 — [option-panels](reference/option-panels.md), [clear-lamps](reference/clear-lamps.md), [skin-color-customization](reference/skin-color-customization.md), [font-rendering](reference/font-rendering.md)(workflow wf_90e33476-4e9, 종합 검토가 코드 대조로 4건 정정)
 - [x] E1. 설계 확정 — 사용자 지시 "끝까지 다 구현해놔"(2026-10-22)에 따라 질문 없이 종합 검토 추천안 L1~L4·P1~P5·C1·C2·F1 을 모두 A(P2 는 A')로 정함. 2026-10-09 사설 id 철거 결정의 일부 변경(불린·이벤트 확장 대역 21000~)은 ADR 로 남기고 보고
-- [ ] E2-1. 1단계(병렬): W1a 글꼴 엔진(내장 UI 물리 px 래스터 + 굵기 API), W1b 램프 등급 클라이언트 코어, W1c 색 데이터 층, W2c 웹 램프 등급
-- [ ] E2-2. 2단계(병렬): W2a 패널 Rust·스킨 호스트(확장 불린·새 이벤트·F1 홀드 키 충돌), W2b 색 렌더와 색 행 메뉴
-- [ ] E2-3. 3단계(병렬): W3a 기본 스킨 IIDX 식 패널·램프 등급 표시·굵은 글꼴, W3b 기본 스킨 색 행과 순백 노트 시트
-- [ ] E2-4. 통합 리뷰(발견→검증)와 수리
+- [x] E2-1. 1단계(병렬, workflow wf_7444d7a7-d9f): W1a 글꼴 엔진 `f03beb3`, W1c 색 데이터 층 `49dfbd3`, W1b 램프 등급 클라이언트 `4d57c2a`(통합 게이트 Rust 6,206 통과·0 실패). W2c 웹 램프 등급: 사용자 승인(2026-10-22 "마이그레이션도 니가하고") 뒤 마이그레이션 `8d85b32` 운영 적용(web-db run 39693988962, 0011 recorded) → 웹 코드 `64c6120`(웹 1,485 통과·0 실패)
+- [x] E2-2. 2단계(병렬, workflow wf_83280bf0-bdb): W2a 패널 Rust·확장 id(이벤트 21000~, 불린 21100~)·F1 홀드 키·IR 등급 `7746932`, W2b 노트 색 곱셈·색 행 메뉴 `7459bf7`(통합 게이트 Rust 6,238 통과·0 실패). 푸시는 3단계(기본 스킨 라벨)와 함께
+- [x] E2-3. 3단계(병렬, workflow wf_59a0a66f-73f): W3a 기본 스킨 IIDX 식 패널·램프 등급 표시·굵은 글꼴 `0c450db`, W3b 플레이 색 행·순백 노트 시트 `5192bbb`(저장값 없을 때 캡처 94장 화소 동일, 통합 게이트 Rust 6,244 통과·0 실패, 스킨 덤프 경고 0). 2~3단계 푸시
+- [ ] E2-4. 통합 리뷰(발견→검증, workflow wf_efddd39c-0ee: 확인 7·거절 2·검증 미완 7)와 수리(workflow wf_ed445327-c90). 수리 항목에 LN 전용 색 행(엔진의 레인당 tint 하나 제약 해소) 포함
+  - 2026-10-22 사용자 지시로 수리 workflow 도중 정지("된곳까지만 일단 스톱 나중에 다시재개"). 재개 방법: 같은 스크립트를 `resumeFromRunId: wf_ed445327-c90` 로 다시 돌리거나 다섯 갈래(lamps·panels·colors·font·web)를 새로 띄운다. 리뷰 전문은 세션 scratch 의 review.md 였으므로 재개 때 요지를 아래에서 다시 쓴다.
+  - 정지 시점 상태: worktree `.claude/worktrees/wf_ed445327-c90-1~4`(lamps·panels·colors·font 중간 작업, 미검증), 메인 트리 web/ 와 `.github/workflows/web-db.yml` 에 web 갈래 중간 작업(미검증·미커밋: AI 기록 질문 lamp 정렬에 등급, AI 비교 합계에 등급, `web/scripts/assist-grade.{count,backfill}.sql` 과 web-db 액션)
+  - 수리 대상 요지: lamps-1 코스 스테이지 SCRATCH AUTO 등급이 설정 게이지로 저장됨(CLASS 계열로 저장·제출해야 함, 중간), lamps-2 refold 내부 스캔을 clear=3 으로 좁힘, lamps-3 내장 선곡 막대 LED 등급 색, panels-1~4(외부 스킨 재배정 칸, 차트 아닌 커서의 NOTE DISPLAY TIME 표시, 패널 열 때 눌려 있던 턴테이블, 5·10키의 닿지 않는 6·7 칸 — 검증 미완), colors-1 색 행 기본값이 프리셋을 무시, colors-2 노트와 dst 의 알파 합성 순서, LN 전용 색, font-1~3(리사이즈 중 글리프 캐시, 균등 배율 여유 1.0 < 1.39, Bold 추가 뒤 Regular 선택이 순서 의존 — 검증 미완), web-1·web-3(AI 정렬·비교 표의 등급), 배포 사이 창 백필 액션
+- [ ] E2-5. ADR(램프 등급, 확장 id 대역 21000~ 으로 2026-10-09 결정 부분 변경, 색 확장 키, 굵은 글꼴 에셋)과 문서 갱신(play-options, skin, theme, crates, architecture, reference 4종, HANDOFF, QA 수동 점검표)
 - [ ] G. ADR·문서 갱신, 전체 게이트, 단계별 커밋·푸시, 운영 DB 마이그레이션 0011, CI 확인
 
 ## 체크리스트 — 웹 AI 기능 기획 (2026-10-19)
