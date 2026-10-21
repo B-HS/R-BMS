@@ -22,7 +22,7 @@
 //! a run walked from its loading, through a long note that is held, to its full combo and to its
 //! failure, and the rows of colours switched.
 
-use rbms_skin::dst::SkinOffset;
+use rbms_skin::dst::{SkinColor, SkinOffset};
 use rbms_skin::model::Animation;
 
 use super::*;
@@ -190,6 +190,22 @@ impl RowsRun {
     /// The course is there before the document is read: what a document draws for a course is
     /// settled when it is compiled.
     fn enter(tag: &str, mode: &RowMode, rows: &[(&str, &str)], size: Option<(u32, u32)>, ending: PlayEnding, course: bool) -> Result<RowsRun, String> {
+        RowsRun::enter_coloured(tag, mode, rows, &[], size, ending, course)
+    }
+
+    /// [`Self::enter`] with each of `colours` set, by the name of its colour row, before the
+    /// document is read: the way a player leaves a colour set on the skin menu for the next run.
+    /// Answers why the scene was not entered, which a colour row the document does not declare is
+    /// one reason for.
+    fn enter_coloured(
+        tag: &str,
+        mode: &RowMode,
+        rows: &[(&str, &str)],
+        colours: &[(&str, SkinColor)],
+        size: Option<(u32, u32)>,
+        ending: PlayEnding,
+        course: bool,
+    ) -> Result<RowsRun, String> {
         let name = format!("{tag}.bms");
         let model = chart_model(&mode_chart(mode.title, mode.sides), &name, mode.mode);
         let chart = settings_of(&format!("{tag}-chart")).with_file_name(&name);
@@ -197,6 +213,11 @@ impl RowsRun {
         for (row, item) in rows {
             if !choose_in_skin(&mut app, screen, row, item) {
                 return Err(format!("the document has no row {row:?} with an item {item:?}"));
+            }
+        }
+        for (row, colour) in colours {
+            if !colour_in_skin(&mut app, screen, row, *colour) {
+                return Err(format!("the document declares no colour row {row:?}"));
             }
         }
         if course {
@@ -283,6 +304,24 @@ fn label_of(mode: &RowMode, rows: &[(&str, &str)]) -> String {
         label.push_str(&format!("-{}-{}", row.replace(' ', ""), item.replace(' ', "")));
     }
     label.to_ascii_lowercase()
+}
+
+/// Set a colour the way a player sets one on the skin menu: in the document the pack draws `screen`
+/// with, store `colour` under the id of the colour row called `row`. Answers whether the document
+/// declares such a row.
+fn colour_in_skin(app: &mut App, screen: i32, row: &str, colour: SkinColor) -> bool {
+    let id = app
+        .shared
+        .skins
+        .header_of(&app.shared.config, screen)
+        .and_then(|header| header.colors.iter().find(|declared| declared.name == row))
+        .map(|declared| declared.id);
+    let document = app.shared.skins.document_path(&app.shared.config, screen).map(str::to_owned);
+    let (Some(id), Some(document)) = (id, document) else {
+        return false;
+    };
+    app.shared.config.skin.customise(&document).colors.insert(id, colour);
+    true
 }
 
 /// Every key mode of the pack offers the lane width row. With it switched to wide the document
@@ -656,3 +695,5 @@ fn the_play_scene_of_the_default_pack_is_captured_with_its_rows_switched() {
     }
     assert_eq!(files_under(&pack), before, "capturing the default pack's play scene changed its folder");
 }
+
+mod colours;

@@ -6,6 +6,7 @@ local parts = require("lua.parts")
 local layout = require("lua.play.layout")
 local field = require("lua.play.field")
 local info = require("lua.play.info")
+local colors = require("lua.play.colors")
 
 local play = {}
 
@@ -85,6 +86,7 @@ function play.header(mode)
         judgetimer = BOMB_UP_TO_GREAT,
         property = properties(mode),
         offset = offsets(mode),
+        color = colors.header(mode),
     }
 end
 
@@ -110,6 +112,7 @@ function play.build(spec)
     s:atlas("common")
     s:atlas("play")
     local view = layout.of(mode, option)
+    colors.paint(view, skin_config.color or {})
     parts.backdrop(s)
     info.build(s, view, main_state)
     field.under(s, view)

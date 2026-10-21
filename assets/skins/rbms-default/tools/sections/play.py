@@ -12,6 +12,7 @@ LAMP = palette('lamp')
 
 NOTE_SHADE: Rgb = NOTE['shade']
 DRAIN: Rgb = TONE['rose']
+PURE_NOTES = 'pure'
 
 NOTE_COLORS: dict[str, Rgb] = {
     'white': NOTE['white'],
@@ -82,10 +83,15 @@ def filled(size: tuple[int, int], color: Rgb, alpha: int = OPAQUE) -> Image.Imag
     return Image.new('RGBA', size, (*color, alpha))
 
 
-def note(name: str, color: Rgb) -> Sprite:
+def gray(color: Rgb) -> Rgb:
+    level = round(sum(color) / len(color))
+    return (level,) * len(color)
+
+
+def note(name: str, color: Rgb, toward: Rgb) -> Sprite:
     width, height = NOTE_SIZE
     image = filled(NOTE_SIZE, color)
-    image.paste(filled((width, NOTE_FOOT_ROWS), shaded(color, NOTE_FOOT_SHARE)), (0, height - NOTE_FOOT_ROWS))
+    image.paste(filled((width, NOTE_FOOT_ROWS), shaded(color, NOTE_FOOT_SHARE, toward)), (0, height - NOTE_FOOT_ROWS))
     return Sprite(name, image)
 
 
@@ -109,14 +115,21 @@ def mine(name: str) -> Sprite:
     return Sprite(name, image)
 
 
+def note_family(key: str, color: Rgb, toward: Rgb) -> list[Sprite]:
+    return [
+        note(f'note_{key}', color, toward),
+        body(f'long_{key}', shaded(color, BODY_IDLE_SHARE, toward)),
+        body(f'held_{key}', shaded(color, BODY_HELD_SHARE, toward)),
+        body(f'hell_{key}', shaded(color, RAIL_SIDE_SHARE, toward), shaded(color, BODY_HELD_SHARE, toward)),
+        body(f'hell_held_{key}', shaded(color, BODY_IDLE_SHARE, toward), mixed(color, WHITE, GAUGE_TIP_WHITE_SHARE)),
+    ]
+
+
 def notes() -> list[Sprite]:
     sprites = [mine('mine'), body('hell_drain', shaded(DRAIN, RAIL_SIDE_SHARE), DRAIN)]
     for key, color in NOTE_COLORS.items():
-        sprites.append(note(f'note_{key}', color))
-        sprites.append(body(f'long_{key}', shaded(color, BODY_IDLE_SHARE)))
-        sprites.append(body(f'held_{key}', shaded(color, BODY_HELD_SHARE)))
-        sprites.append(body(f'hell_{key}', shaded(color, RAIL_SIDE_SHARE), shaded(color, BODY_HELD_SHARE)))
-        sprites.append(body(f'hell_held_{key}', shaded(color, BODY_IDLE_SHARE), mixed(color, WHITE, GAUGE_TIP_WHITE_SHARE)))
+        sprites += note_family(key, color, NOTE_SHADE)
+    sprites += note_family(PURE_NOTES, WHITE, gray(NOTE_SHADE))
     return sprites
 
 

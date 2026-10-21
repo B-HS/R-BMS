@@ -2,6 +2,7 @@ local theme = require("lua.theme")
 local props = require("lua.props")
 local ui = require("lua.ui")
 local layout = require("lua.play.layout")
+local colors = require("lua.play.colors")
 
 local field = {}
 
@@ -95,7 +96,8 @@ end
 local function lane_faces(s, view)
     for _, side in ipairs(view.fields) do
         for _, lane in ipairs(side.shown) do
-            s:rect(lane_box(lane, side.top, side.h), lane.shaded and theme.color.bg or theme.color.panel)
+            local face = colors.base(lane.shaded and theme.color.bg or theme.color.panel, lane.face_tint)
+            colors.tinted(s:rect(lane_box(lane, side.top, side.h), face), lane.face_tint)
         end
     end
 end
@@ -109,9 +111,10 @@ local function seams(side, top, height, each)
 end
 
 local function lane_dividers(s, view)
+    local tint = view.tint.LANE_DIVIDER
     for _, side in ipairs(view.fields) do
         seams(side, side.top, side.h, function(gap)
-            s:rect(gap, theme.color.line)
+            colors.tinted(s:rect(gap, colors.base(theme.color.line, tint)), tint)
         end)
     end
 end
@@ -121,9 +124,11 @@ local function key_beams(s, view)
     local lifted = props.offset.LIFT
     for _, lane in ipairs(view.lanes) do
         local beam = lane_box(lane, grid.top + grid.height - BEAM.height, BEAM.height)
-        s:image("beam", beam, { color = lane.tint, timer = lane_timer(props.timer.KEYON_1P, lane), offset = lifted })
+        local color, tint = colors.base(lane.tint, lane.beam_tint), lane.beam_tint
+        colors.tinted(s:image("beam", beam, { color = color, timer = lane_timer(props.timer.KEYON_1P, lane), offset = lifted }), tint)
         local fading = { { time = 0 }, { time = BEAM.release, a = TRANSPARENT } }
-        s:image("beam", beam, { color = lane.tint, timer = lane_timer(props.timer.KEYOFF_1P, lane), offset = lifted, keys = fading, loop = props.loop.ONCE })
+        local released = { color = color, timer = lane_timer(props.timer.KEYOFF_1P, lane), offset = lifted, keys = fading, loop = props.loop.ONCE }
+        colors.tinted(s:image("beam", beam, released), tint)
     end
 end
 
@@ -136,19 +141,28 @@ local function note_field(s, view)
     end
     local drain = s:define_image("hell_drain")
     local mine = s:define_image("mine")
+    local tinted = false
     for index, lane in ipairs(view.lanes) do
         for _, entry in ipairs(NOTE_IMAGES) do
-            def[entry.list][index] = s:define_image(entry.sprite .. lane.color)
+            def[entry.list][index] = s:define_image(entry.sprite .. (lane.note_tint and colors.PURE_NOTES or lane.color))
         end
+        tinted = tinted or lane.note_tint ~= nil
         def.hcnreactive[index] = drain
         def.mine[index] = mine
         def.dst[index] = { x = lane.x, y = theme.height - grid.top - grid.height, w = lane.w, h = grid.height }
         def.size[index] = lane.note_height
     end
+    if tinted then
+        def.tint = {}
+        for index, lane in ipairs(view.lanes) do
+            def.tint[index] = lane.note_tint or colors.NO_TINT
+        end
+    end
+    local bar = view.tint.BAR_LINE
     s:within(layout.PART.BAR_LINE, function()
         for index, side in ipairs(view.fields) do
             local rule = { x = side.x, top = grid.top + grid.height - SECTION_LINE, w = side.w, h = SECTION_LINE }
-            def.group[index] = s:dst(line_id, rule, { color = theme.color.line, offset = props.offset.LIFT })
+            def.group[index] = colors.tinted(s:dst(line_id, rule, { color = colors.base(theme.color.line, bar), offset = props.offset.LIFT }), bar)
         end
     end)
     s:within(layout.PART.NOTE, function()
@@ -159,14 +173,17 @@ end
 local function judge_line(s, view)
     local grid = layout.FIELD
     local lifted = props.offset.LIFT
+    local tint = view.tint.JUDGE_LINE
+    local dim = tint == nil and theme.color.accent_dim or theme.accent_dim.white
+    local bright = colors.base(theme.color.accent, tint)
     for _, side in ipairs(view.fields) do
         local line = { x = side.x, top = grid.top + grid.height, w = side.w, h = grid.line }
-        s:rect(line, theme.color.accent_dim, { offset = lifted })
+        colors.tinted(s:rect(line, dim, { offset = lifted }), tint)
         local opening = { { time = 0, x = side.x + side.w / 2, w = 0 }, { time = LINE.open } }
-        s:rect(line, theme.color.accent, { timer = props.timer.READY, keys = opening, acc = props.acc.DECELERATE, offset = lifted })
+        colors.tinted(s:rect(line, bright, { timer = props.timer.READY, keys = opening, acc = props.acc.DECELERATE, offset = lifted }), tint)
         local pulse = { x = side.x, top = line.top - LINE.pulse_height, w = side.w, h = LINE.pulse_height }
         local beating = { { time = 0 }, { time = LINE.pulse_fade, a = TRANSPARENT }, { time = LINE.beat, a = TRANSPARENT } }
-        s:image("pulse", pulse, { color = theme.color.accent, timer = props.timer.RHYTHM, keys = beating, loop = 0, offset = lifted })
+        colors.tinted(s:image("pulse", pulse, { color = bright, timer = props.timer.RHYTHM, keys = beating, loop = 0, offset = lifted }), tint)
     end
 end
 
@@ -182,12 +199,14 @@ local function covers(s, view)
     local lane_cover = s:object("slider", ui.merge(block, { type = props.rate.LANECOVER, angle = props.slider_angle.DOWN, range = grid.height, changeable = false }))
     local hidden = s:object("hiddenCover", ui.merge(block, { disapearLine = line, isDisapearLineLinkLift = true }))
     local lift = s:object("liftCover", ui.merge(block, { disapearLine = foot, isDisapearLineLinkLift = false }))
+    local tint = view.tint.LANE_COVER
+    local face = { color = colors.base(theme.color.raised, tint) }
     for _, side in ipairs(view.fields) do
         local below = { x = side.x, top = grid.top + grid.height, w = side.w, h = grid.height }
-        s:place(hidden, below, { color = theme.color.raised })
-        s:place(lift, below, { color = theme.color.raised })
+        colors.tinted(s:place(hidden, below, face), tint)
+        colors.tinted(s:place(lift, below, face), tint)
         local above = { x = side.x, top = grid.top - grid.height, w = side.w, h = grid.height }
-        s:place(lane_cover, above, { color = theme.color.raised })
+        colors.tinted(s:place(lane_cover, above, face), tint)
 
         local covered = { op = { props.option.LANECOVER1_ON }, offset = props.offset.LANECOVER }
         s:rect({ x = side.x, top = grid.top - COVER.edge, w = side.w, h = COVER.edge }, theme.color.accent, covered)
@@ -207,14 +226,16 @@ end
 local function bombs(s, view)
     local grid = layout.FIELD
     local ring = s:sprite("bomb")
+    local tint = view.tint.BOMB
     for _, lane in ipairs(view.lanes) do
         local box = { x = lane.x + (lane.w - ring.cell_w) / 2, top = grid.top + grid.height + (grid.line - ring.cell_h) / 2 }
         local hit = lane_timer(props.timer.BOMB_1P, lane)
         local hold = lane_timer(props.timer.HOLD_1P, lane)
-        local shared = { color = view.bomb_tint or lane.tint, blend = props.blend.ADD, offset = props.offset.LIFT }
+        local shared = { color = colors.base(view.bomb_tint or lane.tint, tint), blend = props.blend.ADD, offset = props.offset.LIFT }
         local once = { { time = 0 }, { time = BOMB.cycle - 1 } }
-        s:image("bomb", box, ui.merge(shared, { timer = hit, keys = once, loop = props.loop.ONCE, def = { id = "img.bomb." .. hit, timer = hit, cycle = BOMB.cycle } }))
-        s:image("bomb", box, ui.merge(shared, { timer = hold, def = { id = "img.bomb." .. hold, timer = hold, cycle = BOMB.cycle } }))
+        local burst = { timer = hit, keys = once, loop = props.loop.ONCE, def = { id = "img.bomb." .. hit, timer = hit, cycle = BOMB.cycle } }
+        colors.tinted(s:image("bomb", box, ui.merge(shared, burst)), tint)
+        colors.tinted(s:image("bomb", box, ui.merge(shared, { timer = hold, def = { id = "img.bomb." .. hold, timer = hold, cycle = BOMB.cycle } })), tint)
     end
 end
 

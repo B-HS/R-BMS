@@ -36,6 +36,8 @@ use rbms_skin::dst::SkinOffset;
 
 use super::by_hand::{self, FIRST_SIDE_KEY, GOOD_OFF_MS, GREAT_OFF_MS, HAND_HOLD_MS, HELD_SIZE, SECOND_SIDE_KEY};
 use super::*;
+use crate::settings_ui::SettingRow;
+use crate::skin_select::SkinRow;
 use crate::skin_select::export::{ExportProgress, export_pack};
 use crate::stage::{SkinMenuState, StageHandler};
 
@@ -428,6 +430,22 @@ impl FieldRun {
     }
 }
 
+/// The rows of the skin tab in the order the skin menu lists them as it opens: the channel rows of
+/// the document's colours are folded under the one COLOR CHANNELS row, which stands where the first
+/// of them is.
+fn rows_the_skin_menu_lists(all: Vec<SettingRow>) -> Vec<SettingRow> {
+    let folded = SettingRow::Skin(SkinRow::ColorChannels);
+    let mut rows = Vec::with_capacity(all.len());
+    for row in all {
+        if !matches!(row, SettingRow::Skin(SkinRow::ColorChannel(_, _))) {
+            rows.push(row);
+        } else if !rows.contains(&folded) {
+            rows.push(folded);
+        }
+    }
+    rows
+}
+
 /// Take the parts called `parts` off the screen of the play document of `screen` with the keys of the
 /// skin menu, the way a player does it: the menu is opened over the app's own settings on that
 /// screen, the cursor is walked to the row of each part, the row is stepped down with Shift held
@@ -442,7 +460,7 @@ fn take_off_with_the_skin_menu(app: &mut App, screen: i32, parts: &[String]) -> 
         menu.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, input)
     };
     menu.on_enter(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 });
-    let rows = app.shared.settings_rows(SettingTab::Skin);
+    let rows = rows_the_skin_menu_lists(app.shared.settings_rows(SettingTab::Skin));
     let mut cursor = 0;
     for part in parts {
         let label = part.to_ascii_uppercase();
