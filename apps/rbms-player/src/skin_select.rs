@@ -1085,14 +1085,15 @@ impl SkinLibrary {
     /// where its slider and its arrows end: only a typed figure takes one further.
     ///
     /// A channel of a colour is counted from 0 to 255, and stands where the colour the row shows has
-    /// it: the player's, or the skin's own while the player has set none. It ships where the pack
-    /// put the colour, or the skin's own when the pack says nothing of it.
+    /// it: the player's, or the one the skin draws the part in while the player has set none. It
+    /// ships where the pack put the colour, or on the colour the skin draws when the pack says
+    /// nothing of it ([`SkinLibrary::unset_color`]).
     pub(crate) fn number_for(&self, config: &Config, screen: i32, row: SkinRow) -> Option<NumberValue> {
         if let SkinRow::ColorChannel(at, channel) = row {
             let def = self.header_of(config, screen)?.colors.get(at)?;
             let (held, _) = self.color_for(config, screen, at)?;
             let given = self.document_path(config, screen).and_then(|path| self.given(path)).and_then(|given| given.colors.get(&def.id).copied());
-            let shipped = given.unwrap_or_else(|| def.default_color());
+            let shipped = given.unwrap_or_else(|| self.unset_color(config, screen, def));
             return Some(NumberValue::of(CHANNEL_STEPS, i64::from(channel.get(held)), i64::from(channel.get(shipped))));
         }
         let SkinRow::Offset(at, axis) = row else {
@@ -1291,12 +1292,26 @@ impl SkinLibrary {
 
     /// The colour one colour row of the document `screen` is to be drawn with stands on, and
     /// whether it is one that is set -- by the player, or by the pack's own adjustments -- rather
-    /// than the skin's own ([`ColorDef::default_color`]). `None` for a row whose declaration is no
+    /// than the skin's own ([`SkinLibrary::unset_color`]). `None` for a row whose declaration is no
     /// longer there.
     pub(crate) fn color_for(&self, config: &Config, screen: i32, at: usize) -> Option<(SkinColor, bool)> {
         let def = self.header_of(config, screen)?.colors.get(at)?;
         let set = self.customisation_for(config, screen).and_then(|entry| entry.colors.get(&def.id).copied());
-        Some((set.unwrap_or_else(|| def.default_color()), set.is_some()))
+        Some((set.unwrap_or_else(|| self.unset_color(config, screen, def)), set.is_some()))
+    }
+
+    /// The colour the document `screen` is to be drawn with draws the part of the colour row `def`
+    /// in while nobody has set the row, which is where showing, stepping and typing the row start.
+    ///
+    /// The skin's own options can pick that colour -- a theme, a set of note colours -- so it is the
+    /// one the document said when it was last read for the screen ([`ColorDef::drawn_color`]),
+    /// which is what that screen is showing. A document not read yet, or one that does not say,
+    /// answers the default its header declares ([`ColorDef::default_color`]).
+    fn unset_color(&self, config: &Config, screen: i32, def: &ColorDef) -> SkinColor {
+        let path = self.document_path(config, screen);
+        let read = self.loaded.get(&screen).filter(|entry| Some(entry.path.as_str()) == path);
+        let said = read.and_then(|entry| entry.skin.def.color.iter().find(|row| row.id == def.id)).and_then(ColorDef::drawn_color);
+        said.unwrap_or_else(|| def.default_color())
     }
 
     /// Set one colour row of the document `screen` is to be drawn with to `color`, and report

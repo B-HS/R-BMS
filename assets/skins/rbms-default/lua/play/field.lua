@@ -15,16 +15,16 @@ local LINE = { open = 400, pulse_height = 16, pulse_fade = 500, beat = 1000 }
 local SECTION_LINE = 2
 
 local NOTE_IMAGES = {
-    { list = "note", sprite = "note_" },
-    { list = "lnstart", sprite = "note_" },
-    { list = "lnend", sprite = "note_" },
-    { list = "lnbody", sprite = "held_" },
-    { list = "lnactive", sprite = "long_" },
-    { list = "hcnstart", sprite = "note_" },
-    { list = "hcnend", sprite = "note_" },
-    { list = "hcnbody", sprite = "hell_held_" },
-    { list = "hcnactive", sprite = "hell_" },
-    { list = "hcndamage", sprite = "hell_held_" },
+    { list = "note", sprite = "note_", tint = "note_tint" },
+    { list = "lnstart", sprite = "note_", tint = "long_tint" },
+    { list = "lnend", sprite = "note_", tint = "long_tint" },
+    { list = "lnbody", sprite = "held_", tint = "long_tint" },
+    { list = "lnactive", sprite = "long_", tint = "long_tint" },
+    { list = "hcnstart", sprite = "note_", tint = "long_tint" },
+    { list = "hcnend", sprite = "note_", tint = "long_tint" },
+    { list = "hcnbody", sprite = "hell_held_", tint = "long_tint" },
+    { list = "hcnactive", sprite = "hell_", tint = "long_tint" },
+    { list = "hcndamage", sprite = "hell_held_", tint = "long_tint" },
 }
 
 local JUDGE = {
@@ -141,12 +141,13 @@ local function note_field(s, view)
     end
     local drain = s:define_image("hell_drain")
     local mine = s:define_image("mine")
-    local tinted = false
+    local tinted, long_apart = false, false
     for index, lane in ipairs(view.lanes) do
         for _, entry in ipairs(NOTE_IMAGES) do
-            def[entry.list][index] = s:define_image(entry.sprite .. (lane.note_tint and colors.PURE_NOTES or lane.color))
+            def[entry.list][index] = s:define_image(entry.sprite .. (lane[entry.tint] and colors.PURE_NOTES or lane.color))
         end
         tinted = tinted or lane.note_tint ~= nil
+        long_apart = long_apart or lane.long_tint ~= lane.note_tint
         def.hcnreactive[index] = drain
         def.mine[index] = mine
         def.dst[index] = { x = lane.x, y = theme.height - grid.top - grid.height, w = lane.w, h = grid.height }
@@ -156,6 +157,12 @@ local function note_field(s, view)
         def.tint = {}
         for index, lane in ipairs(view.lanes) do
             def.tint[index] = lane.note_tint or colors.NO_TINT
+        end
+    end
+    if long_apart then
+        def.long_tint = {}
+        for index, lane in ipairs(view.lanes) do
+            def.long_tint[index] = lane.long_tint or colors.NO_TINT
         end
     end
     local bar = view.tint.BAR_LINE

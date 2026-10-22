@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use rbms_model::{LnKind, Note, NoteKind, TimeLine};
-use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect};
+use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect, resolve};
 use rbms_skin::loader::StretchKind;
 use rbms_skin::model::NoteSet;
 use rbms_skin::property::{SkinHost, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
@@ -897,7 +897,8 @@ fn shown(color: SkinColor) -> Color {
 }
 
 /// The test field with every image of every lane white, which a colour comes out on exactly, and
-/// with the lanes `tinted` names multiplied by [`LANE_COLOR`].
+/// with the notes and the long notes of the lanes `tinted` names multiplied by [`LANE_COLOR`], as a
+/// note set that gives its long notes no colour of their own has them.
 fn white_field(canvas: &mut CpuCanvas, tinted: [bool; 4]) -> NoteBody {
     let white = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
     let lanes = LANES
@@ -909,6 +910,7 @@ fn white_field(canvas: &mut CpuCanvas, tinted: [bool; 4]) -> NoteBody {
             long: std::array::from_fn(|slot| NoteImage::Sprite(solid(canvas, &format!("white-long{lane}.{slot}"), white))),
             mine: NoteImage::Sprite(solid(canvas, &format!("white-mine{lane}"), white)),
             tint: tinted.then_some(LANE_COLOR),
+            long_tint: tinted.then_some(LANE_COLOR),
             ..NoteLane::placeholder(*rect, NOTE_H)
         })
         .collect();
@@ -945,6 +947,51 @@ fn a_lane_that_names_a_colour_draws_its_notes_in_the_colour_the_player_set() {
 
     assert!(draw_with(&mut canvas, &object, &notes, &colored(PLAYER_COLOR_AT_HALF), size));
     assert_eq!(pixel(&canvas, middle(0), row), over_black(shown(PLAYER_COLOR), PLAYER_COLOR_AT_HALF.a), "the colour's alpha does not fade the note");
+}
+
+/// A colour's alpha is a share of the opacity the field is given, on a note as on any other part a
+/// colour reaches: a half-clear colour on a field at half opacity draws its notes at the alpha the
+/// same colour and offset leave a tinted part at.
+#[test]
+fn a_colours_alpha_and_an_opacity_offset_meet_on_a_note_as_they_do_on_a_part() {
+    let timelines = chart(vec![with(note_at(1_000, 0.5, 0), 1, NoteKind::Normal)]);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(white_field(&mut canvas, [true, false, false, false]));
+    let host = Host { color: Some((LANE_COLOR, PLAYER_COLOR_AT_HALF)), ..fading(HALF_SHIFT) };
+    let part = DestinationTrack { tint: Some(LANE_COLOR), offsets: vec![NUDGE_OFFSET], ..still(SkinRect::default()) };
+    let part_alpha = resolve(&part, 0, &TimerState::new(), &host, None).expect("the part draws").color.a;
+    assert!(draw_with(&mut canvas, &object, &playing(&timelines, 500), &host, (CANVAS.0 as f32, CANVAS.1 as f32)));
+    assert_eq!(pixel(&canvas, middle(0), 205), over_black(shown(PLAYER_COLOR), part_alpha), "the note is not at the alpha the part is");
+}
+
+/// A lane whose long notes name a colour of their own draws them in it and its notes in the colour
+/// of the lane's notes, each once the player has set it and not before.
+#[test]
+fn a_lanes_long_notes_take_a_colour_of_their_own_when_they_name_one() {
+    const LONG_COLOR: i32 = LANE_COLOR + 1;
+    let size = (CANVAS.0 as f32, CANVAS.1 as f32);
+    let white = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let mut body = white_field(&mut canvas, [true; 4]);
+    for lane in &mut body.lanes {
+        lane.long_tint = Some(LONG_COLOR);
+    }
+    let object = note_object(body);
+    let long = long_chart(LnKind::Cn, 2_000, 1.0);
+    let long_notes = LaneNotes { ln_mode: LnKind::Cn, ..playing(&long, 500) };
+    let single = chart(vec![with(note_at(1_000, 0.5, 0), 1, NoteKind::Normal)]);
+    let long_color = Host { color: Some((LONG_COLOR, PLAYER_COLOR)), ..Host::default() };
+
+    assert!(draw_with(&mut canvas, &object, &long_notes, &long_color, size));
+    assert_eq!(span(&canvas, middle(0), shown(PLAYER_COLOR)), Some((200, 410)), "the long note is not in its own colour");
+    assert!(draw_with(&mut canvas, &object, &playing(&single, 500), &long_color, size));
+    assert_eq!(pixel(&canvas, middle(0), 205), white, "the colour of the long notes reached a note");
+
+    assert!(draw_with(&mut canvas, &object, &long_notes, &colored(PLAYER_COLOR), size));
+    assert_eq!(span(&canvas, middle(0), shown(PLAYER_COLOR)), None, "the colour of the notes reached a long note that names its own");
+    assert_eq!(span(&canvas, middle(0), white), Some((200, 410)), "a long note whose colour nobody set is not drawn as its images are");
+    assert!(draw_with(&mut canvas, &object, &playing(&single, 500), &colored(PLAYER_COLOR), size));
+    assert_eq!(pixel(&canvas, middle(0), 205), shown(PLAYER_COLOR));
 }
 
 /// The colour reaches every part of a long note: its start, its body and its end.

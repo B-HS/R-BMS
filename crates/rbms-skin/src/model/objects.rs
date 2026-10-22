@@ -373,6 +373,12 @@ pub struct NoteSet {
     /// is not tinted.
     /// This is an R-BMS extension that the reference never reads.
     pub tint: Vec<i32>,
+    /// The colour id each lane's long notes -- the start, the body and the end of a long note, a
+    /// charge note and a hell charge note -- are multiplied by, lane for lane as [`Self::tint`] is.
+    /// Left empty, the long notes take each lane's [`Self::tint`], so a document that gives its long
+    /// notes no colour of their own draws them in the colour of the lane's notes.
+    /// This is an R-BMS extension that the reference never reads.
+    pub long_tint: Vec<i32>,
     pub group: Vec<Destination>,
     pub bpm: Vec<Destination>,
     pub stop: Vec<Destination>,
@@ -406,12 +412,33 @@ impl Default for NoteSet {
             expansionrate: vec![FULL_EXPANSION_PERCENT, FULL_EXPANSION_PERCENT],
             size: Vec::new(),
             tint: Vec::new(),
+            long_tint: Vec::new(),
             group: Vec::new(),
             bpm: Vec::new(),
             stop: Vec::new(),
             time: Vec::new(),
         }
     }
+}
+
+impl NoteSet {
+    /// The colour id lane `lane`'s notes are multiplied by, or `None` for a lane [`Self::tint`] does
+    /// not reach or gives no colour.
+    pub fn tint_of(&self, lane: usize) -> Option<i32> {
+        lane_tint(&self.tint, lane)
+    }
+
+    /// The colour id lane `lane`'s long notes are multiplied by: what [`Self::long_tint`] gives the
+    /// lane, or the lane's [`Self::tint_of`] when that list is empty.
+    pub fn long_tint_of(&self, lane: usize) -> Option<i32> {
+        if self.long_tint.is_empty() { self.tint_of(lane) } else { lane_tint(&self.long_tint, lane) }
+    }
+}
+
+/// The colour id a lane-by-lane `tint` list gives lane `lane`, or `None` for a lane it does not
+/// reach or gives an id below zero ([`NO_TINT`](super::NO_TINT)).
+fn lane_tint(list: &[i32], lane: usize) -> Option<i32> {
+    list.get(lane).copied().filter(|id| *id >= 0)
 }
 
 /// The gauge bar: how many parts it is cut into and how it animates.

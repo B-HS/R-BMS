@@ -231,6 +231,54 @@ fn a_choice_made_in_a_default_pack_document_is_saved_and_restored() {
     assert!(next_run.document(SKIN_TYPE_DECIDE).is_some(), "the installed document was not read with the stored choice");
 }
 
+/// The options of the seven-key play document that pick colours, each with the item it is put on:
+/// the slate theme, the sky accent and the white and yellow notes.
+const COLOUR_OPTIONS: [(&str, i32); 3] = [("Theme", 921), ("Accent", 923), ("Note Colors", 932)];
+
+/// The colours those options draw the parts of some colour rows in, by the row's name: the slate
+/// panel, the sky accent, the yellow of the black keys, which their long notes follow, and the red of
+/// the turntable.
+const COLOURS_DRAWN: [(&str, SkinColor); 5] = [
+    ("White Key Lane", SkinColor::rgba(20, 25, 34, u8::MAX)),
+    ("Judge Line", SkinColor::rgba(76, 201, 240, u8::MAX)),
+    ("Black Key Note", SkinColor::rgba(242, 179, 61, u8::MAX)),
+    ("Black Key LN", SkinColor::rgba(242, 179, 61, u8::MAX)),
+    ("Scratch Note", SkinColor::rgba(240, 86, 76, u8::MAX)),
+];
+
+/// What the alpha of the black keys' notes is put on, about half of all of it.
+const HALF_ALPHA: u8 = 128;
+
+/// A colour row of a default pack document nobody has set shows, and starts its edits from, the
+/// colour the document draws its part in with the options it is read with, not the default its
+/// header declares: putting the alpha of the yellow black-key notes at half stores a half-clear
+/// yellow, not a half-clear cyan.
+#[test]
+fn an_unset_colour_row_of_the_default_pack_starts_from_the_colour_its_options_draw() {
+    let settings = installed("drawn-colours");
+    let mut config = Config { skin: rbms_config::SkinOptions { screen: SKIN_TYPE_PLAY_7KEYS, ..Default::default() }, ..Config::default() };
+    let mut skins = SkinLibrary::new(&settings, &config);
+    skins.rescan(&settings, &config);
+    let path = skins.document_path(&config, SKIN_TYPE_PLAY_7KEYS).expect("the default pack has a seven-key document").to_owned();
+    for (name, op) in COLOUR_OPTIONS {
+        config.skin.customise(&path).properties.insert(name.to_owned(), op);
+    }
+    skins.reload_for(&config, SKIN_TYPE_PLAY_7KEYS, SkinRead { host: &DefaultState, seed: Some(READ_SEED) });
+    assert_eq!(skins.failure(SKIN_TYPE_PLAY_7KEYS), None);
+
+    let header = skins.header_of(&config, SKIN_TYPE_PLAY_7KEYS).expect("the document has a header").clone();
+    let at = |name: &str| header.colors.iter().position(|row| row.name == name).unwrap_or_else(|| panic!("the document has no colour row {name:?}"));
+    for (name, drawn) in COLOURS_DRAWN {
+        assert_eq!(skins.color_for(&config, SKIN_TYPE_PLAY_7KEYS, at(name)), Some((drawn, false)), "the row {name:?} does not show what is drawn");
+    }
+
+    let black_notes = at("Black Key Note");
+    assert!(skins.set_number_for(&mut config, SKIN_TYPE_PLAY_7KEYS, SkinRow::ColorChannel(black_notes, ColorChannel::A), i64::from(HALF_ALPHA)));
+    let id = header.colors[black_notes].id;
+    let yellow = COLOURS_DRAWN[2].1;
+    assert_eq!(config.skin.customisation(&path).and_then(|entry| entry.colors.get(&id).copied()), Some(SkinColor { a: HALF_ALPHA, ..yellow }));
+}
+
 /// The sound a default pack skin plays by its own path and the cue the player raises are the same
 /// installed file: the skin's `sound` folder is the system sound folder of a player who configured
 /// none.

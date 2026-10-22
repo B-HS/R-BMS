@@ -21,7 +21,7 @@ use rbms_skin::loader::{
     SkinLoadOptions, SkinUserConfig, automatic_offsets, is_known_skin_type, is_lua_skin, load_header, load_skin, load_skin_with_host, skin_resolution,
 };
 use rbms_skin::lua::{LoadBudget, LuaBudget};
-use rbms_skin::model::{Destination, NO_TINT, PropertyRef, SkinDef};
+use rbms_skin::model::{Destination, NO_TINT, NoteSet, PropertyRef, SkinDef};
 use rbms_skin::property::generated::{
     OPTION_1P_80_89, OPTION_1P_AA, OPTION_7KEYSONG, OPTION_AA, OPTION_BANNER, OPTION_BEST_AA_1P, OPTION_BGA, OPTION_BGAOFF, OPTION_BGAON, OPTION_CLEAR_GROOVE,
     OPTION_CLEAR_NORMAL, OPTION_GOOD_EXIST, OPTION_GREAT_EXIST, OPTION_JUDGE_NORMAL, OPTION_NO_BACKBMP, OPTION_NO_BPMCHANGE, OPTION_NO_LN,
@@ -513,6 +513,56 @@ fn a_colour_row_a_destination_and_a_note_set_are_read_from_the_tables_a_skin_ret
     let note = skin.def.note.as_ref().expect("the skin has a note set");
     assert_eq!(note.tint, vec![3, NO_TINT, 7], "a lane the list gives no colour keeps its place in it");
     assert!(skin.warnings.iter().all(|warning| !warning.contains("colour")), "the fixture's colour rows are sound: {:?}", skin.warnings);
+}
+
+/// The colour a row's part is drawn in while the row is unset can depend on the skin's own options,
+/// which only the body pass knows, so it is the one thing of a colour row taken from the body pass:
+/// matched by id, and absent from a header read alone.
+#[test]
+fn the_colour_a_row_is_drawn_in_while_unset_is_the_body_passs() {
+    let scratch = Scratch::new("drawn-colours");
+    let source = r#"
+local rows = {
+    { name = "Lane", id = 3, def = "112233" },
+    { name = "Veil", id = 7, def = "445566" },
+    { name = "Plain", id = 9, def = "778899" },
+}
+local header = { type = 5, color = rows }
+if skin_config == nil then
+    return header
+end
+rows[1].drawn = "f2b33d"
+rows[2].drawn = "not a colour"
+header.name = "renamed by the body"
+header.color = { rows[2], rows[1], rows[3], { name = "Extra", id = 11, drawn = "ffffff" } }
+header.destination = {}
+return header
+"#;
+    let skin = load_scratch(&scratch, source).expect("the skin should load");
+    let drawn: Vec<(i32, Option<&str>)> = skin.def.color.iter().map(|row| (row.id, row.drawn.as_deref())).collect();
+    assert_eq!(drawn, vec![(3, Some("f2b33d")), (7, Some("not a colour")), (9, None)], "the rows are the header's, each with what the body said of it");
+    assert_eq!(skin.def.color[0].drawn_color(), Some(SkinColor::rgba(0xF2, 0xB3, 0x3D, u8::MAX)));
+    assert_eq!(skin.def.color[1].drawn_color(), None, "what is not a colour is no colour");
+
+    let path = scratch.path().join("skin.luaskin");
+    let user = SkinUserConfig::default();
+    let header = load_header(&path, seeded(scratch.path(), &user)).expect("the header should load");
+    assert!(header.colors.iter().all(|row| row.drawn.is_none()), "a header read alone says what a row is drawn in");
+}
+
+/// A note set's long notes take each lane's colour id from their own list, and from the lanes'
+/// notes' when the set gives them none; an id below zero, or a lane a list does not reach, names
+/// no colour.
+#[test]
+fn a_note_sets_long_notes_take_their_own_colour_ids_or_the_lanes_notes() {
+    let notes = NoteSet { tint: vec![3, NO_TINT, 7], ..NoteSet::default() };
+    let lanes = |of: &dyn Fn(usize) -> Option<i32>| (0..4).map(of).collect::<Vec<_>>();
+    assert_eq!(lanes(&|lane| notes.tint_of(lane)), vec![Some(3), None, Some(7), None]);
+    assert_eq!(lanes(&|lane| notes.long_tint_of(lane)), vec![Some(3), None, Some(7), None], "with no list of their own they follow the notes");
+
+    let own = NoteSet { long_tint: vec![NO_TINT, 5], ..notes };
+    assert_eq!(lanes(&|lane| own.long_tint_of(lane)), vec![None, Some(5), None, None], "a list of their own is theirs alone");
+    assert_eq!(lanes(&|lane| own.tint_of(lane)), vec![Some(3), None, Some(7), None], "and leaves the notes as they were");
 }
 
 #[test]

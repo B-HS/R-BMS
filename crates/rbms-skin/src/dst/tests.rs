@@ -407,17 +407,25 @@ fn a_track_that_names_no_tint_ignores_every_colour_the_player_set() {
     assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color, drawn_in);
 }
 
-/// The tint is a product and the offsets' alpha shifts are sums, and the shift comes last, so the
-/// two never trade places: a half-clear tint over an opaque track is 128 before the shift is added.
+/// The offsets' alpha shifts are sums and the tint is a product, and the product comes last, which
+/// is the order a lane's colour reaches its notes in: a half-clear tint is half of whatever alpha
+/// the offsets leave. Over an opaque track shifted further up that is 128; at half opacity it is a
+/// quarter, where adding the shift last would have left nothing.
 #[test]
-fn the_tints_alpha_is_a_product_taken_before_the_alpha_offsets_are_added() {
+fn the_tints_alpha_is_a_share_of_the_alpha_the_offsets_leave() {
     const OFFSET_ID: i32 = 2;
+    const UP: f32 = 50.0;
+    const HALF_DOWN: f32 = -127.5;
+    const A_QUARTER: u8 = 64;
     let half_clear = SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 128);
-    let state = FakeState::default().with_color(TINT_ID, half_clear).with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
+    let shifted = |a: f32| FakeState::default().with_color(TINT_ID, half_clear).with_offset(OFFSET_ID, SkinOffset { a, ..SkinOffset::default() });
     let track = DestinationTrack { tint: Some(TINT_ID), offsets: vec![OFFSET_ID], ..coloured_track(SkinColor::WHITE, SkinColor::WHITE) };
-    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color.a, 178);
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &shifted(UP), None).expect("it draws").color.a, half_clear.a);
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &shifted(HALF_DOWN), None).expect("it draws").color.a, A_QUARTER, "half of half");
 
-    let clear = FakeState::default().with_color(TINT_ID, SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 0));
+    let clear = FakeState::default()
+        .with_color(TINT_ID, SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 0))
+        .with_offset(OFFSET_ID, SkinOffset { a: UP, ..SkinOffset::default() });
     assert_eq!(resolve(&track, us(0), &TimerState::new(), &clear, None).expect("it draws").color.a, 0, "a tint with no alpha hides the track");
 }
 

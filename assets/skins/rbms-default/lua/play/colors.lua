@@ -27,6 +27,14 @@ colors.ROW = {
     GREEN_BUTTON_NOTE = row(15, "Green Button Note", CATEGORY.NOTE, "Green Buttons", theme.tone.green),
     BLUE_BUTTON_NOTE = row(16, "Blue Button Note", CATEGORY.NOTE, "Blue Buttons", theme.tone.blue),
     RED_BUTTON_NOTE = row(17, "Red Button Note", CATEGORY.NOTE, "Red Button", theme.tone.red),
+    WHITE_KEY_LN = row(40, "White Key LN", CATEGORY.NOTE, "White Key LN", theme.note.white),
+    BLACK_KEY_LN = row(41, "Black Key LN", CATEGORY.NOTE, "Black Key LN", theme.note.cyan),
+    SCRATCH_LN = row(42, "Scratch LN", CATEGORY.NOTE, "Scratch LN", theme.tone.red),
+    WHITE_BUTTON_LN = row(43, "White Button LN", CATEGORY.NOTE, "White Buttons LN", theme.note.white),
+    YELLOW_BUTTON_LN = row(44, "Yellow Button LN", CATEGORY.NOTE, "Yellow Buttons LN", theme.tone.yellow),
+    GREEN_BUTTON_LN = row(45, "Green Button LN", CATEGORY.NOTE, "Green Buttons LN", theme.tone.green),
+    BLUE_BUTTON_LN = row(46, "Blue Button LN", CATEGORY.NOTE, "Blue Buttons LN", theme.tone.blue),
+    RED_BUTTON_LN = row(47, "Red Button LN", CATEGORY.NOTE, "Red Button LN", theme.tone.red),
     WHITE_KEY_BEAM = row(20, "White Key Beam", CATEGORY.EFFECT, "White Key Beam", theme.note.white),
     BLACK_KEY_BEAM = row(21, "Black Key Beam", CATEGORY.EFFECT, "Black Key Beam", theme.note.cyan),
     SCRATCH_BEAM = row(22, "Scratch Beam", CATEGORY.EFFECT, "Scratch Beam", theme.tone.red),
@@ -45,27 +53,36 @@ local SHARED_LANE_ROWS = { "LANE_DIVIDER", "BAR_LINE", "JUDGE_LINE", "LANE_COVER
 local KEYED = {
     lanes = { "WHITE_KEY_LANE", "BLACK_KEY_LANE", "SCRATCH_LANE" },
     notes = { "WHITE_KEY_NOTE", "BLACK_KEY_NOTE", "SCRATCH_NOTE" },
+    longs = { "WHITE_KEY_LN", "BLACK_KEY_LN", "SCRATCH_LN" },
     beams = { "WHITE_KEY_BEAM", "BLACK_KEY_BEAM", "SCRATCH_BEAM" },
 }
 
 local BUTTONS = {
     lanes = { "WHITE_KEY_LANE", "BLACK_KEY_LANE" },
     notes = { "WHITE_BUTTON_NOTE", "YELLOW_BUTTON_NOTE", "GREEN_BUTTON_NOTE", "BLUE_BUTTON_NOTE", "RED_BUTTON_NOTE" },
+    longs = { "WHITE_BUTTON_LN", "YELLOW_BUTTON_LN", "GREEN_BUTTON_LN", "BLUE_BUTTON_LN", "RED_BUTTON_LN" },
     beams = { "WHITE_BUTTON_BEAM", "YELLOW_BUTTON_BEAM", "GREEN_BUTTON_BEAM", "BLUE_BUTTON_BEAM", "RED_BUTTON_BEAM" },
 }
 
 local KEY_ROWS = {
-    white = { note = "WHITE_KEY_NOTE", beam = "WHITE_KEY_BEAM" },
-    black = { note = "BLACK_KEY_NOTE", beam = "BLACK_KEY_BEAM" },
-    scratch = { note = "SCRATCH_NOTE", beam = "SCRATCH_BEAM" },
+    white = { note = "WHITE_KEY_NOTE", long = "WHITE_KEY_LN", beam = "WHITE_KEY_BEAM" },
+    black = { note = "BLACK_KEY_NOTE", long = "BLACK_KEY_LN", beam = "BLACK_KEY_BEAM" },
+    scratch = { note = "SCRATCH_NOTE", long = "SCRATCH_LN", beam = "SCRATCH_BEAM" },
 }
 
 local BUTTON_ROWS = {
-    white = { note = "WHITE_BUTTON_NOTE", beam = "WHITE_BUTTON_BEAM" },
-    yellow = { note = "YELLOW_BUTTON_NOTE", beam = "YELLOW_BUTTON_BEAM" },
-    green = { note = "GREEN_BUTTON_NOTE", beam = "GREEN_BUTTON_BEAM" },
-    blue = { note = "BLUE_BUTTON_NOTE", beam = "BLUE_BUTTON_BEAM" },
-    red = { note = "RED_BUTTON_NOTE", beam = "RED_BUTTON_BEAM" },
+    white = { note = "WHITE_BUTTON_NOTE", long = "WHITE_BUTTON_LN", beam = "WHITE_BUTTON_BEAM" },
+    yellow = { note = "YELLOW_BUTTON_NOTE", long = "YELLOW_BUTTON_LN", beam = "YELLOW_BUTTON_BEAM" },
+    green = { note = "GREEN_BUTTON_NOTE", long = "GREEN_BUTTON_LN", beam = "GREEN_BUTTON_BEAM" },
+    blue = { note = "BLUE_BUTTON_NOTE", long = "BLUE_BUTTON_LN", beam = "BLUE_BUTTON_BEAM" },
+    red = { note = "RED_BUTTON_NOTE", long = "RED_BUTTON_LN", beam = "RED_BUTTON_BEAM" },
+}
+
+local SHARED_DRAWN = {
+    LANE_DIVIDER = "line",
+    BAR_LINE = "line",
+    JUDGE_LINE = "accent",
+    LANE_COVER = "raised",
 }
 
 local FACE_ROWS = { white = "WHITE_KEY_LANE", black = "BLACK_KEY_LANE", scratch = "SCRATCH_LANE" }
@@ -73,7 +90,7 @@ local FACE_ROWS = { white = "WHITE_KEY_LANE", black = "BLACK_KEY_LANE", scratch 
 local function keys_of(mode)
     local groups = mode.scratch and KEYED or BUTTONS
     local keys = {}
-    for _, list in ipairs({ groups.lanes, SHARED_LANE_ROWS, groups.notes, groups.beams, { "BOMB" } }) do
+    for _, list in ipairs({ groups.lanes, SHARED_LANE_ROWS, groups.notes, groups.longs, groups.beams, { "BOMB" } }) do
         for _, key in ipairs(list) do
             table.insert(keys, key)
         end
@@ -94,13 +111,33 @@ end
 local function lane_rows(lane)
     if lane.kind == "button" then
         local rows = BUTTON_ROWS[lane.color]
-        return lane.shaded and "BLACK_KEY_LANE" or "WHITE_KEY_LANE", rows.note, rows.beam
+        return lane.shaded and "BLACK_KEY_LANE" or "WHITE_KEY_LANE", rows.note, rows.long, rows.beam
     end
     local rows = KEY_ROWS[lane.kind]
-    return FACE_ROWS[lane.kind], rows.note, rows.beam
+    return FACE_ROWS[lane.kind], rows.note, rows.long, rows.beam
 end
 
-function colors.paint(view, stored)
+local function stored_hex(chosen)
+    return string.format("%02x%02x%02x%02x", chosen.r, chosen.g, chosen.b, chosen.a)
+end
+
+local function drawn_of(view, stored)
+    local drawn = { BOMB = theme.hex(view.bomb_tint or theme.note.white) }
+    for key, color in pairs(SHARED_DRAWN) do
+        drawn[key] = theme.hex(theme.color[color])
+    end
+    for _, lane in ipairs(view.lanes) do
+        local face, note, long, beam = lane_rows(lane)
+        local note_color = theme.hex(lane.tint)
+        local chosen = stored[colors.ROW[note].name]
+        drawn[face] = theme.hex(lane.shaded and theme.color.bg or theme.color.panel)
+        drawn[note], drawn[beam] = note_color, note_color
+        drawn[long] = chosen ~= nil and chosen.custom and stored_hex(chosen) or note_color
+    end
+    return drawn
+end
+
+function colors.paint(view, stored, rows)
     local tint = {}
     for _, key in ipairs(keys_of(view.mode)) do
         local entry = colors.ROW[key]
@@ -111,8 +148,17 @@ function colors.paint(view, stored)
     end
     view.tint = tint
     for _, lane in ipairs(view.lanes) do
-        local face, note, beam = lane_rows(lane)
+        local face, note, long, beam = lane_rows(lane)
         lane.face_tint, lane.note_tint, lane.beam_tint = tint[face], tint[note], tint[beam]
+        lane.long_tint = tint[long] or lane.note_tint
+    end
+    local drawn = drawn_of(view, stored)
+    local key_of = {}
+    for key, entry in pairs(colors.ROW) do
+        key_of[entry.id] = key
+    end
+    for _, entry in ipairs(rows) do
+        entry.drawn = drawn[key_of[entry.id]]
     end
 end
 

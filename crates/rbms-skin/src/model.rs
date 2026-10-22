@@ -338,6 +338,14 @@ pub struct ColorDef {
     pub id: i32,
     /// The colour the row starts at, as `RRGGBB` or `RRGGBBAA` ([`SkinColor::from_hex`]).
     pub def: Option<String>,
+    /// The colour the document draws the row's part in while the player has not set the row, in the
+    /// same spelling as `def`, or `None` when the document does not say.
+    ///
+    /// A skin's own options can pick that colour -- a theme, a set of note colours -- so it is worked
+    /// out with the choices of one load. A Lua skin says it from its body pass, where those choices
+    /// are known, and its header pass leaves it out; a menu that has the loaded document starts an
+    /// unset row from it rather than from `def` ([`Self::drawn_color`]).
+    pub drawn: Option<String>,
 }
 
 impl ColorDef {
@@ -345,6 +353,12 @@ impl ColorDef {
     /// colour.
     pub fn default_color(&self) -> SkinColor {
         self.def.as_deref().and_then(SkinColor::from_hex).unwrap_or(SkinColor::WHITE)
+    }
+
+    /// The colour the row's part is drawn in while the player has not set the row: `drawn` when the
+    /// document said one, and `None` when it did not or what it said is not a colour.
+    pub fn drawn_color(&self) -> Option<SkinColor> {
+        self.drawn.as_deref().and_then(SkinColor::from_hex)
     }
 
     /// The text a menu shows for the row.

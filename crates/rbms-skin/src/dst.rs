@@ -573,10 +573,12 @@ pub fn shifted_alpha(alpha: u8, shifts: impl IntoIterator<Item = f32>) -> u8 {
 /// `lua` is what a track timed by a function asks for its start; such a track read without one is
 /// off.
 ///
-/// A track with a [`DestinationTrack::tint`] whose colour `offsets` answers is multiplied by it, all
-/// four channels, before the offsets' alpha shifts are added; the shifts stay additive and the tint
-/// stays a product, so the two never mix. A track with no tint, or one `offsets` answers no colour
-/// for, resolves exactly as it would without the extension.
+/// A track with a [`DestinationTrack::tint`] whose colour `offsets` answers has its red, green and
+/// blue multiplied by the tint's, and its alpha shifted by the offsets first and then multiplied by
+/// the tint's alpha. That is the order a lane's colour reaches its notes in -- the note field's
+/// opacity, offsets and all, and then the colour -- so a colour's alpha is a share of whatever
+/// opacity a part is given, on every part alike. A track with no tint, or one `offsets` answers no
+/// colour for, resolves exactly as it would without the extension.
 pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offsets: &dyn OffsetSource, lua: Option<&dyn LuaDrawEval>) -> Option<Resolved> {
     let last = track.frames.len().checked_sub(1)?;
     let mut time = now_us / MICROS_PER_MILLI;
@@ -625,10 +627,10 @@ pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offse
     let clip = clip.filter(|clip| clip.w > 0.0 && clip.h > 0.0);
 
     let mut color = if interpolated { lerp_color(frame.color, track.frames[index + 1].color, rate) } else { frame.color };
+    color.a = shifted_alpha(color.a, applied.iter().map(|offset| offset.a));
     if let Some(tint) = track.tint.and_then(|id| offsets.color(id)) {
         color = color.tinted(tint);
     }
-    color.a = shifted_alpha(color.a, applied.iter().map(|offset| offset.a));
 
     let mut angle_deg = if interpolated { (frame.angle_deg + (track.frames[index + 1].angle_deg - frame.angle_deg) * rate).trunc() } else { frame.angle_deg };
     for offset in &applied {

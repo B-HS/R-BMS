@@ -39,7 +39,7 @@ use std::cell::Cell;
 use rbms_model::{LnKind, NoteKind, TimeLine};
 use rbms_skin::dst::{DestinationTrack, DrawStateSource, SkinColor, SkinOffset, SkinRect, prepare};
 use rbms_skin::loader::{LoadedSkin, NamedTrack, StretchKind};
-use rbms_skin::model::{Animation, NO_TINT, NoteSet};
+use rbms_skin::model::{Animation, NoteSet};
 use rbms_skin::timer::MICROS_PER_MILLI;
 
 use super::draw::{ImageSelect, Placement};
@@ -485,6 +485,10 @@ pub(crate) struct NoteLane {
     /// The colour id the lane's notes are multiplied by (`note.tint`, an R-BMS extension), or `None`
     /// for a lane drawn in its images' own colours.
     pub(crate) tint: Option<i32>,
+    /// The colour id the lane's long notes are multiplied by (`note.long_tint`, falling back to
+    /// `note.tint`: [`NoteSet::long_tint_of`]), or `None` for long notes drawn in their images' own
+    /// colours.
+    pub(crate) long_tint: Option<i32>,
 }
 
 impl NoteLane {
@@ -499,6 +503,7 @@ impl NoteLane {
             hidden: NoteImage::Outline(PLACEHOLDER_HIDDEN),
             processed: NoteImage::Outline(PLACEHOLDER_PROCESSED),
             tint: None,
+            long_tint: None,
         }
     }
 
@@ -671,7 +676,8 @@ fn build_lane(skin: &LoadedSkin, def: &NoteSet, names: &[&[String]; LONG_IMAGES]
         note,
         long: std::array::from_fn(|slot| image(names[slot], NoteImage::Solid(PLACEHOLDER_LONG))),
         mine: image(&def.mine, NoteImage::Solid(PLACEHOLDER_MINE)),
-        tint: def.tint.get(lane).copied().filter(|id| *id != NO_TINT),
+        tint: def.tint_of(lane),
+        long_tint: def.long_tint_of(lane),
         ..NoteLane::placeholder(animation_rect(&def.dst[lane]), def.size.get(lane).copied().unwrap_or(cell_height))
     }
 }
@@ -766,6 +772,8 @@ struct Lane<'a> {
     /// What the host answers for the lane's colour id, or `None` for a lane that names none or whose
     /// colour nobody set, which is drawn exactly as it would be without the extension.
     tint: Option<SkinColor>,
+    /// The same for the colour id of the lane's long notes.
+    long_tint: Option<SkinColor>,
 }
 
 /// A colour with its alpha scaled by the batch's.
@@ -928,9 +936,10 @@ impl Field<'_> {
     /// note at all.
     ///
     /// `tint` is the colour of the lane the note is in, for the images a lane's colour reaches: a
-    /// note, a long note's head, body and end. A mine, a hidden or an already judged note, the body
-    /// of a hell charge note that is draining and anything SCRATCH AUTO draws are handed none, so
-    /// what they say by their colour is kept.
+    /// note in the colour of the lane's notes, and a long note's head, body and end in the colour of
+    /// its long notes, which is the same one unless the document gives long notes their own. A
+    /// mine, a hidden or an already judged note, the body of a hell charge note that is draining and
+    /// anything SCRATCH AUTO draws are handed none, so what they say by their colour is kept.
     fn put<R: Renderer>(&self, r: &mut R, image: &NoteImage, at: (f32, f32, f32, f32), alpha: f32, tint: Option<SkinColor>) -> bool {
         let (x, y, w, h) = at;
         if self.opacity <= 0.0 {
@@ -1087,7 +1096,7 @@ impl Field<'_> {
         let foot = lane.region.y - grown;
         let height = (if y < foot { f64::from(y - foot) } else { span }) as f32;
         let end_y = (f64::from(y) + span) as f32;
-        let (images, tint) = if self.notes.plays_itself(lane_index) { (&AUTO_LONG_IMAGES, None) } else { (&lane.images.long, lane.tint) };
+        let (images, tint) = if self.notes.plays_itself(lane_index) { (&AUTO_LONG_IMAGES, None) } else { (&lane.images.long, lane.long_tint) };
         let held = lane.long.processing == Some(head_us);
         let body_at = (x, end_y - height + scale, w, height - scale);
         let end_at = (x, end_y, w, scale);
@@ -1234,6 +1243,7 @@ pub(crate) fn draw_note<R: Renderer>(
             images,
             long: notes.longs.get(lane).copied().unwrap_or_default(),
             tint: images.tint.and_then(|id| frame.state.color(id)),
+            long_tint: images.long_tint.and_then(|id| frame.state.color(id)),
         })
         .collect();
     let Some(first) = lanes.first().map(|lane| lane.region) else {

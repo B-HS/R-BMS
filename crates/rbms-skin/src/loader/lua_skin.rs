@@ -22,10 +22,12 @@
 //!    tables.
 //! 6. Put the two results together the way the reference reads them: the type, the name, the author
 //!    and the customisation rows are the header pass's, and the size, the scene timings and every
-//!    object are the body pass's. Then assemble sources, fonts and destination tracks exactly as the
-//!    JSON path does, and hand the interpreter to the [`LoadedSkin`], which keeps it -- with the
-//!    registry of the skin's functions and the record of what went wrong -- for as long as the
-//!    screen is shown.
+//!    object are the body pass's. A colour row takes one thing from the body pass: the colour it
+//!    says the row's part is drawn in while the row is unset (`drawn`), which only the body pass,
+//!    knowing this load's choices, can work out. Then assemble sources, fonts and destination
+//!    tracks exactly as the JSON path does, and hand the interpreter to the [`LoadedSkin`], which
+//!    keeps it -- with the registry of the skin's functions and the record of what went wrong --
+//!    for as long as the screen is shown.
 //! 7. **Prepare** the assembled skin against the host, once (`Skin.prepare`): an object whose own
 //!    options the player's choices do not grant is removed, and so is one whose condition the host
 //!    calls static and answers false; a static condition that holds is forgotten. Both passes have
@@ -54,7 +56,7 @@ use super::{
 use crate::SkinError;
 use crate::lua::main_state::is_property_name;
 use crate::lua::{LuaBudget, LuaMode, LuaPass, OverlayLimits, SkinLua, SkinLuaConfig};
-use crate::model::{SKIN_TYPE_UNSET, SkinDef};
+use crate::model::{ColorDef, SKIN_TYPE_UNSET, SkinDef};
 use crate::property::{DefaultState, SkinHost};
 use crate::resolve::{contained, enumerate_custom_files};
 
@@ -194,7 +196,14 @@ pub fn load_lua_skin(path: &Path, options: &LuaSkinOptions<'_>, host: &dyn SkinH
     def.property = header.property;
     def.filepath = header.filepath;
     def.offset = header.offset;
-    def.color = header.color;
+    def.color = header
+        .color
+        .into_iter()
+        .map(|row| {
+            let drawn = def.color.iter().find(|said| said.id == row.id).and_then(|said| said.drawn.clone());
+            ColorDef { drawn, ..row }
+        })
+        .collect();
 
     let resolution = skin_resolution(def.w, def.h);
     if resolution != (def.w, def.h) {

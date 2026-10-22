@@ -6,11 +6,13 @@
 //! its tint, so the colour is multiplied in on every frame, and the notes of a lane whose row is set
 //! are drawn from the pure white notes of the sheet.
 //!
-//! Three tests hold the pack to that on every machine: every play document declares its colour rows
+//! Five tests hold the pack to that on every machine: every play document declares its colour rows
 //! under the same name and id as every other that has the row; a document read with no colour set
-//! tints nothing, and one read with every colour set tints a white or grey part with each row; and
-//! the face of a black key whose colour is set is drawn in exactly that colour. One more draws the
-//! scenes for a person to look at, only where [`CAPTURE_DIR_ENV`] names a folder.
+//! tints nothing, and one read with every colour set tints a white or grey part with each row; the
+//! face of a black key whose colour is set is drawn in exactly that colour; a lane's notes and its
+//! long notes are cut from the pure white notes exactly when a colour reaches them; and the long
+//! notes of a black key follow its notes until their own row is set. One more draws the scenes for
+//! a person to look at, only where [`CAPTURE_DIR_ENV`] names a folder.
 
 use std::collections::BTreeMap;
 
@@ -19,12 +21,25 @@ use rbms_skin::model::{Destination, NO_TINT};
 use super::*;
 
 /// The colours the captures set by hand, by the name of their row: a red for the notes of the white
-/// keys, a see-through navy for the faces of the black keys, and a cyan for the notes of the
-/// turntable.
+/// keys, a green for the long notes of the black keys, a see-through navy for the faces of the black
+/// keys, and a cyan for the notes of the turntable.
 const RED_WHITE_KEY_NOTES: (&str, SkinColor) = ("White Key Note", SkinColor::rgba(0xFF, 0x40, 0x40, 0xFF));
+const GREEN_BLACK_KEY_LNS: (&str, SkinColor) = ("Black Key LN", SkinColor::rgba(0x30, 0xE0, 0x50, 0xFF));
 const NAVY_BLACK_KEY_LANES: (&str, SkinColor) = ("Black Key Lane", SkinColor::rgba(0x20, 0x30, 0x60, 0xC0));
 const CYAN_SCRATCH_NOTES: (&str, SkinColor) = ("Scratch Note", SkinColor::rgba(0x40, 0xE0, 0xFF, 0xFF));
-const SET_BY_HAND: [(&str, SkinColor); 3] = [RED_WHITE_KEY_NOTES, NAVY_BLACK_KEY_LANES, CYAN_SCRATCH_NOTES];
+const SET_BY_HAND: [(&str, SkinColor); 4] = [RED_WHITE_KEY_NOTES, GREEN_BLACK_KEY_LNS, NAVY_BLACK_KEY_LANES, CYAN_SCRATCH_NOTES];
+
+/// A red for the notes of the black keys, which the long notes of the black keys follow until
+/// their own row is set.
+const RED_BLACK_KEY_NOTES: (&str, SkinColor) = ("Black Key Note", SkinColor::rgba(0xFF, 0x40, 0x40, 0xFF));
+
+/// The lane of a seven-key field, in the order the document numbers its lanes, that the long notes
+/// of the charts written for a mode are in: the fourth key, a black one.
+const LONG_NOTE_LANE: usize = 3;
+
+/// How many times one channel of a pixel has to be over each of the other two for the pixel to be
+/// counted as of that channel's hue.
+const HUE_MARGIN: u16 = 2;
 
 /// The colours every row of a document is set to in turn when all of them are set: none of them a
 /// colour the pack comes with, so a part left in its own colour shows.
@@ -65,9 +80,10 @@ fn destinations(run: &RowsRun) -> Vec<&Destination> {
     def.destination.iter().chain(def.note.iter().flat_map(|note| note.group.iter())).collect()
 }
 
-/// The colour ids the notes of each lane are tinted by, without the lanes that are not tinted.
+/// The colour ids the notes and the long notes of each lane are tinted by, without the lanes that
+/// are not tinted.
 fn note_tints(run: &RowsRun) -> Vec<i32> {
-    run.document().def.note.iter().flat_map(|note| note.tint.iter().copied()).filter(|id| *id != NO_TINT).collect()
+    run.document().def.note.iter().flat_map(|note| note.tint.iter().chain(&note.long_tint).copied()).filter(|id| *id != NO_TINT).collect()
 }
 
 /// A run of `mode` entered for the held tests, with `colours` set.
@@ -158,6 +174,64 @@ fn the_face_of_a_black_key_is_drawn_in_the_colour_its_row_is_set_to() {
     assert_eq!(plain, MONO_GROUND, "the face of a black key with no colour set at {moment} is not the ground of the theme");
     let (moment, navy) = face("colour-face-navy", &[(BLACK_KEY_LANE_ROW, OPAQUE_NAVY)]);
     assert_eq!(navy, crate::Color::rgb(OPAQUE_NAVY.r, OPAQUE_NAVY.g, OPAQUE_NAVY.b), "the face of a black key at {moment} is not the colour its row is set to");
+}
+
+/// The pixels of one column that are mostly red and mostly green, in that order.
+fn reds_and_greens(pixels: &HeadlessCanvas, column: u32) -> (usize, usize) {
+    let leads = |lead: u8, others: [u8; 2]| others.iter().all(|other| u16::from(lead) > u16::from(*other) * HUE_MARGIN);
+    let column: Vec<crate::Color> = (0..HELD_ROWS_SIZE.1).map(|row| pixels.pixel_at(column, row)).collect();
+    let reds = column.iter().filter(|pixel| leads(pixel.r, [pixel.g, pixel.b])).count();
+    let greens = column.iter().filter(|pixel| leads(pixel.g, [pixel.r, pixel.b])).count();
+    (reds, greens)
+}
+
+/// The long notes of the black keys have a colour row of their own. Until it is set they are drawn
+/// in the colour the notes of the black keys are set to; once it is set they are drawn in it. The
+/// lane is read while its long note is held, when the chart has no plain note in it, so every
+/// coloured pixel of it is the long note's.
+#[test]
+fn the_long_notes_of_a_black_key_follow_its_notes_until_their_own_colour_is_set() {
+    let column_of = |tag: &str, colours: &[(&str, SkinColor)]| {
+        let mut run = held_run(tag, &SEVEN, colours);
+        run.open(|_, _| {}).unwrap_or_else(|reason| panic!("{tag}: not opened: {reason}"));
+        run.play_to(ROWS_HELD_SHOT_MS).unwrap_or_else(|reason| panic!("{tag}: not played: {reason}"));
+        run.assert_clean(tag);
+        let lane = run.lanes()[LONG_NOTE_LANE];
+        let (width, _) = run.authored();
+        let column = ((lane.x * 2 + lane.w) as f32 / 2.0 * HELD_ROWS_SIZE.0 as f32 / width as f32) as u32;
+        reds_and_greens(&run.pixels, column)
+    };
+    let (reds, greens) = column_of("colour-long-follows", &[RED_BLACK_KEY_NOTES]);
+    assert!(reds > 0 && greens == 0, "the notes alone set: {reds} red and {greens} green pixels in the lane of the long note");
+    let (reds_apart, greens_apart) = column_of("colour-long-apart", &[RED_BLACK_KEY_NOTES, GREEN_BLACK_KEY_LNS]);
+    assert!(greens_apart > 0 && reds_apart == 0, "both set: {reds_apart} red and {greens_apart} green pixels in the lane of the long note");
+}
+
+/// The end of the name of an image cut from the pure white notes of the sheet, which a colour is
+/// multiplied into.
+const PURE_IMAGE_SUFFIX: &str = "_pure";
+
+/// Which of the colour rows of the black keys' notes and long notes each case sets.
+const NOTE_AND_LONG_CASES: [(&str, &[(&str, SkinColor)]); 4] =
+    [("none", &[]), ("notes", &[RED_BLACK_KEY_NOTES]), ("longs", &[GREEN_BLACK_KEY_LNS]), ("both", &[RED_BLACK_KEY_NOTES, GREEN_BLACK_KEY_LNS])];
+
+/// A lane's notes, and apart from them its long notes, are cut from the pure white notes exactly
+/// when a colour is multiplied into them: setting the long notes' row alone leaves the notes in
+/// their own colours, not white with nothing to colour them.
+#[test]
+fn a_lanes_notes_and_long_notes_are_cut_from_the_pure_sheet_exactly_when_a_colour_reaches_them() {
+    for (tag, colours) in NOTE_AND_LONG_CASES {
+        let run = held_run(&format!("colour-pure-{tag}"), &SEVEN, colours);
+        run.assert_clean(tag);
+        let notes = run.document().def.note.as_ref().unwrap_or_else(|| panic!("{tag}: the document has no notes"));
+        for lane in 0..notes.note.len() {
+            let pure = |images: &[String]| images.get(lane).is_some_and(|id| id.ends_with(PURE_IMAGE_SUFFIX));
+            assert_eq!(pure(&notes.note), notes.tint_of(lane).is_some(), "{tag}: the notes of lane {lane}");
+            assert_eq!(pure(&notes.lnstart), notes.long_tint_of(lane).is_some(), "{tag}: the long notes of lane {lane}");
+        }
+        let longs_tinted = (0..notes.note.len()).any(|lane| notes.long_tint_of(lane).is_some());
+        assert_eq!(longs_tinted, !colours.is_empty(), "{tag}: whether any long note is coloured");
+    }
 }
 
 /// One scene captured with colours set: the mode, the name it is saved under, and whether every row
