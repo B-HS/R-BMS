@@ -1,6 +1,6 @@
 # CI / 릴리스 (GitHub Actions)
 
-최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+최종 갱신 2026-10-23 · 대응 커밋 d438294(v0.1.7 행 추가)
 
 > 이 문서는 워크플로 구현, 릴리스 절차와 이력, 현재 배포 경계를 설명합니다. 워크플로가 존재한다는 사실은 산출물이 지금 사용 가능하다는 보증이 아닙니다. 게시된 릴리스는 `v0.1.4` 하나입니다(`gh release view v0.1.4` 의 `publishedAt` 이 2026-10-15T07:27:28Z, 대응 커밋 ea698a9 의 3분 뒤). `v0.1.0`·`v0.1.3` 은 게시하지 않은 draft 로 남아 있습니다(2.3절).
 >
@@ -100,8 +100,9 @@
 | `v0.1.4` | `87eacd0`(release 워크플로의 버전 커밋, 부모 `51f3a1e`) | 수동 실행 run 38696475211(2026-10-15) | dmg, zip, sha256 둘 | 메인이 내려받아 확인: SHA-256 일치(둘), dmg·앱 `stapler validate`, Gatekeeper `accepted, source=Notarized Developer ID`(dmg·앱), `codesign --verify --deep --strict`, `syspolicy_check distribution` 통과, `CFBundleShortVersionString` 0.1.4, `CFBundleIconFile` R-BMS(`R-BMS.icns`), `x86_64 arm64`, `rbms-player --version` = 0.1.4, Windows exe 리소스 `RT_ICON` 7·`RT_GROUP_ICON` 1. draft 본문은 v0.1.0 대비 릴리스 노트(다른 사이트 이름 0). **게시됨**: `publishedAt` 2026-10-15T07:27:28Z. 에셋은 네 개(dmg 26,596,924바이트, zip 12,911,751바이트, 체크섬 둘) |
 | `v0.1.5` | `9ee3481`(release 워크플로의 버전 커밋, 부모 `109061c`) | 수동 실행 run 39245774265(2026-10-19) | dmg, zip, sha256 둘 | 메인이 내려받아 확인: SHA-256 일치(둘), dmg·앱 `stapler validate`, Gatekeeper `accepted, source=Notarized Developer ID`(dmg·앱), `codesign --verify --deep --strict`, `syspolicy_check distribution` 통과, `CFBundleShortVersionString` 0.1.5, `CFBundleIconFile` R-BMS(`R-BMS.icns`), `x86_64 arm64`, `rbms-player --version` = 0.1.5, dmg 에 앱·`Applications`·문서 셋, Windows zip 에 exe·문서 셋, exe 리소스 `RT_ICON` 7·`RT_GROUP_ICON` 1. draft 본문은 v0.1.4 대비 노트(다른 사이트 이름 0). 에셋 dmg 27,136,494바이트, zip 12,928,385바이트. **draft**, 게시는 사용자 |
 | `v0.1.6` | `2bb868b`(release 워크플로의 버전 커밋, 부모 `eb2f238`) | 수동 실행 run 39318721794(2026-10-20) | dmg, zip, sha256 둘 | 메인이 내려받아 확인: SHA-256 일치(둘), dmg·앱 `stapler validate`, Gatekeeper `accepted, source=Notarized Developer ID`(dmg·앱), `codesign --verify --deep --strict`, `syspolicy_check distribution` 통과, `CFBundleShortVersionString` 0.1.6, `CFBundleIconFile` R-BMS(`R-BMS.icns`), `x86_64 arm64`, `rbms-player --version` = 0.1.6, dmg 에 앱·`Applications`·문서 셋, Windows zip 에 exe·문서 셋, exe 리소스 `RT_ICON` 7·`RT_GROUP_ICON` 1. draft 본문은 v0.1.5 대비 노트(판별 trace·과거 판 채우기, 다른 사이트 이름 0). 에셋 dmg 27,351,327바이트, zip 13,032,424바이트. **draft**, 게시는 사용자 |
+| `v0.1.7` | `d438294`(release 워크플로의 버전 커밋, 부모 `994def3`) | 수동 실행 run 39812316178(2026-10-23, 사용자가 직접 실행) | dmg, zip, sha256 둘 | 메인이 내려받아 확인: SHA-256 일치(둘), dmg·앱 `stapler validate`, Gatekeeper `accepted, source=Notarized Developer ID`(dmg·앱), `codesign --verify --deep --strict`, `syspolicy_check distribution` 통과, `CFBundleShortVersionString` 0.1.7, `CFBundleIconFile` R-BMS(`R-BMS.icns`), `x86_64 arm64`, `rbms-player --version` = 0.1.7, Windows zip 에 exe·문서 셋, exe 리소스 `RT_ICON` 7·`RT_GROUP_ICON` 1. draft 본문은 2026-10-22 고도화 노트(옵션 패널, 어시스트 등급, 색 행, 글자, 다른 사이트 이름 0). 에셋 dmg 27,923,586바이트, zip 13,307,121바이트. **draft**, 게시는 사용자 |
 
-`Cargo.toml` 의 workspace 버전은 가장 최근 릴리스 커밋의 값(지금 0.1.6)입니다. 원격 태그는 `v0.1.0`~`v0.1.6` 입니다(`git ls-remote --tags origin`). 게시 상태는 `v0.1.4` 만 게시, `v0.1.0`·`v0.1.3` 은 draft, `v0.1.1`·`v0.1.2` 는 draft 를 지우고 태그만 남았습니다(`gh release list`, 2026-10-15 확인).
+`Cargo.toml` 의 workspace 버전은 가장 최근 릴리스 커밋의 값(지금 0.1.7)입니다. 원격 태그는 `v0.1.0`~`v0.1.7` 입니다(`git ls-remote --tags origin`). 게시 상태는 `v0.1.4` 만 게시, `v0.1.0`·`v0.1.3` 은 draft, `v0.1.1`·`v0.1.2` 는 draft 를 지우고 태그만 남았습니다(`gh release list`, 2026-10-15 확인).
 
 ## 3. 서명·공증과 보안 경계
 
