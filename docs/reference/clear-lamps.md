@@ -1,24 +1,25 @@
 # 클리어 램프 조사 (요청 3: ASSIST 램프 세분화)
 
-> 최종 갱신 2026-10-22 · 대응 커밋 0323bd9
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
 
-이 문서는 클리어 램프가 정의되고, 정해지고, 저장되고, 전송되고, 그려지는 모든 곳과, 어시스트 클리어를 ASSIST HARD·ASSIST EXHARD 처럼 나누는 설계 대안을 정리한 조사 보고서다. 코드는 바꾸지 않았다. 근거는 2026-10-22 작업 트리(HEAD 0323bd9, 작업 트리에는 `docs/PROCESS.md` 수정만 있다)의 `파일:줄`이다. 기존 문서와 코드가 다른 곳은 7절에 따로 적었다.
+조사로 시작해 구현을 따라 고친 살아 있는 문서다. 0절(결론), 1~4절 중 현재 상태를 말하는 부분, 8절 결정은 구현 뒤의 코드 기준이고, 5절(원본·LR2·IIDX)과 6절(설계 대안 비교)은 조사 당시 그대로다. 문서와 코드가 다르면 코드를 믿었다. 근거는 저장소 루트 기준 `파일:줄` 이다. 결정은 사용자 지시 "끝까지 다 구현해놔" 에 따라 메인이 추천안(6.4절 안 c)으로 정했고 사용자는 아직 확인하지 않았다. ADR [어시스트 램프 등급](../acknowledge/2026-10-22-adr-assist-lamp-grade.md).
 
-읽은 것: `docs/HANDOFF.md`, `docs/play-options.md`(10절 전체), `docs/acknowledge` 의 SCRATCH AUTO·TOTAL·웹 클리어 ADR, `docs/reference/ai-features`, `docs/reference/skin-compat/README.md`, beatoraja 소스(`/Users/hyunseokbyun/development/beatoraja`), ModernChic 스킨(읽기만, 내용을 복사하지 않았다). 읽지 않은 것: `.env*`, 실제 HOME 의 `settings.ron`·`scoredb.sqlite`, 운영 DB. GUI 는 실행하지 않았다.
+구현(2026-10-22): `4d57c2a`(클라이언트 등급, 저장, 병합, 소급, 표시), `8d85b32`(웹 마이그레이션 0011, 운영 적용 web-db run 39693988962), `64c6120`(웹 등급 표시·순위·AI), `0c450db`(기본 스킨 등급 표시), `242397f`(코스 스테이지를 실제로 끝난 CLASS 계열 게이지로 저장·전송), `47a7f9c`(웹 AI 기록 질문 정렬·비교 합계, 등급 백필 액션). 운영 확인: 낡은 등급 행 0(`assist-grade-backfill-count`, run 39733088817), 등급이 매겨진(0 보다 큰) `chart_best` 행 398.
 
-실행한 검증(상태 확인용): `cargo test -p rbms-judge --locked --lib assist` 4개 통과, `cargo test -p rbms-player --locked --lib -- an_assisted_run_is_demoted only_the_single_light_assist` 2개 통과.
+조사 때 읽은 것: `docs/HANDOFF.md`, `docs/play-options.md`(10절 전체), `docs/acknowledge` 의 SCRATCH AUTO·TOTAL·웹 클리어 ADR, `docs/reference/ai-features`, `docs/reference/skin-compat/README.md`, beatoraja 소스(`/Users/hyunseokbyun/development/beatoraja`), ModernChic 스킨(읽기만, 내용을 복사하지 않았다). 읽지 않은 것: `.env*`, 실제 HOME 의 `settings.ron`·`scoredb.sqlite`, 운영 DB 의 행 내용. GUI 는 실행하지 않았다.
 
 ---
 
 ## 0. 결론 (먼저 읽을 것)
 
-1. 램프는 beatoraja `ClearType` 과 같은 11값 선형 id 하나다(0~10). 게이지 종류가 램프를 정하고(6종 선택 게이지, 9종 계산 게이지), 풀콤 조건이 되면 8~10 으로 덮고, 어시스트가 있으면 게이지·풀콤과 무관하게 3 또는 2 로 강등한다(1.3, 1.4절).
-2. 지금 SCRATCH AUTO 를 켜고 HARD 게이지로 클리어하면 램프는 LIGHT ASSIST(id 3, 와이어 `LightAssistEasy`)다. 풀콤이어도 같다. 테스트로 확인했다(1.5절). HARD 라는 사실은 램프에 남지 않고, 따로 저장되는 `gauge`·`assist` 열에만 남는다.
-3. 세분 램프를 만들 재료는 이미 저장돼 있다. 클라이언트의 판별 기록(`scorelog`)에는 끝난 게이지(`gauge`), 어시스트 단계(`assist` 0/1/2), 강등된 램프(`clear`)가 판마다 있다. 서버의 `score` 행에도 `gauge`, `scratch_auto`, `flags` 가 있다(2, 3절). 그래서 2.2절의 한계(어시스트 단계 2 의 원인 구분, 최고 기록 행의 갱신 규칙, 메모리 기록 책의 필드 부족)만 풀면 기존 기록까지 거의 전부 소급할 수 있다.
-4. 램프 id 는 단순한 이름이 아니라 정렬 키다. 클라이언트는 최고 램프를 id 의 최댓값으로 접고(`score.rs:299`, `scoredb.rs:615`), 웹은 순위를 `clear desc, ex_score desc, minbp asc` 로 매긴다(`best-scope.ts:114-127`). 어시스트 램프(2, 3)가 EASY(4) 아래에 있다는 성질이 "어시스트 판은 정상 판을 넘지 못한다"는 규칙을 지킨다.
-5. 와이어는 문자열 enum 이고 양쪽이 모르는 이름을 거절한다. Rust 클라이언트는 모르는 램프 이름이 한 줄이라도 있는 응답을 통째로 읽지 못하고(`chart.rs:219-222` 테스트), 서버 zod 는 모르는 `clear` 를 400 으로 막는다(`common.ts:25`). 이미 배포된 클라이언트(v0.1.2~v0.1.6 태그)가 있고 점수 본문은 다중 IR 프로필에 같은 바이트로 퍼진다(`ir-multi.md` 2절 7항). 새 램프 이름을 와이어에 싣는 안은 이 위험을 진다.
-6. 외부 Lua 스킨은 11칸을 전제로 한다. 선곡 막대 램프 목록 11개(`bars.rs:21`), 폴더 분포 11종(`bars.rs:32`), 분포 그래프 시트가 11열 미만이면 그래프를 그리지 않는다(`build.rs:177-178`). ModernChic 은 `noplay + 10종` 11개 램프를 위치로 넣는다(`Select/lua/songlist.lua:128-141`).
-7. 메인 추천: 램프 id 와 와이어 이름은 그대로 두고(호환 키), 어시스트 클리어에 "게이지 기준 등급"을 덧붙인다. 라벨은 둘을 합쳐 만들고, 최고 기록·순위의 비교 키는 `(clear, 등급, EX, BP)` 로 넓힌다. 제출 본문은 바뀌지 않는다(8절 D1).
+1. 램프는 beatoraja `ClearType` 과 같은 11값 선형 id 하나다(0~10). 게이지 종류가 램프를 정하고(6종 선택 게이지, 9종 계산 게이지), 풀콤 조건이 되면 8~10 으로 덮고, 어시스트가 있으면 게이지·풀콤과 무관하게 3 또는 2 로 강등한다(1.3, 1.4절). 구현은 이 체계를 바꾸지 않았다.
+2. SCRATCH AUTO 를 켜고 HARD 게이지로 클리어하면 램프는 여전히 LIGHT ASSIST(id 3, 와이어 `LightAssistEasy`)다. 풀콤이어도 같다. 이제 그 위에 어시스트 등급 ASSIST HARD(3)가 따라붙는다. 등급은 램프 id·와이어 이름·강등 규칙을 바꾸지 않는 파생 값이다(1.8절).
+3. 등급의 재료는 이미 저장돼 있었다(`scorelog.gauge`·`assist`, 서버 `score.gauge`). 클라이언트 `score` 에 열 `assist_grade` 를, 서버 `chart_best`·`course_best` 에 열 `assist_grade` 를 더했고(마이그레이션 0011), 기존 기록은 클라이언트가 DB 를 열 때 `scorelog` 에서 다시 접고(`refold_assist_grades`) 서버가 마이그레이션의 백필 UPDATE 로 소급했다.
+4. 램프 id 는 단순한 이름이 아니라 정렬 키다. 클라이언트는 최고 램프를 `(clear, 등급)` 쌍으로 접고(`RecordLamp`, `score.rs:132`), 웹은 순위를 `(clear, assist_grade, ex_score, minbp)` 순으로 매긴다(`best-scope.ts:26-31`). 등급은 id 3 안에서만 갈리므로 어시스트 판은 EASY(4) 이상의 정상 판을 넘지 못한다.
+5. 와이어는 문자열 enum 이고 양쪽이 모르는 이름을 거절한다. 새 램프 이름을 와이어에 싣는 안은 이 위험을 지므로 쓰지 않았다. 대신 서버 응답에 필드 `assist_grade`(0~4, 기본 0)를 additive 로 실었다. 제출 본문은 바뀌지 않았다(3.1, 3.7절).
+6. 외부 Lua 스킨은 11칸을 전제로 한다(4.3절). 외부 스킨에는 계속 0~10(어시스트 클리어는 id 3)만 주고, 기본 스킨만 확장 불린 21110~21134 로 등급을 읽는다(4.2절).
+7. 이름은 하나로 통일했다: id 2 ASSIST, id 3 LIGHT ASSIST, 등급 1~4 는 ASSIST EASY / ASSIST CLEAR / ASSIST HARD / ASSIST EXHARD. 이름 `ASSIST EASY` 는 EASY 게이지 클리어를 가리키고, ASSIST EASY 게이지로 클리어한 SCRATCH AUTO 판은 등급 없음(LIGHT ASSIST)이다(1.8절).
+8. 남은 것: `course_best.assist_grade` 는 항상 0 이다(코스는 게이지를 저장하지 않는다). 사용자 확인 대기 항목은 8절 각 결정의 "결정됨" 줄과 10절.
 
 ---
 
@@ -32,8 +33,8 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0 | NoPlay | NoPlay | NO PLAY (64,64,64) | NO PLAY, `lamp_off` (68,68,68), 두 번째 테마 (58,69,86) | NO PLAY #444444 | 100 | 없음 |
 | 1 | Failed | Failed | FAILED (0,0,128) | FAILED (255,0,0) | FAILED #ff0000 | 101 | 없음 |
-| 2 | AssistEasy | AssistEasy | ASSIST EASY (128,0,128) | ASSIST CLEAR (255,99,253) | ASSIST #ff63fd | 1100 | 없음 |
-| 3 | LightAssistEasy | LightAssistEasy | LIGHT ASSIST (255,0,255) | LIGHT ASSIST CLEAR (101,99,255) | L-ASSIST #6563ff | 1101 | 0 (ASSIST EASY 게이지) |
+| 2 | AssistEasy | AssistEasy | ASSIST (128,0,128) | ASSIST (255,99,253) | ASSIST #ff63fd | 1100 | 없음 |
+| 3 | LightAssistEasy | LightAssistEasy | LIGHT ASSIST (255,0,255), 등급 있으면 ASSIST EASY~EXHARD | LIGHT ASSIST (101,99,255), 등급 있으면 ASSIST EASY~EXHARD | LIGHT ASSIST #6563ff, 등급 있으면 ASSIST EASY~EXHARD | 1101 | 0 (ASSIST EASY 게이지) |
 | 4 | Easy | Easy | EASY (64,255,64) | EASY CLEAR (0,255,36) | EASY #00ff24 | 102 | 1 |
 | 5 | Normal | Normal | CLEAR (0,192,240) | CLEAR (255,187,0) | CLEAR #ffbb00 | 103 | 2, 6 |
 | 6 | Hard | Hard | HARD (255,255,255) | HARD CLEAR (223,223,223) | HARD #dfdfdf | 104 | 3, 7 |
@@ -42,8 +43,8 @@
 | 9 | Perfect | Perfect | PERFECT (136,136,255) | PERFECT (244,153,242) | PERFECT #f499f2 | 1103 | 없음 |
 | 10 | Max | Max | MAX (0,0,255) | MAX (234,243,0) | MAX #eaf300 | 1104 | 없음 |
 
-- 이름이 세 벌이다. 앱 화면(`format.rs`), 기본 스킨(`theme.lua`), 웹(`clear-lamp.ts`)이 id 2·3·6·7 에서 서로 다르다. `docs/HANDOFF.md:94`(미해결 8번)가 앱과 스킨의 두 벌을 이미 지적했고, 웹 라벨(`ASSIST`, `L-ASSIST`)까지 합치면 세 벌이다.
-- 색은 둘이다. 앱 화면은 beatoraja 공식 팔레트(`format.rs:114` 주석), 기본 스킨과 웹은 같은 자체 팔레트다(`theme.lua:139-150` 값이 `globals.css:57-67` 과 같다).
+- 이름은 하나로 통일했다(2026-10-22, 조사 때는 앱 `format.rs`, 기본 스킨 `theme.lua`, 웹 `clear-lamp.ts` 가 id 2·3·6·7 에서 서로 달랐다). 앱 `format.rs:114-166`, 기본 스킨 `theme.lua:163-186`, 웹 `clear-lamp.ts`(`lampLabel`)가 같은 이름을 쓴다. id 6·7 의 표기(앱 `HARD`/`EX-HARD`, 스킨 `HARD CLEAR`/`EX HARD CLEAR`, 웹 `HARD`/`EX HARD`)는 그대로 다르다. 앱 설정 설명 문구 `stage/settings/catalog.rs:147,169` 도 `the ASSIST lamp at best` 로 고쳤다(7절 1).
+- 색은 둘이다. 앱 화면은 beatoraja 공식 팔레트(`format.rs:114` 주석), 기본 스킨과 웹은 같은 자체 팔레트다(`theme.lua:139-150` 값이 `globals.css:57-67` 과 같다). 등급 네 색은 셋이 같은 값이다(1.8절).
 - 선택 가능한 게이지의 클리어 판정: 그루브 계열(ASSIST EASY, EASY, NORMAL)은 끝 값이 border 이상이어야 한다(7K 기준 border 60, 80, 80, `gauge.ron:271,280,289`). 서바이벌 계열(HARD, EXHARD, HAZARD)은 border 0 이라 값이 0 보다 크면 산다(`gauge.ron:298` 이하). 공통 판정은 `Gauge::is_cleared` = `value > 0 && value >= border`(`gauge.rs:316-318`).
 
 ### 1.2 게이지 → 램프 (`lamp_for_gauge`, `gauge.rs:146-155`)
@@ -60,8 +61,8 @@
 | EXCLASS | 아니오 | 7 | Hard (6) |
 | EXHARDCLASS | 아니오 | 8 | ExHard (7) |
 
-- 아홉 게이지는 모든 판정에 동시에 움직이고, 선택된 하나가 클리어를 정한다(`gauge.rs:393`, `GrooveGauge::update_with_rate` 가 아홉 개를 모두 갱신). 선택 게이지가 판 도중 바뀔 수 있다(GAUGE AUTO SHIFT, `gauge.rs:500-560`). 기록하는 게이지는 끝난 게이지다(`session.rs:863` `finished_gauge`, `app_result.rs:53-55` `reported_gauge`).
-- 게이지 이름 `ASSIST EASY` 와 램프 id 2 의 라벨 `ASSIST EASY`(앱 화면)는 서로 다른 것이다. ASSIST EASY 게이지로 어시스트 없이 클리어하면 램프는 id 3(LIGHT ASSIST)이고 id 2 가 아니다.
+- 아홉 게이지는 모든 판정에 동시에 움직이고, 선택된 하나가 클리어를 정한다(`gauge.rs:393`, `GrooveGauge::update_with_rate` 가 아홉 개를 모두 갱신). 선택 게이지가 판 도중 바뀔 수 있다(GAUGE AUTO SHIFT, `gauge.rs:500-560`). 기록하는 게이지는 끝난 게이지다(`session.rs:863` `finished_gauge`, 앱은 `app_result.rs:240` 의 `record.finished_gauge` 를 쓴다. 코스 스테이지는 CLASS 계열 게이지로 달리고 그 값 그대로 기록한다).
+- 게이지 이름 `ASSIST EASY`(0번 게이지)와 어시스트 등급 이름 `ASSIST EASY`(1번 등급)는 다른 것이다. ASSIST EASY 게이지로 어시스트 없이 클리어하면 램프는 id 3(LIGHT ASSIST)이고, ASSIST EASY 게이지로 SCRATCH AUTO 클리어를 해도 등급은 없다. 등급 ASSIST EASY 는 EASY 게이지로 SCRATCH AUTO 클리어한 판이다. 램프 id 2 의 라벨은 이제 `ASSIST` 다.
 
 ### 1.3 램프가 정해지는 순서 (한 판)
 
@@ -85,7 +86,7 @@
 | --- | --- | --- | --- | --- |
 | 어시스트 없음, 풀콤 아님 | 0 | 게이지 램프: ASSIST EASY 3, EASY 4, NORMAL 5, HARD 6, EX-HARD 7, HAZARD 8 | 갱신 | ranked |
 | 어시스트 없음, 끝 콤보가 지나간 노트 수와 같음 | 0 | MAX 10 (GREAT·GOOD 0), PERFECT 9 (GOOD 0), FULL COMBO 8 | 갱신 | ranked |
-| SCRATCH AUTO, 그 판의 턴테이블 레인에 노트가 있음 | 1 | LIGHT ASSIST 3 (게이지·풀콤 무관) | 갱신(규칙 세대 3 이상, `sets_best` `score.rs:90-96`) | ranked, SCRATCH AUTO 최고 기록 칸(`ranked-policy.ts:27,61-72`) |
+| SCRATCH AUTO, 그 판의 턴테이블 레인에 노트가 있음 | 1 | LIGHT ASSIST 3 (게이지·풀콤 무관), 등급은 끝난 게이지로(1.8절) | 갱신(규칙 세대 3 이상, `sets_best` `score.rs:90-96`) | ranked, SCRATCH AUTO 최고 기록 칸(`ranked-policy.ts:27,61-72`) |
 | SCRATCH AUTO 인데 턴테이블 노트가 없는 차트·턴테이블 없는 모드(9키) | 0 | 어시스트 없음과 같다 | 갱신 | ranked |
 | JUDGE WIDTH 또는 LN MARGIN 이 100% 초과(`judge_setup.rs:19-22`: 키 3개·스크래치 3개, 모두 여섯 판정 폭 중 하나라도, 또는 LN 여유) | 2 | ASSIST EASY 2 | 갱신 안 함(`updates_score` `lib.rs:345-347`) | unranked(`ASSIST` 표지) |
 | TOTAL 을 직접 지정(`total_override > 0`, `lib.rs:358,367`) | 2 | ASSIST EASY 2 | 갱신 안 함 | unranked(`TOTAL_OVERRIDE`) |
@@ -104,7 +105,7 @@
 
 ### 1.5 확정: SCRATCH AUTO + HARD 게이지 클리어
 
-경로: 게이지 HARD(`finished_gauge`)가 클리어 → `clear_lamp()` 는 Hard(풀콤이면 8~10) → `assist_level(true, false) = 1` → `assist_downgrade(lamp, Light) = LightAssistEasy` → `scorelog.clear = 3`, `gauge = 3`(HARD), `assist = 1`, 제출 `clear: "LightAssistEasy"`, `options.gauge: "Hard"`, `options.scratch_auto: true`, `options.assist: ["AUTO_SCRATCH"]`.
+경로: 게이지 HARD(`finished_gauge`)가 클리어 → `clear_lamp()` 는 Hard(풀콤이면 8~10) → `assist_level(true, false) = 1` → `assist_downgrade(lamp, Light) = LightAssistEasy` → `scorelog.clear = 3`, `gauge = 3`(HARD), `assist = 1`, 제출 `clear: "LightAssistEasy"`, `options.gauge: "Hard"`, `options.scratch_auto: true`, `options.assist: ["AUTO_SCRATCH"]`. 이 판의 어시스트 등급은 ASSIST HARD(3)다(`assist_grade(LightAssistEasy, Hard)`, 새 골든 `contract/client-requests/score-scratch-auto-hard.json`).
 
 테스트 근거(실행해서 통과 확인): `main_tests.rs:317-328` 의 `assisted_lamp(Hard, LIGHT_ASSIST) == LightAssistEasy` 와 `an_assisted_run_is_demoted_and_cannot_reach_a_full_combo_lamp`(`main_tests.rs:332-352`: 어시스트 1 에서 Easy~Max 전부 LightAssistEasy, 어시스트 2 에서 전부 AssistEasy, Failed·NoPlay 는 그대로). 엔진 쪽 `gauge.rs:747-753` 의 `assist_downgrade_replaces_every_cleared_lamp`. 계약 골든 `contract/client-requests/score-scratch-auto.json` 도 `clear: LightAssistEasy` 이다(그 골든의 `options.gauge` 는 `Normal`).
 
@@ -113,14 +114,37 @@
 - 진행 중 접기: `PlaySession::course_lamp(notes_before, counts_before)`(`session.rs:933-938`)가 지금까지의 판정 합계와 코스의 최장 연속 콤보로 `clear_lamp` 를 다시 부르고, 앱이 어시스트로 강등한다(`app_result.rs:774-778`). 코스 어시스트는 스테이지들의 OR 이다(`course_ir.rs:31-46` `CourseAssist`).
 - 결과 스킨 쪽 접기: `skin_host/result/course.rs:164-181` — 실패한 스테이지가 있으면 Failed, 이미 AssistEasy·LightAssistEasy 면 그대로, 코스 최장 콤보가 코스 노트 전부면 (GOOD, GREAT) 로 Max·Perfect·FullCombo, 아니면 마지막 스테이지의 끝난 게이지의 램프.
 - 코스 제출 본문의 `clear` 는 `clear_type_from_id(run.clear)` 의 `ir_clear`(`course_ir.rs:79`). 서버는 코스 램프를 검사하지 않는다(0.1.0 이 마지막 스테이지 램프를 보내서 꺼 둠, `course.service.ts:143-144`, `HANDOFF.md:89` 3번).
-- 코스 게이지는 CLASS 계열 셋(`GaugeIndex` 의 6~8번, `gauge.rs:23-33`)이고 선택 가능한 게이지 목록(`GaugeKind`)에는 없다. 선택 게이지가 코스 게이지이면 `finished_gauge` 가 `None` 이라 기록하는 게이지는 설정 게이지로 대체된다(`reported_gauge`, `app_result.rs:53-55`). 코스에서 어시스트 클리어를 게이지로 세분하려면 이 경우의 규칙이 따로 필요하다.
+- 코스 게이지는 CLASS 계열 셋(`GaugeIndex` 의 6~8번, `gauge.rs:23-33`)이고 선택 가능한 게이지 목록(`GaugeKind`)에는 없다. 조사 때는 선택 게이지가 코스 게이지이면 `finished_gauge` 가 `None` 이라 기록하는 게이지가 설정 게이지로 대체됐고(`reported_gauge`), 그 탓에 코스 스테이지의 SCRATCH AUTO 클리어가 설정 게이지의 등급으로 저장·전송됐다(리뷰 lamps-1). 2026-10-22 수리(`242397f`)로 `reported_gauge` 를 없애고 `record.finished_gauge`(`GaugeIndex`)를 저장(`scoredb_store.rs:220`)하고 `rbms_ir::mapping::ir_gauge_of_index`(`mapping.rs:62`)로 제출한다. 코스 스테이지는 CLASS(6), EXCLASS(7), EXHARDCLASS(8)로 기록되고 등급은 CLASS=ASSIST CLEAR, EXCLASS=ASSIST HARD, EXHARDCLASS=ASSIST EXHARD 다. 이미 저장된 행은 DB 를 열 때 `put_course_stages_on_class`(`scoredb/courses.rs:126`, 호출 `scoredb_store.rs:117`)가 남아 있는 코스의 스테이지 행(gauge < CLASS)을 CLASS 로 옮기고 등급을 다시 접는다. 코스를 지운 뒤의 스테이지 행은 식별할 수 없어 그대로다.
 
 ### 1.7 최고 램프의 병합과 규칙 세대
 
-- 한 차트의 `score` 행(차트×모드×LN 종류): 램프가 엄격히 높아질 때만 `clear`, `option`, `seed`, `gauge`, `assist` 를 그 판의 값으로 바꾼다(`scoredb.rs:615-621`). 같은 램프에서 게이지만 강해진 판은 `gauge`·`assist` 를 갱신하지 않는다. `lamp_counts = updates_best || !is_stale_rule_version(...)`(`scoredb.rs:614`)라서 최고 기록을 못 세우는 판(넓힌 판정)도 규칙 세대 2 이상이면 램프는 올린다. 클리어 횟수는 `clear > 1` 인 판마다 +1(`scoredb.rs:650`).
-- 메모리 기록 책(`ScoreBook`): 선곡의 막대 램프는 `best_clear_for_md5` 의 `max(clear)` 이다(`score.rs:299-311`). 어시스트이면서 규칙 세대 2 미만인 행은 제외한다(그 세대는 강등 전 램프를 저장했다, `reference-divergences.md` D-D9).
-- SQL 쪽 접기: `ScoreDb::best` 는 `ORDER BY clear DESC, ex DESC`(`scoredb.rs:449`), `chart_best_many` 는 `MAX(clear)`(`scoredb.rs:466`).
+- 한 차트의 `score` 행(차트×모드×LN 종류): 램프를 `(clear, assist_grade)` 쌍(`RecordLamp`, `score.rs:132`)으로 비교해 엄격히 높아질 때만 `clear`, `assist_grade`, `option`, `seed`, `gauge`, `assist` 를 그 판의 값으로 바꾼다(`merge_best`, `scoredb.rs:653-`). 같은 id 3 안에서 등급이 오른 판도 gauge·assist 를 따라간다. `lamp_counts = updates_best || !is_stale_rule_version(...)`(`scoredb.rs:654`)라서 최고 기록을 못 세우는 판(넓힌 판정)도 규칙 세대 2 이상이면 램프는 올린다. 클리어 횟수는 `clear > 1` 인 판마다 +1.
+- 메모리 기록 책(`ScoreBook`): 선곡의 막대 램프는 `best_lamp_for_md5`(`score.rs:392`)의 clear, 정렬·상세는 `(clear, 등급)` 쌍이다. `best_clear_for_md5` 는 시그니처(u8)가 그대로이고 그 쌍의 clear 를 돌려준다. 어시스트이면서 규칙 세대 2 미만인 행은 제외한다(그 세대는 강등 전 램프를 저장했다, `reference-divergences.md` D-D9).
+- SQL 쪽 접기: `ScoreDb::best` 는 `ORDER BY clear DESC, assist_grade DESC, EX DESC, minbp ASC`(`scoredb.rs:482`), `chart_best_many` 는 `MAX(clear * 5 + assist_grade)` 로 접고 clear 와 등급으로 나눈다(`scoredb.rs:500-511`).
 - 규칙 세대 `SCORE_RULE_VERSION = 4`(`score.rs:34`). 3 은 SCRATCH AUTO 가 턴테이블을 판정에서 뺀 세대(`score.rs:74`), 4 는 원본 기록 정의(`score.rs:64`). `sets_best(assist, rule_version)` 가 최고 기록 자격을 정한다(`score.rs:90-96`: 어시스트 0 이면 참, 1 이면 세대 3 이상, 그 외 거짓). 제출 본문에도 `extra.rule_version` 으로 간다(`app_result.rs:317`). 서버는 이 값을 AI 분석의 "기준 규칙" 필터(`>= 4`)에만 쓴다(`score-feature.constants.ts:50`, `judge-habit.service.ts:129`, `weekly-summary.service.ts:175`).
+
+### 1.8 어시스트 등급 (구현, 2026-10-22)
+
+램프 id(3), 와이어 이름, 강등 규칙, `SCORE_RULE_VERSION`(4), 제출 본문은 그대로다. 등급은 램프 3(`LightAssistEasy`) 안에서만 갈린다.
+
+| 등급 id | `AssistGrade` | 이름 | 되는 판 (강등 전 게이지가 주는 램프) | 앱 색 / 기본 스킨·웹 색 |
+| --- | --- | --- | --- | --- |
+| 0 | `None` | LIGHT ASSIST | 램프가 3 이 아닌 모든 판, ASSIST EASY 게이지의 클리어, 게이지를 모르는 판, 규칙 세대 2 미만 행, `assist = -1` 행 | (255,0,255) / `#6563ff` |
+| 1 | `Easy` | ASSIST EASY | EASY | `#3ad19f` |
+| 2 | `Clear` | ASSIST CLEAR | NORMAL, CLASS | `#c4a796` |
+| 3 | `Hard` | ASSIST HARD | HARD, EXCLASS | `#afb8ef` |
+| 4 | `ExHard` | ASSIST EXHARD | EX-HARD, HAZARD, EXHARDCLASS | `#ca76a9` |
+
+- 정의(엔진): `rbms_judge::AssistGrade`(`gauge.rs:180-`, `COUNT` 5, `id()`, `from_id()`)와 `rbms_judge::assist_grade(lamp, finished_gauge)`(`gauge.rs:229`). 램프가 `LightAssistEasy` 이고 게이지를 알 때만 `lamp_for_gauge` 로 접는다: Easy→Easy, Normal→Clear, Hard→Hard, ExHard·FullCombo(HAZARD)·Perfect·Max→ExHard, ASSIST EASY 게이지→None. 풀콤 계열이 섞여 보이는 것은 HAZARD 를 EXHARD 로 접으려는 것이다(어시스트 판은 풀콤 계열이 못 된다).
+- 정의(저장): `rbms-store` 는 `rbms-judge` 에 의존하지 않아(`scoredb.rs` 의 `CLEAR_FAILED_ID` 문서) 정수 거울을 따로 둔다. `ASSIST_GRADE_OF_GAUGE: [u8; 9]`(`score.rs:103-113`)와 `assist_grade_of(clear, gauge, assist, rule_version)`(`score.rs:122`)는 clear == 3, assist != -1(`ASSIST_UNRECORDED`), 규칙 세대 2 이상일 때만 표 값을 준다. 엔진 함수와 같은 답인지는 `format::tests::the_score_store_grades_every_stored_run_as_the_engine_does`(`format.rs:426`)가 램프 11 × 게이지 9 전부로 확인한다.
+- 열: 클라이언트 `score.assist_grade INTEGER NOT NULL DEFAULT 0`(`schema.sql:40`, 기존 이관 방식 `ADDED_COLUMNS` `schema.rs:68`, `SCORE_DB_SCHEMA_VERSION` 1 그대로). `scorelog` 에는 열이 없다(`clear`, `gauge`, `assist`, `rule_version` 에서 파생). `ScoreRecord.assist: i32` 를 serde default(-1)로 더했다(`score.rs:199`, `record_of` 가 scorelog 값으로 채움, 옛 `scores.ron` 이관은 기록된 assist 가 있으면 그 값, 없으면 예전 규칙 assisted → -1, 아니면 0).
+- 병합과 정렬: 1.7절.
+- 소급: `refold_assist_grades`(`scoredb.rs:774-`)가 `schema::migrate`(`schema.rs:50`)에서 `refold_reference_bests` 다음에 DB 를 열 때마다 돈다. 각 `score` 행의 clear 가 3 이면 같은 램프의 `scorelog` 행 가운데 최고 등급을, 동률이면 id 가 가장 작은 첫 판을 고르고, 등급이 다를 때만 쓰며 등급이 0 보다 크면 그 판의 gauge·assist 도 쓴다. clear != 3 인 행은 등급 0 으로 정리한다. 내부 스캔은 `WHERE l.clear = ?1`(LIGHT ASSIST)로 좁혀 있다(리뷰 lamps-2). 멱등이다(테스트 `opening_the_database_folds_the_assist_grade_from_the_plays` `scoredb/tests.rs:999`가 두 번째 실행의 `total_changes` 증가 0 을 확인). 구 빌드가 같은 DB 를 쓰며 행을 다시 써서 등급이 0 이 돼도 다음 실행에서 복구된다.
+- 코스 스테이지: 1.6절 마지막 항목.
+- 앱 표시: 결과 화면 라벨 `lamp_label_color(lamp, grade)`(`format.rs:151`, 호출 `app_result.rs:91`), 등급은 `rbms_judge::assist_grade(lamp, Some(record.finished_gauge))`(`app_result.rs:241`). 라벨 함수 둘: `clear_label_color`(등급 없는 램프, `format.rs:118`)와 `stored_lamp_label_color(RecordLamp)`(저장된 램프, `format.rs:164`). 선곡 상세의 최고 기록 라벨, 기록 모달, 기록 목록 행은 등급 이름(`scene.rs:245`, `app_input.rs:615`). 내장 선곡 목록의 막대 LED 는 등급 색(`SelectBar.assist_grade` `list.rs:633`, `scene.rs:135`, 리뷰 lamps-3). 선곡 정렬 Clear 는 `(clear, 등급)` 순(`list.rs:155`). 선곡 필터 CLEARED/NOT CLEARED 는 `ClearType::is_cleared()` 로 NoPlay·Failed 가 아니면 클리어(`list.rs:202-203`, 웹 기준과 같다). 문구: 결과 화면 `SCRATCH AUTO: TURNTABLE NOT COUNTED, ASSIST LAMP`(`stage/result.rs:830`), PLAY 메뉴 `WHILE ON: TURNTABLE NOT COUNTED, ASSIST LAMP BY GAUGE (E.G. ASSIST HARD)`(`play_menu.rs:122`).
+- 서버 순위 패널: 응답의 `assist_grade` 를 `RankingRow.record_lamp` 로 받고 램프가 LIGHT ASSIST 일 때만 등급을 붙인다(`ir_ranking.rs:180-186`). 램프 분포는 라벨 문자열이 아니라 `record_lamp.clear` id 로 센다(`skin_host/ir.rs:179`). 서버가 0~4 밖의 값(음수, 255 초과)을 보내면 그 순위 응답 전체의 역직렬화가 실패한다(`assist_grade: u8`). 서버 계약(0~4, 없으면 0)에 의존한다.
+- 바뀌지 않은 것: 선곡 막대 램프 목록(11개), 폴더 분포 11종(`bars.rs:21,32`), 결과의 370/371, 폴더 NUMBER 320~330, IR NUMBER 202~240. 외부 스킨은 계속 0~10 만 본다.
+- 등급 색 네 개는 각 게이지 램프색(easy, normal, hard, exhard)을 light-assist(`#6563ff`)와 OKLab 에서 35% 섞은 값이고, 기존 11색과 OKLab 거리가 12 이상이다(웹 W2c 보고). 앱 `format.rs:136-139`, 기본 스킨 `theme.grade_lamp`(`theme.lua:152-157`), 웹 `globals.css` 토큰 `--rbms-lamp-assist-easy/-clear/-hard/-exhard` 가 같은 hex 다. 같은지는 `format.rs` 테스트와 웹 `clear-lamp` 테스트가 확인한다.
 
 ---
 
@@ -136,10 +160,11 @@
 | `gauge` INTEGER | 끝난 게이지 id 0~8(`schema.rs:117-131`) | 램프를 올린 판의 값 | 세분 등급의 입력 |
 | `gauge_value` REAL | 끝난 게이지 % | 없음 | 클리어 확인용 |
 | `assist` INTEGER | 0, 1, 2. 옛 `scores.ron` 에서 이관된 어시스트 행은 -1(`ASSIST_UNRECORDED`, `migrate.rs:18,142`) | 램프를 올린 판의 값 | 세분 등급의 입력 |
+| `assist_grade` INTEGER NOT NULL DEFAULT 0 | 없음(파생) | 최고 램프의 어시스트 등급(0~4) | 구현됨(1.8절). 마이그레이션 `ADDED_COLUMNS` 와 `schema.sql` 양쪽에 있다 |
 | `rule_version`, `ln_mode`, `state`, `ir_submitted`, `replay_file`, `title` | 있음 | 일부 | 소급 대상 선별 |
 | 기타 | 판정 12칸, `combo`, `minbp`, `avgjudge`, `seed`, `random`, `playtime`, `date` | 판정 12칸, `playcount`, `clearcount` 등 | - |
 
-부수 테이블: `play_submission(log_id, body JSON, played_as)` 는 판이 끝날 때 만든 제출 본문 전체를 담는다. 따라서 그 판의 `options.assist` 태그, `options.scratch_auto`, `options.gauge` 가 원문으로 남아 있다(0.1.4 이후의 판). `play_trace(log_id, body)` 는 trace 본문이다(2.4절). `ir_sync`, `course_submission`, `course_sync` 는 전송 상태다. 스키마 세대는 `SCORE_DB_SCHEMA_VERSION = 1`(`schema.rs:12`)이고 열 추가는 `ADDED_COLUMNS`(`schema.rs:60-68`)에 `ALTER TABLE ADD COLUMN` 으로 하는 선례가 있다. 열 값을 바꾸는 `refold_reference_bests` 는 DB 를 열 때마다 돈다(`schema.rs:49`, `scoredb.rs:691`).
+부수 테이블: `play_submission(log_id, body JSON, played_as)` 는 판이 끝날 때 만든 제출 본문 전체를 담는다. 따라서 그 판의 `options.assist` 태그, `options.scratch_auto`, `options.gauge` 가 원문으로 남아 있다(0.1.4 이후의 판). `play_trace(log_id, body)` 는 trace 본문이다(2.4절). `ir_sync`, `course_submission`, `course_sync` 는 전송 상태다. 스키마 세대는 `SCORE_DB_SCHEMA_VERSION = 1`(`schema.rs:12`)이고 열 추가는 `ADDED_COLUMNS`(`schema.rs:60-68`)에 `ALTER TABLE ADD COLUMN` 으로 하는 선례가 있고 `assist_grade` 가 이 길로 들어갔다(`schema.rs:68`). 열 값을 바꾸는 `refold_reference_bests` 는 DB 를 열 때마다 돈다(`schema.rs:49`, `scoredb.rs:691`).
 
 ### 2.2 소급·재계산이 되는가
 
@@ -154,9 +179,11 @@
 | 이관 행(`assist = -1`) | - | 어시스트 종류를 알 수 없다 |
 | 메모리 기록 책 `ScoreRecord` | `ScoreRecord.gauge: String`(끝난 게이지 토큰, `gauge_token_of`), `assisted: bool` 뿐(`score.rs:102-141`, `scoredb_store.rs:242-267`) | `assisted` 만으로는 불가. `assisted = !sets_best(assist, rule)` 이므로 SCRATCH AUTO 판(세대 3 이상)은 `assisted=false` 로 읽힌다. 다만 종합 검토에서 확인한 대로 `clear == 3` 이고 `gauge` 가 ASSIST EASY 가 아니면 그 판은 강등된 어시스트 판일 수밖에 없다(`lamp_for_gauge` 가 3 을 주는 게이지는 ASSIST EASY 하나, `gauge.rs:146-155`). 따라서 게이지가 ASSIST EASY 인 판(어차피 가장 낮은 등급)과 세대 2 미만 행을 빼면 기존 필드로도 등급을 계산할 수 있다. 판을 정확히 가르려면 `assist` 필드 추가가 여전히 낫다 |
 
+구현 결과(2026-10-22): 위 표의 어려움 가운데 메모리 기록 책의 `assist` 필드 부족은 `ScoreRecord.assist` 추가로, 램프를 올린 판이 아닌 판의 게이지는 `scorelog` 에서 다시 접는 소급(1.8절)으로 풀었다. 단계 2 의 원인 구분(D4)은 하지 않았다.
+
 ### 2.3 리플레이에 옵션이 남는가
 
-`Replay`(`replay.rs:156`)에는 `scratch_auto`(설정 값. 실제로 노트가 빠졌는지가 아니다), `gauge`(설정 게이지 토큰. 끝난 게이지가 아니다), `random`, `seed`, `judge`(`ReplayJudge` `replay.rs:93`: 판정 알고리즘, 키·스크래치 폭 각 3개, LN 여유, LN 방식, 게이지 세트, 게이지 자동 전환과 하한, 오프셋 단계, 시계, `total_override`)가 남는다. 이 정보로 판을 다시 판정해 램프·어시스트 단계·끝난 게이지를 복원하는 코드가 이미 있다: `trace_backfill.rs:428-439` 의 `stored_as` 가 `assist_level(session.has_auto_played_notes(), custom_judge)` 와 `assisted_lamp` 로 행을 다시 만들고, `differs`(`trace_backfill.rs:482-518`)가 `("lamp", judged.clear, stored.clear)` 등을 비교한다. 즉 램프 정의를 바꾸면 소급 trace 검증이 옛 행과 어긋나 거절한다(`Refusal::Never`). 리플레이 파일은 AUTO REPLAY 가 켜진 사람이 친 판에만 있고 보관 정책으로 지워질 수 있다.
+`Replay`(`replay.rs:156`)에는 `scratch_auto`(설정 값. 실제로 노트가 빠졌는지가 아니다), `gauge`(설정 게이지 토큰. 끝난 게이지가 아니다), `random`, `seed`, `judge`(`ReplayJudge` `replay.rs:93`: 판정 알고리즘, 키·스크래치 폭 각 3개, LN 여유, LN 방식, 게이지 세트, 게이지 자동 전환과 하한, 오프셋 단계, 시계, `total_override`)가 남는다. 이 정보로 판을 다시 판정해 램프·어시스트 단계·끝난 게이지를 복원하는 코드가 이미 있다: `trace_backfill.rs:428-439` 의 `stored_as` 가 `assist_level(session.has_auto_played_notes(), custom_judge)` 와 `assisted_lamp` 로 행을 다시 만들고, `differs`(`trace_backfill.rs:482-518`)가 `("lamp", judged.clear, stored.clear)` 등을 비교한다. 즉 램프 정의를 바꾸면 소급 trace 검증이 옛 행과 어긋나 거절한다(`Refusal::Never`). 리플레이 파일은 AUTO REPLAY 가 켜진 사람이 친 판에만 있고 보관 정책으로 지워질 수 있다. 소급 검증 `stored_as` 는 이제 `record.finished_gauge` 로 행을 다시 만든다(`trace_backfill.rs:430-440`). 코스 스테이지 행의 저장 gauge 는 CLASS 계열인데 리플레이 헤더의 gauge 는 시작 게이지(설정 게이지)다(`app_result.rs:336`, `ir_replay.rs:119`). 스테이지 리플레이는 CLASS 게이지와 이어받은 게이지 값을 보존하지 않아 충실한 재생이 아니다(조사 이전부터).
 
 ### 2.4 trace
 
@@ -173,8 +200,8 @@
 ### 3.1 와이어
 
 - `ClearLamp`(`crates/rbms-ir/src/dto/chart.rs:15-29`)는 변형 이름 그대로의 문자열 enum 이다(대소문자 구분). 점수 제출(`score.rs:55`), 점수 기록 응답(`score.rs:181`), 코스 제출(`score.rs:346`)이 쓴다. `GaugeType` 은 아홉 값(`chart.rs:31-42`).
-- 모르는 이름은 디코드 실패다(`chart.rs:219-222`). `ScoreRecord` 등 DTO 에 `deny_unknown_fields` 는 없어(크레이트 안에 없음) 모르는 필드는 무시된다. 따라서 필드 추가는 하위호환이고 enum 값 추가는 아니다.
-- 계약 골든 32개가 `contract/client-requests/` 에 있고(`contract_requests.rs:35-68`), Rust 테스트가 실제 요청과 같은지, 웹 테스트가 서버 검사를 통과하는지 본다(`web/tests/dto/client-requests.test.ts`). 램프와 직접 관련된 골든: `score-scratch-auto.json`(`LightAssistEasy`), `course-scratch-auto.json`(`LightAssistEasy`), `score-widened-judge.json`(AssistEasy 계열), `score-autoplay.json`(`Max`), 나머지는 일반 램프. 갱신은 `RBMS_UPDATE_CONTRACT=1`(`contract_requests.rs:28-31`).
+- 모르는 이름은 디코드 실패다(`chart.rs:219-222`). `ScoreRecord` 등 DTO 에 `deny_unknown_fields` 는 없어(크레이트 안에 없음) 모르는 필드는 무시된다. 따라서 필드 추가는 하위호환이고 enum 값 추가는 아니다. 등급은 필드로 추가했다: `ScoreRecord.assist_grade: u8`(`crates/rbms-ir/src/dto/score.rs:203`, `#[serde(default)]`, 없으면 0).
+- 계약 골든 33개가 `contract/client-requests/` 에 있고(`contract_requests.rs:35-68`), Rust 테스트가 실제 요청과 같은지, 웹 테스트가 서버 검사를 통과하는지 본다(`web/tests/dto/client-requests.test.ts`). 램프와 직접 관련된 골든: `score-scratch-auto.json`(`LightAssistEasy`), `score-scratch-auto-hard.json`(신규, `LightAssistEasy` + `options.gauge: Hard`, 서버가 ASSIST HARD 로 파생), `course-scratch-auto.json`(`LightAssistEasy`), `score-widened-judge.json`(AssistEasy 계열), `score-autoplay.json`(`Max`), 나머지는 일반 램프. 갱신은 `RBMS_UPDATE_CONTRACT=1`(`contract_requests.rs:28-31`).
 - 다중 IR 프로필: 제출 본문은 클램프 후 한 번 만들어 모든 활성 프로필에 같은 바이트로 보낸다(`ir-multi.md` 2절 7항). 프로필의 서버가 rbms 서버가 아닐 수 있다.
 - `api_version` 은 1 이고(`crates/rbms-ir/src/lib.rs:35`) 서버는 다른 값을 400 으로 거절한다(`ir-api.md:12`).
 
@@ -183,7 +210,7 @@
 - 본문 스키마(`web/src/server/dto/score.ts:50`, `dto/common.ts:25`): `clear` 는 `z.enum(CLEAR_LAMPS)`, `options` 는 `z.object` 라서 모르는 키는 버려지고(strict 아님) 모르는 enum 값은 400. `extra` 는 자유 레코드.
 - 일관성 검사 `findSubmissionIntegrityFailure`(`score.service.ts:293-305`): EX, 판정 수 ≤ 노트 수, max_ex, minbp, 램프(`isClearLampConsistent` `score.service.ts:262-277`: 풀콤·퍼펙트·맥스만 판정 수로 확인하고 나머지 램프는 확인하지 않음), 파생값의 INT 범위. 판정 수는 `effectiveJudgeCounts`(`best-policy.ts:18-25`: 각 칸을 early+late 로 읽고 0 이면 합계 필드)로 센다. 램프와 `options.gauge`·`gauge_value`의 일치는 검사하지 않는다. 즉 서버는 어시스트 램프와 게이지가 맞는지 모른다.
 - 순위 가능 정책 `rankedPolicy`(`ranked-policy.ts:61-72`): 플래그 `AUTOPLAY`, `SCRATCH_AUTO`, `ASSIST`(태그 중 `AUTO_SCRATCH` 가 아닌 것이 있을 때), `JUDGE_WIDTH`(`judge_rate > 100`), `TOTAL_OVERRIDE`(`total_override > 0`), `UNKNOWN_BUILD`, `GUEST`. `SCRATCH_AUTO` 와 `UNKNOWN_BUILD` 는 순위를 막지 않는다(`ranked-policy.ts:27,38`). SCRATCH AUTO 는 `scratchAuto=true` 로 별도 최고 기록 칸에 들어간다.
-- 최고 기록 갱신 판정 `isBetterBest`(`best-policy.ts:39-43`): `clear` 가 다르면 큰 쪽, 같으면 EX, 같으면 BP 가 작은 쪽.
+- 최고 기록 갱신 판정 `isBetterBest`(`best-policy.ts:40-46`): `clear` 가 다르면 큰 쪽, 같으면 `assistGrade`(2026-10-22 부터), 같으면 EX, 같으면 BP 가 작은 쪽.
 
 ### 3.3 서버 DB 열
 
@@ -192,36 +219,43 @@
 | 테이블 | 램프 관련 열 | 인덱스 |
 | --- | --- | --- |
 | `score`(판마다, 67~130행) | `clear`(67), `gauge` tinyint(98, 0~8), `gauge_value`(97), `scratch_auto`, `assist` int(110, **태그 개수**이고 클라이언트의 0/1/2 단계가 아니다. `score.service.ts:184`), `judge_rate`, `total_override`, `autoplay`, `ranked`(123), `flags` JSON(124), `extra` JSON | `score_ranking_idx(chart_sha256, ranked, clear, ex_score)`(133) |
-| `chart_best`(차트×사용자×`scratch_auto`, 139~159행) | `clear`(146), `ex_score`, `minbp`, `max_combo`, `scratch_auto`, `score_id` | PK(`chart_sha256`, `user_id`, `scratch_auto`), `chart_best_rank_idx(chart_sha256, scratch_auto, clear, ex_score)`(158) |
+| `chart_best`(차트×사용자×`scratch_auto`, `schema.ts:141-`) | `clear`, `assist_grade` tinyint(148, 0~4, 신규), `ex_score`, `minbp`, `max_combo`, `scratch_auto`, `score_id` | PK(`chart_sha256`, `user_id`, `scratch_auto`), `chart_best_rank_idx(chart_sha256, scratch_auto, clear, ex_score)`, `chart_best_rank_grade_idx(chart_sha256, scratch_auto, clear, assist_grade, ex_score)`(161, 신규. 옛 색인은 additive 규칙에 따라 그대로 둬 앞부분이 겹친다) |
 | `replay` | `gauge` tinyint(180) | - |
 | `course_score`(261~) | `clear`(261), `scratch_auto`, `ranked` | `course_score_rank_idx(course_hash, ranked, clear, ex_score)`(298) |
-| `course_best`(~308) | `clear`(308), `scratch_auto` | PK(`course_hash`, `user_id`, `scratch_auto`) |
+| `course_best`(`schema.ts:305-`) | `clear`, `assist_grade` tinyint(312, 신규, **항상 0**: 코스 제출과 `course_score` 에 게이지가 없어 파생할 수 없다. 공유 비교 코드를 균일하게 하려고 열만 있다), `scratch_auto` | PK(`course_hash`, `user_id`, `scratch_auto`) |
 | `ai_goal.params`, `ai_result` | 램프 이름 문자열(JSON) | - |
 
-`chart_best` 에는 `gauge` 가 없다. `score_id` 로 `score.gauge` 를 조인해야 한다. 마이그레이션은 `web/drizzle/0000~0010`, 데이터 UPDATE 선례는 `0006_admin_seed.sql:1`. 운영 DB 작업은 `web-db.yml` 워크플로로 메인이 한다(`2026-10-14-adr-production-db-operations.md`).
+`chart_best` 에는 `gauge` 가 없다. `score_id` 로 `score.gauge` 를 조인해야 한다. 등급 열은 이 조인을 피하려고 최고 기록 행에 저장한다. 마이그레이션은 `web/drizzle/0000~0011`(0011 = `0011_assist_grade.sql`, 저널 `when` 1792606768379), 데이터 UPDATE 선례는 `0006_admin_seed.sql:1`. 운영 DB 작업은 `web-db.yml` 워크플로로 메인이 한다(`2026-10-14-adr-production-db-operations.md`).
+
+마이그레이션 0011(`drizzle-kit generate` 로 만들고 이름만 `0011_assist_grade` 로 바꿨다): ① `chart_best` 에 `assist_grade tinyint DEFAULT 0 NOT NULL`, ② `course_best` 에 같은 열, ③ 색인 `chart_best_rank_grade_idx`, ④ 마지막 문장은 수동 SQL 로 `chart_best` 를 `score` 와 조인해 `assist_grade = CASE WHEN score.clear = 3 THEN CASE score.gauge WHEN 1 THEN 1 WHEN 2 THEN 2 WHEN 3 THEN 3 WHEN 4 THEN 4 WHEN 5 THEN 4 WHEN 6 THEN 2 WHEN 7 THEN 3 WHEN 8 THEN 4 ELSE 0 END ELSE 0 END` 로 채운다(`updated_at` 은 바뀌지 않고, WHERE 가 없어 여러 번 돌려도 같다). SQL 의 CASE 와 TS 표 `ASSIST_GRADE_OF_GAUGE`(`assist-grade.ts:8-18`)가 같은지는 단위 테스트가 파일을 읽어 비교한다. 운영 적용은 마이그레이션 먼저(`8d85b32`, run 39693988962), 웹 코드는 그 뒤(`64c6120`)였다([web/architecture.md](../web/architecture.md) 3-2절).
+
+배포 사이 창: 마이그레이션과 코드 푸시 사이에 옛 코드가 `chart_best` 행을 바꾸면 `assist_grade` 가 낡은 채 남는다(옛 코드는 이 열을 쓰지 않는다). 보정 액션 `web-db.yml` 의 `assist-grade-backfill-count`(세기만: 낡은 행 수, 0 초과 등급 행 수, 점수 행이 사라진 행 수)와 `assist-grade-backfill`(세기 → 보정 → 세기)가 있다(`web/scripts/assist-grade.{count,backfill}.sql`, 보정은 바뀔 행에만 `WHERE` 가 걸려 멱등). 운영에서 낡은 행 0 을 확인했다(run 39733088817).
 
 ### 3.4 순위·비교 질의
 
-`web/src/server/compose/best-scope.ts` 전부가 `clear` 를 첫 키로 쓴다.
+`web/src/server/compose/best-scope.ts` 전부가 `(clear, assist_grade, ex_score, minbp)` 순서를 쓴다. 키 순서는 표 하나 `BEST_ORDER`(`best-scope.ts:26-31`)이고 비교 SQL 은 `isRankedAbove`(`:39`)가 만든다. 등급은 id 3 안에서만 갈리므로 어시스트 판은 더 높은 램프 위로 올라가지 못한다.
 
-- 두 칸(`scratch_auto` true/false)을 합칠 때의 `outranks`(15-25): `clear >` , 같으면 EX, 같으면 BP, 모두 같으면 일반 쪽이 이긴다.
-- `isBeatenBy`(93-98), `isRankedAheadOf`(103-109), `rankInList`(114-115 `rank() over (order by clear desc, ex_score desc, minbp asc)`), `listOrder`(121-127).
-- 호출 위치: 차트 순위·내 순위 `compose/index.ts:220-262`, 코스 `compose/course.ts:207-244`, 점수 제출 응답의 순위(`score.service.ts:330-407`).
-- SCRATCH AUTO 칸 안에서는 현재 규칙의 클라이언트가 보낸 클리어 판의 `clear` 가 모두 3 이라(넓힌 판정·TOTAL 을 겸한 판은 unranked 라 이 칸에 없다), 순위는 사실상 EX 로만 갈린다(어시스트 클리어가 3 으로 뭉치므로).
+- 두 칸(`scratch_auto` true/false)을 합칠 때의 `outranks`(`:51`): 키 순서로 앞서면 이기고 모두 같으면 일반 쪽이 이긴다.
+- `isBeatenBy`(`:122`), `isRankedAheadOf`(`:127`), `rankInList`(`:133`, `rank() over (order by clear desc, assist_grade desc, ex_score desc, minbp asc)`), `listOrder`(`:140`). 최고 기록 갱신은 `isBetterBest`(`best-policy.ts:40-46`)가 같은 순서로 비교한다.
+- 호출 위치: 차트 순위·내 순위 `compose/index.ts`, 코스 `compose/course.ts`, 점수 제출 응답의 순위(`score.service.ts`). 코스는 `COURSE_ASSIST_GRADE = NO_ASSIST_GRADE`(`course.service.ts:147`)라 등급이 항상 0 이다.
+- SCRATCH AUTO 칸 안의 순위가 조사 때는 사실상 EX 로만 갈렸으나(어시스트 클리어가 3 으로 뭉침) 이제 등급으로 먼저 갈린다. 기존 순위가 바뀌는 변경이다(8절 D5).
+- 서버 행 파생: 순위·활동·목록 행의 `assist_grade` 는 `score.gauge` 로 즉석 파생하고(`deriveAssistGrade`, `assist-grade.ts:30-31`), 비교·집계(`chart_best`)는 저장된 열을 쓴다. 둘은 같은 표라 일치한다. `deriveAssistGrade({clear, gauge})` 는 clear 가 3 이면 게이지별 등급(`ASSIST_GRADE_OF_GAUGE`), 아니면 0 이고 모르는 게이지 id 도 0 이다. 규칙 세대와 `scratch_auto` 는 입력이 아니다(세대 2 미만 행은 강등 전 램프를 저장했으므로 서버에 "LIGHT ASSIST 인데 게이지가 ASSIST EASY 가 아닌" 옛 행이 생길 수 없다).
 
 ### 3.5 집계·표시 소비처 (서버·웹, 램프 id 를 숫자로 비교하는 곳)
 
 | 위치 | 하는 일 | 의존 |
 | --- | --- | --- |
-| `dto/common.ts:3-34` | `CLEAR_LAMPS` 배열, `clearLampToId`(= 인덱스), `clearLampFromId`(범위 밖은 NoPlay), `MIN_CLEAR_LAMP_ID = clearLampToId('AssistEasy')` (= 2) | 순서 |
-| `shared/constants/clear-lamp.ts:1-47` | 화면용 같은 배열·`MIN_CLEAR_LAMP`·라벨·색 토큰. 두 배열의 일치는 `tests/dto/clear-lamps.test.ts:15-17` 가 지킨다 | 순서, 이름 |
+| `dto/common.ts:3-56` | `CLEAR_LAMPS` 배열, `clearLampToId`(= 인덱스), `clearLampFromId`(범위 밖은 NoPlay), `MIN_CLEAR_LAMP_ID = clearLampToId('AssistEasy')` (= 2), `ASSIST_GRADES`, `AssistGrade`, `assistGradeSchema`, `ASSIST_GRADE_NAMES`, `NO_ASSIST_GRADE`(44-56) | 순서 |
+| `shared/constants/clear-lamp.ts` | 화면용 같은 배열·`MIN_CLEAR_LAMP`·라벨·색 토큰, 등급 표시 계약(`ASSIST_GRADE_LABEL`, `lampLabel(lamp, grade)`, `lampBackground`, `DISPLAY_LAMPS`(11종을 15칸으로 펼친 목록), `isSameDisplayLamp`, `displayLampRank`). 라벨은 id 2 `ASSIST`, id 3 `LIGHT ASSIST`(`L-ASSIST` 약칭 폐기). 두 배열의 일치는 `tests/dto/clear-lamps.test.ts` 가 지킨다 | 순서, 이름 |
 | `compose/fe.ts:75`, `fe.service.ts:102` | 클리어 차트 수·클리어 수 = `clear >= MIN_CLEAR_LAMP_ID` (리더보드 `cleared_charts`, 플레이어 통계 `cleared`) | `>=` |
-| `fe.service.ts:67-70`, `compose/fe.ts:183-190` | 램프 분포 = `chart_best` 를 `clear`·`scratch_auto` 로 묶음 | 이름 |
+| `fe.service.ts:67-76`, `compose/fe.ts:183-190` | 램프 분포 = `chart_best` 를 `clear`·`assist_grade`·`scratch_auto` 로 묶음(`toLampDistribution`이 `scratch_auto` 를 합침) | 이름 |
 | `table-snapshot-filter.ts:11-22,57` | 발광 표 램프 필터(`all/noplay/failed/unclear/cleared/easy/clear/hard/exhard/fullcombo`), 램프 순서로 정렬·분포, 이름 문턱 | 순서, 이름 |
 | `ai-goal-form.tsx:10` | 목표 램프 후보 = `CLEAR_LAMPS.slice(indexOf(MIN_CLEAR_LAMP))` | 순서 |
 | `chart-leaderboard-panel.tsx:136`, `player-stats-panel.tsx:33`, `lamp-stack-bar.tsx`, `lamp-distribution.tsx` | 최고 램프(인덱스 비교), 분포 막대 | 순서, 이름 |
 | AI | 아래 3.6절 | 순서, 이름 |
-| `globals.css:57-67,289` | 램프 색 토큰 11개 | 이름 |
+| `globals.css:57-67,289` | 램프 색 토큰 11개와 등급 토큰 4개(`--rbms-lamp-assist-easy`, `-clear`, `-hard`, `-exhard`). 테스트가 15개 표시 색이 서로 다른 값인지 확인한다 | 이름 |
+
+등급이 닿은 곳(웹 W2c, `64c6120`): 차트 순위·코스 순위·플레이어 점수 목록의 `ScoreRecord`(`score.service.ts:217`), 활동 항목(`fe.service.ts:56`), 플레이어 통계 `lamps[]` 의 `{clear, assist_grade, count}`(`fe.service.ts:76`, `entities/player.type.ts:22`), 발광 표 기록 `TableRecord.assist_grade`(`table-snapshot.service.ts:132`). 컴포넌트 `LampLabel`·`LampStrip`·`LampSwatch`·`LampStackBar`·`LampDistribution`·`ScoreRow` 는 `assistGrade?`(기본 0)를 받는다. 이름이 길어진 표 칸은 폭을 늘렸고(차트 순위·코스 순위 128 → 144, 기록 질문 112 → 144) 약칭은 만들지 않고 `truncate` 를 유지했다. 클리어 집계(`MIN_CLEAR_LAMP_ID` = 2, `cleared_charts`, 표 필터 '클리어 (ASSIST 이상)')는 그대로다.
 
 ### 3.6 AI 기능이 램프를 쓰는 곳
 
@@ -236,6 +270,14 @@
 - 출력 스키마 `dto/ai.ts:223,309,423,482-483`, `dto/ai-play.ts:141,174,189` 가 `clearLampSchema`(이름 enum)로 검증한다. 저장된 `ai_result` 에 옛 이름이 있어도 이름이 유지되면 깨지지 않는다.
 - 문서: `docs/reference/ai-features/server.md:52,164,174`(`MIN_CLEAR_LAMP_ID`, `clear` 열).
 
+등급이 닿은 AI(웹 W2c, `47a7f9c`): 이름 등급을 더하고 필터 의미(램프 id 비교)는 그대로 둔다.
+
+- 응답·digest 필드 `assist_grade`: 추천·연습·목표 후보(`dto/ai.ts:224`), 기록 질문 행(`ai.ts:311`), 판 코치 play(`ai-play.ts:142`), 주간 요약의 `from_assist_grade`/`to_assist_grade`(`ai.ts:485-487`), 비교 합계 `judgeTotalsSchema`(`ai-play.ts:176`, `47a7f9c`).
+- 기록 질문 digest 에 `assist_grades`(이름 배열, `record-query.service.ts:234`)와 `lamp` 필드 설명에 등급 안내를 더했다. `lamp` 필터는 등급을 못 가른다(`VALUE_FORMAT.lamp`에 적혀 있다). 정렬은 등급을 가른다(`SORT_VALUE.lamp = CLEAR_LAMPS.indexOf(row.lamp) * ASSIST_GRADES.length + row.assist_grade`, 점수 source 는 `score.gauge` 에서 파생한 SQL CASE, `compose/ai-record-query.ts`, 리뷰 web-1).
+- 추천·목표·연습·주간 프롬프트에 `ASSIST_GRADE_RULE`(`ai-digest.ts:25`) 문장을 넣었고 프롬프트 버전을 1 에서 2 로 올렸다: `AI_GOAL_PROMPT_VERSION`, `AI_PRACTICE_PROMPT_VERSION`, `AI_RECOMMEND_PROMPT_VERSION`, `AI_WEEKLY_PROMPT_VERSION`, `AI_RECORD_QUERY_PROMPT_VERSION`(각 `service/domain/ai/*.service.ts`). 캐시된 AI 결과가 사용자가 다시 요청할 때 한 번 다시 만들어진다. 비교 합계(web-3)는 모델 digest 가 totals 를 담지 않아 프롬프트 버전을 올리지 않았다.
+- 주간 요약은 같은 id 안에서 등급이 오르면 램프 상승으로 센다(`lamp_ups`, `new_clears` 정의가 달라졌다). 목표의 남은 곡 정렬은 id 가 같으면 등급 높은 쪽이 앞이다. `listPriorBests` 는 `(차트, scratch_auto, clear, gauge)` 별 max(EX) 행을 돌려주고 서비스가 접는다.
+- 제한: `ASSIST_GRADE_RULE` 문장이 영어이고 모델 출력 품질은 실제 공급자로 확인하지 못했다(가짜 공급자 테스트만). 문장은 "그 등급이 이름하는 게이지의 SCRATCH AUTO 클리어" 라고 적는데 등급 1 은 ASSIST EASY 게이지가 아니라 EASY 게이지다(리뷰 web-2는 기각: 이름 규약과 일치).
+
 ### 3.7 호환 위험 정리
 
 | 조합 | 결과 |
@@ -245,6 +287,9 @@
 | 새 클라이언트가 기존 이름만 제출(새 필드는 추가) + 구 서버 | 안전. zod 가 모르는 키를 버린다 |
 | 서버가 추가 필드를 응답에 실음 + 구 클라이언트 | 안전(무시) |
 | 램프 id 일괄 변경 + 서버·클라이언트 순서 | 와이어는 이름이라 id 변경은 보이지 않지만, DB 일괄 UPDATE 와 앱 DB 이관이 한 번씩 필요 |
+| 서버가 응답에 `assist_grade` 를 실음 + 구 클라이언트(v0.1.6 이하) | 안전. Rust DTO 에 `deny_unknown_fields` 가 없어 무시된다. 구 클라이언트는 등급 없이 `LIGHT ASSIST` 로 보인다 |
+| 새 클라이언트 + `assist_grade` 를 아직 안 싣는 서버 | 안전. `#[serde(default)]` 로 0, 이름은 `LIGHT ASSIST` |
+| 마이그레이션 0011 과 코드 푸시 사이 | 옛 코드가 `chart_best` 를 바꾸면 낡은 등급이 남는다. 보정 액션 `assist-grade-backfill`(3.3절)로 바로잡는다 |
 
 ---
 
@@ -252,19 +297,19 @@
 
 ### 4.1 앱이 직접 그리는 화면
 
-- 라벨·색은 `format.rs:116-129` 한 곳(`clear_label_color`). 호출: 결과 화면(`app_result.rs:103`), 선곡 막대와 상세(`scene.rs:133,242`), 서버 순위 패널(`ir_ranking.rs:151-175`, `clear_type_from_lamp` 가 와이어 → 엔진 변환).
-- 결과 화면 어시스트 안내 문구: `result.rs:829-846` — `SCRATCH AUTO: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP`, `WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE`, `OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE`. 문구에 램프 이름이 박혀 있다. 설정 화면의 `SCRATCH_AUTO_NOTE`(`play_menu.rs:113`)도 같다.
-- 서버 순위 패널의 램프 분포는 라벨 문자열이 같은 id 를 찾는 방식이다(`ir_ranking.rs:179-183`): 라벨이 겹치면 낮은 id 로 간다. 클리어 합계는 id 2~10 범위(`ir_ranking.rs:341`).
-- 선곡 필터 `ClearFilter`(`list.rs:195-201`): NOT CLEARED 는 `lamp < Easy`, CLEARED 는 `lamp >= Easy`, FULL COMBO 는 `>= FullCombo`. 정렬 `SortMode::Clear` 는 id 오름차순(`list.rs:153`). 폴더 분포 배열은 `LAMP_KINDS = 11`(`list.rs:376,681`), 폴더 대표 램프는 분포의 가장 낮은 칸(`list.rs:583`). 곡 상세의 클리어 횟수는 `clear >= 2`(`scene.rs:200`), 최고 기록은 `clear` 큰 순 → EX 큰 순(`scene.rs:201`). 이 세 기준이 서로 다르다(7절).
+- 라벨·색은 `format.rs:114-166` 한 곳이다: `clear_label_color`(등급 없는 램프), `lamp_label_color(램프, 등급)`, `stored_lamp_label_color(RecordLamp)`. 호출: 결과 화면(`app_result.rs:91`), 선곡 막대 LED·상세·기록 모달(`scene.rs:135,245`), 기록 목록 행(`app_input.rs:615`), 서버 순위 패널(`ir_ranking.rs:151-186`, `clear_type_from_lamp` 가 와이어 → 엔진 변환).
+- 어시스트 안내 문구: 결과 화면 `stage/result.rs:830` — `SCRATCH AUTO: TURNTABLE NOT COUNTED, ASSIST LAMP`, 그 아래 `WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE`, `OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE`. PLAY 메뉴 `play_menu.rs:122`. 문구에서 램프 이름 `LIGHT ASSIST` 를 뺐다.
+- 서버 순위 패널의 램프 분포는 `record_lamp.clear` id 로 센다(`skin_host/ir.rs:179`). 조사 때는 라벨 문자열이 같은 id 를 찾는 방식이라 등급 라벨 행이 분포에서 빠질 위험이 있었다(`ir_ranking.rs` 의 옛 구현). 클리어 합계는 id 2~10 범위.
+- 선곡 필터 `ClearFilter`(`list.rs:165-206`): NOT CLEARED 는 `!lamp.is_cleared()`, CLEARED 는 `lamp.is_cleared()`(= NoPlay·Failed 가 아니면 클리어), FULL COMBO 는 `>= FullCombo`. 정렬 `SortMode::Clear` 는 `(clear, 등급)` 순(`list.rs:155`). 폴더 분포 배열은 `LAMP_KINDS = 11`, 폴더 대표 램프는 분포의 가장 낮은 칸. 곡 상세의 클리어 횟수는 `clear >= 2`(`scene.rs:202`), 최고 기록은 `(clear, 등급)` 큰 순 → EX 큰 순. 조사 때 서로 달랐던 클리어 기준 셋 가운데 필터는 웹 기준으로 맞췄다(7절 2).
 
 ### 4.2 기본 스킨 (`assets/skins/rbms-default/lua`)
 
-- `theme.lua:139-169`: `theme.lamp` 색과 `theme.clear[0..10]`(키, 이름, 색), `theme.clear_last = 10`. 색 목록에서 `assist`·`light_assist` 가 id 2·3 에 대응한다.
-- 선곡 막대: `select/list.lua:15,123-137` — 램프 id 0~10 마다 막대 안쪽 이미지 하나(`lamp_<key>` 스프라이트가 있으면 도는 프레임, 없으면 `lamp.color` 단색 블록). 아틀라스에 있는 램프 스프라이트는 `lamp_exhard`, `lamp_failed`, `lamp_fullcombo`, `lamp_max`, `lamp_perfect` 와 11열 분포 시트 `lamp_strip`, `lamp_strip_slate`(`atlas/select.lua:28-34`).
-- 폴더 분포 그래프: `select/list.lua:45,163-164` — `type = -1`(램프별), 시트 `divx=11`.
-- 선곡 정보창: `select/info.lua:53-65`(`CLEAR_OPTIONS[0..10]`, 옵션 id), `info.lua:276-286`(선택 곡의 램프 이름을 `theme.clear[index]` 로 그림), `info.lua:330-340`(폴더의 "CLEAR LAMPS" 11행).
-- 결과: `result/score.lua:28,52-70` — 이번 판 램프 = `event_index(CLEAR)` 로 `theme.clear[now]`, "램프 상승" 연출 조건은 `now > FAILED_CLEAR and now > event_index(TARGET_CLEAR)`(`score.lua:67`). 게이지 그래프 선 색은 `result/graphs.lua:25-37`(`theme.lamp.assist`, `easy`, `normal`, `hard`, `exhard`).
-- 호스트가 스킨에 램프를 주는 통로: 이미지 인덱스 370(`INDEX_CLEAR`)과 371(`INDEX_TARGET_CLEAR`)(`skin_host/mod.rs:83-84,385,405`), 선택된 막대의 램프 옵션 100~105·1100~1104(`skin_host/select.rs:110-121,281-286`), 폴더의 램프별 곡 수 NUMBER 320~330(`select.rs:334-339`, `integer.rs:235-245`), IR 순위의 램프 분포 NUMBER 202~240 의 11칸(`skin_host/ir.rs:133-134,282-340`), 결과의 `NUMBER_CLEAR`(370)·`NUMBER_TARGET_CLEAR`(371)(`integer.rs:64-65`).
+- `theme.lua:139-186`: `theme.lamp` 색, 등급 색 표 `theme.grade_lamp`(easy, clear, hard, exhard), `theme.clear[0..10]`(키, 이름, 색. id 2 `ASSIST`, id 3 `LIGHT ASSIST`), `theme.graded_clear = 3`, `theme.assist_grade[0..4]`(이름, 색), `theme.assist_grade_last = 4`. 등급 색을 `theme.lamp` 에 넣지 않은 이유: `tools/sprites.py` 가 `theme.lamp` 를 순서대로 읽어 `lamp_strip` 을 만들어서 11칸이 15칸이 되고 `generate-images --check` 가 select 이미지 차이를 낸다.
+- 선곡 막대: `select/list.lua:15,123-137` — 램프 id 0~10 마다 막대 안쪽 이미지 하나(`lamp_<key>` 스프라이트가 있으면 도는 프레임, 없으면 `lamp.color` 단색 블록). 어시스트 클리어는 계속 id 3 의 LIGHT ASSIST 색이다(등급 없음).
+- 폴더 분포 그래프: `select/list.lua:45,163-164` — `type = -1`(램프별), 시트 `divx=11`. 그대로.
+- 선곡 정보창: `select/info.lua:288-`: 선택 곡의 최고 램프가 `theme.graded_clear`(3)이면 `parts.lamp_names`(`parts.lua:180-199`)가 확장 불린 21110~21114(`SELECTED_BEST_ASSIST_GRADE_FIRST`)로 등급 이름·색을 그린다. 등급 0 은 1~4 가 모두 꺼졌을 때 그려 호스트가 답하지 않아도 이름이 비지 않는다(`parts.assist_grade_drawn`).
+- 결과: `result/score.lua:68-69`(이번 판, 21120~21124), `110-111`(이번 판 이전의 최고, 21130~21134)가 같은 `parts.lamp_names` 를 쓴다. 이전 최고 램프 글자색을 `sub` 에서 램프 색으로 바꿨다(등급 색을 보이려고 모든 램프에 일관 적용한 작은 시각 변화). 게이지 그래프 선 색은 `result/graphs.lua:25-37` 그대로.
+- 호스트가 스킨에 램프를 주는 통로: 이미지 인덱스 370(`INDEX_CLEAR`)과 371(`INDEX_TARGET_CLEAR`), 선택된 막대의 램프 옵션 100~105·1100~1104, 폴더의 램프별 곡 수 NUMBER 320~330, IR 순위의 램프 분포 NUMBER 202~240 의 11칸, 결과의 `NUMBER_CLEAR`(370)·`NUMBER_TARGET_CLEAR`(371)는 그대로 0~10 이다. 등급은 확장 불린 21110~21134 로만 간다(`option-panels.md` 3.4절 표).
 
 ### 4.3 외부 Lua 스킨이 기대하는 것 (beatoraja 0~10)
 
@@ -337,7 +382,9 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 호환: 원본 beatoraja 의 강등 규칙과 어긋나 IR 의 id 의미가 바뀐다. 구 클라이언트·구 서버가 같은 `clear` 이름을 다른 뜻으로 받는다(구 서버는 SCRATCH AUTO 판을 3 으로 가정하는 집계가 있다: 웹 ADR `2026-10-19-adr-web-clear-and-play-history.md` 1절).
 - 계약 테스트: `score-scratch-auto.json`, `course-scratch-auto.json` 의 `clear` 값이 바뀐다.
 
-### 6.4 안 (c) 호환 id 0~10 유지 + 어시스트 등급을 덧붙임 (추천)
+### 6.4 안 (c) 호환 id 0~10 유지 + 어시스트 등급을 덧붙임 (채택, 구현됨)
+
+구현 결과는 1.8절이고 아래는 조사 당시 설계다. 설계와 다르게 구현된 곳: 클라이언트 DB 에 열을 더하지 않는다고 했으나 `score.assist_grade` 열을 더했고(최고 기록 SQL 정렬과 소급 비교를 위해), 웹은 `chart_best`·`course_best` 에 열과 색인을 더했다.
 
 램프 id·와이어 이름·강등 규칙은 그대로 둔다. 어시스트로 강등된 클리어(램프 2, 3)에 대해서만 게이지 기준 등급을 파생한다.
 
@@ -383,14 +430,17 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 
 ## 7. 기존 문서와 코드가 다른 곳, 코드끼리 다른 곳
 
-1. 이름 세 벌(1.1절). `docs/HANDOFF.md:94` 는 두 벌만 적었다.
-2. "클리어"의 기준이 세 곳에서 다르다: 선곡 필터 `CLEARED` 는 `lamp >= Easy`(4) 라 ASSIST·L-ASSIST 를 클리어로 세지 않고 `NOT CLEARED` 에 넣는다(`list.rs:199-200`). 곡 상세의 클리어 횟수는 `clear >= 2`(`scene.rs:200`). 웹은 NO PLAY·FAILED 가 아니면 클리어(`MIN_CLEAR_LAMP_ID` = 2, `2026-10-19-adr-web-clear-and-play-history.md`). 앱의 `ClearFilter::Cleared` 만 웹의 2026-10-19 결정과 어긋난다.
-3. 원본에서 자동 연주 레인을 만드는 `AutoplayModifier` 는 DP BATTLE AUTO-SC 에서만 쓰이고, 거기서 modifier 가 올리는 ASSIST(2)는 버려지고 호출부가 단계 1 만 올린다(`BMSPlayer.java:238-254`). SP 에서 턴테이블을 자동으로 치는 옵션은 원본에 없고 rbms 의 SCRATCH AUTO 가 그 경로의 단계 1 을 재사용한 것이다. `mapping.rs:86-88` 의 주석은 이 1 을 정확히 인용하지만 같은 파일의 `assist_flags` 주석(`mapping.rs:121-124`)은 "`AutoplayModifier` 가 `AssistLevel.ASSIST` 를 올린다"고 써서 단계 2 처럼 읽힌다. 동작은 1 이고 문서·주석의 근거 표기만 둘로 갈려 있다.
-4. 원본이 어시스트로 세는 RANDOM 계열(H-RANDOM, ALL-SCRATCH, SPIRAL, S-RANDOM-EX 등)과 BPM 가이드·지뢰 제거 등을 rbms 는 어시스트로 세지 않거나 옵션 자체가 없다(1.4절, 5.1절). `docs/play-options.md` 는 이 차이를 적고 있지 않다.
-5. `docs/plan/research-2026-09-09/iidx-feature-gap.md:38` 은 LEGACY NOTE 를 "미구현"으로 적지만 지금은 표시 옵션으로 있다(`settings.rs:632`, 판정 불변이라 어시스트가 아니다). 같은 문서의 "클리어램프 10단계"는 코드의 11값(NO PLAY 포함)과 센 방식이 다르다.
-6. `ScoreRecord`(메모리 책)는 `assisted` 하나뿐이어서 `play-options.md` 10.1절이 말하는 "어시스트 단계"가 선곡·기록 목록 쪽에는 없다. 판별 기록 DB 에만 있다.
-7. 서버 `score.assist`(태그 개수)와 클라이언트 `scorelog.assist`(0/1/2 단계)는 같은 이름의 다른 값이다(3.3절).
-8. 서버는 어시스트 램프와 `options.gauge` 의 일치를 검사하지 않는다(3.2절). 현재 클라이언트는 항상 일치시켜 보내지만 서버 보증은 없다.
+조사 때의 목록이고 구현 뒤 상태를 덧붙였다.
+
+1. 이름 세 벌(1.1절): 앱·기본 스킨·웹을 한 이름으로 통일했다. `docs/HANDOFF.md` 미해결 8번은 이 구현으로 해소. 앱 설정 설명 문구 `stage/settings/catalog.rs:147,169` 의 옛 이름 `ASSIST EASY at best` 도 `the ASSIST lamp at best` 로 고쳤다(2026-10-22).
+2. "클리어"의 기준: 선곡 필터를 웹 기준(NO PLAY·FAILED 가 아니면 클리어)으로 맞췄다(`list.rs:202-203`). 곡 상세의 클리어 횟수 `clear >= 2` 와 웹 `MIN_CLEAR_LAMP_ID` = 2 는 같다.
+3. 원본에서 자동 연주 레인을 만드는 `AutoplayModifier` 는 DP BATTLE AUTO-SC 에서만 쓰이고, 거기서 modifier 가 올리는 ASSIST(2)는 버려지고 호출부가 단계 1 만 올린다(`BMSPlayer.java:238-254`). SP 에서 턴테이블을 자동으로 치는 옵션은 원본에 없고 rbms 의 SCRATCH AUTO 가 그 경로의 단계 1 을 재사용한 것이다. `mapping.rs:86-88` 의 주석은 이 1 을 정확히 인용하지만 같은 파일의 `assist_flags` 주석(`mapping.rs:121-124`)은 단계 2 처럼 읽힌다. 동작은 1 이다. 변화 없음.
+4. 원본이 어시스트로 세는 RANDOM 계열(H-RANDOM, ALL-SCRATCH, SPIRAL, S-RANDOM-EX 등)과 BPM 가이드·지뢰 제거 등을 rbms 는 어시스트로 세지 않거나 옵션 자체가 없다(1.4절, 5.1절). 변화 없음(D11).
+5. `docs/plan/research-2026-09-09/iidx-feature-gap.md:38` 은 LEGACY NOTE 를 "미구현"으로 적지만 지금은 표시 옵션으로 있다. 변화 없음.
+6. `ScoreRecord`(메모리 책)는 `assisted` 하나뿐이어서 선곡·기록 목록 쪽에 어시스트 단계가 없었다: `ScoreRecord.assist` 를 더해 해소(1.8절).
+7. 서버 `score.assist`(태그 개수)와 클라이언트 `scorelog.assist`(0/1/2 단계)는 같은 이름의 다른 값이다(3.3절). 변화 없음. 서버 등급은 `assist` 가 아니라 `clear` 와 `gauge` 로 파생한다.
+8. 서버는 어시스트 램프와 `options.gauge` 의 일치를 검사하지 않는다(3.2절). 등급 파생이 `score.gauge` 에 의존하므로 일치하지 않는 본문은 일치하지 않는 등급이 된다. 현재 클라이언트는 항상 일치시켜 보낸다.
+9. 코스 스테이지의 저장 gauge 와 리플레이 헤더 gauge 가 다르다(2.3절).
 
 ---
 
@@ -404,6 +454,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A. 단계는 D → A 로 나눠 진행.
 - 이유: id·와이어 이름·강등 규칙이 그대로라 구 클라이언트·구 서버·외부 스킨(11칸 고정)·원본 beatoraja 호환을 모두 지키고, 제출 본문이 안 바뀌어 계약 골든도 거의 그대로다. 필요한 데이터는 이미 저장돼 있어 소급도 된다. 어시스트 < EASY 순서 성질이 유지된다.
 - 영향: 클라이언트 `rbms-judge`(등급 파생 함수), `rbms-store`(병합 규칙, `ScoreRecord` 필드), 앱 표시 4곳(결과, 선곡, 기록 목록, 서버 순위 패널), 기본 스킨, 웹(열 추가, 비교 5곳, 표시 컴포넌트).
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 안 c(호환 id 유지 + 어시스트 등급). 단계 D → A 로 나누지 않고 한 번에 구현했다. ADR [어시스트 램프 등급](../acknowledge/2026-10-22-adr-assist-lamp-grade.md).
 
 ### D2. 세분 등급의 목록과 순서
 
@@ -411,6 +462,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A. 순서는 낮은 쪽부터 EASY → NORMAL → HARD → EXHARD, 모두 EASY 램프(4)보다 아래.
 - 이유: 사용자가 든 예(ASSIST HARD, ASSIST EXHARD)가 정상 램프(EASY, CLEAR, HARD, EX HARD)의 대응이다. ASSIST EASY 게이지와 EASY 게이지는 둘 다 쉬운 그루브 게이지라 갈라도 실익이 작다. HAZARD 는 어시스트 상황에서 의미를 줄 근거가 없다. 어시스트 클리어가 풀콤 계열이 못 되는 것은 규칙 그대로 둔다.
 - 영향: 등급 열거형 크기, 스킨의 새 색 4개, 기본 스킨 막대·정보창 행 수, 웹 라벨·색 토큰.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 추천 A(4등급 EASY·NORMAL·HARD·EXHARD, HAZARD 는 EXHARD 에 합침)를 따르되 ASSIST EASY 게이지의 클리어는 EASY 등급에 합치지 않고 등급 없음(LIGHT ASSIST)으로 두었다. 등급 이름 ASSIST EASY 는 EASY 게이지 클리어를 가리킨다(1.8절). 사용자가 이 이름 규약(ASSIST EASY 게이지와 ASSIST EASY 등급이 다른 것)을 확인해야 한다.
 
 ### D3. 표시 이름
 
@@ -418,6 +470,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A.
 - 이유: 사용자 표현과 같다. id 2 의 이름이 새 등급 이름 "ASSIST EASY" 와 충돌하므로 id 2 를 "ASSIST" 로 줄여야 한다(웹은 이미 `ASSIST`, 앱은 `ASSIST EASY`, 기본 스킨은 `ASSIST CLEAR`). 이 기회에 `docs/HANDOFF.md:94` 의 이름 불일치를 앱·기본 스킨·웹 세 곳에서 한 번에 통일한다.
 - 영향: `format.rs`, `theme.lua`, `clear-lamp.ts`, 결과 화면 안내 문구(`result.rs:829`, `play_menu.rs:113`), 테스트 문자열, 가이드 문서. 이름 통일 자체는 D1 과 독립으로 먼저 할 수 있다.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 'ASSIST ' + 등급, 등급 없음은 LIGHT ASSIST, id 2 는 ASSIST. 앱·기본 스킨·웹 세 곳을 한 번에 통일했다(1.1절). 남은 옛 이름: 앱 설정 설명 문구(7절 1).
 
 ### D4. 어시스트 종류별 적용 범위
 
@@ -425,6 +478,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A.
 - 이유: id 2 는 항상 unranked 이고 최고 기록도 못 세워 보여 줄 가치가 작다. 원인(넓힌 판정 vs TOTAL vs SCRATCH AUTO 겸용)이 판별 기록 열에서 구분되지 않아(2.2절) 소급 정확도도 떨어진다. 구조는 나중에 id 2 로 확장할 수 있게 둔다.
 - 영향: 파생 함수의 조건, 소급 SQL 범위, 웹 표시.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. SCRATCH AUTO(id 3)만 세분한다. id 2(넓힌 판정·TOTAL)는 등급이 없다.
 
 ### D5. 비교·순위에 등급을 쓸 범위
 
@@ -432,6 +486,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A, 단 웹 순위 키는 2단계(표시 → 병합 → 순위 순)로.
 - 이유: 등급이 순위에 안 들어가면 SCRATCH AUTO 칸의 순위는 계속 EX 만으로 갈려 "ASSIST HARD 가 ASSIST NORMAL 보다 높다"가 순위에 나타나지 않는다. 반대로 순위 키 변경은 SCRATCH AUTO 칸의 기존 순위를 바꾸므로 사용자 확인이 필요하다.
 - 영향: SCRATCH AUTO 최고 기록 칸의 순위, 합산 모드(`outranks`)에서 일반 판과의 비교(등급이 EASY 아래라 일반 클리어를 못 넘는 성질은 유지), `best-scope.ts` 전부, 클라이언트 `merge_best`.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 클라이언트 최고 램프 접기와 웹 순위 키 모두 `(clear, 등급, EX, BP)`. 추천은 웹 순위 키를 단계(표시 → 병합 → 순위)로 나누는 것이었으나 한 번에 구현했다. SCRATCH AUTO 칸의 기존 순위가 바뀐다(3.4절).
 
 ### D6. 기존 기록 처리
 
@@ -439,6 +494,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A. 규칙 세대 2 미만과 `assist = -1` 행은 제외.
 - 이유: 필요한 입력이 이미 저장돼 있고 `refold_reference_bests`(`scoredb.rs:691`)처럼 매번 안전하게 다시 접는 선례가 있다. 사용자의 기존 SCRATCH AUTO 기록 대부분이 이 대상이다(`play-options.md` 10.4절, 운영 사용자의 판은 대부분 SCRATCH AUTO, `2026-10-19-adr-web-clear-and-play-history.md`).
 - 영향: 클라이언트 DB 열기 경로, 서버 마이그레이션 0011(additive)과 최고 기록 재선정(`web-db.yml` 로 운영 적용, 파괴적 작업이 아님), 소급 실패 시 폴백(등급 없음 → "LIGHT ASSIST").
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 클라이언트는 DB 를 열 때 `scorelog` 에서 다시 접고(규칙 세대 2 미만·`assist = -1` 제외), 서버는 마이그레이션 0011 의 백필 UPDATE 와 보정 액션으로 소급했다. 서버 SCRATCH AUTO 칸의 최고 기록 재선정은 하지 않았다: 백필은 `chart_best` 가 가리키는 `score` 의 값만 채운다. 같은 차트에서 게이지가 다른 SCRATCH AUTO 판이 둘 이상인 사용자는 EX 로 고른 최고 기록보다 등급이 높은 다른 판이 `score` 에 있을 수 있고, 그 최고 기록은 다음에 더 높은 `(clear, 등급, EX, BP)` 판을 제출할 때 바뀐다.
 
 ### D7. 웹 반영 범위
 
@@ -446,6 +502,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A.
 - 이유: 웹은 와이어 호환 위험(3.7절)이 가장 큰 곳이라 additive 변경부터 배포하고 순위 키는 별도 결정(D5)에 맞춘다. AI 기능은 id 순서·이름에 의존(3.6절)하므로 id 를 안 바꾸는 안에서는 별도 수정이 거의 없다.
 - 영향: `dto/common.ts`·`clear-lamp.ts`(등급 상수), 표시 컴포넌트(`features/lamp/*`, `score-row.tsx` 등), `compose/fe.ts`(분포), 필요 시 응답 DTO 에 필드 추가, 웹 테스트 고정값.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A 의 범위를 단계 없이 한 번에 구현했다(표시, `chart_best`·비교·순위, AI·집계). 배포는 마이그레이션 0011 → 웹 코드 순서(두 번 푸시).
 
 ### D8. 규칙 세대와 구 빌드 공존
 
@@ -453,6 +510,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A.
 - 이유: 병합 규칙 변경이 "저장된 값의 의미"를 바꾸지 않고 비교 방식만 넓히며, 서버 AI 의 기준 규칙 필터(`>= 4`)와 `sets_best` 가 이미 4 에 맞춰져 있다. 구 빌드가 같은 DB 를 열어 옛 규칙으로 접어도 다음 실행에서 바로잡힌다.
 - 영향: `score.rs:34`, `scoredb.rs:613-652`, 문서 `play-options.md` 10.11절.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. `SCORE_RULE_VERSION` 4 유지(`score.rs:34`). 구 빌드가 같은 DB 를 열어도 다음 실행에서 바로잡힌다.
 
 ### D9. 외부 스킨에 주는 값
 
@@ -460,6 +518,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A.
 - 이유: 11칸 전제를 지키고(4.3절) 새 id 가 없으니 번역 계층도 필요 없다.
 - 영향: `skin_host` 에 rbms 확장 속성 한 개, 기본 스킨 `theme.lua`·`list.lua`·`info.lua`·`score.lua`, 아틀라스 이미지(없으면 단색 블록으로 폴백).
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 외부 스킨에는 0~10, 기본 스킨만 확장 불린 21110~21134(4.2절).
 
 ### D10. 이름 정리와 클리어 기준 정리
 
@@ -467,6 +526,7 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A.
 - 이유: 7절 1·2항의 불일치가 이미 사용자에게 보이는 문제이고 세분을 넣으면 더 눈에 띈다.
 - 영향: `list.rs:195-201`, `HANDOFF.md` 미해결 8번.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 이름 통일과 선곡 필터 CLEARED 를 웹 기준으로 맞춤(7절 1·2).
 
 ### D11. 원본 어시스트 원인 확장 (이번 범위 밖)
 
@@ -474,17 +534,19 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - 추천: A.
 - 이유: 요청 범위(램프 세분화)와 별개이고, 세면 기존 기록과 서버 순위 정책(`ranked`)이 함께 바뀐다.
 - 영향: `assist_level` 입력, 규칙 세대, 서버 `assistFlags`.
+- 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 하지 않았다.
 
 ---
 
-## 9. 구현 때 건드릴 곳 요약 (추천안 기준 체크리스트)
+## 9. 구현한 곳 요약 (추천안 기준 체크리스트, 모두 완료)
 
-- 클라이언트 코어: `crates/rbms-judge/src/gauge.rs`(등급 열거형과 `(clear, 끝난 게이지, 어시스트 단계)` 파생 함수, `clear_type_id` 테스트는 불변), `crates/rbms-store/src/score.rs`(`ScoreRecord.assist`, 비교 키), `crates/rbms-store/src/scoredb.rs`(`merge_best`, `best`, `chart_best_many`), `scoredb/schema.rs`(재접기 호출), `apps/rbms-player/src/scoredb_store.rs`(`record_of`).
-- 클라이언트 표시: `apps/rbms-player/src/format.rs`, `app_result.rs`(결과 라벨), `stage/select/scene.rs`·`list.rs`(막대·필터·정렬·분포), `ir_ranking.rs`(서버 응답 등급 필드가 생기면), `skin_host/*`(확장 속성), `result.rs:829`·`play_menu.rs:113`(문구), `trace_backfill.rs:498`(`lamp` 비교는 불변이어야 한다).
-- 기본 스킨: `assets/skins/rbms-default/lua/theme.lua`, `select/list.lua`, `select/info.lua`, `result/score.lua`, `atlas/select.lua`.
-- 웹: `web/drizzle/0011_*.sql` + `meta`, `db/schema.ts`, `compose/best-scope.ts`, `compose/index.ts`, `compose/course.ts`, `service/domain/score/best-policy.ts`, `score.service.ts`, `dto/common.ts`, `shared/constants/clear-lamp.ts`, `globals.css`, 램프 표시 컴포넌트, `tests/dto/clear-lamps.test.ts`, `tests/components/lamp-label.test.tsx`, `tests/db/scratch-auto-ranking.test.ts`, `tests/db/clear-lamps-and-history.test.ts`.
-- 계약: 기존 골든 불변을 확인하고 SCRATCH AUTO + HARD 골든 하나 추가(`contract_requests.rs:35-68` 의 `CONTRACT_FILES` 에 이름 추가, `RBMS_UPDATE_CONTRACT=1` 로 생성).
-- 문서: `docs/play-options.md` 10.2·10.11절, `docs/theme.md`, `docs/web/*`, `docs/acknowledge`(ADR 신규), `docs/HANDOFF.md` 미해결 8번.
+- 클라이언트 코어: `crates/rbms-judge/src/gauge.rs`(`AssistGrade`, `assist_grade`), `crates/rbms-store/src/score.rs`(`ASSIST_GRADE_*`, `assist_grade_of`, `RecordLamp`, `ScoreRecord.assist`), `scoredb.rs`(`merge_best`, `best`, `chart_best_many`, `refold_assist_grades`), `scoredb/schema.rs`·`schema.sql`(열), `scoredb/courses.rs`(`put_course_stages_on_class`), `apps/rbms-player/src/scoredb_store.rs`(`record_of`, 코스 스테이지 gauge).
+- 클라이언트 표시: `format.rs`, `app_result.rs`, `stage/select/{scene,list}.rs`, `app_input.rs`, `ir_ranking.rs`, `skin_host/{extension,select,result,ir}.rs`, `stage/result.rs:830`·`play_menu.rs:122`(문구), `trace_backfill.rs`(`stored_as` 가 `record.finished_gauge`), `crates/rbms-ir/src/{dto/score.rs,mapping.rs}`(`assist_grade` 필드, `ir_gauge_of_index`).
+- 기본 스킨: `lua/theme.lua`, `lua/parts.lua`, `lua/props.lua`, `lua/select/info.lua`, `lua/result/score.lua`.
+- 웹: `web/drizzle/0011_assist_grade.sql` + `meta`, `db/schema.ts`, `compose/best-scope.ts`, `compose/{index,course,fe,table-snapshot,ai-score-features,ai-play-features,ai-record-query}.ts`, `service/domain/score/{assist-grade,best-policy,score.service}.ts`, `dto/{common,score,table-snapshot,ai,ai-play}.ts`, `shared/constants/clear-lamp.ts`, `globals.css`, 램프 표시 컴포넌트, AI 서비스 8개, `web/scripts/assist-grade.{count,backfill}.sql`, `.github/workflows/web-db.yml`.
+- 계약: 기존 골든 불변, 새 골든 `score-scratch-auto-hard.json`(`contract_requests.rs:53`, `:588`).
+- 테스트(새): 엔진 등급 단위 테스트 7개(`rbms-judge`), 저장 파생·병합·`chart_best`·refold 멱등, 앱 `the_score_store_grades_every_stored_run_as_the_engine_does`·코스 스테이지·내장 막대 LED, 웹 `assist-grade.test.ts`(마이그레이션 SQL 과 TS 표 일치), `best-scope-sql.test.ts`, DB 테스트 `tests/db/assist-grade.test.ts`·`assist-grade-scripts.test.ts`.
+- 문서: 이 문서, [ADR](../acknowledge/2026-10-22-adr-assist-lamp-grade.md), `docs/reference/ir-api.md`, `docs/reference/ai-features/server.md`, `docs/backend/{data-model,api-spec}.md`, `docs/web/architecture.md` 3-2, `docs/HANDOFF.md` 미해결 8번(해소). `docs/play-options.md` 10.2·10.11절, `docs/theme.md`, `docs/skin.md` 는 이 구현 전 상태를 적고 있을 수 있다(이 문서 소유 밖).
 
 ---
 
@@ -494,3 +556,11 @@ LR2 형식 스킨의 램프 번호는 beatoraja 로더 주석이 정의한다: `
 - LR2·IIDX 본가의 어시스트와 램프 결합 규칙(5.2절).
 - beatoraja `ScoreData.assist` 의 쓰임(5.1절 끝).
 - 원본 beatoraja 에서 "legacy note" 로 불리는 옵션의 정확한 소스 대응(5.1절 추정).
+- (구현 뒤 추가) 새 등급 색 4개를 실제 화면에서 눈으로 대조하지 못했다. 계산으로 고른 값이고 OKLab 거리 12 이상만 스크립트로 확인했다. 다크 테마의 대비도 보지 못했다(램프 토큰은 원래 테마 독립).
+- 기본 스킨의 등급 표시 캡처는 헤드리스다. 결과 화면 등급 캡처는 autoplay + 스크래치 레인 자동이라는 앱이 실제로 만들지 않는 조합의 고정물이다(표시 경로 확인용).
+- 외부 스킨(ModernChic)에서 어시스트 클리어가 LIGHT ASSIST(id 3) 그대로 보이는지 실제로 확인하지 않았다(설계상 0~10 만 준다).
+- `ASSIST_GRADE_RULE` 영어 문장과 프롬프트 버전 2 의 모델 출력 품질을 실제 공급자로 확인하지 못했다(가짜 공급자 테스트만).
+- 서버 SCRATCH AUTO 칸의 최고 기록 재선정은 하지 않았다(D6). 필요하면 `chart-notes.repair.sql` 형태의 별도 복구 스크립트로 만들 수 있다.
+- `course_best.assist_grade` 는 항상 0 인 죽은 열이다. 코스에 등급을 줄지(코스 제출·`course_score` 에 게이지 추가) 열을 지울지는 사용자 결정이다.
+- `chart_best_rank_idx` 와 `chart_best_rank_grade_idx` 는 앞부분이 겹치는 중복 색인이다. 옛 코드와의 공존이 끝나면 후속 마이그레이션에서 옛 것을 지우면 된다.
+- 계약 테스트의 기존 결함: `replay-long`·`replay-random` 골든의 `score_id`(`sc_3`)가 캡처 서버 요청 수에 따라 달라져 `RBMS_UPDATE_CONTRACT=1` 실행 때 `sc_4` 로 바뀔 수 있다(수정 전부터 있던 시간 의존 동작이라 손대지 않았다).

@@ -1,6 +1,6 @@
 # UI Theme (`theme.ron`)
 
-Last updated 2026-10-15 · matches ea698a9 (S18 and S19 did not change the theme)
+Last updated 2026-10-22 · matches 47a7f9c (`theme.ron` and `Theme` did not change; the default skin pack's own `theme.lua` gained the tokens listed under "The default skin pack's own tokens")
 
 rbms separates three kinds of look-and-feel:
 
@@ -96,7 +96,7 @@ Hints are at 4.5 or more on the ground, a panel and a raised panel. They are bel
 These convey data, not chrome, so they keep their hue whatever the theme:
 
 - judgement colours (PGREAT/GREAT/GOOD/BAD/POOR/MISS) and FAST (cyan) / SLOW (orange);
-- clear-lamp colours and clear names, including COURSE CLEAR / COURSE FAILED;
+- clear-lamp colours and clear names, including COURSE CLEAR / COURSE FAILED, and the four assist grades of a SCRATCH AUTO clear (ASSIST EASY, ASSIST CLEAR, ASSIST HARD, ASSIST EXHARD: `3ad19f`, `c4a796`, `afb8ef`, `ca76a9`, the colours the web's ranking pages give them; `apps/rbms-player/src/format.rs`);
 - per-difficulty colours, per-mode badge colours (`mode_color`), DJ-rank band colours;
 - score deltas (gain green, loss red), the combo and BP figures of a record, the score-graph bars (NOW cyan, BEST green), the density histogram, the gauge and its figure;
 - the green number;
@@ -154,6 +154,23 @@ One line must differ from the template earlier versions wrote for the file to co
 ```
 
 Everything not listed keeps its default — so this themes the highlights without redesigning every surface.
+
+## The default skin pack's own tokens (`theme.lua`)
+
+`theme.ron` and `Theme` never reach a screen a skin pack draws. The default pack keeps its colours and type in `assets/skins/rbms-default/lua/theme.lua` ([`skin.md`](skin.md) §3.4.3), and only that pack's Lua reads them. These were added on 2026-10-22 for the song-select option panels ([`skin.md`](skin.md) §3.4.5), the assist grades of the clear lamp and the bold face. The values are the ones in the file at 47a7f9c.
+
+| Token | Value | Role |
+|---|---|---|
+| `theme.panel.column` `.orange` `.green` `.violet` `.sky` `.locked` | `theme.tone.orange` (240, 136, 90), `theme.tone.green` (89, 209, 133), `theme.tone.violet` (178, 107, 240), `theme.accent.sky` (76, 201, 240), `theme.mono.muted` (128, 128, 128) | the colour of one column of an option panel: the wire from key to box, the box heading and the column name under the boxes. `locked` is a read-only column (EX JUDGE) |
+| `theme.panel.pick`, `.pick_ink`, `.glow` | (255, 152, 52), (26, 16, 6), 112 | the chosen value of a box: its fill, the dark ink written on it and the alpha of the glow drawn around it. The INFORMATION tag and a changed value use the same orange |
+| `theme.panel.key_white`, `.key_black`, `.key_white_ink`, `.key_black_ink` | (226, 230, 236), (30, 33, 40), (28, 30, 36), (236, 238, 242) | the seven key drawings of the panels and the numbers written on them |
+| `theme.panel.arrow`, `.green_number`, `.caution` | `theme.tone.red`, `theme.tone.green`, `theme.tone.orange` | the `<` `>` of a number box, the green number beside NOTE DISPLAY TIME, a caution line (KEEP GREEN NUMBER IS OFF, the judge algorithm set to SCORE elsewhere) |
+| `theme.grade_lamp` `.easy` `.clear` `.hard` `.exhard` | (58, 209, 159), (196, 167, 150), (175, 184, 239), (202, 118, 169) | the colours of ASSIST EASY, ASSIST CLEAR, ASSIST HARD and ASSIST EXHARD, the same hex as the web (`3ad19f`, `c4a796`, `afb8ef`, `ca76a9`). On the web each is the matching gauge's lamp colour mixed 35% towards the LIGHT ASSIST colour in OKLab, at least 12 OKLab units from each of the eleven older lamp colours (checked by script, not by eye) |
+| `theme.assist_grade[0..4]`, `theme.assist_grade_last`, `theme.graded_clear` | name and colour of each grade (0 is `LIGHT ASSIST` in `theme.lamp.light_assist`), 4, 3 | the grades of the one lamp that has them, id 3 (`graded_clear`) |
+| `theme.clear[2]`, `theme.clear[3]` | `ASSIST`, `LIGHT ASSIST` | lamp names; they were `ASSIST CLEAR` and `LIGHT ASSIST CLEAR` |
+| `theme.font.bold` | `{ id = "inter-bold", path = "font/Inter-Bold.ttf" }` | the bold face the panels write names and chosen values in. A document declares it in its font list only when a bold line is built (`Builder:font_id` in `lua/ui.lua`), so the font lists of the other screens did not change |
+
+The grade colours are a table of their own and not four more entries of `theme.lamp` because `tools/sprites.py` reads `theme.lamp` in order to draw the lamp strip: four more entries made it 15 cells instead of 11 and `generate-images.py --check` reported the select sheet as different. A skin that reads the grade of a lamp does so through the extension options of [`skin.md`](skin.md) §1.4.
 
 ## Web front-end boundary
 

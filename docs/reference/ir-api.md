@@ -1,6 +1,6 @@
 # rbms IR-superset API 계약 — `rbms-ir` 클라이언트 정본
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (2026-10-22 에 `ScoreRecord.assist_grade` 만 더했다. 나머지는 2026-10-15 기준)
 
 > **상태:** 현재 IR 계약과 구현된 경계의 정본입니다. 서버는 https://bms.hyuns.uk 에 배포됐고(2026-10-14) 클라이언트 기본 서버 주소가 이 주소입니다. 아래 JSON의 해시·시간·커밋 값은 **형식 예시**이며 현재 배포 식별자가 아닙니다. 알려진 클라이언트 갭은 본문에서 보존하고, 실제 수동 다중 IR/서버 QA는 [roadmap](../roadmap.md)의 미실시 항목입니다. 필드 규칙이 코드와 다르면 서버 zod 스키마(`web/src/server/dto/`)와 `crates/rbms-ir/src/dto/` 가 맞습니다.
 
@@ -149,9 +149,16 @@
 // `flags`/`ranked` 는 `unranked_summary()` 와 `is_replay_upload_warranted` 가 읽는다.
 
 // ScoreRecord — ranking / best / player scores
-{ "player": {"id":"gkn"}, "player_name": "gkn", "clear": "ExHard",
+{ "player": {"id":"gkn"}, "player_name": "gkn", "clear": "ExHard", "assist_grade": 0,
   "ex_score": 1600, "max_combo": 812, "minbp": 1, "rank": 1, "played_at": 1700000000000,
   "lntype": 1, "option": 0, "total_notes": 812, "judge": null, "extra": {} }
+// assist_grade (2026-10-22): 응답에만 있는 최상위 정수 0..4, 없으면 0(Rust `#[serde(default)] u8`, `crates/rbms-ir/src/dto/score.rs:203`).
+//   `clear` 가 LightAssistEasy 일 때만 0 이 아닐 수 있다. SCRATCH AUTO 로 클리어한 게이지를 이름한다:
+//   1 ASSIST EASY(EASY 게이지), 2 ASSIST CLEAR(NORMAL·CLASS), 3 ASSIST HARD(HARD·EXCLASS), 4 ASSIST EXHARD(EX-HARD·HAZARD·EXHARDCLASS).
+//   0 은 등급 없음(LIGHT ASSIST 그대로이거나 다른 램프). 서버가 `clear` 와 `score.gauge` 에서 파생한다(`web/src/server/service/domain/score/assist-grade.ts`).
+//   ScoreRecord 를 돌려주는 모든 응답(차트 순위, best, 플레이어 점수 목록, 코스 순위)에 실린다. 코스 순위 행은 항상 0 이다(코스 기록에 게이지가 없다).
+//   순위 정렬은 clear → assist_grade → EX → BP 다. 제출 본문(ScoreSubmission, CourseSubmission)과 SubmitResponse 는 바뀌지 않았다.
+//   구 클라이언트는 모르는 필드를 무시하고(`deny_unknown_fields` 없음) 등급 없이 LIGHT ASSIST 로 본다. 서버가 0..4 밖의 값을 보내면 그 응답 전체의 역직렬화가 실패한다.
 
 // CourseSubmission — POST /courses
 { "api_version": 1, "course_hash": "…", "player": {"id":"gkn"},

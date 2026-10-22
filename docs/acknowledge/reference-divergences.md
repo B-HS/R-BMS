@@ -1,6 +1,6 @@
 # 레퍼런스 구현과의 의도적/보류 차이 (M0/M1 적대적 리뷰 결과)
 
-> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리. 이번 갱신에서 코드와 대조한 범위: 새 절 "기록 목표의 진행 중 값"과 "Esc 포기 판 저장" 절의 "저장하지 않는 판"·"코스 도중 Esc" 행. 그 전 갱신(2026-10-15, ea698a9)이 대조한 범위: 2026-10-14 이후 절(Esc 포기 판 저장 ~ 연습과 #TOTAL)과 아래에 표시한 죽은 서술. 그 전 절(2026-06 ~ 09)의 함수 이름은 대조하지 않았다.
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c. 이번 갱신에서 코드와 대조한 범위: 새 절 "옵션 패널·램프 등급·스킨 색·확장 id (2026-10-22)". 그 전 갱신(2026-10-19, e2c829f 이후 작업 트리)이 대조한 범위: 새 절 "기록 목표의 진행 중 값"과 "Esc 포기 판 저장" 절의 "저장하지 않는 판"·"코스 도중 Esc" 행. 그 전 갱신(2026-10-15, ea698a9)이 대조한 범위: 2026-10-14 이후 절(Esc 포기 판 저장 ~ 연습과 #TOTAL)과 아래에 표시한 죽은 서술. 그 전 절(2026-06 ~ 09)의 함수 이름은 대조하지 않았다.
 
 > 워크플로우 `wfgr2tk4o`(21 에이전트) 결과. 18개 발견 중 14개 확정, 그러나 검증자 판정상 **거의 전부 현 corpus(727곡)에 미발현**. 아래는 처리 결정.
 
@@ -360,3 +360,25 @@
 | RIVAL 목표, 다른 기기에서 친 IR BEST | 비례 | 비례(rival ghost 가 늘 null) | 서버 리플레이가 판정 알고리즘·LN 종류·시계를 싣지 않아 같은 판정을 보장할 수 없다(`ir_replay.rs` 의 `from_ir_replay`). 테스트 부채 3.79 |
 | 비례로 물러날 때 화면 표시 | 없다(콘솔에 `record run <파일> is paced evenly: <이유>` 한 줄) | 해당 없음. ghost 가 없으면 조용히 비례 | **사용자 결정 대기.** 테스트 부채 3.78 |
 | 결과 화면의 목표·BEST 값 | 최종 값 그대로 | 최종 값(`MusicResult.java:343`) | 같다 |
+
+## 옵션 패널·램프 등급·스킨 색·확장 id (2026-10-22)
+
+> 사용자 지시(2026-10-22, 요지) "끝까지 다 구현해놔"에 따라 메인이 추천안으로 정했다(사용자 미확인). 판정 규칙과 `SCORE_RULE_VERSION`(4)은 바뀌지 않는다. 결정과 근거: [패널 배치](2026-10-22-adr-option-panel-layout.md), [어시스트 등급](2026-10-22-adr-assist-lamp-grade.md), [확장 id](2026-10-22-adr-rbms-extension-ids.md), [스킨 색 행](2026-10-22-adr-skin-colour-rows.md), [내장 글자](2026-10-22-adr-ui-text-device-pixels.md). 내장 화면의 글자 래스터는 R-BMS 고유 화면이라 원본과 대조할 대상이 없어 아래 표에 넣지 않았다.
+
+| 항목 | 전 | 원본 | 지금 |
+|---|---|---|---|
+| 선곡 옵션 패널의 키 표 | 원본 표(`MusicSelectKeyProperty` `BEAT_7K`·`POPN_9K`)에서 `NEXT_REPLAY` 만 뺀 것 | 패널 1 건반 4 `OPTIONDP_DOWN`, 건반 6 `OPTION2_UP`. 패널 2 건반 3 `JUDGEAREA`, 5 `MARKNOTE`, 6 `BPMGUIDE`, 7 `NOMINE`. 패널 2·3 의 턴테이블은 비어 있다(패널 1 만 `TARGET`) | 열 칸을 바꿨다: 패널 1 건반 4 → GAUGE 이전, 건반 6 → HI-SPEED FIX 이전. 패널 2 건반 3 → SCRATCH AUTO, 5 → KEEP GREEN NUMBER, 6 → LANE COVER, 7 → LIFT, 턴테이블 → HIDDEN+. 패널 3 턴테이블 → JUDGE ALGORITHM 이전·다음. 나머지 칸은 원본과 같고 9키도 같은 인덱스를 따른다. 테스트 `keys.rs` 의 `CHANGED_SLOTS` 가 고정한다 |
+| SCRATCH AUTO 클리어의 램프 | LIGHT ASSIST(id 3) 하나 | 원본에는 SP 에서 턴테이블을 자동으로 치는 옵션이 없다. 가장 가까운 DP BATTLE AUTO-SC 가 `assist = max(assist, 1)` 로 `LightAssistEasy` 가 된다(`BMSPlayer.java:238-254`). 어시스트 램프에 등급은 없다 | 램프 id 3 안에 등급 0~4(LIGHT ASSIST, ASSIST EASY, ASSIST CLEAR, ASSIST HARD, ASSIST EXHARD). beatoraja·LR2 어느 쪽에도 선례가 없는 R-BMS 확장이다. 램프 id·와이어 이름·강등 규칙은 원본 그대로이고 최고 기록 비교 키만 `(clear, 등급, EX, BP)` 로 넓혔다. 외부 스킨은 0~10 만 본다 |
+| 램프 id 2·3 의 표기 | 앱 `ASSIST EASY`·`LIGHT ASSIST`, 기본 스킨 `ASSIST CLEAR`·`LIGHT ASSIST CLEAR`, 웹 `ASSIST`·`L-ASSIST` | `ClearType` `AssistEasy`(2), `LightAssistEasy`(3) | 앱·기본 스킨·웹 모두 `ASSIST`·`LIGHT ASSIST`. 등급 이름 `ASSIST EASY` 와 겹치지 않게 id 2 를 줄인 R-BMS 표기이고 와이어 문자열(`AssistEasy`, `LightAssistEasy`)은 그대로다 |
+| 호스트가 답하는 id | 원본이 선언한 id 만(2026-10-09 결정) | `SkinProperty` 최대 옵션 3035·이벤트 388, 스킨 몫 옵션 900~999·이벤트 1000~1999·타이머 10000~19999 | 이벤트 21000~21099 와 불린 21100~21199 도 답한다(SCRATCH AUTO·KEEP GREEN NUMBER 켬끔, 어시스트 등급, 닿지 않는 키). 원본 id 표와 `reference_implements` 는 건드리지 않았다. 표는 [확장 id ADR](2026-10-22-adr-rbms-extension-ids.md) |
+| 스킨 맞춤 행의 종류 | property·file·offset(원본과 같다) | `property`, `filepath`, `offset` 셋뿐(`SkinHeader`) | `color` 행을 더했다(헤더 `color` 목록, `skin_config.color`, 저장 `colors`). beatoraja 는 모르는 키를 무시하므로(`setIgnoreUnknownFields(true)`) 같은 스킨이 거기서는 제작자 기본색으로 그려진다 |
+| 노트 색 | destination 색을 읽지 않고 알파만 남긴다(원본 `LaneRenderer` 가 `setColor(WHITE)` 로 초기화하는 것과 같다) | 같다 | `note.tint`·`note.long_tint` 가 있는 레인에만 RGBA 를 곱한다. 키가 없으면 이전과 같다. 지뢰·hidden·processed·HCN 닳는 중 몸통·SCRATCH AUTO 초록은 곱하지 않는다 |
+| dst 객체의 `tint` | 없음 | 없음 | 키가 있고 저장값이 있을 때만 `color.tinted(tint)`. 불투명도 오프셋을 먼저 더하고 틴트의 알파를 곱한다(노트와 같은 순서) |
+
+**아직 원본과 다른 점:**
+
+| 항목 | rbms | 원본 | 이유 |
+|---|---|---|---|
+| 외부 스킨 위에서 재배정한 패널 키 | ModernChic 같은 스킨이 죽은 칸 라벨(JUDGE AREA, MARK NOTE, BPM GUIDE, NO MINE)로 그리는 키가 저장되는 설정을 바꾼다: SCRATCH AUTO, KEEP GREEN NUMBER, LANE COVER, LIFT, HIDDEN+, GAUGE 이전, HI-SPEED FIX 이전, JUDGE ALGORITHM. 화면은 변하지 않고 OptionChange 소리만 난다 | 그 칸이 원본 설정을 뒤집는다: 패널 2 는 `showjudgearea`·`markprocessednote`·`bpmguide`·`mineMode`, 패널 1 건반 4·6 은 `optiondp`(54)·`option2p`(43). R-BMS 는 패널 2 의 네 설정을 갖지 않아 전에는 그 칸이 아무 일도 하지 않았다. 패널 1 건반 4 는 값만 저장하고 플레이가 읽지 않았으며 건반 6 은 건반 2 와 같은 RANDOM 이었다 | 스킨이 확장 id 를 안다는 신호 통로가 없어 막지 못했다. **사용자 결정 대기.** 방법 셋(헤더 플래그, 번들 팩 경로, 실행 중 읽기 기록)은 [패널 배치 ADR](2026-10-22-adr-option-panel-layout.md) 7절 |
+| 원본이 어시스트로 세는 옵션 | SCRATCH AUTO 와 넓힌 판정·TOTAL 만 센다 | H-RANDOM, S-RANDOM-EX, SPIRAL, ALL-SCRATCH, BPM 가이드, 지뢰 제거 등도 어시스트(`score = false`)(`BMSPlayer.java:200-256`) | 이번 램프 등급 작업의 범위 밖이다. 세면 기존 기록과 서버 ranked 정책이 함께 바뀐다 |
+| 코스 최고 기록의 어시스트 등급 | 서버 `course_best.assist_grade` 열은 항상 0 이다 | 해당 없음(R-BMS 확장) | 코스 제출 본문과 코스 DB 에 게이지가 없어 파생할 수 없다. **사용자 결정 대기:** 코스 최고 기록에 등급 정책을 둘지 |

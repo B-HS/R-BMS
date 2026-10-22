@@ -1,19 +1,21 @@
 # R-BMS — PROCESS (작업 체크리스트와 상태)
 
-최종 갱신 2026-10-19 · 대응 커밋 `e2c829f`
+최종 갱신 2026-10-22 · 대응 커밋 `47a7f9c`
 
 이 문서는 체크리스트와 현재 상태만 둔다. 끝난 구간의 세부 결과, 웨이브 기록, 사용자 결정 원문은 `docs/history/` 로 옮긴다(ai-process 2.1). 옛 0~9절과 Phase 0~7 로드맵도 같은 곳에 있다(아래 "아카이브").
 
 > 새 세션은 [HANDOFF.md](HANDOFF.md)(맥락, 결정, 작업 규칙, 우선순위 TODO. 항상 덮어쓴다)를 먼저 읽고 이 문서로 체크리스트를 확인한다. 이전 스냅샷은 `history/*-handoff-snapshot.md`.
 > 베이스 룰: 프로젝트 작업 규칙의 단일 출처는 HANDOFF 5절이다. 코딩 컨벤션은 사용자 전역 컨벤션을 따르되 Rust 에는 TS/JS 전용 규칙을 적용하지 않고, 웹(`web/`)은 `web/AGENTS.md` 를 따른다.
 > 위치: 저장소 루트 `/Users/hyunseokbyun/development/R-BMS`, 원격 `B-HS/R-BMS`, 작업 브랜치 `dev`. `prod` 브랜치는 만든 적이 없고(`release.yml` 은 `prod` 푸시도 받게 돼 있지만 쓴 적이 없다) 릴리스는 `dev` 에서 `release.yml` 을 수동 실행한다([ci-release.md](ci-release.md) 2절).
-> 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 S19 마무리의 Rust 6,024 통과).
+> 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 2026-10-22 고도화 통합 게이트의 Rust 6,269 통과·0 실패).
 > Git: Conventional Commits, 설명은 한국어([acknowledge/2026-09-17-commit-language.md](acknowledge/2026-09-17-commit-language.md)), author 사용자 단독, AI 트레일러 금지, 선별 스테이징, force push 금지. 게이트를 통과하면 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 CI 를 확인한다. `Cargo.lock` 은 추적한다(2026-10-11 부터, 결정 D12). `target/` 과 곡 차트는 커밋하지 않는다.
 
-## 상태 (2026-10-15)
+## 상태 (2026-10-22)
+
+- 2026-10-22 "클라이언트 기능 고도화"(아래 체크리스트) 구현과 웹 배포 완료: 운영 DB 마이그레이션 0011 적용(web-db run 39693988962), 웹 `64c6120`·`47a7f9c`, 운영 낡은 등급 행 0(run 39733088817). 클라이언트는 다음 릴리스 v0.1.7 에 들어간다(미태그). 체크리스트의 G 는 메인이 마지막에 체크한다.
 
 - 클라이언트 `v0.1.4` 는 2026-10-15 07:27 UTC 에 게시됐다(release run 38696475211, 버전 커밋 `87eacd0`). `v0.1.3`·`v0.1.0` draft 는 게시하지 않고 남겨 뒀다. 릴리스 이력은 [ci-release.md](ci-release.md) 2.3절.
-- 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0004 적용(`web/drizzle/`, 실행은 `web-db.yml`).
+- 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0011 적용(`web/drizzle/`, 실행은 `web-db.yml`. 이 줄의 웹 배포 `51f3a1e` 는 2026-10-15 관찰값).
 - 2026-10-19 "웹 기록 표시와 구동기 Esc·목표 보완" 완료, 클라이언트 `v0.1.5` draft 게시 대기(사용자). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
 
 ## 체크리스트 — 클라이언트 기능 고도화: 옵션 패널·램프·색상·글꼴 (2026-10-22)
@@ -25,12 +27,10 @@
 - [x] E2-1. 1단계(병렬, workflow wf_7444d7a7-d9f): W1a 글꼴 엔진 `f03beb3`, W1c 색 데이터 층 `49dfbd3`, W1b 램프 등급 클라이언트 `4d57c2a`(통합 게이트 Rust 6,206 통과·0 실패). W2c 웹 램프 등급: 사용자 승인(2026-10-22 "마이그레이션도 니가하고") 뒤 마이그레이션 `8d85b32` 운영 적용(web-db run 39693988962, 0011 recorded) → 웹 코드 `64c6120`(웹 1,485 통과·0 실패)
 - [x] E2-2. 2단계(병렬, workflow wf_83280bf0-bdb): W2a 패널 Rust·확장 id(이벤트 21000~, 불린 21100~)·F1 홀드 키·IR 등급 `7746932`, W2b 노트 색 곱셈·색 행 메뉴 `7459bf7`(통합 게이트 Rust 6,238 통과·0 실패). 푸시는 3단계(기본 스킨 라벨)와 함께
 - [x] E2-3. 3단계(병렬, workflow wf_59a0a66f-73f): W3a 기본 스킨 IIDX 식 패널·램프 등급 표시·굵은 글꼴 `0c450db`, W3b 플레이 색 행·순백 노트 시트 `5192bbb`(저장값 없을 때 캡처 94장 화소 동일, 통합 게이트 Rust 6,244 통과·0 실패, 스킨 덤프 경고 0). 2~3단계 푸시
-- [ ] E2-4. 통합 리뷰(발견→검증, workflow wf_efddd39c-0ee: 확인 7·거절 2·검증 미완 7)와 수리(workflow wf_ed445327-c90). 수리 항목에 LN 전용 색 행(엔진의 레인당 tint 하나 제약 해소) 포함
-  - 2026-10-22 사용자 지시로 수리 workflow 도중 정지("된곳까지만 일단 스톱 나중에 다시재개"). 재개 방법: 같은 스크립트를 `resumeFromRunId: wf_ed445327-c90` 로 다시 돌리거나 다섯 갈래(lamps·panels·colors·font·web)를 새로 띄운다. 리뷰 전문은 세션 scratch 의 review.md 였으므로 재개 때 요지를 아래에서 다시 쓴다.
-  - 정지 시점 상태: worktree `.claude/worktrees/wf_ed445327-c90-1~4`(lamps·panels·colors·font 중간 작업, 미검증), 메인 트리 web/ 와 `.github/workflows/web-db.yml` 에 web 갈래 중간 작업(미검증·미커밋: AI 기록 질문 lamp 정렬에 등급, AI 비교 합계에 등급, `web/scripts/assist-grade.{count,backfill}.sql` 과 web-db 액션)
-  - 수리 대상 요지: lamps-1 코스 스테이지 SCRATCH AUTO 등급이 설정 게이지로 저장됨(CLASS 계열로 저장·제출해야 함, 중간), lamps-2 refold 내부 스캔을 clear=3 으로 좁힘, lamps-3 내장 선곡 막대 LED 등급 색, panels-1~4(외부 스킨 재배정 칸, 차트 아닌 커서의 NOTE DISPLAY TIME 표시, 패널 열 때 눌려 있던 턴테이블, 5·10키의 닿지 않는 6·7 칸 — 검증 미완), colors-1 색 행 기본값이 프리셋을 무시, colors-2 노트와 dst 의 알파 합성 순서, LN 전용 색, font-1~3(리사이즈 중 글리프 캐시, 균등 배율 여유 1.0 < 1.39, Bold 추가 뒤 Regular 선택이 순서 의존 — 검증 미완), web-1·web-3(AI 정렬·비교 표의 등급), 배포 사이 창 백필 액션
-- [ ] E2-5. ADR(램프 등급, 확장 id 대역 21000~ 으로 2026-10-09 결정 부분 변경, 색 확장 키, 굵은 글꼴 에셋)과 문서 갱신(play-options, skin, theme, crates, architecture, reference 4종, HANDOFF, QA 수동 점검표)
-- [ ] G. ADR·문서 갱신, 전체 게이트, 단계별 커밋·푸시, 운영 DB 마이그레이션 0011, CI 확인
+- [x] E2-4. 통합 리뷰(발견→검증, workflow wf_efddd39c-0ee: 확인 7·거절 2·검증 미완 7)와 수리(workflow wf_ed445327-c90). 수리 13건: lamps-1~3 `242397f`(코스 스테이지를 실제로 끝난 CLASS 계열 게이지로 저장·전송, 재전송 게이지 수리 포함, refold 스캔 좁힘, 내장 막대 LED 등급 색), panels-2~4 `3f058f4`, colors-1·2와 LN 전용 색 행 `c1c992e`, font-1~3 `f52e170`, web-1·3와 등급 백필 액션 `47a7f9c`. `panels-1`(외부 스킨 위 표시 없는 설정 변경)은 고치지 않고 남김(HANDOFF 6절 13). 운영 낡은 등급 행 0(web-db run 39733088817).
+  - 수리 단계는 2026-10-22 사용자 지시("된곳까지만 일단 스톱 나중에 다시재개")로 한 번 정지했고, 재개 후 완료했다.
+- [x] E2-5. ADR 5건(`acknowledge/2026-10-22-adr-{assist-lamp-grade,option-panel-layout,rbms-extension-ids,skin-colour-rows,ui-text-device-pixels}.md`: 램프 등급, 옵션 패널 배치, 확장 id 대역 21000~ 로 2026-10-09 결정 부분 변경, 색 행, UI 글자 장치 화소·굵은 글꼴 에셋)와 문서 갱신(reference 4종, `ir-api`, `ai-features/server`, `backend/{data-model,api-spec}`, `web/architecture`, HANDOFF, PROCESS 와 play-options·skin·theme·crates·architecture·QA 수동 점검표). 문서 커밋은 메인이 한다.
+- [x] G. ADR·문서 갱신, 전체 게이트(마지막 Rust 6,269 통과·0 실패, 웹 1,491·DB 122 통과), 단계별 커밋·푸시(`f03beb3` ~ `47a7f9c` 와 문서 커밋), 운영 DB 마이그레이션 0011(run 39693988962), CI(ci run 39733082740·web run 39733082784 통과). 설정 설명 문구의 옛 램프 이름 `ASSIST EASY at best` 도 문서 커밋에서 고침. 남은 것은 사용자 실기와 확인(HANDOFF 6절 13·14, 8절)
 
 ## 체크리스트 — 웹 AI 기능 기획 (2026-10-19)
 

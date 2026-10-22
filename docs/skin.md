@@ -1,6 +1,6 @@
 # 스킨 가이드
 
-최종 갱신 2026-10-15 · 대응 커밋 ea698a9. S18·S19 는 스킨 문서·기본 팩·Lua 환경을 바꾸지 않았다(기본 팩 65개 파일, 1,772,662 B 를 ea698a9 에서 다시 셌다. 테스트 빌드가 Lua 의 프레임 시계를 멈추는 `SkinLua::hold_frame_clock` 은 출하 동작과 무관하다: `architecture.md` "Testing and the lint gate"). 반영한 웨이브(모두 커밋됨): 웨이브 16(스코어 그래프의 TARGET 범례가 실제로 쓰는 목표의 이름을 쓴다: 3.4.1절. 선곡 패널의 점수 칸은 램프만 있는 기록이면 `-`: 6절), 웨이브 18(SCRATCH AUTO 가 치는 레인의 노트를 엔진이 초록으로 그린다: 6절), 웨이브 15(앱이 덧그리는 UI 와 내장 화면의 무채색 팔레트, 값을 못박지 않는 `theme.ron` 템플릿: 3.4.3절, 6절), 웨이브 14(기본 스킨의 모노톤 팔레트와 색 옵션 넷, 온전한 폭발 고리, 발치의 LIFT 수치: 3.4절·3.4.3절. 조절한 팩의 내보내기·가져오기와 같은 옵션을 모든 화면에 적용: 2.8절), 웨이브 13(기본 스킨의 판정선을 필드 맨 아래로: 3.4.1·3.4.2절. 노트 필드를 판정 오프셋만큼 앞서 그림: 1.2절)
+최종 갱신 2026-10-22 · 대응 커밋 47a7f9c. 기본 팩은 70개 파일, 2,240,618 B 다(47a7f9c 에서 다시 셌다. 2026-10-15 의 65개, 1,772,662 B 에서 `font/Inter-Bold.ttf`, `lua/play/colors.lua`, `lua/select/{panel,inform,words}.lua` 다섯 파일이 늘었다). 반영한 변경: 2026-10-22 헤더 확장 키 `color`·`tint`·`long_tint` 와 `skin_config.color`, 확장 이벤트·옵션 id 대역 21000~(새 1.4절, 4.1절), 기본 스킨의 플레이 색 행(새 3.4.4절), 선곡 옵션 패널과 램프 등급 표시(새 3.4.5절), 굵은 글꼴(2.7절, 3.2절), SKIN 메뉴의 색 행(2.2절), 내보내기·적용의 색(2.8절). 그 앞의 S18·S19 는 스킨 문서·기본 팩·Lua 환경을 바꾸지 않았다(테스트 빌드가 Lua 의 프레임 시계를 멈추는 `SkinLua::hold_frame_clock` 은 출하 동작과 무관하다: `architecture.md` "Testing and the lint gate"). 반영한 웨이브(모두 커밋됨): 웨이브 16(스코어 그래프의 TARGET 범례가 실제로 쓰는 목표의 이름을 쓴다: 3.4.1절. 선곡 패널의 점수 칸은 램프만 있는 기록이면 `-`: 6절), 웨이브 18(SCRATCH AUTO 가 치는 레인의 노트를 엔진이 초록으로 그린다: 6절), 웨이브 15(앱이 덧그리는 UI 와 내장 화면의 무채색 팔레트, 값을 못박지 않는 `theme.ron` 템플릿: 3.4.3절, 6절), 웨이브 14(기본 스킨의 모노톤 팔레트와 색 옵션 넷, 온전한 폭발 고리, 발치의 LIFT 수치: 3.4절·3.4.3절. 조절한 팩의 내보내기·가져오기와 같은 옵션을 모든 화면에 적용: 2.8절), 웨이브 13(기본 스킨의 판정선을 필드 맨 아래로: 3.4.1·3.4.2절. 노트 필드를 판정 오프셋만큼 앞서 그림: 1.2절)
 
 R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로 그린다. 문서가 없거나 읽히지 않는 화면은 내장 화면이 그린다. 기본으로 설치되는 자작 스킨 `rbms-default` 가 첫 실행부터 선곡 · 결정 · 플레이 · 결과를 그리며, beatoraja 용으로 만든 외부 Lua 스킨(`.luaskin`)도 수정 없이 읽는다. 이 문서의 독자는 스킨을 쓰는 사용자와 스킨을 만드는 사람이다.
 
@@ -41,7 +41,7 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 
 | 같은 것 | 근거 |
 | --- | --- |
-| 문서 모델(`SkinDef` 최상위 46필드), 속성 id 968개, 타이머 id, destination 보간(`acc`, `loop`, 오프셋) | `crates/rbms-skin/src/model.rs`, `dst.rs`, `property/generated/` |
+| 문서 모델(`SkinDef` 최상위 46필드. R-BMS 는 47번째로 `color` 를 더했다: 1.4절), 속성 id 968개, 타이머 id, destination 보간(`acc`, `loop`, 오프셋) | `crates/rbms-skin/src/model.rs`, `dst.rs`, `property/generated/` |
 | `.luaskin` 은 화면에 들어갈 때마다 새 Lua 상태에서 진입 파일을 두 번 실행한다(헤더 패스 `skin_config == nil`, 본체 패스) | `crates/rbms-skin/src/loader/lua_skin.rs` |
 | 본체가 만든 함수 값(draw, value, timer, act)을 매 프레임 부른다. 오류는 기본값(false, 0, 빈 문자열)으로 대신하고 재호출한다 | `crates/rbms-skin/src/lua/main_state.rs`, `skin_render/object.rs` |
 | 객체 종류: image, imageset, value, floatvalue, text, slider, graph, note, gauge, judge, songlist, 커버, bga, gaugegraph, judgegraph, bpmgraph, timingdistributiongraph, timingvisualizer, hiterrorvisualizer | `crates/rbms-render/src/skin_render/` |
@@ -82,6 +82,35 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | judge 객체의 `numberAlign` | judge(판정) 객체에 `numberAlign` 을 쓰면 콤보 숫자를 그 값대로 정렬한다: 0 오른쪽, 1 왼쪽(첫 자리가 고정되고 오른쪽으로 자란다), 그 밖은 가운데. beatoraja 에는 없는 키이고 beatoraja 는 콤보를 언제나 가운데로 모은다. 키를 쓰지 않은 스킨은 beatoraja 와 같게 그려진다. 숫자 value 의 `align` 은 beatoraja 처럼 읽지 않는다 |
 | timingvisualizer 의 선 | 눈금자 위의 선도 그 객체의 destination 이 가리키는 오프셋의 알파만큼 흐려진다(beatoraja 는 선에 오프셋을 적용하지 않는다). 키프레임 색의 알파는 원본처럼 선에 적용하지 않는다 |
 
+### 1.4 R-BMS 가 더한 키와 id
+
+beatoraja 에 없는 것이다. beatoraja 는 모르는 키를 무시하므로, 이 키를 쓴 문서도 beatoraja 에서는 작성된 색 그대로 그려진다. 결정은 [스킨 색 행 ADR](./acknowledge/2026-10-22-adr-skin-colour-rows.md)와 [확장 id ADR](./acknowledge/2026-10-22-adr-rbms-extension-ids.md), 조사는 [reference/skin-color-customization.md](./reference/skin-color-customization.md).
+
+| 이름 | 위치 | 뜻 | 코드 |
+| --- | --- | --- | --- |
+| `color` | 문서 최상위 목록(JSON 은 `color`, Lua 는 헤더 패스의 표) | 플레이어가 바꿀 수 있는 색 슬롯. 항목은 `category`, `name`, `label`(비면 `name`), `id`(0 이상, 색 행끼리 유일. 오프셋 id 와 별개), `def`(`RRGGBB` 또는 `RRGGBBAA`, `#` 허용. 없거나 색이 아니면 불투명 흰색). 음수·중복 id, 중복 이름, 읽을 수 없는 `def` 는 로드 경고이고 스킨은 로드된다. Lua 스킨은 본체 패스의 같은 항목에 `drawn`(저장값이 없을 때 그 부위가 지금 그려지는 색, 같은 표기)을 덧붙일 수 있고 로더가 id 로 헤더 항목에 합친다 | `rbms_skin::model::ColorDef`, `SkinDef.color`, `SkinHeader.colors` |
+| `tint`(destination) | destination 하나 | 색 id. 그 id 로 저장된 색이 있으면 destination 의 색에 곱한다. R·G·B 는 곱이고 알파는 오프셋(불투명도)을 더한 뒤의 알파에 곱한다. 곱은 가장 가까운 값으로 반올림하므로 흰 destination 에 건 틴트는 정확히 그 색이 된다. 저장된 색이 없거나 id 가 음수면 destination 은 자기 색 그대로이고 결과가 비트 단위로 같다 | `Destination.tint`, `DestinationTrack.tint`, `dst::resolve` |
+| `tint`(note) | note 정의의 목록 | 레인마다 색 id(`dst` 와 나란히 센다). 건너뛸 레인은 `-1`(`NO_TINT`. Lua 표는 구멍이 메워지므로 구멍 대신 -1). 그 레인의 노트에 곱한다. 목록이 닿지 않는 레인은 곱하지 않는다 | `NoteSet.tint`, `tint_of` |
+| `long_tint`(note) | note 정의의 목록 | 같은 모양. 롱노트(머리·몸통·끝, CN, HCN)에 곱한다. 비워 두면 `tint` 가 롱노트에도 닿는다 | `NoteSet.long_tint`, `long_tint_of` |
+| `skin_config.color` | Lua 본체 패스의 전역 표 | 색 행 이름 → `{ r, g, b, a, custom }`. 값은 저장값이고 없으면 행의 `def`, `custom` 은 플레이어가 저장한 값인지 여부다. 로드 시점의 값이고 실행 중 갱신되지 않는다. 헤더 패스에서는 `skin_config == nil` 이고, 색 행이 없는 문서에서는 빈 표다. beatoraja 에서도 도는 스킨은 `(skin_config.color or {})` 로 읽는다 | `rbms_skin::lua::SkinConfigColor` |
+
+노트에 곱하지 않는 것: 지뢰, 처리된 노트 표시, HCN 이 풀려 깎이는 동안의 몸통, SCRATCH AUTO 가 치는 레인(엔진의 단색 초록 `#30E050`. play-options.md 10.5절). 색은 `SkinColor`(RGBA 각 8비트)이고 16진 읽기·쓰기(`from_hex`, `to_hex`)와 곱(`tinted`)이 `crates/rbms-skin/src/dst.rs` 에 있다. 저장소는 `SkinCustomisation.colors`(색 id → `SkinColor`, `crates/rbms-config/src/schema.rs`)이고 `OffsetSource::color(id)` 가 프레임마다 읽는다. 앱의 `ScreenHost::color` 가 `DocumentOffsets::color` 에 위임하므로(`skin_host/mod.rs`, `skin_screen.rs`) 저장한 색은 문서를 다시 읽지 않고 다음 프레임에 곱해진다. 이 위임을 빠뜨리면 컴파일 오류 없이 색이 안 먹는다(`OffsetSource::color` 의 기본이 `None`이라서).
+
+R-BMS 가 답하는 확장 이벤트·옵션 id 는 beatoraja 가 선언한 번호 위에 따로 둔 두 대역이다. 원본 선언 최대(옵션 3035, 이벤트 388)와 원본이 스킨 몫으로 남긴 대역(옵션 900~999, 이벤트 1000~1999, 타이머 10000~19999) 위이고, 2026-10-09 에 철거한 옛 사설 id 20001~20316 은 되살리지 않았다. 대역 안에서 아래 표에 없는 번호는 옵션으로 읽히지 않고 이벤트로 실행되지 않는다. 단일 목록은 `apps/rbms-player/src/skin_host/extension.rs` 다.
+
+| 번호 | 종류 | 뜻 |
+| --- | --- | --- |
+| 이벤트 21000 | 실행 | SCRATCH AUTO 켬·끔. 어떤 인자로 실행해도 한 번에 한 번 뒤집는다 |
+| 이벤트 21001 | 실행 | KEEP GREEN NUMBER 켬·끔 |
+| 옵션 21100, 21101 | 읽기(선곡) | SCRATCH AUTO 켜짐, KEEP GREEN NUMBER 켜짐 |
+| 옵션 21102~21104 | 읽기(선곡) | LANE COVER, LIFT, HIDDEN+ 켜짐(원본의 이벤트·이미지 인덱스 330~332 와 같은 값) |
+| 옵션 21110 + k | 읽기(선곡) | 커서 아래 곡의 최고 램프의 어시스트 등급이 k. 최고 기록이 없는 곡·폴더·코스는 다섯 모두 꺼짐 |
+| 옵션 21120 + k | 읽기(결과) | 이번 판의 등급이 k(코스 결과는 0) |
+| 옵션 21130 + k | 읽기(결과) | 이번 판 이전의 최고 기록(이미지 인덱스 371 과 같은 LN 모드 기준)의 등급이 k. 처음 친 곡은 다섯 모두 꺼짐 |
+| 옵션 21140 + i | 읽기(선곡) | 키 인덱스 i(0~8: 건반 1~7과 턴테이블 두 방향)에 닿는 레인이 없다. 5키·10키에서 i = 5, 6 이 켜진다 |
+
+등급 k 는 0 등급 없음, 1 ASSIST EASY, 2 ASSIST CLEAR, 3 ASSIST HARD, 4 ASSIST EXHARD(`rbms_judge::AssistGrade::id`) 이고 k = 0 은 LIGHT ASSIST 램프의 미등급일 때와 다른 모든 램프일 때 켜지므로 램프 id(선곡 이미지 인덱스 370, 결과 370·371)와 함께 읽는다. 옵션은 `draw`·`value`·`text` 같은 함수 필드에서 `main_state.option(id)` 로만 읽는다. 로더는 `op = {id}` 목록을 원본이 선언한 id 로 제한해 확장 id 를 버리므로 `op` 에는 쓰지 못한다. 음수 id 는 부정이고, 답하지 않는 화면에서는 꺼짐이다. 원본 스킨은 이 번호를 읽지 않는다.
+
 ## 2. 스킨 팩 쓰기
 
 스킨 팩은 `.luaskin`(또는 `.json`, `.json5`) 여러 개가 든 폴더 하나다. 문서는 팩 루트에만 둔다(폴더 안의 하위 폴더는 문서 검색 대상이 아니다. `PACK_SCAN_DEPTH` = 1).
@@ -118,10 +147,10 @@ PACK FOLDER 행의 표시: 환경 변수가 있으면 `<경로> (RBMS_SKIN_PACK)
 | --- | --- |
 | ↑ ↓ | 행 커서 이동. 행이 17개를 넘으면 목록이 스크롤되고 오른쪽 아래에 `현재 / 전체` 가 나온다 |
 | PageUp PageDown | 한 화면(17행)씩 이동 |
-| ← → | 커서 행의 값을 한 칸. 오프셋 행은 1, 불투명도 행은 1%(0~100% 안에서. 아래 주의) |
+| ← → | 커서 행의 값을 한 칸. 오프셋 행은 1, 불투명도 행은 1%(0~100% 안에서. 아래 주의), 색 행은 프리셋 색 한 칸(알파는 그대로) |
 | Shift + ← → | 커서가 오프셋 행이나 불투명도 행이면 열 칸(10, 10%). 다른 행은 한 칸 그대로다 |
-| Enter | 오프셋·불투명도 행에서는 숫자를 직접 친다(아래). 그 밖의 행에서는 → 한 칸과 같다: PACK FOLDER 는 폴더 선택 창, RELOAD·RESET 은 실행. 화면을 떠나지 않는다 |
-| 0 (숫자 줄, 넘패드) | 커서가 오프셋 행이면 0 으로, 불투명도 행이면 100% 로 되돌린다 |
+| Enter | 오프셋·불투명도 행에서는 숫자를 직접 친다(아래). 색 행에서는 16진 색(`RRGGBB` 또는 `RRGGBBAA`, `#` 허용)을 친다. 색이 아니면 행에 1.5초 동안 `NOT A COLOR`. `COLOR CHANNELS` 행에서는 채널 행을 펴고 접는다. 그 밖의 행에서는 → 한 칸과 같다: PACK FOLDER 는 폴더 선택 창, RELOAD·RESET 은 실행. 화면을 떠나지 않는다 |
+| 0 (숫자 줄, 넘패드) | 커서가 오프셋 행이면 0 으로, 불투명도 행이면 100% 로 되돌린다. 색 행이면 `DEFAULT`(저장한 색을 지우고 스킨이 정한 색으로), 색 채널 행이면 그 색이 출하된 값의 채널로 되돌린다 |
 | Tab / Shift+Tab | 미리보기 위 화면 띠(7K 5K 14K 10K 9K SELECT DECIDE RESULT COURSE KEYS)에서 다음 / 이전 화면. 띠에 없는 화면(24키 등)은 SCREEN 행의 ← → 로 간다 |
 | 행 왼쪽 클릭 | 그 행으로 커서를 옮기고 한 칸 앞으로. 오프셋·불투명도 행은 이름 쪽을 눌렀을 때 그렇고, 슬라이더와 숫자 글자는 아래와 같다 |
 | 행 오른쪽 클릭 | 그 행으로 커서를 옮기고 한 칸 뒤로(잘못 누른 클릭을 되돌린다. RELOAD·RESET 은 실행하지 않는다) |
@@ -147,11 +176,13 @@ PACK FOLDER 행의 표시: 환경 변수가 있으면 `<경로> (RBMS_SKIN_PACK)
 | 문서의 파일 행 | 헤더의 `filepath` 마다 한 행. 패턴에 맞는 파일 중에서 고른다. 값을 바꾸면 문서를 다시 읽는다 |
 | 문서의 오프셋 행 | 헤더의 `offset` 마다 허용된 축별로 X, Y, W, H, ANGLE, ALPHA 행. 위치와 크기는 ±2000(픽셀. 플레이 화면 전체를 옮기는 오프셋만 퍼센트), 각도 ±360(도), 알파 ±255(-255 면 사라진다). 한 칸 1, Shift 로 10, 슬라이더와 직접 입력(위 표). 오프셋은 저장값을 바로 읽으므로 문서를 다시 읽지 않고 다음 프레임의 미리보기에 반영된다. 포커스한 오프셋 행은 숫자 0 키로 0 으로 되돌린다(슬라이더의 가운데가 0 이다). 스킨이 선언한 오프셋이 먼저, 엔진이 모든 플레이 스킨에 붙이는 오프셋(All offset(%), Notes offset, Judge offset, Judge Detail offset)이 그 뒤에 나오고, 엔진 오프셋 행은 설명이 `An offset the game adds to every play skin …` 으로 시작한다 |
 | 문서의 불투명도 행 | 알파 축만 허용한 오프셋(`a = true` 하나뿐)은 축 이름 없이 스킨이 준 이름 그대로 한 행이 되고 값을 퍼센트로 읽는다. 100% 가 스킨 그대로(저장값 a = 0), 0% 가 숨김(a = -255)이고 그 사이는 `round((퍼센트 - 100) * 255 / 100)` 이다. 슬라이더와 ← → 는 0~100%, 한 칸 1%, Shift 로 10%, 0 키로 100%. 직접 입력(퍼센트 수를 친다)은 200%(a = +255)까지 받는다. 0~200 의 모든 퍼센트가 서로 다른 알파로 저장되고 그 퍼센트로 다시 읽힌다. 이름이 아니라 축 구성으로 판정한다. 불투명도 행은 스킨이 선언한 위치와 관계없이 다른 오프셋 행 뒤(RELOAD 앞)에 모여 나온다. 아래 주의 참고 |
+| 문서의 색 행 | 헤더의 `color` 마다 한 행(1.4절). 이름은 `<분류> > <이름>`(예: `LANE > WHITE KEY`). 값은 그 색의 견본 사각형과 `#RRGGBBAA`이고 저장한 색이 없으면 `DEFAULT`. ← → 가 프리셋 16색(`FFFFFF C0C0C0 808080 404040 000000 FF4040 FF9020 FFE040 A0FF40 30E050 40E0FF 40A0FF 4060FF A060FF FF40C0 FF90C0`)을 돌고 알파는 지킨다. 프리셋에 없는 색에서는 → 가 첫 색, ← 가 끝 색이다. 저장한 색이 없던 행에 색이 생기거나 있던 색이 없어지면(0 키) 문서를 한 번 다시 읽고, 이미 있는 색을 바꾸는 것은 다시 읽지 않고 다음 프레임에 반영한다. 저장한 색이 없는 행에서 시작하는 색은 헤더의 `def` 가 아니라 문서가 알려 주는 `drawn`(그 부위가 지금 그려지는 색. 3.4.4절)이다 |
+| COLOR CHANNELS | 색 행 뒤에 오는 접이 한 행(`HIDDEN (n)` / `SHOWN (n)`. Enter·← →·클릭으로 편다. 접힘 상태는 저장하지 않는다). 펴면 색 행마다 `<행 이름> R`, `G`, `B`, `A` 가 0~255 숫자 행으로 나온다(한 칸 1, Shift 10, 슬라이더와 직접 입력은 위 표 그대로). 알파는 그 부위의 불투명도에 곱해진다 |
 | RELOAD | 폴더를 다시 훑고 문서를 다시 읽는다 |
 | RESET | 이 문서에서 한 모든 선택을 버린다(팩이 조절값 파일을 갖고 있으면 그 값으로 돌아간다. §2.8) |
 | EXPORT | 조절한 팩을 새 폴더로 내보낸다(§2.8). 팩이 있을 때만 보인다 |
 
-행 순서는 고정 행(PACK FOLDER, SCREEN, SKIN, LOADED), 옵션, 파일, 스킨이 선언한 위치·크기 오프셋, 엔진 오프셋, 불투명도, RELOAD, RESET, EXPORT 다. 팩의 다른 화면도 같은 이름으로 가진 옵션·오프셋 행에서는 `A` 가 지금 값을 그 화면들에 놓는다(바닥 안내의 `A ALL SCREENS`. §2.8). 목록에 묶음 머리는 없다. PageDown 두 번이면 7키 기본 스킨의 불투명도 행에 닿는다.
+행 순서는 고정 행(PACK FOLDER, SCREEN, SKIN, LOADED), 옵션, 파일, 색 행, `COLOR CHANNELS` 접이(펴면 채널 행), 스킨이 선언한 위치·크기 오프셋, 엔진 오프셋, 불투명도, RELOAD, RESET, EXPORT 다. 팩의 다른 화면도 같은 이름으로 가진 옵션·오프셋 행에서는 `A` 가 지금 값을 그 화면들에 놓는다(바닥 안내의 `A ALL SCREENS`. §2.8). 목록에 묶음 머리는 없다. 7키 기본 스킨은 색 행만 17개라 목록이 길다(PageDown 으로 넘긴다).
 
 불투명도 행 주의
 
@@ -174,6 +205,7 @@ SKIN 메뉴와 PLAY 메뉴
 | 플레이 문서의 옵션(기본 스킨: Lane Width, Field Side, Scratch Side, Judge Detail, Score Difference, Judge Display, Score Graph) | 옵션 행 | LANE 묶음의 끝에 같은 행. 두 메뉴가 같은 값을 읽고 쓴다(그 문서의 `skin.custom`). 어느 쪽에서 바꿔도 다른 쪽에 그대로 보인다 |
 | 스킨이 선언한 위치·크기 오프셋(기본 스킨: JUDGE POSITION Y) | 오프셋 행 | LANE 묶음에서 옵션 바로 뒤에 같은 행. 접지 않고 항상 보인다 |
 | 불투명도 행(기본 스킨: 7키 18개) | 목록 끝에 모인 행 | 목록 끝 SKIN 묶음의 접이 `OPACITY`. 닫힌 채로 열리고 Enter·← →·클릭으로 편다 |
+| 색 행(기본 스킨 7키 17개)과 그 채널 행 | 옵션·파일 행 바로 뒤에 평평하게, 채널은 `COLOR CHANNELS` 접이 | SKIN 묶음의 접이 `COLOR`, `COLOR CHANNELS`(닫힌 채 열린다. `docs/play-options.md` 7.2절) |
 | 엔진 오프셋(All offset(%), Notes offset, Judge offset, Judge Detail offset. 15행) | 오프셋 행 | SKIN 묶음의 접이 `POSITION AND SIZE` |
 | 파일 행, 문서 고르기 | 있다 | 없다 |
 | 고른 화면·모드 | `skin.screen` 에 저장된다 | 저장되지 않는다. `skin.screen` 을 읽지도 바꾸지도 않는다 |
@@ -256,6 +288,8 @@ SCORE GRAPH 는 스킨 선곡 위의 기록 모달이 읽으므로 표지 없이
 | `.fnt` | BMFont 텍스트 형식의 비트맵 폰트(type 0)와 distance field(type 1, 2). 페이지 이미지는 `.fnt` 옆에서만 찾는다 |
 | 선언하지 않은 폰트 id | 앱 기본 글꼴로 그려지지만 축소, 줄바꿈, 그림자가 적용되지 않는 대체 경로다. 폰트는 반드시 선언한다 |
 | 폰트에 없는 글자 | 앱의 다국어 폰트로 대신 그린다(E5) |
+| 굵기 | 문서의 `font` 항목에는 굵기 칸이 없다. 굵은 글자는 굵은 TTF 를 따로 선언해 쓴다. 한 가족의 일반 굵기(400, 정자, 보통 폭) 파일만 가족 이름(예: `Inter`)을 받고 다른 굵기는 `<가족> <굵기>`(예: `Inter 700`)라는 별도 글꼴로 등록되며, 이 이름은 올리는 순서와 무관하다. 앱의 내장 화면은 일반 굵기만 가족 이름으로 찾으므로 스킨이 굵은 파일을 먼저 올려도 내장 화면은 굵어지지 않는다. 기본 스킨이 이 방법으로 굵은 글자를 쓴다(3.2절, 3.4.5절) |
+| 글자를 구울 크기 | 스킨 글자(TTF)는 물리 해상도로 구워진다. 내장 화면의 글자도 같은 원칙으로 바뀌었다(`crates.md` 의 rbms-render) |
 
 ### 2.8 조절한 스킨 내보내기, 가져오기, 모든 화면에 적용
 
@@ -286,12 +320,13 @@ SKIN 메뉴에서 조절한 팩을 폴더 하나로 내보내 다른 컴퓨터�
             options: { "Lane Width": "Wide", "Theme": "Mono" },
             files: { "Background": File("bg/night.png"), "Bomb": Random },
             offsets: { "Judge Position": (x: 0.0, y: 12.0, w: 0.0, h: 0.0, r: 0.0, a: 0.0) },
+            colors: { "Black Key Note": "#B0E040FF" },
         ),
     },
 )
 ```
 
-불투명도 행은 알파만 움직이는 오프셋이므로 `offsets` 의 `a` 로 적힌다(§2.2 의 환산). 아무것도 조절하지 않은 문서는 적지 않는다.
+불투명도 행은 알파만 움직이는 오프셋이므로 `offsets` 의 `a` 로 적힌다(§2.2 의 환산). 색 행은 `colors` 에 색 이름과 `#RRGGBBAA` 로 적는다(id 가 아니라 이름이라 문서마다 id 가 달라도 읽힌다). `version` 은 1 그대로이고 `colors` 가 없는 옛 파일도 읽힌다. 아무것도 조절하지 않은 문서는 적지 않는다.
 
 #### 가져오기
 
@@ -302,7 +337,7 @@ SKIN 메뉴에서 조절한 팩을 폴더 하나로 내보내 다른 컴퓨터�
 | 우선순위 | 행마다 사용자가 저장한 값 > 팩의 조절값 > 스킨 제작자의 기본값. 사용자가 저장하지 않은 행만 팩의 값을 따른다 |
 | 저장 | 팩의 값은 `settings.ron` 에 쓰이지 않는다. 메뉴에서 바꾼 행만 지금까지처럼 `skin.custom` 에 저장된다(설정 파일 형식 불변) |
 | RESET, 0 키 | RESET 은 사용자가 저장한 값을 지워 팩의 조절값으로 돌아간다(조절값 파일이 없는 팩은 지금처럼 제작자의 기본값). 오프셋·불투명도 행의 0 키도 팩의 값으로 간다 |
-| 모르는 이름 | 문서, 옵션, 항목, 파일 슬롯, 파일, 오프셋 이름이 그 팩에 없으면 그 줄만 무시한다. 오프셋 값은 행의 범위(위치·크기 ±2000, 각도 ±360, 알파 ±255)로 묶는다 |
+| 모르는 이름 | 문서, 옵션, 항목, 파일 슬롯, 파일, 오프셋, 색 이름이 그 팩에 없으면 그 줄만 무시한다. 색이 아닌 줄도 그 줄만 건너뛴다. 오프셋 값은 행의 범위(위치·크기 ±2000, 각도 ±360, 알파 ±255)로 묶는다 |
 | 쓸 수 없는 파일 | RON 으로 읽히지 않거나, `version` 이 이 빌드가 아는 것(1)보다 높거나, 512 KiB 또는 16,384 줄을 넘거나, 일반 파일이 아니면(링크 포함) 통째로 무시하고 알림을 한 번 낸다. 팩은 제작자의 기본값으로 그려진다 |
 | 적용 범위 | 옵션과 파일은 문서를 읽을 때, 오프셋과 불투명도는 프레임마다 반영된다. 실제 화면, SKIN·PLAY 메뉴의 미리보기, 메뉴의 행이 모두 같은 값(`SkinLibrary::customisation_for`)을 읽는다. 내보낸 팩을 새 설정에서 열면 조절한 화면과 픽셀까지 같은 프레임이 나온다(`stage/capture/play_parts.rs` 의 `a_run_that_names_an_exported_default_pack_draws_the_offsets_it_was_exported_with`) |
 
@@ -324,6 +359,7 @@ SKIN 메뉴에서 조절한 팩을 폴더 하나로 내보내 다른 컴퓨터�
 | 키 | `A`. 확인 없이 지금 값을 그 화면들에 저장하고 설정 파일을 쓴다. 알림 한 줄: `THEME: MONO applied to 8 other screens` |
 | 옵션 | 이름이 같은 옵션에, 이름이 같은 항목으로 맞춘다(op 번호는 문서마다 달라도 된다). 그 이름의 항목이 없는 화면은 건너뛰고 알림에 개수를 적는다(`(1 skipped: no item of that name)`) |
 | 오프셋 | 이름이 같고 그 행의 축을 허용하는 오프셋에, 그 축의 값만 맞춘다. 불투명도 행은 알파 |
+| 색 | 이름이 같은 색 행을 가진 다른 화면에 같은 색을 놓는다. `DEFAULT` 를 놓으면 그 화면들의 저장한 색을 지운다. 이름만 같으면 묶이므로 9키의 `White Key Lane`(라벨 Odd Buttons)에도 7키의 같은 이름 색이 놓인다(3.4.4절) |
 | 하지 않는 것 | 자동으로 묶지 않는다(화면마다 다르게 두고 싶은 옵션이 있다). 파일 슬롯은 대상이 아니다(후보 파일이 문서마다 다르다). 숫자를 치는 중에는 `A` 가 듣지 않는다 |
 
 ## 3. 기본 스킨 `rbms-default`
@@ -334,16 +370,16 @@ SKIN 메뉴에서 조절한 팩을 폴더 하나로 내보내 다른 컴퓨터�
 | --- | --- |
 | 저장소 | `assets/skins/rbms-default/` |
 | 설치 폴더 | `<설정 폴더>/skin/rbms-default/`. `skin.folder` 설정과 무관하게 항상 이 위치다 |
-| 바이너리 | 빌드 스크립트 `apps/rbms-player/build.rs` 가 저장소 폴더를 걸어 만든 표를 싣는다. 65개 파일, 1,772,662 B(7095ef7 실측, 폴더 안 파일 크기의 합. 웨이브 14 의 1,771,429 B 에서 웨이브 16 의 Lua 변경만큼 늘었다). 폰트 `font/Inter-Regular.ttf` 는 렌더러의 `BUNDLED_FONT` 를 가리켜 한 벌만 실린다(두 파일이 달라지면 빌드 실패). 릴리스 바이너리 크기는 +317,760 B(macOS arm64 실측) |
+| 바이너리 | 빌드 스크립트 `apps/rbms-player/build.rs` 가 저장소 폴더를 걸어 만든 표를 싣는다. 70개 파일, 2,240,618 B(47a7f9c 실측, 폴더 안 파일 크기의 합. 문서 9, `lua/` 31, `image/` 5, `font/` 3, `sound/` 22. 2026-10-15 의 65개, 1,772,662 B 에서 굵은 글꼴 420,428 B 와 Lua 모듈 네 개 등이 늘었다). 폰트 `font/Inter-Regular.ttf` 는 렌더러의 `BUNDLED_FONT` 를 가리켜 한 벌만 실린다(두 파일이 달라지면 빌드 실패). 릴리스 바이너리 크기는 65개 파일일 때 +317,760 B(macOS arm64 실측)였고 70개 파일의 값은 재지 않았다 |
 
 ### 3.2 구조
 
 | 경로 | 내용 |
 | --- | --- |
 | `decide.luaskin`, `select.luaskin`, `play5`, `play7`, `play9`, `play10`, `play14` `.luaskin`, `result.luaskin`, `courseresult.luaskin` | 화면 문서 9개. 한 줄짜리 진입 파일이다(`return require("lua.<화면>.main").build(...)`) |
-| `lua/` | 공통 모듈 `theme.lua`(색, 격자, 이름표), `props.lua`(속성 id 이름표), `ui.lua`(조립기), `motion.lua`(키프레임 프리셋), `parts.lua`(조합 부품), 화면 모듈 `lua/<화면>/`, 생성된 시트 좌표표 `lua/atlas/` |
-| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 120,733 B |
-| `font/` | `Inter-Regular.ttf`, `Inter-OFL.txt` |
+| `lua/` | 공통 모듈 `theme.lua`(색, 격자, 이름표, 선곡 패널 색 `theme.panel`, 램프 등급 색), `props.lua`(속성 id 이름표와 확장 id `props.extension`), `ui.lua`(조립기), `motion.lua`(키프레임 프리셋), `parts.lua`(조합 부품), 화면 모듈 `lua/<화면>/`(플레이의 색 행은 `lua/play/colors.lua`, 선곡의 옵션 패널은 `lua/select/{sheet,panel,words,inform}.lua`), 생성된 시트 좌표표 `lua/atlas/` |
+| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 120,807 B. `play.png` 는 1024x570 그대로이고 순백 노트 묶음 다섯 장이 늘었다(3.4.4절) |
+| `font/` | `Inter-Regular.ttf`, `Inter-Bold.ttf`(420,428 B. Inter 4.1 공식 배포의 `extras/ttf/Inter-Bold.ttf`, 무수정, 굵기 700 정적 글꼴), `Inter-OFL.txt`. 같은 저자·같은 OFL 1.1 이라 `Inter-OFL.txt` 한 벌이 두 글꼴을 덮고 `THIRD-PARTY-NOTICES.md` 3절에 Bold 문장을 더했다 |
 | `sound/` | 시스템 사운드 22개 `.wav`. 스킨의 `sound/…` 와 시스템 사운드 폴더가 같은 설치본이다 |
 | `tools/` | 이미지와 사운드 생성 스크립트. 설치본에는 들어가지 않는다 |
 
@@ -459,9 +495,58 @@ DP 는 친 쪽 필드에만 뜬다. 엔진 오프셋 Judge offset(판정 글자�
 - 스킨 위에 앱이 덧그리는 것(SKIN·PLAY 메뉴, `H` 키 안내, 알림, 코스 탭 표지, 선곡의 옵션·검색·필터 오버레이)과 스킨이 없는 내장 화면은 스킨이 아니라 앱 테마(`crates/rbms-render/src/theme.rs`, [theme.md](./theme.md))의 색이다. 앱 테마의 기본값도 무채색이다(웨이브 15): 바탕 `000000`, 면 `161616`·`262626`, 선 `3C3C3C`, 글자 `F2F2F2`·`B8B8B8` 는 Mono 와 같은 값이고, 작은 안내 글자만 `909090`(Mono 는 `808080`)으로 한 단계 밝다. 선택된 행·탭·포커스는 색이 아니라 밝기(면 `505050`, 흰 글자, 흰 띠)로 구분된다. 색이 남는 것은 스킨과 같은 종류다: 판정 색, FAST/SLOW, 클리어 램프와 이름, 난이도·모드 배지·랭크, 점수 차, 그래프, 게이지, GREEN 숫자, 알림과 키 설정의 경고(주황·빨강·호박색). 앱 테마는 스킨의 Theme·Accent 옵션을 따르지 않는다: Slate 나 다른 강조색을 골라도 앱의 메뉴는 무채색 그대로이고, 메뉴의 색은 `theme.ron` 으로 바꾼다([theme.md](./theme.md)).
 - 색 옵션은 화면이 다시 읽힐 때 적용된다(다른 옵션과 같다). SKIN 메뉴와 PLAY 메뉴의 미리보기는 고르는 즉시 따라 바뀐다.
 
-선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 상세 옵션 키. 기본 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다). 패널 3 의 4·6번 키 칸(NOTE DISPLAY TIME)은 KEEP GREEN NUMBER 가 켜져 있으면 유지 중인 이동 시간(ms)과 녹색 숫자를 보이고 1 ms 씩 바꾸며, 꺼져 있으면 `OFF` 와 `KEEP GREEN NUMBER IS OFF` 를 보인다. 패널 3 의 5·7번 키 칸(JUDGE TIMING)은 판정 오프셋을 1 ms 씩 내리고 올리며, 동작 줄에 그 키가 노트를 어느 쪽으로 옮기는지를 쓴다(5번 `NOTES 1 MS LATER` = -1, 7번 `NOTES 1 MS EARLIER` = +1). 플레이 화면의 TIMING 은 판정 오프셋(설정값 그대로)이고 AUTO ADJUST 가 켜져 있으면 표지가 `TIMING AUTO` 가 된다. 이 옵션들의 뜻과 단위는 [play-options.md](./play-options.md)에 있다.
+선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 상세 옵션 키. 기본 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다). 패널 3 의 4·6번 키 칸(NOTE DISPLAY TIME)은 KEEP GREEN NUMBER 가 켜져 있으면 유지 중인 이동 시간(ms)과 녹색 숫자를 보이고 1 ms 씩 바꾸며, 꺼져 있으면 `OFF` 와 `KEEP GREEN NUMBER IS OFF` 를 보인다. 패널 3 의 5·7번 키 칸(JUDGE TIMING)은 판정 오프셋을 1 ms 씩 내리고 올리며, 동작 줄에 그 키가 노트를 어느 쪽으로 옮기는지를 쓴다(5번 `NOTES 1 MS LATER` = -1, 7번 `NOTES 1 MS EARLIER` = +1). 플레이 화면의 TIMING 은 판정 오프셋(설정값 그대로)이고 AUTO ADJUST 가 켜져 있으면 표지가 `TIMING AUTO` 가 된다. 이 옵션들의 뜻과 단위는 [play-options.md](./play-options.md)에 있다. 패널의 키 배치와 칸은 play-options.md 12절, 기본 스킨이 패널을 그리는 방법은 3.4.5절이다.
 
 바닥의 안내 문구는 바뀔 수 있는 키의 이름을 고정해 적지 않는다. 선곡 바닥은 `H`(지금 설정된 키 전체)를 가리키고, 결과 화면은 다시 하기·다음 곡의 키가 키 설정에 있음을 출하 키(R, N)와 함께 적는다.
+
+#### 3.4.4 플레이 색 행
+
+플레이 문서 다섯(play5, play7, play9, play10, play14)은 헤더에 `color` 행을 선언한다(`lua/play/colors.lua`, 1.4절). SKIN 메뉴(F12)에서는 옵션·파일 행 뒤에, PLAY 메뉴(F8)에서는 SKIN 묶음의 접이 `COLOR` 와 `COLOR CHANNELS` 에 나온다(`docs/play-options.md` 7.2절). 5·7·10·14키는 17행, 9키는 22행이다. 메뉴의 행 이름은 `<분류> > <이름>` 이다(예: `LANE > WHITE KEY`, `NOTE > BLACK KEY LN`). 헤더 `def` 는 기본 테마(Mono, Accent White, Note Colors White-Blue)의 색이다.
+
+| 분류 | 행(이름, id) | 가진 문서 | `def` |
+| --- | --- | --- | --- |
+| LANE | White Key Lane 1, Black Key Lane 2, Scratch Lane 3 | 5·7·10·14키 | `161616`, `000000`, `161616` |
+| LANE | White Key Lane 1, Black Key Lane 2(라벨 Odd Buttons, Even Buttons) | 9키 | `161616`, `000000` |
+| LANE | Lane Divider 4, Bar Line 5, Judge Line 6, Lane Cover 7 | 다섯 문서 전부 | `3C3C3C`, `3C3C3C`, `FFFFFF`, `262626` |
+| NOTE | White Key Note 10, Black Key Note 11, Scratch Note 12 | 5·7·10·14키 | `F1F4F8`, `4CC9F0`, `F0564C` |
+| NOTE | White Button Note 13, Yellow Button Note 14, Green Button Note 15, Blue Button Note 16, Red Button Note 17 | 9키 | `F1F4F8`, `F2B33D`, `59D185`, `568CF5`, `F0564C` |
+| NOTE | White Key LN 40, Black Key LN 41, Scratch LN 42 | 5·7·10·14키 | 같은 레인의 노트 행과 같다 |
+| NOTE | White Button LN 43, Yellow Button LN 44, Green Button LN 45, Blue Button LN 46, Red Button LN 47 | 9키 | 같은 버튼의 노트 행과 같다 |
+| EFFECT | White Key Beam 20, Black Key Beam 21, Scratch Beam 22 | 5·7·10·14키 | 같은 레인의 노트 행과 같다 |
+| EFFECT | White Button Beam 23, Yellow Button Beam 24, Green Button Beam 25, Blue Button Beam 26, Red Button Beam 27 | 9키 | 같은 버튼의 노트 행과 같다 |
+| EFFECT | Bomb 30 | 다섯 문서 전부 | `F1F4F8` |
+
+- 저장한 색이 없는 부위는 옵션(Theme, Accent, Note Colors, Bomb Color)이 정하던 색 그대로 그려진다. 기본 스킨 캡처 94장이 변경 전과 화소 단위로 같다. 색을 저장한 부위만 그 destination 의 기본색을 흰색으로 두고 `tint` 를 그 색 id 로 건다(레인 면, 구분선, 마디선, 판정선, 커버, 키빔, 폭발). 노트는 순백 노트 시트의 그림을 고르고 `note.tint`·`note.long_tint` 에 색 id 를 넣는다. 순백 시트는 `image/play.png` 에 더한 묶음 다섯 장(note, long, held, hell, hell_held. 색은 회색조이고 그림자는 `NOTE_SHADE` 를 회색으로 바꾼 값)이고 기존 스프라이트 127개의 화소는 그대로다(`tools/sections/play.py`). 아무 레인에도 저장한 색이 없으면 `note.tint` 를 만들지 않아 문서가 전과 같다.
+- 메뉴가 저장한 색이 없는 행에서 시작하는 색은 `def` 가 아니라 본체 패스가 알려 주는 `drawn`, 곧 그 부위가 지금 그려지는 색이다(`colors.paint`). Theme = Slate, Accent = Sky, Note Colors = White-Yellow 처럼 옵션이 `def` 와 다른 색을 그리는 동안 첫 편집이 색조를 바꾸는 것을 막으려는 것이다. 0 키와 `A` 의 기준은 `def`(출하 값)다. 한계: Bomb 행은 Bomb Color = Note(기본)에서 레인마다 폭발 색이 달라 한 색이 아니므로 `drawn` 을 흰색으로 둔다. 그래서 알파만 고쳐도 모든 레인의 폭발이 흰색이 된다. LN 행의 `drawn` 은 로드 때 저장된 노트 색의 사본이라, 이미 저장한 노트 색을 바꾸면 문서를 다시 읽기 전까지 LN 행의 견본과 시작 색이 이전 노트 색을 보인다(그리기는 프레임마다 읽어 영향이 없다).
+- LN 행: 저장한 LN 행이 없으면 롱노트(머리·몸통·끝, CN, HCN)는 그 레인의 노트 행 색을 따른다(`long_tint` 가 비어 `tint` 로 떨어진다). LN 행을 저장하면 롱노트만 그 색이다.
+- 알파: 색의 알파는 그 부위의 불투명도 오프셋(3.4.2절)을 더한 뒤의 알파에 곱한다. 노트와 destination 부위가 같은 순서다. 처음 구현은 destination 부위에서 곱을 먼저 하고 오프셋을 더했는데(통합 리뷰 colors-2), 같은 설정에서 레인은 0%, 노트는 25% 가 되어 하나로 맞췄다. 그 전에 비불투명 색을 저장해 둔 사용자는 불투명도가 100% 가 아닌 레인·키빔·폭발·커버·마디선에서 이전보다 진하게 본다.
+- 곱하지 않는 것은 1.4절과 같다. 판정선의 어두운 바닥 막대는 흰색이 아니라 회색 `accent_dim.white`(102, 102, 102)에 곱해 강조색과 어두운 짝의 관계를 사용자 색에서도 지킨다. 커버의 가장자리 강조선과 커버 수치는 어느 색 행에도 묶이지 않았다. HCN 을 누르는 동안 가운데 레일은 원래 노트색보다 밝은 하이라이트(색과 흰색의 중간)였지만 순백 시트에서는 흰색 x 사용자 색이라 노트색 그대로 나온다. 곱셈의 한계다.
+- 9키: 노트·LN·키빔은 버튼 색 다섯 묶음(흰 1·9, 노랑 2·8, 초록 3·7, 파랑 4·6, 빨강 5)으로 나뉘고 스크래치와 흰/검 건반의 노트·LN·키빔 행은 없다. 레인 면 행은 홀수 버튼 면(`White Key Lane`)과 짝수 버튼 면(`Black Key Lane`)이고 7키와 이름이 같다. `A` 키가 이름으로 묶으므로 7키의 흰 건반 면 색이 9키의 홀수 버튼 면에 놓인다. **미확인**: 이 묶임이 의도에 맞는지 사용자가 확인하지 않았다.
+- 저장: `settings.ron` 의 `skin.custom[문서 경로].colors` 에 색 id → RGBA 로 적는다(`#[serde(default)]`, 스키마 판은 6 그대로). 이전 빌드로 내리면 `colors` 키를 읽지 않고 다음 저장 때 색을 잃는다. 내보내기·가져오기는 2.8절.
+- 비용: 색 처리는 로드 때만 돌고 프레임 함수를 늘리지 않는다. 플레이 문서 다섯의 프레임 비용은 평균 0.057~0.062 ms, p99 0.067~0.073 ms, 예산 초과 0 이다(`skin-dump --strict --frames 120`).
+
+#### 3.4.5 선곡 옵션 패널 (IIDX 옵션 화면 식)
+
+키 배치와 칸의 뜻은 `docs/play-options.md` 12절, 결정은 [옵션 패널 ADR](./acknowledge/2026-10-22-adr-option-panel-layout.md)다. 이 절은 기본 스킨이 패널을 그리는 방법이다. 모듈: `lua/select/sheet.lua`(세 패널을 조립), `panel.lua`(그리기 도구), `words.lua`(문구), `inform.lua`(INFORMATION 감시), `info.lua`(선곡 정보창의 최고 기록 램프), `side.lua`(BGA 값 이름을 ON/OFF 로 맞춤). 색은 `theme.panel`([theme.md](./theme.md)), 굵은 글자는 `font/Inter-Bold.ttf`(`theme.font.bold`)다.
+
+| 요소 | 내용 |
+| --- | --- |
+| 배치(1920x1080) | 위에 INFORMATION(태그와 본문, y 120~236)과 오른쪽 위의 안내 줄(`HOLD START`, `HOLD SELECT`, `HOLD START + SELECT, OR THE DETAIL OPTIONS KEY (5 AS SHIPPED)`). 그 아래 건반 7개(흰 건반 1·3·5·7 은 아래 줄 y 312, 검은 건반 2·4·6 은 위 줄 y 264, 간격 112, 92x92)와 건반 왼쪽의 턴테이블 상자(120x120). 값 상자는 y 492 부터 |
+| 연결선 | 건반과 턴테이블에서 그 칸의 상자까지 두께 4px 의 꺾인 선을 열 색으로 긋는다. 바깥 건반일수록 높은 차선(y 424·444·464)을 써서 선이 엇갈리지 않는다. 건반 7(패널 1 RANDOM)과 건반 4·6(패널 3 NOTE DISPLAY TIME)은 건반 위 차선(y 248)으로 돌아간다 |
+| 상자 | 머리(굵은 이름, 1~2줄)와 값 전체를 세로로 나열한 어두운 칸. 지금 값은 밝은 주황 바탕(255, 152, 52)에 어두운 굵은 글자와 빛 테두리. 상자 아래에 굵은 열 이름(STYLE, GAUGE, SPEED, ASSIST, RANGE, JUDGE, TIMING, DISPLAY 등). 열 색은 `theme.panel.column`(orange, green, violet, sky, locked) |
+| 패널 1 | RANDOM(키 1·2·7), GAUGE(3·4), HI-SPEED FIX(5·6)를 가운데에 폭 280 상자로. 왼쪽에 TARGET 21줄(위 10줄은 `text` 200~209, 지금 것은 `text` 3, 아래 10줄은 210~219. 지금 줄 강조), 왼쪽 아래에 지금 GAUGE 이름과 두 줄 설명 |
+| 패널 2 | EX JUDGE(회색 `LOCKED`, `READ ONLY`), CONSTANT, SCRATCH AUTO, LEGACY NOTE, KEEP GREEN NUMBER, LANE COVER, LIFT 의 켬·끔 상자 7개. SCRATCH AUTO 아래에 `ON: THE LAMP IS AN ASSIST GRADE`. 왼쪽에 HIDDEN+ 상자, 왼쪽 아래에 `ASSIST LAMP` 규칙(클리어한 게이지 → ASSIST EXHARD·HARD·CLEAR·EASY·LIGHT ASSIST 를 등급 색으로) |
+| 패널 3 | BGA(ON·OFF), GAS(5값), AUTO ADJUST, JUDGE TIMING 숫자 칸(`<` `>`, ±ms, FAST·SLOW 안내), NOTE DISPLAY TIME 숫자 칸(ms와 녹색 숫자. KEEP GREEN NUMBER 꺼짐은 `OFF` 와 `SELECT + KEY 5` 안내, 켜짐은 `LEFT`/`RIGHT` 안내, 차트 아닌 막대 위는 `-`). 왼쪽에 JUDGE ALGORITHM(COMBO·DURATION·LOWEST. SCORE 이면 강조 없이 `SCORE: SET IN SETTINGS > JUDGE`), 왼쪽 아래에 GAS 설명 목록(지금 값은 주황) |
+| INFORMATION | 패널이 열린 동안만 값을 읽는 클로저(`inform.lua`). 열림 타이머(21~23)가 바뀌면 그때 값을 기준으로 잡고 패널 안내를 보인다. 이후 값이 바뀌면 왼쪽에 바뀐 옵션의 이름(굵게), 오른쪽에 새 값(굵은 주황), 아래에 한 줄 설명을 보인다. 값은 원본 id 와 확장 옵션으로 읽는다(RANDOM `event_index(42)`, GAUGE 40, HI-SPEED FIX 55, BGA 72, AUTO ADJUST 75, GAS 78, EX JUDGE 301, CONSTANT 302, LEGACY NOTE 304, JUDGE ALGORITHM 340, JUDGE TIMING `number(12)`, 이동 시간 `number(312)`·녹색 `number(313)`, TARGET `text(3)`, 켬·끔 21100~21104) |
+| 닿지 않는 키 | 5키·10키에서 건반 6·7 의 키 그림과 윤곽, 패널 2 에서는 그 키의 칸(LANE COVER, LIFT)을 알파 196 의 배경색 덮개로 어둡게 한다. 확장 옵션 21140~21148 로 읽는다. 그 키로 가는 연결선과 JUDGE TIMING·NOTE DISPLAY TIME 상자의 `>` 화살표는 다른 키로도 닿으므로 어둡게 하지 않는다 |
+| 움직임 | 기존 관례 그대로다. 패널은 24px 올라오며 150 ms 에 나타나고(`MOTION.rise`, `MOTION.move`), 타이머 21~23 은 도착, 31~33 은 출발이다. 뒤 화면은 덮개(알파 248)로 가린다 |
+| 글자 | 값 24 이상, 보조 18 이상(`theme.type.label` 24, `caption` 18). 이름·강조 값·INFORMATION 제목과 값·태그·건반 표지는 굵게. 화살표는 그림이 아니라 굵은 `<` `>` 글자이고 턴테이블은 사각 상자다 |
+
+램프 등급 표시(`docs/play-options.md` 10.13절): `theme.clear[2]` 는 `ASSIST`, `[3]` 은 `LIGHT ASSIST` 이고, `theme.assist_grade[0..4]` 가 등급 이름과 색을, `theme.grade_lamp` 가 등급 1~4 의 색(`3ad19f`, `c4a796`, `afb8ef`, `ca76a9`. 웹과 같다)을 가진다. 선곡 정보창의 최고 기록 램프(`info.lua`)는 옵션 21110 + k 로, 결과 화면의 이번 판(`result/score.lua`)은 21120 + k, 이전 최고는 21130 + k 로 등급을 읽는다. 등급 0 은 1~4 가 모두 꺼졌을 때 그려 호스트가 답하지 않아도 이름이 비지 않는다. 결과 화면의 이전 최고 램프 글자색은 보조색에서 그 램프의 색으로 바꿨다(등급 색이 보이도록 모든 램프에 적용했다). 처음 등급 색을 `theme.lamp` 에 넣었더니 이미지 생성기가 `theme.lamp` 를 순서대로 읽어 램프 띠가 11칸에서 15칸이 되어 `generate-images.py --check` 가 select 시트의 차이를 냈고, 별도 표 `theme.grade_lamp` 로 옮겨 이미지를 그대로 두었다.
+
+비용(`skin-dump`): 패널 이전(7459bf7)의 선곡 문서는 release 200프레임에서 로드 7.0 ms, destination 503, 함수 61, 프레임 평균 0.024 ms(p99 0.043 ms)였고, 패널을 그린 뒤(0c450db)는 로드 24.8 ms, destination 1611, 함수 171, 프레임 평균 0.047 ms(p99 0.060 ms, 최대 0.078 ms)였다. 패널 수리(`3f058f4`) 뒤의 strict 덤프(debug 120프레임)는 destination 1677, 함수 203, 프레임 평균 0.230 ms, 최대 0.292 ms, 경고·함수 실패·예산 초과 0 이다(release 와 debug 의 값은 비교하지 않는다). 출발 타이머(31~33)의 destination 은 `op` 가 없어 패널이 닫혀 있어도 `draw` 함수가 매 프레임 불린다.
+
+한계: 한 프레임에 옵션 둘이 바뀌면 INFORMATION 은 감시 순서상 마지막 것만 보인다. 문구(INFORMATION 안내, 게이지·GAS·알고리즘 설명)는 영어 대문자로 새로 썼다. **미확인**: 사용자가 문구를 검토하지 않았다. 외부 스킨에서 키 재배정이 적용되는 문제는 `docs/play-options.md` 12.7절.
 
 ### 3.5 이미지와 사운드를 다시 만드는 법
 
@@ -498,6 +583,7 @@ DP 는 친 쪽 필드에만 뜬다. 엔진 오프셋 Judge offset(판정 글자�
 | `dofile`, `loadfile` | 절대 경로나 팩 상대 경로. 정규화해 팩 밖이면 오류. 캐시 없음 |
 | `io` | 읽기는 오버레이 다음 팩, 쓰기는 오버레이(§2.5). 없는 파일은 `nil, 메시지` |
 | `os` | `clock`, `date`(현지 시각), `difftime`, `time`, `setlocale`(항상 `"C"`)만 |
+| `skin_config` | 본체 패스에만 있다(헤더 패스에서는 `nil`). `option`(옵션 이름 → 고른 항목), `enabled_options`, `file_path`, `get_path`, `offset`(오프셋 이름 → 여섯 값)과 R-BMS 확장 `color`(색 행 이름 → `{ r, g, b, a, custom }`. 1.4절)가 있다. 로드 시점의 값이고 실행 중 갱신되지 않는다 |
 | `main_state` | 스킨이 게임을 보는 전부. `option`, `number`, `numbers`, `float_number`, `text`, `event_index`, `offset`, `timer`, `time`, `timer_is_on`, `timer_is_off`, `timer_elapsed(_ms/_seconds)`, `set_timer`, `event_exec`, `key_pressed`, `screen_width`, `screen_height`, `rate`·`exscore` 계열, `gauge`, `gauge_type`, `judge`, `volume_*`, `audio_play/loop/preload/stop/dispose`, `file_*` 헬퍼. id 는 숫자나 이름이다 |
 | `timer_util` | `now_timer`, `is_timer_on`, `is_timer_off`, `timer_function`, `timer_observe_boolean`, `new_passive_timer` |
 | `event_util` | `event_observe_turn_true`, `event_observe_timer`, `event_observe_timer_on`, `event_observe_timer_off`, `event_min_interval` |
@@ -598,6 +684,8 @@ RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> \
 
 환경 변수 없이 도는 기본 스킨 게이트는 다음이 지킨다: `apps/rbms-cli` 의 엄격 덤프 테스트(문서 9개 로드와 type, 경고 0, 팩 불변), `stage/capture/gate.rs`(선곡, 결정, 플레이 5/7/9/10/14, 결과, 코스 결과를 640x360 으로 그려 컴파일된 스킨 장면, 경고 0, 객체 종류, 모서리 배경색을 단언), `crates/rbms-skin/tests/default_pack.rs`(금지 API 점검, 시트 대조), `apps/rbms-player/src/assets/default_pack/tests.rs`(설치 규칙). 화면별 캡처 테스트 이름과 확인 항목은 설계서 §8 에 있다.
 
+2026-10-22 에 더한 캡처 테스트(`RBMS_SKIN_CAPTURE_DIR` 이 있을 때만 PNG 를 쓴다): `stage/capture/panels.rs` 의 `the_default_packs_option_panels_and_graded_lamps_are_captured`(저장소 기본 팩으로 패널 1·2·3 을 열고 키를 눌러 INFORMATION 을 찍고, 최고 기록을 SCRATCH AUTO + HARD 로 바꾼 선곡 정보창과 결과 화면의 등급을 찍는다. 결과 캡처는 autoplay + 스크래치 레인 자동이라는 앱이 실제로 만들지 않는 조합의 고정물이다), `stage/capture/play_rows/colours.rs` 의 `the_play_scene_of_the_default_pack_is_captured_with_its_colours_set`(색을 저장한 장면. 저장한 색이 없는 장면은 `..._with_its_rows_switched` 의 94장이 변경 전과 화소 단위로 같다). 패널 5키 장면과 닿지 않는 키는 임시 환경 스위치로 찍었고 상설 캡처가 없다(테스트 부채 3.92).
+
 ## 6. 알려진 한계
 
 | 구분 | 한계 | 사정 |
@@ -606,7 +694,8 @@ RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> \
 | 엔진 | IR 랭킹 목록·라이벌 값(380~399 등)은 스킨에 연결되지 않았다. IR 상태 타이머(172~174)와 옵션(51 등)은 실제 값이다. IR 서버가 설정된 환경에서는 option 51 이 참이 되어 ModernChic 이 IR 메뉴를 구성에 넣는데 그 구성의 캡처는 찍지 못했다 | 웨이브 9 |
 | 선곡 | 종류별 노트 수(350~353), 밀도(360~365), 주 BPM(92)은 빈칸이다 | songdb 열 추가와 전체 재스캔이 필요해 별도 작업(D9) |
 | 선곡 | 표 이름·표 레벨(text 1001~1003, op 1008)은 선곡에서 빈칸이다. 결정 화면에서는 채워진다 | 미지원 |
-| 선곡 | 패널 2의 BPM GUIDE, JUDGE AREA, MARK NOTE, NO MINE 과 패널 3의 일부 수치는 대응하는 설정이 없어 `NOT AVAILABLE` 이다 | |
+| 선곡 | 옵션 패널의 키 재배정(패널 2 의 3·5·6·7번 키와 턴테이블, 패널 1 의 4·6번 키, 패널 3 의 턴테이블)은 어느 스킨에서나 적용된다. 외부 스킨(ModernChic 등)의 JUDGE AREA·MARK NOTE·BPM GUIDE·NO MINE 칸이 이제 SCRATCH AUTO·KEEP GREEN NUMBER·LANE COVER·LIFT 를 바꾸고 화면에는 표시가 없다. 기본 스킨에는 `NOT AVAILABLE` 칸이 없다 | `docs/play-options.md` 12.7절. 스킨이 확장 id 를 안다고 알릴 길이 없어 막지 않았다. 사용자 미확인 |
+| 선곡 | 기본 스킨의 옵션 패널은 한 프레임에 옵션 둘이 바뀌면 INFORMATION 이 마지막 것만 보인다. 문구는 영어 대문자로 새로 썼고 사용자 검토 전이다. 화살표는 굵은 `<` `>` 글자, 턴테이블은 사각 상자로 그렸다 | 3.4.5절 |
 | 선곡 | 앱이 스킨 위에 덧그리는 것과 스킨의 정합: IR 랭킹 패널이 정보 영역 오른쪽 124px 을 덮지 못한다, 옵션 오버레이가 반투명이라 뒤가 비친다, 토스트가 목록 아래쪽 막대를 덮는다 | 스킨으로 고칠 수 없는 앱 단위 작업 |
 | 선곡 | 판정 알고리즘이 Score 일 때 QUICK SETTINGS 의 해당 행이 움직이지 않고 `SCORE (SET IN SETTINGS)` 로 알린다 | 번호 체계가 beatoraja 와 같다 |
 | 플레이 | 미스 레이어 분리, BACKBMP·배너, 키별 판정 이미지 인덱스, bgaExpand 설정, 오토플레이 중 숫자키 배속, PMS 의 박자 확대는 원천 데이터가 없어 빠졌다 | |
@@ -616,10 +705,12 @@ RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> \
 | 결과 | 다시 하기, 다음 곡이 가능한지 알리는 속성이 없어 불가능한 런에서도 R, N 안내가 나온다. judgegraph 는 색 지정을 받지 않는다(엔진 고정 팔레트) | |
 | 화면 | 24키 문서, type 9 스킨 설정 문서(설정 화면은 내장 SKIN 메뉴가 대신한다), 스킨 문서 안의 skinpreview 객체, `filter != 0` 전용 bilinear 셰이더는 없다 | 웨이브 9 |
 | 설정 | 스킨 선택·옵션(`skin` 그룹 전체)은 기기 로컬이다. 계정 동기화로 올리거나 내려받지 않는다. 문서 절대 경로가 키라서 기기 간에 옮길 수 없다 | 조절한 팩을 다른 기기로 옮기려면 SKIN 메뉴의 EXPORT 로 내보낸 폴더를 가져간다(§2.8). 동기화에 싣는 것은 팩 이름 기준 키로 바꾸는 별도 작업이다 |
+| 색 | 색 행은 플레이 문서의 부위만 다룬다(3.4.4절). 선곡·결정·결과에는 없다. HCN 을 누르는 동안 가운데 레일의 하이라이트는 순백 시트에서 노트색 그대로이고, Bomb 행은 알파만 고쳐도 모든 레인의 폭발을 흰색으로 만든다 | 곱셈 방식의 한계다(3.4.4절) |
 | 색 | 앱이 스킨 위에 덧그리는 것과 내장 화면은 무채색이 됐다(웨이브 15. §3.4.3). 남은 것은 하나다: 앱 테마는 스킨의 Theme·Accent 옵션을 따르지 않는다. 스킨을 Slate 나 Sky 로 바꿔도 앱의 메뉴는 무채색이다. 스킨 팩 없이 그리는 내장 플레이 화면의 레인 바탕·필드 테두리·레인 구분선도 회색이다(번들 `assets/skins/{normal,wide,default}.ron` 이 `SkinConfig` 의 기본값과 같은 `lane_bg (22, 22, 22)`, `outline_color (96, 96, 96)`, `divider_color (60, 60, 60)` 를 준다) | `theme.ron` 으로 사용자가 맞춘다([theme.md](./theme.md)). 스킨의 옵션을 앱 테마에 잇는 것은 정하지 않았다 |
 | 설정 | 판 3 이하의 설정 파일에서 일부러 꺼 둔 LETTERBOX 도 업데이트 뒤 한 번 켜진다 | 그 판은 고른 값과 기본값을 구별해 적지 않았다. 다시 끄면 유지된다 |
 | 선곡 | 곡 검색어를 치는 중에는 마우스로 다른 곳을 눌러도 입력이 끝나지 않는다(beatoraja 는 확정한다). 키를 누르고 있어도 글자가 반복되지 않는다 | Enter 로 확정, Esc 로 취소 |
 | 곡 정보 | 짧은 한글만 든 EUC-KR 차트 일부(모든 바이트가 반각 가나 범위인 경우)와 Shift_JIS 파일에 다른 인코딩 한 줄이 섞인 차트는 반각 가나로 보일 수 있다 | 인코딩은 파일 전체에 한 번 판정하고 동점은 Shift_JIS 다(`crates/rbms-parser/src/encoding.rs`) |
 | 확인 | 한글·일본어 제목의 폭, 기준선, 축소는 캡처로 확인하지 못했다(하니스에는 번들 Inter 하나뿐이고 실제 앱은 시스템 글꼴을 쓴다) | 수동 점검 항목에 포함 |
+| 글자 | 스킨의 글꼴 항목(`font`)에는 굵기 칸이 없어 굵은 글자는 굵은 TTF 를 따로 선언해야 한다(2.7절). 스킨 글자는 글리프 위치의 서브픽셀 빈과 SHRINK 줄의 가로 배율 래스터가 없고 감마·대비 보정도 없다 | `docs/quality-assurance/2026-10-14-test-debt.md` 3.87 |
 | 확인 | 실제 GPU 창에서의 첫 실행, 마우스 조작, 소리, 1280x720 창은 사람이 확인해야 한다 | `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` |
 | 확인 | Windows 와 Linux 에서의 결과는 푸시 뒤 CI 로 확인한다 | `docs/ci-release.md` |

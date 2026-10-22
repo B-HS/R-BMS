@@ -1,6 +1,6 @@
 # 웹 AI 기능 기획 조사 (AI1) - 웹 서버가 가진 데이터와 AI 기능을 넣을 자리
 
-> 최종 갱신 2026-10-19 · 대응 커밋 1eadbb5
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (조사 본문은 2026-10-19 기준 그대로이고 2026-10-22 에는 `chart_best` 행, 4.3절 순위 줄, 부록 C 만 고쳤다)
 > 이 문서는 조사 보고서 전문이다(줄이지 않았다). 끝에 조사자가 함께 낸 "제약"과 "확인하지 못한 것" 목록을 원문 그대로 붙였다. 기획은 [../../plan/2026-10-19-web-ai-features.md](../../plan/2026-10-19-web-ai-features.md), 색인은 [README.md](README.md).
 
 조사 시점 2026-10-19, 브랜치 dev, 코드는 수정하지 않았고 Git 상태도 바꾸지 않았다. `.env*`, `secrets/`, `settings.ron`, `scoredb.sqlite` 는 읽지 않았고 운영 사이트·DB 에 요청하지 않았으며 rbms-player 도 실행하지 않았다. 측정에 쓴 것은 `target/release/rbms-cli` 의 `scan` 과 chart 요약 모드뿐이다(읽기 전용, 임시 sqlite 는 시스템 temp 에만 생성). 경로는 `/Users/hyunseokbyun/development/R-BMS` 기준 상대 경로이고 `web/` 안 파일은 `web/` 접두사를 붙였다. 사용자 결정(BYOK, 3개 공급자, 판별(a)+곡별(b) 패턴, 결정론 집계·AI 는 해석만)은 `docs/PROCESS.md:21-22` 에 이미 기록돼 있다.
@@ -28,7 +28,7 @@ DB 는 MySQL + Drizzle(mysql2), 마이그레이션 0000~0004(`web/drizzle/`)가 
 | --- | --- | --- | --- |
 | `chart` | schema.ts:20-54 | PK `sha256`; uniq `chart_md5_uniq(md5)`; idx `chart_title_idx(title)` | `md5` 는 nullable. 제목·아티스트·레벨·모드·노트 수·BPM·`has_*` 플래그 |
 | `score` | schema.ts:56-137 | PK `id`; uniq `score_idempotent_uniq(user_id, chart_sha256, played_at)`; idx `score_ranking_idx(chart_sha256, ranked, clear, ex_score)`, `score_player_idx(user_id, played_at)`, `score_build_idx(client_build_sha256)`, `score_recent_idx(played_at)` | 한 판 = 한 행. 사용자 시계열은 `score_player_idx` 로 읽힌다 |
-| `chart_best` | schema.ts:139-159 | PK `(chart_sha256, user_id, scratch_auto)`; idx `chart_best_rank_idx(chart_sha256, scratch_auto, clear, ex_score)` | **`user_id` 가 앞에 오는 색인이 없다**(0002 마이그레이션 `web/drizzle/0002_scratch_auto_bests.sql:4,6-7`로 확인). `WHERE user_id = ?` 로 한 사용자의 전체 최고 기록을 읽으면(`countLampsByUser`, `listBestByMd5`) 색인을 못 쓴다. AI 기능이 이 읽기를 자주 하면 마이그레이션이 필요하다 |
+| `chart_best` | schema.ts:141- | PK `(chart_sha256, user_id, scratch_auto)`; idx `chart_best_rank_idx(chart_sha256, scratch_auto, clear, ex_score)`, `chart_best_rank_grade_idx(chart_sha256, scratch_auto, clear, assist_grade, ex_score)`(0011, 2026-10-22. 열 `assist_grade` 도 0011) | **`user_id` 가 앞에 오는 색인이 없다**(0002 마이그레이션 `web/drizzle/0002_scratch_auto_bests.sql:4,6-7`로 확인). `WHERE user_id = ?` 로 한 사용자의 전체 최고 기록을 읽으면(`countLampsByUser`, `listBestByMd5`) 색인을 못 쓴다. AI 기능이 이 읽기를 자주 하면 마이그레이션이 필요하다 |
 | `replay` | schema.ts:161-192 | PK `id`; idx `replay_chart_idx`, `replay_score_idx`, `replay_user_idx`(0003) | 본문은 `data` mediumtext(DB 인라인), `storage_key` 는 쓰이지 않음 |
 | `api_token` | schema.ts:194-208 | PK `id`; uniq `api_token_hash_uniq(token_hash)`; idx `api_token_user_idx` | SHA-256 해시만 저장 |
 | `rival` | schema.ts:210-218 | PK `(user_id, rival_id)` | 라이벌 목록은 공개 조회(`GET /api/players/[id]/rivals` 무인증) |
@@ -171,7 +171,7 @@ DB 는 MySQL + Drizzle(mysql2), 마이그레이션 0000~0004(`web/drizzle/`)가 
 ### 4.3 라이벌·순위
 
 - 라이벌: `rival(user_id, rival_id)`, `rival.service.ts`(`listByLoginId`, `replaceByUserId`), `GET/PUT /api/players/[id]/rivals`(PUT 은 세션·본인). 순위 목록에 `rival_of` 파라미터가 있다(`dto/score.ts:99-105`).
-- 순위: `chartBestScope`(`compose/best-scope.ts:66-73`)가 "일반 판만"/"일반·SCRATCH AUTO 중 더 높은 쪽"을 고른다. 종합 랭킹 `GET /api/fe/leaderboards/players` 는 `cleared`/`played`/`plays` 정렬(클리어 = 램프 id >= ASSIST EASY, `MIN_CLEAR_LAMP_ID`, `dto/common.ts:33-34`). 비교 순서는 램프 > EX > BP 작을수록(best-scope.ts `outranks`).
+- 순위: `chartBestScope`(`compose/best-scope.ts:66-73`)가 "일반 판만"/"일반·SCRATCH AUTO 중 더 높은 쪽"을 고른다. 종합 랭킹 `GET /api/fe/leaderboards/players` 는 `cleared`/`played`/`plays` 정렬(클리어 = 램프 id >= ASSIST EASY, `MIN_CLEAR_LAMP_ID`, `dto/common.ts:33-34`). 비교 순서는 램프 > (2026-10-22 부터) 어시스트 등급 > EX > BP 작을수록(best-scope.ts `outranks`, 부록 C).
 
 ---
 
@@ -312,6 +312,43 @@ DB 는 MySQL + Drizzle(mysql2), 마이그레이션 0000~0004(`web/drizzle/`)가 
 - 리플레이 `extra` 가 저장되지 않는다(2.1절).
 
 ---
+
+## 부록 C. 어시스트 등급과 AI 기능 (2026-10-22 구현 반영)
+
+위 조사는 2026-10-19 기준이다. 어시스트 램프 등급 구현(`8d85b32` 마이그레이션 0011, `64c6120` 웹, `47a7f9c` AI 정렬·비교 합계·백필 액션)으로 서버가 달라진 곳과 AI 기능이 등급을 읽는 방법을 모았다. 등급의 의미와 설계는 [../clear-lamps.md](../clear-lamps.md) 1.8·3절, ADR [어시스트 램프 등급](../../acknowledge/2026-10-22-adr-assist-lamp-grade.md).
+
+**C.1 응답에 실리는 `assist_grade`** (정수 0~4, 램프가 LIGHT ASSIST 일 때만 0 이 아닐 수 있다. 램프 id·와이어 enum·zod 이름은 그대로)
+
+| 응답 | 필드 | 근거 |
+| --- | --- | --- |
+| `ScoreRecord`(차트 순위, best, 플레이어 점수 목록, 코스 순위, `GET /api/scores/[id]`) | `assist_grade`(기본 0. 코스는 항상 0) | `web/src/server/dto/score.ts:77`, `score.service.ts:217` |
+| 활동 항목(`/api/fe/activity/recent`, `/api/fe/players/[playerId]/recent`) | `assist_grade` | `fe.service.ts:56`, `web/src/entities/score.type.ts:35`, `stats.type.ts:24` |
+| 플레이어 통계 `/api/fe/players/[playerId]/stats` | `lamps[]` = `{ clear, assist_grade, count }` | `fe.service.ts:67-76`, `entities/player.type.ts:22` |
+| 발광 표 기록 `/api/fe/tables/{id}/records` | 곡마다 `assist_grade` | `table-snapshot.service.ts:132`, `dto/table-snapshot.ts:79` |
+| AI: 추천·연습 폴더·목표 후보(`aiChartCandidate`) | `assist_grade` | `dto/ai.ts:224` |
+| AI: 기록 질문 행 | `assist_grade` | `dto/ai.ts:311` |
+| AI: 판 코치 play | `assist_grade` | `dto/ai-play.ts:142` |
+| AI: 주간 요약 | `from_assist_grade`, `to_assist_grade` | `dto/ai.ts:485-487` |
+| AI: 비교 합계(`judgeTotalsSchema`) | `assist_grade` | `dto/ai-play.ts:176` |
+
+**C.2 프롬프트 버전 2와 digest**
+
+- 모델에 주는 digest 에 `assist_grade` 를 더한 다섯 기능의 프롬프트 버전을 1 에서 2 로 올렸다(캐시된 결과가 사용자가 다시 요청할 때 한 번 다시 만들어진다): 목표 `AI_GOAL_PROMPT_VERSION`, 연습 폴더 `AI_PRACTICE_PROMPT_VERSION`, 추천 `AI_RECOMMEND_PROMPT_VERSION`, 주간 요약 `AI_WEEKLY_PROMPT_VERSION`, 기록 질문 `AI_RECORD_QUERY_PROMPT_VERSION`(각 `web/src/server/service/domain/ai/*.service.ts`). 판 리포트(`AI_PLAY_REPORT_PROMPT_VERSION`), 베스트·라이벌 비교(`AI_PLAY_COMPARE_PROMPT_VERSION`), 판정 습관(`AI_JUDGE_HABIT_PROMPT_VERSION`)은 이미 2 였고, 리플레이 코치(`AI_REPLAY_COACH_PROMPT_VERSION`)와 게이지 조언(`AI_GAUGE_ADVICE_PROMPT_VERSION`)은 1 이다. 비교 합계(`47a7f9c`)는 모델에 주는 digest 가 구간 비교 모드에서만 만들어지고 totals 를 담지 않아 버전을 올리지 않았다.
+- 추천·목표·연습·주간 프롬프트는 `ASSIST_GRADE_RULE`(`ai-digest.ts:25`)를 싣는다: "`assist_grade` is 0 for every lamp but LightAssistEasy; there it is 0 (LIGHT ASSIST), 1 (ASSIST EASY), 2 (ASSIST CLEAR), 3 (ASSIST HARD), 4 (ASSIST EXHARD), a clear with SCRATCH AUTO on the gauge the grade names, and a higher grade is a better clear of the same lamp." (문구는 영어, 모델 출력 품질은 실제 공급자로 확인하지 못했다.)
+- 기록 질문의 digest 는 `assist_grades`(이름 배열 `ASSIST_GRADE_NAMES`, `record-query.service.ts:234`)와 `lamp` 필드 설명의 등급 안내를 더했다. `lamp` 필터(`in`·`gte`·`lte`)는 램프 id 를 비교하므로 등급을 가르지 못한다는 것이 `VALUE_FORMAT.lamp` 에 적혀 있다.
+
+**C.3 AI 서비스가 등급을 쓰는 방식**
+
+- 최고 기록은 `(clear, assist_grade)` 쌍으로 읽는다(`compose/ai-score-features.ts`, `compose/table-snapshot.ts`). 주간 요약은 같은 id 안에서 등급이 오르면 램프 상승으로 센다(`lamp_ups`, `new_clears` 정의가 달라졌다). 목표의 남은 곡 정렬은 id 가 같으면 등급이 높은 쪽이 앞이다. `listPriorBests` 는 `(차트, scratch_auto, clear, gauge)` 별 max(EX) 행을 돌려주고 서비스가 등급으로 접는다.
+- 기록 질문의 램프 정렬(`sort_field=lamp`)은 순위와 같은 `(clear, assist_grade)` 순이다(`47a7f9c`, 리뷰 web-1): 난이도표 source 는 `SORT_VALUE.lamp = CLEAR_LAMPS.indexOf(row.lamp) * ASSIST_GRADES.length + row.assist_grade`(`record-query.service.ts`), 점수 source 는 `score.gauge` 에서 파생한 SQL `CASE`(`compose/ai-record-query.ts`, 모르는 게이지는 0)다. 그 정렬 식은 `score_ranking_idx` 를 타지 않는다(한 사용자의 점수에 한정한 질문이고 `limit` 이 있어 영향이 작다고 보며 대용량 사용자로 측정하지 않았다).
+- 베스트·라이벌 비교 합계(`47a7f9c`, 리뷰 web-3): 본인 판·본인 최고는 `deriveAssistGrade(row)`(`play-compare.service.ts` 의 `totalsOf`), 공개 최고는 `findPublicBest` select 에 `score.gauge` 를 더해(`compose/ai-play-features.ts`) 같은 함수로 파생한다. `chart_best.assist_grade` 열이 아니라 점수의 게이지에서 파생하므로 배포 사이 창의 낡은 값에 영향받지 않는다. 화면 `ai-compare-totals-table.tsx` 가 `LampLabel` 에 등급을 넘긴다.
+- 변하지 않은 것: 클리어 집계(`MIN_CLEAR_LAMP_ID` = 2, `cleared_charts`, 표 필터 '클리어 (ASSIST 이상)'), AI 의 램프 id 비교(`isClearLampId` 등).
+
+**C.4 남은 제한**
+
+- `course_best.assist_grade` 는 항상 0 이다. 코스 제출과 `course_score` 에 게이지가 없다.
+- 백필은 `chart_best` 가 가리키는 `score` 의 값만 채운다. 같은 차트에서 게이지가 다른 SCRATCH AUTO 판이 둘 이상인 사용자는 EX 로 고른 최고 기록보다 등급이 높은 다른 판이 `score` 에 있을 수 있고, 그 최고 기록은 더 높은 `(clear, 등급, EX, BP)` 판을 제출할 때 바뀐다. 최고 기록 재선정 스크립트는 만들지 않았다.
+- 프롬프트 문구(`ASSIST_GRADE_RULE`)는 등급 1 을 "ASSIST EASY" 라고 부르고 ASSIST EASY 게이지가 아니라 EASY 게이지의 클리어를 뜻한다. 리뷰 web-2 는 이름 규약과 일치한다고 기각했다.
 
 ## 조사자가 낸 제약 목록 (원문)
 

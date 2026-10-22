@@ -1,8 +1,10 @@
 # 선곡 옵션 패널 조사 (START, SELECT, 상세 패널과 플레이 옵션 전체)
 
-> 최종 갱신 2026-10-22 · 대응 커밋 0323bd9
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
 
-조사 전용 문서다. 코드는 바꾸지 않았다. 문서와 코드가 다르면 코드를 믿었고, 다른 곳은 1.10절에 모았다. 근거는 저장소 루트 기준 `파일:줄` 이다. "직접 확인"은 이 조사에서 실행하거나 화면으로 본 것, "읽기만"은 코드를 읽어 추론한 것이다. 이 문서만 읽고 구현 설계를 시작할 수 있게 이름, id, 값 목록, 좌표를 적었다.
+조사로 시작해 구현을 따라 고친 살아 있는 문서다. 1절(현재 구현)과 6절(결정)은 구현 뒤의 코드 기준이고, 2~5절의 조사(원본, IIDX 이미지, Lua 가능성)는 조사 당시 그대로다. 구현으로 달라진 곳은 그 절 머리나 해당 줄에 적었다. 문서와 코드가 다르면 코드를 믿었다. 근거는 저장소 루트 기준 `파일:줄` 이다. "직접 확인"은 이 조사에서 실행하거나 화면으로 본 것, "읽기만"은 코드를 읽어 추론한 것이다.
+
+구현(2026-10-22): `7746932`(키 표, 확장 id, F1 홀드 키, IR 등급), `0c450db`(기본 스킨 IIDX 식 패널), `3f058f4`(패널 수리 3건). 결정의 근거는 ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md)와 [R-BMS 확장 id](../acknowledge/2026-10-22-adr-rbms-extension-ids.md). 결정은 모두 사용자 지시 "끝까지 다 구현해놔" 에 따라 메인이 추천안으로 정했고 사용자는 아직 확인하지 않았다(6절 각 결정의 "결정됨" 줄).
 
 목차: 0 요약 / 1 현재 구현 / 2 플레이 옵션 전체와 바꾸는 곳 / 3 beatoraja 원본 / 4 IIDX 참고 이미지 / 5 기본 스킨 Lua 로 구현할 때 / 6 결정 지점 / 7 검증 기록
 
@@ -11,18 +13,17 @@
 ## 0. 요약
 
 1. 선곡 옵션 패널은 열고 닫는 화면이 아니라 키를 누르고 있는 동안만 올라오는 구조다(원본과 같다). START 단독이 패널 1, SELECT 단독이 패널 2, 둘을 함께 누르거나 상세 키(숫자 5)를 누르고 있으면 패널 3. 기본 키는 `A`, `W`, `5`.
-2. 칸은 화면 요소가 아니라 건반 인덱스(0~8)에 묶인 역할이다. 키 표는 원본 `MusicSelectKeyProperty` 에서 `NEXT_REPLAY` 만 뺀 것과 같다(`stage/select/keys.rs:75-99`).
-3. 실제로 값을 바꾸는 것: 패널 1은 RANDOM(키 1·2·6·7), GAUGE(3), DP OPTION(4), HI-SPEED FIX(5), TARGET(턴테이블·휠·방향키). 패널 2는 7칸 중 CONSTANT(2)와 LEGACY NOTE(4) 둘뿐. 패널 3은 BGA(1), GAUGE AUTO SHIFT(2), AUTO ADJUST(3), NOTE DISPLAY TIME(4·6), JUDGE TIMING(5·7).
-4. 죽은 칸: 패널 1의 DP OPTION(키 4)은 값이 저장되지만 플레이가 읽지 않는다. 패널 2는 EX JUDGE(키 1, 읽기 전용), JUDGE AREA, MARK NOTE, BPM GUIDE, NO MINE 다섯이 아무것도 하지 않는다.
-5. SCRATCH AUTO, KEEP GREEN NUMBER, SCRATCH SIDE, AUTOPLAY, TARGET FALLBACK·RATE, AUTO REPLAY, ESCAPE, TOTAL, JUDGE WIDTH, LN MARGIN 은 스킨이 읽을 id 도, 패널 키도 없다. 패널에서 바꿀 수 없는 가장 큰 이유가 이것이다(2.2절).
-6. Rust 가 Lua 에 값을 주는 길은 `SettingsView::image_index`(`apps/rbms-player/src/skin_host/options.rs:280`)와 Lua 의 `main_state.event_index(id)` 다. id 는 원본이 선언한 것만 쓴다. 사설 id(20001~20316)는 2026-10-09 결정으로 철거됐고 지금 코드에 없다(3.4절).
-7. Lua 는 값이 원본 id 로 오는 옵션이라면 값 목록 전체와 강조(`draw` 함수), INFORMATION 줄, 숫자 칸, 연결선을 모두 그릴 수 있다. 못 하는 것은 차트에 의존하는 레인 미리보기와, id 가 없는 새 옵션의 값 읽기다(5절).
-8. 원본 키 표의 배열(흰 키 1·3·5·7, 검은 키 2·4·6)은 참고 이미지 3·4(IIDX)의 키 그림과 한 칸도 어긋남 없이 같다(4.5절). 그림을 IIDX 처럼 바꾸는 데 키 표를 바꿀 필요가 없다.
-9. 이미 일부 토글은 F1 오버레이(SCRATCH AUTO, AUTOPLAY, SCRATCH SIDE 포함 11행)와 PLAY 메뉴(F8)에 있다. F1 오버레이의 홀드 키가 `LSHIFT`(7키 턴테이블)라 선곡에서 턴테이블을 만지면 오버레이가 열린다(1.10절).
+2. 칸은 화면 요소가 아니라 건반 인덱스(0~8)에 묶인 역할이다. 키 표는 원본 `MusicSelectKeyProperty` 에서 `NEXT_REPLAY` 를 빼고, 일을 하지 않던 칸과 키가 없던 역할에 R-BMS 토글을 배정한 것이다. 원본과 다른 칸은 10곳이고 테스트가 목록으로 고정한다(`stage/select/keys.rs:98-125`, `CHANGED_SLOTS` `keys.rs:391`).
+3. 값을 바꾸는 것: 패널 1은 RANDOM(키 1·2·7), GAUGE 다음(3)·이전(4), HI-SPEED FIX 다음(5)·이전(6), TARGET(턴테이블·휠·방향키). 패널 2는 CONSTANT(2), SCRATCH AUTO(3), LEGACY NOTE(4), KEEP GREEN NUMBER(5), LANE COVER(6), LIFT(7), HIDDEN+(턴테이블 어느 방향이나). 패널 3은 BGA(1), GAUGE AUTO SHIFT(2), AUTO ADJUST(3), NOTE DISPLAY TIME(4·6), JUDGE TIMING(5·7), JUDGE ALGORITHM(턴테이블: 정방향 이전, 역방향 다음).
+4. 죽은 칸은 패널 2의 EX JUDGE(키 1, 읽기 전용) 하나다. DP OPTION 은 패널 키에서 뺐다(값 `play.lane_option`, 설정 행, 스킨 이벤트 54, 인덱스 54 응답은 그대로이고 플레이는 아직 읽지 않는다).
+5. 원본에 id 가 없는 SCRATCH AUTO 와 KEEP GREEN NUMBER 는 R-BMS 확장 id 로 스킨이 읽고 바꾼다(이벤트 21000·21001, 불린 21100·21101, 3.4절). 확장 id 는 2026-10-09 "사설 id 철거" 결정의 부분 변경이다. 스킨 id 도 패널 키도 없는 것: SCRATCH SIDE, AUTOPLAY, TARGET FALLBACK·RATE, AUTO REPLAY, ESCAPE, TOTAL, JUDGE WIDTH, LN MARGIN. 스킨 id 와 이벤트는 있고 패널 키만 없는 것: LN MODE, BOTTOM SHIFTABLE, GUIDE SE.
+6. Rust 가 Lua 에 값을 주는 길은 `SettingsView::image_index`(`apps/rbms-player/src/skin_host/options.rs:291`)와 Lua 의 `main_state.event_index(id)`, 확장 불린은 `SettingsView::boolean`(`options.rs:330`)과 `main_state.option(id)` 다. 원본 id 는 원본이 선언한 것만 쓰고, 확장은 21000 대에 둔다(3.4절).
+7. 기본 스킨이 패널마다 IIDX 옵션 화면처럼 키 그림, 연결선, 값 전체를 세로로 나열한 상자, 고른 값의 주황 강조, INFORMATION 줄, 왼쪽 도움말을 그린다(1.8절). 못 하는 것은 차트에 의존하는 레인 미리보기뿐이다(5.2절).
+8. 원본 키 표의 배열(흰 키 1·3·5·7, 검은 키 2·4·6)은 참고 이미지 3·4(IIDX)의 키 그림과 한 칸도 어긋남 없이 같다(4.5절).
+9. F1 오버레이는 START, SELECT, 상세 키 중 하나가 눌려 있으면 홀드 키(`LSHIFT`)로 열리지 않는다(`apps/rbms-player/src/app_options.rs:204-226`). 패널 1의 턴테이블 TARGET 과 패널 2·3의 턴테이블 역할이 오버레이와 부딪히지 않는다. 핀 키 F1 은 그대로다.
 10. 해상도: 기본 스킨 팩은 1920x1080 으로 작성되고(`assets/skins/rbms-default/lua/theme.lua:5-6`) 기본 창은 1280x720(`crates/rbms-config/src/window.rs`)이라 2/3 배로 줄어 그려진다. 앱 내장 화면(F1 오버레이, PLAY 메뉴 등)만 1280x720 고정 좌표다(`apps/rbms-player/src/lib.rs:149-150`).
-11. 테스트가 막는 범위는 작다. 패널을 그린 픽셀을 비교하는 골든은 없다. 엄격 덤프 게이트(경고 0, 함수 실패 0)와 금지 API 검사가 기본 스킨 Lua 를 지킨다(5.6절).
-
----
+11. 테스트: 패널을 그린 픽셀을 비교하는 골든은 여전히 없다. 키 표(`keys.rs` 테스트), 패널 키(`panel_tests.rs`), 확장 id(`extension.rs`), 엄격 덤프 게이트와 금지 API 검사가 코드와 기본 스킨 Lua 를 지킨다(5.6절). 패널 캡처는 옵트인 하네스 `stage/capture/panels.rs` 가 만든다.
+12. 알려진 위험(수리하지 않음): 키 표 변경은 모든 스킨에 적용되므로, 확장 id 를 모르는 외부 스킨 위에서 패널 2의 죽었던 칸 키가 표시 없이 저장 설정을 바꾼다(1.10절 14).
 
 ## 1. 현재 구현
 
@@ -52,80 +53,91 @@
 
 ### 1.2 패널 상태, 타이머, 옵션 id
 
-- 상태: `PanelState { open, key_pressed, key_released, target_repeat_at_ms, duration_repeat_at_ms, duration_repeats }`(`stage/select/panel.rs:178-201`). 열린 패널은 `Panel::{Closed, Play, Assist, Detail}`(`keys.rs:170-179`).
-- 스킨에 알리는 값: 옵션 21·22·23(`OPTION_PANEL1..3`)이 열린 패널을 답한다(`PanelState::number`, `panel.rs:210-217`, `skin_host/select.rs:320`, 전달은 `skin_host/select/bridge.rs:39`).
-- 타이머: 열리는 패널의 도착 타이머를 켜고 닫는 패널의 출발 타이머를 켠다. 도착 `PANEL1_ON` 21, `PANEL2_ON` 22, `PANEL3_ON` 23, 출발 `PANEL1_OFF` 31, `PANEL2_OFF` 32, `PANEL3_OFF` 33(`panel.rs:54-59`, `lua/props.lua:29-34`). 패널에서 패널로 곧장 넘어가면 앞 패널의 출발과 뒤 패널의 도착이 같은 프레임에 켜진다(`show_panel`, `panel.rs:303-320`).
-- 소리: 패널 키가 하나라도 눌린 순간 `OptionOpen` 한 번, 모두 뗀 순간 `OptionClose` 한 번, 값이 바뀔 때마다 `OptionChange`(TARGET 은 제외). 패널 사이 전환은 무음(`panel.rs:219-232`, `events.rs:118-122`, `panel.rs:355-368`).
+- 상태: `PanelState { open, key_pressed, key_released, target_repeat_at_ms, duration_repeat_at_ms, duration_repeats }`(`stage/select/panel.rs:174-`). 열린 패널은 `Panel::{Closed, Play, Assist, Detail}`(`keys.rs:194`).
+- 스킨에 알리는 값: 옵션 21·22·23(`OPTION_PANEL1..3`)이 열린 패널을 답한다(`PanelState::number`, `panel.rs:204-`, `skin_host/select.rs:320`, 전달은 `skin_host/select/bridge.rs:39`).
+- 타이머: 열리는 패널의 도착 타이머를 켜고 닫는 패널의 출발 타이머를 켠다. 도착 `PANEL1_ON` 21, `PANEL2_ON` 22, `PANEL3_ON` 23, 출발 `PANEL1_OFF` 31, `PANEL2_OFF` 32, `PANEL3_OFF` 33(`panel.rs:56-61`, `lua/props.lua:29-34`). 패널에서 패널로 곧장 넘어가면 앞 패널의 출발과 뒤 패널의 도착이 같은 프레임에 켜진다(`show_panel`, `panel.rs:300-`).
+- 소리: 패널 키가 하나라도 눌린 순간 `OptionOpen` 한 번, 모두 뗀 순간 `OptionClose` 한 번, 값이 바뀔 때마다 `OptionChange`(TARGET 은 제외). 패널 사이 전환은 무음(`panel.rs:216-`, `run_setting_event` `events.rs:365-`, `run_panel_act` `panel.rs:353-`).
 - 패널이 올라와 있는 동안 목록은 멈춘다(`skinned.rs:252-285`의 `skin_input_frame`: 패널이 열리면 `panel_keys` 만 돌고 목록 입력은 안 읽는다).
-- 값 저장: 값이 바뀌면 `options_dirty` 를 켜고, 패널이 모두 닫힌 프레임에 한 번 `rebuild_skin` + `save_settings` 한다(`events.rs:393-409`, `mod.rs:1081`). 선곡을 떠날 때도 쓴다(`mod.rs:1106`). 키를 누르고 있는 동안은 파일을 쓰지 않는다.
+- 값 저장: 값이 바뀌면 `options_dirty` 를 켜고, 패널이 모두 닫힌 프레임에 한 번 `rebuild_skin` + `save_settings` 한다(`settle_option_changes` `events.rs:414-`, 호출 `mod.rs:1081`). 선곡을 떠날 때도 쓴다(`mod.rs:1106`). 키를 누르고 있는 동안은 파일을 쓰지 않는다.
 
 ### 1.3 키 표: 인덱스와 역할
 
-원본과 같은 표다. `NEXT_REPLAY` 만 빠졌다(`keys.rs:67-85`, 테스트 `keys.rs:311-333`). 아래는 7키/14키(`BEAT_TABLE`)이다.
+원본 표에서 `NEXT_REPLAY` 를 빼고 R-BMS 토글을 배정한 표다(`keys.rs:98-111`, 표 위 문서 `keys.rs:76-97`). 원본에서 바뀐 칸은 `CHANGED_SLOTS`(`keys.rs:391-402`)로 고정되고 그 밖의 칸이 원본과 같다는 것도 단언한다. 아래는 7키/14키(`BEAT_TABLE`)이고, 원본에서 바뀐 칸에 `*` 를 붙였다.
 
 | 인덱스 (7키 키) | 목록 역할 | 패널 1 (START) | 패널 2 (SELECT) | 패널 3 (START+SELECT 또는 5) |
 | --- | --- | --- | --- | --- |
 | 0 (`Z`) | Play, FolderOpen | `Option1Down`: RANDOM 다음 | `JudgeWindowUp`: EX JUDGE(무동작) | `BgaDown`: BGA 뒤집기 |
 | 1 (`S`) | FolderClose | `Option1Up`: RANDOM 이전 | `Constant`: CONSTANT 뒤집기 | `GaugeAutoShiftDown`: GAS 다음 |
-| 2 (`X`) | Practice, FolderOpen | `GaugeDown`: GAUGE 다음 | `JudgeArea`: 무동작 | `NotesDisplayTimingAutoAdjust`: AUTO ADJUST 뒤집기 |
-| 3 (`D`) | FolderClose | `OptionDpDown`: DP OPTION 다음 | `LegacyNote`: LEGACY NOTE 뒤집기 | `DurationDown`: NOTE DISPLAY TIME 줄임(누르고 있음으로 읽음, 반복) |
-| 4 (`C`) | FolderOpen, Auto | `HsFixDown`: HI-SPEED FIX 다음 | `MarkNote`: 무동작 | `NotesDisplayTimingDown`: JUDGE TIMING -1 ms |
-| 5 (`F`) | 없음 | `Option2Up`: RANDOM 이전 | `BpmGuide`: 무동작 | `DurationUp`: NOTE DISPLAY TIME 늘림(반복) |
-| 6 (`V`) | FolderOpen, Replay | `Option2Down`: RANDOM 다음 | `NoMine`: 무동작 | `NotesDisplayTimingUp`: JUDGE TIMING +1 ms |
-| 7 (`LSHIFT`) | Up | `TargetUp`: 목표 목록을 위로(이전 목표) | 없음 | 없음 |
-| 8 (`LCTRL`) | Down | `TargetDown`: 목표를 아래로(다음 목표) | 없음 | 없음 |
+| 2 (`X`) | Practice, FolderOpen | `GaugeDown`: GAUGE 다음 | `ScratchAuto`*: SCRATCH AUTO 켬끔(원본 `JUDGEAREA` 자리) | `NotesDisplayTimingAutoAdjust`: AUTO ADJUST 뒤집기 |
+| 3 (`D`) | FolderClose | `GaugeUp`*: GAUGE 이전(원본 `OPTIONDP_DOWN` 자리) | `LegacyNote`: LEGACY NOTE 뒤집기 | `DurationDown`: NOTE DISPLAY TIME 줄임(누르고 있음으로 읽음, 반복) |
+| 4 (`C`) | FolderOpen, Auto | `HsFixDown`: HI-SPEED FIX 다음 | `KeepGreenNumber`*: KEEP GREEN NUMBER 켬끔(원본 `MARKNOTE` 자리) | `NotesDisplayTimingDown`: JUDGE TIMING -1 ms |
+| 5 (`F`) | 없음 | `HsFixUp`*: HI-SPEED FIX 이전(원본 `OPTION2_UP` 자리) | `LaneCover`*: LANE COVER 켬끔(원본 `BPMGUIDE` 자리) | `DurationUp`: NOTE DISPLAY TIME 늘림(반복) |
+| 6 (`V`) | FolderOpen, Replay | `Option2Down`: RANDOM 다음(원본 그대로) | `Lift`*: LIFT 켬끔(원본 `NOMINE` 자리) | `NotesDisplayTimingUp`: JUDGE TIMING +1 ms |
+| 7 (`LSHIFT`) | Up | `TargetUp`: 목표를 위로(이전 목표) | `Hidden`*: HIDDEN+ 켬끔 | `JudgeAlgorithmUp`*: JUDGE ALGORITHM 이전 |
+| 8 (`LCTRL`) | Down | `TargetDown`: 목표를 아래로(다음 목표) | `Hidden`*: HIDDEN+ 켬끔 | `JudgeAlgorithmDown`*: JUDGE ALGORITHM 다음 |
 
-- 패널 1에서 역할 `GaugeUp`, `OptionDpUp`, `HsFixUp` 은 어느 키에도 없다(`keys.rs:67-85`, 원본 표도 같다). 그래서 GAUGE, DP OPTION, HI-SPEED FIX 는 다음 값으로만 갈 수 있고 이전 값으로 못 간다. 같은 이유로 GAS 와 BGA 도 다음으로만 간다.
-- 패널 1에서 턴테이블 외에 목표를 움직이는 것: 방향키 `ArrowDown`=TargetUp, `ArrowUp`=TargetDown(`panel.rs:49-52`), 마우스 휠(`take_wheel`, `skinned.rs:232-236`). 처음 누르면 한 칸, 300 ms 뒤부터 50 ms 마다 한 칸 반복(`SCROLL_DURATION_LOW_MS` 300, `SCROLL_DURATION_HIGH_MS` 50. `crates/rbms-render/src/skin_render/songlist/bars.rs:104-109`, `panel.rs:241-262`).
-- 9키 표(`POPN_TABLE`, `keys.rs:89-99`)는 같은 인덱스에 같은 패널 역할을 둔다. 목록 역할만 다르다(인덱스 0 `Auto`, 4 `Play`, 8 `Replay`).
-- 5키·10키 키보드에는 6·7번 건반(인덱스 5·6)이 없다. 그 모드에서 `Option2Up/Down`(패널 1), `BpmGuide`·`NoMine`(패널 2), `DurationUp`·`NotesDisplayTimingUp`(패널 3)은 닿지 않는다(`keyconfig.rs:1071-1084`의 `limit`. 읽기만).
+- 바뀐 칸 10곳(`CHANGED_SLOTS`): 패널 2 키 3·5·6·7(`JUDGEAREA`, `MARKNOTE`, `BPMGUIDE`, `NOMINE`)이 SCRATCH AUTO, KEEP GREEN NUMBER, LANE COVER, LIFT 로, 패널 1 키 4(`OPTIONDP_DOWN`)가 GAUGE 이전으로, 패널 1 키 6(`OPTION2_UP`)이 HI-SPEED FIX 이전으로, 패널 2 턴테이블 두 방향이 HIDDEN+ 로, 패널 3 턴테이블 두 방향이 JUDGE ALGORITHM 으로. 지워진 `SelectKey` 변종은 `OptionDpUp/Down`, `Option2Up`, `JudgeArea`, `MarkNote`, `BpmGuide`, `NoMine` 이다.
+- 패널 1 키 6 이 RANDOM 이전이 아니고 키 7 이 RANDOM 다음으로 남은 이유: 2P 쪽 RANDOM 은 독립 값이 없다. `option1p`/`option2p` 이벤트가 같은 `play.random` 하나를 만진다(`events.rs:83-85`, 키 1·2 가 이미 양방향). 그래서 키 6 은 키 2 와 완전 중복이라 HI-SPEED FIX 이전으로 돌렸고, 키 7 은 "고유 기능을 가진 기존 역할" 이 남지 않아 원본 역할(`OPTION2_DOWN`)을 그대로 두었다(실제로 동작하고 원본·ModernChic 의 키 7 라벨 RANDOM 2P 와 어긋나지 않는다).
+- 패널 1의 GAUGE 와 HI-SPEED FIX 는 이제 다음·이전 양쪽 키가 있다. GAS 와 BGA 는 여전히 다음으로만 간다(`GaugeAutoShiftDown`, `BgaDown`).
+- 패널 2의 턴테이블과 패널 3의 턴테이블은 "눌림" 으로 읽는다(패널 1의 TARGET 은 "누르고 있음"). 패널이 올라오기 전부터 눌려 있던 방향은 눌림이 아니다(`forget_turntable_changes`, `keys.rs:298`, 호출 `panel.rs:307`).
+- DP OPTION 역할(`OptionDpUp/Down`)은 `SelectKey` 에서 지워져 패널 키로 바꿀 수 없다(1.10절 1).
+- 패널 1에서 목표를 움직이는 것은 턴테이블 외에 방향키 `ArrowDown`=TargetUp, `ArrowUp`=TargetDown(`panel.rs:53-54`), 마우스 휠(`take_wheel`, `skinned.rs:232`). 처음 누르면 한 칸, 300 ms 뒤부터 50 ms 마다 한 칸 반복(`SCROLL_DURATION_LOW_MS` 300, `SCROLL_DURATION_HIGH_MS` 50. `crates/rbms-render/src/skin_render/songlist/bars.rs:104-109`).
+- 9키 표(`POPN_TABLE`, `keys.rs:113-125`)는 같은 인덱스에 같은 패널 역할을 둔다(8·9번 버튼이 인덱스 7·8). 목록 역할만 다르다(인덱스 0 `Auto`, 4 `Play`, 8 `Replay`).
+- 5키·10키 키보드에는 6·7번 건반(인덱스 5·6)이 없다(`keyconfig.rs:1071-1084`의 `key_index_of`). 그 모드에서 닿지 않는 역할: 패널 1 HI-SPEED FIX 이전(6)·RANDOM 다음(7), 패널 2 LANE COVER(6)·LIFT(7), 패널 3 NOTE DISPLAY TIME 늘림(6)·JUDGE TIMING +1(7). 동작은 바꾸지 않았고 기본 스킨이 그 키를 어둡게 그린다(1.8절).
 
 ### 1.4 패널별 슬롯, 값 목록, 순환 방향, 실제 동작
 
-값 순환은 모두 끝에서 처음으로 돌아가고(`stepped`, `settings.rs:1165`), 값이 안 바뀌면(범위 끝 등) 소리가 나지 않는다.
+값 순환은 모두 끝에서 처음으로 돌아가고(`stepped`, `settings.rs:1165`), 값이 안 바뀌면(범위 끝 등) 소리가 나지 않는다. 키를 눌러 바꾼 값은 모두 `options_dirty` 를 켜고 패널이 닫힐 때 저장된다.
 
 패널 1 PLAY OPTIONS
 
 | 슬롯 | 역할 → 이벤트 | 값 목록(순서) | 방향 | 실제 동작 |
 | --- | --- | --- | --- | --- |
-| 1·7 | `Option1Down`·`Option2Down` → `option1p`/`option2p`(42/43) NEXT | OFF, MIRROR, RANDOM, R-RANDOM, S-RANDOM, ROTATE, H-RANDOM, ALL-SCRATCH (8개, 원본 번호 순 `OPTION_GENERAL`, `skin_host/options.rs:70-79`) | 다음 | 1P 와 2P 이벤트가 같은 값 `play.random` 하나를 만진다(`events.rs:184-191`). 차트 양쪽에 같은 옵션이 적용된다 |
-| 2·6 | `Option1Up`·`Option2Up` | 위와 같음 | 이전 | 위와 같음 |
-| 3 | `GaugeDown` → `gauge1p`(40) | ASSIST EASY, EASY, NORMAL, HARD, EX HARD, HAZARD (6개 `GAUGE_CYCLE`, `settings.rs:144`) | 다음만 | `play.gauge` |
-| 4 | `OptionDpDown` → `optiondp`(54) | OFF, FLIP, BATTLE, BATTLE AUTO-SC (4개, `crates/rbms-config/src/options.rs:62-120`) | 다음만 | 값만 저장된다. 플레이에 적용하는 곳이 없다(1.10절) |
-| 5 | `HsFixDown` → `hsfix`(55) | OFF, START, MAX, MAIN, MIN (5개) | 다음만 | `play.fix_hispeed`. 커서가 폴더이거나 못 치는 코스일 때의 동작은 1.10절 |
-| 7·8(턴테이블) | `TargetUp`·`TargetDown`, 방향키, 휠 → `target`(77) | MAX, RATE A-, A, A+, AA-, AA, AA+, AAA-, AAA, AAA+, MAX-, RANK NEXT, RATE CUSTOM, LOCAL BEST, IR BEST, RIVAL (16개 `ScoreTarget::ALL`, `crates/rbms-config/src/judge.rs:84-101`, 라벨 `judge.rs:199-216`) | 정방향은 이전, 역방향은 다음. 휠 노치 수만큼 | `judge.target`. 한 칸마다 `Scratch` 소리, `OptionChange` 소리는 없다 |
+| 1·7 | `Option1Down`·`Option2Down` → `option1p`/`option2p`(42/43) | OFF, MIRROR, RANDOM, R-RANDOM, S-RANDOM, ROTATE, H-RANDOM, ALL-SCRATCH (8개, 원본 번호 순 `OPTION_GENERAL`, `skin_host/options.rs:73-85`) | 다음 | 1P 와 2P 이벤트가 같은 값 `play.random` 하나를 만진다(`events.rs:83-85`, `196`). 차트 양쪽에 같은 옵션이 적용된다 |
+| 2 | `Option1Up` | 위와 같음 | 이전 | 위와 같음 |
+| 3 | `GaugeDown` → `gauge1p`(40) | ASSIST EASY, EASY, NORMAL, HARD, EX HARD, HAZARD (6개 `GAUGE_CYCLE`, `settings.rs:144`) | 다음 | `play.gauge` |
+| 4 | `GaugeUp` → `gauge1p`(40) | 위와 같음 | 이전 | `play.gauge` |
+| 5 | `HsFixDown` → `hsfix`(55) | OFF, START, MAX, MAIN, MIN (5개) | 다음 | `play.fix_hispeed`. 커서가 폴더이거나 못 치는 코스일 때의 동작은 1.10절 |
+| 6 | `HsFixUp` → `hsfix`(55) | 위와 같음 | 이전 | 위와 같음 |
+| 턴테이블(인덱스 7·8) | `TargetUp`·`TargetDown`, 방향키, 휠 → `target`(77) | MAX, RATE A-, A, A+, AA-, AA, AA+, AAA-, AAA, AAA+, MAX-, RANK NEXT, RATE CUSTOM, LOCAL BEST, IR BEST, RIVAL (16개 `ScoreTarget::ALL`, `crates/rbms-config/src/judge.rs:84-101`, 라벨 `judge.rs:199-216`) | 정방향은 이전, 역방향은 다음. 휠 노치 수만큼 | `judge.target`. 한 칸마다 `Scratch` 소리, `OptionChange` 소리는 없다 |
+
+DP OPTION(`optiondp`, 54)은 패널 키에서 뺐다. 값 4개(OFF, FLIP, BATTLE, BATTLE AUTO-SC. `crates/rbms-config/src/options.rs:62-120`)와 이벤트·인덱스는 남아 있고 플레이에 적용되지 않는다.
 
 패널 2 ASSIST OPTIONS
 
 | 슬롯 | 역할 | 값 | 실제 동작 |
 | --- | --- | --- | --- |
-| 1 | `JudgeWindowUp` → `AssistSwitch::CustomJudge` | OFF/ON 표시만 | 뒤집을 설정이 없다(`panel.rs:90-96`). 표시되는 값은 JUDGE WIDTH 6개 중 하나나 LN MARGIN 이 100% 를 넘으면 켜짐인 읽기 전용 값이다(`skin_host/options.rs:181`, `apps/rbms-player/src/judge_setup.rs:19-22`. 좁히는 것은 어시스트가 아니다). 누르면 아무 일도 없고 소리도 없다 |
+| 1 | `JudgeWindowUp` → `AssistSwitch::CustomJudge` | OFF/ON 표시만 | 뒤집을 설정이 없다(`panel.rs:87`). 표시되는 값은 JUDGE WIDTH 6개 중 하나나 LN MARGIN 이 100% 를 넘으면 켜짐인 읽기 전용 값이다(`skin_host/options.rs:190`, `apps/rbms-player/src/judge_setup.rs:19-22`). 누르면 아무 일도 없고 소리도 없다 |
 | 2 | `Constant` → `AssistSwitch::Constant` | OFF/ON | `play.constant_speed` 뒤집기(`SettingId::SpeedFix`). FLOATING 과 CONSTANT 를 맞바꿈 |
-| 3 | `JudgeArea` | 없음 | 무동작. 값은 "없음"으로 읽혀 스킨이 NOT AVAILABLE 을 쓴다 |
+| 3 | `ScratchAuto` → 확장 이벤트 21000 | OFF/ON | `play.scratch_auto` 뒤집기(`SettingId::ScratchAuto`). 전역 설정이라 코스 위에서도 막지 않는다 |
 | 4 | `LegacyNote` | OFF/ON | `play.legacy_note` 뒤집기. 롱노트를 일반 노트로 그릴 뿐이다(화면 전용, 판정은 그대로: `stage/play/field.rs:52-82`) |
-| 5·6·7 | `MarkNote`·`BpmGuide`·`NoMine` | 없음 | 무동작, 값 없음 |
+| 5 | `KeepGreenNumber` → 확장 이벤트 21001 | OFF/ON | `play.keep_green_number` 뒤집기. 전역 설정이라 코스 위에서도 막지 않는다 |
+| 6 | `LaneCover` → 이벤트 330 | OFF/ON | `play.enable_cover` 뒤집기. 못 치는 코스 위에서 무동작 |
+| 7 | `Lift` → 이벤트 331 | OFF/ON | `play.enable_lift` 뒤집기. 같음 |
+| 턴테이블(인덱스 7·8, 어느 방향이나) | `Hidden` → 이벤트 332 | OFF/ON | `play.enable_hidden` 뒤집기. 같음 |
 
 패널 3 DETAIL OPTIONS
 
 | 슬롯 | 역할 → 이벤트 | 값 | 실제 동작 |
 | --- | --- | --- | --- |
-| 1 | `BgaDown` → `bga`(72) | 스킨이 읽는 값 ON(0) / AUTOPLAY ONLY(1) / OFF(2) | 엔진은 ON(0)·OFF(2) 둘뿐이라 AUTOPLAY ONLY 에 닿지 못한다(`skin_host/options.rs:108-111`, `188`). `display.bga` 뒤집기 |
+| 1 | `BgaDown` → `bga`(72) | ON(0) / OFF(2). AUTOPLAY ONLY(1)는 엔진이 만들 수 없다 | `display.bga` 뒤집기(`skin_host/options.rs:115-116`, `197`) |
 | 2 | `GaugeAutoShiftDown` → `gaugeautoshift`(78) | NONE, CONTINUE, SURVIVAL TO GROOVE, BEST CLEAR, SELECT TO UNDER (5개 `GaugeAutoShift::ALL`) | 다음만. `judge.gauge_auto_shift` |
 | 3 | `NotesDisplayTimingAutoAdjust` → 이벤트 75 | OFF/ON | `judge.auto_offset` 뒤집기 |
-| 4·6 | `DurationDown`·`DurationUp` → `duration1p`(59) | 이동 시간 N MS, 녹색 숫자 | KEEP GREEN NUMBER 가 켜져 있을 때만 `play.duration_ms` 를 1 ms 씩(키 누르고 있으면 300 ms 뒤부터 50 ms 마다, 반복이 50번을 넘으면 10 ms 씩) 움직인다(`panel.rs:149-156`, `266-293`). 꺼져 있으면 아무것도 안 한다(`events.rs:157-166`). 범위 1~10,000 ms(`schema.rs:99-102`) |
+| 4·6 | `DurationDown`·`DurationUp` → `duration1p`(59) | 이동 시간 N MS, 녹색 숫자 | KEEP GREEN NUMBER 가 켜져 있고 커서가 곡·완성 코스 위일 때만 `play.duration_ms` 를 1 ms 씩(키 누르고 있으면 300 ms 뒤부터 50 ms 마다, 반복이 50번을 넘으면 10 ms 씩) 움직인다(`panel.rs:266-`, `events.rs:169`, `396-405`). 꺼져 있거나 커서가 폴더·표·실행 파일 위면 아무것도 안 한다. 범위 1~10,000 ms(`schema.rs:99-102`) |
 | 5 | `NotesDisplayTimingDown` → `notesdisplaytiming`(74) | JUDGE TIMING | `judge.offset_ms` -1, -200 에서 멈춤 |
 | 7 | `NotesDisplayTimingUp` | JUDGE TIMING | `judge.offset_ms` +1, +200 에서 멈춤. 키 한 번이 1 ms, 누르고 있어도 반복하지 않는다(눌림으로 읽음) |
+| 턴테이블(인덱스 7·8) | `JudgeAlgorithmUp`(정방향, 이전)·`JudgeAlgorithmDown`(역방향, 다음) → `judgealgorithm`(340) | COMBO, DURATION, LOWEST 3개만 | `judge.judge_algorithm`. 엔진이 SCORE 인 상태면 순환하지 못한다. 못 치는 코스 위에서 무동작 |
 
 ### 1.5 값을 바꾸는 코드 경로
 
 1. 프레임마다 `skin_input_frame`(`skinned.rs:252`)이 `Panel::held` 로 열린 패널을 정하고 `show_panel` 이 타이머를 켠다.
-2. `panel_keys`(`panel.rs:325-352`)가 `keys.panel_presses` 로 이번 프레임에 눌린 패널 역할을 모으고 `press_act`(`panel.rs:114-139`)로 `PanelAct` 로 바꾼다. 패널 1은 목표 움직임(`target_acts`), 패널 3은 NOTE DISPLAY TIME 반복(`duration_moves`)을 더한다.
-3. `run_panel_act`(`panel.rs:355-368`)가 실행한다: `Setting` → `run_setting_event`(`events.rs:350-374`), `Assist` → `adjust(config, row, NEXT)` 후 `OptionChange` 소리, `Duration` → `run_duration_event`.
-4. `step_setting`(`events.rs:178-209`)은 설정 화면의 행과 똑같이 `rbms_config::adjust` 로 한 칸 움직인다. 예외 넷은 RANDOM(원본 번호 순), JUDGE TIMING(1 ms 씩, 범위에서 멈춤), JUDGE ALGORITHM(원본이 번호를 매긴 셋만), NOTE DISPLAY TIME.
-5. 스킨 단추나 스킨 Lua 의 `main_state.event_exec` 도 같은 `run_event_stepping`(`events.rs:321-339`)을 탄다. 한 경로다.
-6. `of_the_play` 로 분류된 이벤트(HI-SPEED FIX, HI-SPEED, 이동 시간, 레인 커버·리프트·히든 켬끔, JUDGE ALGORITHM)는 못 치는 코스(`SelectTab::Courses` 에서 차트가 모자란 코스) 위에서는 무동작이다(`events.rs:350-391`).
+2. `panel_keys`(`panel.rs:323-`)가 `keys.panel_presses` 로 이번 프레임에 눌린 패널 역할을 모으고 `press_act`(`panel.rs:107-`)로 `PanelAct` 로 바꾼다. 패널 1은 목표 움직임(`target_acts`), 패널 3은 NOTE DISPLAY TIME 반복(`duration_moves`)을 더한다.
+3. `run_panel_act`(`panel.rs:353-`)가 실행한다: `Setting` → `run_setting_event`(`events.rs:365-`), `Assist` → `adjust(config, row, NEXT)` 후 `OptionChange` 소리, `Duration` → `run_duration_event`(`events.rs:396-`).
+4. `step_setting`(`events.rs:190-`)은 설정 화면의 행과 똑같이 `rbms_config::adjust` 로 한 칸 움직인다. 예외 넷은 RANDOM(원본 번호 순), JUDGE TIMING(1 ms 씩, 범위에서 멈춤), JUDGE ALGORITHM(원본이 번호를 매긴 셋만), NOTE DISPLAY TIME.
+5. 스킨 단추나 스킨 Lua 의 `main_state.event_exec` 도 같은 `run_event_stepping`(`events.rs:336-`)을 탄다. 한 경로다.
+6. `of_the_play` 로 분류된 이벤트(HI-SPEED FIX, HI-SPEED, 이동 시간, 레인 커버·리프트·히든 켬끔, JUDGE ALGORITHM)는 못 치는 코스(`SelectTab::Courses` 에서 차트가 모자란 코스) 위에서는 무동작이다(`events.rs:365-384`). SCRATCH AUTO 와 KEEP GREEN NUMBER 는 전역 설정이라 분류에 없다. 이동 시간은 이에 더해 커서가 곡·완성 코스(`FocusedBar::Playable`)가 아니어도 무동작이다(`events.rs:396-405`).
 
-### 1.6 스킨 이벤트 id 표 (`stage/select/events.rs:237-272`)
+### 1.6 스킨 이벤트 id 표 (`stage/select/events.rs:250-`)
 
 패널 키와 스킨 단추가 같은 이벤트를 쓴다. 숫자는 `lua/props.lua:282-311` 과 `crates/rbms-skin/src/property/generated/misc.rs` 의 값이다.
 
@@ -139,7 +151,7 @@
 | 308 | lnmode | LN MODE 순환(목록 다시 만듦) |
 | 40 | gauge1p | GAUGE 6개 순환 |
 | 42, 43 | option1p, option2p | RANDOM(원본 번호 순 8개) |
-| 54 | optiondp | DP OPTION(적용 없음) |
+| 54 | optiondp | DP OPTION(적용 없음, 패널 키 없음) |
 | 55 | hsfix | HI-SPEED FIX |
 | 57 | hispeed1p | HI-SPEED 를 HI-SPEED STEP(기본 0.25) 씩 |
 | 59 | duration1p | 이동 시간(KEEP GREEN NUMBER 켜짐일 때만). 두 번째 인자가 걸음(0이면 1 ms) |
@@ -149,18 +161,20 @@
 | 77 | target | TARGET 순환(소리 없음) |
 | 78 | gaugeautoshift | GAS 5개 순환 |
 | 341 | bottomshiftablegauge | BOTTOM SHIFTABLE 3개 순환(패널 키 없음) |
-| 330, 331, 332 | lanecover, lift, hidden | 켬·끔(`EnableCover`, `EnableLift`, `EnableHidden`). 패널 키 없음 |
-| 340 | judgealgorithm | COMBO, DURATION, LOWEST 3개만 순환. 엔진이 SCORE 인 상태면 순환 못 함 |
+| 330, 331, 332 | lanecover, lift, hidden | 켬·끔(`EnableCover`, `EnableLift`, `EnableHidden`). 패널 2 키 6·7·턴테이블 |
+| 340 | judgealgorithm | COMBO, DURATION, LOWEST 3개만 순환. 엔진이 SCORE 인 상태면 순환 못 함. 패널 3 턴테이블 |
 | 343 | guidese | GUIDE SE 뒤집기 |
 | 352 | scrollmode | SPEED FIX(CONSTANT) 뒤집기 |
 | 353 | longnotemode | LEGACY NOTE 뒤집기 |
+| 21000 | R-BMS `RBMS_EVENT_SCRATCH_AUTO` | SCRATCH AUTO 켬끔(`events.rs:285`). 첫 인자가 어느 쪽이든 한 번 실행에 한 번 뒤집는다. 패널 2 키 3 |
+| 21001 | R-BMS `RBMS_EVENT_KEEP_GREEN_NUMBER` | KEEP GREEN NUMBER 켬끔(`events.rs:286`). 같음. 패널 2 키 5 |
 
-원본 이벤트인데 아무 일도 하지 않는 것(`events.rs:20-29`): 10, 17, 73, 79, 89, 210~213, 321~324, 342, 344, 350, 351, 360, 361, 400. 301~307(assist)은 원본에서도 이벤트가 아니다. id 가 아예 표에 없는 이벤트도 조용히 버려진다(`skin_host/mod.rs:524-557`의 `EVENT_ROUTES`).
+원본 이벤트인데 아무 일도 하지 않는 것(`events.rs:20-29`): 10, 17, 73, 79, 89, 210~213, 321~324, 342, 344, 350, 351, 360, 361, 400. 301~307(assist)은 원본에서도 이벤트가 아니다. id 가 아예 표에 없는 이벤트도 조용히 버려진다(`skin_host/mod.rs`의 `EVENT_ROUTES`, 21000~21001 은 `mod.rs:572`).
 
 ### 1.7 Rust 에서 Lua 로 값이 가는 길
 
-- 설정 화면과 패널과 스킨이 같은 `Config` 필드를 읽고 쓴다. `SelectShown::of` 가 프레임마다 `SettingsView::of_config(config)` 를 만든다(`skin_host/select/shown.rs:166-225`, `options.rs:172-211`). 커서가 폴더이거나 못 치는 코스에 있으면 `settings.without_chart()` 로 차트별 값(HI-SPEED FIX, HI-SPEED, 이동 시간)이 "없음"이 된다(`shown.rs:207`).
-- 이미지 인덱스(Lua 의 `main_state.event_index(id)`, imageset 의 `ref`)로 읽는 것(`options.rs:280-315`):
+- 설정 화면과 패널과 스킨이 같은 `Config` 필드를 읽고 쓴다. `SelectShown::of` 가 프레임마다 `SettingsView::of_config(config)` 를 만든다(`skin_host/select/shown.rs:205-`, `options.rs` 의 `of_config`). 커서가 폴더이거나 못 치는 코스에 있으면 `settings.without_chart()` 로 차트별 값(HI-SPEED FIX, HI-SPEED, 이동 시간)이 "없음"이 된다(`shown.rs:207`).
+- 이미지 인덱스(Lua 의 `main_state.event_index(id)`, imageset 의 `ref`)로 읽는 것(`options.rs:291-`):
 
 | id | 값 |
 | --- | --- |
@@ -182,67 +196,92 @@
 | 343 | GUIDE SE 0/1 |
 | 303, 305, 306, 307, 321~324, 342, 350, 351, 360, 361, 400 | 없음(-1): 대응 설정이 없다 |
 
-- 숫자: 12(JUDGE TIMING), 10(HI-SPEED 의 LR2 방식 정수), 310·311(HI-SPEED 정수부·소수부), 실수 310(HI-SPEED), 312(이동 시간), 313(녹색 숫자). 312·313 은 KEEP GREEN NUMBER 가 꺼져 있으면 "없음"(`options.rs:320-332`).
-- 글자: 3(TARGET 이름, 데이터가 없으면 `LOCAL BEST (NO RECORD: AAA)` 꼴), 200~209(앞의 목표 10개), 210~219(뒤의 목표 10개)(`options.rs:348-359`).
-- 값 라우팅: `skin_host/mod.rs:258-` 의 `ROUTES` 에서 위 ids 는 `Cluster::Options`, 옵션 21~23 은 `Cluster::Select`. 표 밖의 id 는 모든 클러스터에 물어본다(`mod.rs:253-257`).
+- 숫자: 12(JUDGE TIMING), 10(HI-SPEED 의 LR2 방식 정수), 310·311(HI-SPEED 정수부·소수부), 실수 310(HI-SPEED), 312(이동 시간), 313(녹색 숫자). 312·313 은 KEEP GREEN NUMBER 가 꺼져 있으면 "없음"(`options.rs` 의 `integer`).
+- 글자: 3(TARGET 이름, 데이터가 없으면 `LOCAL BEST (NO RECORD: AAA)` 꼴), 200~209(앞의 목표 10개), 210~219(뒤의 목표 10개)(`options.rs:372-` 의 `text`).
+- 값 라우팅: `skin_host/mod.rs:265-` 의 `ROUTES` 에서 위 ids 는 `Cluster::Options`, 옵션 21~23 은 `Cluster::Select`. 확장 불린은 21100~21104 가 `Options`(`mod.rs:381`), 21110~21114·21140~21148 이 `Select`(`mod.rs:394-398`), 21120~21134 가 `Result`(`mod.rs:420-424`). 표 밖의 id 는 모든 클러스터에 물어본다(`mod.rs:253-257`).
 - 반드시 알아야 할 게이트: `reference_implements`(`crates/rbms-skin/src/property/names.rs:363-375`)가 "원본이 이 id 를 가진다"를 판정하고, 이 함수를 8곳이 쓴다: Lua `number`·`float_number`·`event_index`(`lua/main_state.rs:859,868,927`), imageset·image 의 `ref`(`rbms-render/src/skin_render/draw.rs:300,312`), 글자 `ref`(`text.rs:191`), songlist(`songlist/build.rs:168`), 로더의 `op` 목록(`loader/track.rs:157`). 원본에 없는 id 는 `event_index` 가 Lua 오류를 던지고 imageset 은 첫 이미지를 항상 보인다.
-- 게이트 밖의 두 길(종합 검토에서 코드로 확인): (1) 이벤트 공간은 `reference_implements(NameSpace::Event, _)` 가 항상 참이다(`names.rs:363-366`). 새 이벤트 id 는 게이트를 고칠 필요가 없고 `EVENT_ROUTES` 와 선곡 `EVENTS` 표에 줄만 더하면 된다. 원본이 사용자용으로 남긴 대역은 1000~1999(3.4절 표). (2) Lua 의 `main_state.option(id)`(불린)은 게이트를 거치지 않고 곧장 호스트에 묻는다(`lua/main_state.rs:851-853`, 호스트 `skin_host/mod.rs:923-926`). 그래서 켬·끔 두 값뿐인 새 옵션(SCRATCH AUTO, KEEP GREEN NUMBER)은 게이트 8곳을 고치지 않고도 "호스트 불린 응답 + Lua `draw` 함수"로 값을 그릴 수 있다. 단 원본에 없는 불린 id 를 쓰는 것이므로 2026-10-09 사설 id 폐기 결정과는 똑같이 충돌한다(6절 결정 3). `op = {id}` 로 쓰면 로더 게이트(`track.rs:157`)에 걸리므로 `draw` 함수로만 읽어야 한다.
+- 게이트 밖의 두 길(종합 검토에서 코드로 확인): (1) 이벤트 공간은 `reference_implements(NameSpace::Event, _)` 가 항상 참이다(`names.rs:363-366`). 새 이벤트 id 는 게이트를 고칠 필요가 없고 `EVENT_ROUTES` 와 선곡 `EVENTS` 표에 줄만 더하면 된다. 원본이 사용자용으로 남긴 대역은 1000~1999(3.4절 표). (2) Lua 의 `main_state.option(id)`(불린)은 게이트를 거치지 않고 곧장 호스트에 묻는다(`lua/main_state.rs:851-853`, 호스트 `skin_host/mod.rs:923-926`). 그래서 켬·끔 두 값뿐인 새 옵션(SCRATCH AUTO, KEEP GREEN NUMBER)은 게이트 8곳을 고치지 않고도 "호스트 불린 응답 + Lua `draw` 함수"로 값을 그릴 수 있다. 구현은 이 길을 택했다(6절 결정 3, 확장 id 표는 3.4절). 원본에 없는 불린 id 를 쓰는 것이라 2026-10-09 사설 id 폐기 결정의 부분 변경이다. `op = {id}` 로 쓰면 로더 게이트(`track.rs:157`)에 걸려 버려지므로 `draw`/`value`/`text` 함수 안에서만 읽는다.
 
-### 1.8 기본 스킨이 그리는 구조 (`assets/skins/rbms-default/lua/select/sheet.lua`)
+스킨이 패널 값을 읽는 방법(선곡 화면). 원본 id 로 읽는 것은 `main_state.event_index(id)`, 확장은 함수 필드 안의 `main_state.option(id)` 다.
 
-`sheets(main_state)` 가 패널 3개를 데이터로 돌려주고(`sheet.lua:64-123`) 각 패널을 `backdrop`, `heading`, `cell`(7번), `footing` 으로 그린다(`sheet.lua:203-212`). 모든 요소는 올라오는 한 벌과 내려가는 한 벌, 두 destination 으로 놓인다(`both`, `sheet.lua:135-138`).
+| 옵션 | 읽는 방법 | 값 |
+| --- | --- | --- |
+| RANDOM | `event_index(42)` (43 도 같은 값) | 0 OFF, 1 MIRROR, 2 RANDOM, 3 R-RANDOM, 4 S-RANDOM, 5 ROTATE, 6 H-RANDOM, 7 ALL-SCRATCH |
+| GAUGE | `event_index(40)` | 0 ASSIST EASY, 1 EASY, 2 NORMAL, 3 HARD, 4 EX HARD, 5 HAZARD |
+| HI-SPEED FIX | `event_index(55)` | 0 OFF, 1 START, 2 MAX, 3 MAIN, 4 MIN. 폴더·못 치는 코스 위 -1 |
+| TARGET | `main_state.text(3)` 현재 이름(기록이 없으면 `LOCAL BEST (NO RECORD: AAA)` 꼴), `text(200..209)` 앞 목표(200 = 10칸 앞 ... 209 = 1칸 앞), `text(210..219)` 뒤 목표(210 = 1칸 뒤 ... 219 = 10칸 뒤) | 이미지 인덱스 77 은 원본에 없다. `event_index(77)` 을 쓰면 Lua 오류 |
+| CONSTANT | `event_index(302)` 또는 `(352)` | 0 끔, 1 켬 |
+| LEGACY NOTE | `event_index(304)` 또는 `(353)` | 0/1 |
+| EX JUDGE(읽기 전용) | `event_index(301)` | 0/1(판정 폭이나 LN MARGIN 이 넓혀짐) |
+| BGA | `event_index(72)` | 0 ON, 2 OFF (1 은 나오지 않음) |
+| GAS | `event_index(78)` | 0 NONE, 1 CONTINUE, 2 SURVIVAL TO GROOVE, 3 BEST CLEAR, 4 SELECT TO UNDER |
+| AUTO ADJUST | `event_index(75)` | 0/1 |
+| JUDGE ALGORITHM | `event_index(340)` | 0 COMBO, 1 DURATION, 2 LOWEST, -1 SCORE |
+| NOTE DISPLAY TIME | `number(312)` ms, `number(313)` 녹색 숫자 | KEEP GREEN NUMBER 가 꺼져 있거나 커서가 차트가 아니면 `INTEGER_ABSENT`(`i32::MIN`) |
+| JUDGE TIMING | `number(12)` | -200..+200 ms |
+| LANE COVER·LIFT·HIDDEN+ 켬끔 | `event_index(330/331/332)` 또는 `option(21102/21103/21104)` | 0/1, true/false |
+| SCRATCH AUTO | `option(21100)` | true/false (원본 id 없음) |
+| KEEP GREEN NUMBER | `option(21101)` | true/false (원본 id 없음) |
+| DP OPTION(패널 키 없음) | `event_index(54)` | 0..3 (값은 남음) |
+| 열린 패널 | `option(21/22/23)`, 타이머 21~23 도착·31~33 출발 | 기존 |
+| 닿지 않는 키 | `option(21140 + 인덱스)` (인덱스 0..8) | 5키·10키에서 인덱스 5·6 이 true |
 
-1920x1080 좌표(`sheet.lua:8-10`, `theme.lua:206-226`):
+### 1.8 기본 스킨이 그리는 구조 (`assets/skins/rbms-default/lua/select/`)
+
+IIDX 옵션 화면 참고 이미지(4절)의 구성을 따른다. 파일: `sheet.lua`(패널 3개를 조립한다. `PAGES` `sheet.lua:673`, `sheet.build` `sheet.lua:685`), `panel.lua`(그리기 도구 `Sheet`: 값 목록 `list`, 숫자 칸 `field`, 키 `key`, 연결선 `wire`, 태그 `tag`, 본문 `body`, 베일 `veil`, 어둡게 `dim`), `inform.lua`(INFORMATION 줄의 변화 감시), `words.lua`(문구). 모든 요소는 올라오는 한 벌과 내려가는 한 벌, 두 destination 으로 놓인다(`Sheet:both`, `panel.lua:40`).
+
+1920x1080 좌표(`sheet.lua:8-29`, `panel.lua:7-19`, `theme.lua:258-`):
 
 | 요소 | 좌표와 크기 | 색(Mono 테마) |
 | --- | --- | --- |
-| 화면 전체 베일 | 0,0,1920x1080. 알파가 0에서 216/255 로 150 ms | `bg` (0,0,0) |
-| 시트 상자 | x 64, top 312, 1792x456 | `raised` (38,38,38) |
-| 상자 윗선 | 상자 위, 높이 2 | `accent`(기본 흰색) |
-| 제목 | x 96, top 344, 크기 32(`body`) | `text` (242,242,242) |
-| 여는 키 안내 | 오른쪽 정렬(x 1824까지), top 350, 크기 18(`caption`) | `muted` (128,128,128) |
-| 제목 아래 선 | x 96, top 400, 1728x2 | `line` (60,60,60) |
-| 칸 k(1~7) | x = 96 + 248 x (k-1), 폭 224 | |
-| 칸의 "KEY k" | top 432, 크기 18 | `accent` |
-| 칸의 이름 | top 464, 크기 24(`label`), 폭 넘으면 줄임(`SHRINK`) | `sub` (184,184,184). 값 없는 칸은 `muted` |
-| 칸의 값 | top 508, 크기 32, 줄임 | `text`. 값 없는 칸은 "NOT AVAILABLE"(18, `muted`) |
-| 칸의 동작 줄 | top 572, 크기 18, 줄임 | `muted` |
-| 아래 선 | x 96, top 620, 1728x2 | `line` |
-| 패널 1 아래 | "TURNTABLE / BUTTONS 8-9"(top 648, 18, `accent`), "TARGET"(680, 24, `sub`), 글자 id 3(716, 32, `text`) | |
-| 패널 2·3 아래 | 주석 한 줄 top 648, 크기 18, `muted` | |
+| 화면 전체 베일 | 0,0,1920x1080. 알파 248/255(뒤 선곡 화면이 6/255 로 비침), 150 ms | `bg` |
+| INFORMATION | 태그 x 504, top 120, 232x32. 본문 x 504, top 156, 1352x80. 오른쪽에 `HOLD ...` 안내(캡션) | 태그·값 `theme.panel.pick` (255,152,52), 제목 `text`, 설명 `sub` |
+| 건반 7개 | 흰 건반 1·3·5·7 은 아래 줄 top 312, 검은 건반 2·4·6 은 위 줄 top 264, 첫 x 836, pitch 112, 92x92 | 흰 `key_white` (226,230,236), 검 `key_black` (30,33,40). 라벨은 DOWN, UP |
+| 턴테이블 상자 | x 626, top 284, 120x120. "TURNTABLE" 과 동작 이름(TARGET, HIDDEN+, JUDGE ALGORITHM) | 열 색 |
+| 연결선 | 폭 4(`WIRE`). 꺾인 직선을 사각형 이어 붙여 그린다. 차선 높이 424·444·464(바깥 건반일수록 높게 해 엇갈림을 피한다), 패널 1 건반 7 과 패널 3 건반 4·6 은 건반 위 차선 y 248 로 돌아간다 | 그 열의 색 |
+| 옵션 상자 | y 492 부터. 머리(굵은 이름 1~2줄, 높이 72) + 값 전체를 세로로 나열(pitch 44, 높이 38) | 어두운 칸 |
+| 고른 값 | 밝은 주황 바탕 + 어두운 굵은 글자 + 빛 테두리 4. 지금/아님 두 `draw` 함수로 전환 | `pick` / `pick_ink` |
+| 열 이름 | 상자 아래 굵은 글자: STYLE, GAUGE, SPEED, ASSIST, RANGE, JUDGE, TIMING, DISPLAY | 열 색 `theme.panel.column`: orange, green, violet, sky, locked(회색) |
+| 왼쪽 열 | x 64, 폭 408: TARGET 21줄, GROOVE GAUGE 도움, HIDDEN+ 상자, ASSIST LAMP 규칙, JUDGE ALGORITHM, GAS 설명 | |
 
-- 올라오기(`sheet.lua:125-133`): 타이머 `PANELn_ON`, 조건 `OPTION_PANELn`, 키프레임 0 ms 에서 아래로 24 px 처짐·알파 0, 150 ms 에서 제 자리, `DECELERATE`. 내려가기: 타이머 `PANELn_OFF`, 150 ms 동안 24 px 내려가며 알파 0, `ACCELERATE`, 한 번만(`loop ONCE`).
-- 이름·값·동작 줄의 글자는 Lua 함수 값으로 매 프레임 `parts.choice(main_state, id, names, "-")`(`lua/parts.lua:174-178`)를 호출한다. 이름 표는 `sheet.lua:20-24` 와 `theme.lua:173-194`.
-- 패널별 칸(각 7칸. 코드를 읽고 실제 캡처로도 확인했다, 7절):
-  1. 패널 1 "PLAY OPTIONS", 안내 "HOLD START": RANDOM(NEXT), RANDOM(PREVIOUS), GAUGE(NEXT), DP OPTION(NEXT), HI-SPEED FIX(NEXT), RANDOM(PREVIOUS), RANDOM(NEXT). 값은 모두 현재 값 하나(예 OFF, NORMAL, OFF, MAIN BPM).
-  2. 패널 2 "ASSIST OPTIONS", "HOLD SELECT": EX JUDGE(OFF, "SET IN SETTINGS"), CONSTANT(OFF, "SWITCH"), JUDGE AREA(NOT AVAILABLE), LEGACY NOTE(OFF, "SWITCH"), MARK NOTE·BPM GUIDE·NO MINE(NOT AVAILABLE). 아래 주석 "AN OPTION MARKED NOT AVAILABLE HAS NO SETTING IN R-BMS".
-  3. 패널 3 "DETAIL OPTIONS", "HOLD START AND SELECT, OR THE DETAIL OPTIONS KEY (5 AS SHIPPED)": BGA(ON), GAUGE AUTO SHIFT(NONE), TIMING AUTO ADJUST(OFF), NOTE DISPLAY TIME(500 MS 또는 꺼짐이면 OFF, 동작 "GREEN 300   1 MS SHORTER" 또는 "KEEP GREEN NUMBER IS OFF"), JUDGE TIMING(0 MS, "NOTES 1 MS LATER"), NOTE DISPLAY TIME("1 MS LONGER"), JUDGE TIMING("NOTES 1 MS EARLIER"). 아래 주석은 NOTE DISPLAY TIME 이 KEEP GREEN NUMBER 가 켜져 있을 때만 움직인다는 안내.
-- 측정(`rbms-cli skin-dump`, 7절): `select.luaskin` 전체 destination 503개, text 246, value 34, image 40, 함수 값 61개(프레임당 59회 호출, 평균 0.022 ms). 이 중 sheet.lua 가 만드는 것은 계산상 destination 약 212개(패널 1 76, 패널 2 64, 패널 3 72)다(계산, 직접 세지는 않음).
-- 이 화면의 값은 현재 값 하나뿐이다. 값 목록 전체도, 고른 값의 강조도, 키 그림도, 연결선도, INFORMATION 줄도 없다. 모든 칸이 같은 7열 격자다.
+- 올라오기·내려가기는 이전과 같은 관례다: 타이머 `PANELn_ON`/`PANELn_OFF`, 옵션 `OPTION_PANELn`, 24 px 처짐과 알파 0 에서 150 ms 로 제 자리(`panel.lua:7`, `rise 24`, `move 150`).
+- 패널 1(`play_page` `sheet.lua:249`): RANDOM(키 1·2·7), GAUGE(3·4), HI-SPEED FIX(5·6) 상자를 가운데 정렬 폭 280 으로 나열. 왼쪽에 TARGET 21줄(글자 `200..209`, `3`, `210..219`, 지금 줄은 주황 강조), 그 아래 GROOVE GAUGE 도움(지금 게이지 이름과 두 줄 설명). 건반 7(RANDOM 다음)은 건반 위 차선으로 돌아가 연결선이 교차하지 않는다.
+- 패널 2(`assist_page` `sheet.lua:352`): ON/OFF 상자 7개. EX JUDGE 는 회색 `locked` 열에 `LOCKED / READ ONLY`. SCRATCH AUTO 아래 "ON: THE LAMP IS AN ASSIST GRADE". 왼쪽에 HIDDEN+ 상자와 ASSIST LAMP 규칙(게이지 → ASSIST EXHARD/HARD/CLEAR/EASY/LIGHT ASSIST 를 등급 색으로, `words.assist_rule` `words.lua:99-`).
+- 패널 3(`detail_page` `sheet.lua:566`): BGA(ON/OFF), GAS(5값), AUTO ADJUST(OFF/ON), JUDGE TIMING 숫자 칸(양쪽 화살표 글자 `<` `>`, `±N MS`, FAST/SLOW 안내 두 줄), NOTE DISPLAY TIME 숫자 칸(ms 와 녹색 숫자. KEEP GREEN NUMBER 가 꺼져 있으면 `OFF` 와 "KEEP GREEN NUMBER IS OFF (SELECT + KEY 5)", 켜져 있는데 커서가 차트가 아니면 `-` 와 "MOVE THE CURSOR TO A CHART TO SET IT", 값이 있으면 LEFT/RIGHT 안내. `display_time` `sheet.lua:481`, `words.lua:71-80`). 왼쪽에 JUDGE ALGORITHM 목록(SCORE 상태면 강조 없이 "SCORE: SET IN SETTINGS > JUDGE")과 아래 GAS 설명 목록.
+- INFORMATION(`inform.lua:13-36`): 패널이 열려 있는 동안만 값을 읽는 클로저다. 열림 타이머 값이 바뀌면 기준값을 새로 잡고 패널 안내(`words.guide` `words.lua:90-97`)를 보인다. 그 뒤 값이 바뀌면 왼쪽에 옵션 이름(굵게), 오른쪽에 새 값(굵은 주황), 아래에 한 줄 설명을 보인다. 한 프레임에 옵션 둘이 바뀌면 감시 순서상 마지막 것만 보인다.
+- 5키·10키에서 닿지 않는 키(인덱스 5·6): 호스트가 불린 21140~21148 로 알리면(`extension.rs`, `skin_host/select/shown.rs` 의 `unreachable_keys_of(mode)`, `bridge.rs`) 스킨이 그 키와 외곽선, 패널 2의 해당 열 상자를 알파 196 으로 어둡게 그린다(`sheet.lua:132` `out_of_reach`, `Sheet:dim` `panel.lua:93`, `OUT_OF_REACH_ALPHA` `panel.lua:15`). 그 키에서 다른 열로 가는 연결선과 화살표는 그대로 밝다.
+- 글꼴: 굵은 글씨는 `Inter-Bold.ttf`(Inter 4.1 `extras/ttf`, 무수정, 420,428 바이트)를 팩 `font/` 에 더한 별도 글꼴 id `inter-bold` 로 쓴다(`theme.lua:255`). `ui.lua` 의 `Builder:font_id` 가 `weight == "bold"` 일 때만 글꼴 목록에 늦게 더하므로 다른 화면은 글꼴 목록이 그대로다. 크기는 값 `label`(24) 이상, 보조 `caption`(18) 이상이다. 라이선스는 THIRD-PARTY-NOTICES 3절.
+- 램프 등급: 패널 2의 ASSIST LAMP 규칙과 선곡 정보창·결과 화면의 등급 이름·색은 `clear-lamps.md` 4.2절.
+- 측정(`rbms-cli skin-dump`, 7.1절): `select.luaskin` 은 release 200프레임에서 로드 7.0 → 24.8 ms, destination 503 → 1,611, 함수 값 61 → 171, 프레임당 호출 59 → 169, 평균 0.024 → 0.047 ms, p99 0.043 → 0.060 ms, 예산 초과 0(3단계 작업자 보고). 출발 destination 의 `draw` 함수는 `op` 가 없어 패널이 닫혀 있어도 매 프레임 불린다. 패널 수리(`3f058f4`) 뒤 debug 엄격 덤프 120프레임은 destination 1,677, 함수 203, 평균 0.230 ms, 최대 0.292 ms, 경고 0(debug 값이라 위 release 값과 비교하지 않는다).
 
 ### 1.9 선곡의 다른 "바로 바꾸기" 길
 
-- 사이드 메뉴 QUICK SETTINGS(`lua/select/side.lua:20-40`, 마우스 클릭): KEY CONFIG, SKIN, LN MODE(308), BGA(72), GAUGE AUTO SHIFT(78), JUDGE ALGORITHM(340). 왼쪽 클릭 다음, 오른쪽 클릭 이전. BGA 이름표가 `ON / AUTOPLAY ONLY / OFF` 인 것은 패널 3과 같은 한계다.
+- 사이드 메뉴 QUICK SETTINGS(`lua/select/side.lua:20-40`, 마우스 클릭): KEY CONFIG, SKIN, LN MODE(308), BGA(72), GAUGE AUTO SHIFT(78), JUDGE ALGORITHM(340). 왼쪽 클릭 다음, 오른쪽 클릭 이전. BGA 이름표는 ON/OFF 둘이다(패널 3과 같다, 1.10절 3).
 - 머리의 MODE, SORT, LN MODE 단추(`lua/select/controls.lua:11-15`)와 숫자 키 1·2·3(`Shortcut::RefMode/RefSort/RefLnMode`).
 - F1 오버레이와 PLAY 메뉴(F8)는 2.3절.
 
 ### 1.10 현재 구현의 결함과 문서-코드 차이
 
-코드로 확인된 것(읽기만, 실행 확인은 표시)
+코드로 확인된 것(읽기만, 실행 확인은 표시). 1~13은 조사 당시 목록이고 구현 뒤 상태를 덧붙였다. 14 이후는 구현에서 새로 생긴 것이다.
 
-1. DP OPTION(패널 1 키 4, 스킨 이벤트 54)은 값 `play.lane_option` 만 저장하고 그 값을 플레이 시작에 적용하는 곳이 없다. `lane_option` 을 읽는 곳은 스킨 값 응답(`skin_host/options.rs:180`), 설정 행의 표시·조절(`settings.rs:1042,1203`), PLAY 메뉴의 되돌림(`stage/play_menu/rows.rs:384`), 직렬화뿐이고 플레이를 시작하는 코드에는 없다(`grep` 결과). 설정 행은 `unbuilt_row` 로 숨겼다(`settings.rs:625`, 사유 `app_options.rs:25-32`). 그런데 패널 1은 이 값을 그리고 바꾼다. `docs/play-options.md:272` 는 "어디에도 보이지 않는다"고 쓰는데 패널 1에서는 보인다.
-2. 패널 2 키 1(EX JUDGE)은 눌러도 아무 일도 없다(`panel.rs:90-96`).
-3. BGA 값 AUTOPLAY ONLY(1)는 엔진이 만들 수 없다(`options.rs:108-111`). 이름표만 있다.
-4. 패널 1의 GAUGE, DP OPTION, HI-SPEED FIX 와 패널 3의 GAS, BGA 는 이전 값 키가 없다(원본 표와 같다).
-5. HI-SPEED FIX 는 커서가 폴더(`BarKind` 가 곡·완성 코스가 아님)일 때 스킨 값이 "없음"(-1)이라 칸에 `-` 가 뜨는데, 키를 누르면 실제로는 값이 움직인다(`events.rs:350-391`의 `has_play_settings` 는 코스 탭의 못 치는 코스만 막는다). 읽기만.
-6. NOTE DISPLAY TIME 키(패널 3의 4·6)는 KEEP GREEN NUMBER 가 꺼져 있으면 무동작이고, 원본은 항상 움직인다(`events.rs:15-18`, `148-155`). 값 칸은 OFF 로 읽힌다.
-7. RANDOM 값의 순환 순서가 화면마다 다르다. 패널과 스킨 이벤트는 원본 번호 순(`OPTION_GENERAL`: ..., R-RANDOM, S-RANDOM, ROTATE, ...)이고, 설정 행·PLAY 메뉴·F1 오버레이·연습은 `NoteOption::ALL` 순(S-RANDOM 이 R-RANDOM 앞, `crates/rbms-chart/src/shuffle.rs:18-27`)이다.
-8. GAUGE 이름이 화면마다 다르다. 스킨 `ASSIST EASY ... EX HARD`(`theme.lua:173-183`), 설정 `EX-HARD`(`settings.rs:147`), IIDX 참고 이미지 `ASSISTED EASY`.
-9. 키 6·7 이 없는 모드(5키, 10키)에서는 해당 역할에 닿지 못한다(1.3절).
-10. F1 오버레이의 홀드 키(`app_options.rs:99`)가 `LSHIFT` 라 7키 기본 배치에서 선곡에서 턴테이블을 누르면 오버레이가 열린다(`stage/mod.rs:322-324`, `app_options.rs:200-215`, 알려진 사실로 `docs/acknowledge/reference-divergences.md:182`). 오버레이가 열려 있는 동안은 목록이 덮인 것으로 읽혀 A·W 패널이 열리지 않는다(`skinned.rs:138-145`). 실행 확인은 안 했다.
-11. `docs/skin.md` 6절의 "패널 3의 일부 수치는 NOT AVAILABLE" 은 낡았다. 패널 3 칸은 모두 값이나 OFF 를 쓴다(`sheet.lua:105-121`). 패널 2의 NOT AVAILABLE 4칸 설명은 맞다.
-12. 출하 설정에서 `play.autoplay` 는 true 다(`schema.rs:588`, 테스트 `crates/rbms-config/src/tests.rs:44`). `enable_cover` 도 true 다(`schema.rs:602`). 패널에 AUTOPLAY 같은 토글을 넣을 때 주의할 출하값이다.
-13. 기본 스킨 파일은 설치 때 복사되고 사용자가 고친 파일은 덮어쓰지 않는다(`apps/rbms-player/src/assets/default_pack.rs:1-30`). 새 모듈을 추가하고 `props.lua` 등을 바꾸면, 옛 `sheet.lua` 를 직접 고쳐 둔 사용자는 새 `props.lua` 와 옛 `sheet.lua` 가 섞인 상태가 될 수 있다(읽기만).
+1. DP OPTION: 패널 1 키에서 뺐고 기본 스킨도 DP 상자를 그리지 않는다. 값 `play.lane_option`, 설정 행(`unbuilt_row` 로 숨김, `settings.rs:625`), 스킨 이벤트 54, 인덱스 54 응답은 그대로이고 플레이를 시작하는 코드는 여전히 이 값을 읽지 않는다.
+2. 패널 2 키 1(EX JUDGE)은 눌러도 아무 일도 없다(`panel.rs:87`). 기본 스킨은 회색 `LOCKED / READ ONLY` 로 그려 죽은 칸임을 숨기지 않는다.
+3. BGA 값 AUTOPLAY ONLY(1)는 엔진이 만들 수 없다(`options.rs:115-116`). 기본 스킨은 이름표를 ON/OFF 둘로 줄였다(`words.lua:4`, `side.lua` 의 BGA 이름).
+4. 이전 값 키: GAUGE 와 HI-SPEED FIX 는 생겼다(1.3절). GAS 와 BGA 는 다음으로만 간다.
+5. HI-SPEED FIX 는 커서가 폴더일 때 스킨 값이 "없음"(-1)이라 칸에 `-` 가 뜨는데 키를 누르면 실제로는 값이 움직인다(`has_play_settings` 는 코스 탭의 못 치는 코스만 막는다, `events.rs:407`). 읽기만. 이동 시간만 이 불일치를 고쳤다(6번).
+6. NOTE DISPLAY TIME 키(패널 3의 4·6)는 KEEP GREEN NUMBER 가 꺼져 있으면 무동작이고(원본은 항상 움직임), 이제 커서가 곡·완성 코스가 아닌 막대(폴더, 표, 실행 파일)일 때도 무동작이다(`events.rs:396-405`). 칸은 꺼짐이면 `OFF` 와 경고, 켜짐인데 차트가 아니면 `-` 와 이동 안내를 따로 보인다. 테스트 `panel_tests.rs:444`(`the_third_panel_leaves_the_travel_time_alone_while_the_cursor_is_off_a_chart`).
+7. RANDOM 값의 순환 순서가 화면마다 다르다. 패널과 스킨 이벤트는 원본 번호 순(`OPTION_GENERAL`)이고, 설정 행·PLAY 메뉴·F1 오버레이·연습은 `NoteOption::ALL` 순(S-RANDOM 이 R-RANDOM 앞, `crates/rbms-chart/src/shuffle.rs:18-27`)이다. 그대로다.
+8. GAUGE 이름이 화면마다 다르다. 스킨 `ASSIST EASY ... EX HARD`, 설정 `EX-HARD`(`settings.rs:147`), IIDX 참고 이미지 `ASSISTED EASY`. 그대로다.
+9. 키 6·7 이 없는 모드(5키, 10키)에서는 해당 역할에 닿지 못한다(1.3절). 동작은 그대로이고 기본 스킨이 그 키를 어둡게 그린다(1.8절).
+10. F1 오버레이의 홀드 키 `LSHIFT` 와 턴테이블의 충돌: 해소했다. START, SELECT, 상세 키 중 하나가 눌려 있으면 홀드 키로 오버레이를 열지 않고 키가 선곡으로 간다(`app_options.rs:204-226`). 핀 키 F1 과 패널이 없을 때는 이전과 같다. 부작용: 스킨 없는 내장 선곡에서도 START 를 누른 채 LShift 를 누르면 열리지 않는다. 실기 미확인(단위 테스트만).
+11. 출하 설정에서 `play.autoplay` 는 true 다(`schema.rs:588`, 테스트 `crates/rbms-config/src/tests.rs:44`). `enable_cover` 도 true 다(`schema.rs:602`). 패널에 AUTOPLAY 같은 토글을 넣을 때 주의할 출하값이다. 패널에는 넣지 않았다.
+12. 기본 스킨 파일은 설치 때 복사되고 사용자가 고친 파일은 덮어쓰지 않는다(`apps/rbms-player/src/assets/default_pack.rs:1-30`). 새 모듈(`panel.lua`, `inform.lua`, `words.lua`)과 `props.lua`·`theme.lua` 변경이 들어가므로, 옛 `sheet.lua` 를 직접 고쳐 둔 사용자는 새 모듈과 옛 `sheet.lua` 가 섞인 상태가 될 수 있다(읽기만).
+13. 5키·10키에서 6·7번 건반이 없다는 사실은 실제 창에서 확인하지 못했다(캡처와 호스트 테스트로만).
+14. 외부 스킨 위험(수리하지 않음, 리뷰 panels-1): 키 표 변경은 모든 스킨에 적용된다. 확장 id 를 모르는 외부 스킨(예 ModernChic)에서 패널 2 키 3·5·6·7 과 턴테이블, 패널 1 키 4·6, 패널 3 턴테이블이 표시 없이 저장 설정(SCRATCH AUTO, KEEP GREEN NUMBER, 가림막, GAUGE 이전, HI-SPEED FIX 이전, 판정 알고리즘)을 바꾼다. 패널 키 소리 `OptionChange` 외에 완화 수단이 없다. 고치려면 스킨이 확장 id 를 안다는 신호(헤더 플래그, 팩 경로 판정, 실행 중 읽기 기록)가 필요한데 로더 변경이나 사용자 파일 영향이 있어 이번에 하지 않았다. 사용자 판단 대기.
+15. 패널 2 턴테이블(HIDDEN+)과 패널 3 턴테이블(JUDGE ALGORITHM)은 눌림으로 읽고, 패널이 올라오기 전부터 눌려 있던 방향은 눌림이 아니다(`forget_turntable_changes`, `keys.rs:298`; 테스트 `panel_tests.rs:322`). 같은 호출이 패널이 바뀔 때 직전 프레임의 한 번 돌림도 버린다(프레임 단위 테스트는 없다).
+16. 5키·10키에서도 패널은 7건반을 그대로 그린다(닿지 않는 키만 어둡게). 패널 3 의 JUDGE TIMING `>` 와 NOTE DISPLAY TIME `>` 화살표, 6·7 키에서 나오는 연결선은 다른 키로 닿는 열이라 밝다.
+17. 값이 바뀐 옵션 이름은 영어 대문자 문구다(`words.lua`). 문구와 게이지·GAS·알고리즘 설명을 메인이 새로 썼다. 사용자 문구 검토 대기.
+18. `docs/play-options.md` 와 `docs/skin.md` 6절, 수동 점검표 C1(`NOT AVAILABLE` 문구)은 이 구현 전 상태를 적고 있다(이 문서 소유 밖).
 
 ---
 
@@ -257,23 +296,23 @@
 | AUTOPLAY (`play.autoplay`) | OFF, ON | ON | 없음 | Autoplay | CHART | 없음 | 없음 | 없음 | 이벤트 16 은 1회 오토플레이이고 설정은 안 바꾼다. 명령줄 `--auto`/`--interactive` |
 | HI-SPEED (`play.hispeed`) | 0.01~20.00, 한 번에 HI-SPEED STEP | 2.00 | 없음 | HiSpeed | SPEED | 없음 | 없음 | UP/DOWN, START+건반 | 이벤트 57. 숫자 10·310·311, 실수 310 |
 | HI-SPEED STEP (`play.hispeed_step`) | 0.01~1.00, 0.01 | 0.25 | 없음 | 없음 | SPEED | 없음 | 없음 | 없음 | 없음 |
-| HI-SPEED FIX (`play.fix_hispeed`) | OFF, START, MAX, MAIN, MIN | MAIN | P1 키 5 | FixHiSpeed | SPEED | 없음 | 없음 | 없음 | 이벤트 55, 인덱스 55 |
+| HI-SPEED FIX (`play.fix_hispeed`) | OFF, START, MAX, MAIN, MIN | MAIN | P1 키 5(다음)·6(이전) | FixHiSpeed | SPEED | 없음 | 없음 | 없음 | 이벤트 55, 인덱스 55 |
 | SPEED FIX (`play.constant_speed`) | FLOATING, CONSTANT | FLOATING | P2 키 2 | 없음 | SPEED | 없음 | 없음 | 없음 | 이벤트 352, 인덱스 302·352 |
-| KEEP GREEN NUMBER (`play.keep_green_number`) | OFF, ON | OFF | 없음 | 없음 | SPEED | 없음 | 없음 | 지정 키(미지정) | 없음 |
-| GREEN NUMBER (`play.duration_ms`) | 이동 시간 1~10,000 ms(녹색 1~6,000) | 500 ms(300) | P3 키 4·6(KEEP 켜짐일 때) | 없음 | SPEED | 없음 | 없음 | START+건반, SELECT+건반, 지정 키 | 이벤트 59, 숫자 312·313 |
-| RANDOM (`play.random`) | OFF, MIRROR, RANDOM, S-RANDOM, R-RANDOM, ROTATE, H-RANDOM, ALL-SCRATCH(설정 순), 패널은 R/S 순서 바뀜(1.10절 7) | OFF | P1 키 1·2·6·7 | Random | CHART | 없음 | OPTION-1P | 없음 | 이벤트 42·43, 인덱스 42·43 |
-| LANE OPTION (`play.lane_option`) | OFF, FLIP, BATTLE, BATTLE AUTO-SC | OFF | P1 키 4(적용 안 됨) | 없음 | 숨김(`unbuilt_row`) | 숨김 | 없음 | 없음 | 이벤트 54, 인덱스 54 |
-| GAUGE (`play.gauge`) | ASSIST EASY, EASY, NORMAL, HARD, EX-HARD, HAZARD | NORMAL | P1 키 3 | Gauge | CHART | 없음 | GAUGE TYPE(9종, 별개 값) | 없음 | 이벤트 40, 인덱스 40 |
+| KEEP GREEN NUMBER (`play.keep_green_number`) | OFF, ON | OFF | P2 키 5 | 없음 | SPEED | 없음 | 없음 | 지정 키(미지정) | 이벤트 21001, 불린 21101(R-BMS 확장) |
+| GREEN NUMBER (`play.duration_ms`) | 이동 시간 1~10,000 ms(녹색 1~6,000) | 500 ms(300) | P3 키 4·6(KEEP 켜짐이고 커서가 곡·코스일 때) | 없음 | SPEED | 없음 | 없음 | START+건반, SELECT+건반, 지정 키 | 이벤트 59, 숫자 312·313 |
+| RANDOM (`play.random`) | OFF, MIRROR, RANDOM, S-RANDOM, R-RANDOM, ROTATE, H-RANDOM, ALL-SCRATCH(설정 순), 패널은 R/S 순서 바뀜(1.10절 7) | OFF | P1 키 1·2·7 | Random | CHART | 없음 | OPTION-1P | 없음 | 이벤트 42·43, 인덱스 42·43 |
+| LANE OPTION (`play.lane_option`) | OFF, FLIP, BATTLE, BATTLE AUTO-SC | OFF | 없음(패널 키에서 뺌, 적용 안 됨) | 없음 | 숨김(`unbuilt_row`) | 숨김 | 없음 | 없음 | 이벤트 54, 인덱스 54 |
+| GAUGE (`play.gauge`) | ASSIST EASY, EASY, NORMAL, HARD, EX-HARD, HAZARD | NORMAL | P1 키 3(다음)·4(이전) | Gauge | CHART | 없음 | GAUGE TYPE(9종, 별개 값) | 없음 | 이벤트 40, 인덱스 40 |
 | LEGACY NOTE (`play.legacy_note`) | OFF, ON | OFF | P2 키 4 | 없음 | CHART | 없음 | 없음 | 없음 | 이벤트 353, 인덱스 304·353 |
-| LANE COVER ON (`play.enable_cover`) | ON, OFF | ON | 없음 | 없음 | LANE | 없음 | 없음 | `\`(COVER TOGGLE), START 두 번 | 이벤트 330, 인덱스 330 |
+| LANE COVER ON (`play.enable_cover`) | ON, OFF | ON | P2 키 6 | 없음 | LANE | 없음 | 없음 | `\`(COVER TOGGLE), START 두 번 | 이벤트 330, 인덱스 330 |
 | LANE COVER (`play.cover`) | 0~100%(0.1% 격자) | 0% | 없음 | LaneCover(1%) | LANE | 없음 | 없음 | RIGHT/LEFT, START+턴테이블, 휠 | 숫자 14, 비율 4 |
-| LIFT ON (`play.enable_lift`) | OFF, ON | OFF | 없음 | 없음 | LANE | 없음 | 없음 | 미지정 | 이벤트 331, 인덱스 331 |
+| LIFT ON (`play.enable_lift`) | OFF, ON | OFF | P2 키 7 | 없음 | LANE | 없음 | 없음 | 미지정 | 이벤트 331, 인덱스 331 |
 | LIFT (`play.lift`) | 0~100% | 0% | 없음 | Lift | LANE | 없음 | 없음 | `[` `]`, START+SELECT+턴테이블 | 숫자 314 |
-| HIDDEN+ ON (`play.enable_hidden`) | OFF, ON | OFF | 없음 | 없음 | LANE | 없음 | 없음 | 미지정 | 이벤트 332, 인덱스 332 |
+| HIDDEN+ ON (`play.enable_hidden`) | OFF, ON | OFF | P2 턴테이블 | 없음 | LANE | 없음 | 없음 | 미지정 | 이벤트 332, 인덱스 332 |
 | HIDDEN+ (`play.hidden`) | 0~100% | 0% | 없음 | Hidden | LANE | 없음 | 없음 | 위·아래 키 미지정 | 숫자 315 |
 | COVER FINE STEP (`play.lanecover_step_fine`) | 0.0001~0.0100 | 0.0010 | 없음 | 없음 | LANE | 없음 | 없음 | FINE STEP 키 | 없음 |
 | SCRATCH SIDE (`play.scratch_left`) | RIGHT, LEFT | RIGHT | 없음 | ScratchSide | 없음 | INPUT | 없음 | 없음 | 스킨 옵션 "Scratch Side". 명령줄 `--sc-left` |
-| SCRATCH AUTO (`play.scratch_auto`) | OFF, ON | OFF | 없음 | ScratchAuto | CHART | 없음 | 없음 | 없음 | 없음. 명령줄 `--sc-auto` |
+| SCRATCH AUTO (`play.scratch_auto`) | OFF, ON | OFF | P2 키 3 | ScratchAuto | CHART | 없음 | 없음 | 없음 | 이벤트 21000, 불린 21100(R-BMS 확장). 명령줄 `--sc-auto` |
 | AUTO REPLAY (`play.auto_replay`) | ON, OFF | ON | 없음 | 없음 | CHART | 없음 | 없음 | 없음 | 없음 |
 | ESCAPE (`play.play_escape`) | IMMEDIATE, HOLD, DOUBLE TAP | IMMEDIATE | 없음 | 없음 | CHART | 없음 | 없음 | 없음 | 없음 |
 | KEY DEBOUNCE (`play.key_debounce_ms`) | 0~100 ms | 16 | 없음 | 없음 | 없음 | INPUT | 없음 | 없음 | 없음 |
@@ -281,7 +320,7 @@
 | TOTAL (`play.total_override`) | AUTO(0) 또는 10 단위 | AUTO | 없음 | 없음 | 없음 | JUDGE | TOTAL(10~5000) | 없음 | 없음 |
 | JUDGE OFFSET (`judge.offset_ms`) | -200~+200 ms | 0 | P3 키 5·7 | 없음 | JUDGE | 없음 | 없음 | `9`/`0` | 이벤트 74, 숫자 12 |
 | AUTO ADJUST (`judge.auto_offset`) | OFF, ON | OFF | P3 키 3 | 없음 | JUDGE | 없음 | 없음 | 미지정 | 이벤트 75, 인덱스 75 |
-| JUDGE ALGORITHM (`judge.judge_algorithm`) | COMBO, DURATION, LOWEST, SCORE | COMBO | 없음 | 없음 | 없음 | JUDGE | 없음 | 없음 | 이벤트 340(앞의 셋만), 인덱스 340 |
+| JUDGE ALGORITHM (`judge.judge_algorithm`) | COMBO, DURATION, LOWEST, SCORE | COMBO | P3 턴테이블 | 없음 | 없음 | JUDGE | 없음 | 없음 | 이벤트 340(앞의 셋만), 인덱스 340 |
 | JUDGE WIDTH 6개 (`judge.judge_rate_key/scratch`) | 50~200%, 5 단위 | 100% | 없음 | 없음 | 없음 | JUDGE | JUDGERANK(1~400, 별개) | 없음 | 없음. 100 초과면 ASSIST 판(어시스트 2) |
 | LN MARGIN (`judge.longnote_margin_rate`) | 50~200%, 5 | 100% | 없음 | 없음 | 없음 | JUDGE | 없음 | 없음 | 없음 |
 | LN MODE (`judge.ln_mode`) | LN, CN, HCN | LN | 없음 | 없음 | 없음 | JUDGE | 없음 | 없음 | 이벤트 308, 키 `3`, 머리 단추, QUICK SETTINGS |
@@ -302,17 +341,19 @@
 
 패널 안에 키가 없는 항목이다. "스킨 id" 는 스킨이 현재 값을 읽을 수 있는지, "이벤트" 는 스킨 단추가 바꿀 수 있는지다.
 
-요청문이 패널에서 바꿀 수 없다고 든 것 가운데 LEGACY NOTE(패널 2 키 4), BGA(패널 3 키 1), GAUGE AUTO SHIFT(패널 3 키 2)는 지금 패널에서 바뀐다. 요청한 사람의 체감과 현재 구현이 다르다. 현재 화면은 값 하나만 보이고 목록이 없어 "무엇이 바뀌는지" 가 안 드러난 것으로 보인다(추정이고 확인한 사실은 아니다). 반대로 DP 옵션은 패널에 있지만 아무 효과가 없고, LN MODE 는 패널에 없고 머리 단추·키 3·QUICK SETTINGS 에 있다. 아래 표는 키가 아예 없는 것만 적는다.
+이 절의 표는 조사 당시 모습이다. 2026-10-22 구현으로 SCRATCH AUTO, KEEP GREEN NUMBER, LANE COVER·LIFT·HIDDEN+ 켬끔, JUDGE ALGORITHM 은 패널 키와 스킨 id 를 갖게 되었고(1.3, 3.4절), 해당 행에 "구현됨" 을 적었다. 키가 없는 채 남은 것은 LN MODE, BOTTOM SHIFTABLE, GUIDE SE(스킨 id·이벤트는 있음)와 아래 표의 나머지다.
+
+요청문이 패널에서 바꿀 수 없다고 든 것 가운데 LEGACY NOTE(패널 2 키 4), BGA(패널 3 키 1), GAUGE AUTO SHIFT(패널 3 키 2)는 조사 당시에도 패널에서 바뀌었다. 요청한 사람의 체감과 구현이 달랐던 것은 값 하나만 보이고 목록이 없어 "무엇이 바뀌는지" 가 안 드러난 때문으로 보인다(추정이고 확인한 사실은 아니다). 지금은 값 목록이 전부 보인다.
 
 | 항목 | 플레이에 주는 영향 | 지금 바꾸는 곳 | 스킨 id | 이벤트 | 패널에 넣을 때 필요한 것 |
 | --- | --- | --- | --- | --- | --- |
-| SCRATCH AUTO | 턴테이블 노트를 사람 대신 쳐 주고 노트에서 뺀다. 램프가 LIGHT ASSIST 로 내려간다(`docs/play-options.md` 10.2, 10.5절) | F1, PLAY > CHART, 명령줄 | 없음 | 없음 | 새 인덱스 id + 새 이벤트 + 패널 키 역할(5.3절) |
-| KEEP GREEN NUMBER | 녹색 숫자 유지 여부. 패널 3의 NOTE DISPLAY TIME 이 이 값이 켜져야 움직인다 | PLAY > SPEED | 없음 | 없음 | 위와 같다 |
+| SCRATCH AUTO | 턴테이블 노트를 사람 대신 쳐 주고 노트에서 뺀다. 램프가 LIGHT ASSIST 로 내려간다(`docs/play-options.md` 10.2, 10.5절) | F1, PLAY > CHART, 명령줄 | 없음 | 없음 | 구현됨(2026-10-22): 패널 2 키 3, 확장 이벤트 21000, 불린 21100 |
+| KEEP GREEN NUMBER | 녹색 숫자 유지 여부. 패널 3의 NOTE DISPLAY TIME 이 이 값이 켜져야 움직인다 | PLAY > SPEED | 없음 | 없음 | 구현됨(2026-10-22): 패널 2 키 5, 확장 이벤트 21001, 불린 21101 |
 | AUTOPLAY | 판 전체를 컴퓨터가 침. 출하 기본 ON | F1, PLAY > CHART | 옵션 32·33 은 플레이 화면 전용 | 이벤트 16 은 1회만 | 패널에 넣으면 실수로 켜진 채 저장될 수 있다. 기록 저장·IR 전송에서 빠지는 판이 된다 |
-| LANE COVER·LIFT·HIDDEN+ 켬/끔 | 판정선 위 가림막 | PLAY > LANE, `\` | 인덱스 330~332 있음 | 있음 | 패널 키 역할만 필요 |
+| LANE COVER·LIFT·HIDDEN+ 켬/끔 | 판정선 위 가림막 | PLAY > LANE, `\` | 인덱스 330~332 있음 | 있음 | 구현됨(2026-10-22): 패널 2 키 6·7·턴테이블 |
 | LANE COVER·LIFT·HIDDEN+ 양 | 가림막 높이 | F1, PLAY > LANE, 플레이 중 키 | 숫자 14·314·315 있음 | 없음 | 패널은 켬끔만 다루는 것이 원본 관례 |
 | HI-SPEED, HI-SPEED STEP | 스크롤 속도 | F1, PLAY > SPEED, 플레이 중 | 숫자 10·310·311 있음 | 57 있음 | 패널 키 역할만 필요(원본도 패널엔 없음) |
-| JUDGE ALGORITHM | 눌림이 어느 노트를 먹는가 | SETTINGS > JUDGE, QUICK SETTINGS | 인덱스 340 있음(SCORE 는 -1) | 340 있음 | 패널 키 역할. SCORE 를 보이려면 값 표 확장 |
+| JUDGE ALGORITHM | 눌림이 어느 노트를 먹는가 | SETTINGS > JUDGE, QUICK SETTINGS | 인덱스 340 있음(SCORE 는 -1) | 340 있음 | 구현됨(2026-10-22): 패널 3 턴테이블(COMBO, DURATION, LOWEST 만 순환, SCORE 는 보이기만) |
 | LN MODE | 롱노트 종류 | SETTINGS > JUDGE, 머리 단추, 키 3 | 인덱스 308 있음 | 308 있음 | 패널 키 역할 |
 | BOTTOM SHIFTABLE | GAS 가 내릴 수 있는 최저 게이지 | SETTINGS > JUDGE | 인덱스 341 있음 | 341 있음 | 패널 키 역할(원본 ModernChic 은 패널 3의 단추로 둔다) |
 | GUIDE SE | 판정마다 소리 | SETTINGS > AUDIO, QUICK SETTINGS 없음 | 인덱스 343 있음 | 343 있음 | 패널 키 역할 |
@@ -322,7 +363,7 @@
 | ESCAPE | Esc 한 번으로 포기할지 | PLAY > CHART | 없음 | 없음 | 플레이에 직접 영향은 없다 |
 | TOTAL 직접 지정 | 게이지 증가량. 직접 지정하면 어시스트 판(최고 기록 없음) | SETTINGS > JUDGE | 없음 | 없음 | 어시스트 판을 만들므로 패널에는 부적합하다 |
 | JUDGE WIDTH 6개, LN MARGIN | 판정 폭. 넓히면 어시스트 판 | SETTINGS > JUDGE | 인덱스 301 은 읽기 전용 | 없음 | 숫자 칸이 필요하고 어시스트 판을 만든다 |
-| DP 옵션(FLIP/BATTLE) | 적용 안 됨 | 패널 1 키 4만 | 있음 | 있음 | 먼저 플레이에 구현해야 의미가 있다 |
+| DP 옵션(FLIP/BATTLE) | 적용 안 됨 | 패널 키에서 뺌(2026-10-22). 설정 행은 숨김 | 있음 | 있음 | 먼저 플레이에 구현해야 의미가 있다 |
 | 2P 쪽 RANDOM | 설정이 하나뿐 | 없음 | 인덱스 43 은 1P 와 같은 값 | 같은 값을 만짐 | 별도 `random_2p` 필드가 필요하다 |
 | MARK NOTE, BPM GUIDE, JUDGE AREA, NO MINE | 대응 기능이 없다 | 없음 | 없음(-1) | 없음 | 기능 자체를 구현해야 한다 |
 
@@ -391,12 +432,34 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
 
 ### 3.4 R-BMS 확장 id 의 과거와 현재, 범위 규칙
 
-현재 코드에는 R-BMS 전용(원본에 없는) 속성 id 가 하나도 없다. 직접 확인: `apps/rbms-player/src/skin_host`, `crates/rbms-skin/src`, `crates/rbms-render/src/skin_render`, 기본 스킨 Lua 전체에서 20000 이상 id 를 쓰는 곳이 없다(정규식 grep 결과는 점수 계산 상수 `150_000` 등 무관한 값뿐). 근거와 역사:
+2026-10-22 구현으로 R-BMS 전용 id 가 다시 생겼다. 단일 목록은 `apps/rbms-player/src/skin_host/extension.rs`의 머리 문서와 상수이고, 결정은 ADR [R-BMS 확장 id](../acknowledge/2026-10-22-adr-rbms-extension-ids.md)다. 2026-10-09 "사설 id 철거" 결정(아래)의 부분 변경이며 사용자는 아직 확인하지 않았다. 숫자·글자·비율 공간에는 확장이 없다.
+
+두 대역은 원본이 선언한 최대(옵션 3035, 이벤트 388)와 스킨에 남긴 대역(옵션 900~999, 이벤트 1000~1999, 타이머 10000~19999) 위에 있고 서로 겹치지 않는다(`extension.rs` 테스트가 고정). 원본 id 표(`reference_implements`), 생성된 원본 id 표, `property_checksum` 은 건드리지 않았다.
+
+- 이벤트 21000~21099(`EXTENSION_EVENT_FIRST/LAST`): 이벤트 공간에는 게이트가 없어 스킨이 `main_state.event_exec(id)` 나 단추 `act` 로 그대로 부른다. `EVENT_ROUTES` 가 `Cluster::Options` 로 보내고(`skin_host/mod.rs:572`) 선곡 `EVENTS` 표에 등록돼 있다(`events.rs:285-286`). 첫 인자가 어느 쪽이든 한 번 실행에 한 번 뒤집는다. 소리는 `OptionChange`, 저장은 패널이 닫힐 때와 선곡을 떠날 때.
+- 불린 21100~21199(`EXTENSION_OPTION_FIRST/LAST`): Lua 는 `draw`/`value`/`text` 같은 함수 필드 안에서 `main_state.option(id)` 로만 읽는다. `op = {id}` 는 로더 게이트(`loader/track.rs:157`)에 걸려 버려진다. 음수 id 는 부정, 답하지 않는 화면에서는 false.
+
+| 종류 | id | 상수 | 답하는 화면 | 뜻 |
+| --- | --- | --- | --- | --- |
+| 이벤트 | 21000 | `RBMS_EVENT_SCRATCH_AUTO` | 선곡 | SCRATCH AUTO 켬끔(`play.scratch_auto`) |
+| 이벤트 | 21001 | `RBMS_EVENT_KEEP_GREEN_NUMBER` | 선곡 | KEEP GREEN NUMBER 켬끔(`play.keep_green_number`) |
+| 불린 | 21100 | `RBMS_OPTION_SCRATCH_AUTO_ON` | 선곡(Options) | SCRATCH AUTO 켜짐 |
+| 불린 | 21101 | `RBMS_OPTION_KEEP_GREEN_NUMBER_ON` | 선곡(Options) | KEEP GREEN NUMBER 켜짐 |
+| 불린 | 21102~21104 | `RBMS_OPTION_LANE_COVER_ON`, `_LIFT_ON`, `_HIDDEN_ON` | 선곡(Options) | 가림막 켜짐(= `event_index(330/331/332) == 1`). 원본 id 로도 읽을 수 있다 |
+| 불린 | 21110 + k (k = 0..4) | `RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST` | 선곡(Select) | 커서 아래 곡의 최고 램프 어시스트 등급 == k. 최고 기록이 없는 곡·폴더·코스는 다섯 모두 꺼짐 |
+| 불린 | 21120 + k | `RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST` | 결과(Result) | 이번 판 등급 == k(코스 결과는 0) |
+| 불린 | 21130 + k | `RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST` | 결과(Result) | 이번 판 이전의 최고 기록(이미지 인덱스 371 과 같은 LN 모드 기준) 등급 == k. 처음 친 곡은 다섯 모두 꺼짐 |
+| 불린 | 21140 + i (i = 0..8) | `RBMS_OPTION_UNREACHABLE_KEY_FIRST` | 선곡(Select) | 지금 모드에서 키 인덱스 i 에 닿는 레인이 없음(5키·10키의 5·6) |
+
+등급 k: 0 은 등급 없음(램프가 LIGHT ASSIST 가 아니거나 ASSIST EASY 게이지로 클리어. 램프 id 와 함께 읽는다: 선곡 `event_index(370)`, 결과 370/371), 1 ASSIST EASY, 2 ASSIST CLEAR, 3 ASSIST HARD, 4 ASSIST EXHARD(`rbms_judge::AssistGrade::id`). 등급 의미는 `clear-lamps.md`.
+
+과거와 근거:
 
 - 2026-09-17: 옵션 패널을 `select` 문서의 대체 단위로 두고 사설 id 를 썼다. 대역은 20001~20011(결과 글자), 20101~20161(선곡 옵션 패널 행: 라벨 20101~, 값 20121~, 포커스 20141~), 20201~20205(플레이 목표 이름과 차이, 선곡·결과 힌트, IR 상태), 20301~20316(선곡 상세 통계) 이었다. 선곡 어댑터 `state.rs:101-148` 에 섞여 있었다(`docs/reference/skin-compat/b5-properties.md:173`, `docs/acknowledge/2026-09-17-skin-system-decisions.md` D10·D15).
 - 충돌 방지 방식: 원본 id 공간 밖(원본이 선언한 최대 id 보다 위)에 둔다. `b5-properties.md:173` 는 "beatoraja id 공간 밖이므로 ModernChic와 충돌하거나 쓰이지 않는다"고 적었다.
-- 2026-10-09 결정으로 폐기: 혼합 합성(`composition`, `layer`, `replace`, `hotspot`)과 함께 "사설 id 20001~20316 삭제, 레퍼런스 id 공간 밖"(`docs/reference/skin-compat/00-synthesis.md:406`, `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md:75`). 철거 작업 W1-1(`00-synthesis.md:467`).
-- 그 뒤 R-BMS 호스트는 원본이 선언한 id 만 답한다. 원본 id 표는 `tools/gen-skin-property.rs` 가 `SkinProperty.java` 에서 뽑아 커밋한 파일이고 FNV-1a 체크섬 테스트가 손 수정을 막는다(`crates/rbms-skin/src/property/generated.rs:1-12`, 체크섬 `PROPERTY_TABLE_CHECKSUM`, `crates/rbms-skin/tests/property_checksum.rs`). 종류(옵션, 숫자, 비율, 실수, 글자, 타이머, 이미지 인덱스, 오프셋)마다 id 공간이 따로다(`property/mod.rs:40-45`). 원본의 상한은 `ID_LENGTH` 65,536 이다(`names.rs:27-30`).
+- 2026-10-09 결정으로 폐기: 혼합 합성(`composition`, `layer`, `replace`, `hotspot`)과 함께 "사설 id 20001~20316 삭제, 레퍼런스 id 공간 밖"(`docs/reference/skin-compat/00-synthesis.md:406`, `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md:75`). 철거 작업 W1-1(`00-synthesis.md:467`). 이때 20000 대 사설 id 는 모두 사라졌다.
+- 2026-10-22: 위 두 대역으로 다시 도입(21000 대). 20000 대를 되살리지 않았고 2026-09-17 의 id 와 겹치지 않는다.
+- 원본 id 표는 `tools/gen-skin-property.rs` 가 `SkinProperty.java` 에서 뽑아 커밋한 파일이고 FNV-1a 체크섬 테스트가 손 수정을 막는다(`crates/rbms-skin/src/property/generated.rs:1-12`, 체크섬 `PROPERTY_TABLE_CHECKSUM`, `crates/rbms-skin/tests/property_checksum.rs`). 종류(옵션, 숫자, 비율, 실수, 글자, 타이머, 이미지 인덱스, 오프셋)마다 id 공간이 따로다(`property/mod.rs:40-45`). 원본의 상한은 `ID_LENGTH` 65,536 이다(`names.rs:27-30`).
 - 원본이 사용자 영역으로 남긴 대역(새 id 가 피해야 하는 곳):
 
 | 종류 | 원본이 선언한 최대 id | 사용자 정의 대역 |
@@ -410,7 +473,7 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
 | 오프셋 | 199 | `OFFSET_MAX` |
 | 이미지 인덱스 | 이름 표 62개(최대 469) | 없음 |
 
-- 새 R-BMS 전용 id 를 다시 허용할 때의 충돌 방지 후보 규칙(제안이지 현재 규칙이 아님): (1) 원본 선언 최대(3035)와 사용자 정의 대역(900~999, 1000~1999, 10000~19999)을 모두 피하는 20000 이상, 상한 65,535. (2) 종류별 공간이 따로이므로 같은 번호가 다른 종류에 있어도 충돌하지 않는다. (3) 별도 확장 표를 두고 `reference_implements` 는 건드리지 않는다. 건드리면 "원본이 구현하는 id 수" 테스트(`names.rs:551-`)가 거짓이 된다. (4) 8곳의 게이트(1.7절)가 확장 표도 통과시켜야 하고, 그러지 않으면 `event_index` 는 오류를 던진다.
+- 조사 당시 후보 규칙과 채택된 규칙의 차이: (1) 20000 이상이 아니라 21000 대로 정했다. (2) 종류별 공간이 따로라 이벤트와 불린에 같은 21000 대 번호가 있어도 충돌하지 않는다. (3) 별도 확장 표를 만들지 않았다: 이벤트는 게이트가 없고 불린은 게이트 밖 경로(`main_state.option`)로 읽혀 `reference_implements` 를 건드릴 필요가 없었다. (4) 게이트 8곳(1.7절)은 고치지 않았다.
 
 ---
 
@@ -502,6 +565,8 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
 
 ## 5. 기본 스킨 Lua 로 구현할 때의 가능성과 한계
 
+5절은 구현 전 조사다. 구현은 5.1절의 방법을 거의 그대로 썼다(값 목록 전체를 세로로 나열, `draw` 함수로 강조, 사각형 키 그림과 연결선, 글자 `value` 함수의 INFORMATION 줄, `timer(21)` 로 기준값을 새로 잡는 감시). 결과는 1.8절이고, 5.2~5.6절에서 달라진 곳은 해당 줄에 덧붙였다.
+
 ### 5.1 가능한 것(Rust 변경 없이)
 
 | 하려는 것 | 방법 | 근거 |
@@ -522,7 +587,7 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
 
 1. 원본에 없는 옵션의 값은 읽을 수 없다. `event_index` 가 오류를 던지고(`lua/main_state.rs:927`) imageset 은 첫 이미지를 항상 보인다(`draw.rs:291-300`). 해당: SCRATCH AUTO, KEEP GREEN NUMBER, SCRATCH SIDE, AUTOPLAY, TARGET FALLBACK, TARGET RATE, AUTO REPLAY, ESCAPE, TOTAL, JUDGE WIDTH, LN MARGIN(1.7절 표 밖). 키로 바꾸는 것도 Lua 가 못 한다. 패널 키는 Rust 가 읽고, Lua 는 `event_exec` 를 단추 클릭이나 자기 함수에서만 부른다.
 2. 색은 destination 마다 고정이다. 값에 따라 글자 색을 바꾸는 방법이 없고, 강조는 사각형을 하나 더 얹는 식이다(`ui.lua:88-117`). Mono/Slate, Accent 옵션과 열 색을 어떻게 맞출지는 설계 선택이다.
-3. 글꼴은 지금 `Inter-Regular.ttf` 하나다(`theme.lua:235-238`). 엔진을 바꾸지 않고 굵은 글씨를 내는 길은 있다: 스킨 팩 `font/` 에 정적 굵은 TTF(예: Inter Bold, OFL)를 더하고 `theme.font` 에 두 번째 글꼴 id 로 선언하면, `TextContext::load_font` 가 파일의 굵기(`info.weight`)로 별도 face 를 등록한다(`crates/rbms-render/src/font.rs:410-427`, 같은 가족의 다른 굵기는 이름에 굵기가 붙는다). 같은 가변 파일로 굵기만 바꾸는 길은 스킨 글꼴 정의(`FontDef`, `crates/rbms-skin/src/model.rs:345-351`)에 굵기 칸이 없어 엔진 확장이 필요하다. 새 에셋 추가 여부는 결정 지점이다(`docs/reference/font-rendering.md` 14절과 종합 결정 목록). 글꼴 품질 문제 전반은 그 문서에 있다.
+3. 글꼴은 지금 `Inter-Regular.ttf` 하나다(`theme.lua:235-238`). 엔진을 바꾸지 않고 굵은 글씨를 내는 길은 있다: 스킨 팩 `font/` 에 정적 굵은 TTF(예: Inter Bold, OFL)를 더하고 `theme.font` 에 두 번째 글꼴 id 로 선언하면, `TextContext::load_font` 가 파일의 굵기(`info.weight`)로 별도 face 를 등록한다(`crates/rbms-render/src/font.rs:410-427`, 같은 가족의 다른 굵기는 이름에 굵기가 붙는다). 같은 가변 파일로 굵기만 바꾸는 길은 스킨 글꼴 정의(`FontDef`, `crates/rbms-skin/src/model.rs:345-351`)에 굵기 칸이 없어 엔진 확장이 필요하다. 구현은 이 방법(정적 굵은 TTF 추가)을 택했다: 팩 `font/Inter-Bold.ttf` 와 글꼴 id `inter-bold`(1.8절, `docs/reference/font-rendering.md` 14절 결정 4). 글꼴 품질 문제 전반은 그 문서에 있다.
 4. 차트에 의존하는 PREVIEW 레인 그림(선택한 RANDOM 결과를 보여 줌)은 Lua 로 만들 수 없다. 차트 패턴과 시드가 스킨에 노출되지 않는다.
 5. 한 패널의 destination 은 올림·내림 각각 하나씩 두 벌이라 두 배다(`both`).
 6. 사용자가 고친 `sheet.lua` 가 있으면 새 모듈과 섞인다(1.10절 13).
@@ -541,6 +606,8 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
 키 표를 바꾸면 영향이 가는 곳: `stage/select/keys.rs` 의 표와 `*_PANEL_PRESSES`, `panel.rs` 의 `press_act`, 키 가이드 `stage/select/guide.rs:50-58,224-246`(`KEY_ROLES` 와 패널·키 행), 테스트 `keys.rs:311-333`(원본과 같은 표라고 단언)와 `panel.rs:375-452`. 키 설정 화면의 패널 행은 따로 없다(패널 키는 건반이 곧 역할이다).
 
 패널 키를 Lua 가 받는 길은 이론상 있다. `main_state.key_pressed(code)`(`lua/main_state.rs:50`, 호스트 `skin_host/mod.rs:983`)로 눌린 키를 읽고, 함수 값 안에서 `main_state.event_exec(id)` 를 부르면 이벤트가 큐에 쌓여 다음 프레임에 실행된다(`skin_host/mod.rs:13-19`). 그러나 키 코드가 libGDX 이름이고 사용자가 바꾼 키 설정을 모르며, 같은 키를 Rust 가 이미 패널 역할로 쓰므로 이중 동작이 된다. 권하지 않는다.
+
+구현 결과(2026-10-22): 위 표의 SCRATCH AUTO, KEEP GREEN NUMBER, 켬끔 3종, JUDGE ALGORITHM 이 들어갔다(1.3, 3.4절). 키 표 변경의 영향은 `keys.rs` 표와 `*_PANEL_PRESSES`, `panel.rs` 의 `press_act`, 키 가이드 `stage/select/guide.rs` 의 `panel_rows` 에 세 줄 추가("{START} + TURNTABLE = TARGET", "{SELECT} + TURNTABLE = HIDDEN+ ON/OFF", "{START}+{SELECT} + TURNTABLE = JUDGE ALGORITHM", 건반 1~7 의 패널 역할은 스킨이 그린다)이고, 가이드 화면 크기 테스트가 통과했다.
 
 ### 5.4 좌표 예산
 
@@ -566,6 +633,7 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
   5. `apps/rbms-player/src/assets/default_pack/tests.rs`: 설치 규칙. 파일 목록은 빌드 스크립트가 만든다(`apps/rbms-player/build.rs`).
   6. 그림 시트나 아틀라스를 바꾸면 `uv run assets/skins/rbms-default/tools/generate-images.py --check`.
 - 키 표나 이벤트를 바꾸면 깨지는 것: `stage/select/keys.rs:311-333`, `panel.rs:375-452`, `panel_tests.rs`(고정 스킨으로 건반을 눌러 설정 값을 본다), `events_tests.rs`, `skin_host/options/tests.rs`. 원본 id 표(`reference_implements`)를 건드리면 `crates/rbms-skin/tests/property_checksum.rs`, `property/names.rs:551-` 의 개수 테스트가 깨진다.
+- 구현 뒤 추가된 보호(2026-10-22): `keys.rs` 의 바뀐 칸 목록 단언(`CHANGED_SLOTS`), `panel_tests.rs`(신규 `a_turntable_direction_held_before_the_panel_came_up_is_not_a_press_on_it`, `the_third_panel_leaves_the_travel_time_alone_while_the_cursor_is_off_a_chart`), `skin_host/extension.rs` 의 대역 테스트, `skin_host/select/tests.rs` 의 닿지 않는 키 옵션, `app_options.rs` 의 홀드 키 테스트. 패널 캡처 하네스는 `stage/capture/panels.rs`(`the_default_packs_option_panels_and_graded_lamps_are_captured`, `RBMS_SKIN_CAPTURE_DIR` 가 있을 때만 파일을 쓰고 비교하지 않는다).
 - 수동 점검표 `docs/quality-assurance/2026-10-11-default-skin-manual-check.md:223`(C1)은 패널 문구(`NOT AVAILABLE`)를 쓴다. 그림이 바뀌면 문구를 고친다.
 - 고칠 문서: `docs/play-options.md`(2, 6절의 패널 설명), `docs/skin.md`(6절 알려진 한계), `docs/plan/2026-10-11-default-skin-design.md` 6.2절, `docs/crates.md`.
 
@@ -575,7 +643,7 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
 
 각 항목은 선택지, 메인 추천, 이유, 영향 범위다.
 
-배치 초안(결정 1 은 A, 결정 2 는 B, 결정 6 은 A 를 고른 경우의 한 예이고 확정이 아니다). "기존"은 지금 그대로, "표 변경"은 키 표 슬롯만 바꾸는 것(역할 이름은 이미 있다), "새 id"는 3.4절의 확장이 필요한 것이다.
+아래 배치 초안은 조사 당시의 예(결정 1 은 A, 결정 2 는 B, 결정 6 은 A)이고, 구현된 배치는 1.3절 표다. 초안과 다른 곳은 패널 1 키 6(RANDOM 이전 대신 HI-SPEED FIX 이전)과 패널 2 턴테이블(HIDDEN+ 를 두었다)이다. "기존"은 지금 그대로, "표 변경"은 키 표 슬롯만 바꾸는 것(역할 이름은 이미 있다), "새 id"는 3.4절의 확장이 필요한 것이다.
 
 | 패널 | 건반 | 옵션 | 분류 |
 | --- | --- | --- | --- |
@@ -594,7 +662,7 @@ R-BMS 가 원본과 다르게 구현한 것: RANDOM 의 값 개수(8, RANDOM_EX�
 | 3 START+SELECT | 1~7 | BGA, GAS, AUTO ADJUST, NOTE DISPLAY TIME 줄임·늘림, JUDGE TIMING -·+ | 기존 |
 | 3 START+SELECT | 턴테이블 | JUDGE ALGORITHM 이전·다음(IIDX 이미지 4 의 ALGORITHM 상자가 키와 이어지지 않은 점에 맞춤) | 표 변경(이벤트 340 과 인덱스는 있음) |
 
-HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 초안에 없다. 패널 2·3 의 턴테이블이나 쪽 넘기기(턴테이블로 두 번째 쪽)를 쓰면 더 넣을 수 있다.
+HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 초안에 없었다. 구현은 HIDDEN+ 켬끔을 패널 2 턴테이블에 두었고, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 넣지 않았다. 패널 2·3 의 턴테이블이나 쪽 넘기기(턴테이블로 두 번째 쪽)를 쓰면 더 넣을 수 있다.
 
 1. 패널 키 배치(어떤 옵션을 어느 키에)
    - A. 원본 키 표의 역할 이름과 이미 동작하는 칸은 그대로 두고, 죽은 칸(패널 2의 5칸, 패널 1 의 DP OPTION)과 역할만 있고 키가 없는 칸(`GaugeUp`, `HsFixUp`, 패널 2·3 의 턴테이블)에만 새 토글을 배정한다. 표의 슬롯은 바뀌므로 `keys.rs:311-333` 의 "원본과 같은 표" 단언은 고쳐야 한다.
@@ -602,6 +670,7 @@ HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 
    - C. 원본 표를 그대로 두고 R-BMS 전용 토글을 네 번째 패널(새 조합)에 모은다.
    - 추천: A(+ 필요하면 C). 이유: 이미지 3·4 의 키 그림이 원본 표와 같아서(4.5절) IIDX 모양을 얻는 데 표 변경이 필요 없고, ModernChic 같은 외부 스킨의 고정 라벨과 어긋나지 않는다. 패널 2(SELECT)는 IIDX 의 ASSIST 와 뜻이 같아 SCRATCH AUTO 를 두기에 맞다.
    - 영향: A 는 `keys.rs`, `panel.rs`, `guide.rs`, 해당 테스트 소수. B 는 표와 테스트 전면, 외부 스킨 호환 깨짐. C 는 여는 입력(새 조합)과 `Panel` 변종 추가.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 원본 표의 동작하는 칸은 그대로 두고 죽은 칸과 키 없는 역할에만 토글을 배정했다(1.3절). 초안과 다른 점은 패널 1 키 6 이 HI-SPEED FIX 이전, 패널 2 턴테이블이 HIDDEN+ 다. `keys.rs` 의 "원본과 같은 표" 단언은 바뀐 칸 목록 `CHANGED_SLOTS` 로 고쳤다. ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 2. 새로 넣을 토글 목록
    - A. SCRATCH AUTO, KEEP GREEN NUMBER, LANE COVER·LIFT·HIDDEN+ 켬끔, JUDGE ALGORITHM, LN MODE, BOTTOM SHIFTABLE, GUIDE SE.
@@ -609,6 +678,7 @@ HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 
    - C. A 에 AUTOPLAY, SCRATCH SIDE, TARGET FALLBACK·RATE 까지.
    - 추천: B. 이유: 원본 id 가 이미 있는 것(330~332, 340, 308, 341, 343)은 Rust 가 키 역할만 더하면 된다. AUTOPLAY 는 출하 ON 이고(`schema.rs:588`) 켜진 채 저장되면 판이 기록에서 빠지므로 패널에 넣지 않는다. JUDGE WIDTH, TOTAL 은 어시스트 판을 만들어 패널에 부적합하다.
    - 영향: 항목 수만큼 `SettingEvent`·`SelectKey`·표 슬롯·가이드 행·테스트.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A 의 목록 가운데 SCRATCH AUTO, KEEP GREEN NUMBER, LANE COVER·LIFT·HIDDEN+ 켬끔, JUDGE ALGORITHM 을 구현했다. 키 자리가 없어 넣지 않은 것: LN MODE, BOTTOM SHIFTABLE, GUIDE SE(스킨 id 와 이벤트는 있다). C 의 AUTOPLAY, SCRATCH SIDE, TARGET FALLBACK·RATE 는 하지 않았다. ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 3. 스킨이 읽는 id(원본에 없는 옵션의 값)
    - A. R-BMS 확장 id 대역(예 20000 이상, 3.4절)을 되살리고 별도 확장 표로 게이트를 통과시킨다.
@@ -617,12 +687,14 @@ HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 
    - A'(종합 검토 추가). 확장 대역을 불린 공간에만 두고 Lua `draw` 함수가 `main_state.option(id)` 로 읽는다. 게이트 8곳은 그대로이고 호스트 불린 응답 몇 줄만 더한다(1.7절). 두 값 옵션에만 쓸 수 있다.
    - 추천: A, 두 값 옵션(SCRATCH AUTO, KEEP GREEN NUMBER)뿐이면 A' 로 시작. 이유: B 는 외부 스킨이 그 id 의 라벨을 굽고 있어 잘못된 라벨을 보이게 된다. C 는 IIDX 식 값 표시와 모순된다. 단 2026-10-09 결정이 사설 id 를 폐기했으므로 사용자가 다시 확인해야 한다.
    - 영향: `crates/rbms-skin`(`names.rs`, `lua/main_state.rs`, `loader/track.rs`)과 `rbms-render`(`draw.rs`, `text.rs`, `songlist/build.rs`)의 게이트 8곳, `skin_host/mod.rs` 의 `ROUTES`·`EVENT_ROUTES`, `options.rs`, 테스트 체크섬 주변, `docs/reference/skin-compat/`.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A'. 이벤트는 21000~21099(스킨이 `event_exec` 로 부름), 불린은 21100~21199(Lua `main_state.option(id)` 로 읽음)이고 게이트 8곳과 원본 id 표는 건드리지 않았다. 20000 대가 아니라 21000 대다. 2026-10-09 사설 id 철거 결정의 부분 변경이라 사용자 확인이 필요하다. 3.4절, ADR [R-BMS 확장 id](../acknowledge/2026-10-22-adr-rbms-extension-ids.md).
 
 4. 외부 Lua 스킨 호환 유지 방식
    - A. 키 표와 id 의미는 원본 그대로, 확장은 별도 id 와 별도 키로만 더한다. 외부 스킨은 확장을 못 그려도 원본 기능은 그대로.
    - B. 설정 항목(SELECT 탭의 OPTION PANEL KEYS: REFERENCE / EXTENDED)으로 키 표를 바꾼다.
    - 추천: A. 이유: 설정 분기가 늘면 테스트와 문서가 둘이 된다. 확장 키가 외부 스킨 위에서 아무 표시 없이 설정을 바꾸는 점은 남는 위험이다(죽은 칸에 새 토글을 두는 경우). 외부 스킨 호환 이득 중 눈에 띄는 것은 CONSTANT(400)와 HAA(342) 응답 추가다(3.3절).
    - 영향: 규칙은 문서, 외부 스킨 캡처 확인.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 키 표의 의미는 원본 그대로 두고 확장은 별도 id 로만 더했다. 남는 위험으로 적은 "죽은 칸에 토글을 두면 외부 스킨 위에서 표시 없이 설정이 바뀐다" 가 그대로 남았고 수리하지 않았다(1.10절 14). 고치려면 스킨이 확장 id 를 안다는 신호가 필요하다. ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 5. 패널 3 숫자형 칸(NOTE DISPLAY TIME, JUDGE TIMING)
    - A. 지금처럼 KEEP GREEN NUMBER 가 켜져 있을 때만 NOTE DISPLAY TIME 이 움직이고 꺼져 있으면 OFF 로 읽는다.
@@ -630,6 +702,7 @@ HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 
    - C. 4·6 을 누르면 KEEP GREEN NUMBER 를 자동으로 켠다.
    - 추천: A. 이유: B·C 는 키 한 번이 다른 설정(속도 방식)을 바꿔 사용자 의도를 벗어난다. 화면에는 IIDX 처럼 값 상자와 양쪽 화살표, 녹색 숫자를 두면 된다(숫자 312·313·12 가 이미 있다).
    - 영향: 순수 Lua. B·C 는 `events.rs`·`panel.rs`.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 숫자 칸(값 상자 + 양쪽 화살표 + 녹색 숫자)이고 KEEP GREEN NUMBER 가 꺼져 있으면 `OFF` 로 읽힌다. 추가로 켜져 있는데 커서가 곡·완성 코스가 아니면 칸이 `-` 이고 키 4·6 도 움직이지 않는다(1.10절 6). ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 6. DP OPTION 과 2P RANDOM
    - A. 숨긴다(패널 1 키 4와 이미지 3 의 DP 상자). 키 4는 다른 일에 쓴다.
@@ -637,6 +710,7 @@ HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 
    - C. 플레이에 실제로 구현한다(FLIP, BATTLE, `random_2p`).
    - 추천: A. 이유: 지금 값이 바뀌지만 플레이에 영향이 없어 사용자를 속인다(1.10절 1). C 는 별도 큰 작업(차트 변형)이다.
    - 영향: A 는 Lua 와 키 역할 하나. C 는 `rbms-chart`/`rbms-play`.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. DP OPTION 을 패널 키에서 빼고 기본 스킨은 DP 상자를 그리지 않는다. 키 4 는 GAUGE 이전이다. 2P RANDOM 은 키 7 이 같은 `play.random` 을 만진다. C(플레이에 적용)는 하지 않았다. ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 7. INFORMATION 줄과 도움말 패널의 범위
    - A. INFORMATION 줄만(순수 Lua, 바뀐 옵션 한 줄 설명).
@@ -644,20 +718,35 @@ HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 
    - C. B + 레인 PREVIEW(차트 의존, Rust 필요).
    - 추천: B. 이유: C 만 Rust 변경이 필요하고 가치가 낮다. TARGET 목록은 글자 id 200~219 가 이미 있다.
    - 영향: Lua 문구 수십 줄, 영어 문장 작성.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): B. INFORMATION 줄과 왼쪽 도움말(TARGET 21줄, GROOVE GAUGE 도움, ASSIST LAMP 규칙, GAS 설명, JUDGE ALGORITHM 목록)을 그린다. C(레인 PREVIEW)는 하지 않았다. 문구는 메인이 영어 대문자로 새로 썼다(사용자 검토 대기). ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 8. F1 오버레이의 운명
    - A. 유지하고 패널이 바꾸는 값과 같은 `Config` 를 쓴다는 것만 문서화.
    - B. 선곡에서 F1 오버레이를 새 패널로 대체해 제거.
    - 추천: A. 이유: 오버레이는 스킨 없는 선곡의 유일한 바로 바꾸기이고(`app_options.rs`), 제거는 범위 밖이다. 홀드 키 `LSHIFT` 와 턴테이블 충돌(1.10절 10)은 별도로 사용자에게 알린다.
    - 영향: 없음(A).
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A(F1 오버레이 유지). 추천은 홀드 키 충돌을 사용자에게 알리는 것이었으나, START·SELECT·상세 키가 눌려 있으면 오버레이를 열지 않게 코드로 풀었다(`app_options.rs:204-226`, 1.10절 10). ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 9. BGA 값
    - A. ON/OFF 둘로 줄여 표시한다(이름표 AUTOPLAY ONLY 삭제).
    - B. AUTOPLAY ONLY 를 구현한다(오토플레이 판에만 BGA).
    - 추천: A. 이유: 구현 이득이 작고 이름표만 거짓이다. 영향: Lua 한 줄(`sheet.lua:23`, `side.lua:24`).
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 기본 스킨의 BGA 이름표를 ON/OFF 둘로 줄였다(`words.lua:4`, `side.lua`). AUTOPLAY ONLY 는 만들지 않았다. ADR [옵션 패널 배치](../acknowledge/2026-10-22-adr-option-panel-layout.md).
 
 10. 이름과 순서 통일
     - 패널의 RANDOM 순서(원본 번호 순)와 설정 행의 순서(S-RANDOM 먼저), GAUGE 표기(EX HARD / EX-HARD / ASSISTED EASY) 통일 여부. 추천: 패널은 원본 번호 순을 유지하고, 표기는 스킨 쪽(`theme.lua`)이 이미 쓰는 철자를 기준으로 하되 IIDX 이미지의 `ASSISTED EASY` 는 쓰지 않는다. 영향: `settings.rs` 라벨은 건드리지 않는다.
+    - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 추천안 유지. 패널의 RANDOM 순서는 원본 번호 순, GAUGE 표기는 스킨 `theme.lua` 의 철자 그대로이고 `ASSISTED EASY` 는 쓰지 않는다. 코드 변경 없음(1.10절 7·8).
+
+### 6.1 사용자 확인 대기 목록(미확인)
+
+위 결정은 모두 사용자 지시 "끝까지 다 구현해놔" 에 따라 질문 없이 메인이 추천안으로 정했다. 사용자가 확인할 것:
+
+1. 패널 키 배치(1.3절 표): 패널 1 키 4·6, 패널 2 키 3·5·6·7·턴테이블, 패널 3 턴테이블.
+2. R-BMS 확장 id 재도입(3.4절): 2026-10-09 사설 id 철거 결정의 부분 변경.
+3. 외부 스킨 위험(1.10절 14): 수리하지 않았다. 고칠지, 어떤 신호(헤더 플래그, 번들 팩 판정, 실행 중 읽기 기록)로 막을지.
+4. F1 오버레이 홀드 키 변경(1.10절 10): 패널 키가 눌려 있으면 열리지 않는다.
+5. 패널 문구(영어 대문자 INFORMATION, 도움말, 게이지·GAS·알고리즘 설명).
+6. 굵은 글꼴 에셋 `Inter-Bold.ttf` 추가(`font-rendering.md` 14절).
 
 ---
 
@@ -669,5 +758,21 @@ HIDDEN+ 켬끔, LN MODE, BOTTOM SHIFTABLE, GUIDE SE 는 자리가 모자라 이 
 | `cargo test -p rbms-player --locked --lib the_browser_of_a_skin_pack_named_by_the_environment_is_captured_over_a_scanned_library -- --nocapture`(환경 변수 `RBMS_SKIN_PACK`, `RBMS_SKIN_CAPTURE_DIR`, `TMPDIR`, `HOME` 모두 scratch) | 통과(38.72 s). `select-panel0~3`, `select-panel3-keeping`, `select-panel1-stepped` 를 1920x1080 으로 저장해 보았고 1.8절 설명과 일치함을 확인했다. 저장소 파일은 바뀌지 않았다(`git status` 로 확인) |
 | 이미지 3장 | 2.png·3.png·4.png 를 열고 4.png 와 3.png 는 `sips` 로 잘라 확대해 확인 |
 | 코드 읽기 | `stage/select/{keys,panel,events,skinned,guide}.rs`, `skin_host/{mod,options,select/*}.rs`, `crates/rbms-skin/src/{lua/main_state.rs,property/*}`, `crates/rbms-render/src/skin_render/draw.rs`, `crates/rbms-config/src/{settings,schema,options,judge}.rs`, `apps/rbms-player/src/{app_options,keyconfig,app_input}.rs`, 기본 스킨 Lua 전체(선곡) |
+
+### 7.1 구현 뒤 검증 기록 (2026-10-22)
+
+작업자 보고(세션 scratch, 저장소 밖)에서 옮긴 실행 결과다. 마지막 줄만 통합 게이트의 결과다.
+
+| 한 것 | 결과 |
+| --- | --- |
+| `7746932`: `cargo test -p rbms-player --locked --lib`, `-p rbms-skin --locked`, `-p rbms-ir --locked` | 2,642 통과 0 실패 2 ignored. rbms-skin 545 통과(원본 id 표와 `property_checksum` 불변). rbms-ir 275 통과 1 ignored |
+| 같은 작업: clippy 전체, fmt, `rbms-cli skin-dump assets/skins/rbms-default --strict --frames 120` | 경고·오류 0, 통과, 종료 코드 0(문서 9개 load ok, 경고 0) |
+| 같은 작업: IR 패널 폭 임시 측정(측정 뒤 삭제) | `ASSIST EXHARD` 86.8 px + 꼬리 76.2 px < 가용 228 px |
+| `0c450db`: skin-dump strict, `default_pack` 테스트, 캡처 | 문서 9개 경고 0·함수 실패 0·예산 초과 0, `default_pack` 4 통과, `the_default_packs_option_panels_and_graded_lamps_are_captured` 가 15장 저장(1920x1080 PNG 를 눈으로 확인). lib 2,656 통과 |
+| `3f058f4`: lib | 2,666 통과 0 실패 2 ignored. 빨간 확인: `forget_turntable_changes()` 호출과 `run_duration_event` 의 차트 게이트를 빼면 새 테스트 2개가 실패하고 복원 뒤 통과 |
+| `3f058f4`: 캡처 | 7키, 5키, 폴더 위 커서(KEEP GREEN 켬) 세 경우를 눈으로 확인. 5키는 임시 환경 스위치로만 찍고 되돌렸다(영구 5키 케이스는 없다) |
+| 마지막 통합 게이트(메인) | Rust 6,269 통과·0 실패, 웹 1,491 통과, DB 통합 122 통과 |
+
+실기(실제 GPU 창)에서 패널을 본 적은 없다. 외부 스킨(ModernChic)에서 패널 키를 눌러 본 적도 없다.
 
 읽기만 하고 실행으로 확인하지 못한 것: F1 오버레이와 턴테이블 `LSHIFT` 의 충돌 동작(1.10절 10), 폴더 위에서 HI-SPEED FIX 가 `-` 를 보이면서 움직이는 것(1.10절 5), 5키·10키에서 6·7번 건반이 없는 것(1.3절). 이 셋은 실제 창 확인이 필요하다.

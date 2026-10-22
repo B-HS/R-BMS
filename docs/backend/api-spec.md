@@ -1,8 +1,8 @@
 # rbms 백엔드 — HTTP API 규격 (IR 슈퍼셋)
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (2026-10-22 에 응답의 `assist_grade` 와 순위 키만 고쳤다. 나머지는 2026-10-15 기준)
 
-> **현재 구현 기준:** 이 문서는 `web/src/app/api`와 `web/src/server`를 따라 읽습니다. 코드와 다르면 코드(`web/src/server/dto/*.ts` 의 zod 스키마)가 맞습니다. 초기 설계에 남은 `/api/settings/*`, `?envelope=1`, 외부 CORS, LR2IR 어댑터 설명은 아래의 구현 상태 표기를 우선합니다. 운영 배포(https://bms.hyuns.uk, Vercel `rbms-web`)는 2026-10-14 에 끝났고, 운영 DB 에는 마이그레이션 0000~0004 가 모두 적용돼 있습니다(0003·0004 는 2026-10-15). 2026-10-15 관찰 시 운영 웹은 `51f3a1e`(`/api/version`)이며 그 뒤 커밋은 `web/` 을 바꾸지 않았습니다. 현재 배포 상태는 [../web/architecture.md](../web/architecture.md) 6-2 절이 정본입니다.
+> **현재 구현 기준:** 이 문서는 `web/src/app/api`와 `web/src/server`를 따라 읽습니다. 코드와 다르면 코드(`web/src/server/dto/*.ts` 의 zod 스키마)가 맞습니다. 초기 설계에 남은 `/api/settings/*`, `?envelope=1`, 외부 CORS, LR2IR 어댑터 설명은 아래의 구현 상태 표기를 우선합니다. 운영 배포(https://bms.hyuns.uk, Vercel `rbms-web`)는 2026-10-14 에 끝났고, 운영 DB 에는 마이그레이션 0000~0011 이 모두 적용돼 있습니다(0003·0004 는 2026-10-15, 0011 어시스트 등급 열은 2026-10-22). 2026-10-15 관찰 시 운영 웹은 `51f3a1e`(`/api/version`)이며 그 뒤 커밋은 `web/` 을 바꾸지 않았습니다. 현재 배포 상태는 [../web/architecture.md](../web/architecture.md) 6-2 절이 정본입니다.
 
 > REST + JSON. 모든 시각은 **unix epoch ms**(레퍼런스 구현 IR은 초 단위 — [compatibility.md](./compatibility.md) 변환표). 차트 키는 **md5(32hex) 또는 sha256(64hex)** 둘 다 허용(`{hash}` 길이로 판별).
 > 인증: `Authorization: Bearer <token>`(선택). 미인증 제출은 서버 설정상 `guest` 허용 가능.
@@ -166,7 +166,7 @@
 ### `GET /api/charts/{hash}/ranking?limit=50&page=1&rival_of={id}&lnmode=1&include_scratch_auto=false`
 ```jsonc
 // 200 ScoreRecord[]  (rbms 모드 raw 배열, scoreRecordSchema)
-[ { "player":{"id":"alice"}, "player_name":"Alice", "clear":"Hard",
+[ { "player":{"id":"alice"}, "player_name":"Alice", "clear":"Hard", "assist_grade":0,
     "ex_score":1600, "max_combo":812, "minbp":1, "rank":1,
     "played_at":1700000000000, "lntype":1, "option":0, "total_notes":812,
     "judge":{ "epg":700,"lpg":12,"egr":50,"lgr":14,"egd":5,"lgd":16,"ebd":1,"lbd":7,"epr":2,"lpr":3,"ems":0,"lms":2,
@@ -174,10 +174,11 @@
     "extra":{ "replay_id":"rp_…" } } ]
 ```
 - `extra.replay_id`(리플레이가 연결된 판만)와 `extra.scratch_auto: true`(SCRATCH AUTO 판 행만)가 `extra` 에 실린다. 플레이 옵션·시드는 `ScoreRecord` 에 없다(`GET /api/scores/{id}` 상세에서 본다).
+- `assist_grade`(2026-10-22, 0~4 정수, 기본 0): `clear` 가 `LightAssistEasy` 일 때만 0 이 아닐 수 있고 SCRATCH AUTO 로 클리어한 게이지를 이름한다(1 ASSIST EASY ← EASY 게이지, 2 ASSIST CLEAR ← NORMAL·CLASS, 3 ASSIST HARD ← HARD·EXCLASS, 4 ASSIST EXHARD ← EX-HARD·HAZARD·EXHARDCLASS). 서버가 `clear` 와 `score.gauge` 로 파생한다(`web/src/server/service/domain/score/assist-grade.ts`). 코스 순위 행은 항상 0 이다. 같은 필드가 `GET /best`, `GET /api/players/{id}/scores`, 코스 순위·best, `GET /api/scores/{id}` 의 `ScoreRecord` 에 실린다(`scoreRecordSchema`, `dto/score.ts:77`). 제출 본문은 바뀌지 않았다. 구 클라이언트는 이 필드를 무시한다. 의미와 설계: [../reference/clear-lamps.md](../reference/clear-lamps.md) 1.8·3절.
 - `judge` 의 합계(`pgreat`~`miss`)는 제출 검사와 EX·BP 가 읽은 값이다(S19 3차 수리, R3-WEB-4): 그 단계의 early/late 합(`epg+lpg` 등)이 0 이 아니면 그 합, 0 이면 저장된 합계다(`effectiveJudgeCounts`, `web/src/server/compose/judge-row.ts` 의 `toJudgeBreakdown`). 분리 필드는 저장한 그대로다. 차트 순위·best·상세(`GET /api/scores/{id}`)·플레이어 기록(`GET /api/players/{id}/scores`)·코스 순위·코스 best 가 모두 같다. 이전에는 차트 쪽만 저장된 합계를 그대로 돌려줘, 분리 필드와 다른 합계(검사를 거치지 않는 값)를 보낸 본문이 EX·BP 와 맞지 않는 판정 내역으로 보였다. 저장된 행은 바꾸지 않으므로 이미 들어온 그런 행도 응답에서 바로잡힌다.
 - `rival_of={id}`: 그 플레이어의 라이벌만(+본인). `lnmode`: 0=LN,1=CN,2=HCN(레퍼런스 구현 `lntype`).
-- `include_scratch_auto`(`true`|`false`, 기본 `false`, 웨이브 20): 기본 목록은 일반 판 최고 기록(`chart_best.scratch_auto=false`)만이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것(램프 → EX → BP, 모두 같으면 일반 판) 한 행이다. SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. `rank` 는 그 목록 안의 순위다.
-- **순위 번호와 동점**(S19): 정렬은 램프 → EX → BP(적은 쪽이 위)이고, 램프·EX·BP 가 모두 같은 사람들은 **공동 순위**(`RANK()`: 1, 2, 2, 4)다. 같은 쪽 경계에서 동점자가 겹치거나 빠지지 않도록 마지막 정렬 키는 그 최고 기록을 먼저 세운 쪽이 앞(`chart_best.updated_at`), 그다음 사용자 id 다. 목록의 `rank`, 제출 응답의 `rank`, `GET /best` 의 `rank` 는 같은 정의다(이 판보다 램프·EX·BP 가 엄격히 좋은 최고 기록의 수 + 1). 원본(beatoraja `RankingData`)은 EX 만으로 정렬하고 동점을 같은 순위로 세는데, R-BMS 의 램프 우선 정렬은 의도한 설계라 그대로 두고 BP 를 순위에 넣었다.
+- `include_scratch_auto`(`true`|`false`, 기본 `false`, 웨이브 20): 기본 목록은 일반 판 최고 기록(`chart_best.scratch_auto=false`)만이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것(램프 → 등급 → EX → BP, 모두 같으면 일반 판) 한 행이다. SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. `rank` 는 그 목록 안의 순위다.
+- **순위 번호와 동점**(S19): 정렬은 램프 → 어시스트 등급 → EX → BP(적은 쪽이 위)이고(2026-10-22 부터 등급이 램프 바로 다음 키다), 램프·등급·EX·BP 가 모두 같은 사람들은 **공동 순위**(`RANK()`: 1, 2, 2, 4)다. 같은 쪽 경계에서 동점자가 겹치거나 빠지지 않도록 마지막 정렬 키는 그 최고 기록을 먼저 세운 쪽이 앞(`chart_best.updated_at`), 그다음 사용자 id 다. 목록의 `rank`, 제출 응답의 `rank`, `GET /best` 의 `rank` 는 같은 정의다(이 판보다 램프·등급·EX·BP 가 엄격히 좋은 최고 기록의 수 + 1). 원본(beatoraja `RankingData`)은 EX 만으로 정렬하고 동점을 같은 순위로 세는데, R-BMS 의 램프 우선 정렬은 의도한 설계라 그대로 두고 BP 를 순위에 넣었다.
 - **`lnmode` 필터의 뜻(현재 동작, 사용자 확인 대기)**: `chart_best` 의 키에는 LN 방식이 없어서 필터는 "최고 기록이 그 LN 방식으로 친 판인 플레이어"만 남기고, 순위는 그렇게 남은 사람들 안에서 센다. LN 방식별 최고 기록을 따로 두는 것(키 확장 + 마이그레이션)이나 파라미터 제거는 사용자 결정이 필요해 바꾸지 않았다. `GET /best?lnmode=` 도 같은 목록 기준으로 `rank` 를 센다.
 - LR2IR 호환 필드(`pg=epg+lpg`, `gr=egr+lgr`, `notes`, `combo`, `minbp`)는 `judge`+상위 필드로 유도 가능.
 
@@ -337,7 +338,7 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 | `GET /api/fe/tables` | `[{ id, name, symbol, entry_count, level_count, last_update, levels:[{level,count}], standard_paths }]`(봉투, `tableSummaryOutputSchema`) | 없음 |
 | `GET /api/fe/tables/{id}` | `{ table, levels:[{ level, entries:[{ md5, level, title, artist, url, url_diff, name_diff }] }] }`(`tableEntryOutputSchema`, `comment` 없음, 약 307KB, 공개 캐시 `s-maxage=3600`) | 없음 |
 | `GET /api/fe/tables/{id}/entries?q=&level=&page=&limit=` | 제목·아티스트·md5 앞 6자 이상으로 검색. `limit` 최대 100. 쪽 나누기 포함 | 없음 |
-| `GET /api/fe/tables/{id}/records` | `{ table_id, records:{ "<md5>": { clear, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } } }` — 내 곡별 최고 기록(기록 있는 곡만, `chart.md5` 로 맞춤). 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고 `scratch_auto` 가 어느 쪽인지 알린다. `no-store` | 세션 |
+| `GET /api/fe/tables/{id}/records` | `{ table_id, records:{ "<md5>": { clear, assist_grade, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } } }` — 내 곡별 최고 기록(기록 있는 곡만, `chart.md5` 로 맞춤). 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고 `scratch_auto` 가 어느 쪽인지 알린다. `no-store` | 세션 |
 
 `/tables/{id}` 의 사람이 보는 페이지(`<meta name="bmstable" content="/tables/{id}/header.json">`)는 화면 웨이브가 만든다. 클라이언트(`rbms-table`)는 header 의 `data_url` 을 header 의 최종 주소 기준으로 풀고, 이 header 는 절대 주소를 내므로 끝 슬래시(운영은 `/x/` 를 308 로 `/x` 로 뗀다)에 영향받지 않는다. 정본 등록 주소는 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음).
 
@@ -470,6 +471,7 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 > 네이티브 IR 위에 구현된 FE 조회 경로입니다. 모두 `/api/fe/*`이고 envelope를 고정으로 사용합니다.
 
 - `GET /api/fe/charts/search`, `/api/fe/charts/[hash]/leaderboard`, `/api/fe/activity/recent`, `/api/fe/leaderboards/players`, `/api/fe/players/[playerId]/{recent,stats}`, `/api/fe/stats/summary`.
+- 어시스트 등급(2026-10-22): `ScoreRecord`, 활동 항목(`/api/fe/activity/recent`, `/api/fe/players/[playerId]/recent`)에 `assist_grade` 가 있고, `/api/fe/players/[playerId]/stats` 의 `lamps[]` 는 `{ clear, assist_grade, count }`, `/api/fe/tables/{id}/records` 의 곡마다도 `assist_grade` 가 있다(`fe.service.ts`, `table-snapshot.service.ts`). 코스 순위는 항상 0.
 - SCRATCH AUTO 다루기(웨이브 20): `/api/fe/charts/[hash]/leaderboard?include_scratch_auto=true` 는 §4 차트 순위와 같은 포함 목록을 쓴다(기본 제외). `/api/fe/leaderboards/players?include_scratch_auto=true` 는 `cleared_charts`·`played_charts` 를 곡마다 두 칸 가운데 하나라도 있으면 세고 `total_plays` 에 SCRATCH AUTO 판을 더한다(기본은 일반 판만). `/api/fe/activity/recent` 는 SCRATCH AUTO 판을 늘 뺀다. `/api/fe/players/[playerId]/recent` 는 모든 판을 `scratch_auto` 와 함께 돌려준다. `/api/fe/players/[playerId]/stats` 의 `lamps`·`cleared` 는 곡마다 더 높은 쪽으로 세고 그중 SCRATCH AUTO 판인 곡 수를 `scratch_auto_charts` 로 준다.
 - `GET /api/fe/me/settings`, `GET|POST /api/fe/tokens`, `DELETE /api/fe/tokens/[tokenId]`은 세션 사용자 전용입니다.
 - `POST /api/fe/auth/login` `{ id, password }` 는 웹 로그인입니다. `/api/auth/login` 과 같은 자격 확인을 하고 세션 쿠키만 세팅합니다(API 토큰을 만들지 않음). 응답 `{ success:true, data:{ user:{ id, login_id, name, role } } }`, 실패 401 `UNAUTHORIZED`, 5/min/IP(`/api/auth/login` 과 같은 버킷).

@@ -1,15 +1,17 @@
-충분히 확인했습니다. 렌더러 프리미티브(`clear`/`fill_rect(Rect)` + `draw_text`/`draw_text_centered`/`draw_text_right`, scale 단위 ≈ 14px×scale), Skin의 `judge_y`/`fields`/`gauge_*`/`top_y`/`combo_y_offset` 관례, `render_lane_cover`(상단 cover_frac 사각형으로 노트가 프레임 안쪽에서 emerge)가 이미 존재함을 코드로 확인했습니다. 이를 전제로 스펙을 작성합니다.
+충분히 확인했습니다. 렌더러 프리미티브(`clear`/`fill_rect(Rect)` + `draw_text`/`draw_text_centered`/`draw_text_right`, scale 단위 = round(scale×8.5)px), Skin의 `judge_y`/`fields`/`gauge_*`/`top_y`/`combo_y_offset` 관례, `render_lane_cover`(상단 cover_frac 사각형으로 노트가 프레임 안쪽에서 emerge)가 이미 존재함을 코드로 확인했습니다. 이를 전제로 스펙을 작성합니다.
 
 ---
 
 # rbms UI 디자인 스펙 — SELECT / PLAY / RESULT (1280×720, rects+text 전용)
+
+최종 갱신 2026-10-22 · 대응 커밋 47a7f9c. 이 날 고친 것은 0절의 `scale` 단위 한 줄뿐이다. 나머지는 작성 당시의 설계 스펙이고 현재 코드와 맞춰 다시 확인하지 않았다(글자 크기를 이 단위로 정한 좌표는 14px 가정으로 잡은 것일 수 있다).
 
 ## 0. 렌더 모델·전역 규약 (코드 정합)
 
 실제 `rbms-render` 프리미티브에 맞춰 작성한다. **사각형 채움**과 **텍스트**만으로 구성한다.
 
 - 프리미티브: `clear(Color)`, `fill_rect(Rect{x,y,w,h}, Color)`, `draw_text(x,y,scale,color,str)`(좌상단 기준), `draw_text_centered(cx,y,...)`, `draw_text_right(right_x,y,...)`. Color는 `{r,g,b,a:u8}` (알파 블렌딩 됨).
-- `scale` 단위: 기본 글자 약 14px 높이 × scale. 본 스펙의 `s=` 값은 그 scale이다 (s2.0≈28px, s5.0≈70px).
+- `scale` 단위: 글자 크기(em)는 `px_for(scale) = round(scale * 8.5).max(8)` 논리 픽셀이다(`crates/rbms-render/src/font.rs`). 본 스펙의 `s=` 값은 그 scale이다 (s2.0 = 17px, s5.0 = 43px). 처음 적은 "약 14px × scale" 은 코드와 달랐다. 1280×720보다 큰 타깃에서는 같은 em 을 타깃의 화소 크기로 그린다(확대하지 않는다).
 - 좌표공간 **1280×720 고정**. 모든 수치는 이 좌표계 절대 픽셀. 리사이즈 리플로우 없음(논리 고정).
 - 깊이는 z-buffer가 없으므로 **그리는 순서 = 레이어**. 항상 `clear → 패널 배경 rect → 게이지/그래프 rect → 노트 → 커버 rect → 텍스트` 순.
 - **반투명 패널**: `Color{a:160~200}`인 어두운 사각형을 텍스트 뒤에 깔아 가독성 확보(알파 블렌딩 지원됨).

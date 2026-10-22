@@ -1,6 +1,6 @@
 # rbms 백엔드 — 데이터 모델 (Drizzle / MySQL)
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (2026-10-22 에 `chart_best`·`course_best` 의 `assist_grade` 열·색인과 0011 만 더했다. 나머지는 2026-10-15 기준이라 0005~0010 의 표는 아직 이 문서에 없고, 정본은 `web/src/server/db/schema.ts` 와 [../web/architecture.md](../web/architecture.md) 다)
 
 > 구현 정본은 `web/src/server/db/{schema,auth-schema}.ts`입니다. 테이블/컬럼은 **snake_case**, TS 필드는 **camelCase**, 모델 타입은 `$inferSelect`/`$inferInsert`에서 유도합니다. 시각은 `timestamp(fsp:3)` 또는 `bigint`(epoch ms)입니다. 설계 초안의 FK 표기는 일부가 **논리 관계**이며, 실제 `.references()`는 스키마 파일에 적힌 것만 존재합니다.
 
@@ -91,9 +91,10 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 - EX/BP는 저장하되 `judge`에서 유도 가능(`ex=(epg+lpg)*2+egr+lgr`). 랭킹/best는 **ranked=true**만.
 
 ### `chart_best` (랭킹 가속 — (chart, user, scratch_auto) 최고 1행)
-| chart_sha256 + user_id + scratch_auto **복합 PK** · score_id varchar(36)(논리 score 관계, FK 없음) · clear · ex_score · minbp · max_combo · scratch_auto bool default false · updated_at |
-- best 갱신 규칙: 램프 > EX > (BP 낮을수록) 순. 랭킹 조회는 이 테이블 정렬. 갱신은 `INSERT IGNORE` + `UPDATE … WHERE (저장된 값보다 좋음)` 문장 하나라 동시 제출이 낮은 판으로 덮지 못한다(S19, `compose/best-scope.ts` 의 `isBeatenBy`). 목록 정렬의 마지막 키는 `updated_at`, `user_id` 다(`listOrder`).
+| chart_sha256 + user_id + scratch_auto **복합 PK** · score_id varchar(36)(논리 score 관계, FK 없음) · clear · **assist_grade tinyint default 0 not null**(0011) · ex_score · minbp · max_combo · scratch_auto bool default false · updated_at |
+- best 갱신 규칙: 램프 > 어시스트 등급 > EX > (BP 낮을수록) 순(2026-10-22 부터. 등급은 램프 `LightAssistEasy`(3) 안에서만 0~4 이고 다른 램프는 0). 랭킹 조회는 이 테이블 정렬. 갱신은 `INSERT IGNORE` + `UPDATE … WHERE (저장된 값보다 좋음)` 문장 하나라 동시 제출이 낮은 판으로 덮지 못한다(S19, `compose/best-scope.ts` 의 `isBeatenBy`). 목록 정렬의 마지막 키는 `updated_at`, `user_id` 다(`listOrder`).
 - 웨이브 20(마이그레이션 `0002_scratch_auto_bests`): SCRATCH AUTO 판도 ranked 이고, 한 사용자가 한 차트에 일반 판 최고(`scratch_auto=false`)와 SCRATCH AUTO 판 최고(`true`)를 따로 가진다. 기본 순위는 `scratch_auto=false` 행만, 포함 순위는 사용자마다 두 행 가운데 더 높은 것(모두 같으면 일반 판)만 읽는다(`web/src/server/compose/best-scope.ts`). 0002 이전 행은 기본값 false 로 일반 판이 된다. 인덱스 `chart_best_rank_idx` 는 `(chart_sha256, scratch_auto, clear, ex_score)`.
+- 마이그레이션 `0011_assist_grade`(2026-10-22): `assist_grade` 는 최고 기록 행이 가리키는 `score` 의 `clear`·`gauge` 에서 파생한 값이다(`clear = 3` 이면 `gauge` 1 → 1, 2 → 2, 3 → 3, 4 → 4, 5 → 4, 6 → 2, 7 → 3, 8 → 4, 그 밖 0. `web/src/server/service/domain/score/assist-grade.ts` 의 `ASSIST_GRADE_OF_GAUGE`). 새 색인 `chart_best_rank_grade_idx(chart_sha256, scratch_auto, clear, assist_grade, ex_score)` 가 순위·비교 질의를 받치고, 옛 `chart_best_rank_idx` 는 additive 규칙에 따라 그대로 둬 앞부분이 겹친다(옛 코드와의 공존이 끝나면 후속 마이그레이션에서 지울 수 있다). 기존 행은 마이그레이션의 마지막 문장(`chart_best` ⨝ `score` 백필 UPDATE)이 채웠다. 푸시 사이 창에서 생길 수 있는 낡은 등급은 `web-db.yml` 액션 `assist-grade-backfill`(세기만 하는 `assist-grade-backfill-count` 도 있다)이 바로잡는다. 운영에서 낡은 행 0 을 확인했다. 의미: [../reference/clear-lamps.md](../reference/clear-lamps.md) 1.8·3.3절.
 
 ### `replay` (µs 정밀)
 | id varchar(36) PK · user_id varchar(36) idx · chart_sha256 idx · score_id null idx · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) null · `data` mediumtext null · created_at |
@@ -119,7 +120,7 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 - `course`: `course_hash` PK · name · lntype · constraint json · trophy json · extra.
 - `course_chart`: course_hash + position **복합 PK** · chart_sha256(논리 chart 관계).
 - `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · 판정 합계 `pgreat`·`great`·`good`·`bad`·`poor`·`miss` · `fast`·`slow`·`combobreak`·`empty_poor` · `max_ex_score`(이 열들은 0004, S19 2차 R2-ACC-3: 클라이언트는 코스 판정을 합계로만 보내고 분리는 0 이라, 그 전에는 판정이 모두 0 으로 저장됐다. 0004 이전 행은 복구할 수 없어 0 이다. 읽기는 분리 합이 0 이 아니면 그것, 아니면 합계) · ex_score · max_combo · gauge_value · minbp · trophy · scratch_auto bool default false · ranked · played_at · extra · `uniq(user_id, course_hash, played_at)`. `scratch_auto` 는 SCRATCH AUTO 스테이지가 낀 코스다(웨이브 20, 0002). 넓힌 판정 스테이지가 낀 코스(`assist` 에 `AUTO_SCRATCH` 밖의 태그)는 `ranked=false` 이다. flag 가 하나라도 있으면 `extra` 에 `flags`·`scratch_auto`·`assist` 를 담는다(api-spec §6).
-- `course_best`: course_hash + user_id + scratch_auto 복합 PK(랭킹 가속). `chart_best` 와 같이 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 둔다(0002).
+- `course_best`: course_hash + user_id + scratch_auto 복합 PK(랭킹 가속). 0011 로 `assist_grade tinyint default 0 not null` 열이 있지만 **항상 0** 이다(코스 제출과 `course_score` 에 게이지가 없어 파생할 수 없다. 공유 비교 코드를 균일하게 하려고 열만 둔 죽은 열이고, 필요 없다고 보면 후속 마이그레이션으로 지운다). `chart_best` 와 같이 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 둔다(0002).
 - `score.scratch_auto` 는 0002 전부터 있던 열이고, 웨이브 20부터는 `options.scratch_auto` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판이면 true 로 적는다. 그래서 점수 행에는 새 열을 더하지 않았다.
 
 ### `difficulty_table` / `table_folder` / `table_chart` / `table_course` (IRTableData)
@@ -143,7 +144,7 @@ type ChartKey = Pick<typeof chart.$inferSelect, 'md5'|'sha256'>
 ```
 
 ## 마이그레이션
-- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 5개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성) → `0003_replay_user_quota`(`replay.user_id` 색인 `replay_user_idx`) → `0004_course_score_judge_totals`(`course_score` 판정 합계·FAST/SLOW·콤보 끊김·空POOR·`max_ex_score` 열). 운영 DB 에는 다섯 개가 모두 적용됐다: 0000~0002 는 2026-10-14, 0003 은 2026-10-15(`web-db.yml` run 38627474716), 0004 는 2026-10-15(run 38673724720). `__drizzle_migrations` 는 5행이다. 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
+- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 12개(0000~0011)이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성) → `0003_replay_user_quota`(`replay.user_id` 색인 `replay_user_idx`) → `0004_course_score_judge_totals`(`course_score` 판정 합계·FAST/SLOW·콤보 끊김·空POOR·`max_ex_score` 열) → `0005_ai_foundation`, `0006_admin_seed`, `0007_chart_pattern`, `0008_ai_goal`, `0009_play_trace`, `0010_play_share_setting`(웹 AI 기능, 표는 [../web/architecture.md](../web/architecture.md) §3-2·§12~§14 가 정본) → `0011_assist_grade`(`chart_best`·`course_best` 에 `assist_grade` 열, 색인 `chart_best_rank_grade_idx`, `chart_best` 백필 UPDATE. 저널 `when` 1792606768379). 운영 DB 에는 모두 적용됐다: 0000~0002 는 2026-10-14, 0003 은 2026-10-15(`web-db.yml` run 38627474716), 0004 는 2026-10-15(run 38673724720), 0011 은 2026-10-22(run 39693988962, 마이그레이션 파일만 먼저 푸시한 `8d85b32`, 웹 코드 `64c6120` 은 그 뒤). 이 문단의 앞부분(0000~0004)은 2026-10-15 에 쓴 것이다. 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
 
 ## 설계 노트 (왜)
 - **best 분리 테이블**: 랭킹은 차트당 수천 history를 매번 정렬하지 않고 `chart_best`만 정렬 → P95<150ms(NFR).

@@ -182,7 +182,7 @@ TARGET 은 `SettingTab::PlayChart` 의 행이라 이 화면이 아니라 PLAY �
 | LOGIN 은 PLAYER ID 와 PASSWORD, REGISTER 는 EMAIL 도. 비밀번호는 쓰고 나면 지운다. LOGOUT 은 PLAYER ID 를 guest 로 | `app_network.rs` `start_auth`·`finish_logout` |
 | 출력 장치·버퍼·샘플레이트·폴리포니는 출력을 다시 연다 | `settings.rs` `reopen`, `audio.rs` |
 
-판정 폭이 100% 를 넘는 행에 커서가 있으면 패널이 `warn` 색으로 경고한다(`OVER 100%: A RUN PLAYED LIKE THIS SETS NO BEST SCORE. IT IS STILL KEPT, WITH ITS REPLAY, AND SENT.`). JUDGE WIDTH 여섯 행과 LN MARGIN 행의 설명(`catalog.rs`)도 같은 말이다(`no best score, ASSIST EASY at best; the run is still kept, with its replay, and sent`). 웨이브 18 전의 문구는 `... SETS NO BEST SCORE AND IS NOT SENT. ITS LAMP AND HISTORY ARE KEPT.` 였고, 사용자 결정(2026-10-14, 사람이 친 판은 모두 저장·전송)으로 넓힌 판정의 판도 리플레이와 함께 남고 보내지게 되어 고쳤다. 웨이브 16 통합 전의 문구는 `... IS NOT SCORED OR SENT.` 였는데, 실제로는 이력·램프·횟수가 남아 "기록이 저장되지 않는다"는 오해를 되풀이했다. 행 설명과 README 의 같은 문장도 함께 고쳤다.
+판정 폭이 100% 를 넘는 행에 커서가 있으면 패널이 `warn` 색으로 경고한다(`OVER 100%: A RUN PLAYED LIKE THIS SETS NO BEST SCORE. IT IS STILL KEPT, WITH ITS REPLAY, AND SENT.`). JUDGE WIDTH 여섯 행과 LN MARGIN 행의 설명(`catalog.rs`)도 같은 말이다(`no best score, the ASSIST lamp at best; the run is still kept, with its replay, and sent`. 2026-10-22 에 id 2 램프 이름이 `ASSIST` 가 되어 `ASSIST EASY at best` 에서 고쳤다). 웨이브 18 전의 문구는 `... SETS NO BEST SCORE AND IS NOT SENT. ITS LAMP AND HISTORY ARE KEPT.` 였고, 사용자 결정(2026-10-14, 사람이 친 판은 모두 저장·전송)으로 넓힌 판정의 판도 리플레이와 함께 남고 보내지게 되어 고쳤다. 웨이브 16 통합 전의 문구는 `... IS NOT SCORED OR SENT.` 였는데, 실제로는 이력·램프·횟수가 남아 "기록이 저장되지 않는다"는 오해를 되풀이했다. 행 설명과 README 의 같은 문장도 함께 고쳤다.
 
 ### 10.1 입력 모드 중의 패널
 

@@ -1,5 +1,7 @@
 # beatoraja 형식 Lua 스킨 호환 — 결정 기록 (2026-10-09)
 
+> 상태: 일부 대체됨(2026-10-22) — 맨 아래 "이전 결정과의 관계" 절의 사설 id 폐기와 그 뒤 "호스트는 원본이 선언한 id 만 답한다"는 규칙을 [2026-10-22-adr-rbms-extension-ids.md](2026-10-22-adr-rbms-extension-ids.md) 가 R-BMS 확장 대역(이벤트 21000~21099, 불린 21100~21199)만큼 바꾼다. 옛 사설 id 20001~20316 의 폐기는 그대로 유효하다. 나머지 결정(D1~D18, 동영상 디코더, 기본값)은 유효하다.
+
 사양: `docs/plan/2026-10-09-lua-skin-compat.md`. 조사: `docs/reference/skin-compat/`.
 
 ## 사용자 결정
@@ -72,4 +74,4 @@
 
 ## 이전 결정과의 관계
 
-`docs/acknowledge/2026-09-17-skin-system-decisions.md` 의 D1~D23 중 번들 세대(D1), 최상위 `replace` 표(D6), `hotspot`(D7), 번들 스코프 저장(D8), 사설 id(D10), `densitygraph`(D12), 2P·NEAR 4조합 문서(D19)는 이 결정으로 폐기된다. 타이머 드라이버(D4)와 `FrameExtra`(D3)는 사양 §4.4·§4.5 의 구조로 대체된다. 커밋 규칙(D21)은 D7 로 대체된다.
+`docs/acknowledge/2026-09-17-skin-system-decisions.md` 의 D1~D23 중 번들 세대(D1), 최상위 `replace` 표(D6), `hotspot`(D7), 번들 스코프 저장(D8), 사설 id(D10), `densitygraph`(D12), 2P·NEAR 4조합 문서(D19)는 이 결정으로 폐기된다. 타이머 드라이버(D4)와 `FrameExtra`(D3)는 사양 §4.4·§4.5 의 구조로 대체된다. 커밋 규칙(D21)은 D7 로 대체된다. 대체됨: [2026-10-22-adr-rbms-extension-ids.md](2026-10-22-adr-rbms-extension-ids.md)

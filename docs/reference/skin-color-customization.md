@@ -1,19 +1,21 @@
 # 스킨 색·불투명도 조절 조사 (레인·노트 색, 부위별 불투명도, 스킨 세부 조절)
 
-> 최종 갱신 2026-10-22 · 대응 커밋 0323bd9
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
 
-사용자 요청 4(레인·노트 색상을 각각 조절, 불투명도 조절, 스킨 세부 조절 확대)를 구현하기 전에 기본 스킨 `rbms-default` 와 엔진이 색을 어떻게 다루는지 읽기 전용으로 조사한 결과다. 같은 탐색을 다시 하지 않도록 이름, id, 계산식, 값 목록을 적었다. 코드는 한 줄도 고치지 않았고, 근거는 `파일:줄` 이다. 문서와 코드가 다른 곳은 1.2절에 모았다. 원본(beatoraja)은 HEAD `8320241d`, 외부 스킨 ModernChic 은 읽기만 했고 내용을 복사하지 않았다.
+사용자 요청 4(레인·노트 색상을 각각 조절, 불투명도 조절, 스킨 세부 조절 확대)를 위해 기본 스킨 `rbms-default` 와 엔진이 색을 어떻게 다루는지 조사하고, 같은 날 구현한 뒤 현재 상태로 고친 살아 있는 문서다. 0절(결론), 6.3절의 상태 표시, 6.9절(구현 결과), 7절의 구현 뒤 상태, 8절 결정이 구현 뒤의 코드 기준이고, 1~5절의 조사(부위 표, 팔레트, 곱셈 실측, 엔진 능력)는 조사 당시 그대로다(코드를 한 줄도 고치지 않은 상태의 관찰이므로 "조사 때" 로 읽는다). 근거는 `파일:줄` 이다. 문서와 코드가 다른 곳은 1.2절에 모았다. 원본(beatoraja)은 HEAD `8320241d`, 외부 스킨 ModernChic 은 읽기만 했고 내용을 복사하지 않았다.
+
+구현(2026-10-22): `49dfbd3`(1단계 헤더 `color` 행, dst·노트 `tint`, 설정 `colors`, Lua `skin_config.color`, 내보내기), `7459bf7`(2단계 노트 색 곱셈, SKIN·PLAY 메뉴의 색 행), `5192bbb`(3단계 기본 스킨 플레이 색 행과 순백 노트 시트), `c1c992e`(LN 전용 색 행과 색 행 기본값을 지금 프리셋 색으로). 결정은 사용자 지시 "끝까지 다 구현해놔" 에 따라 메인이 추천안으로 정했고 사용자는 아직 확인하지 않았다. ADR [스킨 색 행](../acknowledge/2026-10-22-adr-skin-colour-rows.md).
 
 ## 0. 결론
 
-1. 색이 PNG 에 구워진 부위는 노트 계열(일반 노트, LN 머리·꼬리·몸통, HCN, 지뢰)뿐이다. 레인 면, 레인 구분선, 마디선, 판정선, 레인 커버·리프트·HIDDEN+, 키빔, 폭발, 진행 막대, 화면 바탕은 Lua 가 destination 의 색(r,g,b,a)으로 입힌다(2절).
-2. 엔진은 노트를 그릴 때 destination 색을 읽지 않고 알파만 남긴다(`crates/rbms-render/src/skin_render/notes.rs:131-133, 902-935`, beatoraja 의 `LaneRenderer` 가 `setColor(WHITE)` 로 초기화하는 것과 같다). 그래서 노트 색은 Lua 만으로 자유롭게 바꿀 수 없다. 방법은 엔진에 노트 색 입히기를 더하거나, 구운 색 묶음을 늘리는 것뿐이다(5.4절).
-3. 키빔·폭발·펄스·`block`·`bar_*`·숫자 시트는 순백(255,255,255) 마스크라 곱셈 색이 어떤 RGB 든 정확히 나온다(3절 실측). 노트 시트는 순백이 아니다(흰 노트 `F1F4F8`, 그림자 행이 구워져 있다). 곱셈으로 바꾸려면 노트 시트를 순백 바탕으로 다시 생성해야 한다(3절).
-4. 오프셋은 x, y, w, h, 각도, 알파만 바꾸고 RGB 는 바꾸지 못한다(`crates/rbms-skin/src/dst.rs:472-480, 563-570`). 사용자가 입력한 숫자를 색으로 받는 경로가 지금 없다. beatoraja 의 커스터마이즈 종류도 property, filepath, offset 셋뿐이다(5.2절).
-5. Lua 는 본체 패스에서 `skin_config.option` 과 `skin_config.offset` 을 읽어 dst 색에 쓸 수 있다. 그러나 옵션 변경은 문서를 다시 읽고 오프셋 변경은 다시 읽지 않아서, 오프셋을 색 입력으로 쓰면 값이 다음 로드까지 반영되지 않는다(4.6절, 5.3절).
-6. 이미 있는 것: 색 옵션 넷(Theme, Accent, Note Colors, Bomb Color), 부위별 불투명도 18행(오프셋 101~119 중 105 제외), JUDGE POSITION Y, 엔진 오프셋 15행, 모두 `settings.ron` 의 `skin.custom[문서경로]` 에 저장된다(4절).
-7. 설계 대안은 여섯이다: A 기본 스킨 전용 Lua(로드 시 반영), B 엔진 수준 덮어쓰기, C 엔진 확장 + 기본 스킨 채택(실시간 반영, 메인 추천), D 가산 3층 혼합(엔진 변경 없음, 비추천), E 프리셋 확대, F 파일 변종(6절).
-8. 결정이 필요한 것은 10개다(8절). 전부 메인 추천안대로면 C 안을 3단계로 구현한다(6.8절).
+1. 색 행은 헤더 `color` 목록으로 선언하고(`ColorDef`, `crates/rbms-skin/src/model.rs:333`), 기본 스킨 플레이 문서가 레인 면, 레인 구분선, 마디선, 판정선, 레인 커버, 노트, LN, 키빔, 폭발에 색 행을 단다(7키 기준 17행, 9키 22행. 6.9절). 화면 바탕, 진행 막대, 지뢰는 행이 없다.
+2. 사용자 색은 곱셈이다. dst 가 `tint` 색 id 를 가지고 호스트가 그 id 의 저장값을 답하면 `resolve` 가 dst 색에 곱한다(`crates/rbms-skin/src/dst.rs:631-633`). 노트는 destination 색을 읽지 않는 엔진 특성 때문에 레인별 색 id 목록 `NoteSet.tint`(LN 전용 `long_tint`)를 `NoteLane` 으로 옮겨 `Field::put` 이 곱한다(`crates/rbms-render/src/skin_render/notes.rs:788`). 저장값이 없으면 어느 경로도 건너뛰어 결과가 비트 단위로 같다(기본 스킨 캡처 94장이 화소 단위로 같음).
+3. 노트 시트(`image/play.png`)는 1024x570 그대로 두고 순백 바탕 'pure' 묶음 5장을 더했다. 저장값이 있는 레인만 pure 시트를 고르고 나머지는 기존 8색 구운 묶음이다(6.9절). pure 시트의 그림자 사다리는 구운 값과 채널당 최대 15 이하로 다르다(조사 때 계산, 3절 표).
+4. 오프셋은 여전히 x, y, w, h, 각도, 알파만 바꾸고 RGB 는 못 바꾼다. 색은 별도 저장 `skin.custom[문서경로].colors`(`BTreeMap<i32, SkinColor>`, `crates/rbms-config/src/schema.rs:323`)에 두고 프레임마다 읽어 문서를 다시 읽지 않는다. 설정 스키마는 6, 조절값 파일은 버전 1 그대로다.
+5. 메뉴: SKIN 메뉴(F12)와 PLAY 메뉴(F8)에 색 행(견본 + 16진, `←→` 16색 프리셋, `Enter` 16진 입력, `0` 초기화, `A` 다른 화면에 적용)과 접이 `COLOR CHANNELS`(R·G·B·A 0~255)가 있다(6.9절).
+6. 이미 있던 것은 그대로다: 색 옵션 넷(Theme, Accent, Note Colors, Bomb Color), 부위별 불투명도 18행(오프셋 101~119 중 105 제외), JUDGE POSITION Y, 엔진 오프셋 15행(4절). 프리셋은 계속 기본 색을 정하고 색 행은 정했을 때만 그 위에 곱해진다.
+7. 색 알파와 부위 불투명도는 같은 순서로 합친다: 불투명도 오프셋이 남긴 알파에 색 알파를 곱한다. dst 와 노트가 같다(6.9절).
+8. 구현된 설계는 C 안이다(6.3절). 남은 제한과 사용자 확인 대기는 7절 끝과 8절.
 
 ## 1. 조사 방법
 
@@ -42,6 +44,8 @@
 차이로 적을 만한 것은 하나다. `docs/skin.md` 6절 "플레이" 행은 SCRATCH AUTO 노트에 "그림의 알파로 색을 입히는 셰이더가 렌더러에 없다" 고 적고 후속으로 남겼다. 이 조사의 노트 색 입히기(5.4절, 6절)도 같은 결핍에 걸린다.
 
 ## 2. 플레이 필드의 부위별 그리기
+
+이 절은 조사 때의 관찰이다. "Lua 만으로 자유 RGB" 열이 `불가` 인 노트 계열은 구현 뒤 `note.tint` 로 칠해진다(6.9절). 부위별 색 행 이름과 id 는 6.9절 표.
 
 ### 2.1 그리기 순서와 좌표
 
@@ -124,6 +128,8 @@
 `<c>` 는 8종(`blue`, `cyan`, `gray`, `green`, `red`, `silver`, `white`, `yellow`, `play.py:16-25`)이다. `notes()`(`play.py:112-120`)는 색마다 `note_`, `long_`, `held_`, `hell_`, `hell_held_` 다섯 장을 만들어 8색 x 5 = 40장이고, `mine` 과 `hell_drain` 이 더해져 모두 42장이다. 아틀라스 좌표는 `lua/atlas/play.lua:86-132` 이고 노트 4x8 은 y=511, 몸통 8x4 는 y=566 한 줄에 있다. 스프라이트를 10배로 확대해 눈으로 확인하고(Pillow 로 만든 임시 그림) 8x4 몸통 열의 값을 직접 읽은 결과, 노트는 단색 면과 아래 한 줄 그림자뿐이고 그라데이션이나 하이라이트가 없다. 하이라이트는 `hell_held_<c>` 의 가운데 두 열(색과 흰색을 반반 섞음)과 게이지 노드의 끝 칸(`GAUGE_TIP_WHITE_SHARE` 0.5) 둘뿐이다.
 
 나머지 시트: `beam`(8x64, 알파 1~118), `pulse`(8x64, 알파 1~71), `bomb`(1024x128, 8프레임, 알파 5~255, 4배 표본 BOX 축소), `bar_h`(256x4), `bar_v`(4x256), 판정 글자 5장·콤보 숫자 3줄(색 구움), 게이지 노드 72장(`play.lua:14-85`)이다. `common.png` 의 `block`(8x8)과 `num18`~`num96`, `snum24`, `snum32` 는 순백이다(3절).
+
+구현 뒤(2026-10-22): 노트 시트에 순백 바탕 'pure' 묶음 `note_pure`, `long_pure`, `held_pure`, `hell_pure`, `hell_held_pure` 다섯 장이 더해졌다(`tools/sections/play.py:15` `PURE_NOTES`). 같은 생성 함수로 만들고 그림자는 `NOTE_SHADE` 를 회색 (16,16,16)으로 섞는다. 화소는 모두 회색조다: `note_pure` 흰색 바탕에 아래 줄 147, `long_pure` 112, `held_pure` 207, `hell_pure` 레일 88·가운데 207, `hell_held_pure` 레일 112·가운데 흰색. 시트 크기 1024x570 은 그대로이고 기존 127개 스프라이트는 위치가 바뀌어도 화소가 하나도 다르지 않다(스크립트로 확인, `generate-images.py --check` 통과).
 
 ## 3. 흰 이미지 x 곱셈 색 검증(실측)
 
@@ -222,6 +228,8 @@ skin: (custom: { "<설정 폴더>/skin/rbms-default/play7.luaskin": (
 
 현재 설정 스키마는 6(`schema.rs:20`)이다. PLAY 메뉴 때문에 스키마가 오르지 않은 선례가 있다(`docs/play-options.md` 7절 머리). 기본 스킨 팩을 내보내면 `rbms-adjustments.ron`(버전 1, `adjustments.rs:34-37`)이 문서 이름, 옵션 이름과 항목 이름, 오프셋 이름과 축별 값으로 적힌다. 이 파일은 `version == 0` 또는 `version > 1` 이면 통째로 무시된다(`adjustments.rs:153-155`).
 
+구현 뒤(2026-10-22): `skin.custom[문서경로]` 에 필드 `colors: BTreeMap<i32, SkinColor>` 가 더해졌다(`schema.rs:323`, `#[serde(default)]`). RON 은 `colors: { 11: (r: 255, g: 0, b: 0, a: 255) }` 꼴로 읽기 쉽고 `a` 를 생략하면 불투명(255), r/g/b 를 생략하면 0 으로 읽힌다. 모르는 키를 무시하는 테스트와 색 없는 옛 파일 로드 테스트가 있다(`crates/rbms-config/src/tests.rs`). 키는 색 id(오프셋 id 와 별개 공간)다.
+
 ### 4.5 메뉴의 행 종류와 조작
 
 | 행 | 종류(`SkinRowKind`, `skin_select.rs:281-295`) | 조작 |
@@ -256,6 +264,8 @@ skin: (custom: { "<설정 폴더>/skin/rbms-default/play7.luaskin": (
 | 객체별 색 | image, number, text, graph, slider, judge 의 각 부분, gauge 노드, 마디선 모두 destination 색을 틴트로 곱한다 | `draw.rs`, `judge.rs:434`, `gauge.rs:589`, `notes.rs:1333` |
 | 노트(`note` 객체) | 예외. 배치가 흰색·알파 블렌드·최근접으로 고정이고 destination 알파만 필드 전체 불투명도로 쓴다 | `notes.rs:131-133, 905-935` |
 
+구현 뒤: `resolve` 는 dst 색 해석에서 `track.tint` 가 있고 호스트가 그 id 의 색을 답하면 알파를 오프셋으로 먼저 이동한 뒤 `SkinColor::tinted`(RGBA 채널별 곱, 반올림 최근접 `(a*b+127)/255`)를 적용한다(`dst.rs:584-633`). `OffsetSource::color(&self, id) -> Option<SkinColor>`(기본 `None`, `dst.rs:133`)가 값을 준다. 노트(`note` 객체)는 destination 색을 읽지 않는 점이 그대로이고, 레인별 `tint` 가 `Field::put` 의 `BATCH_WHITE` 에 곱해진다(6.9절).
+
 beatoraja 도 같다: `SkinObject.java:485, 515` 가 `color.a += off.a / 255.0f` 만 하고, `LaneRenderer` 는 노트를 그리기 전 `setColor(Color.WHITE)`, `setBlend(0)` 으로 초기화한다(`b3-play-objects.md:290`).
 
 ### 5.2 beatoraja 의 커스터마이즈 종류
@@ -271,6 +281,7 @@ beatoraja 도 같다: `SkinObject.java:485, 515` 가 `color.a += off.a / 255.0f`
 | dst 의 `offset`/`offsets` | 프레임마다 | 엔진이 x,y,w,h,각도,알파에 더함 | RGB 불가 |
 | `main_state.offset(id)`, `main_state.option(op)` | 프레임마다(`main_state.rs:381-384, 881-888`) | 같은 저장값 | `draw`, `value`, `text`, `timer` 같은 함수값 필드에서만 호출되고 dst 색은 정수 필드라 함수를 받지 못한다 |
 | 알파 오프셋 + 가산 합성 | 프레임마다 | 불투명도 행이 곧 채널 값 | 6.5절 D |
+| `skin_config.color[이름]` | 본체 패스(헤더 패스에서는 `skin_config == nil`) | `{ r, g, b, a, custom }`: 저장값, 없으면 행의 `default_color()`. `custom` 은 플레이어가 저장한 값인지 | 로드 시점 값이라 실행 중 갱신되지 않는다. 색 행이 없으면 빈 표. beatoraja 겸용은 `(skin_config.color or {})` 로 막는다(`crates/rbms-skin/src/lua/env.rs:76-79,445-448`) |
 
 ### 5.4 노트 색 입히기가 막히는 지점과 선례
 
@@ -305,7 +316,7 @@ beatoraja 도 같다: `SkinObject.java:485, 515` 가 `color.a += off.a / 255.0f`
 - UI 는 스킨 문서와 무관한 행이어야 한다(스킨이 선언한 행이 아니므로). PLAY 메뉴 LANE 묶음에 `NOTE COLOR WHITE/BLACK/SCRATCH` 같은 설정 행을 두고 `settings.ron` 의 `play` 그룹에 저장하는 형태가 된다(스킨별 값이 아니라 전역).
 - 장점은 ModernChic 같은 외부 스킨에서도 듣는다는 점이다. 단점은 외부 스킨의 그림을 망가뜨리고 레인 종류 판정(7키 홀·짝, 9키 버튼)을 엔진이 해야 한다는 점, 스킨 제작자 의도와 충돌한다는 점, 스킨마다 값을 따로 가질 수 없다는 점이다.
 
-### 6.3 C 안 상세: 엔진 확장 + 기본 스킨 채택(메인 추천)
+### 6.3 C 안 상세: 엔진 확장 + 기본 스킨 채택(메인 추천, 채택·구현됨 — 6.9절)
 
 색 행은 beatoraja 의 오프셋과 같은 id 방식으로 만든다. 값은 프레임마다 저장값에서 읽혀 문서를 다시 읽지 않는다.
 
@@ -313,9 +324,9 @@ beatoraja 도 같다: `SkinObject.java:485, 515` 가 `color.a += off.a / 255.0f`
 | --- | --- | --- |
 | 헤더 | `color` 목록: `{ name, id, def(16진 RRGGBB), category }`. `SkinDef.color: Vec<ColorDef>`(`offset` 옆) | `model.rs:554` 근처 |
 | dst | `Destination.tint: Option<i32>`(색 id). `DestinationTrack.tint` 로 옮긴다 | `model.rs:473`, `loader/track.rs:249-264`, `dst.rs:303` |
-| 해석 | `OffsetSource` 에 기본 구현이 있는 메서드 `color(id) -> Option<SkinColor>` 추가(기본 `None`, 기존 구현체는 그대로 컴파일). `resolve` 가 색 id 가 있고 값이 있으면 r,g,b 를 바꾸고 알파는 곱한 뒤 오프셋 알파를 더한다(`dst.rs:563-570` 자리) | `dst.rs:78, 516` |
+| 해석 | `OffsetSource` 에 기본 구현이 있는 메서드 `color(id) -> Option<SkinColor>` 추가(기본 `None`, 기존 구현체는 그대로 컴파일). `resolve` 가 색 id 가 있고 값이 있으면 r,g,b 를 바꾸고 알파는 곱한 뒤 오프셋 알파를 더한다(`dst.rs:563-570` 자리). 구현은 오프셋을 먼저 더하고 색 알파를 곱한다(6.9절) | `dst.rs:78, 516` |
 | 노트 | `NoteSet.tint: Vec<i32>`(레인과 나란한 색 id, `size` 목록 선례). `NoteLane.tint` 로 옮기고 `Field::put` 이 `BATCH_WHITE` 에 곱한다. 지뢰·hidden·processed·`hcnreactive`(닳는 중)는 틴트에서 뺀다 | `objects.rs:367-370`, `notes.rs:474, 659, 911` |
-| 저장 | `SkinCustomisation.colors: BTreeMap<i32, [u8; 4]>`. 내보내기는 이름 기준(`documents[이름].colors[이름] = "#RRGGBBAA"`)이고 `ADJUSTMENTS_VERSION` 은 1 그대로(없는 키는 이전 빌드가 무시) | `schema.rs:314`, `adjustments.rs:62` |
+| 저장 | `SkinCustomisation.colors: BTreeMap<i32, [u8; 4]>`(구현은 `SkinColor` 구조체, 6.9절). 내보내기는 이름 기준(`documents[이름].colors[이름] = "#RRGGBBAA"`)이고 `ADJUSTMENTS_VERSION` 은 1 그대로(없는 키는 이전 빌드가 무시) | `schema.rs:314`, `adjustments.rs:62` |
 | Lua 발행 | `skin_config.color[이름] = {r,g,b,a}` 도 발행(기본값 계산용). 확장 키가 없는 beatoraja 에서는 `nil` 이라 `(skin_config.color or {})` 로 막는다 | `env.rs:231, 383` |
 | 앱 읽기 | `DocumentOffsets`, `ScreenHost::offset` 처럼 `color` 를 구현 | `skin_screen.rs:272`, `skin_host/mod.rs:914` |
 | 메뉴 | 새 `SkinRow::Color(i)`, `SkinRowKind::Color`. SKIN 메뉴는 옵션 행들 뒤, PLAY 메뉴는 새 접이 `COLOR`(또는 LANE 묶음 끝) | `skin_select.rs:281-309, 930-945`, `skin_menu.rs:716-743`, `play_menu/rows.rs:92-139` |
@@ -371,6 +382,48 @@ E: 기존 `property` 행의 항목을 늘린다. 색 한 묶음당 시트 스프
 2. 메뉴: `SkinRow::Color`, 색 행·16진 입력·채널 행, SKIN·PLAY 메뉴, `A` 키. 기본 스킨 Lua 가 레인 면·구분선·판정선·커버 등에 `tint` 를 건다(노트 제외). 여기까지 이미지 변경 없음.
 3. 노트: 노트 시트 순백 재생성, 노트 `tint` 목록, 렌더러 틴트와 제외 규칙, 캡처로 육안 확인.
 
+### 6.9 구현 결과 (2026-10-22)
+
+C 안을 6.8절의 3단계로 구현했고 리뷰 수리(colors-1, colors-2, LN 전용 행)를 더했다. 결정은 8절, ADR [스킨 색 행](../acknowledge/2026-10-22-adr-skin-colour-rows.md).
+
+데이터 층(`rbms-skin`, `rbms-config`, `49dfbd3`):
+
+- 헤더 `color` 목록: `ColorDef { category, name, label, id, def, drawn }`(`model.rs:333-349`). `def` 는 16진 `RRGGBB` 또는 `RRGGBBAA`(`#` 허용)이고 없거나 읽을 수 없으면 불투명 흰색이다(`default_color()` `model.rs:354`). `label` 이 비면 `name` 을 보인다(`display_name()`). 색 id 는 0 이상이고 색 행끼리 유일해야 하며(오프셋 id 와 별개 공간) 음수·중복 id·중복 이름·읽을 수 없는 `def` 는 로드 경고다(스킨은 정상 로드). Lua/JSON 모두 키 이름은 최상위 `color` 목록이고 beatoraja 는 이 키를 무시한다.
+- `drawn`(수리 colors-1, `c1c992e`): 사용자가 정하지 않은 행의 부위가 지금 옵션(Theme, Accent, Note Colors, Bomb Color)으로 실제로 그려지는 색(`model.rs:341-348`). 헤더 패스는 옵션을 몰라 `def` 를 정적 Mono 값으로 둘 수밖에 없어서, 본체 패스(`colors.paint`)가 행마다 계산해 `drawn` 으로 적고 `crates/rbms-skin/src/loader/lua_skin.rs:203-204` 가 id 로 헤더 행에 합친다. 메뉴는 정하지 않은 행의 견본, 채널 시작점, 프리셋 시작점을 `drawn` 에서 가져오고 없으면 `def` 로 간다(`SkinLibrary::unset_color` `apps/rbms-player/src/skin_select.rs:1310`). 0 키(초기화)와 `A` 키 기준은 그대로 `def` 와 저장값이다. 이 수리 전에는 Note Colors = White-Yellow 에서 검은 건반 노트의 A 를 128 로 정하면 시안 반투명이 저장됐다.
+- tint 참조: `Destination.tint: Option<i32>`(`model.rs:539`)가 `DestinationTrack.tint`(`dst.rs:389`)로 옮겨진다(음수는 None, 중첩 목록도 같은 `build_track` 을 거친다). `NoteSet.tint: Vec<i32>`(`model/objects.rs:375`)는 레인과 나란한 색 id 목록이고 건너뛸 레인은 `NO_TINT`(-1, `model.rs:323`)다. Lua 표는 구멍이 메워지므로 구멍 대신 반드시 -1 을 쓴다. LN 전용 `NoteSet.long_tint`(`objects.rs:381`, `tint_of` `:427`, `long_tint_of` `:433`)는 비어 있으면 `tint` 로 물러난다.
+- 해석: 위 5.1절 구현 뒤 문단. 알파 순서는 수리 colors-2 로 노트 경로와 같게 고쳤다: 조사 때 6.3절은 "알파는 곱한 뒤 오프셋을 더한다" 였으나 구현은 오프셋을 먼저 더하고(`shifted_alpha`) 색 알파를 곱한다. 수리 전에는 색 알파 128 과 불투명도 50% 를 함께 주면 레인 계열은 0%, 노트는 25% 로 갈렸고, 지금은 둘 다 약 25%(알파 64)다. 테스트 `the_tints_alpha_is_a_share_of_the_alpha_the_offsets_leave`(`crates/rbms-skin/src/dst/tests.rs`: +50 이면 128, -127.5 이면 64)와 `a_colours_alpha_and_an_opacity_offset_meet_on_a_note_as_they_do_on_a_part`(`crates/rbms-render/src/skin_render/notes/tests.rs`).
+- `SkinColor::WHITE`, `from_hex`(6/8자리, `#` 허용, `+`·공백·비16진 거부), `to_hex`(`RRGGBBAA` 대문자), `tinted`(`dst.rs:79-103`).
+- 설정: `SkinCustomisation.colors`(4.4절), `OffsetSource for SkinCustomisation::color`(`schema.rs:333`). 직렬화는 6.3절 표가 제안한 `[u8; 4]` 가 아니라 `SkinColor` 구조체다(`SkinOffset` 선례, 수동 편집 때 `a` 생략이 불투명으로 읽혀 3 길이 튜플이 파일 전체 로드를 깨는 일을 막는다). 새 파일을 이전 빌드가 읽으면 `colors` 를 무시하고 다시 쓸 때 잃는다.
+- 내보내기·가져오기: `DocumentAdjustments.colors: BTreeMap<String, String>`(이름 → `#RRGGBBAA`, `apps/rbms-player/src/skin_select/adjustments.rs:75`), `ADJUSTMENTS_VERSION` 1 유지(`:38`). 문서가 선언하지 않는 이름과 읽을 수 없는 색 줄은 건너뛴다. id 는 가져올 때 가져오는 문서의 이름 → id 로 다시 매긴다(테스트로 고정). 팩이 준 색과 플레이어 색을 합치는 `merged()` 가 색도 합친다(`skin_select.rs`).
+- Lua: `skin_config.color[이름] = { r, g, b, a, custom }`(5.3절 표). `rbms_skin::lua::SkinConfigColor`, `SkinConfigGlobal.colors`.
+
+앱 층(`apps/rbms-player`, `7459bf7`):
+
+- 실시간 읽기: `DocumentOffsets::color(id)`(`skin_screen.rs:283`)와 `ScreenHost::color(id)`(`skin_host/mod.rs:946`)가 저장값을 그대로 돌려준다(길이가 아니라 `units_per_pixel` 스케일 없음). 둘 중 하나가 빠지면 trait 기본 `None` 이라 컴파일 오류 없이 색이 안 먹는다. 종단 테스트 `a_stored_colour_tints_the_next_frame_through_the_host`(`skin_host/tests.rs`).
+- 메뉴 행: `SkinRow::Color(usize)`, `ColorChannel(usize, ColorChannel)`, `ColorChannels`(접이 메타 행). `rows_for` 순서는 property, file, Color(0..n), 채널(0:R,G,B,A), (1:R..A)..., offset(이동), offset(불투명도). 키: `←→` 는 16색 프리셋 순환(`COLOR_PRESETS` `skin_select.rs:175`: FFFFFF C0C0C0 808080 404040 000000 FF4040 FF9020 FFE040 A0FF40 30E050 40E0FF 40A0FF 4060FF A060FF FF40C0 FF90C0, 알파 유지, 목록 밖 색은 오른쪽이 첫 항목 왼쪽이 끝 항목), `Enter` 는 16진 입력(`NumberEdit::hex`, `begin_hex_edit`, 잘못된 입력은 `NOT A COLOR` 1.5초), `0` 은 DEFAULT(저장값 지움), `A` 는 같은 이름의 `ColorDef` 를 가진 다른 화면에 적용(DEFAULT 를 적용하면 상대 저장값을 지운다). 채널 행은 0~255 숫자 행(슬라이더 + 입력 + 0 키). 행 줄은 `labelled(category, display_name())` 에 저장값이 있으면 `#RRGGBBAA`, 없으면 `DEFAULT`. 견본은 16 px 사각형(`preview_menu.rs`의 `ColorCell`).
+- SKIN 메뉴: 색 행은 property/file 뒤에 평평하게, 채널 행 자리에 접이 행 `COLOR CHANNELS`(`HIDDEN`/`SHOWN (n)`, `Enter`·좌우·클릭으로 토글, 저장 안 함). PLAY 메뉴: SKIN 그룹 맨 앞(Opacity, Place 앞)에 접이 `COLOR`, `COLOR CHANNELS` 가 있고 둘 다 닫힌 채 시작한다. 색 행이나 채널 행을 바꾼 뒤 `reread_skin` 이 stale 일 때만 다시 읽는다. 색 행 마우스 클릭은 프리셋 한 칸 이동이고 값 영역 클릭으로 16진 입력을 열지는 않는다.
+- 재로드 규칙(`put_color`): 효과 맞춤값(플레이어 값 위에 팩 조절값을 깐 것)에서 그 id 의 "있음" 여부가 바뀔 때만 `stale` 에 올린다. 있음 → 다른 값은 재로드 없음, 없음 → 있음과 있음 → 없음(0 키)은 재로드 1회, 지운 뒤 맞춤값이 비면 `config.skin.forget(path)`. 이유: 기본 스킨은 저장값이 없으면 프리셋 색을 dst 에 구워 tint 를 걸지 않고, 있으면 dst 기본색을 흰색으로 두고 tint 를 건다.
+
+기본 스킨(`5192bbb`, `c1c992e`):
+
+- 규칙(`lua/play/colors.lua`, `main.lua`, `field.lua`): 저장값이 없는 행은 이전과 똑같다(프리셋 색, tint 없음). `skin_config.color[이름].custom` 이 참인 행만 그 부위 dst 의 기본색을 흰색으로 두고 `tint = id` 를 건다(`colors.paint`, `colors.base`, `colors.tinted`). 노트는 그 레인의 'pure' 시트를 고르고 `note.tint` 의 그 칸에 id 를 넣으며 나머지 칸은 `NO_TINT` 다. 아무 레인도 custom 이 아니면 `note.tint` 를 만들지 않는다. 색 처리는 로드 때만 돌고 프레임 함수를 늘리지 않는다.
+- 행(`colors.header(mode)`): 카테고리 `Lane`/`Note`/`Effect`, 메뉴 표기는 `LANE > WHITE KEY` 꼴이다.
+
+| 카테고리 | 행 (id) |
+| --- | --- |
+| LANE | White Key Lane (1), Black Key Lane (2), Scratch Lane (3), Lane Divider (4), Bar Line (5), Judge Line (6), Lane Cover (7) |
+| NOTE | White Key Note (10), Black Key Note (11), Scratch Note (12). 9키: White/Yellow/Green/Blue/Red Button Note (13~17) |
+| NOTE (LN) | White Key LN (40), Black Key LN (41), Scratch LN (42). 9키: White/Yellow/Green/Blue/Red Button LN (43~47) |
+| EFFECT | White Key Beam (20), Black Key Beam (21), Scratch Beam (22). 9키: White/Yellow/Green/Blue/Red Button Beam (23~27). 공통: Bomb (30) |
+
+  행 수는 스크래치가 있는 모드(5·7·10·14키) 17행, 9키 22행이다(`keys_of` 로 센 값). 헤더 `def` 는 기본 테마(Mono, Accent White, Note Colors White-Blue) 값이다: 면 panel 161616·bg 000000, 선 3C3C3C, 판정선 FFFFFF, 커버 262626, 노트·키빔 F1F4F8·4CC9F0·F0564C(9키는 F2B33D·59D185·568CF5 도), 폭발 F1F4F8.
+- 9키(팝픈): 레인 면은 실제 명암 구분(홀수 버튼 panel, 짝수 버튼 bg)을 따라 이름은 7키와 같은 `White Key Lane`/`Black Key Lane` 이고 라벨만 `Odd Buttons`/`Even Buttons` 다. 이름이 같아 `A` 키로 다른 화면에 적용하면 서로 맞춰진다(7키 흰 건반 면 → 9키 홀수 버튼 면). 노트·LN·키빔은 버튼 색 다섯 묶음(흰 1·9, 노랑 2·8, 초록 3·7, 파랑 4·6, 빨강 5)으로 나뉜다. 스크래치 관련 행과 흰/검 건반 행은 9키에서 선언하지 않는다.
+- 판정선 바닥 막대는 custom 일 때 흰색이 아니라 회색 `theme.accent_dim.white`(102,102,102)를 바탕으로 곱한다(강조색과 어두운 짝의 관계를 사용자 색에서도 유지). 커버 가장자리 강조선과 커버 수치는 다른 행에 묶지 않았다.
+- LN: 엔진이 레인당 tint 하나만 받던 제약을 `NoteSet.long_tint` 로 풀었다(`colors.lua` 의 `lane.long_tint = tint[long] or lane.note_tint`, `field.lua` 는 노트 tint 와 다를 때만 `def.long_tint` 를 쓴다). 노트 행만 정하면 LN 도 같은 색이고 LN 행도 정하면 LN 만 따로 칠해진다.
+- 노트 틴트 대상(`notes.rs`): 일반 노트, 떨어지는 놓친 노트, LN·CN·HCN 의 머리·몸통·끝에 `lane_tinted`(`notes.rs:788`, 알파는 `faded` 뒤 RGBA 곱)를 적용한다. 제외: 지뢰, hidden, processed(mark), HCN 몸통 중 닳는 중(`HELL_BODY_DRAINING` `notes.rs:114`, 옛 이름 `hcnreactive`), SCRATCH AUTO 초록(`AUTO_NOTE_IMAGE` `notes.rs:147`). 값이 없으면 `faded()` 와 비트 단위로 같아 골든이 불변이다. `object.rs` 의 `self_placed_track` 이 dst 없는 note 객체 경로에서 `tint: declared.tint` 를 보존한다(`crates/rbms-render/src/skin_render/object.rs:323`).
+
+검증 요약: 저장값이 없을 때 기존 캡처 `the_play_scene_of_the_default_pack_is_captured_with_its_rows_switched` 94장이 변경 전과 화소 단위로 같다(수리 뒤 다시 94장 모두 같음). 색을 정한 캡처 `colours.rs`(옵트인, `RBMS_SKIN_CAPTURE_DIR`) 20장을 눈으로 확인했다(7키 검은 건반 면 남색 반투명, 흰 건반 노트 빨강, 검은 건반 LN 초록, 모든 행을 정한 7·9·14키 등). 수리 뒤 `generate-images.py --check` 통과, `skin-dump --strict --frames 120` 경고 0(문서 18개, 팩 파일 78개 불변).
+
 ## 7. 조사하지 않은 것과 위험
 
 | 구분 | 내용 |
@@ -382,15 +435,37 @@ E: 기존 `property` 행의 항목을 늘린다. 색 한 묶음당 시트 스프
 | 위험 | SKIN 메뉴는 묶음이 없는 52행의 평평한 목록이라 행을 더하면 길어진다. 접이가 필요하면 SKIN 메뉴에도 도입해야 한다 |
 | 위험 | `settings.ron` 이 문서 절대 경로를 키로 쓰므로 색도 기기 간에 옮겨지지 않는다(`docs/skin.md` 6절 설정 행과 같은 한계) |
 
+구현 뒤 상태(위 표 순서):
+
+- 곱셈 틴트가 색 있는 그림을 어둡게 하는 문제: 색 행이 custom 일 때만 tint 를 걸고(opt-in) 기본 스킨 노트는 순백 pure 시트를 쓴다. 외부 스킨에서 모양을 살리는 알파 마스크 셰이더는 만들지 않았다.
+- HCN 누르는 중 가운데 레일 하이라이트: 해결하지 못했다. pure 시트에서는 흰색 × 사용자 색이라 노트 색 그대로 나온다.
+- 알파 오프셋이 더하기 방식이라 색 알파와 합칠 때 어긋남: 색 알파를 "오프셋이 남긴 알파의 곱"으로 정의해 해소했다(6.9절, 단 저장한 비불투명 색과 100% 가 아닌 불투명도를 함께 쓰던 사용자는 부위가 이전보다 더 불투명하게 나온다).
+- SKIN 메뉴 길이: 색 행(17 또는 22)이 평평하게 더해지고 채널 행(4개씩)은 접이 `COLOR CHANNELS` 한 행 안에 있다. SKIN 메뉴의 접이는 이 행 하나뿐이다.
+- `settings.ron` 이 문서 절대 경로를 키로 쓰는 한계: 그대로. 색도 기기 간에 옮겨지지 않는다.
+- 정하지 않은 LN 행의 `drawn` 은 로드 시점의 노트 색 스냅샷이다. 이미 정한 노트 행의 색을 바꿔도 문서를 다시 읽지 않아 다음 로드까지 LN 행의 견본과 채널 시작점이 이전 노트 색을 보인다(그리기는 tint 를 프레임마다 읽어 영향 없음).
+- 옵션 변경으로 문서가 stale 인데 아직 다시 읽지 않았으면 이전 옵션의 `drawn` 이 잠시 보인다. 한 번도 읽지 않은 문서는 `def` 로 간다.
+- Bomb Color = Note(기본)에서는 레인마다 폭발 색이 달라 Bomb 행에 하나의 색이 없다. `drawn` 은 흰색이고 알파만 고치면 모든 레인의 폭발이 흰색이 된다.
+- `A` 키로 색을 다른 화면에 적용하면 있음 여부가 바뀌지 않아도 그 화면들을 stale 로 표시한다(다음 진입 때 한 번 다시 읽음).
+- 노트 경로의 화소 검증은 렌더 단위 테스트로만 덮었다(미리보기 화소는 패널로만 확인). 실제 GPU 창에서 행이 보이는 모습과 실시간 반영, ModernChic 대상 선택 테스트(`RBMS_SKIN_PACK`)는 확인하지 못했다.
+
 ## 8. 결정 지점
 
-1. 적용 범위. 선택지: 기본 스킨만(A) / 엔진 확장 + 기본 스킨 채택(C) / 모든 스킨에 강제 덮어쓰기(B). 메인 추천: C. 이유: 노트까지 자유 색이 되는 유일한 안이고 실시간이며, 확장 키는 beatoraja 에서 무시되어 호환을 해치지 않는다. 영향: `rbms-skin`, `rbms-render`, `rbms-config`, 앱 메뉴, 기본 스킨 시트·Lua.
-2. 조절할 부위. 선택지: 최소(레인 면, 노트) / 표준(+구분선, 판정선, 키빔, 폭발, 커버, 마디선) / 전부(+화면 바탕, 진행 막대, 지뢰). 메인 추천: 표준. 이유: 요청의 "레인·노트" 와 눈에 띄는 부위를 덮고 행 수가 20 안쪽이다. 영향: Lua 와 헤더 선언만 늘고 엔진은 같다.
-3. 레인 단위. 선택지: 종류 셋(흰, 검, 스크래치) / 레인별 개별 / 셋 기본 + 개별 접이. 메인 추천: 셋 기본 + 개별 접이는 후속. 이유: 7키 기준 6~8행이고 IIDX 식 사용에 맞는다. 9키는 버튼 색 역할 5종. 영향: 행 수(6.4절 표), Lua 의 색 id 수.
-4. 색 입력 방식. 선택지: 프리셋만 / 16진 + 프리셋 / 16진 + R·G·B 슬라이더 + 프리셋. 메인 추천: 한 줄 색 행(견본 + 16진, ← → 프리셋)과 접이 안의 R·G·B 행. 이유: SKIN 메뉴가 평평한 52행이라 한 줄 행이 낫고 슬라이더는 필요한 사람만 연다. 영향: `HexEdit` 신설(숫자 편집기는 16진을 받지 않는다), 메뉴 행.
-5. 반영 방식. 선택지: 실시간(저장값을 프레임마다 읽음) / 문서 다시 읽기. 메인 추천: 실시간. 이유: 슬라이더를 끌 때 미리보기가 어두워지지 않는다. 영향: dst `tint`, `OffsetSource::color`(A 안이면 없음).
-6. 불투명도. 선택지: 기존 부위 불투명도 행만 / 색 행에 A 추가 / 레인 종류별 불투명도 행 추가. 메인 추천: 기존 행 유지 + 레인 면·노트는 레인 종류별 행만 후속 검토. 이유: 알파가 더하는 방식이라 두 곳에서 조절하면 중간값이 어긋난다. 영향: 오프셋 id 120~199, 노트는 색 알파 곱셈 정의 필요.
-7. 노트 틴트의 대상. 선택지: 노트와 LN·HCN 몸통·끝 전부 / 노트·LN 만 / 일반 노트만. 메인 추천: 전부, 단 지뢰와 `hcnreactive` 는 제외. 이유: LN 만 다른 색이면 어색하고 지뢰·닳는 중은 의미색이다. 영향: `notes.rs` 제외 규칙, 시트 재생성 범위. HCN 누르는 중 하이라이트는 단순화 또는 흰 레일 겹치기.
-8. 기존 옵션과의 관계. 선택지: 프리셋 항목 유지 + 색 행이 덮음 / 프리셋을 색 행으로 대체. 메인 추천: 유지하고 색 행이 우선. 이유: 저장된 설정(`Note Colors` 등)과 `A` 키 동작이 그대로 호환된다. 영향: Lua 의 우선순위 식과 0 키 의미.
-9. 저장·내보내기 호환. 선택지: 설정 스키마 6·조절값 파일 버전 1 유지 / 둘 다 올림. 메인 추천: 유지(추가 필드). 이유: 이전 빌드가 새 키를 무시하고 선례(PLAY 메뉴)가 있다. 영향: 이전 빌드로 내려가면 색을 잃는다.
-10. 기본 스킨 시트 재생성. 선택지: 노트 시트를 순백 + 회색 사다리로 다시 생성(항목 이름·op 는 유지, 그림자는 ≤15 어긋남 감수) / 구운 8색을 두고 새 색만 틴트(시트 증가). 메인 추천: 재생성. 이유: 시트가 작아지고 규칙이 하나이며 색을 곱셈으로 정확히 낸다(3절). 영향: `play.png`, `atlas/play.lua`, 생성기 `--check`, 캡처 육안 확인.
+1. 적용 범위. 선택지: 기본 스킨만(A) / 엔진 확장 + 기본 스킨 채택(C) / 모든 스킨에 강제 덮어쓰기(B). 메인 추천: C. 이유: 노트까지 자유 색이 되는 유일한 안이고 실시간이며, 확장 키는 beatoraja 에서 무시되어 호환을 해치지 않는다. 영향: `rbms-skin`, `rbms-render`, `rbms-config`, 앱 메뉴, 기본 스킨 시트·Lua. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): C 안(엔진 확장 + 기본 스킨 채택). ADR [스킨 색 행](../acknowledge/2026-10-22-adr-skin-colour-rows.md).
+2. 조절할 부위. 선택지: 최소(레인 면, 노트) / 표준(+구분선, 판정선, 키빔, 폭발, 커버, 마디선) / 전부(+화면 바탕, 진행 막대, 지뢰). 메인 추천: 표준. 이유: 요청의 "레인·노트" 와 눈에 띄는 부위를 덮고 행 수가 20 안쪽이다. 영향: Lua 와 헤더 선언만 늘고 엔진은 같다. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 표준에 LN 전용 행을 더했다. 레인 면(흰·검·스크래치), 구분선, 마디선, 판정선, 커버, 노트, LN, 키빔, 폭발. 화면 바탕, 진행 막대, 지뢰는 행이 없다(6.9절).
+3. 레인 단위. 선택지: 종류 셋(흰, 검, 스크래치) / 레인별 개별 / 셋 기본 + 개별 접이. 메인 추천: 셋 기본 + 개별 접이는 후속. 이유: 7키 기준 6~8행이고 IIDX 식 사용에 맞는다. 9키는 버튼 색 역할 5종. 영향: 행 수(6.4절 표), Lua 의 색 id 수. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 종류 셋(흰·검·스크래치)이 기본이고 레인별 개별 접이는 하지 않았다. 9키는 버튼 색 5종과 레인 면 홀짝 둘.
+4. 색 입력 방식. 선택지: 프리셋만 / 16진 + 프리셋 / 16진 + R·G·B 슬라이더 + 프리셋. 메인 추천: 한 줄 색 행(견본 + 16진, ← → 프리셋)과 접이 안의 R·G·B 행. 이유: SKIN 메뉴가 평평한 52행이라 한 줄 행이 낫고 슬라이더는 필요한 사람만 연다. 영향: `HexEdit` 신설(숫자 편집기는 16진을 받지 않는다), 메뉴 행. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 한 줄 색 행(견본 + 16진, `←→` 16색 프리셋)과 접이 `COLOR CHANNELS` 의 R·G·B·A 행. `HexEdit` 를 새로 만들지 않고 숫자 편집기에 16진 종류(`NumberEdit::hex`)를 더했다.
+5. 반영 방식. 선택지: 실시간(저장값을 프레임마다 읽음) / 문서 다시 읽기. 메인 추천: 실시간. 이유: 슬라이더를 끌 때 미리보기가 어두워지지 않는다. 영향: dst `tint`, `OffsetSource::color`(A 안이면 없음). 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 실시간(`OffsetSource::color` 로 프레임마다 읽음). 단 행의 저장값이 없음 ↔ 있음으로 바뀔 때는 문서를 한 번 다시 읽는다(저장값이 없으면 프리셋 색을 dst 에 구워 두기 때문).
+6. 불투명도. 선택지: 기존 부위 불투명도 행만 / 색 행에 A 추가 / 레인 종류별 불투명도 행 추가. 메인 추천: 기존 행 유지 + 레인 면·노트는 레인 종류별 행만 후속 검토. 이유: 알파가 더하는 방식이라 두 곳에서 조절하면 중간값이 어긋난다. 영향: 오프셋 id 120~199, 노트는 색 알파 곱셈 정의 필요. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 추천(기존 행 유지)과 달리 색 행에 A 채널을 두었다. 더하는 방식이라 어긋난다던 위험은 색 알파를 "오프셋이 남긴 알파의 곱"으로 정의해 풀었다(dst·노트 모두, 리뷰 colors-2). 레인 종류별 불투명도 행은 만들지 않았다.
+7. 노트 틴트의 대상. 선택지: 노트와 LN·HCN 몸통·끝 전부 / 노트·LN 만 / 일반 노트만. 메인 추천: 전부, 단 지뢰와 `hcnreactive` 는 제외. 이유: LN 만 다른 색이면 어색하고 지뢰·닳는 중은 의미색이다. 영향: `notes.rs` 제외 규칙, 시트 재생성 범위. HCN 누르는 중 하이라이트는 단순화 또는 흰 레일 겹치기. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 전부(노트, LN, HCN 머리·몸통·끝). 지뢰, hidden, processed, 닳는 중 HCN 몸통, SCRATCH AUTO 초록은 제외. LN 은 처음 노트 행과 하나였다가 LN 전용 행으로 갈라졌다(`long_tint`). HCN 누르는 중 하이라이트는 만들지 못했다.
+8. 기존 옵션과의 관계. 선택지: 프리셋 항목 유지 + 색 행이 덮음 / 프리셋을 색 행으로 대체. 메인 추천: 유지하고 색 행이 우선. 이유: 저장된 설정(`Note Colors` 등)과 `A` 키 동작이 그대로 호환된다. 영향: Lua 의 우선순위 식과 0 키 의미. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 프리셋 유지 + 색 행이 우선. `custom` 이 참인 행만 tint 를 걸고 0 키가 저장값을 지워 프리셋으로 돌아간다.
+9. 저장·내보내기 호환. 선택지: 설정 스키마 6·조절값 파일 버전 1 유지 / 둘 다 올림. 메인 추천: 유지(추가 필드). 이유: 이전 빌드가 새 키를 무시하고 선례(PLAY 메뉴)가 있다. 영향: 이전 빌드로 내려가면 색을 잃는다. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 유지(설정 스키마 6, 조절값 파일 버전 1). 직렬화는 제안한 `[u8; 4]` 가 아니라 `SkinColor` 구조체다(6.9절).
+10. 기본 스킨 시트 재생성. 선택지: 노트 시트를 순백 + 회색 사다리로 다시 생성(항목 이름·op 는 유지, 그림자는 ≤15 어긋남 감수) / 구운 8색을 두고 새 색만 틴트(시트 증가). 메인 추천: 재생성. 이유: 시트가 작아지고 규칙이 하나이며 색을 곱셈으로 정확히 낸다(3절). 영향: `play.png`, `atlas/play.lua`, 생성기 `--check`, 캡처 육안 확인. 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): 두 번째 선택지(구운 8색을 두고 새 색만 틴트)에 가깝다. 구운 묶음은 그대로 두고 순백 'pure' 묶음 5장을 더했다. 시트는 1024x570 그대로이고 기존 127개 스프라이트의 화소는 불변이다(2.5절 끝).
+
+### 8.1 사용자 확인 대기 목록(미확인)
+
+1. 색 행 목록: 부위, 이름, id, 기본값(6.9절 표). LN 전용 행이 노트 행과 따로 있는 것. 화면 바탕·진행 막대·지뢰 행이 없는 것.
+2. 9키 레인 면 행이 7키와 같은 이름(`White Key Lane`/`Black Key Lane`)에 라벨만 `Odd Buttons`/`Even Buttons` 인 것. `A` 키 적용이 7키 흰 건반 면 → 9키 홀수 버튼 면으로 이어지는 것이 의도에 맞는지.
+3. 판정선 바닥 막대가 custom 일 때 흰색이 아니라 회색(102)에 곱해지는 것.
+4. 색 행에 A 채널을 두고 알파를 곱으로 정의한 것(저장한 비불투명 색과 100% 가 아닌 불투명도를 쓰던 사용자는 결과가 달라진다).
+5. 저장 직렬화가 `[u8; 4]` 가 아니라 `SkinColor` 구조체인 것.
+6. HCN 누르는 중 가운데 레일 하이라이트를 만들지 못하는 곱셈 한계를 받아들일지.

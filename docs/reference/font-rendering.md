@@ -1,22 +1,22 @@
-> 최종 갱신 2026-10-22 · 대응 커밋 0323bd9
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
 
 # 글자 렌더링 조사 (요청 5: 글꼴 가독성, 저화질 느낌)
 
-범위는 앱 UI 글자, 스킨 글자(TTF, BMFont), GPU 쪽 샘플러·포맷·블렌딩, 논리 1280x720 과 물리 픽셀의 관계, 저화질 느낌의 원인 순위, 개선안이다. 코드는 고치지 않았다. 아래 "7. 실증" 의 이미지는 이 세션의 scratchpad 에만 있고 저장소에는 없다(재현 명령 포함). 문서와 코드가 다른 곳은 "12. 문서와 코드의 차이" 에 모았다.
+범위는 앱 UI 글자, 스킨 글자(TTF, BMFont), GPU 쪽 샘플러·포맷·블렌딩, 논리 1280x720 과 물리 픽셀의 관계, 저화질 느낌의 원인 순위, 개선안이다. 조사로 시작해 같은 날 구현한 뒤 현재 상태로 고친 살아 있는 문서다. 1절(결론), 2.1절, 3절의 배율 설명, 5절의 굵기 행, 6절, 7.4절, 9절 O1·O4, 12절, 14절 결정은 구현 뒤의 코드 기준이고, 나머지(경로 표 중 B~G, GPU 사실, 실증 7.1~7.3, 순위 8절의 확실성 열)는 조사 당시 그대로다. 구현: `f03beb3`(내장 UI 글자를 장치 배율의 물리 화소로 래스터하고 굵기 선택 추가), `0c450db`(기본 스킨에 Inter Bold 추가), `f52e170`(리뷰 수리 3건). 결정의 근거는 ADR [UI 글자 장치 화소](../acknowledge/2026-10-22-adr-ui-text-device-pixels.md)(결정은 사용자 지시 "끝까지 다 구현해놔" 에 따라 메인이 추천안으로 정했고 사용자는 아직 확인하지 않았다). "7. 실증" 의 이미지는 조사 세션의 scratchpad 에만 있고 저장소에는 없다(재현 명령 포함). 문서와 코드가 다른 곳은 "12. 문서와 코드의 차이" 에 모았다.
 
 ## 1. 결론
 
-1. 내장 화면(설정, PLAY 메뉴, SKIN 메뉴, 키 설정, 폴더·표, 연습, 로딩, 토스트, 선곡 위의 검색·필터·가이드·힌트, IR 순위 패널, 디버그)의 글자는 **논리 1280x720 기준 정수 px(9~26)로 래스터한 뒤, 글리프의 점 하나하나를 `fill_rect` 로 내보내고 `ScaledRenderer` 가 좌표에 배율을 곱한다.** 창의 물리 크기가 논리의 2배(macOS Retina 기본 창)이면 글자의 화소 하나가 2x2 블록이 되고, 1.5배(Windows 150%, 1920x1080)이면 1화소 폭과 2화소 폭이 번갈아 나오는 격자가 된다. 래스터는 물리 해상도로 한 번도 일어나지 않는다. 확정(코드와 캡처).
-2. **스킨 글자는 화면에 닿는 크기로 래스터한다.** TTF 는 `compose_block` 이 `em = 목적지 높이(물리 px)` 로 한 줄을 텍스처 하나에 구워 1:1 최근접으로 그린다. 스킨 화면은 `canvas.native()` 로 창 표면 화소에 직접 그리므로 늘리는 단계가 없다. 오프스크린 텍스처에 그린 뒤 창에 늘리는 구조는 어디에도 없다(렌더 패스는 표면 하나).
-3. 래스터 자체는 약하다. 소형 크기(내장 UI 9~15px, 대문자 높이 6.5~11px), 쓰는 굵기는 Regular 400 하나(번들 Inter 는 가변 폰트라 굵게 만들 수 있고 실측으로 확인했으나, UI 에서 굵기를 고르는 API 가 없다), 힌팅은 실효 없음, 그레이스케일 커버리지만 쓰고, 블렌딩은 비 sRGB 프레임버퍼에서 부호화된 값 그대로 섞는다(밝은 글자 위 어두운 배경에서 가장자리가 얇고 어둡게 보이는 쪽).
-4. 순위(8절): 1위 내장 UI 논리 래스터 후 확대(확정), 2위 소형·단일 굵기·힌팅 없음, 3위 감마 공간 블렌딩, 4위 비정수 배율의 화소 격자, 5위 스킨 글자의 정수 픽셀 스냅과 SHRINK 선형 축소.
-5. 권장(9절): 렌더러 트레이트에 "장치 배율"을 알려 주는 메서드를 더해 내장 UI 글자를 **논리 글자 크기 x 배율의 물리 크기로 래스터**한다. 새 의존성 없음, 배율 1에서 지금과 화소 단위로 같다(골든 영향 없음), 외부 Lua 스킨 영향 없음. 성능은 사각형 수가 배율에 따라 늘지만(2배에서 2.7배, 3배에서 4.1배) 프로브 측정에서 CPU 제출 비용은 프레임당 50us 안쪽이다. 아틀라스 텍스처 쿼드로의 승격은 2단계로 둔다.
+1. (조사 때) 내장 화면의 글자는 논리 1280x720 기준 정수 px(9~26)로 래스터한 뒤 글리프의 점 하나하나를 `fill_rect` 로 내보내고 `ScaledRenderer` 가 좌표에 배율을 곱했다. 창의 물리 크기가 논리의 2배(macOS Retina 기본 창)이면 글자의 화소 하나가 2x2 블록, 1.5배(Windows 150%, 1920x1080)이면 1화소 폭과 2화소 폭이 번갈아 나오는 격자였다. **구현 뒤:** 렌더러가 장치 배율을 알려 주면(`Renderer::device_scale`) 글자를 `논리 크기 x 배율` 의 물리 em 으로 구워 장치 화소 사각형(`fill_rect_device`)으로 낸다. 배율 1 과 비균등 배율(letterbox 끔)은 이전 경로 그대로다(2.1절).
+2. 스킨 글자는 처음부터 화면에 닿는 크기로 래스터했다. TTF 는 `compose_block` 이 `em = 목적지 높이(물리 px)` 로 한 줄을 텍스처 하나에 구워 1:1 최근접으로 그린다. 스킨 화면은 `canvas.native()` 로 창 표면 화소에 직접 그리므로 늘리는 단계가 없다. 오프스크린 텍스처에 그린 뒤 창에 늘리는 구조는 어디에도 없다(렌더 패스는 표면 하나).
+3. 래스터 자체는 약하다. 소형 크기(내장 UI 9~15px, 대문자 높이 6.5~11px), 그레이스케일 커버리지만 쓰고, 힌팅은 실효 없음, 블렌딩은 비 sRGB 프레임버퍼에서 부호화된 값 그대로 섞는다(밝은 글자 위 어두운 배경에서 가장자리가 얇고 어둡게 보이는 쪽). **구현 뒤:** UI 굵기를 고를 수 있다(`TextStyle`, REGULAR 400 ~ BOLD 700. 번들 Inter 가 가변 폰트라 새 에셋이 필요 없다). 기본 스킨 팩에는 스킨 글자용으로 정적 `Inter-Bold.ttf` 가 더해졌다(6절).
+4. 순위(8절): 1위 내장 UI 논리 래스터 후 확대와 4위 비정수 배율의 화소 격자는 구현으로 해소됐다. 2위 소형·힌팅 없음, 3위 감마 공간 블렌딩, 5위 스킨 글자의 정수 픽셀 스냅과 SHRINK 선형 축소는 그대로다.
+5. 비용(7.3, 7.4절): 사각형 수는 배율에 따라 늘지만(2배에서 약 2.4~2.7배, 3배에서 약 3.7~4.1배) 캐시 적중 프레임의 CPU 제출은 프레임당 약 75us 이내다(W1a 측정 최대 72us). 배율 1 에서 이전과 화소 단위로 같다(골든 서명 10개 불변). 외부 Lua 스킨 영향 없음. 새 의존성 없음.
 
 ## 2. 글자가 화면에 닿는 경로 전부
 
 | 경로 | 쓰는 곳 | 래스터 크기 | 위치 결정 | GPU 에 닿는 모양 |
 | --- | --- | --- | --- | --- |
-| A. 내장 UI `TextContext::draw` | 내장 화면 전부, 토스트, 디버그, 선곡 오버레이 | `px_for(scale) = round(scale*8.5).max(8)` 논리 px | 논리 정수 원점 + 글리프 x 4분 서브픽셀, y 정수 | 켜진 화소 가로 연속 구간마다 `fill_rect`(1xN), 그 뒤 `ScaledRenderer` 가 배율을 곱함 |
+| A. 내장 UI `TextContext::draw` | 내장 화면 전부, 토스트, 디버그, 선곡 오버레이 | 배율 1 또는 비균등: `px_for(scale) = round(scale*8.5).max(8)` 논리 px. 균등 배율: `px_for(scale) x 장치 배율`(반올림 없음, 물리 em) | 배율 1: 논리 정수 원점 + 글리프 x 4분 서브픽셀, y 정수. 균등 배율: 장치 좌표 `round(x*sx)`, `round(y*sy)` 와 장치 좌표 기준 x 서브픽셀 빈 | 켜진 화소 가로 연속 구간마다 사각형. 균등 배율은 장치 화소 사각형 `fill_rect_device`(배율 곱 없음), 그 외는 `fill_rect` 뒤 `ScaledRenderer` 가 배율을 곱함 |
 | B. 스킨 TTF `compose_block` | 스킨 문서의 `text` 객체(폰트가 읽힌 경우) | em = 목적지 높이(물리 px, 분수 가능) | 정수 반올림, 서브픽셀 없음 | 줄마다 RGBA 텍스처 1장(흰 잉크), 1:1 최근접 쿼드(SHRINK 면 선형) |
 | C. 스킨 BMFont type 0 | 스킨의 `.fnt` 글꼴 | 폰트가 만들어진 크기에 배율 `size * (화면폭/스킨폭) / 원본 size` | 레이아웃이 정하는 대로(픽셀 격자 없음) | 페이지 글리프를 잘라 선형 필터 쿼드 |
 | D. 스킨 BMFont type 1, 2 | distance field 글꼴 | 위와 같음 | 위와 같음 | `draw_distance_field_quad`(원본 셰이더 식, 평활 폭 1/16 고정) |
@@ -26,11 +26,14 @@
 
 ### 2.1 A. 내장 UI 글자 (`crates/rbms-render/src/font.rs`)
 
-- 호출 형태: `draw_text(r, x, y, scale, color, text)`(`font.rs:316` 의 `draw`). `scale` 은 옛 5x7 시절의 단위이고 `px_for(scale)` 이 px 로 바꾼다(`font.rs:61`). `TEXT_PIXELS_PER_SCALE = 8.5`(`skin_render/text.rs:63`)가 같은 비율이다.
-- 레이아웃: `ensure`(`font.rs:279`)가 cosmic-text `Buffer` 에 `Metrics::new(px, px*1.2)` 로 한 줄을 셰이핑(`Shaping::Advanced`)하고, 글리프마다 `g.physical((0.0, run.line_y), 1.0)`(`font.rs:297`)로 정수 원점과 `CacheKey` 를 만든다. `physical` 은 cosmic-text 0.19 의 `layout.rs:89`: x 는 `SubpixelBin`(0, 1/4, 1/2, 3/4)으로 양자화, y 는 `truncf` 로 정수. `(텍스트, px)` 단위 레이아웃 캐시 512줄(`LAYOUT_CACHE_LIMIT`, `font.rs:137`), 글리프 구간 캐시 4096개(`RUN_CACHE_LIMIT`, `font.rs:141`).
-- 래스터: `SwashCache::with_pixels` 로 글리프를 그레이스케일 알파 마스크(`Format::Alpha`)로 구워 화소 `(dx, dy, rgb, 커버리지)` 목록을 만들고 `merge_runs`(`font.rs:555`)로 같은 색·같은 커버리지의 가로 이웃을 합친다. 합쳐진 구간은 `(글리프 CacheKey, 색)` 으로 캐시한다.
-- 그리기: 원점은 `(x.round(), y.round())`(`font.rs:324`). 구간마다 `r.fill_rect(Rect(ox+gx+dx, oy+gy+dy, w, 1), Color{rgb, a = ca*color.a/255})`(`font.rs:349`). `Rect` 좌표는 논리 단위다.
-- 배율: 내장 화면은 `Canvas`(UI_SIZE 1280x720 고정, `stage/canvas.rs:26`)에 그린다. `Canvas::fill_rect` 는 호출마다 `ScaledRenderer::new(&mut self.native(), UI_SIZE)` 를 만들어 `scale_rect(rect, 창뷰포트/1280x720)` 를 곱해 내려보낸다(`canvas.rs:215`, `canvas.rs:405`, `lib.rs:557`). 즉 **글리프 한 화소 = 배율만큼 커진 사각형 한 개**다.
+- 호출 형태: `draw_text(r, x, y, scale, color, text)`(`font.rs` 의 `draw`)와 굵기를 고르는 `*_styled`. `scale` 은 옛 5x7 시절의 단위이고 `px_for(scale)` 이 px 로 바꾼다. `TEXT_PIXELS_PER_SCALE = 8.5`(`skin_render/text.rs:63`)가 같은 비율이다. 굵기는 `FontWeight(u16)`(REGULAR 400, MEDIUM 500, SEMIBOLD 600, BOLD 700, `font.rs:116-123`)와 `TextStyle { scale, weight }`(`font.rs:131-145`)로 고른다. `TextContext` 메서드 `text_width_styled`, `draw_text_styled`, `draw_text_centered_styled`, `draw_text_right_styled`, `fit_text_styled`(`font.rs:457-502`)와 같은 이름의 자유 함수(`font.rs:821-841`)가 있고 `RenderCtx` 는 `ctx.text.*_styled` 로 쓴다. `weight` 를 인자로 따로 받지 않고 `TextStyle` 로 묶은 이유: 인자 8개가 clippy `too_many_arguments` 에 걸리고 새 `#[allow]` 는 금지다. 굵을수록 폭이 넓어지므로 정렬·`fit` 도 같은 style 로 재야 한다.
+- 레이아웃: `ensure` 가 cosmic-text `Buffer` 에 `Metrics::new(px, px*1.2)` 로 한 줄을 셰이핑(`Shaping::Advanced`)한다. 레이아웃 캐시 키는 family → `(px, weight)` → text 이고 weight 0(`OWN_WEIGHT_KEY` `font.rs:149`)은 face 자기 굵기(plain 호출)다(`layout_key` `font.rs:154`). `Laid`(`width`, `glyphs`, `shaped`, `used`)는 글리프의 `LayoutGlyph` 와 `line_y` 를 함께 저장하므로, 레이아웃은 논리 px 로 한 번만 셰이핑하고 장치 배율마다 `CacheKey` 를 다시 만든다. 한도: 레이아웃 캐시 512줄(`LAYOUT_CACHE_LIMIT` `font.rs:223`), 글리프 구간 캐시 4096개(`RUN_CACHE_LIMIT` `font.rs:227`). 22줄 메뉴의 (레이아웃, 구간) 항목 수는 1x (22, 328), 2x (22, 326), 3x (22, 325) 로 배율에 따라 늘지 않고 항목당 run 수만 는다(`an_enlarged_menu_fits_both_caches_as_the_small_one_does` 가 고정). `Laid` 가 `LayoutGlyph` 를 더 들어 레이아웃 캐시 메모리가 늘었다(512줄 x 약 20글리프 x 약 80B, 1 MB 이하 추정, 측정은 안 함).
+- 래스터: 기본 경로는 `SwashCache::get_image_uncached` 로 굽고 `lit_pixels(image, base)`(`font.rs:723`)로 켜진 화소 `(dx, dy, rgb, 커버리지)` 목록을 만든다. cosmic-text 0.19 `with_pixels` 와 같은 의미다(Mask: 계수를 base rgb 로 잉크, Color: rgba 그대로, SubpixelMask: 그리지 않음). 같은 색·같은 커버리지의 가로 이웃을 합친 구간(`merge_runs`)은 `(글리프 CacheKey, 색)` 으로 캐시하고(`GlyphPainter::paint` `font.rs:678-`), 픽셀 사본은 `evict_runs`(`font.rs:667`)로 한도를 관리하는 runs 캐시 하나만 둔다. swash 이미지 캐시(`SwashCache.image_cache`, 한도 없는 `HashMap`)는 쓰지 않는다(리뷰 font-1: 창을 끄는 동안 프레임마다 새 em 의 글리프가 남아 1,000개 크기에 이미지 279개가 271,503개, RSS 14.6 MB 가 139.2 MB 로 늘었다. `with_pixels` 로 임시 되돌리면 새 테스트 `a_window_drag_rasterizes_past_the_rasterizers_unbounded_image_cache` 가 '48 drag frames leave 13480 rasterized images beside 3443 glyph runs' 로 실패하고, 수정본은 이미지 캐시 0개·runs ≤ `RUN_CACHE_LIMIT` 로 통과). `lit_pixels` 와 `with_pixels` 의 동치는 골든 불변과 `primitives.rs` 의 `the_glyph_atlas_draws_the_same_pixels_as_the_fill_path` 가 고정한다.
+- 그리기: `device_text_scale(r)`(`font.rs:175`)가 `Some(s)` 이면 새 경로, `None` 이면 이전 경로다.
+  - 새 경로: em 은 `px_for(scale) x s`(반올림 안 함), 글리프 `g.physical((0, trunc(line_y) x s), s)`, 원점 `round(x x sx)`, `round(y x sy)`, x 서브픽셀 빈은 장치 좌표 기준이다. 구간마다 `r.fill_rect_device(...)` 로 장치 화소 사각형을 낸다. baseline 을 `trunc(line_y) x s` 로 둔 이유: 이전 확대 경로와 같은 세로 위치를 지키려는 것이다(`line_y x s` 로 두면 1.5배에서 약 1.5 장치 화소 내려가는 것을 실측했다). 그래서 물리 해상도에서 쓸 수 있는 1/s 화소 단위 baseline 정밀도는 쓰지 않는다.
+  - 이전 경로(배율 1 또는 비균등): 원점 `(x.round(), y.round())`, 구간마다 `r.fill_rect(Rect(논리 좌표))` 뒤 `ScaledRenderer` 가 배율을 곱한다. 배율 1 에서 화소 단위로 이전과 같다.
+- 배율 판정 `device_text_scale`(`font.rs:157-186`): `(sx, sy) == (1, 1)` 이면 `None`. 그 외에 각 변이 따로 반올림될 때 생길 수 있는 오차 `ROUNDING_ERROR_PX(0.5) x (1 + 긴 변/짧은 변)`(16:9 에서 약 1.39 화소) 이내이고 유한·양수일 때 `|sx - sy| x 긴 변` 이 거기 들면 균등으로 보고 `Some(min(sx, sy))` 를 돌려준다. letterbox 끔의 16:9 가 아닌 창은 `None` 이라 이전처럼 늘어난 글자다(결정 6A). 레터박스 뷰포트의 최대 오차는 0.889 화소다(리뷰 font-2: 처음 구현의 여유 1.0 화소는 `LogicalSize` 를 가로세로 따로 반올림한 16:9 창, 예 1280x720 의 x1.33 인 1702x958 을 비균등으로 오판했다).
+- 트레이트: `Renderer::device_scale(&self) -> (f32, f32)`(기본 (1,1), `lib.rs:442`)와 `fill_rect_device(&mut self, rect, color)`(기본은 `device_scale` 로 나눠 `fill_rect`, `lib.rs:454`). `ScaledRenderer`(`lib.rs:593,598`)는 `device_scale = inner x 자기 배율`, `fill_rect_device` 는 곱 없이 inner 로 전달한다. `RegionRenderer`(`region.rs:109,113`)는 inner 의 배율을 그대로, `fill_rect_device` 는 영역 원점 x 배율을 반올림해 더해 전달한다(정수 격자 유지). 앱 `Canvas`(`apps/rbms-player/src/stage/canvas.rs:414,418`)는 `scale_between(UI_SIZE, native_size)` 를 보고하고 `fill_rect_device` 를 `native().fill_rect` 로 보낸다. `NativeCanvas`, `HeadlessCanvas`, `Gpu` 는 기본값이다. `OffsetRenderer`(스킨 OFFSET_ALL 늘이기, `skin_render/whole.rs`)는 일부러 전달하지 않고 기본 (1,1) 을 유지한다: 전달하면 스탠드인 글자·노트 라벨이 OFFSET_ALL 늘이기에서 화소가 바뀌어 "외부 Lua 스킨 화소 불변" 비목표를 어긴다(`text_drawn_through_a_stretch_is_the_unstretched_text_enlarged`). 새 렌더러 래퍼가 `device_scale` 을 전달하지 않으면 그 아래는 이전 경로로 그려지고 그것도 항상 올바른 결과다.
 - 폭 계산: `text_width`, `fit_text`, 가운데·오른쪽 정렬은 같은 논리 px 의 레이아웃 폭을 쓴다. 창 크기와 무관한 값이라 레이아웃이 안정적이다.
 
 내장 화면의 크기 상수(`apps/rbms-player/src/stage/preview_menu.rs:41-184`)와 px 환산(Inter 대문자 높이 = 0.7275 em, OS/2 capHeight 1490/2048):
@@ -89,7 +92,7 @@
 - 스킨 화면: `SkinScreen::draw_native` 가 `canvas.native()`(뷰포트 크기의 네이티브 렌더러)에 그린다(`skin_screen.rs:425`). 문서 좌표 -> 화면 좌표는 `SkinViewport` 가 한 번에 곱한다. 글자는 이 단계 뒤의 물리 px 로 구워진다.
 - 내장 화면: `Canvas` 가 UI_SIZE 를 보고하고(`canvas.rs:396`), 그린 좌표는 위의 `ScaledRenderer` 가 곱한다. 포인터 위치는 반대 방향으로 `position_in_viewport` 가 1280x720 로 되돌린다(`lib.rs:1475`).
 - macOS 번들은 `NSHighResolutionCapable = true`(`scripts/macos-app.sh:62`)라 저해상도 확대 모드가 아니다.
-- 비균등 배율(letterbox 끔, 16:9 가 아닌 창)에서는 가로·세로 배율이 다르다. 내장 글자를 물리 래스터로 바꿀 때는 이 경우를 따로 둬야 한다(9절 O1 의 규칙).
+- 비균등 배율(letterbox 끔, 16:9 가 아닌 창)에서는 가로·세로 배율이 다르다. 구현은 이 경우 이전 경로(늘어난 글자)를 그대로 쓴다. 균등 판정의 여유는 각 변을 따로 반올림한 오차까지다(2.1절). 같은 16:9 라도 `LogicalSize` 를 가로세로 따로 반올림한 창은 균등으로 판정된다.
 
 ## 4. GPU 쪽 사실 (`apps/rbms-player/src/gpu/`)
 
@@ -107,7 +110,7 @@
 
 결과: 글자의 가장자리 값은 "부호화된 화소값 그대로의 선형 보간"이다(감마 보정 없음). 흰 글자의 커버리지 0.5 화소는 어두운 바탕 위에서 부호화 값 0.5, 물리적으로 맞는 선형광 혼합이었다면 약 0.735 다. 밝은 글자·어두운 배경 UI 에서 가장자리가 약 32% 어둡게 나온다(가는 글씨로 보이는 이유의 하나).
 
-`CpuCanvas`(헤드리스 캡처, 테스트)는 `fill_rect` 를 `floor`/`ceil` 로 바깥쪽 맞춤한다(`cpu.rs:424-427`). GPU 의 화소 중심 규칙과 다르다. 정수 배율에서는 같지만 1.5배 같은 비정수 배율에서는 헤드리스 이미지가 GPU 와 다르다(이 사실은 `stage/capture.rs` 의 `GPU_EDGE_PIXELS_ONE_IN` 주석에도 적혀 있다). 텍스처 쿼드는 양쪽 다 화소 중심에서 샘플해 일치한다(`cpu.rs:248` `paint_quad`).
+`CpuCanvas`(헤드리스 캡처, 테스트)는 `fill_rect` 를 `floor`/`ceil` 로 바깥쪽 맞춤한다(`cpu.rs:424-427`). GPU 의 화소 중심 규칙과 다르다. 정수 배율에서는 같지만 1.5배 같은 비정수 배율에서는 헤드리스 이미지가 GPU 와 다르다(이 사실은 `stage/capture.rs` 의 `GPU_EDGE_PIXELS_ONE_IN` 주석에도 적혀 있다). 구현 뒤 내장 글자는 정수 장치 사각형(`fill_rect_device`)이라 CPU·GPU 규칙이 일치한다. 강제 GPU 일치 테스트(`RBMS_REQUIRE_GPU=1`, 1280x720 과 1920x1080)가 허용치 안에서 통과했다. 텍스처 쿼드는 양쪽 다 화소 중심에서 샘플해 일치한다(`cpu.rs:248` `paint_quad`).
 
 ## 5. 래스터 세부
 
@@ -119,11 +122,11 @@
 | 안티에일리어싱 | 그레이스케일 커버리지(`Format::Alpha`), LCD 서브픽셀 안 씀 | 같음 |
 | 감마 | 없음. 커버리지를 알파로 쓰고 부호화 공간에서 섞음 | 같음(`over` 도 부호화 값 산술) |
 | 알파 | straight alpha, 색은 `Color.a * 커버리지 / 255` | 흰 잉크 + `tint`, 흰 바탕 알파 0 이라 가장자리에 어두운 테두리가 끼지 않음 |
-| 가변 폰트 축 | 요청한 굵기만 `wght` 로 셰이핑과 래스터에 적용(UI 는 항상 400). `opsz` 는 기본 14 고정 | 같음(굵기 400) |
+| 가변 폰트 축 | 요청한 굵기만 `wght` 로 셰이핑과 래스터에 적용한다. UI 는 `TextStyle` 로 굵기를 고르고 plain 호출은 face 자기 굵기(번들 Inter 는 400)다. `opsz` 는 기본 14 고정 | 같음(굵기 400, 스킨 `FontDef` 에 굵기 칸이 없다. 굵은 글씨는 정적 Bold TTF 를 별도 글꼴 id 로) |
 
 힌팅이 실효 없는 이유: 번들 Inter 는 Inter 4.001 **가변 폰트**(`fvar`: `opsz` 14~32, `wght` 100~900)이고 `fpgm` 이 없으며 `maxp.maxSizeOfInstructions = 0`, `prep` 은 7바이트(`SCANCTRL`, `SCANTYPE` 만)다. swash 0.2.10 은 skrifa 0.44 의 `HintingInstance` 를 `HintingMode::Smooth{lcd_subpixel: Some(Horizontal), preserve_linear_metrics: true}` 로 만든다(`swash-0.2.10/src/scale/hinting_cache.rs`). skrifa 는 `prep` 이 비어 있지 않으면 인터프리터를 고르는데(`skrifa-0.44.0/src/outline/glyf/mod.rs:115` `prefer_interpreter`), 글리프에 명령이 없으니 윤곽이 그대로 나온다. 즉 정수 격자 맞춤 없이 해석적 커버리지로 구워진다. 이 판단은 폰트 테이블과 소스 읽기에 근거하고, 힌팅 켬/끔의 화소 비교는 하지 않았다.
 
-가변 폰트의 굵은 서체: 번들 Inter 가 가변이라 같은 파일로 굵은 서체를 얻을 수 있다. cosmic-text 0.19 는 셰이핑에서도(`src/font/mod.rs:143` 가 `wght` 로 harfrust 위치를 만든다), 폰트 고르기에서도(`src/font/system.rs:41` `variable_weight_match`), 래스터에서도(`src/swash.rs`) `wght` 를 쓴다. 실측(프로브 `probe/src/bin/weight.rs`, 번들 Inter 하나만 든 데이터베이스, `HI-SPEED FIX` 24px): 굵기 400 -> 500 -> 600 -> 700 -> 800 에서 줄 폭 155.95 -> 156.57 -> 157.27 -> 157.88 -> 158.66px, 잉크 합(커버리지 합) 203,003 -> 239,126 -> 275,537 -> 310,178 -> 352,427(700 에서 +53%). 폭이 함께 자라므로 글자가 붙지 않는다. 지금 막혀 있는 곳은 엔진 API 다: `Face.weight` 는 있으나 UI 호출(`draw_text`)에는 굵기 인자가 없고 레이아웃 캐시 키(`family -> px -> text`, `font.rs:163`)에 굵기가 없다. `opsz` 축은 설정하지 않아 기본 14 로 고정이다.
+가변 폰트의 굵은 서체: 번들 Inter 가 가변이라 같은 파일로 굵은 서체를 얻을 수 있다. cosmic-text 0.19 는 셰이핑에서도(`src/font/mod.rs:143` 가 `wght` 로 harfrust 위치를 만든다), 폰트 고르기에서도(`src/font/system.rs:41` `variable_weight_match`), 래스터에서도(`src/swash.rs`) `wght` 를 쓴다. 실측(프로브 `probe/src/bin/weight.rs`, 번들 Inter 하나만 든 데이터베이스, `HI-SPEED FIX` 24px): 굵기 400 -> 500 -> 600 -> 700 -> 800 에서 줄 폭 155.95 -> 156.57 -> 157.27 -> 157.88 -> 158.66px, 잉크 합(커버리지 합) 203,003 -> 239,126 -> 275,537 -> 310,178 -> 352,427(700 에서 +53%). 폭이 함께 자라므로 글자가 붙지 않는다. 조사 때 막혀 있던 엔진 API 는 구현됐다(2.1절): `TextStyle`/`*_styled` 가 굵기를 받고 레이아웃 캐시 키가 `family -> (px, weight) -> text` 다. `opsz` 축은 설정하지 않아 기본 14로 고정이다. 가변 축이 없는 사용자 글꼴(`--font`)에 굵기를 요청하면 fontdb 가 가장 가까운 컷을 골라 굵어지지 않을 수 있다(측정 안 함). 시스템 대체 글꼴(CJK)의 굵기 동작도 측정하지 않았다.
 
 시스템 폰트: `TextContext::new()` 는 설치된 폰트를 스캔해 번들 Inter 가 없는 글자(CJK, 태국어, 아랍어 등)를 대체한다. 한자 매칭 로케일은 `ja` 로 고정(중국어 로케일 호스트만 예외, `font.rs:44-55`). 결정적 테스트는 `use_embedded_fonts_only()`(`font.rs:643`)로 번들 폰트만 쓴다.
 
@@ -133,10 +136,13 @@
 | --- | --- | --- |
 | `assets/fonts/Inter-Regular.ttf` | 876,576 바이트, sha1 `97d4f3722d62c6cc5340bf6220ada3d64ca367b1` | Inter 4.001 가변, 2048 upem, glyph 2,933, 라이선스 SIL OFL 1.1(`assets/fonts/Inter-OFL.txt` 4,377 바이트) |
 | `assets/skins/rbms-default/font/Inter-Regular.ttf` | 같은 파일(바이트 동일, `cmp` 확인) | 기본 스킨 팩이 복사본을 들고 있다. 바이너리 안에서는 `BUNDLED_FONT` 정적 하나를 공유한다(`font.rs:25`, `apps/rbms-player/build.rs:50`), 설치 때 팩 폴더에 써 낸다 |
+| `assets/skins/rbms-default/font/Inter-Bold.ttf` | 420,428 바이트 | Inter 4.1 공식 zip(sha256 `9883fdd4...`)의 `extras/ttf/Inter-Bold.ttf`, 정적, 무수정(name: family Inter, Bold, OS/2 weight 700). `theme.font.bold = { id = "inter-bold", path = "font/Inter-Bold.ttf" }`(`theme.lua:255`). 라이선스는 같은 저자·같은 OFL 1.1(연도 표기만 2020/2016 차이)이라 `Inter-OFL.txt` 가 덮는다고 판단하고 THIRD-PARTY-NOTICES 3절에 Bold 문장을 더했다 |
 
 - 바이너리에는 `include_bytes!` 로 876KB 가 들어간다. 스킨의 `inter` 글꼴과 내장 UI 글꼴은 같은 바이트라 `load_font` 가 같은 이름으로 알아본다(`font.rs:411`, 테스트 `block_tests.rs:308`).
+- 글꼴 이름 규칙(리뷰 font-3): `TextContext::load_font` 가 face 에 주는 이름에서 가족 이름(`Inter`)은 그 가족의 일반 cut(굵기 400, 정자, 보통 폭)만 받고 다른 cut 은 `<가족> <굵기>`(예 `Inter 700`)다(`name_for` `font.rs:316-326`). 처음에는 먼저 올라온 face 가 가족 이름을 가졌고 기본 스킨의 글꼴 id 알파벳 순서(`inter` < `inter-bold`)가 Regular 를 지켜 주었을 뿐이라, 순서가 뒤집히면 내장 UI 전체가 굵어질 수 있었다. 테스트 `the_built_in_screens_stay_regular_whichever_cut_of_their_family_a_skin_loads_first`(기본 스킨의 실제 `Inter-Bold.ttf` 로 [없음]/[Regular, Bold]/[Bold, Regular]/[Bold 만] 네 경우의 폭과 화소가 같음).
+
 - 사용자 글꼴(`Config.display.font_path`, SETTINGS 의 DISPLAY 묶음 FONT 행 / `--font`)은 내장 UI 의 우선 family 만 바꾼다(`set_ui_family`). 스킨 글자는 각 스킨의 글꼴 id 를 따른다.
-- 굵은 서체 전용 파일은 번들에 없지만 가변 축으로 만들 수 있다(5절 실측). 다국어 대체는 호스트 폰트에 의존한다.
+- 내장 UI 의 굵은 서체는 번들 가변 Inter 의 `wght` 축으로 낸다(5절 실측, 새 에셋 없음). 스킨 글자용으로는 기본 스킨 팩에 정적 `Inter-Bold.ttf` 를 더했다(아래 표). 다국어 대체는 호스트 폰트에 의존한다.
 - 크기 설정은 UI 쪽은 `px_for(scale)` 정수, 스킨 쪽은 문서의 `size`(design)와 목적지 높이(em)다. 코드에서 정하는 별도의 "글자 품질" 설정은 없다(`DisplayOptions` 에 글자 관련은 `font_path` 뿐).
 
 ## 7. 실증
@@ -183,6 +189,21 @@
 - 아틀라스 경로(글리프당 쿼드 1개, 64B)는 이 화면에서 329개, 약 21KB 다. 물리 래스터 직접(2배)의 3% 이하다.
 - 플레이 화면의 비용 기준(`docs/reference/frame-cost.md`: 플레이 단계 갱신+그리기 p99 1ms 미만, 프레임 할당 256KB 미만)에는 영향이 없다. 기본 스킨으로 플레이할 때 글자는 스킨 텍스트(줄 텍스처 캐시)이고, 내장 글자가 플레이 중에 나오는 곳은 토스트, 디버그, ANALYSIS 오버레이(`stage/play/mod.rs:1278`)와, 스킨 문서가 없을 때의 내장 HUD 다. 결과 화면에서는 IR 줄(`stage/result.rs:1110,1251`)이 내장 글자다. 손대는 경로(A)는 캐시 적중 때 프레임당 할당이 없다(`pixels` 벡터는 캐시 미스에서만).
 
+### 7.4 구현 뒤 측정과 검증 (2026-10-22)
+
+| 항목 | 결과 |
+| --- | --- |
+| 22줄 메뉴(굵기 행 포함 화면, 릴리스, 호출만 세는 `Sink`)의 사각형 수와 캐시 적중 프레임 CPU 시간(W1a) | 1x 22,275개 / 45us, 1.25x 30,088 / 53us, 1.5x 37,978 / 56us, 2x 54,455 / 61us, 3x 82,305 / 72us. 7.3절의 12,081개 화면과 화면이 달라 수치를 직접 비교하지 않는다 |
+| 이전/새 경로 비교(scratch 프로브, 릴리스) | 1x 는 바이트 동일, 1.5x·2x 는 다르다. 2배·3배 확대 크롭 PNG 에서 이전은 2x2 계단, 새는 매끄러운 획이고 1.5배에서 이전은 1·2화소 격자, 새는 일정한 획(눈으로 확인). 굵기 400/500/600/700 차이도 눈으로 확인 |
+| `cargo test -p rbms-render --locked` | 875 통과 0 실패(골든 서명 10개 불변). 새 테스트 `primitives` 6, `font` 3, `whole` 1 |
+| `cargo test -p rbms-player --locked --lib`, 강제 GPU 일치 | 2,615 통과(W1a 시점). `RBMS_REQUIRE_GPU=1` 일치 테스트 1920x1080 통과(어댑터 있음, 건너뛰지 않음) |
+| 수리 font-1 (이미지 캐시) | 임시 되돌림으로 새 테스트 실패 확인 후 수정본 통과. 창을 끄는 동안 새 em 의 글리프를 굽는 CPU 비용(프레임당 수백 us~1 ms)은 그대로고 메모리 증가만 막았다. 같은 크기가 반복되는 동안 runs 캐시가 재사용된다. runs 캐시가 4096개를 넘어 밀려난 글리프는 이제 다시 굽는다(22행 메뉴는 4x 에서도 1,024개 이하) |
+| 수리 font-2 (균등 판정) | 임시 복원으로 `(1306, 734)`(x1.02)와 `(1702, 958)` 이 비균등으로 오판되어 두 테스트 실패 확인 후 통과. 대표 뷰포트 1366x768, 1600x900, 1702x958, 2560x1440, 2880x1620, 3456x1944, x1.01~x3.00 의 1% 단위 200개 반올림 창이 모두 균등, 1920x720·2560x720·1280x1080·1920x1090·1920x1081 은 `None` |
+| 수리 font-3 (이름 규칙) | 임시로 옛 `name_for` 로 되돌리면 폭이 `230.20752 != 226.6919` 로 실패, 수정본 통과 |
+| 수리 뒤 `cargo test -p rbms-render --locked` | lib 785 + 골든 등 전부 통과, 골든 파일 변경 없음. 마지막 통합 게이트 Rust 6,269 통과·0 실패 |
+
+실기(Retina 실제 창, Windows 125/150%, 전체 화면 비정수 배율)에서 눈으로 본 것은 없다. 근거는 헤드리스 이미지와 강제 GPU 일치 테스트(1920x1080)뿐이다.
+
 ## 8. 저화질 느낌의 원인 후보 순위
 
 | 순위 | 원인 | 확실성 | 근거 | 영향 범위 |
@@ -196,9 +217,13 @@
 
 사용자가 보고 있는 화면이 Retina 기본 창일 가능성이 가장 높고(이 저장소의 맥 번들과 해상도 행 기본값), 그 경우 1위가 단독으로 "저화질"을 설명한다. 확인하지 못한 것: 사용자 화면의 실제 배율, 실제 GPU 캡처의 2배 이미지(2배는 CPU 바이트 동일성으로 대체), Windows 125/150% 실측.
 
+구현 뒤(2026-10-22): 순위 1(내장 UI 논리 래스터 후 확대)과 4(비정수 배율의 화소 격자)는 해소됐다. 2는 굵기 선택이 생겼고(5절) 소형·힌팅 없음은 그대로, 3(감마 공간 블렌딩)과 5(스킨 글자의 정수 스냅, `SHRINK` 선형 축소)는 건드리지 않았다.
+
 ## 9. 개선안
 
-### O1. 내장 UI 글자를 물리 픽셀로 래스터 (1단계, 권장)
+### O1. 내장 UI 글자를 물리 픽셀로 래스터 (1단계, 권장) — 구현됨(`f03beb3`, 수리 `f52e170`)
+
+구현 결과는 2.1절이다. 아래는 조사 당시 설계이고 구현과 다른 곳: (1) `OffsetRenderer` 는 원점 이동을 더해 전달하지 않고 기본 (1,1) 을 유지한다. (2) 균등 판정은 `|sx - sy| < eps` 가 아니라 각 변을 따로 반올림한 오차 `0.5 x (1 + 긴 변/짧은 변)` 이내이고 배율은 `min(sx, sy)` 다. (3) baseline 은 `trunc(line_y) x s` 다. (4) `Laid` 가 `LayoutGlyph` 와 `line_y` 를 함께 저장한다. (5) 래스터는 swash 이미지 캐시를 쓰지 않는다. (6) 레이아웃 캐시 키에 굵기가 들어갔다(O4). 캐시 한도는 바꾸지 않았다(22줄 메뉴의 항목 수는 배율에 따라 늘지 않는다).
 
 내용: 렌더러 트레이트가 "내 한 단위가 장치 화소 몇 개인가"를 알려 주고, 글자 엔진이 논리 글자 크기에 그 배율을 곱한 em 으로 구워 장치 화소 격자에 맞춘 사각형을 낸다.
 
@@ -231,7 +256,9 @@
 - 외부 스킨: 스킨 경로에 적용하면 레퍼런스(libGDX 의 부호화 공간 혼합)와 화소가 달라진다. UI 경로에만 적용하면 영향 없음.
 - 효과가 7.2 모의에서 미세해서 O1 이후 실기로 판단하는 것을 권장.
 
-### O4. 굵은 서체 선택 (선택, IIDX 식 패널과 관련)
+### O4. 굵은 서체 선택 (선택, IIDX 식 패널과 관련) — 구현됨(`f03beb3`)
+
+구현: `FontWeight`, `TextStyle`, `*_styled`, 레이아웃 캐시 키 `family -> (px, weight) -> text`(2.1절). 글리프 구간 캐시는 `CacheKey` 가 `font_weight` 와 em 비트를 이미 갖고 있어 그대로 뒀다. 새 패널은 `TextStyle` 로 굵기를 고르고 정렬·`fit` 도 같은 style 로 잰다. 스킨 글자(기본 스킨 선곡 옵션 패널)는 `FontDef` 에 굵기 칸이 없어 이 API 로 굵어지지 않는다. 대신 정적 `Inter-Bold.ttf` 를 팩 `font/` 에 더하는 방법(12절)을 썼다.
 
 - 필요한 이유: 참고 이미지(IIDX 옵션 화면)의 라벨과 값은 굵은 서체다. 지금 UI 는 Regular 400 만 그린다.
 - 새 에셋이 필요 없다: 번들 Inter 는 가변이고 cosmic-text 0.19 가 셰이핑과 래스터에서 `wght` 를 쓴다(5절 실측: 700 에서 폭 +1.2%, 잉크 +53%).
@@ -281,11 +308,11 @@
 
 ## 12. 문서와 코드의 차이
 
-- `docs/architecture.md:76` 은 "텍스트는 cosmic-text 로 셰이핑하고 글리프 아틀라스로 래스터한다", `docs/crates.md:239` 는 "glyph_atlas: GPU glyph atlas for shaped text" 라고 쓴다. 코드의 앱 경로는 `fill_rect` 구간이고 아틀라스는 테스트에서만 부른다(2.4). 코드가 맞다. 구현을 끝낸 뒤 두 문서를 현재 상태에 맞춰야 한다.
+- `docs/architecture.md:76` 은 "텍스트는 cosmic-text 로 셰이핑하고 글리프 아틀라스로 래스터한다", `docs/crates.md:239` 는 "glyph_atlas: GPU glyph atlas for shaped text" 라고 쓴다. 코드의 앱 경로는 `fill_rect` 구간이고 아틀라스는 테스트에서만 부른다(2.4). 코드가 맞다. 구현 뒤 내장 UI 경로는 '장치 배율 em 으로 구운 켜진 화소 구간을 `fill_rect_device` 로 낸다' 로 더 달라졌고, 두 문서는 아직 고치지 않았다(이 문서 소유 밖).
 - `docs/reference/ui-design.md:12` 는 "scale 단위 = 14px x scale" 이라고 쓰지만 코드는 `px_for(scale) = round(scale*8.5).max(8)`(`font.rs:61`)이다. `docs/font-cjk-support.md` 머리말은 코드와 일치한다.
 - `docs/font-cjk-support.md` 와 `docs/reference/skin-compat/00-synthesis.md` 가 말하는 "물리 픽셀 래스터"는 스킨 TTF 에 해당하고 내장 UI 에는 해당하지 않는다. 두 구현이 공존한다는 점이 문서에 명시돼 있지 않다.
 - 종합 검토 정정(2026-10-22): 이 문서 초안의 요약은 "새 A/W 옵션 패널도 내장 UI 경로" 라고 읽혔으나, 선곡 옵션 패널은 스킨이 그리는 선곡에만 있고(`apps/rbms-player/src/stage/select/mod.rs:219`, `PanelState`) 그림은 기본 스킨 `lua/select/sheet.lua` 가 스킨 TTF 경로 B(물리 px 래스터)로 그린다. 패널의 글자 품질은 O1 과 무관하고, 가독성은 `theme.type` 크기와 굵기가 정한다.
-- 굵은 서체(O4)의 범위: O4 는 내장 UI 호출에만 굵기를 준다. 스킨 글자는 `FontDef`(`crates/rbms-skin/src/model.rs:345-351`)에 굵기 칸이 없어 O4 로 굵어지지 않는다. 스킨 패널을 굵게 하려면 (a) 정적 굵은 TTF(Inter Bold, OFL)를 스킨 팩 `font/` 에 더해 두 번째 글꼴 id 로 선언하거나(엔진 변경 없음: `load_font` 가 파일의 `info.weight` 로 별도 face 를 등록, `crates/rbms-render/src/font.rs:410-427`), (b) `FontDef` 에 R-BMS 확장 굵기 키를 더해야 한다(원본은 모르는 키를 무시).
+- 굵은 서체(O4)의 범위: O4 는 내장 UI 호출에만 굵기를 준다. 스킨 글자는 `FontDef`(`crates/rbms-skin/src/model.rs:345-351`)에 굵기 칸이 없어 O4 로 굵어지지 않는다. 스킨 패널을 굵게 하려면 (a) 정적 굵은 TTF(Inter Bold, OFL)를 스킨 팩 `font/` 에 더해 두 번째 글꼴 id 로 선언하거나(엔진 변경 없음: `load_font` 가 파일의 `info.weight` 로 별도 face 를 등록), (b) `FontDef` 에 R-BMS 확장 굵기 키를 더해야 한다(원본은 모르는 키를 무시). 구현은 (a) 를 택했다(`font/Inter-Bold.ttf`, 6절). 임시 테스트로 `TextContext::load_font` 가 Regular 를 `Inter`, Bold 를 `Inter 700` 별도 face 로 등록하고 폭이 다름(168.95 vs 171.03)을 확인한 뒤 삭제했다. Bold 가 가족 이름을 받지 않는다는 것은 `font.rs` 의 `the_built_in_screens_stay_regular_...` 가 확인한다.
 
 ## 13. 확인하지 못한 것과 한계
 
@@ -296,6 +323,16 @@
 - 프로브의 시간은 호출만 세는 렌더러 기준이라 GPU 비용을 포함하지 않는다. 인스턴스 바이트는 구조체 크기에서 계산한 값이다.
 - 스킨 글자의 실제 외부 스킨(ModernChic) 화면은 이 조사에서 그리지 않았다(글꼴 목록만 확인).
 
+구현 뒤 추가(2026-10-22):
+
+- 실기 확인 없음: Retina 실제 창, Windows 125/150%, 전체 화면 비정수 배율(7.4절).
+- 창 크기를 끄는 동안 배율마다 새 em 의 글리프를 다시 굽는 CPU 비용(프레임당 수백 us~1 ms)은 그대로다. 격자 양자화는 글리프 크기가 최대 약 5% 틀어져 화소가 바뀌어 택하지 않았다.
+- 아틀라스 경로(`glyph_atlas.rs` 의 `glyph_bitmap` 이 `with_pixels` 사용)는 장치 배율 글리프를 굽지 않고 앱에서 쓰이지 않아 한도 없는 증가는 재현되지 않으나 같은 이중 보관이 남아 있다. 필요해지면 `lit_pixels` 로 옮길 후보다.
+- `device_text_scale` 의 여유는 렌더러 자신의 `size()` 모양(긴 변/짧은 변)에 의존한다. `Canvas` 와 `ScaledRenderer` 는 항상 1280x720 이라 16:9 다. 극단적으로 가늘고 긴 `RegionRenderer` 위 텍스트는 여유가 커져 균등으로 느슨하게 판정될 수 있다(그런 호출은 없다).
+- 스킨 가족에 Regular 가 없고 Bold/Medium 만 있는 글꼴은 이제 `<가족> <굵기>` 이름을 받는다. 이름은 `load_font` 반환값으로만 쓰여 동작은 같으나 시작 로그 `font: path (family)` 의 이름이 바뀔 수 있다.
+- 굵은 글꼴 파일 420 KB 가 내장 팩에 더해졌다(팩 10 MB 예산 안).
+- 결과 화면 `PREVIOUS CLEAR` 글자색을 램프 색으로 바꾼 작은 시각 변화는 `clear-lamps.md` 4.2절.
+
 ## 14. 결정 지점
 
 1. **적용 범위**
@@ -303,34 +340,47 @@
    - 메인 추천: A.
    - 이유: 저화질의 확정 원인(1위)을 가장 작은 변경으로 없앤다. B, C 는 외부 스킨 레퍼런스 정합과 골든 재녹화 비용이 든다.
    - 영향 범위: A 는 `rbms-render` 트레이트·`font.rs`, `canvas.rs`. 스킨 팩과 외부 스킨은 불변.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 내장 UI 글자만(트레이트 수준이라 내장 화면 전부 자동 적용, 스킨 글자는 손대지 않음). 단 `OffsetRenderer` 는 일부러 전달하지 않아 외부 스킨의 스탠드인 글자·노트 라벨 화소가 바뀌지 않는다. ADR [UI 글자 장치 화소](../acknowledge/2026-10-22-adr-ui-text-device-pixels.md).
 2. **구현 방식**
    - 선택지: A. 1단계로 기존 구간 경로를 물리 해상도로(O1), 아틀라스는 나중 / B. 처음부터 아틀라스(O1+O2) / C. 배율 1 경로만 유지하고 레거시 확대 유지(이번에 하지 않음).
    - 메인 추천: A.
    - 이유: 프레임 끝 훅과 렌더러별 바인딩 수명 관리가 필요한 B 는 변경이 크다. A 는 새 텍스처 수명이 없고 배율 1 에서 불변이라 위험이 작다. 7.3 의 비용으로 3배 배율에서도 CPU 제출은 50us 이내다.
    - 영향 범위: A 는 `font.rs`, `lib.rs`, `region.rs`, `whole.rs`, `canvas.rs`. B 는 `gpu/mod.rs` 프레임 끝 훅과 `glyph_atlas.rs` 가 더해진다.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 기존 구간 경로를 물리 해상도로(O1), 아틀라스는 나중.
 3. **글자 크기 상향과 새 패널의 글자 기준**
    - 선택지: A. 새 옵션 패널부터 논리 12px 이상(scale 1.4+), 제목 20px 이상 / B. 내장 화면 전부 일괄 상향 / C. 현행 유지.
    - 메인 추천: A.
    - 이유: 일괄 상향은 레이아웃과 골든을 다 건드린다. 새 패널은 어차피 새로 짠다.
    - 영향 범위: A 는 새 패널의 상수, B 는 `preview_menu.rs`, `settings_view.rs` 등의 상수와 골든.
    - 종합 검토 정정: 선곡 옵션 패널은 내장 화면이 아니라 기본 스킨 Lua 가 1920x1080 문서 좌표로 그린다(8절 1위 행). 그래서 패널의 기준은 "논리 px" 가 아니라 `theme.type` 크기다. 1280x720 비 HiDPI 창에서 `caption` 18 은 12px, `label` 24 는 16px 이 되므로(2.2절) 패널의 값 글자는 `label`(24) 이상, 보조 글자는 `caption`(18)을 최소로 두는 것이 이 항목의 A 에 해당한다.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 새 옵션 패널부터 값 글자는 `label`(24) 이상, 보조는 `caption`(18) 이상으로 새로 짰다. 내장 화면의 일괄 상향은 하지 않았다.
 4. **굵은 서체**
    - 선택지: A. 번들 Inter 의 가변 굵기 축으로 굵은 서체를 고르는 엔진 API 를 추가(새 에셋 없음, O4) / B. 정적 Bold TTF 를 따로 번들(용량 증가) / C. Regular 만 쓴다.
    - 메인 추천: A(새 패널의 값·헤더 용도. O1 이후 육안 비교 뒤 굵기 값을 정해도 된다).
    - 이유: 같은 파일로 굵기 400~800 이 셰이핑까지 정상 동작함을 실측했고, 새 에셋·빌드 스크립트 변경이 없다.
    - 영향 범위: `font.rs` 캐시 키와 API 만. 기본 스킨 팩과 외부 스킨은 불변.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A(내장 UI 는 가변 굵기 축 API, `TextStyle`)와 함께 스킨 글자용으로 B(정적 Bold TTF 번들, 420 KB)도 했다. 스킨 글자는 `FontDef` 에 굵기 칸이 없어 A 로는 굵어지지 않기 때문이다(12절).
 5. **감마·대비 보정(O3) 적용과 설정 노출**
    - 선택지: A. 이번에는 하지 않고 O1 이후 실기로 판단 / B. UI 경로에 고정 상수로 적용 / C. DISPLAY 에 행 노출.
    - 메인 추천: A.
    - 이유: 모의에서 효과가 미세하고 배율 1 화소가 바뀌어 골든 10개를 재생성해야 한다. 노출은 사용자가 고를 이유가 없다.
    - 영향 범위: B, C 는 `font.rs`, 골든 10개, (C) `rbms-config` 와 설정 화면.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 하지 않았다.
 6. **비균등 배율(letterbox 끔 + 비 16:9 창)의 글자**
    - 선택지: A. 레거시 확대(지금과 같은 모양) 유지 / B. 세로 배율 기준으로 균등 래스터 후 가로 위치만 곱함.
    - 메인 추천: A.
    - 이유: 글자가 가로로 늘어난 모양이 레터박스 끔의 원래 의미이고, B 는 간격 계산이 복잡하다.
    - 영향 범위: `font.rs` 의 분기 하나.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 레거시 확대 유지. 균등 판정의 여유는 각 변을 따로 반올림한 오차까지다.
 7. **글자 품질·성능 설정 노출**
    - 선택지: A. 노출하지 않음(항상 물리 해상도) / B. "UI 글자 해상도" 행 추가.
    - 메인 추천: A.
    - 이유: 비용이 작고(7.3) 고를 이유가 없다.
    - 영향 범위: A 는 없음.
+   - 결정됨(2026-10-22, 메인이 정함, 사용자 미확인): A. 노출하지 않았다.
+
+### 14.1 사용자 확인 대기 목록(미확인)
+
+1. 굵은 글꼴 에셋 `Inter-Bold.ttf`(420 KB) 추가와 라이선스 표기 방식.
+2. `OffsetRenderer` 를 전달에서 뺀 선택(외부 스킨 화소 불변을 우선한 것).
+3. 실기(Retina 창, Windows 125/150%, 전체 화면)에서 글자 모양과 창 끌기 중 프레임 시간.

@@ -1,6 +1,6 @@
 # docs/acknowledge — 결정 기록 색인
 
-> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리
+> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
 
 사용자 결정, 합의, 전제를 둔다. 2026-10-14 부터 새 결정은 결정 1건 = 파일 1개의 ADR(`YYYY-MM-DD-adr-<슬러그>.md`, 머리: `최종 갱신 · 대응 커밋` 과 `상태 · 결정일 · 결정자 · 커밋`, 절: 배경 / 결정 / 이유 / 기각된 대안 / 영향과 관련 파일 / 날짜와 사용자 원문)로 쓴다. 그 전의 파일은 여러 결정을 한 파일의 표로 묶는다. 결정이 바뀌면 옛 파일의 결정 문장은 고치지 않고, 바뀐 행 끝에 "대체됨: <새 파일>" 을 더하고 그 파일의 상태 줄과 이 색인의 상태를 함께 바꾼다.
 
@@ -12,7 +12,7 @@
 
 | 파일 | 한 줄 요약 | 결정일 | 상태 |
 | --- | --- | --- | --- |
-| [2026-10-14-adr-scratch-auto-rule.md](2026-10-14-adr-scratch-auto-rule.md) | SCRATCH AUTO: 턴테이블 노트는 초록·판정에서 빠진 없는 노트, 그 판도 최고 기록·이력·리플레이·전송, 램프 LIGHT ASSIST(2026-10-14 사용자 확인), 규칙 세대 3, 옛 세대의 SCRATCH AUTO 판(사용자 DB 37판)은 램프·이력만 | 2026-10-14 | 유효 |
+| [2026-10-14-adr-scratch-auto-rule.md](2026-10-14-adr-scratch-auto-rule.md) | SCRATCH AUTO: 턴테이블 노트는 초록·판정에서 빠진 없는 노트, 그 판도 최고 기록·이력·리플레이·전송, 램프 LIGHT ASSIST(2026-10-14 사용자 확인), 규칙 세대 3, 옛 세대의 SCRATCH AUTO 판(사용자 DB 37판)은 램프·이력만 | 2026-10-14 | 유효(결정 4 의 램프 LIGHT ASSIST 는 그대로이고 그 안을 등급으로 나눈다: [어시스트 등급](2026-10-22-adr-assist-lamp-grade.md)) |
 | [2026-10-14-adr-save-and-send-every-played-run.md](2026-10-14-adr-save-and-send-every-played-run.md) | 사람이 친 판은 어시스트와 상관없이 전부 저장·리플레이·전송. 넓힌 판정 판은 최고 기록·순위만 제외(2026-10-14 사용자 확인) | 2026-10-14 | 유효 |
 | [2026-10-14-adr-assisted-course-submission.md](2026-10-14-adr-assisted-course-submission.md) | 어시스트 곡이 낀 코스도 코스로 보낸다(`scratch_auto`·`assist` 선택 필드), 서버는 단일 곡과 같은 정책 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-scratch-auto-ranking-toggle.md](2026-10-14-adr-scratch-auto-ranking-toggle.md) | SCRATCH AUTO 판도 순위에 올림. 최고 기록을 SCRATCH AUTO 여부로 나눔(마이그레이션 0002), 서버 API 의 목록은 기본 숨김 + `include_scratch_auto` 토글(클라이언트가 파라미터를 싣지 않아 그대로), 웹 화면의 토글은 2026-10-19 부터 기본 켬, `A-SCR` 표지 | 2026-10-14, 화면 기본값 변경 2026-10-19 | 유효(웹 화면의 기본값은 켬으로 바뀜: [웹 클리어·플레이 기록](2026-10-19-adr-web-clear-and-play-history.md)) |
@@ -52,19 +52,31 @@
 | [2026-10-19-adr-web-clear-and-play-history.md](2026-10-19-adr-web-clear-and-play-history.md) | 웹: 클리어 = NO PLAY·FAILED 가 아닌 모든 램프(ASSIST·L-ASSIST 포함, `MIN_CLEAR_LAMP_ID`), 화면의 SCRATCH AUTO 포함 토글은 기본 켬(서버 API 기본은 끔 그대로: Rust 클라이언트가 파라미터를 싣지 않음), 플레이어 페이지 "플레이 기록"을 `?page=` 로 나눠 전체 판을 보임(`GET /api/fe/players/{id}/recent?page&limit`) | 2026-10-19 | 유효 |
 | [2026-10-19-adr-record-target-follows-its-run.md](2026-10-19-adr-record-target-follows-its-run.md) | 구동기: LOCAL BEST·이 기기에서 친 IR BEST 목표와 스킨 BEST 칸의 진행 중 값은 그 기록 판의 리플레이를 다시 판정한 노트별 판정(원본 passnotes 기준)을 따르고, 얻지 못하면(리플레이 없음, 다른 차트·노트 수·PG/GR, 옛 FRAME 시계 리플레이, 연습) 선형 비례로 물러남. 결과 화면의 값은 그대로. 조사: [record-target-pace.md](../reference/record-target-pace.md) | 2026-10-19 | 유효(요청과 물러남 규칙만 사용자 확인. 나머지 여섯 질문은 아래 미확인 목록 7번) |
 
+## 2026-10-22 세션의 ADR
+
+사용자 지시 "끝까지 다 구현해놔"(2026-10-22)에 따라 메인이 추천안으로 정했고 결정마다 사용자에게 묻지 않았다. 아래 다섯 ADR 의 결정은 모두 사용자 미확인이다. 사용자가 직접 승인한 것은 운영 DB 마이그레이션 0011 의 적용 하나다("마이그레이션도 니가하고"). 확인이 필요한 질문은 아래 "아직 확인받지 않은 메인의 결정" 8~12번에 모았다.
+
+| 파일 | 한 줄 요약 | 결정일 | 상태 |
+| --- | --- | --- | --- |
+| [2026-10-22-adr-assist-lamp-grade.md](2026-10-22-adr-assist-lamp-grade.md) | SCRATCH AUTO 클리어의 어시스트 등급: 램프 id·와이어·강등 규칙은 그대로 두고 LIGHT ASSIST 안에 등급 0~4(ASSIST EASY/CLEAR/HARD/EXHARD, 끝난 게이지로 파생, ASSIST EASY 게이지는 등급 0). 비교 키 `(clear, 등급, EX, BP)`, DB 를 열 때 다시 접어 소급, 코스 스테이지는 CLASS 계열 게이지로 저장·전송, 웹 마이그레이션 0011(운영 적용됨)과 응답의 `assist_grade`, 외부 스킨에는 0~10 만. [2026-10-14 SCRATCH AUTO 규칙](2026-10-14-adr-scratch-auto-rule.md)의 LIGHT ASSIST 를 확장한다. 램프 이름 통일(HANDOFF 6절 8번 해소) | 2026-10-22 | 유효(사용자 미확인) |
+| [2026-10-22-adr-option-panel-layout.md](2026-10-22-adr-option-panel-layout.md) | 선곡 옵션 패널: 원본 키 표의 죽은 칸 열 곳만 재배정(SCRATCH AUTO·KEEP GREEN NUMBER·LANE COVER·LIFT·HIDDEN+·JUDGE ALGORITHM·GAUGE 이전·HI-SPEED FIX 이전), DP OPTION 숨김, BGA 두 값, 패널 연 뒤의 턴테이블 눌림만 인정, F1 오버레이 홀드 키는 패널이 떠 있으면 무시, 5키·10키 닿지 않는 칸 흐림, IIDX 식 기본 스킨 패널. 외부 스킨의 키 재배정 위험은 남김 | 2026-10-22 | 유효(사용자 미확인) |
+| [2026-10-22-adr-rbms-extension-ids.md](2026-10-22-adr-rbms-extension-ids.md) | R-BMS 확장 id: 이벤트 21000~21099(SCRATCH AUTO·KEEP GREEN NUMBER 켬끔), 불린 21100~21199(켬끔 값, 어시스트 등급, 닿지 않는 키)와 id 표 전체. 2026-10-09 사설 id 철거 결정의 부분 변경(옛 20001~20316 은 되살리지 않음) | 2026-10-22 | 유효(사용자 미확인) |
+| [2026-10-22-adr-skin-colour-rows.md](2026-10-22-adr-skin-colour-rows.md) | 스킨 색 행: 헤더 `color`·dst/노트 `tint`·`long_tint` 확장 키(beatoraja 는 무시), 저장값이 있을 때만 흰 바탕 x 곱셈이고 "있음" 여부가 바뀔 때만 문서를 다시 읽음, 알파는 오프셋을 먼저 더한 뒤 틴트를 곱함, 메뉴의 프리셋·16진·R/G/B/A, 기본 스킨 행 17(9키 22)개와 순백 노트 시트 | 2026-10-22 | 유효(사용자 미확인) |
+| [2026-10-22-adr-ui-text-device-pixels.md](2026-10-22-adr-ui-text-device-pixels.md) | 내장 UI 글자를 장치 배율의 물리 화소로 래스터(배율 1 은 화소 동일), 굵기 API, 기본 스킨 팩의 Inter Bold 에셋(OFL), 감마·서브픽셀 미적용 | 2026-10-22 | 유효(사용자 미확인) |
+
 ## 그 전의 결정 파일
 
 | 파일 | 한 줄 요약 | 날짜 | 상태 |
 | --- | --- | --- | --- |
 | [2026-10-14-web-decisions.md](2026-10-14-web-decisions.md) | 웹 배포 준비: 사용자 결정 U1~U5, 메인 추천안 M1~M11, 질문 Q1~Q6 | 2026-10-14 | 일부 대체됨: Q5, Q6 의 실행 주체 → [운영 DB 작업](2026-10-14-adr-production-db-operations.md), M1·Q1 의 출처·삭제 요청 문구 → [표 페이지](2026-10-14-adr-table-page-no-source-notice.md) |
-| [2026-10-09-lua-skin-compat-decisions.md](2026-10-09-lua-skin-compat-decisions.md) | Lua 스킨 호환 D1~D18(기본 스킨 자작, F=즐겨찾기만, Cargo.lock 추적, IIDX 식 판정, 정적 판정 글자, "GREAT 67", 앱 UI 무채색 등), 동영상 디코더 | 2026-10-09 ~ 10-12 | 유효 |
+| [2026-10-09-lua-skin-compat-decisions.md](2026-10-09-lua-skin-compat-decisions.md) | Lua 스킨 호환 D1~D18(기본 스킨 자작, F=즐겨찾기만, Cargo.lock 추적, IIDX 식 판정, 정적 판정 글자, "GREAT 67", 앱 UI 무채색 등), 동영상 디코더 | 2026-10-09 ~ 10-12 | 일부 대체됨: "이전 결정과의 관계" 절의 사설 id 폐기와 원본 id 만 답한다는 규칙 → [확장 id](2026-10-22-adr-rbms-extension-ids.md). 옛 사설 id 20001~20316 의 폐기는 유효 |
 | [2026-09-17-skin-system-decisions.md](2026-09-17-skin-system-decisions.md) | 스킨 시스템 완성 D1~D23 | 2026-09-17 | 대체됨(2026-10-09, Lua 스킨 호환 결정) |
 | [2026-09-17-commit-language.md](2026-09-17-commit-language.md) | 커밋 설명 언어는 한국어 | 2026-09-17 | 유효 |
 | [2026-09-09-enhancement-decisions.md](2026-09-09-enhancement-decisions.md) | 고도화 결정 1~12, 웹 W1~W8·OQ1~OQ6, Phase E E1~E13, 마무리 순서 | 2026-09-09 ~ 09-10 | 일부 대체됨: 결정 8(작업 규칙), 결정 12 → [SCRATCH AUTO 규칙](2026-10-14-adr-scratch-auto-rule.md)·[모든 판 저장·전송](2026-10-14-adr-save-and-send-every-played-run.md), 마무리 순서의 릴리스 → [릴리스 정책](2026-10-14-adr-release-policy.md) |
 | [release-branch-strategy.md](release-branch-strategy.md) | prod 브랜치·보호·첫 버전의 옵션(결정 대기였음) | 2026-09-16 | 대체됨 → [릴리스 정책](2026-10-14-adr-release-policy.md) |
 | [design.md](design.md) | 웹 디자인 정본(토큰, Surface, 화면 규칙) | 2026-09-09(최종 수정 2026-10-14) | 유효(웹 2026-10-14 디자인 기준과의 차이는 `docs/web/2026-10-14-design-direction.md` 3.1.1) |
 | [empty-poor-local-scores.md](empty-poor-local-scores.md) | 空POOR 처리와 로컬 기록 스키마 | 2026-06-03(상태 갱신 2026-09-16, 대조 2026-10-15) | 일부 대체됨: 풀콤 조건 → [풀콤 조건](2026-10-15-adr-full-combo-condition.md), LightAssistEasy 흡수 → [SCRATCH AUTO 규칙](2026-10-14-adr-scratch-auto-rule.md). 파일 머리의 대조 결과 참고 |
-| [reference-divergences.md](reference-divergences.md) | 레퍼런스 구현과의 의도적·보류 차이. 2026-10-14~15 절: Esc 포기 판, 플레이 수리, 롱노트 정리, 입력 시각 판정, 기록의 원본 정의, 연습과 #TOTAL | 2026-09-09 ~ 2026-10-15 | 유효(Phase D 의 D-D6, Phase E 절은 이력. 파일 안 표시) |
+| [reference-divergences.md](reference-divergences.md) | 레퍼런스 구현과의 의도적·보류 차이. 2026-10-14~15 절: Esc 포기 판, 플레이 수리, 롱노트 정리, 입력 시각 판정, 기록의 원본 정의, 연습과 #TOTAL. 2026-10-19 절: 기록 목표의 진행 중 값. 2026-10-22 절: 옵션 패널 키 표, 램프 등급, 확장 id, 스킨 맞춤 행·노트 색 | 2026-09-09 ~ 2026-10-22 | 유효(Phase D 의 D-D6, Phase E 절은 이력. 파일 안 표시) |
 | [decisions.md](decisions.md) | 포팅 착수 결정(그래픽 스택, 첫 범위, 모드 확장성) | 2026-05-31 | 대체됨(범위 제한은 Phase E~G 에서 해소) |
 
 ## 사용자에게 아직 확인받지 않은 메인의 결정
@@ -78,7 +90,12 @@
 5. **메뉴 입력의 PAD DEBOUNCE.** 컨트롤러 디바운스가 LR2 형이 되면서 메뉴에서도 뗌 뒤 2~16 ms 튀는 버튼이 두 번 눌린 것이 될 수 있다. 메뉴에만 옛 양방향 잠금을 둘지. [키보드 시각 ADR](2026-10-15-adr-keyboard-input-timing.md) 남은 한계 4, 테스트 부채 3.71.
 6. **연습 판의 게이지 사망.** 지금은 게이지 잠금으로 구간 끝까지 판정한다(NONE 을 CONTINUE 로). 원본은 연습 패널로 돌아간다. A 원본대로 / B 지금대로 두고 ADR 로 남긴다. `reference-divergences.md` "연습과 #TOTAL" 절, `docs/play-options.md` 9절.
 7. **기록 목표의 진행 중 값 여섯 질문(2026-10-19).** 지금 동작은 메인이 원본 의미로 정했다: 기준은 판정된 노트 수, 스킨 BEST 칸도 로컬 최고 판의 리플레이를 따름, RIVAL·다른 기기 IR BEST 는 비례, 비례로 물러날 때 화면 표시 없음, 같은 EX 가 여럿이면 처음 낸 판, 고스트가 늦으면 로딩이 기다림. 각 선택지는 [조사 문서](../reference/record-target-pace.md) 9절, [ADR](2026-10-19-adr-record-target-follows-its-run.md).
+8. **외부 스킨 위에서 재배정한 패널 키(2026-10-22).** 지금은 모든 스킨에 적용된다. ModernChic 같은 스킨의 죽은 칸 라벨(JUDGE AREA, MARK NOTE, BPM GUIDE, NO MINE) 키가 SCRATCH AUTO·KEEP GREEN NUMBER·LANE COVER·LIFT·HIDDEN+ 등 저장되는 설정을 화면 변화 없이 바꾼다. 선택지: (a) 지금대로 / (b) 헤더나 맞춤 행의 확장 지원 표시를 로더가 읽어 그 스킨에만 / (c) 번들 기본 팩 경로에만 / (d) 실행 중 확장 id 읽기를 기록해 읽은 스킨에만. [패널 배치 ADR](2026-10-22-adr-option-panel-layout.md) 7절.
+9. **원본 id 만 답하던 2026-10-09 결정의 부분 변경(2026-10-22).** 지금은 이벤트 21000~21099 와 불린 21100~21199 를 답한다. 선택지: (a) 지금대로 / (b) 되돌려 SCRATCH AUTO·KEEP GREEN NUMBER 값 표시, 어시스트 등급 표시, 닿지 않는 키 흐림을 포기. [확장 id ADR](2026-10-22-adr-rbms-extension-ids.md).
+10. **어시스트 등급의 정의와 웹 순위 키(2026-10-22).** 지금은 ASSIST EASY 게이지를 등급 0(LIGHT ASSIST)에 두고 HAZARD 를 EXHARD 로 접으며, 웹 순위·최고 기록 키를 `(clear, 등급, EX, BP)` 로 바꿔 SCRATCH AUTO 칸의 기존 순위가 다시 매겨진다. 선택지: (a) 지금대로 / (b) ASSIST EASY 게이지를 ASSIST EASY(EASY) 등급에 합침(조사 문서 8절 D2 A) / (c) 순위는 EX 만 보고 등급은 표시만. [어시스트 등급 ADR](2026-10-22-adr-assist-lamp-grade.md).
+11. **코스 최고 기록의 등급(2026-10-22).** 서버 `course_best.assist_grade` 열은 항상 0 이다(코스 제출 본문과 코스 DB 에 게이지가 없다). 선택지: (a) 쓰지 않는 열로 두고 후속 마이그레이션에서 지움 / (b) 코스 제출에 스테이지 게이지를 더해 등급을 채움 / (c) 지금대로. [어시스트 등급 ADR](2026-10-22-adr-assist-lamp-grade.md) 6절.
+12. **색 행의 세부(2026-10-22).** 9키 `Odd Buttons`·`Even Buttons` 행이 7키 `White Key Lane`·`Black Key Lane` 과 같은 이름이라 `A` 키가 서로 적용된다. 알파 합성 순서를 노트와 같게 바꿔 저장된 비불투명 색과 100% 가 아닌 불투명도를 함께 쓴 부위는 이전보다 불투명하다. 판정선 바닥 막대는 회색 102 바탕에 곱한다. 선택지: (a) 지금대로 / (b) 9키 행 이름을 7키와 다르게. [스킨 색 행 ADR](2026-10-22-adr-skin-colour-rows.md).
 
-확인받은 것(2026-10-14): SCRATCH AUTO 램프 LIGHT ASSIST 유지, 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외(추천안 A), `v0.1.0` draft 는 둔다, `v0.1.3` draft 도 두고 다음은 `v0.1.4`. 확인받은 것(2026-10-15): Esc 포기 판의 두 예외 거부([Esc 판은 모두 저장](2026-10-15-adr-escape-keeps-every-run.md)), 키 디바운스 기본 16 ms·컨트롤러 LR2 형·PAD DEBOUNCE 설정·턴테이블 원본 잠금([키보드 시각](2026-10-15-adr-keyboard-input-timing.md)), 코스 램프 원본 규칙([코스 곡별 콤보](2026-10-15-adr-course-stage-combo.md)), BGA 상주 256 MiB([BGA 상주 상한](2026-10-15-adr-bga-resident-texture-cap.md)), THR2-1 구조 유지([wgpu Metal 메인 스레드](2026-10-15-adr-wgpu-metal-main-thread.md)), 사고 49개 유지([사고 기록 유지](2026-10-15-adr-accidental-sync-records-kept.md)). 확인받은 것(2026-10-19): 노트를 하나도 치지 않은 판은 Esc·앱 종료에서 저장·전송하지 않음([Esc 판 ADR](2026-10-15-adr-escape-keeps-every-run.md) 결정 7. 10-15 에 거부한 "판정 없는 판 제외"와 달리 사용자 본인의 지시), 웹의 클리어 기준·SCRATCH AUTO 포함 화면 기본 켬·플레이 기록 페이지([웹 ADR](2026-10-19-adr-web-clear-and-play-history.md)), 기록 목표를 기록 판의 노트별 판정으로 따라가되 못 얻으면 비례([목표 ADR](2026-10-19-adr-record-target-follows-its-run.md)).
+확인받은 것(2026-10-14): SCRATCH AUTO 램프 LIGHT ASSIST 유지, 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외(추천안 A), `v0.1.0` draft 는 둔다, `v0.1.3` draft 도 두고 다음은 `v0.1.4`. 확인받은 것(2026-10-15): Esc 포기 판의 두 예외 거부([Esc 판은 모두 저장](2026-10-15-adr-escape-keeps-every-run.md)), 키 디바운스 기본 16 ms·컨트롤러 LR2 형·PAD DEBOUNCE 설정·턴테이블 원본 잠금([키보드 시각](2026-10-15-adr-keyboard-input-timing.md)), 코스 램프 원본 규칙([코스 곡별 콤보](2026-10-15-adr-course-stage-combo.md)), BGA 상주 256 MiB([BGA 상주 상한](2026-10-15-adr-bga-resident-texture-cap.md)), THR2-1 구조 유지([wgpu Metal 메인 스레드](2026-10-15-adr-wgpu-metal-main-thread.md)), 사고 49개 유지([사고 기록 유지](2026-10-15-adr-accidental-sync-records-kept.md)). 확인받은 것(2026-10-19): 노트를 하나도 치지 않은 판은 Esc·앱 종료에서 저장·전송하지 않음([Esc 판 ADR](2026-10-15-adr-escape-keeps-every-run.md) 결정 7. 10-15 에 거부한 "판정 없는 판 제외"와 달리 사용자 본인의 지시), 웹의 클리어 기준·SCRATCH AUTO 포함 화면 기본 켬·플레이 기록 페이지([웹 ADR](2026-10-19-adr-web-clear-and-play-history.md)), 기록 목표를 기록 판의 노트별 판정으로 따라가되 못 얻으면 비례([목표 ADR](2026-10-19-adr-record-target-follows-its-run.md)). 확인받은 것(2026-10-22): 운영 DB 마이그레이션 0011 의 적용([어시스트 등급 ADR](2026-10-22-adr-assist-lamp-grade.md) 7절). 다섯 요구를 끝까지 구현하라는 지시는 범위 승인이고 개별 설계 확인이 아니다(위 8~12번).
 
-사용자 실기 확인으로 남은 것(결정이 아님): v0.1.4 의 IR: RANK·SYNC RECORDS NOW·키 입력 체감·JUDGE OFFSET 재조정·PAD DEBOUNCE 확인(게시는 2026-10-15 07:27 UTC 에 끝남), 사고 때 개발 빌드가 다시 쓴 설정이 의도대로인지. 오래된 질문(웹 rate limit 지속형 저장소, `user.rank_points` 처리)은 `docs/HANDOFF.md` 와 웹 문서에 있다.
+사용자 실기 확인으로 남은 것(결정이 아님): v0.1.4 의 IR: RANK·SYNC RECORDS NOW·키 입력 체감·JUDGE OFFSET 재조정·PAD DEBOUNCE 확인(게시는 2026-10-15 07:27 UTC 에 끝남), 사고 때 개발 빌드가 다시 쓴 설정이 의도대로인지. 2026-10-22 작업: 옵션 패널과 F1 홀드 키 충돌, 5키·10키 흐림, 색 행 메뉴와 실시간 반영, 내장 글자(Retina·Windows 125/150%·전체 화면), 어시스트 등급 색, 패널 INFORMATION 영어 문구는 실제 창에서 본 적이 없다(헤드리스 캡처와 테스트로만 확인). 오래된 질문(웹 rate limit 지속형 저장소, `user.rank_points` 처리)은 `docs/HANDOFF.md` 와 웹 문서에 있다.
