@@ -68,7 +68,9 @@ pub use migrate::{ASSIST_UNRECORDED, MigrationReport, SEED_UNRECORDED, migrate_s
 pub use pending::{PENDING_RUN_SUFFIX, PendingImport, PendingRun};
 pub use replay_gc::{DEFAULT_KEEP_RECENT_PER_CHART, DEFAULT_REPLAY_MAX_TOTAL_BYTES, ReplayGcPlan, ReplayPolicy, UploadHold};
 use schema::MODE_POPN_9K;
-pub use schema::{GAUGE_UNKNOWN, MODE_UNKNOWN, RANDOM_OFF, SCORE_DB_SCHEMA_VERSION, gauge_id, gauge_token, mode_id, mode_name, random_id, random_token};
+pub use schema::{
+    GAUGE_CLASS, GAUGE_UNKNOWN, MODE_UNKNOWN, RANDOM_OFF, SCORE_DB_SCHEMA_VERSION, gauge_id, gauge_token, mode_id, mode_name, random_id, random_token,
+};
 
 use crate::score::{ASSIST_GRADE_OF_GAUGE, JUDGE_PARITY_RULE_VERSION};
 use crate::{ASSIST_GRADE_COUNT, ASSIST_GRADE_NONE, LIGHT_ASSIST_CLEAR_ID, REFERENCE_RECORD_RULE_VERSION, RecordLamp, assist_grade_of};
@@ -765,6 +767,10 @@ fn assist_grade_sql() -> String {
 /// Run on every migration, as [`refold_reference_bests`] is: the grade is new, so a database written
 /// before it holds none, and a build that predates it rewrites a row without one. A play of a rule
 /// older than the judge-parity pass and a play imported without its assist level have no grade.
+///
+/// Only the plays that hold [`LIGHT_ASSIST_CLEAR_ID`] are ranked: a row of any other lamp is joined
+/// to no play of its own lamp here and has its grade cleared by the second statement, so ranking the
+/// rest of the history would cost the open its time and change nothing.
 pub(super) fn refold_assist_grades(conn: &Connection) -> Result<(), ScoreDbError> {
     let grade = assist_grade_sql();
     let sql = format!(
@@ -774,7 +780,7 @@ pub(super) fn refold_assist_grades(conn: &Connection) -> Result<(), ScoreDbError
          FROM (SELECT chart_key, mode, ln_mode, clear, grade, gauge, assist FROM \
                (SELECT l.chart_key, l.mode, l.ln_mode, l.clear, {grade} AS grade, l.gauge, l.assist, \
                        ROW_NUMBER() OVER (PARTITION BY l.chart_key, l.mode, l.ln_mode, l.clear ORDER BY {grade} DESC, l.id ASC) AS pick \
-                FROM scorelog l) \
+                FROM scorelog l WHERE l.clear = ?1) \
                WHERE pick = 1) AS f \
          WHERE score.chart_key = f.chart_key AND score.mode = f.mode AND score.ln_mode = f.ln_mode AND score.clear = f.clear \
            AND score.assist_grade <> f.grade"

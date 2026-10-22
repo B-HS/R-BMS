@@ -17,6 +17,7 @@ use super::scene::wheel_bar;
 use super::tests::{app, press, record, release};
 use super::*;
 use crate::App;
+use crate::format::clear_label_color;
 use crate::stage::HeadlessCanvas;
 use crate::stage::capture::{app_in, scene_frame_at, settings_of, skin_folder_of};
 
@@ -336,6 +337,32 @@ fn the_built_in_rows_made_from_the_model_are_the_rows_the_browser_always_drew() 
         panic!("the root begins with a folder");
     };
     assert_eq!(parts(row), (true, label.as_str(), "", Color::GRAY, "", Color::GRAY, theme().lamp_default, None, None, false));
+}
+
+/// A chart's best clear SCRATCH AUTO played on HARD is drawn on the built-in row in the colour of the
+/// ASSIST HARD it is, as the records under it name it, not the LIGHT ASSIST colour of its lamp; a
+/// skin is still handed the lamp alone.
+#[test]
+fn a_graded_light_assist_clear_lights_the_built_in_row_in_its_grade() {
+    let mut app = fixture_app();
+    let graded = rbms_store::ScoreRecord {
+        gauge: "hard".into(),
+        assist: rbms_store::SCRATCH_AUTO_ASSIST,
+        ..record("md5-b.bms", rbms_store::LIGHT_ASSIST_CLEAR_ID, 500, 0, 3_000)
+    };
+    app.shared.scores.push(graded);
+    let bars = app.shared.select_bars(&facts_of(&app), None, false);
+    let beta = bar_titled(&bars, "beta");
+    assert_eq!((beta.lamp, beta.assist_grade), (Some(rbms_store::LIGHT_ASSIST_CLEAR_ID), rbms_store::ASSIST_GRADE_HARD));
+    assert_eq!(wheel_bar(beta, ADDED_AT).lamp, i32::from(rbms_store::LIGHT_ASSIST_CLEAR_ID), "a skin reads the lamp as it always did");
+
+    let mut state = SelectState::new();
+    state.refresh_bars(&app.shared);
+    let scene = state.build_scene(&app.shared);
+    let row = scene.rows.iter().find(|row| row.title == "beta").expect("the chart has a row");
+    let (_, assist_hard) = crate::format::lamp_label_color(ClearType::LightAssistEasy, rbms_judge::AssistGrade::Hard);
+    assert_eq!(row.lamp, assist_hard);
+    assert_ne!(row.lamp, clear_label_color(ClearType::LightAssistEasy).1, "not the colour of the lamp without its grade");
 }
 
 /// The same for the course tab, whose rows are folders that carry the constraint badges as their

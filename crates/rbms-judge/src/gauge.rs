@@ -17,8 +17,8 @@ pub enum GaugeKind {
 
 /// One of the nine gauges a chart is played with, in the reference implementation's index order
 /// (`GrooveGauge.java:20-28`). All nine advance on every judgment; the selected one decides the
-/// clear. [`GaugeIndex::Class`] and up are the course gauges, which this engine builds and updates
-/// for parity but never selects, having no course mode.
+/// clear. [`GaugeIndex::Class`] and up are the course gauges, which no player setting selects: a
+/// course's stage is started on one, and is recorded on the one it finished on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GaugeIndex {
     AssistEasy,

@@ -614,6 +614,7 @@ impl AppShared {
             return SelectBar::new(BarKind::Song { exists: false }, String::new());
         };
         let fact = facts.of(index);
+        let lamp = self.scores.best_lamp_for_md5(&entry.md5);
         SelectBar {
             chart: Some(BarChart {
                 index,
@@ -628,7 +629,8 @@ impl AppShared {
                 best: best_score(&self.scores, &entry.md5),
                 images: if skinned { chart_images(entry, fact) } else { BarImages::default() },
             }),
-            lamp: self.scores.best_clear_for_md5(&entry.md5),
+            lamp: lamp.map(|lamp| lamp.clear),
+            assist_grade: lamp.map_or(rbms_store::ASSIST_GRADE_NONE, |lamp| lamp.assist_grade),
             ..SelectBar::new(BarKind::Song { exists: true }, entry.title.as_str())
         }
     }

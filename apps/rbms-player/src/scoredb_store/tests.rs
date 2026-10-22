@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use rbms_store::SCORE_LN_MODE_FROM_CHART;
-use rbms_store::scoredb::{JUDGE_PGREAT, UNSET_MINIMUM};
+use rbms_store::scoredb::{JUDGE_PGREAT, UNSET_MINIMUM, gauge_id};
 
 use super::*;
 
@@ -48,7 +48,7 @@ fn finished<'a>(summary: &'a PlaySummary, md5: &'a str) -> FinishedPlay<'a> {
         ln_mode: SCORE_LN_MODE_FROM_CHART,
         lamp: ClearType::Normal,
         summary,
-        gauge: GaugeKind::Normal,
+        gauge: GaugeIndex::Normal,
         random: NoteOption::Mirror,
         seed: 42,
         assist: 0,
@@ -144,6 +144,71 @@ fn a_row_whose_gauge_id_names_nothing_reads_as_the_default_gauge() {
     let mut log = play_log(&finished(&summary, "abcd"));
     log.gauge = 999;
     assert_eq!(record_of(&log).gauge, gauge_token(GaugeKind::Normal));
+}
+
+/// Every gauge a run can finish on, the three a course's stage runs on among them, is stored under
+/// the id the database names it by.
+#[test]
+fn every_gauge_a_run_finishes_on_is_stored_under_its_own_id() {
+    let summary = summary();
+    let tokens = ["assist", "easy", "normal", "hard", "exhard", "hazard", "class", "exclass", "exhardclass"];
+    for (gauge, token) in GaugeIndex::ALL.into_iter().zip(tokens) {
+        let log = play_log(&FinishedPlay { gauge, ..finished(&summary, "abcd") });
+        assert_eq!(log.gauge, gauge_id(token), "{gauge:?}");
+        assert_eq!(record_of(&log).gauge, token, "{gauge:?} reads back as itself");
+    }
+}
+
+/// The kept course a SCRATCH AUTO stage of `md5` ended at `played_at_ms`, as its submission body.
+fn kept_course_body(md5: &str, played_at_ms: i64) -> String {
+    let course = rbms_ir::CourseSubmission {
+        api_version: rbms_ir::API_VERSION,
+        course_hash: "course".into(),
+        player: rbms_ir::PlayerId { id: String::new() },
+        clear: rbms_ir::ClearLamp::LightAssistEasy,
+        ex_score: 0,
+        judge: Default::default(),
+        max_combo: 0,
+        gauge_value: 0.0,
+        charts: vec![rbms_ir::ChartId { md5: md5.into(), sha256: String::new() }],
+        played_at: played_at_ms,
+        lntype: 0,
+        max_ex_score: 0,
+        minbp: 0,
+        trophy: None,
+        scratch_auto: true,
+        assist: Vec::new(),
+        extra: Default::default(),
+    };
+    course.to_json().expect("the course serialises")
+}
+
+/// A course's SCRATCH AUTO stage an older build stored on the gauge the settings chose (EX-HARD here)
+/// is put on the CLASS gauge it ran on when the database opens, and its chart is the ASSIST CLEAR the
+/// stage was. The same chart played alone before the course keeps the gauge it was played on.
+#[test]
+fn opening_the_database_puts_a_kept_courses_stage_on_the_class_gauge() {
+    let dir = temp_dir("course-stage-gauge");
+    let (db_path, ron_path, _) = score_paths(&dir);
+    let summary = summary();
+    let stage = play_log(&FinishedPlay { lamp: ClearType::LightAssistEasy, assist: 1, gauge: GaugeIndex::ExHard, ..finished(&summary, "stagechart") });
+    let alone = PlayLog { date: stage.date - 60, gauge: gauge_id("hard"), ..stage.clone() };
+    {
+        let mut db = open_score_db(&db_path, &ron_path).expect("the database opens");
+        record_finished_play(&mut db, &alone, true, None).expect("the chart played alone");
+        record_finished_play(&mut db, &stage, true, None).expect("the stage");
+        let ended_ms = stage.date * MILLIS_PER_SECOND + 1;
+        db.put_course("course", ended_ms, &kept_course_body("stagechart", ended_ms), None).expect("the course is kept");
+        let best = db.best("stagechart", mode_id("BEAT_7K")).expect("reads").expect("exists");
+        assert_eq!(best.assist_grade, rbms_judge::AssistGrade::ExHard.id(), "the older build graded it by the settings gauge");
+    }
+
+    let db = open_score_db(&db_path, &ron_path).expect("the database opens again");
+    let gauges: Vec<i32> = db.all_plays().expect("the history reads").iter().map(|log| log.gauge).collect();
+    assert_eq!(gauges, [gauge_id("hard"), rbms_store::scoredb::GAUGE_CLASS], "only the stage moves");
+    let best = db.best("stagechart", mode_id("BEAT_7K")).expect("reads").expect("exists");
+    assert_eq!(best.assist_grade, rbms_judge::AssistGrade::Hard.id(), "the chart played alone on HARD is the best grade left");
+    assert_eq!(book_from_db(&db).best_lamp_for_md5("stagechart").map(|lamp| lamp.assist_grade), Some(rbms_judge::AssistGrade::Hard.id()));
 }
 
 #[test]

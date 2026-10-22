@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use rbms_config::ScoreTarget;
 use rbms_ir::{CourseSubmission, IrError, PlayerProfile, ReplayData, ServerInfo, SubmitResponse};
+use rbms_judge::gauge::GaugeIndex;
 use rbms_store::scoredb::{BestScore, PlayLog, ReplayState, SyncState, SyncWalk, chart_key, mode_id};
 
 use super::*;
@@ -79,6 +80,8 @@ struct AcceptingServer {
     sent_for: Mutex<Vec<String>>,
     /// What each submission said of the assists it was played with: SCRATCH AUTO, and the tags.
     assists: Mutex<Vec<(bool, Vec<String>)>>,
+    /// The gauge each submission said its run finished on.
+    gauges: Mutex<Vec<rbms_ir::GaugeType>>,
     /// Where each course submission is handed on, when a test listens for one.
     courses: Mutex<Option<Sender<CourseSubmission>>>,
 }
@@ -90,6 +93,7 @@ impl ScoreServer for AcceptingServer {
     fn submit_score(&self, sub: &ScoreSubmission) -> Result<SubmitResponse, IrError> {
         self.sent_for.lock().expect("the submission log").push(sub.player.id.clone());
         self.assists.lock().expect("the assist log").push((sub.options.scratch_auto, sub.options.assist.clone()));
+        self.gauges.lock().expect("the gauge log").push(sub.options.gauge);
         Ok(SubmitResponse { accepted: true, ..Default::default() })
     }
     fn chart_ranking(&self, _chart: &ChartId, _limit: u32) -> Result<Vec<rbms_ir::ScoreRecord>, IrError> {
@@ -517,6 +521,37 @@ fn a_course_with_a_scratch_auto_stage_is_sent_saying_so_and_sets_a_best() {
         let tags = if scratch_auto { vec![rbms_ir::mapping::AUTO_SCRATCH_FLAG.to_owned()] } else { Vec::new() };
         assert_eq!(course.assist, tags, "SCRATCH AUTO {scratch_auto}");
     }
+}
+
+/// A course stage runs on the course's CLASS gauge whatever gauge the settings choose, and it is
+/// stored and sent on that gauge: a SCRATCH AUTO clear of it is the ASSIST CLEAR the result screen
+/// shows, not the grade of the gauge the settings name.
+#[test]
+fn a_course_stage_is_stored_and_sent_on_the_course_gauge_it_ran_on() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("course-stage-gauge", server.clone());
+    shared.config.play.scratch_auto = true;
+    shared.config.play.gauge = rbms_judge::GaugeKind::ExHard;
+    let model = recorded_model();
+    shared.course_run = Some(one_stage_course(model.md5.clone()));
+    let auto_lanes = (0..model.mode.key).map(|lane| model.mode.is_scratch(lane)).collect();
+    let course_gauge = Some((GaugeIndex::Class, COURSE_OPENING_GAUGE));
+    let options = SessionOptions { gauge: rbms_judge::GaugeKind::ExHard, auto_lanes, initial_gauge: course_gauge, ..SessionOptions::default() };
+    let session = run_model_to_its_end(model.clone(), options, &inputs_by_hand(&model, &HAND_OFFSETS_US, true));
+    assert_eq!(session.record().finished_gauge, GaugeIndex::Class, "the stage ran on the course gauge");
+    let (_, summary) = end_run(&mut shared, session);
+    assert!(summary.clear_lamp.is_cleared(), "the fixture stage clears: {summary:?}");
+    shared.submit_rx.take().expect("the stage was handed to the score server").recv().expect("the submission came back");
+    assert_eq!(server.gauges.lock().expect("the gauge log").as_slice(), [rbms_ir::GaugeType::Class], "the stage is sent on the gauge it ran on");
+
+    let (logs, best) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one stage was played and {} rows were stored", logs.len());
+    };
+    let class_id = rbms_store::scoredb::gauge_id("class");
+    assert_eq!((log.clear, log.gauge), (clear_type_id(ClearType::LightAssistEasy), class_id), "the row names the course gauge");
+    assert_eq!(log.assist_grade(), rbms_judge::AssistGrade::Clear.id(), "a CLASS clear is ASSIST CLEAR");
+    assert_eq!(best.map(|best| best.assist_grade), Some(rbms_judge::AssistGrade::Clear.id()), "and so is the best it set");
 }
 
 /// A course with a stage judged wider is sent as a course too, saying so, and like the chart sets

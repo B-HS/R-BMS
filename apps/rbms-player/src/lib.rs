@@ -115,8 +115,7 @@ use course_ir::{CourseAssist, UNRELEASED_COURSE_REASON, build_course_submission}
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
 use format::{
-    clear_label_color, difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label, rule_version_mark,
-    rule_version_note,
+    difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label, rule_version_mark, rule_version_note,
 };
 use gamepad::{PadEvent, PadState};
 use gpu::Gpu;
@@ -553,6 +552,10 @@ pub(crate) struct SelectBar {
     /// `None` when nothing was recorded on it. A folder's is the lowest clear any chart under it
     /// sits on (`DirectoryBar.getLamp`).
     pub(crate) lamp: Option<u8>,
+    /// The assist grade inside a chart's `lamp` ([`rbms_store::RecordLamp::assist_grade`]), which
+    /// the built-in row colours its lamp by; a skin is handed the lamp alone. Zero for no grade, and
+    /// for every bar that is not a chart.
+    pub(crate) assist_grade: u8,
     /// The same for the rival that is picked.
     pub(crate) rival_lamp: Option<u8>,
     /// The medal of a course (`GradeBar.getTrophy`).
@@ -565,7 +568,17 @@ pub(crate) struct SelectBar {
 impl SelectBar {
     /// A bar of `kind` called `title` with nothing else known about it.
     pub(crate) fn new(kind: BarKind, title: impl Into<String>) -> SelectBar {
-        SelectBar { kind, title: title.into(), chart: None, course: None, lamp: None, rival_lamp: None, trophy: None, distribution: None }
+        SelectBar {
+            kind,
+            title: title.into(),
+            chart: None,
+            course: None,
+            lamp: None,
+            assist_grade: rbms_store::ASSIST_GRADE_NONE,
+            rival_lamp: None,
+            trophy: None,
+            distribution: None,
+        }
     }
 
     /// What the reference writes on the bar (`Bar.getTitle`): a chart's title with its subtitle

@@ -4,6 +4,7 @@
 //! Behind the optional `mapping` feature so the DTO/HTTP core stays free of engine dependencies.
 
 use rbms_chart::shuffle::NoteOption;
+use rbms_judge::gauge::GaugeIndex;
 use rbms_judge::{ClearType, GaugeKind, JudgeProperty};
 use rbms_model::Mode;
 
@@ -53,6 +54,23 @@ pub fn ir_gauge(g: GaugeKind) -> crate::GaugeType {
         GaugeKind::Hard => G::Hard,
         GaugeKind::ExHard => G::ExHard,
         GaugeKind::Hazard => G::Hazard,
+    }
+}
+
+/// The IR gauge type for one of the nine gauges a chart is played with: [`ir_gauge`] for a gauge a
+/// player selects, and the course gauge of the same name for the three a course stage runs on.
+pub fn ir_gauge_of_index(g: GaugeIndex) -> crate::GaugeType {
+    use crate::GaugeType as G;
+    match g {
+        GaugeIndex::AssistEasy => G::AssistEasy,
+        GaugeIndex::Easy => G::Easy,
+        GaugeIndex::Normal => G::Normal,
+        GaugeIndex::Hard => G::Hard,
+        GaugeIndex::ExHard => G::ExHard,
+        GaugeIndex::Hazard => G::Hazard,
+        GaugeIndex::Class => G::Class,
+        GaugeIndex::ExClass => G::ExClass,
+        GaugeIndex::ExHardClass => G::ExHardClass,
     }
 }
 
@@ -297,6 +315,16 @@ mod tests {
         for g in ALL_GAUGES {
             assert!(!matches!(ir_gauge(g), G::Class | G::ExClass | G::ExHardClass));
         }
+    }
+
+    #[test]
+    fn ir_gauge_of_index_agrees_with_ir_gauge_and_names_each_course_gauge() {
+        use crate::GaugeType as G;
+        for g in ALL_GAUGES {
+            assert_eq!(ir_gauge_of_index(GaugeIndex::from_kind(g)), ir_gauge(g), "{g:?} is sent as the gauge it is");
+        }
+        let course: Vec<G> = [GaugeIndex::Class, GaugeIndex::ExClass, GaugeIndex::ExHardClass].into_iter().map(ir_gauge_of_index).collect();
+        assert_eq!(course, [G::Class, G::ExClass, G::ExHardClass]);
     }
 
     #[test]

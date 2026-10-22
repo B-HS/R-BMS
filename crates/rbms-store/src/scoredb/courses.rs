@@ -11,7 +11,7 @@ use rusqlite::types::Value;
 use rusqlite::{Row, params, params_from_iter};
 
 use super::sync::SyncWalk;
-use super::{ScoreDb, ScoreDbError, SyncState};
+use super::{GAUGE_CLASS, ScoreDb, ScoreDbError, SyncState};
 
 /// One finished course as it is kept: its body and the account it was played under, and where it
 /// stands with the server a walk reads it for.
@@ -115,6 +115,28 @@ impl ScoreDb {
         let mut stmt = self.conn.prepare("SELECT id, course_hash, played_at, body, played_as, NULL AS sync_state FROM course_submission ORDER BY id ASC")?;
         let rows = stmt.query_map([], KeptCourse::from_row)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(ScoreDbError::from)
+    }
+
+    /// Put the course stages `stages` names on [`GAUGE_CLASS`], the gauge every course this client
+    /// keeps ran its stages on, and fold the assist grades afresh from the plays
+    /// ([`super::refold_assist_grades`]). A build before the stage was stored on the gauge it ran on
+    /// stored it on the gauge the settings chose, which grades a SCRATCH AUTO clear of it by a gauge
+    /// it never played. A row already on a course gauge is left as it is, so the same stages put
+    /// again write nothing. Answers how many rows moved; the grades are folded only when one did.
+    pub fn put_course_stages_on_class(&mut self, stages: &[i64]) -> Result<usize, ScoreDbError> {
+        let tx = self.conn.transaction()?;
+        let mut moved = 0;
+        {
+            let mut stmt = tx.prepare("UPDATE scorelog SET gauge = ?1 WHERE id = ?2 AND gauge < ?1")?;
+            for id in stages {
+                moved += stmt.execute(params![GAUGE_CLASS, id])?;
+            }
+        }
+        if moved > 0 {
+            super::refold_assist_grades(&tx)?;
+        }
+        tx.commit()?;
+        Ok(moved)
     }
 
     /// The newest course kept, or `None` when there is none ([`SyncWalk::courses_up_to`]).

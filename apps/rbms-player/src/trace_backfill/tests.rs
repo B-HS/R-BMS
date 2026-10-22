@@ -602,9 +602,10 @@ fn the_shades_are_stated_as_the_run_showed_them() {
     assert_eq!(made.speed.end, live.speed.end);
 }
 
-/// The stage of a course is not judged again, even where its replay would come to its row: the run
-/// started on the course's gauge and combo, which the replay does not keep. A row of the same chart
-/// stored after the course is no stage of it and gets its trace.
+/// The stage of a course is not judged again, even where its replay would come to its row, as the row
+/// an older build stored on the gauge the settings chose does: the run started on the course's gauge
+/// and combo, which the replay does not keep. A row of the same chart stored after the course is no
+/// stage of it and gets its trace.
 #[test]
 fn a_course_stage_gets_no_trace_and_is_looked_past() {
     let folder = own_folder("course");
@@ -626,10 +627,12 @@ fn a_course_stage_gets_no_trace_and_is_looked_past() {
     let db = app.shared.scoredb.as_mut().expect("the score database");
     let stage = db.all_plays().expect("reads").into_iter().max_by_key(|log| log.id).expect("the stage is stored");
     assert_ne!(stage.id, single.log.id, "the stage is a row of its own");
+    assert_eq!(stage.gauge, rbms_store::scoredb::GAUGE_CLASS, "the stage is stored on the course gauge it ran on");
     let stage_body = body_of(db, stage.id);
     let single_body = single.body.clone().expect("the run kept its body");
+    let stage = PlayLog { id: 0, gauge: rbms_store::scoredb::gauge_id("normal"), ..stage };
     let stage_untraced =
-        db.record_play_kept(&PlayLog { id: 0, ..stage.clone() }, true, Some(KeptSubmission { body: &stage_body, played_as: None })).expect("stored");
+        db.record_play_kept(&stage, true, Some(KeptSubmission { body: &stage_body, played_as: None })).expect("stored as an older build stored it");
     let later = PlayLog { id: 0, date: single.log.date + AFTER_THE_COURSE_S, ..single.log.clone() };
     let after_the_course = db.record_play_kept(&later, true, Some(KeptSubmission { body: &single_body, played_as: None })).expect("stored");
     let as_stored = UntracedPlay { log: PlayLog { id: stage_untraced, ..stage }, body: Some(stage_body) };

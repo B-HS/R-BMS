@@ -26,12 +26,13 @@ use std::path::{Path, PathBuf};
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::NetworkOptions;
 use rbms_config::gauge_token;
+use rbms_judge::gauge::GaugeIndex;
 use rbms_judge::{ClearType, GaugeKind, clear_type_id};
 use rbms_model::Mode;
 use rbms_play::PlaySummary;
 use rbms_store::scoredb::{
     JUDGE_MISS, JUDGE_TIER_COUNT, JudgeCounts, KeptSubmission, MigrationReport, PLAY_STATE_LIVE, PlayLog, ReplayGcPlan, ReplayPolicy, ScoreDb, UNSET_MINIMUM,
-    UploadHold, chart_key, gauge_id, mode_id, mode_name, open_with_import, random_id, random_token,
+    UploadHold, chart_key, mode_id, mode_name, open_with_import, random_id, random_token,
 };
 use rbms_store::{SCORE_RULE_VERSION, ScoreBook, ScoreRecord};
 
@@ -109,16 +110,31 @@ pub(crate) fn score_paths(config_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
 /// simply be tried again.
 pub(crate) fn open_score_db(db_path: &Path, ron_path: &Path) -> Option<ScoreDb> {
     match open_with_import(db_path, ron_path) {
-        Ok((db, report)) => {
+        Ok((mut db, report)) => {
             if let Some(report) = report {
                 report_import(&report, ron_path);
             }
+            put_course_stages_on_their_gauge(&mut db);
             Some(db)
         }
         Err(e) => {
             notify(Level::Error, format!("score database not opened ({}): {e}", db_path.display()));
             None
         }
+    }
+}
+
+/// Put the stages of the courses the database keeps on the CLASS gauge they ran on
+/// ([`ScoreDb::put_course_stages_on_class`]), a build before this one having stored each on the gauge
+/// the settings chose. The stages are the rows the courses kept were played as
+/// ([`crate::trace_backfill::course_stages`]); a stage of a course that was not kept is told by
+/// nothing and stays as it was. A failure is reported and the database used as it stands.
+fn put_course_stages_on_their_gauge(db: &mut ScoreDb) {
+    let moved = crate::trace_backfill::course_stages(db).and_then(|stages| db.put_course_stages_on_class(&stages.into_iter().collect::<Vec<_>>()));
+    match moved {
+        Ok(0) => {}
+        Ok(moved) => notify(Level::Info, format!("{moved} course stages stored on the gauge the settings chose are on the course gauge they ran on now")),
+        Err(e) => notify(Level::Warn, format!("course stages not put on their gauge: {e}")),
     }
 }
 
@@ -165,8 +181,9 @@ pub(crate) struct FinishedPlay<'a> {
     /// The lamp awarded, after any assist demotion.
     pub(crate) lamp: ClearType,
     pub(crate) summary: &'a PlaySummary,
-    /// The gauge the run finished on.
-    pub(crate) gauge: GaugeKind,
+    /// The gauge the run finished on ([`rbms_play::PlayRecord::finished_gauge`]): the one GAUGE AUTO
+    /// SHIFT left it on, and for a course's stage the course gauge it ran on.
+    pub(crate) gauge: GaugeIndex,
     pub(crate) random: NoteOption,
     pub(crate) seed: u64,
     /// Assist level (`rbms_ir::mapping::assist_level`): zero for an unassisted run.
@@ -200,7 +217,7 @@ pub(crate) fn play_log(play: &FinishedPlay<'_>) -> PlayLog {
         combo: play.summary.max_combo,
         minbp: play.summary.min_bp_with_unreached(),
         avgjudge: if play.avg_duration_us == rbms_play::AVG_DURATION_ABSENT_US { UNSET_MINIMUM } else { play.avg_duration_us },
-        gauge: gauge_id(gauge_token(play.gauge)),
+        gauge: play.gauge.index() as i32,
         gauge_value: play.summary.gauge_value,
         assist: i32::from(play.assist),
         option: 0,

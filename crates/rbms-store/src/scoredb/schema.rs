@@ -112,6 +112,10 @@ pub(super) const MODE_POPN_9K: i32 = 9;
 /// Gauge id for a token that is not one of the known ones.
 pub const GAUGE_UNKNOWN: i32 = 0;
 
+/// Gauge id of CLASS, the first of the three course gauges: every id from it on is a gauge a
+/// course's stage runs on, and none below it is.
+pub const GAUGE_CLASS: i32 = 6;
+
 /// Gauge tokens and the ids they are stored under, in the reference implementation's
 /// `GrooveGauge` index order — the same order `rbms_judge::gauge::GaugeIndex` is declared in. The
 /// aliases match what `rbms_config::gauge_from_name` accepts, so a token that crate writes always
@@ -124,7 +128,7 @@ const GAUGE_IDS: &[(&str, i32)] = &[
     ("hard", 3),
     ("exhard", 4),
     ("hazard", 5),
-    ("class", 6),
+    ("class", GAUGE_CLASS),
     ("exclass", 7),
     ("exhardclass", 8),
 ];

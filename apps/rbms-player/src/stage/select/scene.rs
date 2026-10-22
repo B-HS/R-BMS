@@ -130,7 +130,9 @@ fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
         mode_color: mode_color(chart.mode),
         level: chart.level_text.clone(),
         difficulty_color: difficulty_color(chart.difficulty),
-        lamp: bar.lamp.map_or(theme().lamp_default, |clear| clear_label_color(clear_type_from_id(clear)).1),
+        lamp: bar
+            .lamp
+            .map_or(theme().lamp_default, |clear| crate::format::stored_lamp_label_color(rbms_store::RecordLamp { clear, assist_grade: bar.assist_grade }).1),
         dj_level: chart.best.filter(|_| score_graph).map(|best| RANK_BANDS[dj_rank(best.ex, best.max_ex)].0),
         favorite: chart.favorite,
         ..opens

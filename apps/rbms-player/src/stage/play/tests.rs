@@ -6,7 +6,6 @@
 #![allow(clippy::wildcard_imports)]
 
 use super::*;
-use crate::app_result::reported_gauge;
 use crate::stage::{KeyInput, Stage};
 use crate::{App, Config, LaunchOptions};
 use rbms_play::SessionOptions;
@@ -455,9 +454,10 @@ fn a_shifted_run_is_recorded_under_the_gauge_it_finished_on() {
     session.tick(SessionClock::at(0), &mut NullSink);
 
     let summary = session.summary();
+    let recorded = session.record().finished_gauge;
     assert!(summary.gauge_shifted, "BEST CLEAR re-picks every frame and climbs off NORMAL at once");
-    assert_ne!(reported_gauge(&summary, rbms_judge::GaugeKind::Normal), rbms_judge::GaugeKind::Normal, "the record follows the shift");
-    assert_eq!(reported_gauge(&summary, rbms_judge::GaugeKind::Normal), summary.finished_gauge.expect("a selectable gauge decided the clear"));
+    assert_ne!(recorded, rbms_judge::gauge::GaugeIndex::Normal, "the record follows the shift");
+    assert_eq!(recorded.kind(), Some(summary.finished_gauge.expect("a selectable gauge decided the clear")));
 }
 
 /// A run nothing shifted still reports the gauge it was played on.
@@ -466,7 +466,7 @@ fn an_unshifted_run_is_recorded_under_the_gauge_that_was_chosen() {
     let state = play_state();
     let summary = state.session.summary();
     assert!(!summary.gauge_shifted);
-    assert_eq!(reported_gauge(&summary, rbms_judge::GaugeKind::Normal), rbms_judge::GaugeKind::Normal);
+    assert_eq!(state.session.record().finished_gauge, rbms_judge::gauge::GaugeIndex::Normal);
 }
 
 #[test]

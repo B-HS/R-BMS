@@ -42,18 +42,6 @@ const BPM_POINT_CAPACITY: usize = 512;
 /// being one number rather than six. PGREAT is the tier the setting is read by.
 const SUBMITTED_JUDGE_WIDTH_TIER: usize = 0;
 
-/// The gauge a finished run is recorded and submitted under: the one it actually finished on, which
-/// GAUGE AUTO SHIFT may have moved away from the gauge the player chose
-/// (`BMSPlayer.java:639-650`).
-///
-/// The reference stores `-1` for a run whose gauge moved (`BMSPlayer.java:884`); neither the score
-/// record nor the submission here has such a token, so the run reports the gauge that decided its
-/// clear rather than one its own lamp would contradict. `configured` stands in for a course gauge,
-/// which no setting selects.
-pub(crate) fn reported_gauge(summary: &rbms_play::PlaySummary, configured: rbms_judge::GaugeKind) -> rbms_judge::GaugeKind {
-    summary.finished_gauge.unwrap_or(configured)
-}
-
 /// What the result screen needs about the chart that was just played, copied out of the session so
 /// the score record, the submission and the saved replay can all be built without holding it.
 struct ChartRun {
@@ -220,6 +208,14 @@ pub(crate) struct RecordedRun {
 /// A run played on a TOTAL of the player's own is eased the way a widened judge eases it
 /// ([`crate::judged_wider`]): its lamp is an assist lamp and it sets no best, and its replay records
 /// the TOTAL so playback moves the gauge as the run did.
+///
+/// The run is recorded and submitted under the gauge it finished on
+/// ([`rbms_play::PlayRecord::finished_gauge`]), the one its lamp and its assist grade are of: the
+/// gauge GAUGE AUTO SHIFT moved it to (`BMSPlayer.java:639-650`), and for a course's stage the course
+/// gauge it ran on, which no setting selects. The reference stores `-1` for a run whose gauge moved
+/// (`BMSPlayer.java:884`); neither the score record nor the submission here has such a token, so the
+/// run reports the gauge that decided its clear rather than one its own lamp would contradict. Its
+/// replay names the gauge the settings chose instead, which is what playback starts the run on.
 fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::PlaySummary, record: &rbms_play::PlayRecord) -> RecordedRun {
     let play = &state.session;
     let avg_duration_us = record.avg_duration_us;
@@ -241,10 +237,10 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         !practice && shared.config.play.auto_replay && shared.replay.is_none() && !shared.run_plays_itself() && !play.recorded_events().is_empty();
     let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
     let lamp = assisted_lamp(summary.clear_lamp, assist);
-    let assist_grade = rbms_judge::assist_grade(lamp, Some(record.finished_gauge));
+    let finished_gauge = record.finished_gauge;
+    let assist_grade = rbms_judge::assist_grade(lamp, Some(finished_gauge));
 
     let assist_tags = assist_flags(scratch_auto, custom_judge);
-    let finished_gauge = reported_gauge(summary, shared.config.play.gauge);
     let c = summary.counts;
     let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     let mut sub = ScoreSubmission {
@@ -286,7 +282,7 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         minbp: summary.min_bp_with_unreached(),
         gauge_value: summary.gauge_value,
         options: PlayOptions {
-            gauge: ir_gauge(finished_gauge),
+            gauge: rbms_ir::mapping::ir_gauge_of_index(finished_gauge),
             random: ir_random(shared.config.play.random),
             random_p2: None,
             scratch_auto,

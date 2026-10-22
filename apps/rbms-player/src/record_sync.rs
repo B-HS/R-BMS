@@ -948,7 +948,10 @@ pub(crate) fn rebuilt_submission(log: &PlayLog, facts: Option<&ChartFacts>) -> S
         minbp: u32::try_from(charged_minbp(log)).unwrap_or(u32::MAX),
         gauge_value: log.gauge_value,
         options: PlayOptions {
-            gauge: ir_gauge(rbms_config::gauge_from_name(gauge_token(log.gauge))),
+            gauge: usize::try_from(log.gauge)
+                .ok()
+                .and_then(rbms_judge::gauge::GaugeIndex::from_index)
+                .map_or_else(|| ir_gauge(rbms_config::gauge_from_name(gauge_token(log.gauge))), rbms_ir::mapping::ir_gauge_of_index),
             random: ir_random(NoteOption::from_str(random_token(log.random))),
             random_p2: None,
             scratch_auto,

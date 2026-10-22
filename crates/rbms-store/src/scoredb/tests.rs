@@ -1027,6 +1027,31 @@ fn opening_the_database_folds_the_assist_grade_from_the_plays() {
     assert_eq!(db.conn.total_changes(), changes_before, "a grade that stands is not written again");
 }
 
+/// A course's stage a build before this one stored on the gauge the settings chose is put on the
+/// CLASS gauge it ran on, and the grade of its chart folds again from it: the ASSIST EXHARD it never
+/// played becomes the ASSIST CLEAR the stage was. A play that is no stage keeps its gauge, a stage
+/// already on a course gauge keeps its own, and the same stages put again write nothing.
+#[test]
+fn a_course_stage_stored_on_the_settings_gauge_is_put_on_class() {
+    let mut db = fresh();
+    let mode = mode_id("BEAT_7K");
+    let stage = db.record_play(&scratch_auto_clear("aa", 10, 100, "exhard"), true).expect("a stage stored on EX-HARD");
+    let alone = db.record_play(&scratch_auto_clear("bb", 10, 100, "hard"), true).expect("a chart played alone");
+    let on_course_gauge = db.record_play(&scratch_auto_clear("cc", 10, 100, "exclass"), true).expect("a stage stored on its course gauge");
+    assert_eq!(db.best("aa", mode).expect("reads").expect("exists").assist_grade, crate::ASSIST_GRADE_EXHARD, "the grade of the settings gauge");
+
+    assert_eq!(db.put_course_stages_on_class(&[stage, on_course_gauge]).expect("the stages move"), 1);
+    let gauge_of = |id: i64| -> i32 { db.conn.query_row("SELECT gauge FROM scorelog WHERE id = ?1", [id], |row| row.get(0)).expect("the play reads") };
+    assert_eq!((gauge_of(stage), gauge_of(alone), gauge_of(on_course_gauge)), (GAUGE_CLASS, gauge_id("hard"), gauge_id("exclass")));
+    let best = db.best("aa", mode).expect("reads").expect("exists");
+    assert_eq!((best.assist_grade, best.gauge), (crate::ASSIST_GRADE_CLEAR, GAUGE_CLASS), "the stage is the ASSIST CLEAR it was");
+    assert_eq!(db.best("bb", mode).expect("reads").expect("exists").assist_grade, crate::ASSIST_GRADE_HARD, "a chart played alone keeps its grade");
+
+    let changes_before = db.conn.total_changes();
+    assert_eq!(db.put_course_stages_on_class(&[stage, on_course_gauge]).expect("puts again"), 0);
+    assert_eq!(db.conn.total_changes(), changes_before, "nothing is written twice");
+}
+
 #[test]
 fn the_score_book_folds_the_grade_inside_the_lamp() {
     let graded = |clear: u8, gauge: &str, assist: i32| ScoreRecord { gauge: gauge.into(), assist, ..record("aa", 1, clear, [10, 0, 0, 0, 0, 0], false) };

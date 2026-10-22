@@ -29,13 +29,15 @@
 //! does not state, at nought.
 //!
 //! The stage of a course gets none: it started on the course's gauge and its combo, which its
-//! replay does not keep. A row says nothing of a course, and this client stores a stage's row on the
-//! gauge the settings choose, a course gauge being none of those. A row is a course's stage when it
-//! stands where a course the score database keeps had its stages, the rows last stored before the
-//! course ended being its charts in order ([`course_stages`]), or when it was stored on a course
-//! gauge, as a row imported from another client's history may be. The stage of a course that was not
-//! kept is told by nothing but its judging again: started on the course's gauge and carried combo,
-//! it comes to its row only where those leave no mark on the gauge it ended on and its combo.
+//! replay does not keep. A row is a course's stage when it was stored on a course gauge, as this
+//! client stores a stage on the gauge it ran on and a row imported from another client's history may
+//! be, or when it stands where a course the score database keeps had its stages, the rows last stored
+//! before the course ended being its charts in order ([`course_stages`]): a build before this one
+//! stored a stage on the gauge the settings chose, a course gauge being none of those, and the
+//! database is put right as it opens ([`crate::scoredb_store::open_score_db`]). The stage of a course
+//! that was not kept, stored by such a build, is told by nothing but its judging again: started on
+//! the course's gauge and carried combo, it comes to its row only where those leave no mark on the
+//! gauge it ended on and its combo.
 //!
 //! The work goes on a thread of its own, a run at a time with a pause between, waiting while a
 //! chart is played or loaded, and looking at that and at being cancelled while it searches for where
@@ -427,7 +429,6 @@ impl Rejudge<'_> {
     /// The row `session`, scored as `summary` and recorded as `record`, would have been stored as.
     fn stored_as(&self, session: &PlaySession, summary: &PlaySummary, record: &PlayRecord) -> PlayLog {
         let assist = rbms_ir::mapping::assist_level(session.has_auto_played_notes(), self.custom_judge);
-        let gauge = crate::app_result::reported_gauge(summary, rbms_config::gauge_from_name(&self.replay.gauge));
         play_log(&FinishedPlay {
             md5: &self.log.md5,
             sha256: &self.log.sha256,
@@ -436,7 +437,7 @@ impl Rejudge<'_> {
             ln_mode: self.ln_mode_key,
             lamp: assisted_lamp(summary.clear_lamp, assist),
             summary,
-            gauge,
+            gauge: record.finished_gauge,
             random: rbms_chart::shuffle::NoteOption::from_str(&self.replay.random),
             seed: self.replay.seed,
             assist,
