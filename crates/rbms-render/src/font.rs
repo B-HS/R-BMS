@@ -8,10 +8,13 @@ use std::collections::HashMap;
 use std::hash::Hasher;
 use std::sync::Arc;
 
-use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, LayoutGlyph, Metrics, Shaping, Stretch, Style, SwashCache, Weight, fontdb};
+use cosmic_text::{
+    Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, LayoutGlyph, Metrics, Shaping, Stretch, Style, SwashCache, SwashContent, SwashImage, Weight,
+    fontdb,
+};
 
 use crate::glyph_atlas::{GlyphAtlas, GlyphAtlasBinding, glyph_bitmap, packed_rgb};
-use crate::{BlendMode, Color, QuadParams, Rect, Renderer};
+use crate::{BYTES_PER_PIXEL, BlendMode, Color, QuadParams, Rect, Renderer};
 
 pub use block::{BLOCK_MAX_DIM, BLOCK_MAX_EM, BLOCK_MAX_PIXELS, BlockAlign, BlockFit, BlockSpec, TextBlock};
 pub(crate) use block::{CAP_CHARS, CLEAR_PIXEL, block_extent, slack};
@@ -153,27 +156,31 @@ fn layout_key(px: f32, weight: Option<FontWeight>) -> LayoutKey {
     (px as u32, weight.map_or(OWN_WEIGHT_KEY, |w| w.0))
 }
 
-/// The most two axes of a renderer's [`Renderer::device_scale`] may disagree by, in target pixels
-/// across the renderer's longer edge, for text to still be rasterized at the target's resolution.
-///
-/// A letterboxed viewport keeps the screen's shape only to the nearest whole pixel, so its two
-/// scales differ by at most half a pixel over that edge; a window stretched out of shape differs by
-/// more and keeps its text drawn the old way, stretched with the rest of the screen.
-const UNIFORM_SCALE_SLACK_PX: f32 = 1.0;
+/// How far rounding a length to whole target pixels can move it, in pixels.
+const ROUNDING_ERROR_PX: f32 = 0.5;
 
 /// The one factor glyphs are rasterized larger by on `r`, or `None` when text is drawn in `r`'s own
 /// units: a renderer that is its own target, or one whose axes are scaled unlike each other.
 ///
 /// The smaller of the two axes is taken, so a line rasterized at the target's resolution never
 /// outgrows the box it was measured into on either axis.
+///
+/// The two axes are told apart from a target of the screen's own shape by more than rounding can
+/// account for. Each edge of such a target is rounded to whole pixels on its own, as a window's
+/// logical size on a scaled display is, so the longer edge is off by up to half a pixel and the
+/// shorter by as much, which measured along the longer edge is `longer / shorter` times as many.
+/// The scales may therefore differ by that much, over the longer edge, and still be the screen's
+/// shape; a window stretched out of shape differs by more and keeps its text drawn the old way,
+/// stretched with the rest of the screen.
 fn device_text_scale<R: Renderer>(r: &R) -> Option<f32> {
     let (sx, sy) = r.device_scale();
     if sx == 1.0 && sy == 1.0 {
         return None;
     }
     let (w, h) = r.size();
-    let across = w.max(h).max(1) as f32;
-    let uniform = (sx - sy).abs() * across < UNIFORM_SCALE_SLACK_PX;
+    let (longer, shorter) = (w.max(h).max(1) as f32, w.min(h).max(1) as f32);
+    let rounding_slack_px = ROUNDING_ERROR_PX * (1.0 + longer / shorter);
+    let uniform = (sx - sy).abs() * longer <= rounding_slack_px;
     (uniform && sx.is_finite() && sy.is_finite() && sx > 0.0 && sy > 0.0).then_some(sx.min(sy))
 }
 
@@ -241,8 +248,13 @@ pub struct TextContext {
     default_family: String,
     cache: HashMap<String, HashMap<LayoutKey, HashMap<String, Laid>>>,
     /// Rasterized, run-length-merged glyph pixels keyed by `(glyph cache key, packed RGB)`. Built
-    /// once per glyph+colour and replayed every frame, so the hot draw path neither re-runs
-    /// `swash.with_pixels` nor emits one quad per pixel. Survives family changes.
+    /// once per glyph+colour and replayed every frame, so the hot draw path neither re-rasterizes
+    /// nor emits one quad per pixel. Survives family changes.
+    ///
+    /// This is the only copy of a glyph's pixels the draw path keeps, and it is swept to a bound:
+    /// the rasterizer's own image cache is never swept and a window drag asks it for a glyph at a
+    /// new fractional size every frame, so the draw path rasterizes past it
+    /// ([`SwashCache::get_image_uncached`]).
     runs: HashMap<(CacheKey, u32), RunEntry>,
     /// The same rasterizations packed into one texture page, for the textured-quad text path.
     /// Filled lazily by [`TextContext::draw_text_atlas`] and left empty by the default path.
@@ -296,13 +308,15 @@ impl TextContext {
 
     /// The name a freshly loaded face is handed out under.
     ///
-    /// That is its family name, which is what a single font per family has always been called. A
-    /// second cut of a family already loaded cannot share it, so it is told apart by its weight,
-    /// and by its style and stretch as well when even that is taken.
+    /// The family's own name is the regular cut's, whichever cut of the family is loaded first: it
+    /// is also what the built-in screens are set in when nothing else was asked for, so it must
+    /// never come to mean a heavier cut because of the order a skin lists its fonts in. Any other
+    /// cut is told apart by its weight, and by its style and stretch as well when even that is
+    /// taken.
     fn name_for(&self, face: &Face) -> String {
         let taken = |name: &str| self.faces.get(name).is_some_and(|known| !known.same_cut(face));
         let by_weight = format!("{} {}", face.family, face.weight.0);
-        if !taken(&face.family) {
+        if face.same_cut(&Face::of_family(&face.family)) && !taken(&face.family) {
             face.family.clone()
         } else if !taken(&by_weight) {
             by_weight
@@ -511,8 +525,9 @@ impl TextContext {
 
     /// Register an extra font face, returning the name to pass to [`TextContext::set_family`].
     ///
-    /// The name is the face's family name, unless another cut of that family is already loaded:
-    /// then it carries the weight too, so each cut can be asked for on its own.
+    /// The name is the face's family name when it is the family's regular cut. Any other cut
+    /// carries its weight too, so each cut can be asked for on its own, in whichever order they
+    /// are loaded.
     ///
     /// Success means the database gained at least one face from `data`; bytes that are not a font
     /// add nothing and yield `None`, leaving the database and every cache untouched. Lines already
@@ -684,13 +699,7 @@ impl GlyphPainter<'_> {
             match self.runs.entry(key) {
                 std::collections::hash_map::Entry::Occupied(mut slot) => slot.get_mut().used = self.tick,
                 std::collections::hash_map::Entry::Vacant(slot) => {
-                    let mut pixels: Vec<(i32, i32, u8, u8, u8, u8)> = Vec::new();
-                    self.swash.with_pixels(self.fs, ck, base, |dx, dy, col| {
-                        let ca = col.a();
-                        if ca != 0 {
-                            pixels.push((dx, dy, col.r(), col.g(), col.b(), ca));
-                        }
-                    });
+                    let pixels = self.swash.get_image_uncached(self.fs, ck).map(|image| lit_pixels(&image, base)).unwrap_or_default();
                     slot.insert(RunEntry { runs: merge_runs(pixels), used: self.tick });
                 }
             }
@@ -705,6 +714,38 @@ impl GlyphPainter<'_> {
                 fill(Rect::new((ox + gx + run.dx) as f32, (oy + gy + run.dy) as f32, run.w as f32, 1.0), Color { r: run.r, g: run.g, b: run.b, a });
             }
         }
+    }
+}
+
+/// The lit pixels `(dx, dy, r, g, b, ca)` of a rasterized glyph, relative to its pen origin: a
+/// coverage mask is inked in `base`, a colour image keeps its own colours, and a pixel with no
+/// coverage is left out.
+fn lit_pixels(image: &SwashImage, base: CtColor) -> Vec<(i32, i32, u8, u8, u8, u8)> {
+    let (left, top) = (image.placement.left, -image.placement.top);
+    let width = image.placement.width.max(1) as usize;
+    let place = |index: usize| (left + (index % width) as i32, top + (index / width) as i32);
+    match image.content {
+        SwashContent::Mask => image
+            .data
+            .iter()
+            .enumerate()
+            .filter(|(_, coverage)| **coverage != 0)
+            .map(|(index, coverage)| {
+                let (dx, dy) = place(index);
+                (dx, dy, base.r(), base.g(), base.b(), *coverage)
+            })
+            .collect(),
+        SwashContent::Color => image
+            .data
+            .chunks_exact(BYTES_PER_PIXEL)
+            .enumerate()
+            .filter(|(_, pixel)| pixel[3] != 0)
+            .map(|(index, pixel)| {
+                let (dx, dy) = place(index);
+                (dx, dy, pixel[0], pixel[1], pixel[2], pixel[3])
+            })
+            .collect(),
+        SwashContent::SubpixelMask => Vec::new(),
     }
 }
 
@@ -984,6 +1025,30 @@ mod tests {
         assert_eq!(runs.iter().map(|r| r.w as usize).sum::<usize>(), total);
     }
 
+    /// A glyph image of `width` x `height` pixels whose top left corner lies `left` right of the pen
+    /// and `top` above the baseline.
+    fn glyph_image(content: SwashContent, (left, top): (i32, i32), (width, height): (u32, u32), data: Vec<u8>) -> SwashImage {
+        SwashImage { content, placement: cosmic_text::Placement { left, top, width, height }, data, ..SwashImage::default() }
+    }
+
+    #[test]
+    fn lit_pixels_ink_a_mask_in_the_base_colour_and_keep_a_colour_image_as_it_is() {
+        let ink = CtColor::rgb(10, 20, 30);
+        let mask = glyph_image(SwashContent::Mask, (-1, 5), (3, 2), vec![0, 10, 0, 255, 0, 20]);
+        assert_eq!(
+            lit_pixels(&mask, ink),
+            vec![(0, -5, 10, 20, 30, 10), (-1, -4, 10, 20, 30, 255), (1, -4, 10, 20, 30, 20)],
+            "a mask is inked and its empty cells left out"
+        );
+
+        let colour = glyph_image(SwashContent::Color, (2, 3), (2, 1), vec![1, 2, 3, 255, 9, 9, 9, 0]);
+        assert_eq!(lit_pixels(&colour, ink), vec![(2, -3, 1, 2, 3, 255)], "a colour image keeps its own colours and its clear pixel is left out");
+
+        let subpixel = glyph_image(SwashContent::SubpixelMask, (0, 0), (1, 1), vec![255, 255, 255]);
+        assert!(lit_pixels(&subpixel, ink).is_empty(), "a subpixel mask is not drawn");
+        assert!(lit_pixels(&glyph_image(SwashContent::Mask, (0, 0), (0, 0), Vec::new()), ink).is_empty(), "an empty image lights nothing");
+    }
+
     #[test]
     fn merge_runs_empty_input_yields_no_runs() {
         let runs = merge_runs(Vec::new());
@@ -1204,16 +1269,20 @@ mod tests {
     /// The size the menu is laid out for.
     const MENU_SPACE: (u32, u32) = (1280, 720);
 
+    /// Draw [`MENU`] onto `target` through the built-in screens' adapter.
+    fn draw_menu(target: &mut CpuCanvas) {
+        let row = MENU_SPACE.1 as f32 / MENU.len() as f32;
+        let mut ui = crate::ScaledRenderer::new(target, MENU_SPACE);
+        for (i, (scale, line)) in MENU.iter().enumerate() {
+            draw_text(&mut ui, 8.0, i as f32 * row, *scale, MENU_INKS[i % MENU_INKS.len()], line);
+        }
+    }
+
     /// Draw [`MENU`] on a fresh engine through the built-in screens' adapter onto a target `factor`
     /// times [`MENU_SPACE`], and answer the occupancy of both caches.
     fn menu_cache_use(factor: u32) -> (usize, usize) {
         use_embedded_fonts_only();
-        let row = MENU_SPACE.1 as f32 / MENU.len() as f32;
-        let mut target = CpuCanvas::new(MENU_SPACE.0 * factor, MENU_SPACE.1 * factor);
-        let mut ui = crate::ScaledRenderer::new(&mut target, MENU_SPACE);
-        for (i, (scale, line)) in MENU.iter().enumerate() {
-            draw_text(&mut ui, 8.0, i as f32 * row, *scale, MENU_INKS[i % MENU_INKS.len()], line);
-        }
+        draw_menu(&mut CpuCanvas::new(MENU_SPACE.0 * factor, MENU_SPACE.1 * factor));
         cache_stats()
     }
 
@@ -1231,6 +1300,117 @@ mod tests {
             assert!(large.1 * 4 <= RUN_CACHE_LIMIT, "at {factor}x the menu holds {} glyph runs of {RUN_CACHE_LIMIT}", large.1);
             assert!(large.1 <= small.1 * 2, "at {factor}x the menu holds {} glyph runs, at 1x {}", large.1, small.1);
         }
+    }
+
+    /// How many frames of a window drag the test below draws, each at a width the one before it did
+    /// not have.
+    const DRAG_FRAMES: u32 = 48;
+
+    /// A letterboxed viewport's height for a given width: the screen's shape, to the nearest pixel.
+    fn letterboxed_height(width: u32) -> u32 {
+        (width as f32 * MENU_SPACE.1 as f32 / MENU_SPACE.0 as f32).round() as u32
+    }
+
+    /// Dragging a window edge draws every frame at a size the frame before did not have, so every
+    /// frame rasterizes its glyphs at a new fractional size. Each of those is kept by the glyph-run
+    /// cache, which is swept down to its bound, and must not also be kept by the rasterizer, whose
+    /// image cache is never swept.
+    #[test]
+    fn a_window_drag_rasterizes_past_the_rasterizers_unbounded_image_cache() {
+        use_embedded_fonts_only();
+        for frame in 0..DRAG_FRAMES {
+            let width = MENU_SPACE.0 + 1 + frame;
+            draw_menu(&mut CpuCanvas::new(width, letterboxed_height(width)));
+        }
+        let (images, runs) = with_text_context(|e| (e.swash.image_cache.len(), e.runs.len()));
+        assert!(runs <= RUN_CACHE_LIMIT, "{DRAG_FRAMES} drag frames leave {runs} glyph runs of {RUN_CACHE_LIMIT}");
+        assert_eq!(images, 0, "{DRAG_FRAMES} drag frames leave {images} rasterized images beside {runs} glyph runs");
+    }
+
+    /// The factor [`device_text_scale`] answers on a target of `size` drawn through the built-in
+    /// screens' adapter.
+    fn text_scale_on(size: (u32, u32)) -> Option<f32> {
+        let mut target = CpuCanvas::new(size.0, size.1);
+        device_text_scale(&crate::ScaledRenderer::new(&mut target, MENU_SPACE))
+    }
+
+    /// The target a window of `factor` times the screen opens as when each axis is rounded to whole
+    /// pixels on its own, as a logical size on a scaled display is.
+    fn rounded_window(factor: f32) -> (u32, u32) {
+        ((MENU_SPACE.0 as f32 * factor).round() as u32, (MENU_SPACE.1 as f32 * factor).round() as u32)
+    }
+
+    /// Representative viewports, each a letterboxed or stretched window of the screen's own shape to
+    /// the nearest pixel: its two axes agree, so text is rasterized at the target's resolution.
+    #[test]
+    fn a_viewport_of_the_screens_shape_is_rasterized_at_the_targets_resolution() {
+        const VIEWPORTS: [(u32, u32); 6] = [(1366, 768), (1600, 900), (1702, 958), (2560, 1440), (2880, 1620), (3456, 1944)];
+        for size in VIEWPORTS {
+            let scale = text_scale_on(size).unwrap_or_else(|| panic!("{size:?} was taken for a stretched window"));
+            let (sx, sy) = (size.0 as f32 / MENU_SPACE.0 as f32, size.1 as f32 / MENU_SPACE.1 as f32);
+            assert_eq!(scale, sx.min(sy), "{size:?} rasterizes at the smaller of its two axes");
+        }
+        assert_eq!(text_scale_on(MENU_SPACE), None, "a target of the screen's own size has nothing to enlarge");
+    }
+
+    /// Every window of one to three times the screen, in hundredths, with each axis rounded alone:
+    /// the two axes then differ by up to a pixel and a half over the longer edge, which is rounding
+    /// and not a stretch.
+    #[test]
+    fn a_window_whose_axes_were_rounded_apart_is_still_the_screens_shape() {
+        const HUNDREDTHS: std::ops::RangeInclusive<u32> = 101..=300;
+        const HUNDREDTHS_PER_UNIT: f32 = 100.0;
+        for hundredths in HUNDREDTHS {
+            let factor = hundredths as f32 / HUNDREDTHS_PER_UNIT;
+            let size = rounded_window(factor);
+            assert!(text_scale_on(size).is_some(), "{size:?} (x{factor}) was taken for a stretched window");
+        }
+    }
+
+    /// A window pulled out of shape is still drawn the old way, stretched with the rest of the screen.
+    /// The last of them is a single pixel taller than rounding either edge could explain.
+    #[test]
+    fn a_window_stretched_out_of_shape_keeps_its_text_drawn_in_the_screens_units() {
+        const STRETCHED: [(u32, u32); 5] = [(1920, 720), (2560, 720), (1280, 1080), (1920, 1090), (1920, 1081)];
+        for size in STRETCHED {
+            assert_eq!(text_scale_on(size), None, "{size:?} was taken for the screen's shape");
+        }
+    }
+
+    const DEFAULT_PACK_LINE: &str = "HI-SPEED FIX 1.50 / GREEN 300";
+
+    /// A plain line on a fresh engine that has loaded `fonts` as skin fonts, in that order: its
+    /// pixels and its width.
+    fn plain_line_after_loading(fonts: &[&[u8]]) -> (Vec<u8>, f32) {
+        use_embedded_fonts_only();
+        for font in fonts {
+            load_font(font.to_vec()).expect("a skin font loads");
+        }
+        let mut canvas = CpuCanvas::new(260, 40);
+        canvas.clear(Color::BLACK);
+        draw_text(&mut canvas, 4.0, 6.0, 1.8, Color::WHITE, DEFAULT_PACK_LINE);
+        (canvas.pixels().to_vec(), text_width(DEFAULT_PACK_LINE, 1.8))
+    }
+
+    /// The default skin pack ships Inter in two files, a regular one and a bold one, under the family
+    /// the built-in screens are set in. Which of them the pack lists first is nothing the built-in
+    /// screens may depend on: they stay in the regular cut either way.
+    #[test]
+    fn the_built_in_screens_stay_regular_whichever_cut_of_their_family_a_skin_loads_first() {
+        let bold: &[u8] = include_bytes!("../../../assets/skins/rbms-default/font/Inter-Bold.ttf");
+        let (alone, alone_width) = plain_line_after_loading(&[]);
+        let (regular_first, regular_first_width) = plain_line_after_loading(&[&BUNDLED_FONT, bold]);
+        let (bold_first, bold_first_width) = plain_line_after_loading(&[bold, &BUNDLED_FONT]);
+        let (bold_only, bold_only_width) = plain_line_after_loading(&[bold]);
+
+        assert_eq!(regular_first_width, alone_width, "the regular cut loaded first leaves the line its width");
+        assert_eq!(bold_first_width, alone_width, "the bold cut loaded first leaves the line its width");
+        assert_eq!(bold_only_width, alone_width, "the bold cut loaded alone leaves the line its width");
+        assert!(regular_first == alone && bold_first == alone && bold_only == alone, "and its pixels");
+
+        use_embedded_fonts_only();
+        let heavy = load_font(bold.to_vec()).expect("the bold cut loads");
+        assert_ne!(heavy, with_text_context(|e| e.default_family().to_string()), "the bold cut does not take the family's own name");
     }
 
     /// A regular style is the plain call: the same layout, the same pixels.
