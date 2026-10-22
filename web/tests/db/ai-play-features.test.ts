@@ -6,6 +6,7 @@ import { createTraceDb } from '@server/compose/trace'
 import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chart, chartBest, playAnalysis, playShareSetting, playTrace, rival, score } from '@server/db/schema'
+import { gaugeTypeToId } from '@server/dto/common'
 import type { TraceUploadInput } from '@server/dto/trace'
 import { ANALYSIS_VERSION, PLAY_ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
 import { countTraceJudgements } from '@server/service/domain/trace/trace-check'
@@ -238,6 +239,7 @@ describe.skipIf(!hasDatabase)('판별 기반 AI 기능 (임시 MySQL)', () => {
         expect(await compareDb.findPublicBest({ userId: RIVAL, chartSha256: NORMAL.chart.sha256, scratchAuto: false })).toMatchObject({
             scoreId: TRACES.rival.score_id,
             clear: 5,
+            gauge: gaugeTypeToId('AssistEasy'),
             exScore: EX.rival,
             pgreat: countTraceJudgements(NORMAL).pgreat,
         })

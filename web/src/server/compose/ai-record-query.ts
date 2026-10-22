@@ -3,6 +3,7 @@ import type { MySqlColumn } from 'drizzle-orm/mysql-core'
 import type { Database } from '@server/db'
 import { chart, chartBest, score } from '@server/db/schema'
 import { AI_RECORD_QUERY_LIMIT } from '@server/dto/ai'
+import { GAUGE_TYPES, NO_ASSIST_GRADE, gaugeTypeToId } from '@server/dto/common'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import {
     EX_RATE_BASIS_POINTS_PER_PERCENT,
@@ -11,6 +12,7 @@ import {
     type RecordQueryTable,
 } from '@server/service/domain/ai/record-query.compiler'
 import { createAiRecordQueryService, type AiRecordQueryServiceDb } from '@server/service/domain/ai/record-query.service'
+import { ASSIST_GRADE_OF_GAUGE, LIGHT_ASSIST_LAMP_ID } from '@server/service/domain/score/assist-grade'
 import { EX_PER_PGREAT } from '@server/service/domain/score/best-policy'
 import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { orderedLevels } from '@server/service/domain/table-snapshot/table-snapshot.service'
@@ -57,13 +59,21 @@ const toWhere = (condition: RecordCondition, columns: RecordColumns) => {
 const SCORE_COLUMNS: RecordColumns = { clear: score.clear, exScore: score.exScore, minbp: score.minbp, scratchAuto: score.scratchAuto }
 const BEST_COLUMNS: RecordColumns = { clear: chartBest.clear, exScore: chartBest.exScore, minbp: chartBest.minbp, scratchAuto: chartBest.scratchAuto }
 
+const gaugeGradeCases = sql.join(
+    GAUGE_TYPES.map((gauge) => sql`when ${gaugeTypeToId(gauge)} then ${ASSIST_GRADE_OF_GAUGE[gauge]}`),
+    sql` `,
+)
+
+/** The assist grade of a play, from its lamp and the gauge it ended on: the same mapping as `deriveAssistGrade`, built from its table. */
+const scoreAssistGrade = sql`(case when ${score.clear} = ${LIGHT_ASSIST_LAMP_ID} then (case ${score.gauge} ${gaugeGradeCases} else ${NO_ASSIST_GRADE} end) else ${NO_ASSIST_GRADE} end)`
+
 const SCORE_SORT = {
-    played_at: score.playedAt,
-    ex_rate: sql`${score.exScore} / nullif(${exScoreDenominator()}, 0)`,
-    bp: score.minbp,
-    level: chart.level,
-    lamp: score.clear,
-} satisfies Record<RecordQuerySort['sort_field'], MySqlColumn | SQL>
+    played_at: [score.playedAt],
+    ex_rate: [sql`${score.exScore} / nullif(${exScoreDenominator()}, 0)`],
+    bp: [score.minbp],
+    level: [chart.level],
+    lamp: [score.clear, scoreAssistGrade],
+} satisfies Record<RecordQuerySort['sort_field'], (MySqlColumn | SQL)[]>
 
 const recordSelection = (columns: RecordColumns) => ({
     scoreId: score.id,
@@ -97,7 +107,7 @@ export const createAiRecordQueryDb = (db: Database): AiRecordQueryServiceDb => (
             .from(score)
             .leftJoin(chart, eq(chart.sha256, score.chartSha256))
             .where(and(eq(score.userId, userId), ...conditions.map((condition) => toWhere(condition, SCORE_COLUMNS))))
-            .orderBy(order(SCORE_SORT[sort.sort_field]), desc(score.playedAt), desc(score.id))
+            .orderBy(...SCORE_SORT[sort.sort_field].map((term) => order(term)), desc(score.playedAt), desc(score.id))
             .limit(limit)
         return rows.map((row) => ({ ...row, title: row.title ?? '', artist: row.artist ?? '' }))
     },

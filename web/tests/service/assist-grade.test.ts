@@ -79,3 +79,30 @@ describe('마이그레이션 0011 의 백필 SQL', () => {
         expect(backfill.match(/`best`\.`[a-z_]+` =/g)).toEqual(['`best`.`assist_grade` ='])
     })
 })
+
+describe('운영 DB 의 어시스트 등급 보정 SQL', () => {
+    const [migrationBackfill = ''] = readFileSync(new URL('../../drizzle/0011_assist_grade.sql', import.meta.url), 'utf8')
+        .split('--> statement-breakpoint')
+        .slice(-1)
+    const migrationCase = migrationBackfill.match(/SET `best`\.`assist_grade` = (CASE .+ END);/)?.[1] ?? ''
+    const backfill = readFileSync(new URL('../../scripts/assist-grade.backfill.sql', import.meta.url), 'utf8')
+    const count = readFileSync(new URL('../../scripts/assist-grade.count.sql', import.meta.url), 'utf8')
+    const caseExpressions = (sql: string) => [...sql.matchAll(/CASE WHEN .+? END ELSE 0 END/g)].map(([found]) => found)
+
+    test('등급 식은 0011 의 백필 식과 같고 보정은 바뀔 행만 건드리며 세기는 같은 식으로 센다', () => {
+        expect(migrationCase).not.toBe('')
+        expect(caseExpressions(backfill)).toEqual([migrationCase, migrationCase])
+        expect(caseExpressions(count)).toEqual([migrationCase])
+        expect(backfill).toContain('UPDATE `chart_best` AS `best`')
+        expect(backfill).toContain('INNER JOIN `score` ON `score`.`id` = `best`.`score_id`')
+        expect(backfill).toContain('WHERE `best`.`assist_grade` <> CASE')
+        expect(backfill.match(/SET /g)).toHaveLength(1)
+    })
+
+    test('식의 게이지별 등급이 deriveAssistGrade 와 같다', () => {
+        const gaugeCases = [...migrationCase.matchAll(/WHEN (\d+) THEN (\d+)/g)].map(([, gauge, grade]) => [Number(gauge), Number(grade)] as const)
+        expect(gaugeCases.map(([gauge]) => gauge)).toEqual(GAUGE_TYPES.map((_, id) => id).filter((id) => id > 0))
+        for (const [gauge, grade] of gaugeCases) expect(grade).toBe(deriveAssistGrade({ clear: LIGHT_ASSIST, gauge }))
+        expect(migrationCase).toStartWith(`CASE WHEN \`score\`.\`clear\` = ${LIGHT_ASSIST} THEN CASE \`score\`.\`gauge\``)
+    })
+})

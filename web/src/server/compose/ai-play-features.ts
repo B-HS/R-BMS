@@ -65,6 +65,7 @@ export const createAiPlayCompareDb = (db: Database) =>
                     scoreId: chartBest.scoreId,
                     playedAt: score.playedAt,
                     clear: chartBest.clear,
+                    gauge: score.gauge,
                     exScore: chartBest.exScore,
                     minbp: chartBest.minbp,
                     random: score.random,

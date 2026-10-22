@@ -10,7 +10,16 @@ import {
     type AiRecordQueryRowOutput,
     type AiRecordQueryRunInput,
 } from '@server/dto/ai'
-import { ASSIST_GRADE_NAMES, CLEAR_LAMPS, GAUGE_TYPES, NO_ASSIST_GRADE, RANDOM_OPTIONS, clearLampFromId, gaugeTypeFromId } from '@server/dto/common'
+import {
+    ASSIST_GRADES,
+    ASSIST_GRADE_NAMES,
+    CLEAR_LAMPS,
+    GAUGE_TYPES,
+    NO_ASSIST_GRADE,
+    RANDOM_OPTIONS,
+    clearLampFromId,
+    gaugeTypeFromId,
+} from '@server/dto/common'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import {
     NO_PLAY_LAMP_ID,
@@ -148,7 +157,7 @@ const SORT_VALUE = {
     played_at: ({ row }: ScopedRow) => row.played_at,
     ex_rate: ({ row }: ScopedRow) => row.ex_rate,
     bp: ({ row }: ScopedRow) => row.bp,
-    lamp: ({ row }: ScopedRow) => CLEAR_LAMPS.indexOf(row.lamp),
+    lamp: ({ row }: ScopedRow) => CLEAR_LAMPS.indexOf(row.lamp) * ASSIST_GRADES.length + row.assist_grade,
     level: ({ entry }: ScopedRow) => entry.levelIndex,
 } satisfies Record<(typeof AI_RECORD_QUERY_SORT_FIELDS)[number], (scoped: ScopedRow) => number | null>
 

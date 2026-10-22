@@ -1,6 +1,6 @@
 import { clearLampToId, gaugeTypeFromId, NO_ASSIST_GRADE, type AssistGrade, type GaugeType } from '@server/dto/common'
 
-const LIGHT_ASSIST_LAMP_ID = clearLampToId('LightAssistEasy')
+export const LIGHT_ASSIST_LAMP_ID = clearLampToId('LightAssistEasy')
 
 /**
  * The grade of the lamp a gauge gives on a clear without any demotion, with the full-combo overwrite ignored: the EASY lamp is 1,
@@ -8,7 +8,7 @@ const LIGHT_ASSIST_LAMP_ID = clearLampToId('LightAssistEasy')
  * kind: CLASS the NORMAL one, EXCLASS the HARD one, EXHARDCLASS the EX-HARD one. The ASSIST EASY gauge gives LIGHT ASSIST itself,
  * so it has no grade.
  */
-const ASSIST_GRADE_OF_GAUGE = {
+export const ASSIST_GRADE_OF_GAUGE = {
     AssistEasy: 0,
     Easy: 1,
     Normal: 2,

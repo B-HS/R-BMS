@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again / admin-seed-count: count the rows the admin seed migration (0006) would change'
+        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again / admin-seed-count: count the rows the admin seed migration (0006) would change / assist-grade-backfill-count: count the stale chart_best.assist_grade / assist-grade-backfill: reset them from their score (as migration 0011 did, safe to repeat)'
         type: choice
-        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup, admin-seed-count]
+        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup, admin-seed-count, assist-grade-backfill-count, assist-grade-backfill]
         default: status
 
 permissions:
@@ -89,3 +89,12 @@ jobs:
       - name: Count the admin seed target
         if: inputs.action == 'admin-seed-count'
         run: bun scripts/run-sql.ts admin-seed.count.sql
+      - name: Count the stale assist grades
+        if: startsWith(inputs.action, 'assist-grade-backfill')
+        run: bun scripts/run-sql.ts assist-grade.count.sql
+      - name: Backfill the assist grades
+        if: inputs.action == 'assist-grade-backfill'
+        run: bun scripts/run-sql.ts assist-grade.backfill.sql
+      - name: Count the stale assist grades again
+        if: inputs.action == 'assist-grade-backfill'
+        run: bun scripts/run-sql.ts assist-grade.count.sql

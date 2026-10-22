@@ -5,7 +5,7 @@ import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chart, chartBest, score } from '@server/db/schema'
 import type { AiRecordQueryFilter, AiRecordQueryRunInput } from '@server/dto/ai'
-import { clearLampToId, gaugeTypeToId } from '@server/dto/common'
+import { clearLampToId, gaugeTypeToId, type ClearLamp } from '@server/dto/common'
 import type { RecordQueryTable } from '@server/service/domain/ai/record-query.compiler'
 import { createAiRecordQueryService } from '@server/service/domain/ai/record-query.service'
 
@@ -17,6 +17,7 @@ if (!hasDatabase) {
 const PREFIX = 'w1rq'
 const OWNER = `${PREFIX}_owner`
 const OTHER = `${PREFIX}_other`
+const GRADER = `${PREFIX}_grader`
 const DAY_MS = 86_400_000
 const T0 = Date.UTC(2026, 8, 1, 12)
 const NOTES = 1000
@@ -96,6 +97,31 @@ const SCORES = [
     },
 ]
 
+const UNKNOWN_GAUGE_ID = 99
+
+const GRADER_PLAYS = [
+    { id: 'g1', clear: 'LightAssistEasy', gauge: gaugeTypeToId('Hazard') },
+    { id: 'g2', clear: 'LightAssistEasy', gauge: gaugeTypeToId('AssistEasy') },
+    { id: 'g3', clear: 'LightAssistEasy', gauge: gaugeTypeToId('Normal') },
+    { id: 'g4', clear: 'Easy', gauge: gaugeTypeToId('Easy') },
+    { id: 'g5', clear: 'LightAssistEasy', gauge: gaugeTypeToId('ExClass') },
+    { id: 'g6', clear: 'LightAssistEasy', gauge: UNKNOWN_GAUGE_ID },
+] satisfies { id: string; clear: ClearLamp; gauge: number }[]
+
+const GRADER_SCORES = GRADER_PLAYS.map((play, index) => ({
+    id: `${PREFIX}_${play.id}`,
+    userId: GRADER,
+    chartSha256: CHARTS.alpha.sha256,
+    clear: clearLampToId(play.clear),
+    exScore: 1000,
+    maxExScore: MAX_EX,
+    minbp: 10,
+    random: 'Off',
+    gauge: play.gauge,
+    playedAt: T0 + index * DAY_MS,
+    scratchAuto: play.clear === 'LightAssistEasy',
+}))
+
 const BESTS = [
     { score: SCORES[0], scratchAuto: false },
     { score: SCORES[2], scratchAuto: true },
@@ -151,9 +177,9 @@ describe.skipIf(!hasDatabase)('기록 질문 쿼리 (임시 MySQL)', () => {
     beforeAll(async () => {
         await cleanup()
         const db = getDb()
-        await db.insert(user).values([OWNER, OTHER].map((id) => ({ id, name: id, email: `${id}@w1rq.invalid`, loginId: id })))
+        await db.insert(user).values([OWNER, OTHER, GRADER].map((id) => ({ id, name: id, email: `${id}@w1rq.invalid`, loginId: id })))
         await db.insert(chart).values(Object.values(CHARTS).map((row) => ({ ...row, notes: NOTES, mode: 'BEAT_7K' })))
-        await db.insert(score).values(SCORES.map((row) => ({ ...row, chartMd5: null, notes: NOTES, mode: 'BEAT_7K' })))
+        await db.insert(score).values([...SCORES, ...GRADER_SCORES].map((row) => ({ ...row, chartMd5: null, notes: NOTES, mode: 'BEAT_7K' })))
         await db.insert(chartBest).values(BESTS)
     })
 
@@ -164,6 +190,33 @@ describe.skipIf(!hasDatabase)('기록 질문 쿼리 (임시 MySQL)', () => {
         expect(await scoreIds([{ field: 'lamp', op: 'gte', value: 'Easy' }], { limit: 1 })).toEqual([`${PREFIX}_s2`])
         expect(await scoreIds([{ field: 'lamp', op: 'eq', value: 'Max' }])).toEqual([])
         expect((await runAs(OTHER, [{ field: 'lamp', op: 'eq', value: 'Max' }]))?.rows.map((row) => row.score_id)).toEqual([`${PREFIX}_s4`])
+    })
+
+    test('램프 정렬은 LIGHT ASSIST 판을 끝난 게이지의 등급 순으로 가르고 모르는 게이지는 등급 0 이며 등급은 더 높은 램프를 넘지 못한다', async () => {
+        const gradeSort = (sort_dir: 'asc' | 'desc', overrides: Partial<AiRecordQueryRunInput> = {}) =>
+            runAs(GRADER, [], { sort_field: 'lamp', sort_dir, ...overrides }).then((result) =>
+                result?.rows.map((row) => [row.score_id, row.assist_grade]),
+            )
+        expect(await gradeSort('desc')).toEqual([
+            [`${PREFIX}_g4`, 0],
+            [`${PREFIX}_g1`, 4],
+            [`${PREFIX}_g5`, 3],
+            [`${PREFIX}_g3`, 2],
+            [`${PREFIX}_g6`, 0],
+            [`${PREFIX}_g2`, 0],
+        ])
+        expect(await gradeSort('asc')).toEqual([
+            [`${PREFIX}_g6`, 0],
+            [`${PREFIX}_g2`, 0],
+            [`${PREFIX}_g3`, 2],
+            [`${PREFIX}_g5`, 3],
+            [`${PREFIX}_g1`, 4],
+            [`${PREFIX}_g4`, 0],
+        ])
+        expect(await gradeSort('desc', { limit: 2 })).toEqual([
+            [`${PREFIX}_g4`, 0],
+            [`${PREFIX}_g1`, 4],
+        ])
     })
 
     test('EX 비율은 최대 EX 가 0 이면 노트 수 × 2 로 나누고 정수 비교로 경계를 지킨다', async () => {

@@ -306,6 +306,44 @@ describe('난이도표 질문', () => {
         expect(context.recordDb.calls.map((call) => call.method)).toEqual(['listTableBestRecords'])
     })
 
+    test('램프 정렬은 LIGHT ASSIST 판을 등급 순으로 가르고 어떤 등급도 더 높은 램프를 넘지 못한다', async () => {
+        const bests = [
+            record({
+                scoreId: 'best-a',
+                chartMd5: MD5.alpha,
+                clear: clearLampToId('LightAssistEasy'),
+                gauge: gaugeTypeToId('AssistEasy'),
+                scratchAuto: true,
+            }),
+            record({
+                scoreId: 'best-b',
+                chartMd5: MD5.bravo,
+                clear: clearLampToId('LightAssistEasy'),
+                gauge: gaugeTypeToId('ExHard'),
+                scratchAuto: true,
+            }),
+            record({ scoreId: 'best-c', chartMd5: MD5.charlie, clear: clearLampToId('Easy'), gauge: gaugeTypeToId('Easy') }),
+        ]
+        const titlesSortedBy = async (sortDir: 'asc' | 'desc') => {
+            const context = setup({ rows: { bests } })
+            const answer = await context.service.run({
+                userId: USER,
+                plan: { filters: [{ field: 'table', op: 'eq', value: 'insane1' }], sort_field: 'lamp', sort_dir: sortDir, limit: 10 },
+            })
+            return answer.result?.rows.map((row) => [row.title, row.lamp, row.assist_grade])
+        }
+        expect(await titlesSortedBy('desc')).toEqual([
+            ['Charlie', 'Easy', 0],
+            ['Bravo', 'LightAssistEasy', 4],
+            ['Alpha', 'LightAssistEasy', 0],
+        ])
+        expect(await titlesSortedBy('asc')).toEqual([
+            ['Alpha', 'LightAssistEasy', 0],
+            ['Bravo', 'LightAssistEasy', 4],
+            ['Charlie', 'Easy', 0],
+        ])
+    })
+
     test('레벨 정렬은 표의 레벨 순서를 따르고 같은 레벨은 제목 순이다', async () => {
         const context = setup({ rows: { bests: [], played: [] } })
         const answer = await context.service.run({

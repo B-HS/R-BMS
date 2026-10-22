@@ -6,6 +6,7 @@ import {
     createAiPlayCompareService,
     pickGapSegments,
     type AiPlayCompareServiceDb,
+    type PublicBestRow,
 } from '@server/service/domain/ai/play-compare.service'
 import {
     AI_PLAY_REPORT_SYSTEM_PROMPT,
@@ -16,6 +17,7 @@ import {
 } from '@server/service/domain/ai/play-report.service'
 import { computeCoachAnalysis, refineCoachOutput, toCoachDigest, toPlayView, type PlayScoreRow } from '@server/service/domain/ai/replay-coach.service'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
+import { clearLampToId, gaugeTypeToId } from '@server/dto/common'
 import { GAUGE_OUTCOME, RUN_END } from '@server/service/domain/analysis/play-metrics'
 import type { TraceUploadInput } from '@server/dto/trace'
 import type { AnalyzedPlay } from '@server/service/domain/trace/trace.service'
@@ -429,6 +431,54 @@ describe('베스트·라이벌 비교(기획 5.3)', () => {
         const view = await compare.view(RIVAL_PARAMS)
         expect(view).toMatchObject({ mode: 'totals', reason: 'note_layout_differs', target: { who: 'rival', ex_score: 50, played_at: 7 } })
         expect(view?.totals?.target.ex_score).toBe(view?.target?.ex_score)
+    })
+
+    test('판정 합계의 두 판은 각각 끝난 게이지로 어시스트 등급을 싣고 LIGHT ASSIST 가 아닌 판은 0 이다', async () => {
+        const lightAssist = clearLampToId('LightAssistEasy')
+        const base = analyzedPlayOf(NORMAL)
+        const compareWith = (target: { rivalBest: PublicBestRow | null; ownBest: AnalyzedPlay | null }) =>
+            createAiPlayCompareService({
+                db: {
+                    findOwnedPlayScore: async () => scoreRow({ clear: lightAssist, gauge: gaugeTypeToId('Hard') }),
+                    findPublicBest: async () => target.rivalBest,
+                    listRivals: async () => [{ userId: RIVAL_ID, loginId: 'rival', name: 'Rival', allowsSegments: false }],
+                    findLoginId: async () => 'tracer',
+                },
+                plays: {
+                    analyzedPlayOfScore: async () => base,
+                    bestAnalyzedPlayOnChart: async () => target.ownBest,
+                    rivalSegmentsOnChart: async () => ({ allowed: false as const }),
+                },
+                runner: unusedRunner,
+                results: noResults,
+            })
+        const publicBest = (overrides: Partial<PublicBestRow>): PublicBestRow => ({
+            ...scoreRow({ scoreId: 'sc_rival_public', exScore: 50, playedAt: 7 }),
+            ...overrides,
+        })
+
+        const exHardRival = await compareWith({ rivalBest: publicBest({ clear: lightAssist, gauge: gaugeTypeToId('ExHard') }), ownBest: null }).view(
+            RIVAL_PARAMS,
+        )
+        expect(exHardRival?.totals).toMatchObject({
+            base: { lamp: 'LightAssistEasy', assist_grade: 3 },
+            target: { lamp: 'LightAssistEasy', assist_grade: 4 },
+        })
+        const plainRival = await compareWith({
+            rivalBest: publicBest({ clear: lightAssist, gauge: gaugeTypeToId('AssistEasy') }),
+            ownBest: null,
+        }).view(RIVAL_PARAMS)
+        expect(plainRival?.totals?.target).toMatchObject({ lamp: 'LightAssistEasy', assist_grade: 0 })
+        const normalRival = await compareWith({
+            rivalBest: publicBest({ clear: clearLampToId('Hard'), gauge: gaugeTypeToId('Hard') }),
+            ownBest: null,
+        }).view(RIVAL_PARAMS)
+        expect(normalRival?.totals?.target).toMatchObject({ lamp: 'Hard', assist_grade: 0 })
+
+        const differentLayout = analyzedPlayOf(SCRATCH_AUTO, { score: { clear: lightAssist, gauge: gaugeTypeToId('Easy') } })
+        const ownBest = await compareWith({ rivalBest: null, ownBest: differentLayout }).view({ ...RIVAL_PARAMS, query: { against: 'best' } })
+        expect(ownBest).toMatchObject({ mode: 'totals', reason: 'note_layout_differs' })
+        expect(ownBest?.totals).toMatchObject({ base: { assist_grade: 3 }, target: { lamp: 'LightAssistEasy', assist_grade: 1 } })
     })
 
     test('한쪽 판이 도달하지 못한 구간은 차이를 null 로 하고 누적과 차이 큰 구간에서 뺀다', () => {

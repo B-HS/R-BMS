@@ -62,3 +62,15 @@ describe('운영 DB workflow 의 차트 노트 수 동작', () => {
         ])
     })
 })
+
+describe('운영 DB workflow 의 어시스트 등급 보정 동작', () => {
+    test('세기 동작은 세기 SQL 만 돌리고 보정 동작은 세기, 보정, 세기 순으로 돌린다', () => {
+        expect(actions).toContain('assist-grade-backfill-count')
+        expect(actions).toContain('assist-grade-backfill')
+        expect(sqlSteps.filter((step) => step.script.startsWith('assist-grade.'))).toEqual([
+            { condition: "startsWith(inputs.action, 'assist-grade-backfill')", script: 'assist-grade.count.sql' },
+            { condition: "inputs.action == 'assist-grade-backfill'", script: 'assist-grade.backfill.sql' },
+            { condition: "inputs.action == 'assist-grade-backfill'", script: 'assist-grade.count.sql' },
+        ])
+    })
+})

@@ -23,6 +23,7 @@ import { COMPARE_GAP_SEGMENTS, PLAY_FEATURE_ANALYSIS_VERSION } from '@server/ser
 import { isShownTag, segmentKey } from '@server/service/domain/ai/play-digest'
 import type { PlayScoreDb, PlayScoreRow } from '@server/service/domain/ai/replay-coach.service'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { AnalyzedPlay, RivalSegmentPlay, TraceService } from '@server/service/domain/trace/trace.service'
 
 export const AI_PLAY_COMPARE_FEATURE = 'play_compare'
@@ -57,6 +58,7 @@ export type PublicBestRow = {
     scoreId: string
     playedAt: number
     clear: number
+    gauge: number
     exScore: number
     minbp: number
     random: string
@@ -88,8 +90,9 @@ type AiPlayCompareServiceDeps = {
 type SegmentCounts = { id: string; chart_notes: number; notes: number; ex_score: number; bp: number }
 type BaseSegment = SegmentCounts & { from_ms: number; to_ms: number; top_tags: { tag: string; notes: number }[] }
 
-const totalsOf = (row: Pick<PublicBestRow, 'clear' | 'exScore' | 'minbp' | 'pgreat' | 'great' | 'good' | 'bad' | 'poor'>) => ({
+const totalsOf = (row: Pick<PublicBestRow, 'clear' | 'gauge' | 'exScore' | 'minbp' | 'pgreat' | 'great' | 'good' | 'bad' | 'poor'>) => ({
     lamp: clearLampFromId(row.clear),
+    assist_grade: deriveAssistGrade(row),
     ex_score: row.exScore,
     minbp: row.minbp,
     pgreat: row.pgreat,

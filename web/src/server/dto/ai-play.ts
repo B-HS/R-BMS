@@ -173,6 +173,7 @@ export const aiCompareOutputSchema = z.object({
 
 const judgeTotalsSchema = z.object({
     lamp: clearLampSchema,
+    assist_grade: assistGradeSchema,
     ex_score: z.number().int(),
     minbp: z.number().int(),
     pgreat: z.number().int(),

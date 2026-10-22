@@ -29,7 +29,7 @@ export const AiCompareTotalsTable: FC<{ totals: NonNullable<AiCompareView['total
                 <tr key={label}>
                     <td>{label}</td>
                     <td>
-                        <LampLabel lamp={row.lamp} />
+                        <LampLabel lamp={row.lamp} assistGrade={row.assist_grade} />
                     </td>
                     <td>{formatCount(row.ex_score)}</td>
                     <td>{formatCount(row.minbp)}</td>

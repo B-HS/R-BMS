@@ -130,7 +130,7 @@ describe('판별 기반 AI 화면', () => {
     })
 
     test('비교가 공개 판정 합계뿐이면 이유를 적고 AI 버튼을 두지 않는다', async () => {
-        const totals = { lamp: 'Hard' as const, ex_score: 50, minbp: 1, pgreat: 20, great: 10, good: 0, bad: 0, poor: 1 }
+        const totals = { lamp: 'Hard' as const, assist_grade: 0 as const, ex_score: 50, minbp: 1, pgreat: 20, great: 10, good: 0, bad: 0, poor: 1 }
         const view: CompareView = {
             against: 'best',
             base: { who: 'me', login_id: 'me', score_id: SCORE_ID, played_at: 0, lamp: 'Normal', ex_score: 41, random: 'Off', scratch_auto: false },
@@ -200,6 +200,28 @@ describe('판별 기반 AI 화면', () => {
         notice: null,
         ai: null,
         ...overrides,
+    })
+
+    test('판정 합계 표는 LIGHT ASSIST 판마다 끝난 게이지의 어시스트 등급을 따로 보인다', async () => {
+        const judgements = { ex_score: 50, minbp: 1, pgreat: 20, great: 10, good: 0, bad: 0, poor: 1 }
+        const view = compareView({
+            mode: 'totals',
+            reason: 'rival_not_sharing',
+            segments: [],
+            gap_segments: [],
+            totals: {
+                base: { ...judgements, lamp: 'LightAssistEasy', assist_grade: 4 },
+                target: { ...judgements, lamp: 'LightAssistEasy', assist_grade: 0 },
+            },
+        })
+        const installed = installFetchRoutes({ [`GET ${COMPARE_PATH}`]: () => jsonResponse(view) })
+        restoreFetch = installed.restore
+        await renderWithQueryClient(<AiComparePanel scoreId={SCORE_ID} />)
+        const baseRow = (await page.findByText('이 판')).closest('tr')
+        const targetRow = page.getByText('비교 판').closest('tr')
+        expect(baseRow?.textContent).toContain('ASSIST EXHARD')
+        expect(targetRow?.textContent).toContain('LIGHT ASSIST')
+        expect(targetRow?.textContent).not.toContain('ASSIST EXHARD')
     })
 
     test('한쪽 판이 도달하지 못한 구간은 차이를 보이지 않고 몇 구간을 뺐는지 알린다', async () => {
