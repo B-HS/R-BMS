@@ -272,6 +272,46 @@ fn the_assist_grade_of_the_best_lamp_switches_on_its_own_option_only() {
     assert!(grade_options.clone().all(|id| state_of(&folder).boolean(id) == Some(false)), "a folder has a grade");
 }
 
+/// The key indices no lane of a mode is on: none in a mode with seven keys or nine buttons, and
+/// the indices of keys six and seven in a mode with five.
+#[test]
+fn a_five_key_or_ten_key_mode_has_no_lane_on_the_indices_of_keys_six_and_seven() {
+    use crate::keyconfig::KEY_INDEX_COUNT;
+    const KEYS_SIX_AND_SEVEN: [usize; 2] = [5, 6];
+    for mode in [Mode::BEAT_5K, Mode::BEAT_10K] {
+        let unreachable = shown::unreachable_keys_of(mode);
+        for (index, out_of_reach) in unreachable.into_iter().enumerate() {
+            assert_eq!(out_of_reach, KEYS_SIX_AND_SEVEN.contains(&index), "{} key index {index}", mode.name);
+        }
+    }
+    for mode in [Mode::BEAT_7K, Mode::BEAT_14K, Mode::POPN_9K, Mode::KEYBOARD_24K] {
+        assert_eq!(shown::unreachable_keys_of(mode), [false; KEY_INDEX_COUNT], "{}", mode.name);
+    }
+}
+
+/// A skin reads which keys are out of reach by this player's own nine options, one for each key
+/// index, and a frame the browser has not said anything of reads every key as reachable.
+#[test]
+fn the_keys_out_of_reach_are_read_by_the_option_of_their_index() {
+    use crate::keyconfig::KEY_INDEX_COUNT;
+    use crate::skin_host::extension::{RBMS_OPTION_UNREACHABLE_KEY_FIRST, RBMS_OPTION_UNREACHABLE_KEY_LAST};
+    let ids = RBMS_OPTION_UNREACHABLE_KEY_FIRST..=RBMS_OPTION_UNREACHABLE_KEY_LAST;
+    assert_eq!(ids.clone().count(), KEY_INDEX_COUNT);
+    let timers = TimerState::new();
+    let answers = |shown: &SelectShown| {
+        let mut host = ScreenHost::new(0, &timers);
+        host.show_select(shown);
+        ids.clone().map(|id| host.boolean(id)).collect::<Vec<_>>()
+    };
+
+    let mut shown = shown_on(song(), None);
+    assert_eq!(answers(&shown), [Some(false); KEY_INDEX_COUNT], "a frame that says nothing has keys out of reach");
+    shown.unreachable_keys = shown::unreachable_keys_of(Mode::BEAT_5K);
+    let expected = shown.unreachable_keys.map(Some);
+    assert_eq!(answers(&shown), expected);
+    assert_eq!(expected.iter().filter(|answer| **answer == Some(true)).count(), 2, "keys six and seven");
+}
+
 #[test]
 fn a_bar_that_is_not_a_chart_or_a_course_is_never_a_bar_that_was_not_played() {
     for kind in [BarKind::Folder, BarKind::Table, BarKind::Executable] {

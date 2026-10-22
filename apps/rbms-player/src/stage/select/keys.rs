@@ -24,7 +24,7 @@ use rbms_model::Mode;
 use rbms_render::skin_render::frame::BarHold;
 
 use crate::AppShared;
-use crate::keyconfig::KEY_INDEX_COUNT;
+use crate::keyconfig::{KEY_INDEX_COUNT, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX};
 
 /// What a key can stand for on the browser (`MusicSelectKeyProperty.MusicSelectKey`). Only the
 /// roles a table assigns or the browser asks about are here.
@@ -286,6 +286,19 @@ impl SelectKeys {
     /// (`BMSPlayerInputProcessor.resetKeyChangedTime`).
     pub(super) fn forget_change(&mut self, index: usize) -> bool {
         self.changed.get_mut(index).is_some_and(std::mem::take)
+    }
+
+    /// Forgets that either direction of the turntable has changed. A direction already down when a
+    /// panel comes up, or when the panel gives way to another, is the list's scrolling carried on
+    /// and no press on the panel. The turntable roles this player adds
+    /// ([`SelectKey::Hidden`], [`SelectKey::JudgeAlgorithmUp`] and [`SelectKey::JudgeAlgorithmDown`])
+    /// are read as presses, where the reference reads the turntable on its panels only as held
+    /// (`TARGET_UP`, `TARGET_DOWN`, which this leaves as they are), so a press is a turn made while
+    /// the panel is up.
+    pub(super) fn forget_turntable_changes(&mut self) {
+        for index in [SCRATCH_FORWARD_INDEX, SCRATCH_BACKWARD_INDEX] {
+            self.forget_change(index);
+        }
     }
 
     /// Which way the keys that move the list are holding it. The key for the next bar wins over

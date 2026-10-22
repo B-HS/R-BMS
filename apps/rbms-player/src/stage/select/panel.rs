@@ -294,6 +294,9 @@ impl SelectState {
     /// A panel that goes starts its departure timer and switches its arrival timer off, and one that
     /// comes starts its arrival timer and switches its departure timer off. Nothing is switched for
     /// a panel that stays as it is.
+    ///
+    /// A turntable direction already down when the panel changes is not a press on the panel that
+    /// follows ([`super::keys::SelectKeys::forget_turntable_changes`]).
     pub(super) fn show_panel(&mut self, shared: &mut AppShared, held: Panel) {
         if let Some(sound) = self.panel.option_key_sound(held) {
             shared.play_system_sound(sound);
@@ -301,6 +304,7 @@ impl SelectState {
         if self.panel.open == held {
             return;
         }
+        self.keys.forget_turntable_changes();
         let now_us = shared.skin_now_us();
         if let Some((on, off)) = timers_of(self.panel.open) {
             shared.skin_timers.set_on(off, now_us);

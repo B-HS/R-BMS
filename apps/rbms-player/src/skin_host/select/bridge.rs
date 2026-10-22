@@ -16,7 +16,7 @@ use rbms_render::SongBars;
 use rbms_render::skin_render::frame::BarKind;
 use rbms_store::scoredb::{BestScore, chart_key, mode_id};
 
-use super::shown::{ChartInputs, CourseShown, SelectInputs, SelectShown};
+use super::shown::{ChartInputs, CourseShown, SelectInputs, SelectShown, unreachable_keys_of};
 use crate::app_result::{local_best_before_reading, target_context};
 use crate::skin_host::ir::IrBrowser;
 use crate::target;
@@ -93,7 +93,7 @@ impl AppShared {
             config: &self.config,
             ir: IrBrowser::of_ranking(self.has_primary_ir_server(), entry.and_then(|entry| self.ranking_cache.peek(&entry.md5))),
         });
-        SelectShown { settings: shown.settings.with_target_stand_in(stand_in), ..shown }
+        SelectShown { settings: shown.settings.with_target_stand_in(stand_in), unreachable_keys: unreachable_keys_of(self.mode), ..shown }
     }
 
     /// The target a run of the chart `md5` would be paced against in place of the one the TARGET

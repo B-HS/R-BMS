@@ -73,6 +73,8 @@ words.display_time = {
     off = "OFF",
     off_note = "KEEP GREEN NUMBER IS OFF: TURN IT ON WITH SELECT + KEY 5 TO SET THE TIME HERE",
     off_lines = { "KEEP GREEN NUMBER IS OFF", "(SELECT + KEY 5)" },
+    away_note = "KEEP GREEN NUMBER IS ON: MOVE THE CURSOR TO A CHART TO SET THE TIME HERE",
+    away_lines = { "MOVE THE CURSOR TO", "A CHART TO SET IT" },
     held_lines = { "LEFT: 1 MS SHORTER", "RIGHT: 1 MS LONGER" },
     green = "GREEN NUMBER %d",
 }

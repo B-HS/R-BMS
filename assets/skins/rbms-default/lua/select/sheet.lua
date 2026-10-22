@@ -129,10 +129,25 @@ local function switch(main_state, spec, read)
     return option(spec)
 end
 
-local function keyboard(page, labels)
+local function out_of_reach(main_state, ...)
+    local ids = {}
+    for _, index in ipairs({ ... }) do
+        table.insert(ids, props.extension.UNREACHABLE_KEY_FIRST + index - 1)
+    end
+    return function()
+        for _, id in ipairs(ids) do
+            if not main_state.option(id) then
+                return false
+            end
+        end
+        return true
+    end
+end
+
+local function keyboard(page, main_state, labels)
     for index = 1, KEYS.count do
         local label = labels[index]
-        page:key(key_box(index), label.text, label.color, is_black(index))
+        page:key(key_box(index), label.text, label.color, is_black(index), out_of_reach(main_state, index))
     end
 end
 
@@ -276,7 +291,7 @@ local function play_page(page, main_state)
     def.watch = { random.watch, gauge.watch, fix.watch, target_watch }
     information(page, main_state, def)
 
-    keyboard(page, {
+    keyboard(page, main_state, {
         { text = "DOWN", color = random.color },
         { text = "UP", color = random.color },
         { text = "DOWN", color = gauge.color },
@@ -410,7 +425,7 @@ local function assist_page(page, main_state)
         labels[index] = { text = "ON/OFF", color = spec.color }
     end
     labels[1].text = "LOCKED"
-    keyboard(page, labels)
+    keyboard(page, main_state, labels)
     turntable(page, "ON/OFF", hidden.color)
 
     local pitch = (MAIN.w - LEFT_GAP / 2) / #columns
@@ -425,7 +440,7 @@ local function assist_page(page, main_state)
         else
             page:wire(down(index, lanes[#lanes + 1 - reach], x), spec.color)
         end
-        boxed_list(page, centered(x, width), spec)
+        page:dim(boxed_list(page, centered(x, width), spec), out_of_reach(main_state, index))
     end
 
     page:wire(from_turntable(), hidden.color)
@@ -470,16 +485,22 @@ local function display_time(main_state)
             return duration
         end
     end
+    local kept = function()
+        return main_state.option(props.extension.KEEP_GREEN_NUMBER_ON)
+    end
     return {
         read = function()
             return held() or props.no_value.LOW
         end,
         first = function()
             local duration = held()
-            if duration == nil then
-                return words.display_time.off
+            if duration ~= nil then
+                return string.format("%d MS", duration)
             end
-            return string.format("%d MS", duration)
+            if kept() then
+                return NO_NAME
+            end
+            return words.display_time.off
         end,
         second = function()
             if held() == nil then
@@ -490,9 +511,18 @@ local function display_time(main_state)
         held = function()
             return held() ~= nil
         end,
+        away = function()
+            return held() == nil and kept()
+        end,
+        off = function()
+            return held() == nil and not kept()
+        end,
         tell = function(now)
             local name = words.display_time.name
             if not ui.has_value(now) then
+                if kept() then
+                    return name, NO_NAME, words.display_time.away_note
+                end
                 return name, words.display_time.off, words.display_time.off_note
             end
             local green = main_state.number(props.number.DURATION_GREEN)
@@ -579,7 +609,7 @@ local function detail_page(page, main_state)
     def.watch = { bga.watch, shift.watch, adjust.watch, duration, timing, algorithm.watch }
     information(page, main_state, def)
 
-    keyboard(page, {
+    keyboard(page, main_state, {
         { text = "ON/OFF", color = bga.color },
         { text = "DOWN", color = shift.color },
         { text = "ON/OFF", color = adjust.color },
@@ -627,11 +657,8 @@ local function detail_page(page, main_state)
     local duration_spec = { name = { "NOTE DISPLAY TIME" }, color = duration_color, first = duration.first, second = duration.second }
     duration_spec.reserve = #words.display_time.off_lines
     local duration_frame, duration_lines = page:field(duration_box, duration_spec)
-    page:caption_lines(duration_lines, words.display_time.off_lines, theme.panel.caution, {
-        draw = function()
-            return not duration.held()
-        end,
-    })
+    page:caption_lines(duration_lines, words.display_time.off_lines, theme.panel.caution, { draw = duration.off })
+    page:caption_lines(duration_lines, words.display_time.away_lines, theme.color.muted, { draw = duration.away })
     page:caption_lines(duration_lines, words.display_time.held_lines, theme.color.muted, { draw = duration.held })
     page:column_label(duration_frame, "SPEED", duration_color)
 

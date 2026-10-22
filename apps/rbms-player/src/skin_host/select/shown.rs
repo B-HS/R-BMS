@@ -17,10 +17,12 @@
 use rbms_config::{Config, SortMode};
 use rbms_course::CourseConstraint;
 use rbms_model::Mode;
+use rbms_play::ScratchDir;
 use rbms_render::skin_render::frame::{BarDistribution, BarKind, SongBar};
 use rbms_skin::lua::{LocalTime, local_time};
 use rbms_store::scoredb::BestScore;
 
+use crate::keyconfig::{KEY_INDEX_COUNT, key_index_of};
 use crate::skin_host::ir::IrBrowser;
 use crate::skin_host::options::SettingsView;
 use crate::skin_host::score::standing::{PointFamily, ScoreSheet, ScoreStanding, TargetPace};
@@ -151,6 +153,20 @@ pub struct SelectShown {
     pub settings: SettingsView,
     /// The ranking of the chart under the cursor.
     pub ir: IrBrowser,
+    /// For each key index of the browser's key table, whether no key of the mode whose keys are
+    /// bound is on it ([`unreachable_keys_of`]). [`SelectShown::of`] leaves every key reachable, and
+    /// the browser says which are not.
+    pub unreachable_keys: [bool; KEY_INDEX_COUNT],
+}
+
+/// For each key index of the browser's key table (`crate::keyconfig::key_index_of`), whether no lane
+/// of `mode` is on it, whichever way a turntable is spun. A five-key or ten-key mode has no lane on
+/// the indices of keys six and seven.
+pub fn unreachable_keys_of(mode: Mode) -> [bool; KEY_INDEX_COUNT] {
+    let reached = |index: usize| {
+        (0..mode.key).any(|lane| [ScratchDir::Forward, ScratchDir::Backward].into_iter().any(|dir| key_index_of(mode, lane, dir) == Some(index)))
+    };
+    std::array::from_fn(|index| !reached(index))
 }
 
 /// What the library and the player's records say about the chart under the cursor.
@@ -218,6 +234,7 @@ impl SelectShown {
             standing: ScoreStanding::of(&sheet, sheet.notes, TargetPace { total_notes: sheet.notes, ..TargetPace::default() }),
             settings: if has_chart_settings { settings } else { settings.without_chart() },
             ir: IrBrowser { board: inputs.ir.board.filter(|_| has_ranking), ..inputs.ir },
+            unreachable_keys: [false; KEY_INDEX_COUNT],
         }
     }
 

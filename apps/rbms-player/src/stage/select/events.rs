@@ -13,9 +13,10 @@
 //! played where the reference plays it.
 //!
 //! The note display time (59) is the travel time a held green number is held at: it moves while the
-//! KEEP GREEN NUMBER row is on and does nothing while it is off, because the scroll speed is then
-//! what is stored and there is no travel time for the event to move. It is the one event that reads
-//! its second argument, which is how far it steps.
+//! KEEP GREEN NUMBER row is on and the cursor is on a chart, and does nothing while the row is off,
+//! because the scroll speed is then what is stored and there is no travel time for the event to
+//! move, or while the cursor is on a bar that is no chart, where a skin is shown no travel time. It
+//! is the one event that reads its second argument, which is how far it steps.
 //!
 //! What the reference keeps and this player has no setting for is left out of the table, and an id
 //! that is not in it does nothing at all: the difficulty filter (10), the automatic adjustment of the
@@ -389,9 +390,12 @@ impl SelectState {
 
     /// `duration1p` with its step: move the travel time a held green number is held at, with the
     /// sound of a changed option when it moved. It has no place to go on a course whose charts are
-    /// not all there, like the other settings of the play under the cursor.
+    /// not all there, like the other settings of the play under the cursor, and none with the cursor
+    /// on a bar that is no chart: a skin reads no travel time there ([`crate::skin_host::select::SelectShown::of`]), and a
+    /// number nobody can see is not moved.
     pub(super) fn run_duration_event(&mut self, shared: &mut AppShared, arg1: i32, arg2: i32) {
-        if !self.has_play_settings() || !step_duration(&mut shared.config, arg1, arg2) {
+        let on_a_chart = self.focused_bar(shared) == FocusedBar::Playable && self.has_play_settings();
+        if !on_a_chart || !step_duration(&mut shared.config, arg1, arg2) {
             return;
         }
         self.options_dirty = true;

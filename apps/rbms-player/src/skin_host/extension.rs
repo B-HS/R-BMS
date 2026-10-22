@@ -2,8 +2,9 @@
 //!
 //! The host answers the ids the reference declares (`SkinProperty`), and a skin written for the
 //! reference never names anything else. A few things this player has are not in the reference at
-//! all -- SCRATCH AUTO, KEEP GREEN NUMBER as a switch, the assist grade inside a light-assist lamp --
-//! and a skin that wants to show or switch one needs an id for it. They are kept in two bands of
+//! all -- SCRATCH AUTO, KEEP GREEN NUMBER as a switch, the assist grade inside a light-assist lamp,
+//! which keys of the browser's table a controller can reach -- and a skin that wants to show or
+//! switch one needs an id for it. They are kept in two bands of
 //! this player's own, well above everything the reference declares (its highest option is 3035 and
 //! its highest event 388) and clear of the bands it leaves to a skin (options 900 to 999, events
 //! 1000 to 1999, timers 10000 to 19999):
@@ -25,6 +26,8 @@
 //! named below reads as no option and runs as no event.
 
 use rbms_judge::AssistGrade;
+
+use crate::keyconfig::KEY_INDEX_COUNT;
 
 /// The first and last of the events this player keeps for itself.
 pub const EXTENSION_EVENT_FIRST: i32 = 21_000;
@@ -71,9 +74,26 @@ pub const RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST: i32 = 21_120;
 /// index 371 reads), all off where the chart was never played.
 pub const RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST: i32 = 21_130;
 
+/// The first of nine options, one for each key index of the browser's key table (0 to 8: the seven
+/// keys and the two directions of the turntable): the option `first + i` is on, on the song browser,
+/// while no key of the mode whose keys are bound is on index `i`, so no press of it can come. A
+/// five-key or ten-key mode has no lane on indices 5 and 6, which are the keys six and seven of an
+/// option panel, and a skin that draws those keys reads these to draw them out of reach.
+pub const RBMS_OPTION_UNREACHABLE_KEY_FIRST: i32 = 21_140;
+
+/// The last option of the run of nine that starts at [`RBMS_OPTION_UNREACHABLE_KEY_FIRST`].
+pub const RBMS_OPTION_UNREACHABLE_KEY_LAST: i32 = RBMS_OPTION_UNREACHABLE_KEY_FIRST + KEY_INDEX_COUNT as i32 - 1;
+
 /// The last option of a run of five that starts at `first`.
 pub const fn assist_grade_options_last(first: i32) -> i32 {
     first + ASSIST_GRADE_OPTIONS - 1
+}
+
+/// Which key index the option `id` asks about, or `None` for an id outside the run of
+/// [`RBMS_OPTION_UNREACHABLE_KEY_FIRST`].
+pub fn unreachable_key_asked(id: i32) -> Option<usize> {
+    let place = id.checked_sub(RBMS_OPTION_UNREACHABLE_KEY_FIRST)?;
+    usize::try_from(place).ok().filter(|index| *index < KEY_INDEX_COUNT)
 }
 
 /// Which assist grade id the option `id` asks about in the run of five that starts at `first`, or
@@ -111,6 +131,7 @@ mod tests {
         for first in GRADE_RUNS {
             options.extend(first..=assist_grade_options_last(first));
         }
+        options.extend(RBMS_OPTION_UNREACHABLE_KEY_FIRST..=RBMS_OPTION_UNREACHABLE_KEY_LAST);
         for id in &options {
             assert!((EXTENSION_OPTION_FIRST..=EXTENSION_OPTION_LAST).contains(id), "option {id}");
         }
@@ -118,6 +139,17 @@ mod tests {
         options.sort_unstable();
         options.dedup();
         assert_eq!(options.len(), count, "two options share an id");
+    }
+
+    #[test]
+    fn an_unreachable_key_option_names_the_key_index_of_its_place_in_its_run() {
+        for index in 0..KEY_INDEX_COUNT {
+            let id = RBMS_OPTION_UNREACHABLE_KEY_FIRST + i32::try_from(index).expect("a key index fits");
+            assert_eq!(unreachable_key_asked(id), Some(index));
+        }
+        assert_eq!(unreachable_key_asked(RBMS_OPTION_UNREACHABLE_KEY_FIRST - 1), None);
+        assert_eq!(unreachable_key_asked(RBMS_OPTION_UNREACHABLE_KEY_LAST + 1), None);
+        assert_eq!(unreachable_key_asked(i32::MIN), None, "an id far below the run does not wrap round");
     }
 
     #[test]

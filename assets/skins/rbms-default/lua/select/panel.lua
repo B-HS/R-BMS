@@ -13,6 +13,7 @@ local ROWS = { first = 8, pitch = 44, height = 38, inset = 10, foot = 6 }
 local GLOW = 4
 local LABEL_GAP = 8
 local KEY = { frame = 4, label = theme.type.caption }
+local OUT_OF_REACH_ALPHA = 196
 local FIELD = { height = 52, inset = 10, arrow = 20, arrow_inset = 14, gap = 12 }
 
 panel.HEADER = HEADER
@@ -89,15 +90,23 @@ function Sheet:tag(box, text, fill, ink)
     self:write(spec, { x = box.x, top = theme.centered_top(box, size), w = box.w }, ink)
 end
 
-function Sheet:key(box, label, color, black)
+function Sheet:dim(box, draw)
+    self:fill(box, theme.color.bg, { a = OUT_OF_REACH_ALPHA, draw = draw })
+end
+
+function Sheet:key(box, label, color, black, out_of_reach)
     local frame = KEY.frame
-    self:fill({ x = box.x - frame, top = box.top - frame, w = box.w + frame * 2, h = box.h + frame * 2 }, color)
+    local outer = { x = box.x - frame, top = box.top - frame, w = box.w + frame * 2, h = box.h + frame * 2 }
+    self:fill(outer, color)
     local face = black and theme.panel.key_black or theme.panel.key_white
     local ink = black and theme.panel.key_black_ink or theme.panel.key_white_ink
     self:fill(box, face)
     local size = KEY.label
     local spec = { text = label, size = size, weight = "bold", align = "center", overflow = props.text_overflow.SHRINK }
     self:write(spec, { x = box.x, top = theme.centered_top(box, size), w = box.w }, ink)
+    if out_of_reach then
+        self:dim(outer, out_of_reach)
+    end
 end
 
 function Sheet:heading(box, lines, color)

@@ -315,6 +315,45 @@ fn the_turntable_of_the_third_panel_steps_the_judge_algorithm() {
     assert_eq!(browser.sel(), 0, "the turntable moved the list under the panel");
 }
 
+/// A turntable direction that was already down when a panel came up, or when the panel gave way to
+/// another, is the list's scrolling carried on and not a press on the panel: it neither switches
+/// HIDDEN+ nor steps the judge algorithm. A turn made once the panel is up still does.
+#[test]
+fn a_turntable_direction_held_before_the_panel_came_up_is_not_a_press_on_it() {
+    use rbms_judge::JudgeAlgorithm;
+    let hidden = |browser: &Browser| browser.app.shared.config.play.enable_hidden;
+    let algorithm = |browser: &Browser| browser.app.shared.config.judge.judge_algorithm;
+
+    let mut browser = browser("panel-turntable-held-before");
+    browser.hold(TURNTABLE_FORWARD);
+    browser.frame_after(SHORT_STEP);
+    browser.frame_after(SHORT_STEP);
+
+    browser.hold(SELECT);
+    browser.frame_after(SHORT_STEP);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(browser.state.panel.number(), 2);
+    assert!(!hidden(&browser), "a turntable held before the second panel came up switched HIDDEN+");
+
+    browser.hold(START);
+    browser.frame_after(SHORT_STEP);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(browser.state.panel.number(), 3);
+    assert_eq!(algorithm(&browser), JudgeAlgorithm::Combo, "a turntable held before the third panel came up stepped the judge algorithm");
+
+    browser.let_go(START);
+    browser.frame_after(SHORT_STEP);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(browser.state.panel.number(), 2);
+    assert!(!hidden(&browser), "a turntable held through the change back to the second panel switched HIDDEN+");
+
+    browser.let_go(TURNTABLE_FORWARD);
+    browser.frame_after(SHORT_STEP);
+    browser.hold(TURNTABLE_FORWARD);
+    browser.frame_after(SHORT_STEP);
+    assert!(hidden(&browser), "a turn made on the panel was not a press");
+}
+
 /// With the first panel up the key the option overlay is held open by, which ships on the turntable,
 /// is the panel's: the overlay stays shut and the turntable steps the target. With no panel up the
 /// same key opens the overlay as it always has.
@@ -396,6 +435,52 @@ fn the_third_panel_moves_the_held_travel_time_while_its_keys_are_held() {
     assert_eq!(duration(&browser), shipped - 1, "DURATION_DOWN");
     assert_eq!(browser.sel(), 0, "a key of the panel moved the list");
     assert!((browser.app.shared.config.play.hispeed - Config::default().play.hispeed).abs() < f64::EPSILON, "the speed is worked out when a chart starts");
+}
+
+/// With the cursor off a chart the panel shows no travel time, so the keys that move it leave it
+/// where it is -- a number nobody can see is not moved -- and with the cursor on a chart they move it
+/// again.
+#[test]
+fn the_third_panel_leaves_the_travel_time_alone_while_the_cursor_is_off_a_chart() {
+    let shipped = rbms_config::DEFAULT_DURATION_MS;
+    let mut browser = holding("panel3-duration-folder", &[START, SELECT]);
+    browser.app.shared.config.play.keep_green_number = true;
+    browser.app.shared.select_view = SelectView::Root;
+    browser.app.shared.sel = 0;
+    browser.app.shared.rebuild_select_items();
+    browser.frame_after(SHORT_STEP);
+    assert!(matches!(browser.app.shared.select_items.first(), Some(SelectItem::Folder { .. })), "the cursor is not on a folder");
+
+    for key in [KEY_SIX, KEY_FOUR] {
+        browser.hold(key);
+        browser.frame_after(SHORT_STEP);
+        browser.frame_after(PAST_THE_FIRST_REPEAT);
+        browser.let_go(key);
+        browser.frame_after(SHORT_STEP);
+        assert_eq!(browser.app.shared.config.play.duration_ms, shipped, "{key:?} moved a travel time the panel does not show");
+    }
+
+    browser.app.shared.select_view = SelectView::AllSongs;
+    browser.app.shared.rebuild_select_items();
+    browser.frame_after(SHORT_STEP);
+    browser.hold(KEY_SIX);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(browser.app.shared.config.play.duration_ms, shipped + 1, "on a chart the key moves it again");
+}
+
+/// The browser lends the skin which keys of its table the bound mode has no lane on: none in the
+/// seven-key mode the fixture starts in, and the two of keys six and seven once it is a five-key one.
+#[test]
+fn the_browser_lends_the_keys_the_bound_mode_has_no_lane_on() {
+    use crate::keyconfig::KEY_INDEX_COUNT;
+    use crate::skin_host::select::BrowserLent;
+    let mut browser = browser("panel-keys-out-of-reach");
+    let lent = BrowserLent::default();
+    assert_eq!(browser.app.shared.select_shown(None, &lent).unreachable_keys, [false; KEY_INDEX_COUNT]);
+
+    browser.app.shared.mode = Mode::BEAT_5K;
+    let out_of_reach = browser.app.shared.select_shown(None, &lent).unreachable_keys;
+    assert_eq!(out_of_reach.iter().enumerate().filter(|(_, out)| **out).map(|(index, _)| index).collect::<Vec<_>>(), [5, 6]);
 }
 
 /// A key held on a panel is one press: the option moves once however long it is held.

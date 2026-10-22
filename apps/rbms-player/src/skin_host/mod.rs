@@ -52,7 +52,8 @@ use rbms_skin::timer::{TimerId, TimerState};
 
 use extension::{
     RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_SCRATCH_AUTO, RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST,
-    RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, RBMS_OPTION_SCRATCH_AUTO_ON, RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_options_last,
+    RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, RBMS_OPTION_SCRATCH_AUTO_ON, RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST,
+    RBMS_OPTION_UNREACHABLE_KEY_FIRST, RBMS_OPTION_UNREACHABLE_KEY_LAST, assist_grade_options_last,
 };
 
 /// The image index of the browser's difficulty filter (`IndexType.difficulty`), which the reference
@@ -394,6 +395,7 @@ pub const ROUTES: &[Route] = &[
         assist_grade_options_last(RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST),
         Cluster::Select,
     ),
+    Route::band(IdSpace::Boolean, RBMS_OPTION_UNREACHABLE_KEY_FIRST, RBMS_OPTION_UNREACHABLE_KEY_LAST, Cluster::Select),
     Route::band(IdSpace::ImageIndex, BUTTON_FAVORITTE_SONG, BUTTON_FAVORITTE_CHART, Cluster::Select),
     Route::band(IdSpace::ImageIndex, INDEX_CLEAR, INDEX_TARGET_CLEAR, Cluster::Select),
     Route::one(IdSpace::Text, STRING_TITLE, Cluster::Select),

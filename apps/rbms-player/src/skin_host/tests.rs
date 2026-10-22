@@ -461,10 +461,11 @@ fn this_players_own_events_are_routed_to_the_settings() {
 fn this_players_own_options_are_routed_to_the_clusters_that_answer_them() {
     use super::extension::{
         RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, RBMS_OPTION_SCRATCH_AUTO_ON,
-        RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_options_last,
+        RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, RBMS_OPTION_UNREACHABLE_KEY_FIRST, RBMS_OPTION_UNREACHABLE_KEY_LAST, assist_grade_options_last,
     };
     let first = |id: i32| clusters_of(IdSpace::Boolean, id).next();
     assert_eq!((first(RBMS_OPTION_SCRATCH_AUTO_ON), first(RBMS_OPTION_HIDDEN_ON)), (Some(Cluster::Options), Some(Cluster::Options)));
+    assert_eq!((first(RBMS_OPTION_UNREACHABLE_KEY_FIRST), first(RBMS_OPTION_UNREACHABLE_KEY_LAST)), (Some(Cluster::Select), Some(Cluster::Select)));
     let selected = RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST;
     assert_eq!((first(selected), first(assist_grade_options_last(selected))), (Some(Cluster::Select), Some(Cluster::Select)));
     for run in [RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST] {
