@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from 'next'
+import { NextIntlClientProvider } from 'next-intl'
+import { getLocale } from 'next-intl/server'
 import '@app/globals.css'
 import { Providers } from '@app/providers'
 import { SITE_DESCRIPTION, SITE_LOCALE, SITE_NAME, SITE_URL } from '@shared/constants/site'
@@ -13,6 +15,8 @@ export const metadata: Metadata = {
     twitter: { card: 'summary', title: SITE_NAME, description: SITE_DESCRIPTION },
 }
 
+export const instant = false
+
 export const viewport: Viewport = {
     themeColor: [
         { media: '(prefers-color-scheme: dark)', color: '#000000' },
@@ -20,12 +24,14 @@ export const viewport: Viewport = {
     ],
 }
 
-const RootLayout = ({ children }: LayoutProps<'/'>) => (
-    <html lang='ko' suppressHydrationWarning>
+const RootLayout = async ({ children }: LayoutProps<'/'>) => (
+    <html lang={await getLocale()} suppressHydrationWarning>
         <body className='bg-background text-foreground min-h-dvh font-sans antialiased md:h-dvh md:overflow-hidden'>
-            <Providers>
-                <AppShell>{children}</AppShell>
-            </Providers>
+            <NextIntlClientProvider>
+                <Providers>
+                    <AppShell>{children}</AppShell>
+                </Providers>
+            </NextIntlClientProvider>
         </body>
     </html>
 )
