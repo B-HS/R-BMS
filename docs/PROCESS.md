@@ -10,9 +10,9 @@
 > 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 2026-10-22 고도화 통합 게이트의 Rust 6,269 통과·0 실패).
 > Git: Conventional Commits, 설명은 한국어([acknowledge/2026-09-17-commit-language.md](acknowledge/2026-09-17-commit-language.md)), author 사용자 단독, AI 트레일러 금지, 선별 스테이징, force push 금지. 게이트를 통과하면 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 CI 를 확인한다. `Cargo.lock` 은 추적한다(2026-10-11 부터, 결정 D12). `target/` 과 곡 차트는 커밋하지 않는다.
 
-## 상태 (2026-10-22)
+## 상태 (2026-10-23)
 
-- 2026-10-22 "클라이언트 기능 고도화"(아래 체크리스트) 구현과 웹 배포 완료: 운영 DB 마이그레이션 0011 적용(web-db run 39693988962), 웹 `64c6120`·`47a7f9c`, 운영 낡은 등급 행 0(run 39733088817). 클라이언트는 v0.1.7 태그와 release draft(run 39812316178, `d438294`, 산출물 점검 통과, [ci-release.md](ci-release.md) 2.3). 게시는 사용자. 체크리스트의 G 는 메인이 마지막에 체크한다.
+- 2026-10-22 "클라이언트 기능 고도화"(아래 체크리스트) 구현과 웹 배포 완료: 운영 DB 마이그레이션 0011 적용(web-db run 39693988962), 웹 `64c6120`·`47a7f9c`, 운영 낡은 등급 행 0(run 39733088817). 클라이언트 v0.1.7(run 39812316178, `d438294`, 산출물 점검 통과, [ci-release.md](ci-release.md) 2.3)은 사용자가 게시했다(Latest). v0.1.6 도 게시됨, v0.1.5 는 draft. 진행 중인 체크리스트 없음, 다음은 사용자 실기(QA 3.20)와 [HANDOFF.md](HANDOFF.md) 6절 13 확인.
 
 - 클라이언트 `v0.1.4` 는 2026-10-15 07:27 UTC 에 게시됐다(release run 38696475211, 버전 커밋 `87eacd0`). `v0.1.3`·`v0.1.0` draft 는 게시하지 않고 남겨 뒀다. 릴리스 이력은 [ci-release.md](ci-release.md) 2.3절.
 - 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0011 적용(`web/drizzle/`, 실행은 `web-db.yml`. 이 줄의 웹 배포 `51f3a1e` 는 2026-10-15 관찰값).
@@ -46,7 +46,7 @@
 - [x] AI-W4. 판별 trace(0009 `4d30bb4`, 웹 `57fdc08`·클라이언트 `98a2cf0`), 클라이언트 릴리스는 R2
 - [x] AI-W5. 판별 기반 기능 1·2·3·8·4 전체 — 0010 운영 적용(run 39316772885), 코드는 2026-10-20 커밋. 게이트 웹 1,451·DB 108·Rust 6,146 통과
 - [x] AI-W6. 과거 판 소급(EVENT 시계 리플레이 재판정)
-- [ ] AI-R2. 클라이언트 v0.1.6 태그·draft(trace 전송·소급 포함), 사용자 실기(키 진단·리포트 확인) — draft 완료(run 39318721794, `2bb868b`, 산출물 점검 통과, [ci-release.md](ci-release.md) 2.3). 남은 것: 사용자 게시·키 진단·실기
+- [ ] AI-R2. 클라이언트 v0.1.6 태그·draft(trace 전송·소급 포함), 사용자 실기(키 진단·리포트 확인) — draft 완료(run 39318721794, `2bb868b`, 산출물 점검 통과, [ci-release.md](ci-release.md) 2.3), 사용자 게시됨(2026-10-23 확인). 남은 것: 키 진단·실기
 
 ## 체크리스트 — 웹 기록 표시와 구동기 Esc·목표 보완 (2026-10-19)
 
