@@ -11,16 +11,18 @@
 //! the course starts. It answers with values rather than writing them anywhere, so the settings the
 //! player chose are still theirs when the course ends.
 //!
-//! The module is complete but not yet called: the call sites named in
-//! `docs/plan/phase-g-wiring/G3-course.md` belong to the integration branch, and the allow below
-//! goes away with the first of them.
+//! [`course_stage_gauge`] is how each stage's gauge starts: on the table the COURSE GAUGE setting
+//! picks, which a course's own gauge constraint does not override, on the course gauge the player's
+//! GAUGE setting maps to, and, after the first stage, with every gauge where the stage before left it.
 
 use std::path::{Path, PathBuf};
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::PlayOptions;
 use rbms_course::{Course, CourseChart, CourseConstraint, CourseRun};
-use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::GaugeKind;
+use rbms_judge::gauge::GaugeIndex;
+use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
 use rbms_judge::ln::LnMode;
 use rbms_library::Library;
 
@@ -277,18 +279,19 @@ pub(crate) struct CourseOverrides {
     /// (`LaneRenderer.java:95-102`, `BMSPlayer.java:419-423`).
     pub(crate) speed_locked: bool,
     pub(crate) random: RandomLock,
-    /// Gauge table the course forces, or `None` to keep the one in force (`GrooveGauge.java:123-149`).
-    pub(crate) gauge_set: Option<GaugeSetId>,
     /// Long-note flavour the course forces, or `None` to keep the one in force
     /// (`MusicSelector.java:501-503`).
     pub(crate) ln_mode: Option<LnMode>,
-    /// Constraints this build stores and shows but does not yet enforce, because enforcing them
-    /// needs the judge tables to be selectable per run.
+    /// Constraints this build stores and shows but does not yet enforce: NO GOOD and NO GREAT, which
+    /// no course this build plays uses yet.
     pub(crate) unapplied: Vec<&'static str>,
 }
 
 impl CourseOverrides {
     /// Read a course's constraint set.
+    ///
+    /// A gauge constraint narrows nothing: the course is played on the table the COURSE GAUGE
+    /// setting picks ([`course_stage_gauge`]), and the constraint is only shown on the course's row.
     pub(crate) fn of(course: &Course) -> CourseOverrides {
         let mut out = CourseOverrides::default();
         for constraint in &course.constraints {
@@ -298,11 +301,11 @@ impl CourseOverrides {
                 CourseConstraint::Random => out.random = RandomLock::Random,
                 CourseConstraint::NoSpeed => out.speed_locked = true,
                 CourseConstraint::NoGood | CourseConstraint::NoGreat => out.unapplied.push(constraint_badge(*constraint)),
-                CourseConstraint::GaugeLr2 => out.gauge_set = Some(GaugeSetId::Lr2),
-                CourseConstraint::Gauge5Keys => out.gauge_set = Some(GaugeSetId::FiveKeys),
-                CourseConstraint::Gauge7Keys => out.gauge_set = Some(GaugeSetId::SevenKeys),
-                CourseConstraint::Gauge9Keys => out.gauge_set = Some(GaugeSetId::Pms),
-                CourseConstraint::Gauge24Keys => out.gauge_set = Some(GaugeSetId::Keyboard),
+                CourseConstraint::GaugeLr2
+                | CourseConstraint::Gauge5Keys
+                | CourseConstraint::Gauge7Keys
+                | CourseConstraint::Gauge9Keys
+                | CourseConstraint::Gauge24Keys => {}
                 CourseConstraint::Ln => out.ln_mode = Some(LnMode::LongNote),
                 CourseConstraint::Cn => out.ln_mode = Some(LnMode::ChargeNote),
                 CourseConstraint::Hcn => out.ln_mode = Some(LnMode::HellChargeNote),
@@ -311,15 +314,11 @@ impl CourseOverrides {
         out
     }
 
-    /// The long-note flavour the run plays under.
-    #[cfg(test)]
+    /// The long-note flavour the run plays under: the course's, when it states one, as the
+    /// reference plays an LN, CN or HCN course on that flavour whatever LN MODE says
+    /// (`MusicSelector.java:501-503`). The setting itself is left as the player set it.
     pub(crate) fn ln_mode_for(&self, chosen: LnMode) -> LnMode {
         self.ln_mode.unwrap_or(chosen)
-    }
-
-    /// The gauge table the run plays on.
-    pub(crate) fn gauge_set_for(&self, chosen: Option<GaugeSetId>) -> Option<GaugeSetId> {
-        self.gauge_set.or(chosen)
     }
 
     /// Rewrite a copy of the play settings for the run. The caller keeps the original and puts it
@@ -367,19 +366,50 @@ impl CourseOverrides {
     }
 }
 
+/// How a course stage's gauge starts: the table, the slot, its value, and every slot's value the
+/// stage before left (`GrooveGauge.java:123-158`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CourseStageGauge {
+    pub(crate) set: GaugeSetId,
+    pub(crate) start: GaugeIndex,
+    pub(crate) value: f32,
+    /// Every gauge's value the stage before ended on, `None` on the course's first stage.
+    pub(crate) carried: Option<[f32; GaugeIndex::COUNT]>,
+}
+
+/// How the stage `run` stands on starts its gauge, for a chart of `mode` played under `rule` by a
+/// player whose GAUGE setting is `chosen`.
+///
+/// The table is the rule's ([`CourseGaugeMode::gauge_set`]), whatever gauge constraint the course
+/// states. The slot is the course gauge the chosen gauge maps to, held to the table's top course
+/// gauge ([`GaugeSetId::course_gauge_for`]), as the reference picks it (`GrooveGauge.java:164`).
+/// The first stage starts that slot on the value the course opened with; a later one starts every
+/// slot where the stage before left it, as the reference carries all nine
+/// (`GrooveGauge.java:150-155`).
+pub(crate) fn course_stage_gauge(rule: CourseGaugeMode, chosen: GaugeKind, mode: &rbms_model::Mode, run: &CourseRun) -> CourseStageGauge {
+    let set = rule.gauge_set(mode);
+    let start = set.course_gauge_for(chosen);
+    let carried = run.carry_gauges;
+    let value = carried.map_or(run.carry_gauge, |values| values[start.index()]);
+    CourseStageGauge { set, start, value, carried }
+}
+
 /// The stage line the loading and play screens show during a course.
 pub(crate) fn stage_label(run: &CourseRun) -> String {
     format!("STAGE {} / {}", run.stage_number(), run.course.stage_count())
 }
 
-/// The rows the course result screen lists, as label and value.
-pub(crate) fn result_rows(run: &CourseRun) -> Vec<(String, String)> {
+/// The rows the course result screen lists, as label and value. The gauge rule the course was
+/// played under (`rule`) follows the gauge, as the badges show the course's own gauge constraint,
+/// which the rule outranks.
+pub(crate) fn result_rows(run: &CourseRun, rule: CourseGaugeMode) -> Vec<(String, String)> {
     let mut rows = vec![
         ("EX SCORE".to_string(), format!("{} / {}", run.totals.ex, run.totals.max_ex)),
         ("SCORE RATE".to_string(), format!("{:.2}%", run.totals.score_rate())),
         ("MAX COMBO".to_string(), run.totals.max_combo.to_string()),
         ("MISS COUNT".to_string(), run.totals.min_bp().to_string()),
         ("GAUGE".to_string(), format!("{:.1}%", run.carry_gauge)),
+        ("GAUGE RULE".to_string(), rbms_config::course_gauge_token(rule).to_string()),
     ];
     if let Some(stage) = run.failed_at {
         rows.push(("FAILED AT".to_string(), format!("STAGE {}", stage + 1)));

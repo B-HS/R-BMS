@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::load::{file_name_for, load_dir, load_file, parse, save};
 use crate::model::{CONSTRAINT_GROUP_COUNT, Course, CourseChart, CourseConstraint, DEFAULT_COURSE_NAME, TrophyRule};
-use crate::run::{CLEAR_FAILED, CLEAR_NO_PLAY, CourseRun, CourseStep, StageResult};
+use crate::run::{CLEAR_FAILED, CLEAR_NO_PLAY, CourseRun, CourseStep, GAUGE_SLOTS, StageResult};
 
 const ARRAY_FIXTURE: &str = include_str!("../tests/fixtures/courses_array.json");
 const SINGLE_FIXTURE: &str = include_str!("../tests/fixtures/course_single.json");
@@ -353,6 +353,20 @@ fn a_run_carries_the_gauge_and_the_combo_across_stages() {
     assert_eq!(run.totals.notes, TEST_NOTES * 2);
     assert_eq!(run.totals.ex, TEST_EX * 2);
     assert_eq!(run.totals.max_ex, TEST_NOTES * 4);
+}
+
+/// The gauge slots a stage ended on are the integration layer's to hand over, as the stage result
+/// carries plain numbers only: a new run has none, and folding a stage in leaves them as they were.
+#[test]
+fn a_new_run_carries_no_gauge_slots_until_the_caller_hands_them_over() {
+    let mut run = three_stage_run();
+    assert_eq!(run.carry_gauges, None);
+    let ended: [f32; GAUGE_SLOTS] = [20.0, 30.0, 40.0, 0.0, 0.0, 0.0, 72.0, 61.0, 0.0];
+    run.advance(&stage(TEST_EX, 72.0, true));
+    assert_eq!(run.carry_gauges, None, "advancing does not invent the slots");
+    run.carry_gauges = Some(ended);
+    run.advance(&stage(TEST_EX, 44.0, true));
+    assert_eq!(run.carry_gauges, Some(ended));
 }
 
 #[test]

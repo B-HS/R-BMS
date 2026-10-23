@@ -186,7 +186,7 @@ fn show_result(state: &mut PlayState, shared: &mut AppShared, end: RunEnd) -> Tr
     keep_run_record(shared, record_shown.unwrap_or(record));
     if shared.course_run.is_some() {
         shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
-        let carried = CarriedCombo { standing: standing_combo, longest: standing_max_combo };
+        let carried = CarriedOver { standing: standing_combo, longest: standing_max_combo, gauges: state.session.gauge_values() };
         let course_lamp = course_lamp(shared, &state.session);
         return match fold_course_stage(shared, &summary, carried, block_reason, course_lamp) {
             Some(rbms_course::CourseStep::Next) => crate::load_course_stage(shared),
@@ -576,7 +576,7 @@ pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, sha
         return;
     }
     shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
-    let carried = CarriedCombo { standing: state.session.standing_combo(), longest: state.session.standing_max_combo() };
+    let carried = CarriedOver { standing: state.session.standing_combo(), longest: state.session.standing_max_combo(), gauges: state.session.gauge_values() };
     let course_lamp = course_lamp(shared, &state.session);
     match fold_course_stage(shared, &summary, carried, recorded.block_reason, course_lamp) {
         Some(rbms_course::CourseStep::Next) => {
@@ -737,14 +737,18 @@ pub(crate) fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
     })
 }
 
-/// The course's streak where a stage ended, which is not the chart's own: the combo the next stage
-/// starts from and the longest one of the course so far ([`PlaySession::standing_combo`],
-/// [`PlaySession::standing_max_combo`]).
+/// What a stage that ended carries into the next one besides its tallies. The course's streak, which
+/// is not the chart's own: the combo the next stage starts from and the longest one of the course so
+/// far ([`PlaySession::standing_combo`], [`PlaySession::standing_max_combo`]). And every gauge's value
+/// as the stage ended ([`PlaySession::gauge_values`]), which the next stage starts each gauge on.
 #[derive(Clone, Copy)]
-struct CarriedCombo {
+struct CarriedOver {
     standing: u32,
     longest: u32,
+    gauges: [f32; rbms_judge::gauge::GaugeIndex::COUNT],
 }
+
+const _: () = assert!(rbms_course::run::GAUGE_SLOTS == rbms_judge::gauge::GaugeIndex::COUNT);
 
 /// The lamp the course stands at with the stage just played folded in, demoted by the assists its
 /// stages had so far as a single chart's is ([`PlaySession::course_lamp`], `MusicResult.java:402-428`).
@@ -760,12 +764,14 @@ fn course_lamp(shared: &AppShared, session: &PlaySession) -> ClearType {
 /// next stage, or its end. `None` when no course is being played.
 ///
 /// The course's own combo is the streak carried from stage to stage (`JudgeManager.coursecombo`);
-/// the chart's record keeps the stage's own ([`rbms_play::PlaySummary::max_combo`]). `course_lamp`
-/// is the lamp the course stands at with this stage in ([`course_lamp`]).
+/// the chart's record keeps the stage's own ([`rbms_play::PlaySummary::max_combo`]). Every gauge's
+/// value as the stage ended is what the next stage starts each gauge on (`GrooveGauge.java:150-155`),
+/// exact rather than the reference's last sample of each. `course_lamp` is the lamp the course stands
+/// at with this stage in ([`course_lamp`]).
 fn fold_course_stage(
     shared: &mut AppShared,
     summary: &rbms_play::PlaySummary,
-    carried: CarriedCombo,
+    carried: CarriedOver,
     block_reason: Option<&'static str>,
     course_lamp: ClearType,
 ) -> Option<rbms_course::CourseStep> {
@@ -785,7 +791,11 @@ fn fold_course_stage(
         clear: clear_type_id(course_lamp),
         survived: !summary.failed,
     };
-    shared.course_run.as_mut().map(|run| run.advance(&stage))
+    shared.course_run.as_mut().map(|run| {
+        let step = run.advance(&stage);
+        run.carry_gauges = Some(carried.gauges);
+        step
+    })
 }
 
 /// The course is over: keep and send it if every stage was submittable, then show the course

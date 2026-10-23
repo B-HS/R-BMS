@@ -25,6 +25,11 @@ const PERCENT: f64 = 100.0;
 /// Theoretical EX score per note (`GradeBar.java:88`, `notes * 2`).
 const EX_PER_NOTE: u32 = 2;
 
+/// How many gauges a run keeps side by side, the reference's nine gauge slots
+/// (`GrooveGauge.java:150-155` carries every one of them into the next stage). The crate knows no
+/// judge types, so the integration layer holds this equal to its own slot count.
+pub const GAUGE_SLOTS: usize = 9;
+
 /// What one finished stage of a course contributed.
 ///
 /// The fields mirror what a finished run reports, so the integration layer fills this in from a
@@ -131,6 +136,9 @@ pub struct CourseRun {
     pub index: usize,
     /// Gauge the next stage starts from.
     pub carry_gauge: f32,
+    /// Every gauge slot's value the stage just played ended on, which the next stage starts each of
+    /// its gauges on. `None` until a stage has been played.
+    pub carry_gauges: Option<[f32; GAUGE_SLOTS]>,
     pub totals: CourseTotals,
     /// Stage the run failed on, if it did.
     pub failed_at: Option<usize>,
@@ -143,7 +151,7 @@ pub struct CourseRun {
 impl CourseRun {
     /// Start `course` with the gauge its first stage begins on.
     pub fn new(course: Course, initial_gauge: f32) -> CourseRun {
-        CourseRun { course, index: 0, carry_gauge: initial_gauge, totals: CourseTotals::default(), failed_at: None, clear: CLEAR_NO_PLAY }
+        CourseRun { course, index: 0, carry_gauge: initial_gauge, carry_gauges: None, totals: CourseTotals::default(), failed_at: None, clear: CLEAR_NO_PLAY }
     }
 
     /// The chart the next stage plays, or `None` once the course is over.

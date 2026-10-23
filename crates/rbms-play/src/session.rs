@@ -185,6 +185,10 @@ pub struct SessionOptions {
     pub replay: Option<Replay>,
     pub initial_gauge: Option<(GaugeIndex, f32)>,
     pub initial_combo: u32,
+    /// Every one of the nine gauges' values the course stage before left, in [`GaugeIndex::ALL`]
+    /// order, which a later stage of a course starts each gauge on (`GrooveGauge.java:150-155`).
+    /// `None` for a single chart and for a course's first stage.
+    pub carried_gauges: Option<[f32; GaugeIndex::COUNT]>,
 }
 
 impl Default for SessionOptions {
@@ -201,6 +205,7 @@ impl Default for SessionOptions {
             replay: None,
             initial_gauge: None,
             initial_combo: 0,
+            carried_gauges: None,
         }
     }
 }
@@ -270,6 +275,7 @@ struct Setup {
     seed: u64,
     initial_gauge: Option<(GaugeIndex, f32)>,
     initial_combo: u32,
+    carried_gauges: Option<[f32; GaugeIndex::COUNT]>,
     /// The rate the chart is played at, in percent ([`PlaySession::set_playback_rate`]).
     playback_percent: i32,
 }
@@ -627,6 +633,7 @@ impl PlaySession {
             seed: options.seed,
             initial_gauge: options.initial_gauge,
             initial_combo: options.initial_combo,
+            carried_gauges: options.carried_gauges,
             playback_percent: UNMODIFIED_PLAYBACK_PERCENT,
         };
         let player = build_player(model, &setup);
@@ -950,6 +957,13 @@ impl PlaySession {
         self.player.judge().max_combo
     }
 
+    /// Every one of the nine gauges' values as they stand, in [`GaugeIndex::ALL`] order: at the end
+    /// of a course stage, what the next stage starts each gauge on ([`SessionOptions::carried_gauges`]).
+    pub fn gauge_values(&self) -> [f32; GaugeIndex::COUNT] {
+        let gauge = &self.player.judge().gauge;
+        GaugeIndex::ALL.map(|index| gauge.value_at(index))
+    }
+
     /// Which note a press takes when several are in range.
     pub fn algorithm(&self) -> JudgeAlgorithm {
         self.player.algorithm()
@@ -1216,6 +1230,9 @@ fn apply_setup(player: &mut Player, setup: &Setup) {
     if let Some((index, gauge_value)) = setup.initial_gauge {
         player.set_initial_state(index, gauge_value, setup.initial_combo);
     }
+    if let Some(values) = &setup.carried_gauges {
+        player.carry_gauges(values);
+    }
 }
 
 /// A keysound booked ahead on the song clock: autoplay accompaniment and autoplay note sounds.
@@ -1451,6 +1468,38 @@ mod tests {
         assert_eq!(session.standing_combo(), 120);
         assert_eq!(session.standing_max_combo(), 120);
         assert_eq!(summary.max_combo, 0, "the chart's own combo carries nothing in from the stage before");
+    }
+
+    /// What every one of the nine gauges held at the end of a course stage, the selected CLASS one
+    /// among them, as the next stage is handed them.
+    const CARRIED_GAUGES: [f32; GaugeIndex::COUNT] = [30.0, 40.0, 50.0, 60.0, 0.0, 0.0, 72.0, 55.0, 0.0];
+
+    /// A course stage played on the table and the gauge the stage before ended on.
+    fn a_later_course_stage(replay: Option<Replay>) -> PlaySession {
+        let class = GaugeIndex::Class;
+        let options = SessionOptions {
+            initial_gauge: Some((class, CARRIED_GAUGES[class.index()])),
+            carried_gauges: Some(CARRIED_GAUGES),
+            replay,
+            ..SessionOptions::default()
+        };
+        let mut session = PlaySession::new(one_note(), options);
+        session.set_judge_setup(JudgeSetup { gauge_set: Some(GaugeSetId::Lr2), ..JudgeSetup::default() });
+        session
+    }
+
+    #[test]
+    fn a_course_stage_starts_with_every_carried_gauge() {
+        let session = a_later_course_stage(None);
+        assert_eq!(session.gauge_values(), CARRIED_GAUGES);
+        assert_eq!(session.judge().gauge.selected_index(), GaugeIndex::Class);
+    }
+
+    #[test]
+    fn a_seek_keeps_the_carried_gauges() {
+        let mut session = a_later_course_stage(Some(replay_of(Vec::new())));
+        session.seek(0);
+        assert_eq!(session.gauge_values(), CARRIED_GAUGES, "the rebuilt run starts where the stage before left every gauge");
     }
 
     /// Four notes a beat apart from the second measure on, on the first key lane.

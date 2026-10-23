@@ -425,6 +425,15 @@ impl Player {
         self.judge.max_combo = initial_combo;
     }
 
+    /// Start every one of the nine gauges where the course stage before left it, selected or not, as
+    /// the reference carries each gauge's last value into the next stage (`GrooveGauge.java:150-155`).
+    /// A gauge that ran out stays out.
+    pub fn carry_gauges(&mut self, values: &[f32; GaugeIndex::COUNT]) {
+        for (index, value) in GaugeIndex::ALL.into_iter().zip(values) {
+            self.judge.gauge.set_value_at(index, *value);
+        }
+    }
+
     /// The gauge the player chose, which auto-shift may have moved the selection away from.
     pub fn configured_gauge(&self) -> GaugeKind {
         self.configured_gauge
@@ -1545,6 +1554,16 @@ mod judge_wiring_tests {
         assert_eq!(p.judge().combo, 120);
         assert_eq!(p.judge().max_combo, 120);
         assert_eq!((p.judge().stage_combo, p.judge().stage_max_combo), (0, 0), "the stage's own combo starts at nothing");
+    }
+
+    #[test]
+    fn carried_gauges_seed_every_slot_and_an_empty_one_stays_empty() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        let carried: [f32; GaugeIndex::COUNT] = [12.0, 2.0, 34.0, 0.0, 45.5, 0.0, 72.0, 0.0, 88.0];
+        p.carry_gauges(&carried);
+        for (index, value) in GaugeIndex::ALL.into_iter().zip(carried) {
+            assert_eq!(p.judge().gauge.value_at(index), value, "{index:?}");
+        }
     }
 
     #[test]

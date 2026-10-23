@@ -255,10 +255,10 @@ fn sound_folder_path(settings_path: &Path, config: &Config) -> Option<PathBuf> {
     }
 }
 
-/// Gauge a course stage starts on before anything has been played, read off the class row of the
-/// gauge table so the number the browser shows is the one the run will use.
-fn course_start_gauge(set: rbms_judge::gauge_tables::GaugeSetId) -> f32 {
-    rbms_judge::builtin_gauge_tables().get(set.data_key()).map_or(0.0, |table| table.at(rbms_judge::gauge::GaugeIndex::Class).init)
+/// Gauge a course stage starts on before anything has been played, read off the `start` row of the
+/// gauge table `set` so the number the browser shows is the one the run will use.
+fn course_start_gauge(set: rbms_judge::gauge_tables::GaugeSetId, start: rbms_judge::gauge::GaugeIndex) -> f32 {
+    rbms_judge::builtin_gauge_tables().get(set.data_key()).map_or(0.0, |table| table.at(start).init)
 }
 
 /// Begin a course: rewrite the play settings the constraints narrow, remember the originals the
@@ -268,6 +268,10 @@ fn course_start_gauge(set: rbms_judge::gauge_tables::GaugeSetId) -> f32 {
 /// ([`crate::app_result::abandon_course`]): what was played of it by hand is kept and sent as a
 /// FAILED course, and the settings it narrowed are put back before they are taken as the player's
 /// own.
+///
+/// The course opens on the course gauge the GAUGE setting maps to, read off the table the COURSE
+/// GAUGE setting picks for a seven-key chart: the first chart's mode is not known until it loads,
+/// and every table's course gauges open at the same value.
 fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
     if shared.course_run.is_some() || shared.course_settings_backup.is_some() {
         crate::app_result::abandon_course(shared, crate::app_result::Sending::Now);
@@ -277,9 +281,10 @@ fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
     overrides.apply_to(&mut shared.config.play);
     shared.course_stage_reasons.clear();
     shared.course_assist = CourseAssist::NONE;
-    let set = overrides.gauge_set_for(shared.config.judge.gauge_set).unwrap_or_default();
+    let set = shared.config.judge.course_gauge.gauge_set(&Mode::BEAT_7K);
+    let start = set.course_gauge_for(shared.config.play.gauge);
     shared.course_overrides = Some(overrides);
-    shared.course_run = Some(rbms_course::CourseRun::new(entry.course.clone(), course_start_gauge(set)));
+    shared.course_run = Some(rbms_course::CourseRun::new(entry.course.clone(), course_start_gauge(set, start)));
     load_course_stage(shared)
 }
 

@@ -466,13 +466,8 @@ impl AppShared {
             }
         };
         let seed = carried_seed.filter(|_| self.replay.is_none()).unwrap_or(seed);
-        let mut judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
-        let course_state = if self.replay.is_some() { None } else { self.course_run.as_ref().map(|run| (run.carry_gauge, run.totals.combo_carry)) };
-        if course_state.is_some()
-            && let Some(overrides) = self.course_overrides.as_ref()
-        {
-            judge_setup.gauge_set = overrides.gauge_set_for(judge_setup.gauge_set);
-        }
+        let (judge_setup, course_stage) = self.stage_judge_setup(&mode);
+        let course_combo = course_stage.and(self.course_run.as_ref()).map(|run| run.totals.combo_carry);
         let mut model = decoded.model;
         let ln_mode_decides_flavour = rbms_chart::contains_undefined_long_note(&model);
         let lntype = run_lntype(decoded.lnmode, judge_setup.ln_mode);
@@ -588,13 +583,37 @@ impl AppShared {
             analysis: self.replay.is_some() && self.config.display.replay_analysis,
             auto_calibration: self.config.judge.auto_offset,
             replay: self.replay.clone(),
-            initial_gauge: course_state.map(|(gauge_value, _)| (rbms_judge::gauge::GaugeIndex::Class, gauge_value)),
-            initial_combo: course_state.map_or(0, |(_, combo)| combo),
+            initial_gauge: course_stage.map(|stage| (stage.start, stage.value)),
+            initial_combo: course_combo.unwrap_or(0),
+            carried_gauges: course_stage.and_then(|stage| stage.carried),
             ..SessionOptions::default()
         };
         let mut session = PlaySession::new(model, options);
         session.set_judge_setup(judge_setup);
         Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds, ghost, overview })
+    }
+
+    /// How the chart of `mode` about to be loaded is judged, and, when it is a course stage played
+    /// by hand, how its gauge starts ([`crate::course_ui::course_stage_gauge`]). A course stage is
+    /// played on the table the COURSE GAUGE setting picks, ahead of the GAUGE SET setting and of the
+    /// course's own gauge constraint, and on the long-note flavour the course's LN, CN or HCN
+    /// constraint forces (`MusicSelector.java:501-503`), which has to be settled here, before the
+    /// run's long-note type and the key its record is kept under are read from it. A replay of a
+    /// stage is judged as it was recorded.
+    pub(crate) fn stage_judge_setup(&self, mode: &rbms_model::Mode) -> (rbms_play::JudgeSetup, Option<crate::course_ui::CourseStageGauge>) {
+        let mut judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
+        let course_stage = self
+            .course_run
+            .as_ref()
+            .filter(|_| self.replay.is_none())
+            .map(|run| crate::course_ui::course_stage_gauge(self.config.judge.course_gauge, self.config.play.gauge, mode, run));
+        if let Some(stage) = &course_stage {
+            judge_setup.gauge_set = Some(stage.set);
+            if let Some(overrides) = self.course_overrides.as_ref() {
+                judge_setup.ln_mode = overrides.ln_mode_for(judge_setup.ln_mode);
+            }
+        }
+        (judge_setup, course_stage)
     }
 
     /// Whether a skin can draw the play screen of a chart of `mode`: one is chosen for the mode, and

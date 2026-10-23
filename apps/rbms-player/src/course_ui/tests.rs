@@ -3,12 +3,17 @@ use std::path::Path;
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::PlayOptions;
 use rbms_course::{Course, CourseChart, CourseConstraint, CourseRun, StageResult, TrophyRule};
-use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::GaugeKind;
+use rbms_judge::gauge::GaugeIndex;
+use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
 use rbms_judge::ln::LnMode;
 use rbms_library::{Library, SongEntry};
 use rbms_model::Mode;
 
-use super::{COURSE_DIR_NAME, CourseList, CourseOverrides, RandomLock, SelectTab, constraint_badge, courses_dir, library_index, result_rows, stage_label};
+use super::{
+    COURSE_DIR_NAME, CourseList, CourseOverrides, RandomLock, SelectTab, constraint_badge, course_stage_gauge, courses_dir, library_index, result_rows,
+    stage_label,
+};
 
 const TEST_MD5_PRESENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TEST_MD5_ABSENT: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -191,23 +196,87 @@ fn a_course_without_a_grade_constraint_leaves_the_note_option_alone() {
     }
 }
 
+/// The course gauge a course opens on, as the tests' runs are started.
+const COURSE_OPENING_GAUGE: f32 = 100.0;
+
+/// The gauge constraints, every one of them.
+const GAUGE_CONSTRAINTS: [CourseConstraint; 5] =
+    [CourseConstraint::GaugeLr2, CourseConstraint::Gauge5Keys, CourseConstraint::Gauge7Keys, CourseConstraint::Gauge9Keys, CourseConstraint::Gauge24Keys];
+
+/// A two-stage course under `constraints`, standing on its first stage.
+fn two_stage_run(constraints: Vec<CourseConstraint>) -> CourseRun {
+    CourseRun::new(course("C", vec![chart(TEST_MD5_PRESENT, "One"), chart(TEST_MD5_PRESENT, "Two")], constraints), COURSE_OPENING_GAUGE)
+}
+
 #[test]
-fn the_gauge_constraints_each_select_their_table() {
-    let cases = [
-        (CourseConstraint::GaugeLr2, GaugeSetId::Lr2),
-        (CourseConstraint::Gauge5Keys, GaugeSetId::FiveKeys),
-        (CourseConstraint::Gauge7Keys, GaugeSetId::SevenKeys),
-        (CourseConstraint::Gauge9Keys, GaugeSetId::Pms),
-        (CourseConstraint::Gauge24Keys, GaugeSetId::Keyboard),
-    ];
-    for (constraint, set) in cases {
-        let overrides = CourseOverrides::of(&course("C", vec![chart(TEST_MD5_PRESENT, "One")], vec![constraint]));
-        assert_eq!(overrides.gauge_set, Some(set), "{constraint:?}");
-        assert_eq!(overrides.gauge_set_for(Some(GaugeSetId::SevenKeys)), Some(set), "the course wins over the setting");
+fn the_gauge_constraints_are_shown_but_do_not_pick_the_table() {
+    for constraint in GAUGE_CONSTRAINTS {
+        let gauge_course = course("C", vec![chart(TEST_MD5_PRESENT, "One")], vec![constraint]);
+        assert_eq!(CourseOverrides::of(&gauge_course), CourseOverrides::default(), "{constraint:?} narrows nothing");
+        let mut list = CourseList::from_courses(vec![gauge_course]);
+        list.resolve(|_| true);
+        assert_eq!(list.rows()[0].badges, vec![constraint_badge(constraint)], "{constraint:?} is still shown");
     }
-    let none = CourseOverrides::default();
-    assert_eq!(none.gauge_set_for(Some(GaugeSetId::Pms)), Some(GaugeSetId::Pms), "no constraint keeps the setting");
-    assert_eq!(none.gauge_set_for(None), None);
+}
+
+#[test]
+fn a_first_stage_starts_on_the_class_gauge_of_the_lr2_table_by_default() {
+    let stage = course_stage_gauge(CourseGaugeMode::default(), GaugeKind::Normal, &Mode::BEAT_7K, &two_stage_run(Vec::new()));
+    assert_eq!(stage.set, GaugeSetId::Lr2);
+    assert_eq!(stage.start, GaugeIndex::Class);
+    assert_eq!(stage.value, COURSE_OPENING_GAUGE);
+    assert_eq!(stage.carried, None);
+}
+
+#[test]
+fn the_course_gauge_setting_outranks_a_gauge_constraint() {
+    for constraint in GAUGE_CONSTRAINTS {
+        let run = two_stage_run(vec![constraint]);
+        assert_eq!(course_stage_gauge(CourseGaugeMode::Iidx, GaugeKind::Normal, &Mode::BEAT_7K, &run).set, GaugeSetId::Iidx, "{constraint:?}");
+        assert_eq!(course_stage_gauge(CourseGaugeMode::Lr2, GaugeKind::Normal, &Mode::BEAT_5K, &run).set, GaugeSetId::Lr2, "{constraint:?}");
+    }
+}
+
+#[test]
+fn beatoraja_rule_follows_the_chart_mode() {
+    let run = two_stage_run(vec![CourseConstraint::GaugeLr2]);
+    let set_for = |mode: &Mode| course_stage_gauge(CourseGaugeMode::Beatoraja, GaugeKind::Normal, mode, &run).set;
+    assert_eq!(set_for(&Mode::BEAT_7K), GaugeSetId::SevenKeys);
+    assert_eq!(set_for(&Mode::BEAT_14K), GaugeSetId::SevenKeys);
+    assert_eq!(set_for(&Mode::BEAT_5K), GaugeSetId::FiveKeys);
+    assert_eq!(set_for(&Mode::POPN_9K), GaugeSetId::Pms);
+}
+
+#[test]
+fn a_hard_player_starts_a_course_on_exclass() {
+    let run = two_stage_run(Vec::new());
+    for rule in CourseGaugeMode::ALL {
+        assert_eq!(course_stage_gauge(rule, GaugeKind::Hard, &Mode::BEAT_7K, &run).start, GaugeIndex::ExClass, "{rule:?}");
+    }
+    assert_eq!(course_stage_gauge(CourseGaugeMode::Lr2, GaugeKind::ExHard, &Mode::BEAT_7K, &run).start, GaugeIndex::ExHardClass);
+    assert_eq!(course_stage_gauge(CourseGaugeMode::Lr2, GaugeKind::Easy, &Mode::BEAT_7K, &run).start, GaugeIndex::Class);
+}
+
+#[test]
+fn an_exhard_player_starts_an_iidx_course_on_exclass() {
+    let run = two_stage_run(Vec::new());
+    for chosen in [GaugeKind::ExHard, GaugeKind::Hazard] {
+        assert_eq!(course_stage_gauge(CourseGaugeMode::Iidx, chosen, &Mode::BEAT_7K, &run).start, GaugeIndex::ExClass, "{chosen:?}");
+    }
+}
+
+#[test]
+fn a_later_stage_starts_on_every_gauge_the_stage_before_left() {
+    let mut run = two_stage_run(Vec::new());
+    run.advance(&stage(TEST_EX, 80.0, true));
+    let left: [f32; GaugeIndex::COUNT] = [30.0, 40.0, 50.0, 60.0, 0.0, 0.0, 80.0, 64.5, 12.0];
+    run.carry_gauges = Some(left);
+    for (chosen, start) in [(GaugeKind::Normal, GaugeIndex::Class), (GaugeKind::Hard, GaugeIndex::ExClass), (GaugeKind::ExHard, GaugeIndex::ExHardClass)] {
+        let stage = course_stage_gauge(CourseGaugeMode::Lr2, chosen, &Mode::BEAT_7K, &run);
+        assert_eq!(stage.start, start, "{chosen:?}");
+        assert_eq!(stage.value, left[start.index()], "{chosen:?} starts where its gauge was left");
+        assert_eq!(stage.carried, Some(left));
+    }
 }
 
 #[test]
@@ -273,11 +342,22 @@ fn the_result_rows_report_the_totals_and_the_stage_a_run_failed_on() {
     run.advance(&stage(TEST_EX, 80.0, true));
     run.advance(&stage(100, 0.0, false));
 
-    let rows = result_rows(&run);
+    let rows = result_rows(&run, CourseGaugeMode::Lr2);
     let labels: Vec<&str> = rows.iter().map(|(label, _)| label.as_str()).collect();
-    assert_eq!(labels, vec!["EX SCORE", "SCORE RATE", "MAX COMBO", "MISS COUNT", "GAUGE", "FAILED AT"]);
+    assert_eq!(labels, vec!["EX SCORE", "SCORE RATE", "MAX COMBO", "MISS COUNT", "GAUGE", "GAUGE RULE", "FAILED AT"]);
     assert_eq!(rows[0].1, "1500 / 4000");
-    assert_eq!(rows[5].1, "STAGE 2");
+    assert_eq!(rows[6].1, "STAGE 2");
+}
+
+#[test]
+fn the_result_rows_name_the_gauge_rule() {
+    let mut run = two_stage_run(vec![CourseConstraint::GaugeLr2]);
+    run.advance(&stage(TEST_EX, 80.0, true));
+    for (rule, name) in [(CourseGaugeMode::Lr2, "LR2"), (CourseGaugeMode::Beatoraja, "BEATORAJA"), (CourseGaugeMode::Iidx, "IIDX")] {
+        let rows = result_rows(&run, rule);
+        let at = rows.iter().position(|(label, _)| label == "GAUGE").expect("the gauge row");
+        assert_eq!(rows.get(at + 1).map(|(label, value)| (label.as_str(), value.as_str())), Some(("GAUGE RULE", name)), "{rule:?}");
+    }
 }
 
 #[test]
@@ -289,7 +369,7 @@ fn a_cleared_run_that_earns_a_trophy_reports_it() {
     let mut run = CourseRun::new(with_trophy, 100.0);
     run.advance(&stage(TEST_EX, 82.0, true));
 
-    let rows = result_rows(&run);
+    let rows = result_rows(&run, CourseGaugeMode::default());
     assert_eq!(rows.last().map(|(label, value)| (label.as_str(), value.as_str())), Some(("TROPHY", "bronzemedal")));
     assert!(rows.iter().all(|(label, _)| label != "FAILED AT"));
 }
