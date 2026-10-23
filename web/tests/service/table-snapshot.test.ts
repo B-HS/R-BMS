@@ -11,9 +11,9 @@ import {
 } from '@server/service/domain/table-snapshot/table-snapshot.service'
 
 const TABLE_ID = 'insane1'
-const ENTRY_COUNT = 1035
+const ENTRY_COUNT = 1034
 const LEVEL_COUNT = 26
-const DOWNLOAD_LINK_COUNT = 1033
+const DOWNLOAD_LINK_COUNT = 1032
 const ORIGIN = 'https://bms.hyuns.uk'
 
 const requireTable = () => {
@@ -36,7 +36,7 @@ const createService = (rows: BestRecordRow[] = [], observe: (md5s: string[]) => 
 const query = (input: Record<string, string> = {}) => tableEntriesQuerySchema.parse(input)
 
 describe('스냅샷 자료', () => {
-    test('발광 표가 1035곡, 26레벨로 읽히고 source.json 의 수와 같다', () => {
+    test('발광 표가 1034곡, 26레벨로 읽히고 source.json 의 수와 같다', () => {
         const table = requireTable()
         expect(table.entries).toHaveLength(ENTRY_COUNT)
         expect(table.source.snapshot.entries).toBe(ENTRY_COUNT)
@@ -66,7 +66,7 @@ describe('스냅샷 자료', () => {
 })
 
 describe('요약과 레벨 묶음', () => {
-    test('레벨 수는 문서의 값(★10 이 64곡, ★25 가 2곡, ??? 가 5곡)과 같고 합계가 1035 이다', () => {
+    test('레벨 수는 문서의 값(★10 이 64곡, ★25 가 2곡, ??? 가 5곡)과 같고 합계가 1034 이다', () => {
         const summary = summariseTable(requireTable())
         const counts = new Map(summary.levels.map((level) => [level.level, level.count]))
         expect(counts.get('10')).toBe(64)
@@ -216,7 +216,7 @@ describe('내 기록', () => {
         expect(asked).toHaveLength(0)
     })
 
-    test('1035곡 전부 기록이 있어도 응답 JSON 이 200KB 안쪽이다', async () => {
+    test('1034곡 전부 기록이 있어도 응답 JSON 이 200KB 안쪽이다', async () => {
         const rows = entries.map((entry) => ({
             md5: entry.md5,
             clear: 10,
@@ -234,7 +234,7 @@ describe('내 기록', () => {
 })
 
 describe('FE 상세 응답의 크기', () => {
-    test('1035곡 전체 상세가 gzip 전 400KB 안쪽이다', () => {
+    test('1034곡 전체 상세가 gzip 전 400KB 안쪽이다', () => {
         const size = JSON.stringify({ success: true, data: groupTableByLevel(requireTable()) }).length
         expect(size).toBeLessThan(400 * 1024)
     })

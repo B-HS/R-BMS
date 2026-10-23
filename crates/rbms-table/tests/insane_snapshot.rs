@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use rbms_table::{DifficultyTable, SavedTable, parse_header};
 
 /// Charts the archived table lists.
-const CHARTS: usize = 1_035;
+const CHARTS: usize = 1_034;
 
 /// Its levels: ★1 to ★25, then `???`.
 const NUMBERED_LEVELS: usize = 25;

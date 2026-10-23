@@ -258,14 +258,14 @@ fn the_sites_copy_of_the_insane_table_is_reached_from_either_address() {
     for address in [SITE_PAGE, SITE_PAGE_WITH_SLASH] {
         let mut served = site().redirecting(SITE_PAGE_WITH_SLASH, SITE_PAGE);
         let table = served.fetch(address).unwrap_or_else(|error| panic!("{address} is the table: {error}"));
-        assert_eq!(table.entries.len(), 1_035);
+        assert_eq!(table.entries.len(), 1_034);
         assert_eq!(table.level_order.len(), 26);
         assert_eq!(table.skipped, 0);
         assert_eq!(served.asked, vec![address, SITE_HEADER, SITE_BODY], "the header is found from the root, whichever page answered");
     }
 
     let mut as_snapshot = Site::default().serving(SITE_PAGE, &page).serving(SITE_HEADER, snapshot_header).serving(SITE_BODY, snapshot_body);
-    assert_eq!(as_snapshot.fetch(SITE_PAGE).expect("the header's own relative body").entries.len(), 1_035);
+    assert_eq!(as_snapshot.fetch(SITE_PAGE).expect("the header's own relative body").entries.len(), 1_034);
     assert_eq!(as_snapshot.asked, vec![SITE_PAGE, SITE_HEADER, SITE_BODY], "a relative body is read beside the header");
 }
 

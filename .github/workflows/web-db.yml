@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again / admin-seed-count: count the rows the admin seed migration (0006) would change / assist-grade-backfill-count: count the stale chart_best.assist_grade / assist-grade-backfill: reset them from their score (as migration 0011 did, safe to repeat)'
+        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again / admin-seed-count: count the rows the admin seed migration (0006) would change / assist-grade-backfill-count: count the stale chart_best.assist_grade / assist-grade-backfill: reset them from their score (as migration 0011 did, safe to repeat) / chart-purge-count / chart-purge-delete: every row of the chart removed at the request of the site owner (web/scripts/chart-purge.*.sql)'
         type: choice
-        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup, admin-seed-count, assist-grade-backfill-count, assist-grade-backfill]
+        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup, admin-seed-count, assist-grade-backfill-count, assist-grade-backfill, chart-purge-count, chart-purge-delete]
         default: status
 
 permissions:
@@ -98,3 +98,12 @@ jobs:
       - name: Count the stale assist grades again
         if: inputs.action == 'assist-grade-backfill'
         run: bun scripts/run-sql.ts assist-grade.count.sql
+      - name: Count the removed chart's rows
+        if: startsWith(inputs.action, 'chart-purge-')
+        run: bun scripts/run-sql.ts chart-purge.count.sql
+      - name: Delete the removed chart's rows
+        if: inputs.action == 'chart-purge-delete'
+        run: bun scripts/run-sql.ts chart-purge.delete.sql
+      - name: Count the removed chart's rows again
+        if: inputs.action == 'chart-purge-delete'
+        run: bun scripts/run-sql.ts chart-purge.count.sql

@@ -64,14 +64,14 @@ describe('표준 표 형식 header.json', () => {
 })
 
 describe('표준 표 형식 data.json', () => {
-    test('1035곡 배열을 내고 첫 글자가 [ 이다', async () => {
+    test('1034곡 배열을 내고 첫 글자가 [ 이다', async () => {
         const response = await createRoutes().standardData(new Request(`${ORIGIN}/tables/insane1/data.json`), tableContext('insane1'))
         expect(response.status).toBe(200)
         expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8')
         expect(response.headers.get('access-control-allow-origin')).toBe('*')
         const text = await response.text()
         expect(text.startsWith('[')).toBe(true)
-        expect(JSON.parse(text)).toHaveLength(1035)
+        expect(JSON.parse(text)).toHaveLength(1034)
     })
 
     test('If-None-Match 가 ETag 와 같으면 본문 없는 304 이다', async () => {
@@ -109,7 +109,7 @@ describe('FE 표 API', () => {
         const list = await createRoutes().list(new Request(`${ORIGIN}/api/fe/tables`), undefined)
         expect(list.status).toBe(200)
         expect(list.headers.get('cache-control')).toContain('s-maxage=')
-        expect((await list.json()).data[0]).toMatchObject({ id: 'insane1', entry_count: 1035, level_count: 26 })
+        expect((await list.json()).data[0]).toMatchObject({ id: 'insane1', entry_count: 1034, level_count: 26 })
         const detail = await createRoutes().detail(new Request(`${ORIGIN}/api/fe/tables/insane1`), tableContext('insane1'))
         const body = await detail.json()
         expect(body.success).toBe(true)

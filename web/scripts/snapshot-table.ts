@@ -20,6 +20,7 @@ const EXIT_CODE = { SAME: 0, DIFFERENT: 1, FAILED: 2 } as const
 const HEADER_FIELDS_DROPPED = ['original_url'] as const
 const ENTRY_FIELDS_EMPTIED = ['comment'] as const
 const ENTRY_FIELDS_KEPT = ['url', 'url_diff', 'name_diff'] as const
+const ENTRY_MD5_REMOVED: readonly string[] = ['f8b3b8ca5b5c5f7be1352b7aae723bee']
 const WEB_ADDRESS_PATTERN = /\s*[/／]?\s*(?:https?:\/\/|www\.)\S*/gi
 
 type Fetched = {
@@ -45,6 +46,7 @@ type Snapshot = {
     bodies: Body[]
     entryCount: number
     levelCount: number
+    validMd5Count: number
 }
 
 const objectSchema = z.record(z.string(), z.unknown())
@@ -105,6 +107,8 @@ const SHAPE_BY_FIRST_CHARACTER: Partial<Record<string, 'header' | 'body'>> = { '
 
 const pageHeaderOrBody = (bytes: Uint8Array) => SHAPE_BY_FIRST_CHARACTER[decodeUtf8(bytes).trimStart()[0] ?? ''] ?? 'page'
 
+const isKeptEntry = (entry: unknown) => !ENTRY_MD5_REMOVED.includes(String(objectSchema.safeParse(entry).data?.md5))
+
 const levelsOf = (entries: unknown[]) => new Set(entries.map((entry) => objectSchema.safeParse(entry).data?.level)).size
 
 const withoutWebAddresses = (value: unknown) => (typeof value === 'string' ? value.replace(WEB_ADDRESS_PATTERN, '').trim() : value)
@@ -143,7 +147,7 @@ const collect = async (tableUrl: string): Promise<Snapshot> => {
         const entries = z.array(z.unknown()).parse(parseJson(fetched.bytes))
         bodies.push({ fetched, entries })
     }
-    const entries = bodies.flatMap((body) => body.entries)
+    const entries = bodies.flatMap((body) => body.entries).filter(isKeptEntry)
     return {
         headerText: normalizeHeader(headerObject),
         dataText: normalizeData(entries),
@@ -154,6 +158,7 @@ const collect = async (tableUrl: string): Promise<Snapshot> => {
         bodies,
         entryCount: entries.length,
         levelCount: levelsOf(entries),
+        validMd5Count: entries.filter((entry) => MD5_PATTERN.test(String(objectSchema.safeParse(entry).data?.md5))).length,
     }
 }
 
@@ -167,11 +172,8 @@ const httpOf = (fetched: Fetched) => ({
     bytes: fetched.bytes.length,
 })
 
-const sourceJsonOf = (snapshot: Snapshot, fetchedAt: string, tableUrl: string, outDir: string) => {
-    const md5Count = snapshot.bodies
-        .flatMap((body) => body.entries)
-        .filter((entry) => MD5_PATTERN.test(String(objectSchema.safeParse(entry).data?.md5))).length
-    return `${JSON.stringify(
+const sourceJsonOf = (snapshot: Snapshot, fetchedAt: string, tableUrl: string, outDir: string) =>
+    `${JSON.stringify(
         {
             schema: SOURCE_SCHEMA_VERSION,
             origin: {
@@ -191,7 +193,7 @@ const sourceJsonOf = (snapshot: Snapshot, fetchedAt: string, tableUrl: string, o
                 data_file_sha256: sha256Of(snapshot.dataText),
                 entries: snapshot.entryCount,
                 levels: snapshot.levelCount,
-                entries_with_valid_md5: md5Count,
+                entries_with_valid_md5: snapshot.validMd5Count,
             },
             method: {
                 command: `bun scripts/snapshot-table.ts ${tableUrl} ${outDir}`,
@@ -201,13 +203,13 @@ const sourceJsonOf = (snapshot: Snapshot, fetchedAt: string, tableUrl: string, o
                     'header.json: original_url is dropped',
                     'data.json: one entry per line, entry order and key order kept; comment is emptied and web addresses are removed from the text fields other than the download links (url, url_diff, name_diff), which are kept as they are',
                     'the page html is not stored: Cloudflare injects a per-request script, so its hash changes on every request',
+                    `data.json: entries whose md5 is ${ENTRY_MD5_REMOVED.join(', ')} are left out (removed at the site owner's request)`,
                 ],
             },
         },
         null,
         HEADER_JSON_INDENT,
     )}\n`
-}
 
 const readIfExists = async (path: string) => readFile(path, 'utf-8').catch(() => null)
 

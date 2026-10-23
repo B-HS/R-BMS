@@ -123,7 +123,7 @@ mod tests {
             }
         }
         let Carried::Snapshot(insane) = carried(&DEFAULT_TABLES[0]) else { panic!("the insane table is carried") };
-        assert_eq!((insane.entries.len(), insane.level_order.len(), insane.skipped), (1_035, 26, 0));
+        assert_eq!((insane.entries.len(), insane.level_order.len(), insane.skipped), (1_034, 26, 0));
     }
 
     /// The two tables of stellabms.xyz are fetched from the original site and never carried, so
@@ -177,7 +177,7 @@ mod tests {
             split_matched(read_and_match_all(&TableStore::beside(&settings.0), &config.library.tables, &Library::default(), &AtomicUsize::new(0)));
         assert_eq!(names[0], "\u{767a}\u{72c2}BMS\u{96e3}\u{6613}\u{5ea6}\u{8868}");
         assert_eq!(levels.iter().map(Vec::len).collect::<Vec<_>>(), vec![26, 0, 0], "every level of the carried table is a folder, owned or not");
-        assert!(matches!(table_status(INSANE_COPY), Some(TableStatus::Loaded { entries: 1_035, origin: TableOrigin::Address { fetched_at: None }, .. })));
+        assert!(matches!(table_status(INSANE_COPY), Some(TableStatus::Loaded { entries: 1_034, origin: TableOrigin::Address { fetched_at: None }, .. })));
 
         assert!(!seed_default_tables(&mut config, &settings.0), "a second run gives nothing and writes nothing");
         assert_eq!(config.library.tables.len(), 3);
