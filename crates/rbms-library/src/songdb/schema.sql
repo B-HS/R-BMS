@@ -69,3 +69,15 @@ CREATE TABLE IF NOT EXISTS song_detail (
     end_density  REAL NOT NULL,
     density_bins BLOB NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS song_radar (
+    path    TEXT PRIMARY KEY REFERENCES song(path) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    applies INTEGER NOT NULL,
+    notes   REAL NOT NULL,
+    peak    REAL NOT NULL,
+    scratch REAL NOT NULL,
+    soflan  REAL NOT NULL,
+    charge  REAL NOT NULL,
+    chord   REAL NOT NULL
+);

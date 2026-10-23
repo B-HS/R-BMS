@@ -16,8 +16,10 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use rbms_chart::{RADAR_AXIS_COUNT, RADAR_VERSION, RadarAxis, radar_display, radar_raw};
 use rbms_config::{Config, ConfigError, LoadOutcome, SettingId, SettingTab, descriptor, display_value, tab_rows};
 use rbms_library::songdb::{SongRow, mode_from_id};
+use rbms_model::{Mode, Model};
 use rbms_store::{ScoreBook, ScoreRecord};
 
 const USAGE: &str = "usage:\n  \
@@ -44,6 +46,9 @@ const PLAY_MENU_HEADING: &str = "PLAY";
 /// What PAD DEBOUNCE is printed as: its value is kept in the player's key config file, not in the
 /// settings document this command reads, so the document has no number to show for it.
 const KEY_CONFIG_VALUE: &str = "(in keyconfig.ron)";
+
+/// What each NOTES RADAR axis is printed as, in [`RadarAxis`] order.
+const RADAR_AXIS_LABELS: [&str; RADAR_AXIS_COUNT] = ["NOTES", "PEAK", "SCRATCH", "SOF-LAN", "CHARGE", "CHORD"];
 
 fn main() -> ExitCode {
     run(std::env::args())
@@ -280,6 +285,21 @@ fn config_command(path: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The chart summary's NOTES RADAR lines: the metric generation, the raw values and the 0..=200
+/// display values, or one line saying the mode has no radar.
+fn radar_lines(model: &Model, mode: &Mode) -> Vec<String> {
+    let Some(raw) = radar_raw(model, mode) else {
+        return vec![format!("radar      : none for {}", mode.name)];
+    };
+    let display = radar_display(&raw, mode);
+    let axes = |value: &dyn Fn(RadarAxis) -> String| RadarAxis::ALL.map(|axis| format!("{} {}", RADAR_AXIS_LABELS[axis as usize], value(axis))).join("  ");
+    vec![
+        format!("radar ver  : {RADAR_VERSION}"),
+        format!("radar raw  : {}", axes(&|axis| format!("{:.2}", raw.value(axis)))),
+        format!("radar disp : {}", axes(&|axis| format!("{:.1}", display[axis as usize]))),
+    ]
+}
+
 fn chart_command(path: &str) -> ExitCode {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
@@ -327,6 +347,9 @@ fn chart_command(path: &str) -> ExitCode {
     println!("mode       : {}", mode.name);
     println!("notes      : {}", rbms_chart::count_playable_notes(&model));
     println!("length     : {length_s:.1}s");
+    for line in radar_lines(&model, &mode) {
+        println!("{line}");
+    }
     ExitCode::SUCCESS
 }
 
@@ -497,6 +520,30 @@ mod tests {
         assert_eq!(rows[0].title, "CLI scan");
         assert!(!scan_database_path().exists(), "the scan database is removed after reading rows");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_chart_with_a_radar_prints_its_raw_and_display_values_for_every_axis() {
+        let source = rbms_parser::parse(b"#BPM 120\n#00111:01010101\n");
+        let model = rbms_chart::to_model(&source, Mode::BEAT_7K);
+
+        let lines = radar_lines(&model, &Mode::BEAT_7K);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], format!("radar ver  : {RADAR_VERSION}"));
+        assert_eq!(lines[1], "radar raw  : NOTES 2.67  PEAK 4.00  SCRATCH 0.00  SOF-LAN 0.00  CHARGE 0.00  CHORD 0.00");
+        assert!(lines[2].starts_with("radar disp : NOTES "), "{}", lines[2]);
+        assert!(!lines[2].starts_with("radar disp : NOTES 0.0 "), "a chart with notes has a display value for NOTES: {}", lines[2]);
+        for label in RADAR_AXIS_LABELS {
+            assert!(lines[2].contains(label), "{label} is printed in the display line");
+        }
+    }
+
+    #[test]
+    fn a_mode_without_a_radar_prints_one_line_saying_so() {
+        let source = rbms_parser::parse(b"#BPM 120\n#00111:01010101\n");
+        let model = rbms_chart::to_model(&source, Mode::POPN_9K);
+
+        assert_eq!(radar_lines(&model, &Mode::POPN_9K), [format!("radar      : none for {}", Mode::POPN_9K.name)]);
     }
 
     #[test]

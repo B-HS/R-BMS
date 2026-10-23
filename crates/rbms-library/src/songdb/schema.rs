@@ -31,8 +31,8 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub const PARSER_VERSION: u32 = 5;
 
 /// Connection settings every open applies: the write-ahead log so a scan writing in one connection
-/// does not block the browser reading in another, and the foreign keys that make `song_detail`
-/// follow its `song` row into the grave.
+/// does not block the browser reading in another, and the foreign keys that make `song_detail` and
+/// `song_radar` follow their `song` row into the grave.
 pub(crate) const PRAGMAS: &str = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
 
 /// The tables, indexes and their creation order.

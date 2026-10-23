@@ -405,6 +405,7 @@ fn measuring_the_notes_adds_what_the_detail_found() {
         peak_density: 18.0,
         avg_density: 12.5,
         end_density: 15.25,
+        radar: None,
     };
     let chart = ChartMeta::of_entry(&entry).with_detail(&detail);
     let state = ChartState::Chart(&chart);
@@ -431,6 +432,7 @@ fn a_total_the_chart_states_is_kept_when_the_notes_are_measured() {
         peak_density: 0.0,
         avg_density: 0.0,
         end_density: 0.0,
+        radar: None,
     };
     let chart = ChartMeta::of_entry(&entry).with_detail(&detail);
     let state = ChartState::Chart(&chart);

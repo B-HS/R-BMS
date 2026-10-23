@@ -5,7 +5,8 @@
 //! Columns rbms adds for its own use carry an `rbms_` prefix, which is what keeps the two sets
 //! apart.
 
-use rbms_model::Mode;
+use rbms_chart::{RADAR_VERSION, RadarRaw, radar_raw};
+use rbms_model::{Mode, Model};
 
 /// A long note whose flavour the chart left unstated, so the player's LN MODE decides it.
 pub const FEATURE_UNDEFINED_LN: i32 = 1;
@@ -118,6 +119,42 @@ pub struct DetailRow {
     pub density: Vec<u32>,
 }
 
+/// A chart's NOTES RADAR as the database holds it: the generation of the metric definitions that
+/// measured it, and the six raw values, or `None` for a mode that has no radar.
+///
+/// Only the raw values are stored. The 0..=200 display scale is derived from them when a radar is
+/// drawn, so changing a display curve never invalidates a row; changing a metric definition raises
+/// [`RADAR_VERSION`], which makes [`RadarRow::is_current`] false for every row measured before.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadarRow {
+    /// [`RADAR_VERSION`] as of the build that measured the chart.
+    pub version: u32,
+    /// The raw metrics, or `None` when the chart's mode has no radar (9-key and 24-key charts).
+    pub raw: Option<RadarRaw>,
+}
+
+impl RadarRow {
+    /// Measure `model`, played in `mode`, under the current metric definitions.
+    pub fn measure(model: &Model, mode: &Mode) -> RadarRow {
+        RadarRow { version: RADAR_VERSION, raw: radar_raw(model, mode) }
+    }
+
+    /// Whether the current metric definitions would measure the same values again. A row that is
+    /// not current has to be measured anew before it is shown.
+    pub fn is_current(&self) -> bool {
+        self.version == RADAR_VERSION
+    }
+}
+
+/// One chart as a scan hands it to the database: its row, and what was derived from the parse that
+/// read it. A scan derives all of it from one parse, so the database writes it in one transaction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScannedChart {
+    pub song: SongRow,
+    pub detail: Option<DetailRow>,
+    pub radar: Option<RadarRow>,
+}
+
 /// Columns [`song_from_row`] reads, in its own order.
 pub(crate) const SONG_COLUMNS: &str = "path, md5, sha256, title, subtitle, artist, subartist, genre, rbms_maker, rbms_level_text, difficulty, mode, \
      judge, rbms_total, rbms_init_bpm, minbpm, maxbpm, length, notes, rbms_long_notes, stagefile, banner, backbmp, preview, folder, favorite, date, \
@@ -143,6 +180,15 @@ pub(crate) const UPSERT_DETAIL: &str = "INSERT INTO song_detail (path, duration_
      VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
      ON CONFLICT(path) DO UPDATE SET duration_us = excluded.duration_us, peak_density = excluded.peak_density, avg_density = excluded.avg_density, \
      end_density = excluded.end_density, density_bins = excluded.density_bins";
+
+/// Read one chart's radar.
+pub(crate) const SELECT_RADAR: &str = "SELECT version, applies, notes, peak, scratch, soflan, charge, chord FROM song_radar WHERE path = ?1";
+
+/// Insert or replace one chart's radar.
+pub(crate) const UPSERT_RADAR: &str = "INSERT INTO song_radar (path, version, applies, notes, peak, scratch, soflan, charge, chord) \
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+     ON CONFLICT(path) DO UPDATE SET version = excluded.version, applies = excluded.applies, notes = excluded.notes, peak = excluded.peak, \
+     scratch = excluded.scratch, soflan = excluded.soflan, charge = excluded.charge, chord = excluded.chord";
 
 /// Read one [`SongRow`] out of a row selected with [`SONG_COLUMNS`].
 pub(crate) fn song_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SongRow> {
@@ -179,6 +225,20 @@ pub(crate) fn song_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SongRow
         feature: row.get(29)?,
         content: row.get(30)?,
     })
+}
+
+/// Read one [`RadarRow`] out of a row selected with [`SELECT_RADAR`]. A chart whose mode has no radar
+/// is stored with zeros for the six values and `applies` unset, and comes back as `raw: None`.
+pub(crate) fn radar_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadarRow> {
+    let applies: bool = row.get(1)?;
+    let raw = RadarRaw { notes: row.get(2)?, peak: row.get(3)?, scratch: row.get(4)?, soflan: row.get(5)?, charge: row.get(6)?, chord: row.get(7)? };
+    Ok(RadarRow { version: row.get(0)?, raw: applies.then_some(raw) })
+}
+
+/// Run [`UPSERT_RADAR`] for one chart through a statement prepared from it.
+pub(crate) fn execute_upsert_radar(stmt: &mut rusqlite::Statement<'_>, path: &str, radar: &RadarRow) -> rusqlite::Result<usize> {
+    let raw = radar.raw.unwrap_or_default();
+    stmt.execute(rusqlite::params![path, radar.version, radar.raw.is_some(), raw.notes, raw.peak, raw.scratch, raw.soflan, raw.charge, raw.chord])
 }
 
 /// The values [`UPSERT_SONG`] binds, in statement order. The derived numeric level and the scan

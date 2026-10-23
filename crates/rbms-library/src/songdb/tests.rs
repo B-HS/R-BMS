@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use rbms_chart::{RADAR_VERSION, RadarRaw};
 use rbms_model::Mode;
 
 use super::*;
@@ -262,9 +263,148 @@ fn details_are_written_alongside_the_charts_of_a_batch() {
     let mut db = fresh();
     let chart = row("/songs/pack/a.bms", "A");
     let detail = DetailRow { duration_us: 42, peak_density: 1.0, avg_density: 2.0, end_density: 3.0, density: vec![7] };
-    db.upsert_batch_with_details(&[(chart.clone(), Some(detail.clone())), (row("/songs/pack/b.bms", "B"), None)]).expect("store the batch");
+    let bare = ScannedChart { song: row("/songs/pack/b.bms", "B"), detail: None, radar: None };
+    db.upsert_batch_with_details(&[ScannedChart { song: chart.clone(), detail: Some(detail.clone()), radar: None }, bare]).expect("store the batch");
     assert_eq!(db.detail(&chart.path).expect("read the detail"), Some(detail));
     assert!(db.detail("/songs/pack/b.bms").expect("read the other detail").is_none(), "a chart with no computed detail stores none");
+}
+
+fn radar_raw_sample() -> RadarRaw {
+    RadarRaw { notes: 12.5, peak: 56.0, scratch: 1.25, soflan: 3.5, charge: 0.75, chord: 7.125 }
+}
+
+fn radar_sample() -> RadarRow {
+    RadarRow { version: RADAR_VERSION, raw: Some(radar_raw_sample()) }
+}
+
+#[test]
+fn migrate_creates_the_radar_table_keyed_on_the_song() {
+    let db = fresh();
+    assert_eq!(
+        db.columns_of("song_radar").expect("read the radar columns"),
+        ["path", "version", "applies", "notes", "peak", "scratch", "soflan", "charge", "chord"]
+    );
+}
+
+#[test]
+fn a_stored_radar_comes_back_value_for_value() {
+    let mut db = fresh();
+    let chart = row("/songs/pack/a.bms", "A");
+    db.upsert_batch(std::slice::from_ref(&chart)).expect("store the chart");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), None, "a chart nobody measured has no radar row");
+
+    db.put_radar(&chart.path, &radar_sample()).expect("store the radar");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), Some(radar_sample()));
+}
+
+#[test]
+fn a_radar_written_twice_replaces_rather_than_duplicates() {
+    let mut db = fresh();
+    let chart = row("/songs/pack/a.bms", "A");
+    db.upsert_batch(std::slice::from_ref(&chart)).expect("store the chart");
+    db.put_radar(&chart.path, &radar_sample()).expect("store once");
+    let second = RadarRow { version: RADAR_VERSION, raw: Some(RadarRaw { notes: 99.0, ..radar_raw_sample() }) };
+    db.put_radar(&chart.path, &second).expect("store again");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), Some(second));
+    let rows: i64 = db.conn.query_row("SELECT COUNT(*) FROM song_radar", [], |row| row.get(0)).expect("count the radar rows");
+    assert_eq!(rows, 1);
+}
+
+#[test]
+fn a_mode_without_a_radar_is_stored_as_not_applying_and_comes_back_without_values() {
+    let mut db = fresh();
+    let chart = row("/songs/pack/a.pms", "A");
+    db.upsert_batch(std::slice::from_ref(&chart)).expect("store the chart");
+    let unavailable = RadarRow { version: RADAR_VERSION, raw: None };
+    db.put_radar(&chart.path, &unavailable).expect("store the radar");
+
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), Some(unavailable), "the row says the mode has none, which is not the same as never measured");
+    let (applies, notes): (i64, f64) = db
+        .conn
+        .query_row("SELECT applies, notes FROM song_radar WHERE path = ?1", [&chart.path], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("read the columns");
+    assert_eq!((applies, notes), (0, 0.0));
+}
+
+#[test]
+fn a_radar_of_another_generation_is_returned_as_stored_and_is_not_current() {
+    let mut db = fresh();
+    let chart = row("/songs/pack/a.bms", "A");
+    db.upsert_batch(std::slice::from_ref(&chart)).expect("store the chart");
+    let stale = RadarRow { version: RADAR_VERSION + 1, raw: Some(radar_raw_sample()) };
+    db.put_radar(&chart.path, &stale).expect("store the radar");
+
+    let read = db.radar(&chart.path).expect("read the radar").expect("the row is there");
+    assert_eq!(read, stale, "the row is not hidden or rewritten");
+    assert!(!read.is_current());
+    assert!(radar_sample().is_current());
+}
+
+#[test]
+fn a_deleted_chart_takes_its_radar_with_it() {
+    let mut db = fresh();
+    let chart = row("/songs/pack/a.bms", "A");
+    let kept = row("/elsewhere/b.bms", "B");
+    db.upsert_batch(&[chart.clone(), kept.clone()]).expect("store the charts");
+    db.put_radar(&chart.path, &radar_sample()).expect("store the radar");
+    db.put_radar(&kept.path, &radar_sample()).expect("store the other radar");
+
+    db.delete_missing(&HashSet::new(), &["/songs/pack".to_string()]).expect("drop the chart");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), None, "the radar row went with the chart");
+    assert_eq!(db.radar(&kept.path).expect("read the other radar"), Some(radar_sample()), "a chart outside the scanned folders keeps its radar");
+}
+
+#[test]
+fn a_radar_for_a_chart_that_is_not_stored_is_refused() {
+    let db = fresh();
+    let err = db.put_radar("/songs/pack/missing.bms", &radar_sample()).expect_err("the foreign key refuses a radar with no chart");
+    assert!(matches!(err, SongDbError::Sqlite(_)), "{err}");
+    assert_eq!(db.radar("/songs/pack/missing.bms").expect("read the radar"), None);
+}
+
+#[test]
+fn a_database_from_before_the_radar_table_gets_it_on_migrate_and_has_no_radar_rows() {
+    let mut db = fresh();
+    let chart = row("/songs/pack/a.bms", "A");
+    db.upsert_batch(std::slice::from_ref(&chart)).expect("store the chart");
+    db.set_parser_version(PARSER_VERSION).expect("stamp the generation a completed scan left");
+    db.conn.execute_batch("DROP TABLE song_radar").expect("make the layout the previous build wrote");
+
+    assert_eq!(db.migrate().expect("migrate"), SCHEMA_VERSION);
+    assert!(!db.needs_full_rescan().expect("read the generation"), "adding the table does not make the next scan a full one");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), None, "the stored chart has no radar until it is measured");
+    db.put_radar(&chart.path, &radar_sample()).expect("store the radar");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), Some(radar_sample()));
+}
+
+#[test]
+fn radars_are_written_alongside_the_charts_of_a_batch() {
+    let mut db = fresh();
+    let measured = row("/songs/pack/a.bms", "A");
+    let unmeasured = row("/songs/pack/b.bms", "B");
+    let detail = DetailRow { duration_us: 42, peak_density: 1.0, avg_density: 2.0, end_density: 3.0, density: vec![7] };
+    db.upsert_batch_with_details(&[
+        ScannedChart { song: measured.clone(), detail: Some(detail), radar: Some(radar_sample()) },
+        ScannedChart { song: unmeasured.clone(), detail: None, radar: None },
+    ])
+    .expect("store the batch");
+
+    assert_eq!(db.radar(&measured.path).expect("read the radar"), Some(radar_sample()));
+    assert_eq!(db.radar(&unmeasured.path).expect("read the other radar"), None);
+}
+
+#[test]
+fn a_batch_rewriting_a_chart_replaces_its_radar_and_one_without_a_radar_keeps_the_old_one() {
+    let mut db = fresh();
+    let chart = row("/songs/pack/a.bms", "A");
+    db.upsert_batch_with_details(&[ScannedChart { song: chart.clone(), detail: None, radar: Some(radar_sample()) }]).expect("store the batch");
+
+    let remeasured = RadarRow { version: RADAR_VERSION, raw: Some(RadarRaw { peak: 70.0, ..radar_raw_sample() }) };
+    db.upsert_batch_with_details(&[ScannedChart { song: chart.clone(), detail: None, radar: Some(remeasured) }]).expect("store the rewrite");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), Some(remeasured));
+
+    db.upsert_batch_with_details(&[ScannedChart { song: chart.clone(), detail: None, radar: None }]).expect("store the rewrite without a radar");
+    assert_eq!(db.radar(&chart.path).expect("read the radar"), Some(remeasured));
 }
 
 #[test]

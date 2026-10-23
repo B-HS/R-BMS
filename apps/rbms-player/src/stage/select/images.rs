@@ -194,7 +194,7 @@ impl SongImages {
             self.uploaded[slot] = Some(uploaded);
             *texture = uploaded.taken.then_some(uploaded.texture);
         }
-        ReferenceImages { stagefile: textures[STAGEFILE], backbmp: textures[BACKBMP], banner: textures[BANNER] }
+        ReferenceImages { stagefile: textures[STAGEFILE], backbmp: textures[BACKBMP], banner: textures[BANNER], notes_radar: None }
     }
 
     /// Whether every file asked for has been read or found unreadable, so nothing more will change

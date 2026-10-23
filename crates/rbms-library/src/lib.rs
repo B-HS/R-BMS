@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use rbms_chart::to_model;
 use rbms_model::Mode;
 
+use crate::songdb::RadarRow;
+
 pub mod scan;
 pub mod songdb;
 
@@ -54,6 +56,10 @@ pub struct ChartDetail {
     pub peak_density: f64,
     pub avg_density: f64,
     pub end_density: f64,
+    /// The chart's NOTES RADAR as measured with this detail, or `None` for a detail assembled from
+    /// stored rows that carry none. A stored radar can be of an older generation than this build's:
+    /// see [`RadarRow::is_current`].
+    pub radar: Option<RadarRow>,
 }
 
 /// Whether a path carries one of the chart extensions the scanner reads: the BMS family, and the
@@ -68,7 +74,8 @@ pub fn is_bmson(p: &Path) -> bool {
 }
 
 /// Parse + time-integrate a single chart to derive its playable-note count, long-note count, length
-/// and BPM range for the select detail panel. `None` if the file can't be read.
+/// and BPM range for the select detail panel, and measure its NOTES RADAR from the same parse.
+/// `None` if the file can't be read.
 pub fn compute_chart_detail(path: &Path, mode: Mode) -> Option<ChartDetail> {
     let bytes = std::fs::read(path).ok()?;
     let (model, total_value) = if is_bmson(path) {
@@ -106,6 +113,7 @@ pub fn compute_chart_detail(path: &Path, mode: Mode) -> Option<ChartDetail> {
         peak_density: dens.peak,
         avg_density: dens.avg,
         end_density: dens.end,
+        radar: Some(RadarRow::measure(&model, &mode)),
     })
 }
 

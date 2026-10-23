@@ -139,6 +139,7 @@ pub(crate) fn detail_of(row: &SongRow, cached: &DetailRow) -> ChartDetail {
         peak_density: cached.peak_density,
         avg_density: cached.avg_density,
         end_density: cached.end_density,
+        radar: None,
     }
 }
 

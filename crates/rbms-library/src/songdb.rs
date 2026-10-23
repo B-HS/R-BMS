@@ -23,12 +23,15 @@ use rusqlite::Connection;
 
 pub use rows::{
     CONTENT_BGA, CONTENT_NO_KEYSOUND, CONTENT_PREVIEW, CONTENT_TEXT, DetailRow, FEATURE_CHARGE_NOTE, FEATURE_HELL_CHARGE_NOTE, FEATURE_LONG_NOTE,
-    FEATURE_MINE_NOTE, FEATURE_RANDOM, FEATURE_SCROLL, FEATURE_STOP_SEQUENCE, FEATURE_UNDEFINED_LN, SongRow, mode_from_id, mode_id,
+    FEATURE_MINE_NOTE, FEATURE_RANDOM, FEATURE_SCROLL, FEATURE_STOP_SEQUENCE, FEATURE_UNDEFINED_LN, RadarRow, ScannedChart, SongRow, mode_from_id, mode_id,
 };
 pub(crate) use schema::now_secs;
 pub use schema::{PARSER_VERSION, SCHEMA_VERSION};
 
-use rows::{SONG_COLUMNS, UPSERT_DETAIL, UPSERT_SONG, numeric_level, pack_density, song_from_row, unpack_density, upsert_params};
+use rows::{
+    SELECT_RADAR, SONG_COLUMNS, UPSERT_DETAIL, UPSERT_RADAR, UPSERT_SONG, execute_upsert_radar, numeric_level, pack_density, radar_from_row, song_from_row,
+    unpack_density, upsert_params,
+};
 
 /// Everything that can go wrong reading or writing the song database.
 #[derive(Debug)]
@@ -197,6 +200,25 @@ impl SongDb {
         Ok(())
     }
 
+    /// The stored NOTES RADAR of one chart, or `None` when it was never measured. The row is returned
+    /// as it was written: check [`RadarRow::is_current`] before showing it.
+    pub fn radar(&self, path: &str) -> Result<Option<RadarRow>, SongDbError> {
+        let mut stmt = self.conn.prepare_cached(SELECT_RADAR)?;
+        let mut rows = stmt.query([path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(radar_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Store one chart's NOTES RADAR, replacing whatever was there. The chart has to be stored first:
+    /// the radar row is keyed on it and goes when it goes.
+    pub fn put_radar(&self, path: &str, radar: &RadarRow) -> Result<(), SongDbError> {
+        let mut stmt = self.conn.prepare_cached(UPSERT_RADAR)?;
+        execute_upsert_radar(&mut stmt, path, radar)?;
+        Ok(())
+    }
+
     /// Star or unstar one chart. This is user data, so a rescan never writes it.
     pub fn set_favorite(&self, path: &str, favorite: i32) -> Result<(), SongDbError> {
         self.conn.prepare_cached("UPDATE song SET favorite = ?2 WHERE path = ?1")?.execute((path, favorite))?;
@@ -232,19 +254,24 @@ impl SongDb {
         Ok(())
     }
 
-    /// Insert or refresh a batch of charts together with the detail each scan already computed for
-    /// them, in one transaction.
-    pub fn upsert_batch_with_details(&mut self, entries: &[(SongRow, Option<DetailRow>)]) -> Result<(), SongDbError> {
+    /// Insert or refresh a batch of charts together with the detail and the NOTES RADAR each scan
+    /// already computed for them, in one transaction. A chart handed over without a detail or a radar
+    /// keeps the one it had.
+    pub fn upsert_batch_with_details(&mut self, entries: &[ScannedChart]) -> Result<(), SongDbError> {
         let scanned_at = now_secs();
         let tx = self.conn.transaction()?;
         {
             let mut song = tx.prepare_cached(UPSERT_SONG)?;
             let mut detail = tx.prepare_cached(UPSERT_DETAIL)?;
-            for (row, cached) in entries {
+            let mut radar = tx.prepare_cached(UPSERT_RADAR)?;
+            for ScannedChart { song: row, detail: cached, radar: measured } in entries {
                 let level_num = numeric_level(&row.level);
                 song.execute(upsert_params(row, &level_num, &scanned_at).as_slice())?;
                 if let Some(d) = cached {
                     detail.execute(rusqlite::params![row.path, d.duration_us, d.peak_density, d.avg_density, d.end_density, pack_density(&d.density)])?;
+                }
+                if let Some(r) = measured {
+                    execute_upsert_radar(&mut radar, &row.path, r)?;
                 }
             }
         }

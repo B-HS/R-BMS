@@ -26,7 +26,7 @@ use crate::songdb::rows::{
     FEATURE_RANDOM, FEATURE_SCROLL, FEATURE_STOP_SEQUENCE, FEATURE_UNDEFINED_LN, NO_KEYSOUND_MIN_LENGTH_MS, NO_KEYSOUND_MS_PER_SAMPLE,
     NO_KEYSOUND_SAMPLE_SLACK, mode_id,
 };
-use crate::songdb::{DetailRow, PARSER_VERSION, SongDb, SongDbError, SongRow};
+use crate::songdb::{DetailRow, PARSER_VERSION, RadarRow, ScannedChart, SongDb, SongDbError, SongRow};
 
 #[cfg(test)]
 mod tests;
@@ -273,7 +273,7 @@ fn parse_and_commit(db: &mut SongDb, req: &ScanRequest, jobs: Vec<Found>) -> Res
     }
     drop(tx);
 
-    let mut batch: Vec<(SongRow, Option<DetailRow>)> = Vec::with_capacity(COMMIT_BATCH);
+    let mut batch: Vec<ScannedChart> = Vec::with_capacity(COMMIT_BATCH);
     let mut upserted = 0usize;
     let mut failure: Option<SongDbError> = None;
     let mut stopped = false;
@@ -318,9 +318,10 @@ fn worker_count(jobs: usize) -> usize {
     cores.clamp(1, MAX_WORKERS).min(jobs.max(1))
 }
 
-/// Read and parse one chart into the row and the detail the database stores for it. A file that
-/// cannot be read or is not a chart at all contributes nothing, exactly as the in-memory scan did.
-fn parse_chart(job: &Found) -> Option<(SongRow, Option<DetailRow>)> {
+/// Read and parse one chart into the row, the detail and the NOTES RADAR the database stores for it.
+/// A file that cannot be read or is not a chart at all contributes nothing, exactly as the in-memory
+/// scan did.
+fn parse_chart(job: &Found) -> Option<ScannedChart> {
     let bytes = std::fs::read(&job.source).ok()?;
     if crate::is_bmson(&job.source) {
         return parse_bmson_chart(job, &bytes);
@@ -370,12 +371,13 @@ fn parse_chart(job: &Found) -> Option<(SongRow, Option<DetailRow>)> {
         content: content_bits(&model, job.has_text, !headers.preview.is_empty(), length_ms),
     };
     let detail = DetailRow { duration_us, peak_density: density.peak, avg_density: density.avg, end_density: density.end, density: density.bins };
-    Some((row, Some(detail)))
+    Some(ScannedChart { song: row, detail: Some(detail), radar: Some(RadarRow::measure(&model, &mode)) })
 }
 
-/// Read one bmson chart into the row and the detail the database stores for it. bmson states its
-/// own mode instead of leaving it to be detected, and its TOTAL is already absolute on the model.
-fn parse_bmson_chart(job: &Found, bytes: &[u8]) -> Option<(SongRow, Option<DetailRow>)> {
+/// Read one bmson chart into the row, the detail and the NOTES RADAR the database stores for it.
+/// bmson states its own mode instead of leaving it to be detected, and its TOTAL is already absolute
+/// on the model.
+fn parse_bmson_chart(job: &Found, bytes: &[u8]) -> Option<ScannedChart> {
     let chart = rbms_parser::bmson::parse(bytes).ok()?;
     let mode = chart.mode();
     let model = chart.to_model();
@@ -420,7 +422,7 @@ fn parse_bmson_chart(job: &Found, bytes: &[u8]) -> Option<(SongRow, Option<Detai
         content: content_bits(&model, job.has_text, !chart.info.preview_music.is_empty(), length_ms),
     };
     let detail = DetailRow { duration_us, peak_density: density.peak, avg_density: density.avg, end_density: density.end, density: density.bins };
-    Some((row, Some(detail)))
+    Some(ScannedChart { song: row, detail: Some(detail), radar: Some(RadarRow::measure(&model, &mode)) })
 }
 
 /// The chart's BPM range, falling back to its initial BPM when no timeline states one — the same

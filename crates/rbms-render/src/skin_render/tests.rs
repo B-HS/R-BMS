@@ -981,7 +981,7 @@ fn a_negative_id_the_reference_has_no_picture_under_is_an_object_that_never_draw
     let rect = SkinRect::new(8.0, 8.0, 16.0, 16.0);
     let mut canvas = stage();
     let picture = swatch_texture(&mut canvas, "picture", 1, 1, &[RED]);
-    let every = ReferenceImages { stagefile: Some(picture), backbmp: Some(picture), banner: Some(picture) };
+    let every = ReferenceImages { stagefile: Some(picture), backbmp: Some(picture), banner: Some(picture), ..ReferenceImages::default() };
 
     for id in ["-1", "-103", "-109", "-112", "-2147483648"] {
         let object = reference_at(rect, id);
@@ -1464,3 +1464,4 @@ fn filtering_is_decided_by_the_size_on_screen() {
 }
 
 mod opacity;
+mod radar;

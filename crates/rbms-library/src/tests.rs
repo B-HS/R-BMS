@@ -31,6 +31,22 @@ fn compute_chart_detail_derives_notes_length_and_bpm_range() {
 }
 
 #[test]
+fn compute_chart_detail_measures_the_radar_of_a_mode_that_has_one() {
+    let path = samples_dir().join("autoplay-demo.bms");
+    let d = compute_chart_detail(&path, Mode::BEAT_7K).expect("the committed sample chart parses");
+    let radar = d.radar.expect("the detail was measured");
+    assert!(radar.is_current());
+    assert!(radar.raw.is_some_and(|raw| raw.notes > 0.0), "the sample chart has press events per second: {radar:?}");
+}
+
+#[test]
+fn compute_chart_detail_of_a_nine_key_chart_says_it_has_no_radar() {
+    let path = samples_dir().join("autoplay-demo.bms");
+    let d = compute_chart_detail(&path, Mode::POPN_9K).expect("the committed sample chart parses");
+    assert_eq!(d.radar, Some(RadarRow { version: rbms_chart::RADAR_VERSION, raw: None }));
+}
+
+#[test]
 fn compute_chart_detail_of_a_chart_years_long_has_no_density_histogram() {
     let path = std::env::temp_dir().join(format!("rbms_library_years_long_{}.bms", std::process::id()));
     std::fs::write(&path, "#BPM 0.0001\n#00111:01\n#99911:01\n").expect("write the fixture chart");

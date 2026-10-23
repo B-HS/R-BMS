@@ -21,6 +21,9 @@
 //! here: [`Layer`], one pixmap's life as a texture, and [`draw_layer`], which fits a texture to a
 //! rectangle.
 //!
+//! The NOTES RADAR polygon ([`RadarImage`]) is painted the same way but is no graph object: it is a
+//! reference image, which the renderer paints from six values the frame carries.
+//!
 //! What is shared between two or more kinds stays here: reading a colour, the plot rectangle, and the
 //! arithmetic the two visualisers have in common.
 
@@ -31,6 +34,7 @@ mod hit_error;
 mod limit_tests;
 mod notes_dist;
 mod pixmap;
+mod radar;
 mod timing_dist;
 mod timing_vis;
 
@@ -56,6 +60,7 @@ pub(crate) use gauge_graph::{GaugeGraphBody, draw_gauge_graph};
 pub(crate) use hit_error::{HitErrorBody, draw_hit_error};
 pub use notes_dist::{EARLY_LATE_BUCKETS, JUDGEMENTS, NOTE_KINDS, NoteDistribution, PlayCursor};
 pub(crate) use notes_dist::{JudgeGraphBody, draw_judge_graph};
+pub(crate) use radar::{RadarImage, RadarValues};
 pub use timing_dist::{TIMING_JUDGE_AREAS, TimingHistogram};
 pub(crate) use timing_dist::{TimingDistributionBody, draw_timing_distribution};
 pub use timing_vis::RecentHits;
@@ -272,6 +277,7 @@ pub(crate) fn release<R: Renderer>(body: &Body, r: &mut R) {
         Body::TimingDistribution(body) => body.release(r),
         Body::TimingVisualizer(body) => body.release(r),
         Body::HitError(body) => body.release(r),
+        Body::Reference(body) => body.release(r),
         _ => {}
     }
 }

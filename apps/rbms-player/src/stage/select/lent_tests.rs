@@ -29,7 +29,7 @@ const STAGE_PICTURE: TextureId = TextureId(1);
 const BACK_PICTURE: TextureId = TextureId(2);
 
 /// A frame with none of a chart's pictures loaded.
-const NO_PICTURES: ReferenceImages = ReferenceImages { stagefile: None, backbmp: None, banner: None };
+const NO_PICTURES: ReferenceImages = ReferenceImages { stagefile: None, backbmp: None, banner: None, notes_radar: None };
 
 /// Where the fixture draws each square, as its left edge in the skin's own coordinates, and the box
 /// they share: one while the chart under the cursor is a seven-key chart, one while the bar there is
@@ -158,6 +158,7 @@ fn the_chart_under_the_cursor_reads_what_the_song_database_holds() {
         peak_density: 0.0,
         avg_density: 0.0,
         end_density: 0.0,
+        radar: None,
     };
     let measured = chart_under_cursor(&chart, None, Some(&detail), &NO_PICTURES);
     let state = ChartState::Chart(&measured);
@@ -181,7 +182,7 @@ fn the_chart_under_the_cursor_has_the_pictures_that_are_loaded() {
     let state = ChartState::Chart(&unloaded);
     assert_eq!(options.map(|id| state.boolean(id)), [Some(false), Some(true), Some(false), Some(true), Some(false), Some(true)]);
 
-    let pictures = ReferenceImages { stagefile: Some(STAGE_PICTURE), backbmp: Some(BACK_PICTURE), banner: None };
+    let pictures = ReferenceImages { stagefile: Some(STAGE_PICTURE), backbmp: Some(BACK_PICTURE), banner: None, notes_radar: None };
     let loaded = chart_under_cursor(&chart, None, None, &pictures);
     let state = ChartState::Chart(&loaded);
     assert_eq!(options.map(|id| state.boolean(id)), [Some(true), Some(false), Some(false), Some(true), Some(true), Some(false)]);

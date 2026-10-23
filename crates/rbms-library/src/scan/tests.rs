@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 
+use rbms_chart::RADAR_VERSION;
+
 use super::*;
-use crate::songdb::SongDb;
+use crate::songdb::{SongDb, mode_from_id};
 
 const US_PER_SECOND: i64 = 1_000_000;
 
@@ -487,6 +489,106 @@ fn a_scan_caches_the_detail_panel_of_every_chart_it_parses() {
     let detail = db.detail(&normalize(&path)).expect("read the detail").expect("the scan cached a detail");
     assert!(detail.duration_us > 0, "the chart's length is integrated during the scan");
     assert!(!detail.density.is_empty(), "the density histogram is cached with it");
+}
+
+/// The radar a direct measurement of `body` gives it, read the way the scan reads a `.bms` file.
+fn measured_radar(body: &str) -> RadarRow {
+    let source = rbms_parser::parse(body.as_bytes());
+    let mode = detect_mode(&source, "song.bms");
+    RadarRow::measure(&to_model(&source, mode), &mode)
+}
+
+#[test]
+fn a_scan_stores_the_radar_of_every_chart_it_parses() {
+    let fixture = Fixture::new("radar");
+    let body = chart("song");
+    let path = fixture.write("song.bms", &body);
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let stored = db.radar(&normalize(&path)).expect("read the radar").expect("the scan stored a radar");
+    assert_eq!(stored, measured_radar(&body), "the stored radar is the direct measurement of the chart");
+    assert!(stored.is_current());
+    assert!(stored.raw.is_some_and(|raw| raw.notes > 0.0 && raw.peak > 0.0), "{stored:?}");
+}
+
+#[test]
+fn the_radar_a_scan_stores_is_the_radar_the_focused_detail_computes() {
+    let fixture = Fixture::new("radar-detail");
+    let path = fixture.write("song.bms", &chart("song"));
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let key = normalize(&path);
+    let stored = db.song(&key).expect("read the chart").expect("the chart is stored");
+    let mode = mode_from_id(stored.mode).expect("the stored mode is one of the build's");
+    let computed = crate::compute_chart_detail(&path, mode).expect("the chart parses");
+    assert_eq!(computed.radar, db.radar(&key).expect("read the radar"));
+}
+
+#[test]
+fn a_chart_in_a_mode_without_a_radar_is_stored_with_a_row_that_says_so() {
+    let fixture = Fixture::new("radar-popn");
+    let path = fixture.write("pop.pms", &chart("pop"));
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let stored = db.song(&normalize(&path)).expect("read the chart").expect("the chart is stored");
+    assert_eq!(mode_from_id(stored.mode), Some(rbms_model::Mode::POPN_9K));
+    assert_eq!(
+        db.radar(&normalize(&path)).expect("read the radar"),
+        Some(RadarRow { version: RADAR_VERSION, raw: None }),
+        "the row is there so the cursor never measures a nine-key chart again"
+    );
+}
+
+#[test]
+fn a_bmson_chart_gets_a_radar_too() {
+    let fixture = Fixture::new("radar-bmson");
+    let path = fixture.write("song.bmson", &bmson_chart("bmson song"));
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let stored = db.radar(&normalize(&path)).expect("read the radar").expect("the scan stored a radar");
+    assert!(stored.is_current());
+    assert!(stored.raw.is_some_and(|raw| raw.notes > 0.0), "a bmson chart in a seven-key mode has a radar: {stored:?}");
+}
+
+#[test]
+fn a_rewritten_chart_is_measured_again() {
+    let fixture = Fixture::new("radar-rewrite");
+    let path = fixture.write("song.bms", &chart("song"));
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+    let key = normalize(&path);
+    let before = db.radar(&key).expect("read the radar").expect("the scan stored a radar");
+
+    let denser = format!("{}#00112:01010101\n#00114:01010101\n", chart("song, now with more notes"));
+    fixture.write("song.bms", &denser);
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let after = db.radar(&key).expect("read the radar").expect("the rescan stored a radar");
+    assert_ne!(after, before, "the rewrite changed the chart, so it changed the radar");
+    assert_eq!(after, measured_radar(&denser));
+}
+
+#[test]
+fn an_incremental_scan_leaves_a_stored_radar_alone_and_a_full_one_measures_it_again() {
+    let fixture = Fixture::new("radar-stale");
+    let body = chart("song");
+    let path = fixture.write("song.bms", &body);
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+    let key = normalize(&path);
+
+    let stale = RadarRow { version: RADAR_VERSION + 1, raw: None };
+    db.put_radar(&key, &stale).expect("store a radar of another generation");
+
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+    assert_eq!(db.radar(&key).expect("read the radar"), Some(stale), "a chart whose file did not move is not read, so its radar is not touched");
+
+    scan(&mut db, &ScanRequest::new(fixture.roots(), true));
+    assert_eq!(db.radar(&key).expect("read the radar"), Some(measured_radar(&body)), "a full scan reads every chart and measures it under this build");
 }
 
 /// A chart of a few bytes whose tempo puts its last note years away is scanned like any other, and

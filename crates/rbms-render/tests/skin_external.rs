@@ -941,7 +941,7 @@ fn reference_images(canvas: &mut CpuCanvas) -> ReferenceImages {
         let image = reference_image(stem);
         Some(canvas.register_texture(&format!("rbms.external.reference.{stem}"), &image.rgba, image.width, image.height))
     });
-    ReferenceImages { stagefile, backbmp, banner }
+    ReferenceImages { stagefile, backbmp, banner, ..ReferenceImages::default() }
 }
 
 /// Reads a pack's images and fonts from disk and keeps count of what that cost.
