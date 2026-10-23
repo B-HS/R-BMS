@@ -429,6 +429,7 @@ mod tests {
         (SettingId::LongNoteMargin, "LN MARGIN", "100%"),
         (SettingId::LnMode, "LN MODE", "LN"),
         (SettingId::GaugeSet, "GAUGE SET", "AUTO"),
+        (SettingId::CourseGauge, "COURSE GAUGE", "LR2"),
         (SettingId::GaugeAutoShift, "GAUGE AUTO SHIFT", "NONE"),
         (SettingId::BottomShiftableGauge, "BOTTOM SHIFTABLE", "ASSIST EASY"),
         (SettingId::Target, "TARGET", "RATE AAA"),

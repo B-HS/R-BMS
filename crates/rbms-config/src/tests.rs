@@ -13,7 +13,7 @@ use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
 use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::GaugeAutoShift;
-use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
 use rbms_judge::ln::LnMode;
 
 use super::*;
@@ -98,8 +98,82 @@ fn every_judge_token_round_trips_through_its_own_vocabulary() {
     for set in GAUGE_SET_CYCLE {
         assert_eq!(gauge_set_from_token(gauge_set_token(set)), set);
     }
+    for mode in CourseGaugeMode::ALL {
+        assert_eq!(course_gauge_from_token(course_gauge_token(mode)), mode);
+    }
     for target in ScoreTarget::ALL {
         assert_eq!(target_from_token(target.token()), target);
+    }
+}
+
+/// A fresh install plays courses on the LR2 table, which is the player's decision of 2026-10-23.
+#[test]
+fn the_course_gauge_defaults_to_lr2() {
+    assert_eq!(Config::default().judge.course_gauge, CourseGaugeMode::Lr2);
+    assert_eq!(CourseGaugeMode::default(), CourseGaugeMode::Lr2);
+}
+
+/// The COURSE GAUGE row prints the tokens the file stores, in the order the setting cycles through
+/// the modes, and every one of them comes back from the file as the mode it was written from.
+#[test]
+fn course_gauge_tokens_round_trip() {
+    let tokens: Vec<&str> = CourseGaugeMode::ALL.into_iter().map(course_gauge_token).collect();
+    assert_eq!(tokens, COURSE_GAUGE_LABELS, "the row prints other names than the file stores");
+    assert_eq!(tokens, ["LR2", "BEATORAJA", "IIDX"]);
+    for mode in CourseGaugeMode::ALL {
+        assert_eq!(course_gauge_from_token(&course_gauge_token(mode).to_ascii_lowercase()), mode, "{mode:?} is case sensitive");
+        let mut config = Config::default();
+        config.judge.course_gauge = mode;
+        let text = ron_of(&config);
+        assert!(text.contains(&format!("course_gauge: \"{}\"", course_gauge_token(mode))), "{mode:?} is not stored as its token");
+        let back: Config = ron::from_str(&text).expect("a config round-trips");
+        assert_eq!(back.judge.course_gauge, mode);
+    }
+}
+
+/// A token no mode is stored under reads as the shipped LR2 rather than failing the whole load.
+#[test]
+fn an_unknown_course_gauge_token_reads_lr2() {
+    for unknown in ["nonsense", "", "BEAT_7K", "AUTO"] {
+        assert_eq!(course_gauge_from_token(unknown), CourseGaugeMode::Lr2, "`{unknown}`");
+        let text = format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, judge: (course_gauge: "{unknown}"))"#);
+        let read: Config = ron::from_str(&text).expect("a file with an unreadable course gauge parses");
+        assert_eq!(read.judge.course_gauge, CourseGaugeMode::Lr2, "`{unknown}`");
+    }
+}
+
+/// A settings file written before the COURSE GAUGE row holds none, and a file of the current schema
+/// that lacks it reads as the shipped table without a migration.
+#[test]
+fn a_settings_file_without_a_course_gauge_reads_lr2() {
+    let without = format!("(schema_version: {CURRENT_SCHEMA_VERSION}, judge: (offset_ms: 5))");
+    let before: Config = ron::from_str(&without).expect("a file from before the row loads");
+    assert_eq!(before.judge.offset_ms, 5);
+    assert_eq!(before.judge.course_gauge, CourseGaugeMode::Lr2);
+    let (migrated, from) = migrate(&without).expect("a file of the current schema loads");
+    assert_eq!(from, None, "adding the row needed no new schema");
+    assert_eq!(migrated.judge.course_gauge, CourseGaugeMode::Lr2);
+    let stated: Config =
+        ron::from_str(&format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, judge: (course_gauge: "IIDX"))"#)).expect("a stated course gauge loads");
+    assert_eq!(stated.judge.course_gauge, CourseGaugeMode::Iidx);
+}
+
+/// The single-song GAUGE SET row keeps offering the chart's own table and LR2 only: the IIDX table
+/// the engine gained is reached through COURSE GAUGE, so it must not leak into the row's cycle, its
+/// tokens or what a file may state.
+#[test]
+fn the_single_song_gauge_set_cycle_stays_auto_and_lr2() {
+    assert_eq!(GAUGE_SET_CYCLE, [None, Some(GaugeSetId::Lr2)]);
+    assert_eq!(GAUGE_SET_LABELS, [AUTO_VALUE, "LR2"]);
+    assert_eq!(gauge_set_from_token("IIDX"), None, "a table only a course reaches read as a choice of the single-song row");
+    assert_eq!(gauge_set_from_token("iidx"), None);
+    let read: Config =
+        ron::from_str(&format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, judge: (gauge_set: "IIDX"))"#)).expect("a file stating the IIDX table parses");
+    assert_eq!(read.judge.gauge_set, None);
+    let mut config = Config::default();
+    for _ in 0..=GAUGE_SET_CYCLE.len() {
+        adjust(&mut config, SettingId::GaugeSet, 1);
+        assert!(GAUGE_SET_CYCLE.contains(&config.judge.gauge_set), "the row stepped to {:?}", config.judge.gauge_set);
     }
 }
 
@@ -295,6 +369,7 @@ fn ron_round_trip_preserves_every_field() {
     c.judge.judge_algorithm = JudgeAlgorithm::Combo;
     c.judge.ln_mode = LnMode::HellChargeNote;
     c.judge.gauge_set = Some(GaugeSetId::Lr2);
+    c.judge.course_gauge = CourseGaugeMode::Iidx;
     c.judge.gauge_auto_shift = GaugeAutoShift::BestClear;
     c.judge.bottom_shiftable_gauge = GaugeKind::Normal;
     c.judge.target = ScoreTarget::IrBest;

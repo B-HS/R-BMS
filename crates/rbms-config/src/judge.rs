@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::GaugeAutoShift;
-use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
 use rbms_judge::ln::LnMode;
 
 use crate::settings::AUTO_VALUE;
@@ -29,6 +29,9 @@ pub const GAUGE_SET_CYCLE: [Option<GaugeSetId>; 2] = [None, Some(GaugeSetId::Lr2
 
 /// Names the GAUGE SET row shows, one per entry of [`GAUGE_SET_CYCLE`].
 pub const GAUGE_SET_LABELS: &[&str] = &[AUTO_VALUE, "LR2"];
+
+/// Names the COURSE GAUGE row shows, one per entry of [`CourseGaugeMode::ALL`].
+pub const COURSE_GAUGE_LABELS: &[&str] = &["LR2", "BEATORAJA", "IIDX"];
 
 /// How many targets the TARGET row steps through: the reference's eleven fixed rates
 /// (`TargetProperty.java:117-141`) plus the next rank up, the rate the player types, and the three
@@ -367,4 +370,18 @@ pub fn gauge_set_token(set: Option<GaugeSetId>) -> &'static str {
 /// a chart selects for itself — reads as "follow the chart's mode".
 pub fn gauge_set_from_token(token: &str) -> Option<GaugeSetId> {
     GAUGE_SET_CYCLE.into_iter().find(|set| gauge_set_token(*set).eq_ignore_ascii_case(token)).unwrap_or_default()
+}
+
+/// Settings-file token for the gauge table a course is played on.
+pub fn course_gauge_token(mode: CourseGaugeMode) -> &'static str {
+    match mode {
+        CourseGaugeMode::Lr2 => "LR2",
+        CourseGaugeMode::Beatoraja => "BEATORAJA",
+        CourseGaugeMode::Iidx => "IIDX",
+    }
+}
+
+/// Parse a persisted course gauge token, defaulting to LR2.
+pub fn course_gauge_from_token(token: &str) -> CourseGaugeMode {
+    CourseGaugeMode::ALL.into_iter().find(|mode| course_gauge_token(*mode).eq_ignore_ascii_case(token)).unwrap_or_default()
 }

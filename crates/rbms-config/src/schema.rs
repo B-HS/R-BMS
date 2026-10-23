@@ -2,7 +2,7 @@ use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
 use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::{GaugeAutoShift, clamp_bottom_shiftable};
-use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
 use rbms_judge::ln::LnMode;
 use rbms_skin::dst::{OffsetSource, SkinColor, SkinOffset};
 use rbms_skin::loader::SkinUserConfig;
@@ -655,6 +655,10 @@ pub struct JudgeOptions {
     /// Gauge table to play on, or `None` to take the one the chart's mode selects.
     #[serde(with = "gauge_set_token")]
     pub gauge_set: Option<GaugeSetId>,
+    /// Gauge table a course is played on. It outranks the course's own gauge constraint, and
+    /// [`JudgeOptions::gauge_set`] applies to single songs only.
+    #[serde(with = "course_gauge_token")]
+    pub course_gauge: CourseGaugeMode,
     #[serde(with = "gauge_auto_shift_token")]
     pub gauge_auto_shift: GaugeAutoShift,
     /// The floor a per-frame auto-shift may drop the gauge selection to.
@@ -682,6 +686,7 @@ impl Default for JudgeOptions {
             judge_algorithm: JudgeAlgorithm::default(),
             ln_mode: LnMode::default(),
             gauge_set: None,
+            course_gauge: CourseGaugeMode::default(),
             gauge_auto_shift: GaugeAutoShift::default(),
             bottom_shiftable_gauge: GaugeKind::AssistEasy,
             target: ScoreTarget::default(),
@@ -968,6 +973,21 @@ mod gauge_set_token {
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<GaugeSetId>, D::Error> {
         let token = String::deserialize(deserializer)?;
         Ok(crate::judge::gauge_set_from_token(&token))
+    }
+}
+
+/// Stores the course gauge table as the token the COURSE GAUGE row shows.
+mod course_gauge_token {
+    use rbms_judge::gauge_tables::CourseGaugeMode;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &CourseGaugeMode, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(crate::judge::course_gauge_token(*value))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<CourseGaugeMode, D::Error> {
+        let token = String::deserialize(deserializer)?;
+        Ok(crate::judge::course_gauge_from_token(&token))
     }
 }
 

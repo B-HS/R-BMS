@@ -39,9 +39,10 @@ pub use error::ConfigError;
 pub use gauge::{gauge_from_name, gauge_token};
 pub use io::{LoadOutcome, load, migrate, save};
 pub use judge::{
-    GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_FALLBACK_COUNT,
-    TARGET_FALLBACK_LABELS, TARGET_LABELS, algorithm_from_token, algorithm_token, gauge_auto_shift_from_token, gauge_auto_shift_token, gauge_set_from_token,
-    gauge_set_token, ln_mode_from_token, ln_mode_token, target_fallback_from_token, target_from_token,
+    COURSE_GAUGE_LABELS, GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget,
+    TARGET_FALLBACK_COUNT, TARGET_FALLBACK_LABELS, TARGET_LABELS, algorithm_from_token, algorithm_token, course_gauge_from_token, course_gauge_token,
+    gauge_auto_shift_from_token, gauge_auto_shift_token, gauge_set_from_token, gauge_set_token, ln_mode_from_token, ln_mode_token, target_fallback_from_token,
+    target_from_token,
 };
 pub use legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
 pub use number::NumberSpec;

@@ -13,6 +13,7 @@ use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
 use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::{BOTTOM_SHIFTABLE_GAUGES, GaugeAutoShift};
+use rbms_judge::gauge_tables::CourseGaugeMode;
 use rbms_judge::ln::LnMode;
 use rbms_skin::loader::{
     SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_PLAY_24KEYS, SKIN_TYPE_RESULT,
@@ -24,8 +25,8 @@ use crate::audio::{
     volume_percent,
 };
 use crate::judge::{
-    GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_FALLBACK_LABELS, TARGET_LABELS,
-    gauge_set_token,
+    COURSE_GAUGE_LABELS, GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget,
+    TARGET_FALLBACK_LABELS, TARGET_LABELS, gauge_set_token,
 };
 use crate::number::NumberSpec;
 use crate::options;
@@ -201,6 +202,7 @@ pub enum SettingId {
     LongNoteMargin,
     LnMode,
     GaugeSet,
+    CourseGauge,
     GaugeAutoShift,
     BottomShiftableGauge,
     Target,
@@ -267,7 +269,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 93;
+pub const SETTING_COUNT: usize = 94;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -302,6 +304,7 @@ impl SettingId {
         SettingId::LongNoteMargin,
         SettingId::LnMode,
         SettingId::GaugeSet,
+        SettingId::CourseGauge,
         SettingId::GaugeAutoShift,
         SettingId::BottomShiftableGauge,
         SettingId::Target,
@@ -696,6 +699,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "Which gauge table the nine gauges are built from",
     ),
     row(
+        SettingId::CourseGauge,
+        SettingTab::Judge,
+        "COURSE GAUGE",
+        SettingKind::Cycle { values: COURSE_GAUGE_LABELS },
+        "Which gauge table a course is played on, ahead of the course's own gauge constraint",
+    ),
+    row(
         SettingId::GaugeAutoShift,
         SettingTab::Judge,
         "GAUGE AUTO SHIFT",
@@ -1072,6 +1082,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::LongNoteMargin => format!("{}{}", config.judge.longnote_margin_rate, unit_of(id)),
         SettingId::LnMode => cycle_label(id, cycle_at(LnMode::ALL, config.judge.ln_mode)),
         SettingId::GaugeSet => gauge_set_token(config.judge.gauge_set).to_string(),
+        SettingId::CourseGauge => cycle_label(id, cycle_at(CourseGaugeMode::ALL, config.judge.course_gauge)),
         SettingId::GaugeAutoShift => cycle_label(id, cycle_at(GaugeAutoShift::ALL, config.judge.gauge_auto_shift)),
         SettingId::BottomShiftableGauge => cycle_label(id, cycle_at(BOTTOM_SHIFTABLE_GAUGES, config.judge.bottom_shiftable_gauge)),
         SettingId::Target => config.judge.target.label().to_string(),
@@ -1260,6 +1271,10 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::GaugeSet => {
             let at = stepped(cycle_at(GAUGE_SET_CYCLE, config.judge.gauge_set), GAUGE_SET_CYCLE.len(), delta);
             store(&mut config.judge.gauge_set, GAUGE_SET_CYCLE[at])
+        }
+        SettingId::CourseGauge => {
+            let at = stepped(cycle_at(CourseGaugeMode::ALL, config.judge.course_gauge), CourseGaugeMode::ALL.len(), delta);
+            store(&mut config.judge.course_gauge, CourseGaugeMode::ALL[at])
         }
         SettingId::GaugeAutoShift => {
             let at = stepped(cycle_at(GaugeAutoShift::ALL, config.judge.gauge_auto_shift), GaugeAutoShift::ALL.len(), delta);
@@ -2001,6 +2016,7 @@ mod tests {
             SettingId::PlayEscapeMode,
             SettingId::Random,
             SettingId::Gauge,
+            SettingId::CourseGauge,
             SettingId::ScratchSide,
             SettingId::Sort,
             SettingId::SkinScreen,
@@ -2018,6 +2034,24 @@ mod tests {
             declared.sort_unstable();
             assert_eq!(seen, declared, "{id:?} does not show the values it declares");
         }
+    }
+
+    #[test]
+    fn the_course_gauge_row_cycles_lr2_beatoraja_iidx() {
+        let mut config = Config::default();
+        assert_eq!(cycle_values(SettingId::CourseGauge), ["LR2", "BEATORAJA", "IIDX"]);
+        assert_eq!(config.judge.course_gauge, CourseGaugeMode::Lr2);
+        assert_eq!(adjust(&mut config, SettingId::CourseGauge, 1), AdjustOutcome::Changed);
+        assert_eq!((config.judge.course_gauge, display_value(&config, SettingId::CourseGauge)), (CourseGaugeMode::Beatoraja, "BEATORAJA".to_string()));
+        assert_eq!(adjust(&mut config, SettingId::CourseGauge, 1), AdjustOutcome::Changed);
+        assert_eq!((config.judge.course_gauge, display_value(&config, SettingId::CourseGauge)), (CourseGaugeMode::Iidx, "IIDX".to_string()));
+        assert_eq!(adjust(&mut config, SettingId::CourseGauge, 1), AdjustOutcome::Changed, "the list wraps at its end");
+        assert_eq!(config.judge.course_gauge, CourseGaugeMode::Lr2);
+        assert_eq!(adjust(&mut config, SettingId::CourseGauge, -1), AdjustOutcome::Changed, "the list wraps at its start");
+        assert_eq!(config.judge.course_gauge, CourseGaugeMode::Iidx);
+        assert_eq!(adjust(&mut config, SettingId::CourseGauge, -1), AdjustOutcome::Changed);
+        assert_eq!(config.judge.course_gauge, CourseGaugeMode::Beatoraja);
+        assert_eq!(config.judge.gauge_set, None, "the single-song gauge table is a row of its own");
     }
 
     #[test]
@@ -2134,6 +2168,7 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::JudgeAlgorithm), "COMBO", "JudgeAlgorithm.java:42 lists Combo first, so it is the shipped default");
         assert_eq!(display_value(&config, SettingId::LnMode), "LN");
         assert_eq!(display_value(&config, SettingId::GaugeSet), AUTO_VALUE);
+        assert_eq!(display_value(&config, SettingId::CourseGauge), "LR2");
         assert_eq!(display_value(&config, SettingId::GaugeAutoShift), "NONE");
         assert_eq!(display_value(&config, SettingId::BottomShiftableGauge), "ASSIST EASY");
         assert_eq!(display_value(&config, SettingId::Target), "RATE AAA", "the shipped target is the rate the spec names");
@@ -2234,6 +2269,7 @@ mod tests {
                 SettingId::LongNoteMargin,
                 SettingId::LnMode,
                 SettingId::GaugeSet,
+                SettingId::CourseGauge,
                 SettingId::GaugeAutoShift,
                 SettingId::BottomShiftableGauge,
                 SettingId::Total,

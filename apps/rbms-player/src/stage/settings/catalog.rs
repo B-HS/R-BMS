@@ -41,7 +41,10 @@ const JUDGE_SECTIONS: &[Section] = &[
         ],
     },
     Section { heading: "LONG NOTES", rows: &[SettingId::LongNoteMargin, SettingId::LnMode] },
-    Section { heading: "GAUGE", rows: &[SettingId::GaugeSet, SettingId::GaugeAutoShift, SettingId::BottomShiftableGauge, SettingId::Total] },
+    Section {
+        heading: "GAUGE",
+        rows: &[SettingId::GaugeSet, SettingId::CourseGauge, SettingId::GaugeAutoShift, SettingId::BottomShiftableGauge, SettingId::Total],
+    },
 ];
 
 const DISPLAY_SECTIONS: &[Section] = &[
@@ -174,6 +177,10 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         }
         SettingId::GaugeSet => {
             "Which table the gauges of a run are built from. AUTO takes the table of the chart's mode; LR2 takes the LR2 table for every chart."
+        }
+        SettingId::CourseGauge => {
+            "Which table the gauges of a course are built from, whatever gauge the course itself asks for. LR2 takes the LR2 table for every chart. \
+             BEATORAJA takes the table of each chart's mode. IIDX takes the DAN gauge of the arcade game, which takes half the damage at or below 30%."
         }
         SettingId::GaugeAutoShift => {
             "How the gauge may change during a run. NONE fails the run when the gauge empties. CONTINUE plays on with an empty gauge. \
