@@ -97,6 +97,7 @@ pub(super) fn wheel_bar(bar: &SelectBar, now_secs: i64) -> SongBar {
         trophy: bar.trophy,
         features: chart.map(|chart| chart.features).or(bar.course.as_ref().map(|course| course.features)).unwrap_or_default(),
         distribution: bar.distribution.map(Box::new),
+        rank: chart.and_then(|chart| chart.best).and_then(|best| u8::try_from(dj_rank(best.ex, best.max_ex)).ok()),
     }
 }
 

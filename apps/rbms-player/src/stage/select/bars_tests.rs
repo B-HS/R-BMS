@@ -167,6 +167,23 @@ fn a_wheel_bar_is_the_charts_bar_as_the_reference_asks_for_it() {
     assert_eq!(beta.features, SongBar::FEATURE_RANDOM);
 }
 
+/// A bar's rank badge is the DJ LEVEL of its best score, read the way the record panel reads a best:
+/// an assisted run is left out however high it scored, and a chart nothing was recorded on has no
+/// badge.
+#[test]
+fn a_wheel_bars_rank_is_the_dj_level_of_its_best_unassisted_run() {
+    const AAA: u8 = 7;
+    let mut app = fixture_app();
+    app.shared.scores.push(rbms_store::ScoreRecord { assisted: true, ..record("md5-a.bms", 7, RECORD_MAX_EX, 0, 3_000) });
+    let bars = app.shared.select_bars(&facts_of(&app), None, true);
+    let alpha = bar_titled(&bars, "alpha");
+    let best = alpha.chart.as_ref().and_then(|chart| chart.best);
+    assert_eq!(best, Some(BarScore { ex: 950, max_ex: RECORD_MAX_EX }), "the assisted run's full EX was counted");
+    assert_eq!(best.map(|best| best.ex), app.shared.scores.best_ex_for_md5("md5-a.bms"), "the bar and the record panel disagree");
+    assert_eq!(wheel_bar(alpha, ADDED_AT).rank, Some(AAA));
+    assert_eq!(wheel_bar(bar_titled(&bars, "beta"), ADDED_AT).rank, None, "nothing was recorded on it");
+}
+
 /// The wheel's bars are kept until a chart on show stops being new, and remade then.
 #[test]
 fn the_wheels_bars_are_remade_when_a_chart_stops_being_new() {

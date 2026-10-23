@@ -16,7 +16,7 @@ use rbms_skin::property::MapHost;
 use rbms_skin::property::generated::OPTION_PANEL1;
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerState};
 
-use super::bars::{BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_TEXTS, BAR_TROPHIES};
+use super::bars::{BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_RANKS, BAR_TEXTS, BAR_TROPHIES};
 use super::{
     BarDistribution, BarHold, BarKind, BarScroll, BarScroller, BarTrophy, LAMP_KINDS, RANK_KINDS, SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS, SongBar,
     SongBars,
@@ -66,6 +66,7 @@ const SMALL_CELL: i32 = 4;
 const LEVEL_BAND: i32 = 16;
 const DIGIT_CELL: (i32, i32) = (4, 2);
 const GRAPH_BAND: i32 = 32;
+const RANK_BAND: i32 = 40;
 
 /// Images the fixture's bar set holds, one per kind of bar.
 const BAR_IMAGES: usize = 7;
@@ -79,6 +80,11 @@ const LEVEL_AT: (i32, i32, i32, i32) = (4, 5, 6, 10);
 const LABEL_AT: (i32, i32, i32, i32) = (110, 3, 12, 14);
 const GRAPH_AT: (i32, i32, i32, i32) = (20, 1, 110, 2);
 const TEXT_AT: (i32, i32, i32, i32) = (30, 4, 100, 10);
+const RANK_AT: (i32, i32, i32, i32) = (126, 2, 8, 16);
+const THUMB_AT: (i32, i32, i32, i32) = (-30, 0, 18, 18);
+
+/// The side of the picture a test hands the wheel for a bar.
+const PICTURE_SIDE: u32 = 4;
 
 /// How far apart across a bar two labels, and two texts, are placed, so which one was drawn can be
 /// read off where it landed.
@@ -235,6 +241,10 @@ enum Piece {
     Digit(usize, usize),
     /// A segment of the graph, by the lamp or rank it counts.
     Graph(usize),
+    /// A rank badge, by the DJ LEVEL it stands for.
+    Rank(usize),
+    /// A bar's picture, which is cut from no band of the sheet.
+    Picture,
     /// A composed title.
     Text,
 }
@@ -279,6 +289,8 @@ struct Wheel<'a> {
     graph_type: i32,
     /// Destinations declared after the wheel, each starting with a comma.
     over: &'a str,
+    /// Members added to the wheel itself after its graph, each starting with a comma.
+    wheel_extra: &'a str,
 }
 
 impl Default for Wheel<'_> {
@@ -293,6 +305,7 @@ impl Default for Wheel<'_> {
             level_extra: "",
             graph_type: -1,
             over: "",
+            wheel_extra: "",
         }
     }
 }
@@ -349,7 +362,7 @@ fn document(wheel: &Wheel<'_>) -> String {
             "type": 5, "name": "wheel", "w": {}, "h": {},
             "source": [{{ "id": "sheet", "path": "sheet.tex" }}],
             "font": [{{ "id": "0", "path": "font.ttf" }}],
-            "image": [{bars},{lamp_images},{trophies},{label_images},{{"id":"cover","src":"sheet","x":60,"y":60,"w":4,"h":4,"act":19}}],
+            "image": [{bars},{lamp_images},{trophies},{label_images},{rank_images},{{"id":"cover","src":"sheet","x":60,"y":60,"w":4,"h":4,"act":19}}],
             "imageset": [{{ "id": "bars", "images": [{set}] }}],
             "value": [{levels}],
             "graph": [{{ "id": "graph", "src": "sheet", "x": 0, "y": {GRAPH_BAND}, "w": {kinds}, "h": 2, "divx": {kinds}, "type": {graph_type} }}],
@@ -360,7 +373,7 @@ fn document(wheel: &Wheel<'_>) -> String {
                 "text": [{texts}], "level": [{level}],
                 "lamp": [{lamp}], "playerlamp": [{player_lamp}], "rivallamp": [{rival_lamp}],
                 "trophy": [{trophy}], "label": [{labels}],
-                "graph": {graph}
+                "graph": {graph}{wheel_extra}
             }},
             "destination": [{{ "id": "wheel" }}{over}]
         }}"#,
@@ -370,6 +383,7 @@ fn document(wheel: &Wheel<'_>) -> String {
         lamp_images = images("lamp", BAR_LAMPS, LAMP_BAND, (SMALL_CELL, SMALL_CELL)),
         trophies = images("trophy", BAR_TROPHIES, TROPHY_BAND, (SMALL_CELL, SMALL_CELL)),
         label_images = images("label", BAR_LABELS, LABEL_BAND, (SMALL_CELL, SMALL_CELL)),
+        rank_images = images("rank", BAR_RANKS, RANK_BAND, (SMALL_CELL, SMALL_CELL)),
         set = wheel.bar_set.iter().map(|id| format!(r#""{id}""#)).collect::<Vec<_>>().join(","),
         graph_type = wheel.graph_type,
         on = bar(ON_X, ""),
@@ -381,6 +395,7 @@ fn document(wheel: &Wheel<'_>) -> String {
         trophy = records(BAR_TROPHIES, |index| nested(&format!("trophy-{index}"), TROPHY_AT, "")),
         graph = nested("graph", GRAPH_AT, ""),
         over = wheel.over,
+        wheel_extra = wheel.wheel_extra,
     )
 }
 
@@ -454,6 +469,7 @@ impl Rig {
             TROPHY_BAND => Piece::Trophy((x / SMALL_CELL) as usize),
             LABEL_BAND => Piece::Label((x / SMALL_CELL) as usize),
             GRAPH_BAND => Piece::Graph(x as usize),
+            RANK_BAND => Piece::Rank((x / SMALL_CELL) as usize),
             _ => Piece::Digit(((y - LEVEL_BAND) / DIGIT_CELL.1) as usize, (x / DIGIT_CELL.0) as usize),
         }
     }
@@ -1137,4 +1153,103 @@ fn the_mouse_wheel_queues_two_notches_and_travels_faster_with_two() {
     rested.input(1, BarHold::None, START);
     rested.reset_input(START + 121);
     assert_eq!(rested.at(START + 121).duration_ms, 0, "a slide that ended while a panel was open is let go");
+}
+
+/// A wheel that declares this player's two parts: a rank badge for each DJ LEVEL and a place for a
+/// bar's picture.
+fn ranked_wheel() -> String {
+    let ranks = records(BAR_RANKS, |index| nested(&format!("rank-{index}"), RANK_AT, ""));
+    format!(r#","rank":[{ranks}],"thumb":{}"#, nested("picture", THUMB_AT, ""))
+}
+
+/// A flat picture of [`PICTURE_SIDE`] pixels a side, registered with the rig's canvas.
+fn register_picture(rig: &mut Rig) -> TextureId {
+    let pixels = vec![u8::MAX; (PICTURE_SIDE * PICTURE_SIDE) as usize * BYTES_PER_PIXEL];
+    rig.canvas.register_texture("picture", &pixels, PICTURE_SIDE, PICTURE_SIDE)
+}
+
+/// What each quad was cut from, with a quad of `picture` read as a bar's picture.
+fn pieces_with_picture(rig: &Rig, quads: &[Quad], picture: TextureId) -> Vec<(Piece, Rect)> {
+    quads.iter().map(|quad| (if quad.tex == picture { Piece::Picture } else { rig.piece(quad) }, quad.params.dst)).collect()
+}
+
+/// A bar's picture is drawn after the lamps and its rank badge after the picture, both before the
+/// levels; a bar with no score has no badge, a bar the browser has no picture for has none, and a
+/// rank the wheel has no badge under draws nothing.
+#[test]
+fn a_bars_picture_and_rank_badge_are_drawn_between_its_lamp_and_its_level() {
+    let extra = ranked_wheel();
+    let mut rig = Rig::with("ranks", &Wheel { wheel_extra: &extra, ..Wheel::default() }, DOC);
+    assert!(rig.screen.warnings().is_empty(), "{:?}", rig.screen.warnings());
+    let picture = register_picture(&mut rig);
+    let past_aaa = u8::try_from(BAR_RANKS).expect("eight ranks fit a byte");
+    let bars = vec![
+        SongBar { rank: Some(7), level: 7, ..song("AAA") },
+        SongBar { rank: None, ..song("UNPLAYED") },
+        SongBar { rank: Some(2), level: 3, ..song("D") },
+        SongBar { rank: Some(past_aaa), ..song("PAST AAA") },
+        table(0),
+    ];
+    let thumbs = [(0, picture), (2, picture)];
+    let quads = rig.draw(&SongBars { thumbs: &thumbs, ..SongBars::new(&bars, CENTER) });
+    let pieces = pieces_with_picture(&rig, &quads, picture);
+
+    let bar = |slot: usize| (bar_x(slot), slot_y(slot, PITCH));
+    let pictures = landed(&pieces, |piece| *piece == Piece::Picture);
+    assert_eq!(pictures.len(), 2, "only the two bars the browser has a picture for show one");
+    for (rect, slot) in pictures.iter().zip([0, 2]) {
+        let (x, y) = bar(slot);
+        assert!(same(*rect, part_on(x, y, THUMB_AT)), "the picture of slot {slot} landed on {rect:?}");
+    }
+    let ranks: Vec<(Piece, Rect)> = pieces.iter().copied().filter(|(piece, _)| matches!(piece, Piece::Rank(_))).collect();
+    assert_eq!(kinds(&ranks), [Piece::Rank(7), Piece::Rank(2)], "an unplayed bar, a rank past AAA and a table show no badge");
+    for ((_, rect), slot) in ranks.iter().zip([0, 2]) {
+        let (x, y) = bar(slot);
+        assert!(same(*rect, part_on(x, y, RANK_AT)), "the badge of slot {slot} landed on {rect:?}");
+    }
+
+    let order: Vec<Piece> =
+        kinds(&pieces).into_iter().filter(|piece| matches!(piece, Piece::Lamp(_) | Piece::Picture | Piece::Rank(_) | Piece::Digit(..))).collect();
+    let expected = [
+        Piece::Lamp(0),
+        Piece::Lamp(0),
+        Piece::Lamp(0),
+        Piece::Lamp(0),
+        Piece::Lamp(0),
+        Piece::Picture,
+        Piece::Picture,
+        Piece::Rank(7),
+        Piece::Rank(2),
+        Piece::Digit(0, 7),
+        Piece::Digit(0, 0),
+        Piece::Digit(0, 3),
+        Piece::Digit(0, 0),
+    ];
+    assert_eq!(order, expected, "lamps, pictures, badges, levels: each pass over every slot before the next");
+}
+
+/// A document that declares neither of this player's parts draws no picture and no badge, whatever
+/// the bars carry.
+#[test]
+fn a_wheel_without_the_players_own_parts_draws_no_picture_and_no_badge() {
+    let mut rig = Rig::new("no-ranks");
+    let picture = register_picture(&mut rig);
+    let bars: Vec<SongBar> = (0..SLOTS).map(|_| SongBar { rank: Some(7), ..song("AAA") }).collect();
+    let thumbs: Vec<(usize, TextureId)> = (0..SLOTS).map(|bar| (bar, picture)).collect();
+    let quads = rig.draw(&SongBars { thumbs: &thumbs, ..SongBars::new(&bars, CENTER) });
+    let pieces = pieces_with_picture(&rig, &quads, picture);
+    assert!(pieces.iter().all(|(piece, _)| !matches!(piece, Piece::Picture | Piece::Rank(_))), "{pieces:?}");
+}
+
+/// A picture the renderer no longer holds is skipped rather than drawn from a stale texture.
+#[test]
+fn a_picture_the_renderer_let_go_of_is_not_drawn() {
+    let extra = ranked_wheel();
+    let mut rig = Rig::with("released-picture", &Wheel { wheel_extra: &extra, ..Wheel::default() }, DOC);
+    let picture = register_picture(&mut rig);
+    rig.canvas.release_texture(picture);
+    let bars = vec![song("CHART")];
+    let thumbs = [(0, picture)];
+    let quads = rig.draw(&SongBars { thumbs: &thumbs, ..SongBars::new(&bars, 0) });
+    assert!(quads.iter().all(|quad| quad.tex != picture));
 }

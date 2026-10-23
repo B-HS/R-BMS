@@ -470,6 +470,10 @@ pub struct SongListTracks {
     pub trophy: Vec<NamedTrack>,
     pub label: Vec<NamedTrack>,
     pub graph: Option<NamedTrack>,
+    /// The score rank badges, one per DJ LEVEL from F to AAA ([`crate::model::SongList::rank`]).
+    pub rank: Vec<NamedTrack>,
+    /// Where a bar's picture goes ([`crate::model::SongList::thumb`]).
+    pub thumb: Option<NamedTrack>,
 }
 
 /// The destinations a document nests inside its repeating objects, assembled once at load.
@@ -755,6 +759,8 @@ fn build_nested(skin: &mut LoadedSkin) -> Result<(), SkinError> {
             trophy: build_slots(skin, "song bar trophy", &list.trophy, false)?,
             label: build_slots(skin, "song bar label", &list.label, false)?,
             graph: list.graph.as_ref().map(|graph| build_slot(skin, "song bar graph", graph, false)).transpose()?,
+            rank: build_slots(skin, "song bar rank", &list.rank, false)?,
+            thumb: list.thumb.as_ref().map(|thumb| build_slot(skin, "song bar picture", thumb, false)).transpose()?,
         };
         skin.nested.songlist = Some(tracks);
     }

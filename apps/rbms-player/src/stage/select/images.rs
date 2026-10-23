@@ -254,6 +254,6 @@ fn take_job(pending: &mut [Option<(u64, PathBuf)>; SLOTS], job: Job) {
 
 /// Reads one picture a chart names, the way a chart's background images are read: the name is
 /// looked for beside the chart with the extensions a chart may have meant.
-fn read_picture(file: &Path) -> Option<DecodedImage> {
+pub(super) fn read_picture(file: &Path) -> Option<DecodedImage> {
     decode_bga_image(file.parent()?, file.file_name()?.to_str()?)
 }

@@ -281,7 +281,7 @@ fn a_function_in_every_reference_field_is_registered_under_the_kind_of_its_field
                 id = "list",
                 listoff = { drawn("off") }, liston = { drawn("on") }, text = { drawn("bartext") }, level = { drawn("level") },
                 lamp = { drawn("lamp") }, playerlamp = { drawn("mine") }, rivallamp = { drawn("rival") }, trophy = { drawn("trophy") },
-                label = { drawn("label") }, graph = drawn("bargraph"),
+                label = { drawn("label") }, graph = drawn("bargraph"), rank = { drawn("rank") }, thumb = drawn("thumb"),
             },
         }
         skin.made = made
@@ -334,6 +334,8 @@ fn a_function_in_every_reference_field_is_registered_under_the_kind_of_its_field
         &list.trophy[0],
         &list.label[0],
         list.graph.as_ref().expect("the bar graph"),
+        &list.rank[0],
+        list.thumb.as_ref().expect("the bar picture"),
     ];
     for track in tracks {
         assert_eq!(converted.property_kind(&track.timer), LuaFnKind::Timer, "{}", track.id);

@@ -13,8 +13,8 @@ use rbms_skin::loader::{LoadedSkin, NamedTrack, StretchKind};
 use rbms_skin::model::{GraphDef, ImageDef, PropertyRef, SkinDef, ValueDef};
 use rbms_skin::property::{NameSpace, extension};
 
-use super::bars::{BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_SLOTS, BAR_TEXTS, BAR_TROPHIES, LAMP_KINDS, RANK_KINDS};
-use super::{BarArea, BarPart, GraphPart, ImagePart, Kept, LevelPart, PADDING_ALTERNATE_ZERO, Slot, SongListBody, TextPart};
+use super::bars::{BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_RANKS, BAR_SLOTS, BAR_TEXTS, BAR_TROPHIES, LAMP_KINDS, RANK_KINDS};
+use super::{BarArea, BarPart, GraphPart, ImagePart, Kept, LevelPart, PADDING_ALTERNATE_ZERO, Slot, SongListBody, TextPart, ThumbPart};
 use crate::skin_render::SkinAssets;
 use crate::skin_render::draw::ImageSelect;
 use crate::skin_render::object::{Body, ImageBody, MAX_PLACES, SkinObject, Sprite, image_sprite};
@@ -169,6 +169,16 @@ impl Builder<'_, '_> {
         })
     }
 
+    /// Where a bar's picture goes. The destination's id names nothing, so the part is drawn with an
+    /// image body that holds no picture of its own.
+    fn thumb(named: &NamedTrack) -> Option<Box<ThumbPart>> {
+        if named.track.frames.is_empty() {
+            return None;
+        }
+        let body = Body::Image(ImageBody { variants: Vec::new(), select: ImageSelect::First });
+        Some(Box::new(ThumbPart { object: object_of(&named.track, body), kept: Cell::new(Kept::NEVER) }))
+    }
+
     /// The wheel's graph: the last graph definition `named` names whose `type` is negative.
     fn graph(&mut self, named: &NamedTrack) -> Option<GraphPart> {
         let def: &GraphDef = self.def.graph.iter().rfind(|graph| graph.id == named.id && graph.graph_type < 0)?;
@@ -243,6 +253,8 @@ pub(crate) fn build_songlist(
         trophy: builder.list(&tracks.trophy, BAR_TROPHIES, Builder::image),
         label: builder.list(&tracks.label, BAR_LABELS, Builder::image),
         graph: tracks.graph.as_ref().and_then(|named| builder.graph(named)),
+        rank: builder.list(&tracks.rank, BAR_RANKS, Builder::image),
+        thumb: tracks.thumb.as_ref().and_then(Builder::thumb),
         areas: RefCell::new(vec![BarArea::EMPTY; count]),
         slots,
     };

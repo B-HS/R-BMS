@@ -53,6 +53,7 @@ use crate::*;
 mod analysis;
 #[cfg(test)]
 mod bars_tests;
+mod browse_facts;
 mod download_modal;
 #[cfg(test)]
 mod download_modal_tests;
@@ -82,6 +83,7 @@ mod preview;
 mod ranking_mode;
 #[cfg(test)]
 mod ranking_mode_tests;
+mod ranking_scroll;
 #[cfg(test)]
 pub(crate) mod recorded_tests;
 mod scene;
@@ -99,11 +101,13 @@ mod table_tests;
 mod target_tests;
 #[cfg(test)]
 pub(super) mod tests;
+mod thumbs;
 #[cfg(test)]
 mod tree_tests;
 #[cfg(test)]
 mod user_folder_tests;
 
+use browse_facts::BrowseState;
 use download_modal::{DownloadHands, DownloadModal, render_download_modal};
 use filter::{FilterKey, FilterPanel, render_filter_panel};
 use guide::GUIDE_KEY;
@@ -243,6 +247,8 @@ pub(crate) struct SelectState {
     /// The pictures a skin's frame refers to: those of the chart under the cursor and the back
     /// image of the chart loaded last.
     images: SongImages,
+    /// The pictures of the bars near the cursor, for a skin's wheel to show on its bars.
+    thumbs: thumbs::SongThumbs,
     /// What a parse of the chart the cursor rests on found, for a skin's frame.
     analysis: analysis::ChartAnalysis,
     /// The back image of the chart loaded last, with the chart and the reading of the facts it was
@@ -283,6 +289,9 @@ pub(crate) struct SelectState {
     /// The way an arrow key that went down since the last frame of a skin's browser moves the
     /// wheel, kept so that a press let go before that frame is still one.
     arrow_tap: BarHold,
+    /// What a skin is lent beside the list: the other charts of the song, the open folder's lamps,
+    /// the player's own plays of the chart, and how far its ranking list is scrolled.
+    browse: BrowseState,
 }
 
 impl Default for SelectState {
@@ -319,6 +328,7 @@ impl Default for SelectState {
             facts_generation: 0,
             courses_generation: 0,
             images: SongImages::default(),
+            thumbs: thumbs::SongThumbs::default(),
             analysis: analysis::ChartAnalysis::default(),
             loaded_backbmp: None,
             keys: SelectKeys::default(),
@@ -336,6 +346,7 @@ impl Default for SelectState {
             selected_replay: None,
             course_shown: None,
             arrow_tap: BarHold::None,
+            browse: BrowseState::default(),
         }
     }
 }
@@ -1492,6 +1503,7 @@ impl StageHandler for SelectState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.refresh_scene_cache(ctx.shared);
         self.refresh_lent(ctx.shared);
+        self.refresh_browse(ctx.shared);
         let ranking_lines = if self.ranking_open { self.ranking_lines(ctx.shared) } else { Vec::new() };
         self.clamp_ranking_selection(ctx.shared, &ranking_lines);
         let Some(view) = self.cached_scene.as_ref() else {
@@ -1513,10 +1525,12 @@ impl StageHandler for SelectState {
         let wall_clock = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
         let cursor = self.cursor(ctx.shared);
         let images = if has_document { self.images.textures(canvas) } else { ReferenceImages::default() };
+        let thumbs = if has_document { self.thumbs.frame(canvas, self.bars.bars(), cursor) } else { &[] };
         let bars = if has_document { self.bars.wheel(i64::try_from(wall_clock.as_secs()).unwrap_or(i64::MAX)) } else { &[] };
         let wheel = SongBars {
             ln_mode: i32::from(ctx.shared.config.judge.ln_mode.id()),
             scroll: self.scroller.at(self.clock.millis_at(ctx.now)),
+            thumbs,
             ..SongBars::new(bars, cursor)
         };
         let entry = SelectState::search_entry(&self.search_edit, ctx.shared);
@@ -1537,6 +1551,8 @@ impl StageHandler for SelectState {
             best: self.focused_records.best(),
             replays_stored: self.focused_records.replays_stored(),
             ranking_mode: self.ranking_open,
+            ranking_offset: self.browse.ranking.offset(),
+            browse: Some(&self.browse.facts),
         };
         let focused = if self.tab == SelectTab::Songs { ctx.shared.focused_song_index() } else { None };
         let measured = self.focused_detail.as_ref().filter(|_| self.focused_detail_si == focused);

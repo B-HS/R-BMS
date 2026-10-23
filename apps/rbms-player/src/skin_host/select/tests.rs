@@ -12,8 +12,15 @@ use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 use rbms_store::scoredb::{BestScore, JudgeCounts};
 
 use super::*;
+use crate::skin_host::extension::{
+    EXTENSION_VALUE_FIRST, RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST,
+    RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAMP_FIRST, RBMS_NUMBER_MY_RECORD_LAST, RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST,
+    RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_OPTION_SIBLING_CHART_LAST, RBMS_RATE_FOLDER_LAMP_FIRST,
+    RBMS_RATE_FOLDER_LAMP_LAST, RBMS_TEXT_MY_RECORD_DATE_FIRST, RBMS_TEXT_MY_RECORD_DATE_LAST,
+};
 use crate::skin_host::ir::IrBrowser;
-use crate::skin_host::{Cluster, IdSpace, STRING_TARGET_NAME, ScreenHost, clusters_of};
+use crate::skin_host::select::browse::{BrowseFacts, RecordRow, SIBLING_SLOTS, SiblingChart};
+use crate::skin_host::{Cluster, IdSpace, ROUTES, STRING_TARGET_NAME, ScreenHost, clusters_of};
 use rbms_skin::dst::DrawStateSource;
 use rbms_skin::property::SkinHost;
 use rbms_skin::timer::TimerState;
@@ -784,5 +791,118 @@ fn every_id_the_browser_skin_reads_that_the_browser_owns_has_a_cluster_that_answ
     }
     for id in [1, 3, 30, 60, 61, 62, 120, 129, 150, 159, 200, 209, 210, 219, 1000, 1020, 1021] {
         assert!(answered(IdSpace::Text, id), "text {id}");
+    }
+}
+
+/// The other charts, the folder's lamps and the player's plays the browser lends beside the list.
+fn browse_facts() -> BrowseFacts {
+    BrowseFacts {
+        siblings: [None, Some(SiblingChart { level: 5 }), Some(SiblingChart { level: 8 }), None, None],
+        folder_lamps: [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        records: [
+            Some(RecordRow { ex_score: 210, lamp: 5, miss_count: 7, dj_level: 6, date: "2024-01-02 03:04".to_string() }),
+            None,
+            Some(RecordRow { ex_score: 99, lamp: 1, miss_count: 40, dj_level: 2, date: String::new() }),
+            None,
+            None,
+            None,
+        ],
+    }
+}
+
+#[test]
+fn the_browser_answers_the_other_charts_the_folder_and_the_plays_it_is_lent() {
+    let config = Config::default();
+    let bars = [song()];
+    let shown = SelectShown { browse: browse_facts(), ..SelectShown::of(inputs(&bars, &config)) };
+    let state = state_of(&shown);
+
+    assert_eq!(
+        [RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_OPTION_SIBLING_CHART_FIRST + 1, RBMS_OPTION_SIBLING_CHART_LAST].map(|id| state.boolean(id)),
+        [Some(false), Some(true), Some(false)]
+    );
+    assert_eq!(state.integer(RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST + 2), Some(8));
+    assert_eq!(state.integer(RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST), Some(INTEGER_ABSENT));
+    assert_eq!(state.integer(RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST + 10), Some(1));
+    assert_eq!(state.integer(RBMS_NUMBER_FOLDER_CHART_COUNT), Some(4));
+    assert_eq!(state.rate(RBMS_RATE_FOLDER_LAMP_FIRST), Some(0.5));
+    assert_eq!(state.integer(RBMS_NUMBER_MY_RECORD_EX_FIRST), Some(210));
+    assert_eq!(state.integer(RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST + 2), Some(40));
+    assert_eq!(state.integer(RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST + 1), Some(INTEGER_ABSENT));
+    assert_eq!(state.text(RBMS_TEXT_MY_RECORD_DATE_FIRST).as_deref(), Some("2024-01-02 03:04"));
+    assert_eq!(state.text(RBMS_TEXT_MY_RECORD_DATE_FIRST + 1).as_deref(), Some(""));
+}
+
+#[test]
+fn a_frame_the_browser_worked_nothing_out_for_reads_the_absent_value_of_every_id_of_these_runs() {
+    let config = Config::default();
+    let bars = [song()];
+    let shown = SelectShown::of(inputs(&bars, &config));
+    let state = state_of(&shown);
+    let slots = || 0..i32::try_from(SIBLING_SLOTS).expect("the slots fit");
+
+    assert_eq!(shown.browse, BrowseFacts::default());
+    assert!(slots().all(|slot| state.boolean(RBMS_OPTION_SIBLING_CHART_FIRST + slot) == Some(false)));
+    assert!(slots().all(|slot| state.integer(RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST + slot) == Some(INTEGER_ABSENT)));
+    assert!((RBMS_NUMBER_MY_RECORD_EX_FIRST..=RBMS_NUMBER_MY_RECORD_LAST).all(|id| state.integer(id) == Some(INTEGER_ABSENT)));
+    assert!((RBMS_TEXT_MY_RECORD_DATE_FIRST..=RBMS_TEXT_MY_RECORD_DATE_LAST).all(|id| state.text(id).as_deref() == Some("")));
+    assert!((RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST..=RBMS_NUMBER_FOLDER_CHART_COUNT).all(|id| state.integer(id) == Some(0)));
+    assert!((RBMS_RATE_FOLDER_LAMP_FIRST..=RBMS_RATE_FOLDER_LAMP_LAST).all(|id| state.rate(id) == Some(0.0)));
+
+    let unlent = SelectState::default();
+    assert_eq!((unlent.boolean(RBMS_OPTION_SIBLING_CHART_FIRST), unlent.integer(RBMS_NUMBER_MY_RECORD_EX_FIRST)), (None, None));
+    assert_eq!((unlent.rate(RBMS_RATE_FOLDER_LAMP_FIRST), unlent.text(RBMS_TEXT_MY_RECORD_DATE_FIRST)), (None, None), "no frame, no answer");
+}
+
+#[test]
+fn the_host_answers_the_ids_of_the_other_charts_the_folder_and_the_plays_through_the_browser_alone() {
+    let config = Config::default();
+    let bars = [song()];
+    let shown = SelectShown { browse: browse_facts(), ..SelectShown::of(inputs(&bars, &config)) };
+    let timers = TimerState::new();
+    let mut host = ScreenHost::new(0, &timers);
+    host.show_select(&shown);
+
+    let routed = |space: IdSpace, id: i32| clusters_of(space, id).collect::<Vec<_>>();
+    assert_eq!(routed(IdSpace::Boolean, RBMS_OPTION_SIBLING_CHART_FIRST), [Cluster::Select]);
+    assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST), [Cluster::Select]);
+    assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_FOLDER_CHART_COUNT), [Cluster::Select]);
+    assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_MY_RECORD_LAST), [Cluster::Select]);
+    assert_eq!(routed(IdSpace::Rate, RBMS_RATE_FOLDER_LAMP_LAST), [Cluster::Select]);
+    assert_eq!(routed(IdSpace::Text, RBMS_TEXT_MY_RECORD_DATE_LAST), [Cluster::Select]);
+
+    assert_eq!(host.boolean(RBMS_OPTION_SIBLING_CHART_FIRST + 1), Some(true));
+    assert_eq!(host.boolean(-(RBMS_OPTION_SIBLING_CHART_FIRST + 1)), Some(false), "an option read negated is the other way");
+    assert_eq!(host.integer(RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST + 1), 5);
+    assert_eq!(host.integer(RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST + 5), 1);
+    assert_eq!(host.rate(RBMS_RATE_FOLDER_LAMP_FIRST + 10), Some(0.25));
+    assert_eq!(host.float(RBMS_RATE_FOLDER_LAMP_FIRST + 10), 0.25, "a float read falls back to the rate of the same id");
+    assert_eq!(host.integer(RBMS_NUMBER_MY_RECORD_LAMP_FIRST), 5);
+    assert_eq!(host.text(RBMS_TEXT_MY_RECORD_DATE_FIRST), "2024-01-02 03:04");
+}
+
+/// Every id of this player's own that the host routes to the browser is answered by it once it lends
+/// a frame, even if the answer is the absent value of its kind: an id routed here and answered by
+/// nobody reads as no one's, and a skin cannot tell that from an id that was never filled.
+#[test]
+fn every_id_of_this_player_s_own_that_is_routed_to_the_browser_is_answered_by_it() {
+    let config = Config::default();
+    let bars = [song()];
+    let shown = SelectShown::of(inputs(&bars, &config));
+    let state = state_of(&shown);
+
+    for route in ROUTES.iter().filter(|route| route.cluster == Cluster::Select && route.first >= EXTENSION_VALUE_FIRST) {
+        for id in route.first..=route.last {
+            let answered = match route.space {
+                IdSpace::Boolean => state.boolean(id).is_some(),
+                IdSpace::Integer => state.integer(id).is_some(),
+                IdSpace::ImageIndex => state.image_index(id).is_some(),
+                IdSpace::Rate => state.rate(id).is_some(),
+                IdSpace::Float => state.float(id).is_some(),
+                IdSpace::Text => state.text(id).is_some(),
+                IdSpace::Offset => state.offset(id).is_some(),
+            };
+            assert!(answered, "{:?} {id} is routed to the browser and the browser answers nothing", route.space);
+        }
     }
 }

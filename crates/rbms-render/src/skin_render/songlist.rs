@@ -25,6 +25,12 @@
 //! - A folder's graph sets no colour, blend or filter of its own and is drawn with whatever the bar
 //!   image drawn before it left behind.
 //!
+//! This player adds two parts the reference's wheel has no list for, which only a document written
+//! for this player declares (`rank` and `thumb`): a bar's picture and the rank badge of its best
+//! score. Each is one more pass, drawn after the lamps and before the levels, picture first, and
+//! prepared after every part of the reference's own, so a document that declares neither is drawn
+//! and asked exactly as before. Both are kept parts: drawn where their destination last put them.
+//!
 //! A frame is settled while it is prepared. The reference asks a slot's conditions twice in a
 //! frame, once as it prepares the wheel and once as it draws the bar, and asks a level's again for
 //! every bar; here all of that happens in [`prepare_songlist`], in the same order, and what it
@@ -47,7 +53,7 @@ use super::object::{Body, MAX_PLACES, SkinObject, Sprite};
 use super::text::{self, TextBody};
 use super::{SkinFrame, SkinViewport};
 use crate::ctx::RenderCtx;
-use crate::{BlendMode, Color, QuadParams, Renderer, TextureFilter};
+use crate::{BlendMode, Color, QuadParams, Renderer, TextureFilter, TextureId};
 
 pub use bars::{
     BarDistribution, BarHold, BarKind, BarScroll, BarScroller, BarTrophy, LAMP_KINDS, RANK_KINDS, SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS, SongBar,
@@ -186,6 +192,24 @@ impl ImagePart {
             self.kept.set(placed.into());
         }
         self.cell.set(self.sprite.animation_index(self.sprite.cells(), frame.now_us, frame.timers, frame.script()));
+    }
+}
+
+/// Where a bar's picture goes: a destination with no image of its own, since the picture is the
+/// browser's to supply, one per bar ([`SongBars::thumbs`]).
+#[derive(Debug)]
+struct ThumbPart {
+    object: SkinObject,
+    /// Where the destination last put the picture.
+    kept: Cell<Kept>,
+}
+
+impl ThumbPart {
+    /// Prepares the picture's place once for every bar it is drawn on, as an image's is.
+    fn prepare(&self, frame: &SkinFrame<'_>) {
+        if let Some(placed) = place(&self.object.track, frame, ORIGIN) {
+            self.kept.set(placed.into());
+        }
     }
 }
 
@@ -394,6 +418,10 @@ pub(crate) struct SongListBody {
     trophy: Vec<Option<ImagePart>>,
     label: Vec<Option<ImagePart>>,
     graph: Option<GraphPart>,
+    /// The rank badges, one per DJ LEVEL from F to AAA.
+    rank: Vec<Option<ImagePart>>,
+    /// Boxed because the part holds an object, which may itself be a wheel.
+    thumb: Option<Box<ThumbPart>>,
     /// What each slot shows, as the frame prepared last left it.
     areas: RefCell<Vec<BarArea>>,
 }
@@ -420,6 +448,10 @@ impl SongListBody {
         if let Some(graph) = &self.graph {
             graph.prepare(frame, counted);
         }
+        if let Some(thumb) = &self.thumb {
+            thumb.prepare(frame);
+        }
+        self.rank.iter().flatten().for_each(|image| image.prepare(frame));
     }
 
     /// What slot `slot` shows: which bar landed on it, where the slide has carried it, and what it
@@ -534,13 +566,19 @@ impl<R: Renderer> Painter<'_, '_, R> {
     /// Draws one cell of one part at `rect`, in the part's own colour, blend, filter and stretch
     /// (`SkinObject.draw`). A part with no colour draws nothing and leaves the batch as it was.
     fn image(&mut self, object: &SkinObject, sprite: &Sprite, cell: u32, rect: SkinRect, kept: Kept) {
+        self.picture(object, (sprite.tex, sprite.size), sprite.region(cell), rect, kept);
+    }
+
+    /// Draws one pixel region of a texture `size` pixels large at `rect`, as [`Self::image`] draws
+    /// a cell.
+    fn picture(&mut self, object: &SkinObject, texture: (TextureId, (u32, u32)), region: SkinRect, rect: SkinRect, kept: Kept) {
         if kept.color.a == 0 {
             return;
         }
         let blend = BlendMode::from_skin_blend(object.track.blend);
         let tint: Color = kept.color.into();
         let screen = self.viewport.place(rect);
-        let (fitted, source) = stretch_rect(object.stretch, SkinRect::new(screen.x, screen.y, screen.w, screen.h), sprite.region(cell));
+        let (fitted, source) = stretch_rect(object.stretch, SkinRect::new(screen.x, screen.y, screen.w, screen.h), region);
         let filter = match filtering_for(object.track.filter, fitted, (source.w, source.h)) {
             Filtering::Nearest => TextureFilter::Nearest,
             Filtering::Linear => TextureFilter::Linear,
@@ -548,7 +586,19 @@ impl<R: Renderer> Painter<'_, '_, R> {
         self.batch = Batch { tint, blend, filter };
         self.ctx.text.leave_blend(blend);
         let place = Placement { object, blend, tint, angle_deg: kept.angle_deg, viewport: self.viewport };
-        self.drawn |= place.cell(self.r, sprite, cell, rect);
+        self.drawn |= place.texture(self.r, texture.0, texture.1, region, rect);
+    }
+
+    /// Draws a bar's picture, held in `texture`, where the picture's destination last put it, moved
+    /// onto the bar at `corner`. The whole picture is the source, fitted as the destination's
+    /// stretch says. A texture the renderer no longer holds draws nothing.
+    fn thumb(&mut self, thumb: &ThumbPart, texture: TextureId, corner: (f32, f32)) {
+        let Some(size) = self.r.texture_size(texture) else {
+            return;
+        };
+        let kept = thumb.kept.get();
+        let whole = SkinRect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
+        self.picture(&thumb.object, (texture, size), whole, kept.moved(corner), kept);
     }
 
     /// Draws an image where its destination last put it, moved onto the bar at `corner`.
@@ -630,7 +680,8 @@ impl<R: Renderer> Painter<'_, '_, R> {
 ///
 /// The wheel's own destination places nothing and tints nothing: every part carries a destination
 /// of its own. The passes run in the reference's order -- bars, graphs, titles, trophies, lamps,
-/// levels, labels -- and each goes over every slot before the next begins.
+/// levels, labels -- and each goes over every slot before the next begins. This player's pictures
+/// and rank badges come between the lamps and the levels.
 pub(crate) fn draw_songlist<R: Renderer>(
     ctx: &mut RenderCtx<'_>,
     r: &mut R,
@@ -695,6 +746,22 @@ pub(crate) fn draw_songlist<R: Renderer>(
         };
         for lamp in lamps.into_iter().flatten() {
             painter.kept(lamp, corner);
+        }
+    }
+
+    if let Some(thumb) = &body.thumb {
+        for area in areas.iter().filter(on_show) {
+            if let Some(texture) = list.thumb_of(area.bar) {
+                let corner = painter.corner(area.at);
+                painter.thumb(thumb, texture, corner);
+            }
+        }
+    }
+
+    for area in areas.iter().filter(on_show) {
+        if let Some(rank) = list.bars[area.bar].rank_index().and_then(|index| part(&body.rank, index)) {
+            let corner = painter.corner(area.at);
+            painter.kept(rank, corner);
         }
     }
 

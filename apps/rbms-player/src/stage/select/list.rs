@@ -694,10 +694,17 @@ pub(crate) fn chart_images(entry: &SongEntry, fact: Option<&ChartFact>) -> BarIm
     }
 }
 
-/// The best score recorded on a chart: the run with the highest EX, and among runs that tie the
-/// oldest, which is the run the built-in row has always ranked a chart by.
+/// The best score recorded on a chart: of the runs that may set a best, which leaves an assisted run
+/// out as [`ScoreBook::best_ex_for_md5`] does, the one with the highest EX, and among runs that tie
+/// the oldest. A bar's rank badge and the built-in row's rank are read from it, so both agree with
+/// the rank the browser's record panel shows.
 fn best_score(scores: &ScoreBook, md5: &str) -> Option<BarScore> {
-    scores.for_md5(md5).into_iter().max_by_key(|record| record.ex_score).map(|record| BarScore { ex: record.ex_score, max_ex: record.max_ex })
+    scores
+        .for_md5(md5)
+        .into_iter()
+        .filter(|record| !record.assisted)
+        .max_by_key(|record| record.ex_score)
+        .map(|record| BarScore { ex: record.ex_score, max_ex: record.max_ex })
 }
 
 /// The lowest lamp any chart of a folder sits on, or `None` for a folder with no charts counted

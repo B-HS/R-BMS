@@ -148,7 +148,9 @@ fn song_list(list: &mut SongList, visit: Visit<'_>) -> Result<(), SkinError> {
     each_destination(&mut list.rivallamp, visit)?;
     each_destination(&mut list.trophy, visit)?;
     each_destination(&mut list.label, visit)?;
-    list.graph.as_mut().map_or(Ok(()), |graph| each_destination_slot(graph, visit))
+    list.graph.as_mut().map_or(Ok(()), |graph| each_destination_slot(graph, visit))?;
+    each_destination(&mut list.rank, visit)?;
+    list.thumb.as_mut().map_or(Ok(()), |thumb| each_destination_slot(thumb, visit))
 }
 
 /// Visits every slot of a document, list by list in the order the mirror declares them.

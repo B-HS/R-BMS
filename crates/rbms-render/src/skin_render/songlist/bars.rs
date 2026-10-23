@@ -8,6 +8,8 @@
 //! scroll has carried it are all decided here, in the reference's own order and with its own
 //! arithmetic.
 
+use crate::TextureId;
+
 /// How many slots the reference's wheel has room for (`SkinBar.BAR_COUNT`, `BarRenderer.barlength`).
 /// A document that declares more has the rest ignored.
 pub(crate) const BAR_SLOTS: usize = 60;
@@ -26,6 +28,10 @@ pub(crate) const BAR_TROPHIES: usize = 3;
 
 /// How many chart labels a wheel carries (`SkinBar.BARLABEL_COUNT`).
 pub(crate) const BAR_LABELS: usize = 5;
+
+/// How many rank badges a wheel carries, one per DJ LEVEL from F to AAA. The reference's wheel has
+/// none: the list is this player's own.
+pub(crate) const BAR_RANKS: usize = 8;
 
 /// How many clear lamps a folder's charts are counted into, from no play up to max
 /// (`DirectoryBar.getLamps`).
@@ -227,6 +233,10 @@ pub struct SongBar {
     /// How the charts under a bar that opens have been cleared, when that has been counted. One
     /// that has not been counted draws no graph, as a folder whose counts are all zero draws none.
     pub distribution: Option<Box<BarDistribution>>,
+    /// The DJ LEVEL of the best score the player holds on the bar, zero for F up to seven for AAA,
+    /// or `None` for a bar with no score. It picks the wheel's rank badge, which only a document
+    /// for this player declares; a rank the wheel has no badge under draws nothing.
+    pub rank: Option<u8>,
 }
 
 impl SongBar {
@@ -245,7 +255,19 @@ impl SongBar {
 
     /// A bar of `kind` called `title`, with nothing played on it and nothing else known about it.
     pub fn new(kind: BarKind, title: impl Into<String>) -> SongBar {
-        SongBar { kind, title: title.into(), is_new: false, level: 0, difficulty: 0, lamp: 0, rival_lamp: 0, trophy: None, features: 0, distribution: None }
+        SongBar {
+            kind,
+            title: title.into(),
+            is_new: false,
+            level: 0,
+            difficulty: 0,
+            lamp: 0,
+            rival_lamp: 0,
+            trophy: None,
+            features: 0,
+            distribution: None,
+            rank: None,
+        }
     }
 
     /// The features the wheel reads off this bar: a chart's own when it is on disk, a course's when
@@ -283,6 +305,11 @@ impl SongBar {
             return None;
         }
         Some(usize::try_from(self.difficulty).ok().filter(|difficulty| *difficulty < BAR_LEVELS).unwrap_or_default())
+    }
+
+    /// Which rank badge the bar draws, or `None` for a bar with no score.
+    pub(crate) fn rank_index(&self) -> Option<usize> {
+        self.rank.map(usize::from)
     }
 
     /// Which trophy a course draws, or `None` for a bar that is not a course or has no medal.
@@ -472,13 +499,18 @@ pub struct SongBars<'a> {
     pub scroll: BarScroll,
     /// Whether the application's option panel is open over the browser.
     pub options_open: bool,
+    /// The picture of each bar that has one ready, as the bar's place in [`SongBars::bars`] and the
+    /// texture holding the picture. The browser reads pictures only for the bars near the cursor,
+    /// so this is a short list rather than one entry per bar; a bar it leaves out shows no picture.
+    /// Only a document for this player places a bar's picture at all.
+    pub thumbs: &'a [(usize, TextureId)],
 }
 
 impl<'a> SongBars<'a> {
     /// The list `bars` with the cursor on `selected`: no rival, folders counted, long notes played
-    /// as long notes, the wheel at rest and no panel open.
+    /// as long notes, the wheel at rest, no panel open and no pictures.
     pub fn new(bars: &'a [SongBar], selected: usize) -> SongBars<'a> {
-        SongBars { bars, selected, rival: false, folder_lamps: true, ln_mode: LONG_NOTE, scroll: BarScroll::default(), options_open: false }
+        SongBars { bars, selected, rival: false, folder_lamps: true, ln_mode: LONG_NOTE, scroll: BarScroll::default(), options_open: false, thumbs: &[] }
     }
 
     /// Which bar lands on `slot` of a wheel whose cursor is on slot `center`, or `None` for an empty
@@ -487,5 +519,10 @@ impl<'a> SongBars<'a> {
         let len = i64::try_from(self.bars.len()).ok().filter(|len| *len > 0)?;
         let position = i64::try_from(self.selected).ok()? + len * RING_TURNS + i64::try_from(slot).ok()? - i64::from(center);
         usize::try_from(position.rem_euclid(len)).ok()
+    }
+
+    /// The texture holding the picture of bar `bar`, when the browser has one ready.
+    pub(crate) fn thumb_of(&self, bar: usize) -> Option<TextureId> {
+        self.thumbs.iter().find(|(held, _)| *held == bar).map(|(_, texture)| *texture)
     }
 }

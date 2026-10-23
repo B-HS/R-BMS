@@ -608,6 +608,13 @@ pub struct SongList {
     pub trophy: Vec<Destination>,
     pub label: Vec<Destination>,
     pub graph: Option<Destination>,
+    /// This player's own addition: the score rank badge a chart's bar carries, one image per DJ
+    /// LEVEL from F to AAA, placed against the bar's corner as a lamp is. The reference reads no
+    /// such key, so a document written for it is unharmed by one that names it.
+    pub rank: Vec<Destination>,
+    /// This player's own addition: where a bar's picture goes, against the bar's corner. Its id
+    /// names nothing: the picture is the browser's to supply, one per bar.
+    pub thumb: Option<Destination>,
 }
 
 /// A character sprite sheet in the reference's pomyu-chara format.

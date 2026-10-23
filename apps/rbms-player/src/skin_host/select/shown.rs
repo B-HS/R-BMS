@@ -22,6 +22,7 @@ use rbms_render::skin_render::frame::{BarDistribution, BarKind, SongBar};
 use rbms_skin::lua::{LocalTime, local_time};
 use rbms_store::scoredb::BestScore;
 
+use super::browse::BrowseFacts;
 use crate::keyconfig::{KEY_INDEX_COUNT, key_index_of};
 use crate::skin_host::ir::IrBrowser;
 use crate::skin_host::options::SettingsView;
@@ -160,6 +161,10 @@ pub struct SelectShown {
     /// Whether the ranking mode is open over the browser (this player's own option 21105).
     /// [`SelectShown::of`] leaves it closed, and the browser says when it is open.
     pub ranking_mode: bool,
+    /// The other charts of the song under the cursor, the open folder's lamps and the player's own
+    /// plays of the chart. [`SelectShown::of`] leaves all of them empty, and the browser says what
+    /// they are.
+    pub browse: BrowseFacts,
 }
 
 /// For each key index of the browser's key table (`crate::keyconfig::key_index_of`), whether no lane
@@ -239,6 +244,7 @@ impl SelectShown {
             ir: IrBrowser { board: inputs.ir.board.filter(|_| has_ranking), ..inputs.ir },
             unreachable_keys: [false; KEY_INDEX_COUNT],
             ranking_mode: false,
+            browse: BrowseFacts::default(),
         }
     }
 

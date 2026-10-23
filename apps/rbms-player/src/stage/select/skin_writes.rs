@@ -1,5 +1,6 @@
-//! What a skin writes to the song browser: the share of the list its scrollbar was dragged to, and
-//! the search word typed into its search box.
+//! What a skin writes to the song browser: the share of the list its scrollbar was dragged to, the
+//! share of the ranking its list of scores was dragged to ([`super::ranking_scroll`]), and the
+//! search word typed into its search box.
 //!
 //! The skin's writes arrive in the request queue of the browser's cluster
 //! ([`crate::skin_host::writers`] says which write is whose). The browser owns the list and the
@@ -22,10 +23,12 @@ impl SelectState {
         for request in shared.skin_requests().take_if(Cluster::Select, |request| browser_write(request).is_some()) {
             match browser_write(&request) {
                 Some(BrowserWrite::Position(share)) => self.move_to_share(shared, share),
+                Some(BrowserWrite::RankingPosition(share)) => self.scroll_ranking_to_share(shared, share),
                 Some(BrowserWrite::Search(word)) => self.search_for(shared, &word),
                 None => {}
             }
         }
+        self.grow_scrolled_ranking(shared);
     }
 
     /// Puts the cursor on the row that `share` of the way down the list falls on, on whichever tab is

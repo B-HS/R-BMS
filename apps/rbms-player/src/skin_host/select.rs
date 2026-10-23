@@ -8,8 +8,13 @@
 //! What this cluster answers:
 //!
 //! - this player's own options 21105, whether the ranking mode is open, 21110-21114, the assist
-//!   grade of the best lamp on the bar, and 21140-21148, which key indices of the browser's table no
-//!   key of the bound mode is on ([`super::extension`]);
+//!   grade of the best lamp on the bar, 21115-21119, which difficulty slots of the song hold a chart,
+//!   and 21140-21148, which key indices of the browser's table no key of the bound mode is on
+//!   ([`super::extension`]);
+//! - this player's own numbers 21030-21034 (the levels of those charts), 21040-21051 (the charts of
+//!   the open folder by lamp and altogether) and 21060-21083 (the figures of the player's own plays of
+//!   the chart), rates 21040-21050 (the share of the folder's charts on each lamp) and texts
+//!   21000-21005 (the dates of those plays), all read from [`browse::BrowseFacts`];
 //! - options 1-3 and 5 (which kind of bar is under the cursor), 21-23 (the open panel), 100-105 and
 //!   1100-1104 (the lamp on it), 196-198, 1196-1204 and 1205-1208 (its replays and the slot
 //!   selected), 624-625 (whether a rival is compared), 1002-1007 and 1010-1017 (what a course
@@ -57,6 +62,7 @@ use super::score::{BAD, GREAT, JUDGE_KINDS, MISS, POOR, SIDES_PER_JUDGEMENT, who
 use super::{ClusterState, INDEX_CLEAR, INDEX_DIFFICULTY_FILTER, INDEX_TARGET_CLEAR, STRING_DIFFICULTY_FILTER, STRING_MODE_FILTER, STRING_SORT};
 
 mod bridge;
+pub mod browse;
 pub mod shown;
 
 pub(crate) use bridge::BrowserLent;
@@ -297,6 +303,9 @@ impl ClusterState for SelectState<'_> {
         if id == RBMS_OPTION_RANKING_MODE_ON {
             return Some(shown.ranking_mode);
         }
+        if let Some(on) = shown.browse.boolean(id) {
+            return Some(on);
+        }
         if let Some((_, constraint)) = CONSTRAINT_OPTIONS.iter().find(|(option, _)| *option == id) {
             return Some(constraints.is_some_and(|constraints| constraints.contains(constraint)));
         }
@@ -344,6 +353,9 @@ impl ClusterState for SelectState<'_> {
     }
 
     fn integer(&self, id: i32) -> Option<i32> {
+        if let Some(number) = self.shown.and_then(|shown| shown.browse.integer(id)) {
+            return Some(number);
+        }
         let lamps = self.folder_lamps();
         match id {
             NUMBER_FOLDER_TOTALSONGS => Some(lamps.map_or(INTEGER_ABSENT, |lamps| lamps.iter().map(|count| whole(*count)).sum())),
@@ -377,6 +389,9 @@ impl ClusterState for SelectState<'_> {
 
     fn rate(&self, id: i32) -> Option<f32> {
         let shown = self.shown?;
+        if let Some(share) = shown.browse.rate(id) {
+            return Some(share);
+        }
         let standing = &shown.standing;
         let sheet = self.record().map(|record| &record.sheet);
         let judged = |judge: i32| sheet.map_or(0.0, |sheet| share_of(sheet.count(judge), sheet.notes));
@@ -418,6 +433,9 @@ impl ClusterState for SelectState<'_> {
 
     fn text(&self, id: i32) -> Option<Cow<'_, str>> {
         let shown = self.shown?;
+        if let Some(date) = shown.browse.text(id) {
+            return Some(date);
+        }
         let stage = |place: i32| {
             let stages = self.bar().and_then(|bar| bar.course.as_ref()).map(|course| course.stages.as_slice());
             usize::try_from(place).ok().and_then(|place| stages?.get(place)).map_or(Cow::Borrowed(""), |title| Cow::Borrowed(title.as_str()))

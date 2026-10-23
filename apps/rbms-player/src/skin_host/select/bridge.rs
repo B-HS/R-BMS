@@ -5,10 +5,12 @@
 //! has fetched.
 //!
 //! What only the browser itself knows it lends for the frame ([`BrowserLent`]): which panel is open,
-//! the mode the list is held to, the course under the cursor, the replay slot selected, and what the
-//! player's records hold of the chart under the cursor. The last is read from the score database,
-//! which is not something to do on every frame, so the browser reads it when the cursor comes to
-//! rest on a chart and keeps it until the cursor or the records move.
+//! the mode the list is held to, the course under the cursor, the replay slot selected, how far the
+//! ranking list is scrolled, and what the player's records hold of the chart under the cursor. The
+//! last is read from the score database, which is not something to do on every frame, so the browser
+//! reads it when the cursor comes to rest on a chart and keeps it until the cursor or the records
+//! move. The other charts of the song, the open folder's lamps and the player's latest plays of the
+//! chart are kept the same way ([`super::browse::BrowseFacts`]).
 
 use rbms_config::ScoreTarget;
 use rbms_model::Mode;
@@ -16,6 +18,7 @@ use rbms_render::SongBars;
 use rbms_render::skin_render::frame::BarKind;
 use rbms_store::scoredb::{BestScore, chart_key, mode_id};
 
+use super::browse::BrowseFacts;
 use super::shown::{ChartInputs, CourseShown, SelectInputs, SelectShown, unreachable_keys_of};
 use crate::AppShared;
 use crate::app_result::{local_best_before_reading, target_context};
@@ -26,10 +29,6 @@ use crate::target;
 /// (`SearchWordBar`: `"Search : '" + text + "'"`).
 const SEARCH_TITLE_OPENS: &str = "Search : '";
 const SEARCH_TITLE_CLOSES: &str = "'";
-
-/// The score the ranking list a skin draws starts from. The browser keeps no scroll of that list, so
-/// it shows the ranking from its top.
-const RANKING_LIST_TOP: usize = 0;
 
 /// What the browser lends one frame of its skin beside the list itself.
 #[derive(Debug, Clone, Copy, Default)]
@@ -50,6 +49,12 @@ pub(crate) struct BrowserLent<'a> {
     pub(crate) replays_stored: usize,
     /// Whether the ranking mode is open over the browser.
     pub(crate) ranking_mode: bool,
+    /// How many scores down the ranking of the chart under the cursor the list a skin draws is
+    /// scrolled (`MusicSelector.getRankingOffset`).
+    pub(crate) ranking_offset: usize,
+    /// The other charts of the song under the cursor, the open folder's lamps and the player's own
+    /// plays of the chart, when the browser has worked them out.
+    pub(crate) browse: Option<&'a BrowseFacts>,
 }
 
 impl AppShared {
@@ -93,10 +98,19 @@ impl AppShared {
             panel: Some(lent.panel),
             selected_replay: lent.selected_replay,
             config: &self.config,
-            ir: IrBrowser::of_ranking(self.has_primary_ir_server(), entry.and_then(|entry| self.ranking_cache.peek(&entry.md5)), RANKING_LIST_TOP),
+            ir: IrBrowser::of_ranking(self.has_primary_ir_server(), entry.and_then(|entry| self.ranking_cache.peek(&entry.md5)), lent.ranking_offset),
         });
-        let shown = SelectShown { ranking_mode: lent.ranking_mode, ..shown };
+        let shown = SelectShown { ranking_mode: lent.ranking_mode, browse: lent.browse.cloned().unwrap_or_default(), ..shown };
         SelectShown { settings: shown.settings.with_target_stand_in(stand_in), unreachable_keys: unreachable_keys_of(self.mode), ..shown }
+    }
+
+    /// How many scores the ranking list a skin draws is scaled by for the chart under the cursor: the
+    /// scores received so far, and one while there are none (`MusicSelector.getRankingPosition`).
+    /// The slider that scrolls the list reads and writes its position over this count.
+    pub(crate) fn ranking_list_extent(&self) -> usize {
+        let ranking = self.focused_song_index().and_then(|index| self.library.songs().get(index)).and_then(|entry| self.ranking_cache.peek(&entry.md5));
+        let received = IrBrowser::of_ranking(self.has_primary_ir_server(), ranking, 0).board.map_or(0, |board| board.total);
+        usize::try_from(received).unwrap_or_default().max(1)
     }
 
     /// The target a run of the chart `md5` would be paced against in place of the one the TARGET

@@ -16,7 +16,7 @@
 //! | --- | --- | --- |
 //! | rate 1, `musicselect_position` | moves the browser's cursor to that share of the list | the browser: [`BrowserWrite::Position`] |
 //! | rate 7, `skinselect_position` | scrolls the skin settings screen | nothing: the skin menu is built in, and scrolls its own list |
-//! | rate 8, `ranking_position` | scrolls the ranking list of the browser or the result screen | the result screen, which holds the offset; the browser reads the offset ([`super::ir::IrBrowser`]) but holds none it could move yet, so it draws its list from the top |
+//! | rate 8, `ranking_position` | scrolls the ranking list of the browser or the result screen | the result screen, which holds its own offset, and the browser: [`BrowserWrite::RankingPosition`] |
 //! | rates 17, 18, 19 | the system, key and background volume | [`carry_out`], at once |
 //! | rate 20, `practice_position` | scrolls the practice items of the play screen | nothing: practice is a screen of its own here |
 //! | string 30, `searchword` | `MusicSelector.search` | the browser: [`BrowserWrite::Search`] |
@@ -25,6 +25,10 @@
 //! that made it ends. The cursor and the search belong to the browser's own state, so they wait in
 //! the request queue for it ([`browser_write`]) and are applied by it. A write to an id nobody here
 //! carries out is dropped without a word, as the reference drops an event no screen defines.
+//!
+//! The ranking slider is the same share of the same count on both screens: the offset is the share
+//! cut down over the scores received so far, and a share outside `0..1` moves nothing
+//! (`MusicSelector.setRankingPosition`, `AbstractResult.setRankingPosition`).
 //!
 //! # Typing into a text
 //!
@@ -36,7 +40,7 @@
 use rbms_config::{AudioOptions, DEFAULT_BUS_VOLUME, clamp_volume};
 use rbms_render::skin_render::{Composition, SkinTextWriter, TextEntry, TextEntryStart};
 use rbms_skin::lua::BoundFrame;
-use rbms_skin::property::generated::{RATE_BGMVOLUME, RATE_KEYVOLUME, RATE_MASTERVOLUME, RATE_MUSICSELECT_POSITION, STRING_SEARCHWORD};
+use rbms_skin::property::generated::{RATE_BGMVOLUME, RATE_KEYVOLUME, RATE_MASTERVOLUME, RATE_MUSICSELECT_POSITION, RATE_RANKING_POSITION, STRING_SEARCHWORD};
 use rbms_skin::property::{SkinHost, VolumeBus};
 use winit::event::Ime;
 
@@ -102,6 +106,8 @@ pub(crate) fn carry_out(shared: &mut AppShared, request: &ClusterRequest) -> boo
 pub(crate) enum BrowserWrite {
     /// The share of the list the scrollbar was dragged to (`musicselect_position`).
     Position(f32),
+    /// The share of the ranking the list of scores was dragged to (`ranking_position`).
+    RankingPosition(f32),
     /// The search word that was confirmed (`searchword`).
     Search(String),
 }
@@ -110,6 +116,7 @@ pub(crate) enum BrowserWrite {
 pub(crate) fn browser_write(request: &ClusterRequest) -> Option<BrowserWrite> {
     match request {
         ClusterRequest::WriteRate { id: RATE_MUSICSELECT_POSITION, value } => Some(BrowserWrite::Position(*value)),
+        ClusterRequest::WriteRate { id: RATE_RANKING_POSITION, value } => Some(BrowserWrite::RankingPosition(*value)),
         ClusterRequest::WriteText { id: STRING_SEARCHWORD, value } => Some(BrowserWrite::Search(value.clone())),
         _ => None,
     }

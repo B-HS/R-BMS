@@ -107,6 +107,7 @@ const NESTED_ARRAY_FIELDS: &[&str] = &[
     "offset",
     "op",
     "playerlamp",
+    "rank",
     "rivallamp",
     "stop",
     "text",

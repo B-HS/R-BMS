@@ -92,10 +92,10 @@ fn a_volume_request_is_carried_out_at_once_and_any_other_request_is_left_alone()
 }
 
 #[test]
-fn the_browser_carries_out_the_cursor_and_the_search_and_nothing_else() {
+fn the_browser_carries_out_the_cursor_the_ranking_list_and_the_search_and_nothing_else() {
     assert_eq!(browser_write(&ClusterRequest::WriteRate { id: RATE_MUSICSELECT_POSITION, value: 0.4 }), Some(BrowserWrite::Position(0.4)));
     assert_eq!(browser_write(&ClusterRequest::WriteText { id: STRING_SEARCHWORD, value: "word".to_string() }), Some(BrowserWrite::Search("word".to_string())));
-    assert_eq!(browser_write(&ClusterRequest::WriteRate { id: RATE_RANKING_POSITION, value: 0.4 }), None, "the ranking list is the result screen's");
+    assert_eq!(browser_write(&ClusterRequest::WriteRate { id: RATE_RANKING_POSITION, value: 0.4 }), Some(BrowserWrite::RankingPosition(0.4)));
     assert_eq!(browser_write(&ClusterRequest::WriteRate { id: RATE_MASTERVOLUME, value: 0.4 }), None);
     assert_eq!(browser_write(&ClusterRequest::WriteText { id: STRING_TITLE, value: "x".to_string() }), None, "the reference writes no other string");
     assert_eq!(browser_write(&ClusterRequest::Event { id: BUTTON_LNMODE, arg1: 1, arg2: 0 }), None);

@@ -33,6 +33,8 @@
 //! NUMBER switched on or off ([`crate::skin_host::extension`]). They are run as every other is, by a
 //! skin's button or script and by the second panel's keys. A third, the ranking mode opened or
 //! closed (21002), is a skin's button for what the ranking shortcut does ([`super::ranking_mode`]).
+//! Five more (21010 to 21014) move the cursor to the chart of the song in a difficulty slot
+//! ([`super::browse_facts`]).
 //!
 //! The buttons that leave the browser go where this player keeps the same thing: the key
 //! configuration (13) is its own screen, the skin configuration (14) is the skin menu, practice
@@ -47,8 +49,9 @@ use rbms_store::ScoreBook;
 
 use super::SelectState;
 use super::skinned::FocusedBar;
-use crate::skin_host::extension::{RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_RANKING_MODE, RBMS_EVENT_SCRATCH_AUTO};
+use crate::skin_host::extension::{RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_RANKING_MODE, RBMS_EVENT_SCRATCH_AUTO, RBMS_EVENT_SIBLING_CHART_FIRST};
 use crate::skin_host::options::{JUDGE_ALGORITHMS_NUMBERED, OPTION_GENERAL, random_option_index};
+use crate::skin_host::select::browse::SIBLING_SLOTS;
 use crate::skin_host::{Cluster, ClusterRequest};
 use crate::stage::{KeyConfigState, SkinMenuState, Stage, Transition};
 use crate::{AppShared, SelectTab, SystemSound};
@@ -246,6 +249,8 @@ pub(super) enum SelectEvent {
     FavoriteChart,
     /// This player's own: open the ranking mode, or close it when it is open.
     RankingMode,
+    /// This player's own: move the cursor to the chart of the song under it in this difficulty slot.
+    SiblingChart(usize),
 }
 
 /// The reference's event table as this browser carries it out, by id, and this player's own events
@@ -292,6 +297,10 @@ const EVENTS: &[(i32, SelectEvent)] = &[
 
 /// What the event `id` does here, or `None` for an id that does nothing.
 pub(super) fn event_of(id: i32) -> Option<SelectEvent> {
+    let sibling = id.checked_sub(RBMS_EVENT_SIBLING_CHART_FIRST).and_then(|place| usize::try_from(place).ok()).filter(|slot| *slot < SIBLING_SLOTS);
+    if let Some(slot) = sibling {
+        return Some(SelectEvent::SiblingChart(slot));
+    }
     EVENTS.iter().find(|(event, _)| *event == id).map(|(_, does)| *does)
 }
 
@@ -366,6 +375,7 @@ impl SelectState {
             Some(SelectEvent::Replay(slot)) => return self.play_replay_slot(shared, slot),
             Some(SelectEvent::FavoriteChart) => self.favorite_event(shared),
             Some(SelectEvent::RankingMode) => self.toggle_ranking_panel(shared),
+            Some(SelectEvent::SiblingChart(slot)) => self.move_to_sibling_chart(shared, slot),
             None => {}
         }
         Transition::Stay

@@ -121,6 +121,7 @@ pub fn referenced_sources(skin: &LoadedSkin) -> BTreeSet<String> {
         for nested in [&list.listoff, &list.liston, &list.text, &list.level, &list.lamp, &list.playerlamp, &list.rivallamp, &list.trophy, &list.label] {
             name_all(&mut named, nested);
         }
+        name_all(&mut named, &list.rank);
         named.extend(list.graph.iter().map(|graph| graph.id.clone()));
     }
     let from_sets: Vec<String> = def.imageset.iter().filter(|set| named.contains(&set.id)).flat_map(|set| set.images.iter().cloned()).collect();

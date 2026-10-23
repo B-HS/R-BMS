@@ -512,6 +512,10 @@ impl References<'_, '_> {
         if let Some(graph) = &mut list.graph {
             self.destination(graph, &field(source, "graph")?)?;
         }
+        self.each(&mut list.rank, source, "rank", Self::destination)?;
+        if let Some(thumb) = &mut list.thumb {
+            self.destination(thumb, &field(source, "thumb")?)?;
+        }
         Ok(())
     }
 
