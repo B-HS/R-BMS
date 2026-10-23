@@ -117,7 +117,8 @@ fn cursor_is_on_show(screen: &Screen) -> bool {
 }
 
 /// Every group lists exactly the rows the table gives it, under the headings of its sections and in
-/// their order, and as the screen ships every group is on show whole: no row is behind a scroll.
+/// their order. As the screen ships every group is on show whole but NETWORK, which the DISCORD
+/// section made two entries longer than the screen: it draws the rows on show and scrolls to the rest.
 #[test]
 fn every_group_lists_its_rows_under_the_headings_of_its_sections() {
     for tab in SettingTab::SHOWN {
@@ -131,14 +132,16 @@ fn every_group_lists_its_rows_under_the_headings_of_its_sections() {
         let in_order: Vec<SettingRow> = catalog::sections(tab).iter().flat_map(|section| section.rows.iter().map(|id| SettingRow::Fixed(*id))).collect();
         assert_eq!(screen.state.rows, in_order, "{tab:?}");
         assert!(matches!(screen.state.list.entries.first(), Some(ListItem::Heading(_))), "{tab:?} does not begin with a heading");
-        assert!(
-            screen.state.list.entries.len() <= visible_rows(),
+        assert_eq!(
+            screen.state.list.entries.len() > visible_rows(),
+            tab == SettingTab::Network,
             "{tab:?} has {} entries and the screen shows {}",
             screen.state.list.entries.len(),
             visible_rows()
         );
+        let on_show = screen.state.list.entries.iter().take(visible_rows()).filter(|entry| matches!(entry, ListItem::Row(_))).count();
         let drawn = screen.app.shared.hot.iter().filter(|(_, hot)| matches!(hot, Hot::SettingRow(_))).count();
-        assert_eq!(drawn, listed.len(), "{tab:?} does not draw every row it lists");
+        assert_eq!(drawn, on_show, "{tab:?} does not draw every row it has on show");
     }
 }
 

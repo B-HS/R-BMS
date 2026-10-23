@@ -73,6 +73,7 @@ fn default_values_are_sane() {
     assert!(c.network.auto_upload_replay, "replay upload rides along with a ranked submit by default");
     assert!(c.network.auto_upload_trace, "a run's note-by-note record goes up after its score by default (decision Q5 of 2026-10-19)");
     assert!(c.network.rivals.is_empty());
+    assert!(c.network.discord_status, "what is played shows on the Discord profile until the player turns it off");
     assert_eq!(c.audio.device, None, "the system default device until one is picked");
     assert_eq!(c.audio.buffer_frames, None);
     assert_eq!(c.audio.sample_rate, None);

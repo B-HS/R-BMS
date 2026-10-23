@@ -821,6 +821,9 @@ pub struct NetworkOptions {
     /// Extra score servers a score is submitted to alongside `server_url`. Empty keeps the
     /// single-server behaviour the fields above describe.
     pub ir_profiles: Vec<IrProfile>,
+    /// Show what is being played as this player's activity in the Discord desktop app on this
+    /// machine (Rich Presence). A file from before the row existed reads as on.
+    pub discord_status: bool,
 }
 
 /// One score server a play can be submitted to, so a player can hold accounts on several at once.
@@ -856,6 +859,7 @@ impl Default for NetworkOptions {
             auto_upload_trace: true,
             rivals: Vec::new(),
             ir_profiles: Vec::new(),
+            discord_status: true,
         }
     }
 }

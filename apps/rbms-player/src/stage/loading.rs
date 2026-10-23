@@ -286,6 +286,11 @@ impl ChartAssets {
         ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), loads, announced: false }
     }
 
+    /// The chart being waited on, as it was parsed.
+    pub(crate) fn model(&self) -> &rbms_model::Model {
+        self.chart.model()
+    }
+
     /// Note that the decide cue has been played for this chart, so the screen that starts the run
     /// does not play it again.
     pub(crate) fn mark_announced(&mut self) {
@@ -415,6 +420,11 @@ impl LoadingState {
     pub(crate) fn rescan(shared: &AppShared) -> LoadingState {
         let full = shared.song_db.as_ref().is_none_or(|db| db.needs_full_rescan().unwrap_or(false));
         LoadingState::scan(shared.config.library.scan_roots(), shared.config.library.tables.clone(), songdb_path(&shared.settings_path), full)
+    }
+
+    /// What this screen is waiting to do: a scan, or which chart.
+    pub(crate) fn task(&self) -> &LoadingTask {
+        &self.task
     }
 
     /// Whether keysounds are still decoding, which is what holds an audio-settings reopen back.

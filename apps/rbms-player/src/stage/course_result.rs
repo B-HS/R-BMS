@@ -130,10 +130,14 @@ impl CourseResultState {
         &self.rows
     }
 
-    /// Whether the course cleared, for the same reason.
-    #[cfg(test)]
+    /// Whether the course cleared, for the same reason and for the Discord profile.
     pub(crate) fn cleared(&self) -> bool {
         self.cleared
+    }
+
+    /// The name the course ran under.
+    pub(crate) fn course_name(&self) -> &str {
+        &self.course_name
     }
 
     /// Play the arrival cue, once. A skin's scene plays the course's own cue or else the single

@@ -376,3 +376,29 @@ fn the_tables_already_given_are_kept_in_the_file() {
     assert!((config.play.hispeed - 2.5).abs() < 1e-9);
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
 }
+
+/// A file written before the DISCORD STATUS row reads with the row on, a file that switched it off
+/// keeps it off, and the row steps the value it shows.
+#[test]
+fn a_file_written_before_the_discord_row_reads_with_it_on() {
+    let older = format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, network: (auto_upload_trace: false))"#);
+    let (config, from) = migrate(&older).expect("a current file without the row parses");
+    assert_eq!(from, None);
+    assert!(config.network.discord_status, "a file from before the row reads as on");
+    assert!(!config.network.auto_upload_trace, "the rest of the file still reads as written");
+
+    let mut off = Config::default();
+    off.network.discord_status = false;
+    let text = ron_of(&off);
+    assert!(text.contains("discord_status: false"), "the value is written out even when it is the default's opposite");
+    let back: Config = ron::from_str(&text).expect("a config round-trips");
+    assert!(!back.network.discord_status, "a switched-off row came back on");
+
+    let mut stepped = Config::default();
+    assert_eq!(display_value(&stepped, SettingId::DiscordStatus), "ON");
+    assert_eq!(adjust(&mut stepped, SettingId::DiscordStatus, 1), AdjustOutcome::Changed);
+    assert!(!stepped.network.discord_status);
+    assert_eq!(display_value(&stepped, SettingId::DiscordStatus), "OFF");
+    assert_eq!(SETTING_COUNT, SettingId::ALL.len());
+    assert_eq!(SettingId::ALL.last(), Some(&SettingId::DiscordStatus), "the row is added at the end of the list");
+}

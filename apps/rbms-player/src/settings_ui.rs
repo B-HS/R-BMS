@@ -497,6 +497,7 @@ mod tests {
         (SettingId::GreenNumber, "GREEN NUMBER", "300"),
         (SettingId::ShowMissingCharts, "MISSING CHARTS", "ON"),
         (SettingId::DownloadFolder, "DOWNLOAD FOLDER", "(none)"),
+        (SettingId::DiscordStatus, "DISCORD STATUS", "ON"),
     ];
 
     /// An app with no library, no window and no server, so every row reads out of a fresh document.

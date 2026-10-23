@@ -291,7 +291,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-실기 점검(사용자, QA 문서에 추가): Discord 데스크톱 켜고 `rbms-player` 실행(개발자가 직접 띄울 때는 `HOME` 을 새 임시 폴더로, `--server http://127.0.0.1:9`), 프로필에 "Playing R-BMS"·아이콘·곡 제목·`7K ANOTHER 12` 꼴·경과 시간, 코스 `{name} · 1/4`, 설정 끄면 사라짐, Discord 를 끄고 켜면 60초 안에 다시 보임, 앱 종료하면 사라짐, Windows·Linux(가능하면 flatpak) 각각.
+실기 점검(사용자, QA 문서에 추가): Discord 데스크톱 켜고 `rbms-player` 실행(개발자가 직접 띄울 때는 `HOME` 을 새 임시 폴더로, `--server http://127.0.0.1:9`), 프로필에 "Playing R-BMS"·아이콘·곡 제목·`7K ANOTHER 12` 꼴·경과 시간, 코스 `1/4 · {name}`, 설정 끄면 사라짐, Discord 를 끄고 켜면 60초 안에 다시 보임, 앱 종료하면 사라짐, Windows·Linux(가능하면 flatpak) 각각.
 
 ## 9. 메인 결정 필요
 

@@ -78,6 +78,7 @@ const NETWORK_SECTIONS: &[Section] = &[
         heading: "SCORES",
         rows: &[SettingId::SyncRecords, SettingId::AutoUploadReplay, SettingId::AutoUploadTrace, SettingId::Rivals, SettingId::IrProfiles],
     },
+    Section { heading: "DISCORD", rows: &[SettingId::DiscordStatus] },
 ];
 
 const AUDIO_SECTIONS: &[Section] = &[
@@ -112,7 +113,7 @@ pub(crate) fn group_summary(tab: SettingTab) -> &'static str {
         SettingTab::Judge => "THE RULES A RUN IS JUDGED AND ITS GAUGE IS KEPT BY",
         SettingTab::Display => "THE WINDOW AND WHAT THE SCREENS SHOW",
         SettingTab::Input => "KEYS, CONTROLLERS AND THE SCRATCH LANE",
-        SettingTab::Network => "THE SCORE SERVER AND YOUR ACCOUNT ON IT",
+        SettingTab::Network => "THE SCORE SERVER, YOUR ACCOUNT ON IT AND DISCORD",
         SettingTab::Audio => "VOLUMES, THE OUTPUT DEVICE AND SYSTEM SOUNDS",
         SettingTab::Select => "THE SONG LIST AND ITS PREVIEW",
         SettingTab::PlaySpeed | SettingTab::PlayLane | SettingTab::PlayJudge | SettingTab::PlayChart | SettingTab::Skin => "",
@@ -253,6 +254,10 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         }
         SettingId::Rivals => "The players shown beside you on a ranking. ENTER opens the list to add and remove them.",
         SettingId::IrProfiles => "More score servers every run is also sent to. ENTER opens the list to add, switch off and remove them.",
+        SettingId::DiscordStatus => {
+            "Shows R-BMS as the game you are playing on your Discord profile, with the song, its mode and difficulty, the course and how long you have played. \
+             Anyone who can see your profile sees it. Needs the Discord desktop app on this computer."
+        }
         SettingId::MasterVolume => "The volume of everything the player sounds, applied after the three below are mixed.",
         SettingId::KeyVolume => "The volume of the key sounds: what a note sounds when it is hit.",
         SettingId::BgmVolume => "The volume of the background sounds of a chart.",

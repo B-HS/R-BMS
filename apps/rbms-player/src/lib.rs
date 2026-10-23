@@ -61,6 +61,7 @@ mod command_line;
 mod course_ir;
 mod course_ui;
 mod dialog;
+mod discord_presence;
 mod download;
 mod favorites;
 mod format;
@@ -914,6 +915,8 @@ struct AppShared {
     /// The thread file writes are handed to, so a save never stalls a frame on the disk
     /// ([`save_worker`]).
     saves: save_worker::SaveWorker,
+    /// What the player's Discord profile is told is being played ([`discord_presence`]).
+    discord: discord_presence::DiscordPresence,
     /// The traces being made for runs stored without one ([`trace_backfill`]).
     trace_backfill: trace_backfill::TraceBackfill,
     /// The wall clock the audio fallback and the timing probe read, restarted when a run begins. The
@@ -1099,6 +1102,7 @@ impl App {
             .forcing_pack(launch.skin_pack.clone(), &config)
             .drawing_play_built_in(launch.skin_path.is_some(), &config);
 
+        let discord_status = config.network.discord_status;
         let mut app = App {
             stage,
             suspended: Vec::new(),
@@ -1194,6 +1198,7 @@ impl App {
                 server_build: None,
                 course_submits: Vec::new(),
                 saves: save_worker::SaveWorker::for_this_build(),
+                discord: discord_presence::DiscordPresence::for_this_build(discord_status),
                 trace_backfill: trace_backfill::TraceBackfill::default(),
                 clock: Instant::now(),
                 booted: Instant::now(),
@@ -1235,6 +1240,7 @@ impl App {
         app.shared.reload_record_sync_states();
         app.shared.rebuild_select_items();
         app.shared.reload_skin();
+        discord_presence::follow_screen(&app.stage, &mut app.shared);
         app
     }
 }
@@ -1318,6 +1324,7 @@ impl App {
             self.shared.begin_skin_scene();
         }
         self.stage.on_enter(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 });
+        discord_presence::follow_screen(&self.stage, &mut self.shared);
     }
 
     /// Bring the window to the DISPLAY tab's RESOLUTION and WINDOW MODE rows when either changed,
@@ -1365,6 +1372,7 @@ impl App {
         self.shared.poll_network();
         self.shared.poll_ir_jobs(stage);
         self.shared.poll_audio_reopen(now, stage, keysounds_decoding);
+        self.shared.discord.follow_setting(self.shared.config.network.discord_status);
         if (self.shared.config.display.debug || self.shared.soak.enabled())
             && self.shared.frame_count.is_multiple_of(RAM_SAMPLE_FRAMES)
             && let Some(u) = memory_stats::memory_stats()
@@ -1593,12 +1601,19 @@ impl ApplicationHandler<FrameReady> for App {
     /// to the save thread. Quit in the macOS menu or the Dock ends the process from inside the event
     /// loop, right after this, so [`run`] never gets back from the loop to wait for them.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.keep_what_quitting_cuts_short();
-        self.shared.finish_saves();
+        self.wind_down();
     }
 }
 
 impl App {
+    /// What the way out does before the process ends: keep what quitting cut short, finish the
+    /// writes, and take what is being played off the Discord profile.
+    fn wind_down(&mut self) {
+        self.keep_what_quitting_cuts_short();
+        self.shared.finish_saves();
+        self.shared.discord.stop();
+    }
+
     /// Keep the run, or the course, the player was in when the app was told to quit: closing the
     /// window, Quit in the menu or the Dock. It is kept as Escape keeps it (the player's decision of
     /// 2026-10-15, "no record goes unsaved"): a run played by hand left part-way is a FAILED run, a

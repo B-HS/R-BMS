@@ -268,10 +268,11 @@ pub enum SettingId {
     GreenNumber,
     ShowMissingCharts,
     DownloadFolder,
+    DiscordStatus,
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 96;
+pub const SETTING_COUNT: usize = 97;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -372,6 +373,7 @@ impl SettingId {
         SettingId::GreenNumber,
         SettingId::ShowMissingCharts,
         SettingId::DownloadFolder,
+        SettingId::DiscordStatus,
     ];
 
     /// Position of the row in the whole settings list, which is also its index in [`SettingId::ALL`].
@@ -842,6 +844,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     row(SettingId::AutoUploadTrace, SettingTab::Network, "AUTO UPLOAD TRACE", SettingKind::Toggle, "Send each run's note-by-note record after its score"),
     row(SettingId::Rivals, SettingTab::Network, "RIVALS", SettingKind::Action, "Players shown next to you on the ranking"),
     row(SettingId::IrProfiles, SettingTab::Network, "IR PROFILES", SettingKind::Action, "Extra score servers this play is also sent to"),
+    row(SettingId::DiscordStatus, SettingTab::Network, "DISCORD STATUS", SettingKind::Toggle, "Show what you play on your Discord profile"),
     row(
         SettingId::MasterVolume,
         SettingTab::Audio,
@@ -1153,6 +1156,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::SyncSettings => on_off(config.network.sync_settings),
         SettingId::AutoUploadReplay => on_off(config.network.auto_upload_replay),
         SettingId::AutoUploadTrace => on_off(config.network.auto_upload_trace),
+        SettingId::DiscordStatus => on_off(config.network.discord_status),
         SettingId::Rivals => config.network.rivals.len().to_string(),
         SettingId::IrProfiles => config.network.ir_profiles.len().to_string(),
         SettingId::MasterVolume => gain_value(config.audio.master, id),
@@ -1375,6 +1379,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::SyncSettings => toggle(&mut config.network.sync_settings),
         SettingId::AutoUploadReplay => toggle(&mut config.network.auto_upload_replay),
         SettingId::AutoUploadTrace => toggle(&mut config.network.auto_upload_trace),
+        SettingId::DiscordStatus => toggle(&mut config.network.discord_status),
         SettingId::GuideSe => toggle(&mut config.audio.guide_se),
         SettingId::MasterVolume => {
             let next = step_volume(config.audio.master, delta);
@@ -2348,6 +2353,7 @@ mod tests {
                 SettingId::AutoUploadTrace,
                 SettingId::Rivals,
                 SettingId::IrProfiles,
+                SettingId::DiscordStatus,
             ]
         );
         assert_eq!(

@@ -61,6 +61,7 @@ RUNTIME_SIZE = 256
 FAVICON_SIZES = (16, 32, 48)
 WEB_ICON_SIZE = 512
 APPLE_ICON_SIZE = 180
+DISCORD_ICON_SIZE = 1024
 
 
 def scaled(value: int) -> int:
@@ -127,6 +128,8 @@ def outputs() -> dict[str | Path, bytes]:
     files[WEB_APP / 'icon.png'] = png_bytes(sized[WEB_ICON_SIZE])
     apple = master(full_bleed=True).convert('RGB').resize((APPLE_ICON_SIZE, APPLE_ICON_SIZE), Image.Resampling.LANCZOS)
     files[WEB_APP / 'apple-icon.png'] = png_bytes(apple)
+    discord = master(full_bleed=True).convert('RGB').resize((DISCORD_ICON_SIZE, DISCORD_ICON_SIZE), Image.Resampling.LANCZOS)
+    files[f'png/discord-{DISCORD_ICON_SIZE}.png'] = png_bytes(discord)
     return files
 
 

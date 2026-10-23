@@ -259,6 +259,7 @@ impl AppShared {
             SettingId::SyncSettings => on_off(self.config.network.sync_settings),
             SettingId::AutoUploadReplay => on_off(self.config.network.auto_upload_replay),
             SettingId::AutoUploadTrace => on_off(self.config.network.auto_upload_trace),
+            SettingId::DiscordStatus => on_off(self.config.network.discord_status),
             SettingId::Rivals => self.config.network.rivals.len().to_string(),
             SettingId::IrProfiles => self.config.network.ir_profiles.len().to_string(),
             SettingId::SyncRecords => self.sync_records_value().unwrap_or_else(|| ACTION_VALUE.to_string()),

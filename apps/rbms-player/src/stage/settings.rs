@@ -553,7 +553,7 @@ impl SettingsState {
         }
         match id {
             SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume => ctx.shared.apply_audio_gains(),
-            SettingId::SyncSettings | SettingId::AutoUploadReplay | SettingId::AutoUploadTrace => ctx.shared.save_settings(),
+            SettingId::SyncSettings | SettingId::AutoUploadReplay | SettingId::AutoUploadTrace | SettingId::DiscordStatus => ctx.shared.save_settings(),
             SettingId::GuideSe => ctx.shared.syssound.set_guide_enabled(ctx.shared.config.audio.guide_se),
             _ => {}
         }

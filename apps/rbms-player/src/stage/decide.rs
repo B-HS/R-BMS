@@ -209,6 +209,11 @@ impl DecideState {
         }
     }
 
+    /// The chart the screen shows and the level of the table it was picked from.
+    pub(crate) fn chart_and_table_level(&self) -> (&ChartOverview, &str) {
+        (&self.chart, &self.table_level)
+    }
+
     /// The scene for the library chart at `index`, which is parsed when the screen is entered: by
     /// then the browser has let go of the output stream the chart's keysounds are loaded into.
     pub(crate) fn song(index: usize) -> DecideState {
@@ -310,7 +315,7 @@ impl DecideState {
 /// picked from; both empty anywhere else in the browser (`MusicSelector.readChart`). The level is
 /// written as its folder is titled (`setTablelevel(HashBar.getTitle())`): with the symbol of its
 /// table in front.
-fn table_of_the_open_folder(shared: &AppShared) -> (String, String) {
+pub(crate) fn table_of_the_open_folder(shared: &AppShared) -> (String, String) {
     let Some((table, level)) = shared.innermost_level() else {
         return (String::new(), String::new());
     };

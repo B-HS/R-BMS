@@ -124,6 +124,11 @@ pub(crate) struct PendingChart {
 }
 
 impl PendingChart {
+    /// The chart as it was parsed, for what the Discord profile says of it.
+    pub(crate) fn model(&self) -> &rbms_model::Model {
+        self.session.model()
+    }
+
     /// Turn the parsed chart into the screen that plays it, now that its images are in.
     pub(crate) fn into_play(self, bga: std::collections::HashMap<i32, crate::DecodedImage>) -> PlayState {
         PlayState::new(self.session, bga, self.lntype, self.ln_mode_key)
@@ -225,6 +230,13 @@ pub(crate) struct PracticeChart {
     ln_mode_key: String,
     judge_setup: rbms_play::JudgeSetup,
     seed: u64,
+}
+
+impl PracticeChart {
+    /// The whole chart the panel is set up on, for what the Discord profile says of it.
+    pub(crate) fn model(&self) -> &rbms_model::Model {
+        &self.model
+    }
 }
 
 /// The gauge kind a practice slice runs on, folding the three course gauges onto the six a session

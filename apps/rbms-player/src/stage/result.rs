@@ -1112,8 +1112,8 @@ impl ResultState {
         }
     }
 
-    /// The run this screen reports, for the tests that check what the run put on it.
-    #[cfg(test)]
+    /// The run this screen reports: what the tests check the run put on it, and what the Discord
+    /// profile says of it.
     pub(crate) fn view(&self) -> &ResultView {
         &self.view
     }

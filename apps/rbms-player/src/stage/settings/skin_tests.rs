@@ -169,16 +169,22 @@ fn the_button_on_the_rail_opens_the_skin_menu() {
 /// How many buttons at the foot of the rail lead to a menu: one to the play menu and one to the skin menu.
 const MENU_LINKS: usize = 2;
 
-/// Every row, every group of the rail and the two buttons to the menus are regions of the frame, and
-/// nothing else is: every group of the screen as it ships is short enough to be on show whole.
+/// Every row on show, every group of the rail and the two buttons to the menus are regions of the
+/// frame, and nothing else is. Every group of the screen as it ships is on show whole but NETWORK,
+/// whose rows past the screen are reached by scrolling.
 #[test]
 fn every_row_every_tab_and_the_two_buttons_are_clickable() {
     let mut app = app_in("regions");
     for tab in SettingTab::SHOWN {
-        let rows = app.shared.settings_rows(tab).len();
         app.stage = Stage::Settings(SettingsState::on_tab(tab));
         draw(&mut app);
-        assert_eq!(app.shared.hot.len(), rows.min(visible_rows()) + SettingTab::SHOWN.len() + MENU_LINKS, "{tab:?}");
+        let Stage::Settings(state) = &app.stage else {
+            panic!("the settings screen is up");
+        };
+        let on_show = state.list.entries.iter().take(visible_rows()).filter(|entry| matches!(entry, ListItem::Row(_))).count();
+        let whole = state.rows.len();
+        assert_eq!(on_show < whole, tab == SettingTab::Network, "{tab:?}");
+        assert_eq!(app.shared.hot.len(), on_show + SettingTab::SHOWN.len() + MENU_LINKS, "{tab:?}");
     }
 }
 
