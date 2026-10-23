@@ -516,7 +516,7 @@ fn the_third_panel_leaves_the_travel_time_alone_while_the_cursor_is_off_a_chart(
     let shipped = rbms_config::DEFAULT_DURATION_MS;
     let mut browser = holding("panel3-duration-folder", &[START, SELECT]);
     browser.app.shared.config.play.keep_green_number = true;
-    browser.app.shared.select_view = SelectView::Root;
+    browser.app.shared.open_for_tests([]);
     browser.app.shared.sel = 0;
     browser.app.shared.rebuild_select_items();
     browser.frame_after(SHORT_STEP);
@@ -531,7 +531,7 @@ fn the_third_panel_leaves_the_travel_time_alone_while_the_cursor_is_off_a_chart(
         assert_eq!(browser.app.shared.config.play.duration_ms, shipped, "{key:?} moved a travel time the panel does not show");
     }
 
-    browser.app.shared.select_view = SelectView::AllSongs;
+    browser.app.shared.open_for_tests([SelectFolder::AllSongs]);
     browser.app.shared.rebuild_select_items();
     browser.frame_after(SHORT_STEP);
     browser.hold(KEY_SIX);
@@ -610,7 +610,7 @@ fn the_list_keys_of_the_keyboard_are_the_panels_while_one_is_up() {
     for code in [KeyCode::ArrowDown, KeyCode::ArrowUp, KeyCode::ArrowLeft, KeyCode::ArrowRight, KeyCode::Enter, KeyCode::NumpadEnter] {
         assert!(matches!(browser.key(code), Transition::Stay), "{code:?} left the browser with a panel up");
         assert_eq!(browser.sel(), 0, "{code:?} moved the list with a panel up");
-        assert!(browser.app.shared.select_view == SelectView::AllSongs, "{code:?} left the folder with a panel up");
+        assert!(browser.app.shared.opened() == [SelectFolder::AllSongs], "{code:?} left the folder with a panel up");
     }
 
     browser.let_go(SELECT);

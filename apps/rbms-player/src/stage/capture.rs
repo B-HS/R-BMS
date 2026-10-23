@@ -105,13 +105,14 @@ use winit::keyboard::KeyCode;
 use crate::app_play::loaded_chart_for_tests;
 use crate::app_result::enter_result;
 use crate::gpu::Gpu;
+use crate::select_tree::SelectFolder;
 use crate::skin_select::SKIN_PACK_ENV;
 use crate::stage::canvas::UI_SIZE;
 use crate::stage::render_tests::{FRAME_DT, app, play_state, render};
 use crate::stage::scene_life::SceneTimes;
 use crate::stage::select::tests::record;
 use crate::stage::{Canvas, CourseResultState, DecideState, FrameCtx, HeadlessCanvas, KeyConfigState, KeyInput, PlayState, SelectState, Stage, Transition};
-use crate::{App, Config, LaunchOptions, SelectView, SortMode};
+use crate::{App, Config, LaunchOptions, SortMode};
 
 /// Environment variable naming the folder captures are saved in. Nothing is saved without it.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
@@ -1744,7 +1745,7 @@ fn capture_browser(pack: &Path) -> Result<Vec<String>, String> {
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
     let mut saved = Vec::new();
 
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.rebuild_select_items();
     let focus =
         app.shared.library.songs().iter().position(|entry| entry.title == BROWSER_FOCUS_TITLE).ok_or("the scan did not find the chart that names pictures")?;
@@ -1770,12 +1771,12 @@ fn capture_browser(pack: &Path) -> Result<Vec<String>, String> {
     let charts = app.shared.library.len();
     app.shared.table_names = vec!["CAPTURE TABLE".to_owned()];
     app.shared.table_levels = vec![vec![("1".to_owned(), (0..charts / 2).collect()), ("2".to_owned(), (charts / 2..charts).collect())]];
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
     app.shared.sel = app.shared.select_items.len().saturating_sub(1);
     saved.extend(capture_browser_view(&mut app, &mut pixels, size, "select-root", SelectState::new())?);
 
-    app.shared.select_view = SelectView::TableLevels(0);
+    app.shared.open_for_tests([app.shared.table_folder(0)]);
     app.shared.rebuild_select_items();
     app.shared.sel = app.shared.select_items.len().saturating_sub(1);
     saved.extend(capture_browser_view(&mut app, &mut pixels, size, "select-table", SelectState::new())?);
@@ -1854,7 +1855,7 @@ fn the_browser_of_a_first_run_is_captured_over_a_scanned_library() {
     let mut app = with_browse_library(first_run_app("first-run-library"), "first-run-library").unwrap_or_else(|reason| panic!("first run: {reason}"));
     let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).expect("the default pack's browser says how large it is");
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.rebuild_select_items();
     let focus = app.shared.library.songs().iter().position(|entry| entry.title == BROWSER_FOCUS_TITLE).expect("the scan found the chart that names pictures");
     app.shared.sel = focus.checked_sub(1).expect("the chart that names pictures is not the first of the list");
@@ -1954,7 +1955,7 @@ fn capture_browser_overlays(pack: &Path) -> Result<Vec<String>, String> {
     let mut app = browse_app(pack, "overlays")?;
     let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.rebuild_select_items();
     let focus =
         app.shared.library.songs().iter().position(|entry| entry.title == BROWSER_FOCUS_TITLE).ok_or("the scan did not find the chart that names pictures")?;
@@ -1995,7 +1996,7 @@ fn capture_browser_overlays(pack: &Path) -> Result<Vec<String>, String> {
 
     let mut empty = pack_app(pack, "overlays-empty");
     empty.shared.library = Library::from_songs(Vec::new());
-    empty.shared.select_view = SelectView::AllSongs;
+    empty.shared.open_for_tests([SelectFolder::AllSongs]);
     empty.shared.rebuild_select_items();
     empty.shared.audio_failed = true;
     empty.shared.config.library.preview = false;
@@ -2647,7 +2648,7 @@ fn the_movies_of_a_skin_pack_named_by_the_environment_are_captured_as_they_play(
     if choose_in_skin(&mut app, SKIN_TYPE_MUSIC_SELECT, MOVIE_BACKGROUND_ROW, MOVIE_BACKGROUND_ON) {
         let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).expect("a document that offers a choice says its size");
         let mut pixels = HeadlessCanvas::new(size.0, size.1);
-        app.shared.select_view = SelectView::AllSongs;
+        app.shared.open_for_tests([SelectFolder::AllSongs]);
         app.shared.rebuild_select_items();
         let saved = capture_browser_view(&mut app, &mut pixels, size, "select-movie", SelectState::new())
             .unwrap_or_else(|reason| panic!("select-movie: not drawn: {reason}"));

@@ -25,6 +25,7 @@
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
+use crate::select_tree::{ListPlace, show_the_list_again};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::tablesrc::{
     COPY_OLD_AFTER_DAYS, TableOrigin, TableStatus, apply_finished_fetches, copy_age, copy_age_days, forget_table, is_address, register_table, reload_tables,
@@ -296,7 +297,7 @@ impl TablesState {
     fn add_picked_file(&mut self, shared: &mut AppShared, path: &std::path::Path) {
         let location = path.to_string_lossy().to_string();
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or(DEFAULT_TABLE_NAME).to_string();
-        self.add_source(shared, TableSource { name, location });
+        self.add_source(shared, TableSource { name, location, group: String::new() });
     }
 
     /// Take a source off the list, with everything kept of its table. One whose table is still on
@@ -305,12 +306,7 @@ impl TablesState {
         if idx < shared.config.library.tables.len() {
             let removed = shared.config.library.tables.remove(idx);
             forget_table(shared, &removed.location);
-            if idx < shared.table_names.len() {
-                shared.table_names.remove(idx);
-            }
-            if idx < shared.table_levels.len() {
-                shared.table_levels.remove(idx);
-            }
+            shared.remove_table_slot(idx);
             shared.save_settings();
             self.sel = self.sel.min(TablesState::row_count(shared).saturating_sub(1));
         }
@@ -321,7 +317,7 @@ impl TablesState {
     fn add_typed_url(&mut self, shared: &mut AppShared) {
         let url = self.text_input.take().map(|mut edit| edit.take()).unwrap_or_default().trim().to_string();
         if !url.is_empty() {
-            self.add_source(shared, TableSource { name: String::new(), location: url });
+            self.add_source(shared, TableSource { name: String::new(), location: url, group: String::new() });
         }
     }
 
@@ -413,9 +409,8 @@ impl StageHandler for TablesState {
         let add_file = add_url + 1;
         match key.code {
             KeyCode::Escape => {
-                ctx.shared.select_view = SelectView::Root;
-                ctx.shared.sel = 0;
-                ctx.shared.rebuild_select_items();
+                let place = ListPlace::of(ctx.shared);
+                show_the_list_again(ctx.shared, &place);
                 return Transition::Back;
             }
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
@@ -549,6 +544,7 @@ impl StageHandler for TablesState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::select_tree::SelectFolder;
     use crate::stage::render_tests::app;
     use crate::tablesrc::{TableStore, forget_table_status, read_and_match};
 
@@ -583,7 +579,7 @@ mod tests {
             assert!(table_is_fetching(&app.shared, address), "nothing is fetching the table that was added");
             assert_eq!(table_status(address), Some(TableStatus::NotFetched));
             assert_eq!((app.shared.table_names.len(), app.shared.table_levels.len()), (1, 1), "the row has no slot in the song list's tables");
-            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table that has not arrived is a folder already");
+            assert_eq!(folders(&mut app, |_| Vec::new()).len(), 1, "a table that has not arrived is a folder already");
             let kept = rbms_config::load(&app.shared.settings_path).expect("the settings were saved");
             assert_eq!(kept.config.library.tables.iter().map(|source| source.location.as_str()).collect::<Vec<_>>(), vec![address]);
             assert!(matches!(state.update(&mut ctx(&mut app)), Transition::Stay), "the screen stopped while the table was out");
@@ -593,7 +589,7 @@ mod tests {
             assert_eq!(addresses.tables.asked(), 1);
             assert_eq!(table_status(address).as_ref().map(status_summary), Some(("0 OF 2 CHARTS OWNED  -  2 LEVELS".to_string(), false)));
             assert!(addresses.store().has_copy_file(address), "a table that was registered was not kept");
-            assert_eq!(folders(&mut app, SelectView::Root).len(), 2, "the table that arrived is not a folder");
+            assert_eq!(folders(&mut app, |_| Vec::new()).len(), 2, "the table that arrived is not a folder");
             let mut said = Vec::new();
             crate::notify::drain(&mut said);
             assert!(said.iter().any(|(level, message)| *level == Level::Info && message == "table added: TYPED (0 local charts)"), "{said:?}");
@@ -615,7 +611,7 @@ mod tests {
             assert_eq!(status_summary(&status), ("LOAD FAILED".to_string(), true));
             assert!(status_detail(&status).is_some_and(|detail| detail.starts_with("LOAD FAILED: ")), "the row does not say why");
             assert!(!addresses.store().has_copy_file(address));
-            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table that was not fetched is a folder");
+            assert_eq!(folders(&mut app, |_| Vec::new()).len(), 1, "a table that was not fetched is a folder");
             let mut said = Vec::new();
             crate::notify::drain(&mut said);
             assert!(said.iter().all(|(_, message)| !message.contains("table added")), "{said:?}");
@@ -717,7 +713,7 @@ mod tests {
     #[test]
     fn an_empty_or_repeated_url_is_refused_without_leaving_the_screen() {
         let mut app = app();
-        app.shared.config.library.tables.push(TableSource { name: "have".into(), location: "https://example.test/have.json".into() });
+        app.shared.config.library.tables.push(TableSource { name: "have".into(), location: "https://example.test/have.json".into(), group: String::new() });
         let mut state = TablesState::new();
 
         state.text_input = Some(TextEdit::from_text("   "));
@@ -820,7 +816,7 @@ mod tests {
     fn a_file_already_in_the_list_is_not_added_again() {
         let mut app = app();
         let mut state = TablesState::new();
-        app.shared.config.library.tables.push(TableSource { name: "one".into(), location: "/tables/one.json".into() });
+        app.shared.config.library.tables.push(TableSource { name: "one".into(), location: "/tables/one.json".into(), group: String::new() });
         state.add_picked_file(&mut app.shared, std::path::Path::new("/tables/one.json"));
         assert_eq!(app.shared.config.library.tables.len(), 1);
         assert!(app.shared.table_fetches.is_idle());
@@ -860,8 +856,9 @@ mod tests {
     }
 
     /// The folders of the song list as it stands, by label.
-    fn folders(app: &mut crate::App, view: SelectView) -> Vec<String> {
-        app.shared.select_view = view;
+    fn folders(app: &mut crate::App, open: fn(&crate::AppShared) -> Vec<SelectFolder>) -> Vec<String> {
+        let path = open(&app.shared);
+        app.shared.open_for_tests(path);
         app.shared.rebuild_select_items();
         app.shared
             .select_items
@@ -883,11 +880,11 @@ mod tests {
         register(&mut app, &file);
 
         assert_eq!(app.shared.config.library.tables.len(), 1, "the source is in the settings");
-        let root = folders(&mut app, SelectView::Root);
+        let root = folders(&mut app, |_| Vec::new());
         assert_eq!(root.len(), 2, "the song list has the table's folder beside ALL SONGS: {root:?}");
         assert!(root[1].ends_with(" (0)"), "the folder says nothing in it is owned: {}", root[1]);
-        assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)", "LV 2 (0)"], "the table's levels, in its order");
-        assert!(folders(&mut app, SelectView::TableLevel(0, 0)).is_empty(), "an unowned level opens onto an empty list");
+        assert_eq!(folders(&mut app, |shared| vec![shared.table_folder(0)]), vec!["LV 1 (0)", "LV 2 (0)"], "the table's levels, in its order");
+        assert!(folders(&mut app, |shared| vec![shared.table_folder(0), shared.level_folder(0, 0)]).is_empty(), "an unowned level opens onto an empty list");
 
         let status = table_status(&file.location()).expect("the load is remembered");
         assert_eq!(status_summary(&status), ("0 OF 3 CHARTS OWNED  -  2 LEVELS".to_string(), false));
@@ -908,7 +905,7 @@ mod tests {
             let mut said = Vec::new();
             crate::notify::drain(&mut said);
             assert!(said.iter().all(|(_, message)| !message.contains("table added")), "a table that was not read was announced as added: {said:?}");
-            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table that was not read is not a folder");
+            assert_eq!(folders(&mut app, |_| Vec::new()).len(), 1, "a table that was not read is not a folder");
 
             let status = table_status(&file.location()).expect("the failure is remembered");
             assert_eq!(status_summary(&status), ("LOAD FAILED".to_string(), true));
@@ -931,7 +928,7 @@ mod tests {
             register(&mut app, &file);
 
             assert_eq!(app.shared.config.library.tables.len(), 1, "the row is there to look at and remove");
-            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table with no levels is not a folder");
+            assert_eq!(folders(&mut app, |_| Vec::new()).len(), 1, "a table with no levels is not a folder");
             let mut said = Vec::new();
             crate::notify::drain(&mut said);
             assert!(said.iter().all(|(_, message)| !message.starts_with("table added:")), "an empty table was announced like one with a folder: {said:?}");
@@ -949,11 +946,11 @@ mod tests {
     #[test]
     fn a_source_is_labelled_by_the_users_name_then_the_tables_own_then_only_its_location() {
         let loaded = TableStatus::Loaded { name: "\u{767a}\u{72c2}".to_string(), entries: 9, levels: 3, owned: 4, origin: TableOrigin::File, stale: None };
-        let unnamed = TableSource { name: String::new(), location: "https://tables.test/t/".into() };
+        let unnamed = TableSource { name: String::new(), location: "https://tables.test/t/".into(), group: String::new() };
         assert_eq!(source_label(&unnamed, None), "https://tables.test/t/");
         assert_eq!(source_label(&unnamed, Some(&loaded)), "\u{767a}\u{72c2}  -  https://tables.test/t/");
         assert_eq!(source_label(&unnamed, Some(&TableStatus::Failed { reason: "x".into() })), "https://tables.test/t/");
-        let named = TableSource { name: "\u{7b2c}2".into(), location: "/tables/second.json".into() };
+        let named = TableSource { name: "\u{7b2c}2".into(), location: "/tables/second.json".into(), group: String::new() };
         assert_eq!(source_label(&named, Some(&loaded)), "\u{7b2c}2  -  /tables/second.json", "a name in any script is a name");
     }
 
@@ -983,7 +980,7 @@ mod tests {
     fn a_source_whose_table_failed_is_drawn_differently_from_one_nothing_is_known_of() {
         let file = TableFile::written("drawn", b"not a table");
         let mut app = app();
-        app.shared.config.library.tables.push(TableSource { name: "one".into(), location: file.location() });
+        app.shared.config.library.tables.push(TableSource { name: "one".into(), location: file.location(), group: String::new() });
         let unknown = crate::stage::render_tests::render(&mut app, Stage::Tables(TablesState::new())).pixel_checksum();
 
         let nothing_owned = rbms_table::Md5Index::new(std::iter::empty());
@@ -1075,10 +1072,18 @@ mod tests {
         assert_eq!((saved, is_old), ("SAVED JUST NOW".to_string(), false), "a copy fetched just now is not said to be, or is old");
         assert_eq!(old_copy_note(&status, now), None);
         let written = ron::ser::to_string(&app.shared.config.library.tables).expect("the sources are written");
-        assert_eq!(written, format!(r#"[(name:"",location:"{address}")]"#), "what the settings file holds of a table is its name and its address, as before");
+        assert_eq!(
+            written,
+            format!(r#"[(name:"",location:"{address}",group:"")]"#),
+            "what the settings file holds of a table is its name, its address and the group it is shown under"
+        );
         let earlier: Vec<TableSource> =
             ron::from_str(r#"[(name: "mine", location: "https://tables.test/manager/earlier/")]"#).expect("an earlier settings entry reads");
-        assert_eq!((earlier[0].name.as_str(), earlier[0].location.as_str()), ("mine", "https://tables.test/manager/earlier/"));
+        assert_eq!(
+            (earlier[0].name.as_str(), earlier[0].location.as_str(), earlier[0].group.as_str()),
+            ("mine", "https://tables.test/manager/earlier/", ""),
+            "an entry written before there were groups is a table of its own"
+        );
 
         let mut state = TablesState::new();
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyD));
@@ -1097,7 +1102,7 @@ mod tests {
             let mut addresses = Addresses::of(&app);
             addresses.tables.serve(address, "Before", ONE_LEVEL);
             addresses.register(&mut app, address);
-            assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)"]);
+            assert_eq!(folders(&mut app, |shared| vec![shared.table_folder(0)]), vec!["LV 1 (0)"]);
 
             addresses.tables.serve(address, "After", TWO_LEVELS);
             let mut state = TablesState::new();
@@ -1112,7 +1117,7 @@ mod tests {
 
             assert_eq!(addresses.tables.asked(), 2, "one registration and one reload; a second R while it was out is not a second fetch");
             assert_eq!(app.shared.table_names, vec!["AFTER".to_string()]);
-            assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)", "LV 2 (0)"], "the folder is the reloaded table's");
+            assert_eq!(folders(&mut app, |shared| vec![shared.table_folder(0)]), vec!["LV 1 (0)", "LV 2 (0)"], "the folder is the reloaded table's");
             assert_eq!(addresses.store().copy_name(address).as_deref(), Some("After"), "the copy was not replaced");
             assert_eq!(table_status(address).as_ref().map(status_summary), Some(("0 OF 2 CHARTS OWNED  -  2 LEVELS".to_string(), false)));
             let mut said = Vec::new();
@@ -1139,7 +1144,11 @@ mod tests {
             addresses.wait_for_fetches(&mut app, &mut state);
 
             assert_eq!(app.shared.table_names, vec!["KEPT".to_string()]);
-            assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)", "LV 2 (0)"], "the folder of a table whose reload failed changed");
+            assert_eq!(
+                folders(&mut app, |shared| vec![shared.table_folder(0)]),
+                vec!["LV 1 (0)", "LV 2 (0)"],
+                "the folder of a table whose reload failed changed"
+            );
             assert_eq!(addresses.store().copy_name(address).as_deref(), Some("Kept"));
             let status = table_status(address).expect("the table is still loaded");
             assert_eq!(status_summary(&status), ("RELOAD FAILED  -  0 OF 2 CHARTS OWNED".to_string(), true));
@@ -1240,7 +1249,7 @@ mod tests {
         let mut addresses = Addresses::of(&app);
         addresses.tables.serve(address, "Twice", ONE_LEVEL);
         addresses.register(&mut app, address);
-        app.shared.config.library.tables.push(TableSource { name: "again".into(), location: address.to_string() });
+        app.shared.config.library.tables.push(TableSource { name: "again".into(), location: address.to_string(), group: String::new() });
         app.shared.table_names.push("AGAIN".to_string());
         let first = app.shared.table_levels[0].clone();
         app.shared.table_levels.push(first);
@@ -1272,27 +1281,30 @@ mod tests {
         let names = |app: &crate::App| app.shared.table_levels[0].iter().map(|(name, _)| name.clone()).collect::<Vec<_>>();
         assert_eq!(names(&app), vec!["1", "2", "3"]);
 
-        app.shared.select_view = SelectView::TableLevel(0, 1);
+        app.shared.open_for_tests([app.shared.table_folder(0), app.shared.level_folder(0, 1)]);
         app.shared.rebuild_select_items();
         addresses.tables.serve(address, "Followed", LEVELS_0_1_2);
         let mut state = TablesState::new();
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
         addresses.wait_for_fetches(&mut app, &mut state);
         assert_eq!(names(&app), vec!["0", "1", "2"]);
-        assert!(app.shared.select_view == SelectView::TableLevel(0, 2), "the list is no longer looking into level 2, which moved one place down");
+        assert!(
+            app.shared.opened() == [app.shared.table_folder(0), app.shared.level_folder(0, 2)],
+            "the list is no longer looking into level 2, which moved one place down"
+        );
 
         addresses.tables.serve(address, "Followed", LEVELS_0_1);
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
         addresses.wait_for_fetches(&mut app, &mut state);
         assert_eq!(names(&app), vec!["0", "1"]);
-        assert!(app.shared.select_view == SelectView::TableLevels(0), "a level the table no longer has is still being looked into");
+        assert!(app.shared.opened() == [app.shared.table_folder(0)], "a level the table no longer has is still being looked into");
 
-        app.shared.select_view = SelectView::TableLevel(0, 0);
+        app.shared.open_for_tests([app.shared.table_folder(0), app.shared.level_folder(0, 0)]);
         addresses.tables.serve(address, "Followed", LEVELS_1_2_3);
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
         addresses.wait_for_fetches(&mut app, &mut state);
         assert!(
-            app.shared.select_view == SelectView::TableLevels(0),
+            app.shared.opened() == [app.shared.table_folder(0)],
             "the list went on looking into the first level, which is another level now that level 0 is gone"
         );
     }
@@ -1394,7 +1406,7 @@ mod tests {
         addresses.register(&mut app, kept);
         crate::notify::exclusive(|| addresses.register(&mut app, dead));
         addresses.registered.extend([waiting, arriving].map(str::to_string));
-        app.shared.config.library.tables.push(TableSource { name: String::new(), location: waiting.to_string() });
+        app.shared.config.library.tables.push(TableSource { name: String::new(), location: waiting.to_string(), group: String::new() });
         read_and_match(&addresses.store(), &app.shared.config.library.tables[2], &rbms_table::Md5Index::new(std::iter::empty()));
 
         let open = addresses.tables.hold();
@@ -1448,7 +1460,7 @@ mod tests {
         addresses.register(&mut app, insane);
         addresses.register(&mut app, satellite);
         register(&mut app, &file);
-        app.shared.config.library.tables.push(TableSource { name: String::new(), location: old.to_string() });
+        app.shared.config.library.tables.push(TableSource { name: String::new(), location: old.to_string(), group: String::new() });
         let nothing_owned = rbms_table::Md5Index::new(std::iter::empty());
         read_and_match(&addresses.store(), &app.shared.config.library.tables[3], &nothing_owned);
         assert_eq!(addresses.tables.asked(), 2, "the table with an old copy was read from the copy");

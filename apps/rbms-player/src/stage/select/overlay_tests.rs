@@ -18,10 +18,11 @@ use crate::app_options::{TOGGLE_KEY, options_key};
 use crate::ir_ranking_view::panel_action;
 use crate::keyconfig::{Bindable, ControlAction, KeyConfig, Shortcut, ShortcutGroup, ShortcutScreen, default_keys_for_mode};
 use crate::pointer::PointerInput;
+use crate::select_tree::SelectFolder;
 use crate::stage::select::filter::filter_panel_rect;
 use crate::stage::select::overlay::ranking_panel_rect;
 use crate::stage::{Canvas, FrameCtx, HeadlessCanvas, Stage, StageHandler, StageId, Transition};
-use crate::{App, AppShared, CW, Hot, Mode, SKIN_TYPE_MUSIC_SELECT, SelectTab, SelectView, SortMode};
+use crate::{App, AppShared, CW, Hot, Mode, SKIN_TYPE_MUSIC_SELECT, SelectTab, SortMode};
 
 /// How far inside the corner of a box a pixel that is to be looked at is taken from, so that its
 /// outline is not what is read.
@@ -348,7 +349,7 @@ fn reset(browser: &mut Browser) {
     shared.search.clear();
     shared.practice_requested = false;
     shared.config.library.sort = SortMode::Title;
-    shared.select_view = SelectView::AllSongs;
+    shared.open_for_tests([SelectFolder::AllSongs]);
     shared.sel = 0;
     if shared.favorites.contains(FIRST_CHART_MD5) {
         shared.favorites.toggle(FIRST_CHART_MD5);
@@ -435,7 +436,7 @@ fn check_shortcut(browser: &mut Browser, shortcut: Shortcut, code: KeyCode) {
             let table = browser.app.shared.settings_path.with_file_name("reloaded-by-its-key.json");
             std::fs::write(&table, br#"[{"md5":"none","level":"1"}]"#).expect("the table file is written");
             let location = table.to_string_lossy().into_owned();
-            browser.app.shared.config.library.tables.push(rbms_config::TableSource { name: "mine".into(), location: location.clone() });
+            browser.app.shared.config.library.tables.push(rbms_config::TableSource { name: "mine".into(), location: location.clone(), group: String::new() });
             assert!(matches!(browser.key(code), Transition::Stay), "{shortcut:?} left the browser");
             assert!(crate::tablesrc::table_is_fetching(&browser.app.shared, &location), "{shortcut:?} started nothing");
             while crate::tablesrc::table_is_fetching(&browser.app.shared, &location) {
@@ -473,9 +474,9 @@ fn every_key_the_guide_lists_does_what_it_says() {
                 KeyCode::ArrowUp => assert_eq!(browser.arrow(*code), 2, "{code:?} goes round the top of the list"),
                 KeyCode::Enter => assert!(starts_a_chart(&browser.key(*code)), "{code:?}"),
                 KeyCode::Escape => {
-                    browser.app.shared.select_view = SelectView::TableLevels(0);
+                    browser.app.shared.open_for_tests([browser.app.shared.table_folder(0)]);
                     browser.key(*code);
-                    assert!(browser.app.shared.select_view == SelectView::Root, "{code:?} did not go back a folder");
+                    assert!(browser.app.shared.is_at_root(), "{code:?} did not go back a folder");
                 }
                 other => panic!("the guide lists {other:?}, which this test does not know how to press"),
             }

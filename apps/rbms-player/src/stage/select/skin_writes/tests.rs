@@ -10,7 +10,7 @@ use crate::skin_host::{Cluster, ClusterRequest};
 fn browsing(titles: &[&str]) -> crate::App {
     let mut app = app();
     app.shared.library = Library::from_songs(titles.iter().map(|title| entry(title, "a", "5")).collect());
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.rebuild_select_items();
     app
@@ -96,7 +96,7 @@ fn a_write_the_browser_does_not_carry_out_is_left_where_it_is() {
 fn a_word_confirmed_in_the_skins_search_box_runs_the_browsers_own_search() {
     let mut app = browsing(&["alpha", "beta", "bravo"]);
     let mut state = SelectState::new();
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
     let root_rows = app.shared.select_items.len();
 
@@ -105,7 +105,7 @@ fn a_word_confirmed_in_the_skins_search_box_runs_the_browsers_own_search() {
     assert!(!app.shared.searching, "the word was typed into the skin's box, so the application's search box is not opened for it");
     assert!(state.search_is_on_show(&app.shared), "what the word found is on show");
     assert_eq!(app.shared.search, "br");
-    assert!(app.shared.select_view == SelectView::AllSongs, "a search spans the whole library");
+    assert!(app.shared.opened() == [SelectFolder::AllSongs], "a search spans the whole library");
     assert_eq!(titles(&app), vec!["bravo".to_string()]);
 
     write_word(&mut app, "al");
@@ -126,7 +126,7 @@ fn a_word_confirmed_in_the_skins_search_box_runs_the_browsers_own_search() {
     let now = Instant::now();
     state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, super::super::tests::press(KeyCode::Escape));
     assert!(!state.search_is_on(&app.shared), "Escape leaves a search on show the way it leaves a typed one");
-    assert!(app.shared.select_view == SelectView::Root, "and the browser is back in the folder the first search was made from");
+    assert!(app.shared.is_at_root(), "and the browser is back in the folder the first search was made from");
     assert_eq!(app.shared.select_items.len(), root_rows);
 }
 
@@ -243,7 +243,7 @@ fn the_search_box_of_a_skin_pack_named_by_the_environment_is_typed_into() {
     let size = (u32::try_from(header.width).unwrap_or(1920), u32::try_from(header.height).unwrap_or(1080));
     let titles: Vec<String> = (0..PACK_SONGS).map(|at| format!("song {at:02}")).collect();
     app.shared.library = Library::from_songs(titles.iter().map(|title| entry(title, "artist", "7")).collect());
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.rebuild_select_items();
     let browser = || Stage::Select(Box::new(SelectState::new()));

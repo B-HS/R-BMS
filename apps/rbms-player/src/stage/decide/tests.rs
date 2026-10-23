@@ -15,6 +15,7 @@ use rbms_skin::timer::{MICROS_PER_MILLI, timer_id};
 use super::*;
 use crate::app_play::loaded_chart_for_tests;
 use crate::notify::Level;
+use crate::select_tree::SelectFolder;
 use crate::skin_screen::texture_tests::HandDecode;
 use crate::stage::capture::{app_in, settings_of};
 use crate::stage::render_tests::FRAME_DT;
@@ -322,9 +323,33 @@ fn run_to_the_end(app: &mut App, pixels: &mut HeadlessCanvas) -> Transition {
 /// A browser on a library of one chart, with the pack's decide skin if there is one.
 fn browsing(mut app: App) -> (App, SelectState) {
     app.shared.library = Library::from_songs(vec![entry("alpha", "a", "5")]);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.rebuild_select_items();
     (app, SelectState::new())
+}
+
+/// A chart picked from a level of a table is picked from that table and that level, the level
+/// titled as its folder is (`setTablelevel(HashBar.getTitle())`), however deep the table sits; a
+/// chart picked anywhere else is picked from no table.
+#[test]
+fn the_decide_screen_names_the_innermost_table_and_level() {
+    let (mut app, _) = browsing(crate::stage::render_tests::app());
+    app.shared.config.library.tables = ["https://tables.test/decide/one/", "https://tables.test/decide/stella/"]
+        .map(|location| rbms_config::TableSource { name: String::new(), location: location.to_owned(), group: "STELLA".to_owned() })
+        .to_vec();
+    app.shared.table_names = vec!["ONE".to_owned(), "S1".to_owned()];
+    app.shared.table_levels = vec![vec![("1".to_owned(), vec![0])], vec![("3".to_owned(), vec![0])]];
+    app.shared.table_extras = vec![crate::tablesrc::TableExtras::default(), crate::tablesrc::TableExtras { symbol: Some("st".to_owned()) }];
+    assert_eq!(table_of_the_open_folder(&app.shared), (String::new(), String::new()), "the flat list is no table");
+
+    let (table, level) = (app.shared.table_folder(1), app.shared.level_folder(1, 0));
+    app.shared.open_for_tests([SelectFolder::TableGroup("STELLA".to_owned()), table.clone(), level]);
+    assert_eq!(table_of_the_open_folder(&app.shared), ("S1".to_owned(), "st3".to_owned()));
+    app.shared.open_for_tests([SelectFolder::TableGroup("STELLA".to_owned()), table]);
+    assert_eq!(table_of_the_open_folder(&app.shared), (String::new(), String::new()), "the levels of a table are no level");
+    let (table, level) = (app.shared.table_folder(0), app.shared.level_folder(0, 0));
+    app.shared.open_for_tests([table, level]);
+    assert_eq!(table_of_the_open_folder(&app.shared), ("ONE".to_owned(), "LV 1".to_owned()));
 }
 
 /// Send one key to the browser and answer where it goes.

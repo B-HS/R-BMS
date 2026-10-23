@@ -14,6 +14,9 @@ pub use saved::SavedTable;
 /// The mark some editors put in front of a UTF-8 file, which is not JSON.
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
+/// The symbol a table is given when its header names none, or when it has no header.
+pub(crate) const ABSENT_SYMBOL: &str = "*";
+
 /// A BMS difficulty table resolved into header metadata plus body entries, browsable by
 /// level. Built from a `header.json` (+ its `data_url`) or directly from a body `data.json`.
 pub struct DifficultyTable {
@@ -104,11 +107,18 @@ impl DifficultyTable {
     /// non-numeric levels like "???" sort last).
     pub fn from_parts(header: Option<TableHeader>, entries: Vec<TableEntry>) -> DifficultyTable {
         let (name, symbol, level_order, course) = match header {
-            Some(h) => (h.name.unwrap_or_default(), h.symbol.unwrap_or_else(|| "*".into()), h.level_order.unwrap_or_default(), h.course),
-            None => (String::new(), "*".into(), Vec::new(), None),
+            Some(h) => (h.name.unwrap_or_default(), h.symbol.unwrap_or_else(|| ABSENT_SYMBOL.into()), h.level_order.unwrap_or_default(), h.course),
+            None => (String::new(), ABSENT_SYMBOL.into(), Vec::new(), None),
         };
         let level_order = if level_order.is_empty() { derive_level_order(&entries) } else { level_order };
         DifficultyTable { name, symbol, level_order, entries, skipped: 0, course }
+    }
+
+    /// The symbol the table's header names, which the reference titles each level folder with
+    /// (`tag + level`), or `None` when it names none: no header, no symbol in it, or an empty one.
+    pub fn named_symbol(&self) -> Option<&str> {
+        let symbol = self.symbol.trim();
+        (!symbol.is_empty() && symbol != ABSENT_SYMBOL).then_some(symbol)
     }
 
     /// This table, recording how many body items were left out of it.
@@ -453,6 +463,18 @@ mod tests {
         let t = DifficultyTable::from_parts(Some(header), vec![entry("a", "1")]);
         assert_eq!(t.symbol, "", "explicit empty symbol is NOT replaced by '*'");
         assert_eq!(t.name, "");
+    }
+
+    #[test]
+    fn named_symbol_is_none_without_a_header_symbol() {
+        let with_symbol =
+            |symbol: Option<&str>| TableHeader { name: None, symbol: symbol.map(str::to_string), data_url: Vec::new(), course: None, level_order: None };
+        let named = |header: Option<TableHeader>| DifficultyTable::from_parts(header, vec![entry("a", "1")]).named_symbol().map(str::to_string);
+        assert_eq!(named(None), None, "a table with no header names no symbol");
+        assert_eq!(named(Some(with_symbol(None))), None, "the stand-in for a header with no symbol is not a symbol");
+        assert_eq!(named(Some(with_symbol(Some("")))), None, "an empty symbol is none");
+        assert_eq!(named(Some(with_symbol(Some("\u{2605}")))), Some("\u{2605}".to_string()));
+        assert_eq!(named(Some(with_symbol(Some("st")))), Some("st".to_string()));
     }
 
     #[test]

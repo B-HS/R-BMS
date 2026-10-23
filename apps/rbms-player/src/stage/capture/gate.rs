@@ -24,6 +24,7 @@ use rbms_skin::loader::SKIN_TYPE_PLAY_5KEYS;
 use rbms_skin::loader::{SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS};
 
 use super::*;
+use crate::select_tree::SelectFolder;
 use crate::stage::select::tests::entry;
 
 /// The file of the pack that says which colours it is drawn in.
@@ -114,7 +115,7 @@ fn gate_chart() -> PathBuf {
 fn the_default_pack_draws_the_browser() {
     let mut app = pack_app(&default_pack(), "gate-select");
     app.shared.library = Library::from_songs(GATE_SONGS.iter().map(|title| entry(title, "artist", "7")).collect());
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.config.library.preview = false;
     app.shared.audio_failed = true;

@@ -107,7 +107,7 @@ fn a_skins_frame_is_lent_the_chart_under_the_cursor() {
     let mut browser = browser("lent-chart");
     assert_eq!(squares(&browser), [true, false, false], "a seven-key chart with no replay saved");
 
-    browser.app.shared.select_view = SelectView::Root;
+    browser.app.shared.open_for_tests([]);
     browser.app.shared.sel = 0;
     browser.app.shared.rebuild_select_items();
     browser.frame_after(SHORT_STEP);

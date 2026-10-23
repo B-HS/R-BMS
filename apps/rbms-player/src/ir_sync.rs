@@ -294,7 +294,7 @@ mod tests {
         c.network.server_url = Some("https://ir.example/api".into());
         c.library.songs_folder = Some("/local/songs".into());
         c.library.folders = vec!["/local/songs".into()];
-        c.library.tables = vec![TableSource { name: "mine".into(), location: "/local/table.json".into() }];
+        c.library.tables = vec![TableSource { name: "mine".into(), location: "/local/table.json".into(), group: String::new() }];
         c.library.seeded_default_tables = vec![rbms_config::INSANE_TABLE_ID.into()];
         c.display.font_path = Some("/local/font.ttf".into());
         c.audio.sound_folder = Some(LOCAL_SOUND_FOLDER.into());
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn a_field_of_the_configuration_that_names_a_place_on_disk_is_one_the_upload_blanks() {
         let mut config = Config::default();
-        config.library.tables.push(TableSource { name: String::new(), location: String::new() });
+        config.library.tables.push(TableSource { name: String::new(), location: String::new(), group: String::new() });
         config.network.ir_profiles.push(rbms_config::IrProfile::default());
         let text = ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::default()).unwrap();
         let mut fields: Vec<&str> = text
@@ -476,7 +476,7 @@ mod tests {
         remote.network.server_url = Some("https://elsewhere/api".into());
         remote.library.songs_folder = Some("/their/songs".into());
         remote.library.folders = vec!["/their/songs".into()];
-        remote.library.tables = vec![TableSource { name: "theirs".into(), location: "/their/table.json".into() }];
+        remote.library.tables = vec![TableSource { name: "theirs".into(), location: "/their/table.json".into(), group: String::new() }];
         remote.display.font_path = Some("/their/font.ttf".into());
         remote.audio.sound_folder = Some(REMOTE_SOUND_FOLDER.into());
         remote.skin = remote_skin_settings().skin;

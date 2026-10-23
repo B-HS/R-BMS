@@ -68,7 +68,7 @@ impl DefaultTable {
     /// The row this table is registered as. The name is left empty, so the list shows the name the
     /// table gives itself.
     pub fn source(&self) -> TableSource {
-        TableSource { name: String::new(), location: self.location.to_string() }
+        TableSource { name: String::new(), location: self.location.to_string(), group: String::new() }
     }
 }
 
@@ -100,7 +100,7 @@ mod tests {
     const OTHER: DefaultTable = DefaultTable { id: "other", location: "https://tables.test/other", same_as: &[] };
 
     fn library_with(locations: &[&str]) -> LibraryOptions {
-        let tables = locations.iter().map(|location| TableSource { name: String::new(), location: (*location).to_string() }).collect();
+        let tables = locations.iter().map(|location| TableSource { name: String::new(), location: (*location).to_string(), group: String::new() }).collect();
         LibraryOptions { tables, ..LibraryOptions::default() }
     }
 
@@ -137,7 +137,7 @@ mod tests {
         let mut library = library_with(&["https://tables.test/mine"]);
         let added = library.seed_default_tables(DEFAULT_TABLES);
         assert_eq!(added, vec![&DEFAULT_TABLES[0]]);
-        assert_eq!(library.tables[0], TableSource { name: String::new(), location: "https://bms.hyuns.uk/tables/insane1".into() });
+        assert_eq!(library.tables[0], TableSource { name: String::new(), location: "https://bms.hyuns.uk/tables/insane1".into(), group: String::new() });
         assert_eq!(library.tables[1].location, "https://tables.test/mine", "the player's own table stays, after it");
         assert_eq!(library.seeded_default_tables, vec![INSANE_TABLE_ID.to_string()]);
 

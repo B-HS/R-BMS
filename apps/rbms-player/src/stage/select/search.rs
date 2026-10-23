@@ -52,10 +52,10 @@ use winit::event::Ime;
 use super::SelectState;
 use crate::app_options::options_key;
 use crate::keyconfig::{Shortcut, ShortcutScreen, belongs_to_a_typed_line};
+use crate::select_tree::{ListPlace, OpenedFolder, SelectFolder};
 use crate::stage::{FrameCtx, KeyInput, StageId, Transition};
-use crate::tablesrc::ListPlace;
 use crate::textedit::{ImeEdit, edit_key};
-use crate::{AppShared, KeyCode, SelectTab, SelectView};
+use crate::{AppShared, KeyCode, SelectTab};
 
 /// What the search box draws where the next character will go.
 const SEARCH_CARET: &str = "_";
@@ -150,7 +150,7 @@ impl SelectState {
             return;
         }
         self.search_resume = Some(ListPlace::of(shared));
-        shared.select_view = SelectView::AllSongs;
+        shared.select_path = vec![OpenedFolder::plain(SelectFolder::AllSongs)];
         shared.sel = 0;
         self.rebuild(shared);
     }
@@ -200,14 +200,14 @@ impl SelectState {
     ///
     /// A difficulty table can arrive, or come back changed, while the search is on. Where the
     /// search was made from is kept as a place that is found again in the list as it is now
-    /// ([`ListPlace`]): the folder the cursor was on wherever it stands now, and the level the
-    /// browser was inside by its name.
+    /// ([`ListPlace`]): the bar the cursor was on wherever it stands now, and the folders the
+    /// browser was inside by what they are.
     pub(super) fn exit_search(&mut self, shared: &mut AppShared) {
         shared.searching = false;
         self.search_edit = ImeEdit::default();
         shared.search.clear();
         let place = self.search_resume.take();
-        shared.select_view = place.as_ref().map_or(SelectView::AllSongs, |place| place.view(shared));
+        shared.select_path = place.as_ref().map_or_else(|| vec![OpenedFolder::plain(SelectFolder::AllSongs)], |place| place.path(shared));
         shared.sel = 0;
         self.rebuild(shared);
         shared.sel = place.map_or(0, |place| place.row(shared));
@@ -244,10 +244,10 @@ impl SelectState {
     }
 
     /// Drop a search another screen left behind: one that was on when the browser was left, and is
-    /// no longer over the flat song list because the screen that was opened put the browser back
-    /// at the top of the library. The word must not go on narrowing folders nobody searched.
+    /// no longer over the flat song list because the browser was moved off it meanwhile. The word
+    /// must not go on narrowing folders nobody searched.
     pub(super) fn drop_a_search_left_behind(&mut self, shared: &mut AppShared) {
-        if !self.search_is_on(shared) || shared.select_view == SelectView::AllSongs {
+        if !self.search_is_on(shared) || shared.is_in_the_flat_list() {
             return;
         }
         self.search_resume = None;

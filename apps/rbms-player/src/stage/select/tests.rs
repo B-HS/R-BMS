@@ -36,7 +36,7 @@ pub(crate) fn release(code: KeyCode) -> KeyInput<'static> {
 fn browsing(songs: Vec<rbms_library::SongEntry>) -> App {
     let mut app = app();
     app.shared.library = Library::from_songs(songs);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.rebuild_select_items();
     app
@@ -131,7 +131,7 @@ fn the_sort_key_writes_the_order_it_chose_out() {
 fn the_favourite_key_stars_the_focused_chart_and_leaves_a_folder_alone() {
     let mut app = app();
     let mut state = SelectState::new();
-    app.shared.select_items = vec![SelectItem::Folder { label: "ALL SONGS".into(), target: SelectView::AllSongs }];
+    app.shared.select_items = vec![SelectItem::Folder { label: "ALL SONGS".into(), target: SelectFolder::AllSongs }];
     app.shared.sel = 0;
     key(&mut app, &mut state, press(KeyCode::KeyF));
     assert!(!app.shared.favorites_path.exists(), "a folder row wrote a favourites file");
@@ -151,20 +151,20 @@ fn the_favourite_key_stars_the_focused_chart_and_leaves_a_folder_alone() {
 fn closing_the_search_box_goes_back_to_the_folder_it_was_opened_from() {
     let mut app = browsing(vec![entry("alpha", "a", "5"), entry("beta", "a", "5"), entry("gamma", "a", "5")]);
     let mut state = SelectState::new();
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
     let root_rows = titles(&app);
 
     key(&mut app, &mut state, press(KeyCode::Slash));
     assert!(app.shared.searching);
-    assert!(app.shared.select_view == SelectView::AllSongs, "a search has to span the whole library");
+    assert!(app.shared.opened() == [SelectFolder::AllSongs], "a search has to span the whole library");
 
     key(&mut app, &mut state, typed("bet"));
     assert_eq!(titles(&app), vec!["beta".to_string()], "the query did not filter the list");
 
     key(&mut app, &mut state, press(KeyCode::Escape));
     assert!(!app.shared.searching);
-    assert!(app.shared.select_view == SelectView::Root, "the browser stayed in the list the search ran over");
+    assert!(app.shared.is_at_root(), "the browser stayed in the list the search ran over");
     assert_eq!(titles(&app), root_rows);
     assert!(app.shared.search.is_empty(), "the query outlived the search box");
 }
@@ -388,7 +388,7 @@ fn a_chart_keysound_and_the_preview_copy_of_it_never_share_an_id() {
 fn a_folder_row_counts_only_the_charts_the_filter_leaves() {
     let mut app = browsing(vec![entry("starred", "a", "5"), entry("plain", "a", "5")]);
     let mut state = SelectState::new();
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
     assert_eq!(titles(&app), vec!["ALL SONGS (2)".to_string()]);
 
@@ -469,11 +469,11 @@ fn a_white_key_opens_the_focused_chart() {
 fn a_white_key_on_a_folder_enters_it() {
     let mut app = three_songs();
     let mut state = SelectState::new();
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
 
     assert!(matches!(tap(&mut app, &mut state, WHITE_LANES[0]), Transition::Stay));
-    assert!(app.shared.select_view == SelectView::AllSongs, "the folder was not entered");
+    assert!(app.shared.opened() == [SelectFolder::AllSongs], "the folder was not entered");
     assert_eq!(app.shared.select_items.len(), 3);
 }
 
@@ -484,9 +484,9 @@ fn a_black_key_goes_up_a_folder_and_does_nothing_at_the_root() {
         let mut app = three_songs();
         let mut state = SelectState::new();
         assert!(matches!(tap(&mut app, &mut state, lane), Transition::Stay));
-        assert!(app.shared.select_view == SelectView::Root, "black key on lane {lane} did not leave the folder");
+        assert!(app.shared.is_at_root(), "black key on lane {lane} did not leave the folder");
         assert!(matches!(tap(&mut app, &mut state, lane), Transition::Stay), "at the root it must not quit");
-        assert!(app.shared.select_view == SelectView::Root);
+        assert!(app.shared.is_at_root());
     }
 }
 
@@ -500,7 +500,7 @@ fn key_six_of_the_pad_leaves_the_built_in_browser_where_it_was() {
     app.shared.sel = 1;
     assert!(matches!(tap(&mut app, &mut state, KEY_SIX_LANE), Transition::Stay));
     assert_eq!(app.shared.sel, 1);
-    assert!(app.shared.select_view == SelectView::AllSongs);
+    assert!(app.shared.opened() == [SelectFolder::AllSongs]);
 }
 
 /// The second side of a double-play layout does what the first does, turntable included.
@@ -664,5 +664,5 @@ fn the_turntable_moves_the_course_list_on_the_course_tab() {
     turn(&mut app, &mut state, ScratchDir::Forward, Instant::now());
     assert_eq!(app.shared.sel, 0, "the song list stayed where it was");
     assert!(matches!(tap(&mut app, &mut state, BLACK_CLOSE_LANES[0]), Transition::Stay));
-    assert!(app.shared.select_view == SelectView::AllSongs, "no folder is left from the course tab");
+    assert!(app.shared.opened() == [SelectFolder::AllSongs], "no folder is left from the course tab");
 }

@@ -17,8 +17,8 @@ fn the_table_list_defaults_to_empty_and_keeps_its_order() {
     assert!(LibraryOptions::default().tables.is_empty());
     let mut c = Config::default();
     c.library.tables = vec![
-        TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into() },
-        TableSource { name: String::new(), location: "/local/table.json".into() },
+        TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into(), group: String::new() },
+        TableSource { name: String::new(), location: "/local/table.json".into(), group: String::new() },
     ];
     let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
     assert_eq!(back.library.tables.len(), 2, "count preserved");
@@ -52,7 +52,7 @@ fn merging_a_malformed_legacy_list_is_skipped_rather_than_fatal() {
 fn merging_legacy_lists_appends_only_what_is_missing() {
     let mut c = Config::default();
     c.library.folders = vec!["/songs".into()];
-    c.library.tables = vec![TableSource { name: "kept".into(), location: "/local/table.json".into() }];
+    c.library.tables = vec![TableSource { name: "kept".into(), location: "/local/table.json".into(), group: String::new() }];
     merge_legacy_lists(
         &mut c,
         Some(r#"(folders: ["/songs", "/more"])"#),

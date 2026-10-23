@@ -41,7 +41,7 @@ fn browser(tag: &str, skinned: bool) -> Browser {
 }
 
 fn at(address: &str) -> TableSource {
-    TableSource { name: String::new(), location: address.to_owned() }
+    TableSource { name: String::new(), location: address.to_owned(), group: String::new() }
 }
 
 /// A table body that lists the charts titled `titles` at level 1.
@@ -55,11 +55,10 @@ fn listing(titles: &[&str]) -> Vec<u8> {
 fn read_as_a_scan_does(browser: &mut Browser) {
     let shared = &mut browser.app.shared;
     let store = TableStore::beside(&shared.settings_path);
-    let (names, levels) = read_and_match_all(&store, &shared.config.library.tables, &shared.library, &AtomicUsize::new(0));
-    shared.table_names = names;
-    shared.table_levels = levels;
+    let matched = read_and_match_all(&store, &shared.config.library.tables, &shared.library, &AtomicUsize::new(0));
+    shared.set_tables(matched);
     shared.table_fetches.first_fetches_are_due();
-    shared.select_view = SelectView::Root;
+    shared.open_for_tests([]);
     shared.sel = 0;
     shared.rebuild_select_items();
 }
@@ -169,7 +168,7 @@ fn a_table_with_no_copy_is_fetched_beside_the_browser_and_its_folder_arrives_und
             assert_eq!(tables.asked(), 1, "{tag}: the table is fetched once");
             assert_eq!(rows(&browser), vec!["ALL SONGS (4)", "NEW (2)", "KEPT (1)"], "{tag}: the table that arrived is not a folder in its place");
             assert_eq!(browser.sel(), cursor_after, "{tag}: the cursor is not on the bar it was on");
-            assert!(browser.app.shared.select_view == SelectView::Root, "{tag}: the table arriving moved the browser");
+            assert!(browser.app.shared.is_at_root(), "{tag}: the table arriving moved the browser");
             assert_eq!(store.copy_name(&new).as_deref(), Some("New"), "{tag}: the table that arrived was not kept");
             assert!(matches!(table_status(&new), Some(TableStatus::Loaded { owned: 2, .. })), "{tag}");
             let said = said();
@@ -207,7 +206,7 @@ fn a_table_arriving_leaves_a_browser_that_is_inside_another_table_where_it_is() 
 
     let open = tables.hold();
     browser.frame();
-    browser.app.shared.select_view = SelectView::TableLevel(1, 0);
+    browser.app.shared.open_for_tests([browser.app.shared.table_folder(1), browser.app.shared.level_folder(1, 0)]);
     browser.app.shared.sel = 0;
     browser.app.shared.rebuild_select_items();
     browser.frame();
@@ -219,7 +218,10 @@ fn a_table_arriving_leaves_a_browser_that_is_inside_another_table_where_it_is() 
     land(&mut browser);
     browser.frame();
 
-    assert!(browser.app.shared.select_view == SelectView::TableLevel(1, 0), "the table arriving took the browser out of the level it was in");
+    assert!(
+        browser.app.shared.opened() == [browser.app.shared.table_folder(1), browser.app.shared.level_folder(1, 0)],
+        "the table arriving took the browser out of the level it was in"
+    );
     assert_eq!((rows(&browser), browser.sel()), (before, cursor), "the rows or the cursor moved");
     assert_eq!(browser.app.shared.table_names, vec!["NEW".to_owned(), "KEPT".to_owned()]);
     forget(&browser, &[new, kept]);
@@ -243,7 +245,7 @@ fn a_table_arriving_leaves_a_filtered_list_of_charts_and_its_cursor_as_they_are(
 
     let open = tables.hold();
     browser.frame();
-    browser.app.shared.select_view = SelectView::AllSongs;
+    browser.app.shared.open_for_tests([SelectFolder::AllSongs]);
     browser.app.shared.sel = 0;
     while browser.state.filter.filter(&browser.app.shared.config).mode != Some(rbms_model::Mode::BEAT_7K) {
         browser.state.filter.cycle_mode(true);
@@ -348,7 +350,7 @@ fn a_table_registered_in_the_manager_lands_on_the_browser_after_the_manager_is_l
 
         let open = tables.hold();
         register_table(&mut browser.app.shared, at(address));
-        browser.app.shared.select_view = SelectView::Root;
+        browser.app.shared.open_for_tests([]);
         browser.app.shared.sel = 0;
         browser.app.shared.rebuild_select_items();
         browser.come_back();
@@ -466,7 +468,7 @@ fn a_search_made_inside_a_level_is_left_for_that_level_after_its_table_came_back
     browser.app.shared.config.library.tables = vec![at(address)];
     read_as_a_scan_does(&mut browser);
     browser.frame();
-    browser.app.shared.select_view = SelectView::TableLevel(0, 0);
+    browser.app.shared.open_for_tests([browser.app.shared.table_folder(0), browser.app.shared.level_folder(0, 0)]);
     browser.app.shared.sel = 0;
     browser.app.shared.rebuild_select_items();
     browser.frame();
@@ -484,7 +486,10 @@ fn a_search_made_inside_a_level_is_left_for_that_level_after_its_table_came_back
 
     stroke(&mut browser, KeyCode::Escape, None);
     browser.frame();
-    assert!(browser.app.shared.select_view == SelectView::TableLevel(0, 1), "the search was left for another level than it was made in");
+    assert!(
+        browser.app.shared.opened() == [browser.app.shared.table_folder(0), browser.app.shared.level_folder(0, 1)],
+        "the search was left for another level than it was made in"
+    );
     assert_eq!((rows(&browser), browser.sel()), inside);
     forget(&browser, &[address]);
 }

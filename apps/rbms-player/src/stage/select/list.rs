@@ -25,7 +25,9 @@ use rbms_render::ReferenceImages;
 use rbms_render::skin_render::frame::{LAMP_KINDS, RANK_KINDS};
 use rbms_store::RecordLamp;
 
+use crate::select_tree::{ALL_SONGS_TITLE, SelectFolder, TableRef, level_title, table_group, table_name};
 use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta};
+use crate::user_folders::USER_FOLDERS_LABEL;
 use crate::*;
 
 /// Level a chart whose `#PLAYLEVEL` is not a number sorts under: after every chart that has one,
@@ -231,6 +233,12 @@ impl SelectFilter {
         SelectFilter { favorite_only: config.library.favorite_only, ..SelectFilter::default() }
     }
 
+    /// This filter with the favourites switch the settings file remembers now, which the settings
+    /// screen can have moved since the list was built through this.
+    pub(crate) fn with_favorites_of(self, config: &Config) -> SelectFilter {
+        SelectFilter { favorite_only: config.library.favorite_only, ..self }
+    }
+
     /// Whether anything is being filtered out at all.
     pub(crate) fn is_active(&self) -> bool {
         *self != SelectFilter::default()
@@ -262,7 +270,7 @@ impl SelectFilter {
 }
 
 impl AppShared {
-    /// Recompute the visible select list for the current `select_view`, filtered by what the
+    /// Recompute the visible select list for the folder open innermost, filtered by what the
     /// settings file remembers.
     ///
     /// This is what every screen other than the browser calls — a finished scan, a chart returning
@@ -274,67 +282,107 @@ impl AppShared {
 
     /// Recompute the visible select list, keeping only the charts `filter` lets through.
     pub(crate) fn rebuild_select_items_with(&mut self, filter: SelectFilter) {
-        let songs = self.library.songs();
-        self.select_items = match self.select_view {
-            SelectView::Root => {
-                let shown = self.shown_count(0..songs.len(), filter);
-                let mut items = vec![SelectItem::Folder { label: format!("ALL SONGS ({shown})"), target: SelectView::AllSongs }];
-                for (ti, levels) in self.table_levels.iter().enumerate() {
-                    if levels.is_empty() {
-                        continue;
-                    }
-                    let total: usize = levels.iter().map(|(_, v)| self.shown_count(v.iter().copied(), filter)).sum();
-                    let name = self.table_names.get(ti).cloned().unwrap_or_else(|| "TABLE".into());
-                    items.push(SelectItem::Folder { label: format!("{name} ({total})"), target: SelectView::TableLevels(ti) });
-                }
-                if !self.user_folders.shown.is_empty() {
-                    let total: usize = self.user_folders.shown.iter().map(|folder| self.shown_count(folder.charts.iter().copied(), filter)).sum();
-                    items.push(SelectItem::Folder { label: format!("{} ({total})", crate::user_folders::USER_FOLDERS_LABEL), target: SelectView::UserFolders });
-                }
-                items
-            }
-            SelectView::AllSongs => self.arrange_songs((0..songs.len()).collect(), filter).into_iter().map(SelectItem::Song).collect(),
-            SelectView::TableLevels(ti) => self
-                .table_levels
-                .get(ti)
-                .map(|levels| {
-                    levels
-                        .iter()
-                        .enumerate()
-                        .map(|(li, (level, songs))| SelectItem::Folder {
-                            label: format!("LV {level} ({})", self.shown_count(songs.iter().copied(), filter)),
-                            target: SelectView::TableLevel(ti, li),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            SelectView::TableLevel(ti, li) => self
-                .table_levels
-                .get(ti)
-                .and_then(|levels| levels.get(li))
-                .map(|(_, songs)| self.arrange_songs(songs.clone(), filter).into_iter().map(SelectItem::Song).collect())
-                .unwrap_or_default(),
-            SelectView::UserFolders => self
-                .user_folders
-                .shown
-                .iter()
-                .enumerate()
-                .map(|(at, folder)| SelectItem::Folder {
-                    label: folder.row_label(self.shown_count(folder.charts.iter().copied(), filter)),
-                    target: SelectView::UserFolder(at),
-                })
-                .collect(),
-            SelectView::UserFolder(at) => self
-                .user_folders
-                .shown
-                .get(at)
-                .map(|folder| self.arrange_songs(folder.charts.clone(), filter).into_iter().map(SelectItem::Song).collect())
-                .unwrap_or_default(),
-        };
+        self.select_items = self.rows_of(self.select_path.last().map(|open| &open.folder), filter);
+        self.select_filter = filter;
         if self.sel >= self.select_items.len() {
             self.sel = self.select_items.len().saturating_sub(1);
         }
         self.select_gen = self.select_gen.wrapping_add(1);
+    }
+
+    /// The rows of `folder`, or of the top of the library for `None`, keeping only the charts
+    /// `filter` lets through.
+    ///
+    /// The top holds the flat list, then the tables in the order of the sources -- the tables of a
+    /// group under one row, where the first of them is -- then the player's own folders. A table,
+    /// and a group, none of whose tables has levels is no row. A folder that is no longer there has
+    /// no rows.
+    fn rows_of(&self, folder: Option<&SelectFolder>, filter: SelectFilter) -> Vec<SelectItem> {
+        let songs = self.library.songs();
+        match folder {
+            None => {
+                let shown = self.shown_count(0..songs.len(), filter);
+                let mut items = vec![SelectItem::Folder { label: format!("{ALL_SONGS_TITLE} ({shown})"), target: SelectFolder::AllSongs }];
+                let mut groups_shown: Vec<&str> = Vec::new();
+                for at in 0..self.table_levels.len() {
+                    let group = table_group(self, at);
+                    if group.is_empty() {
+                        items.extend(self.table_row(at, filter));
+                        continue;
+                    }
+                    if groups_shown.contains(&group) {
+                        continue;
+                    }
+                    groups_shown.push(group);
+                    let tables: Vec<usize> = (0..self.table_levels.len()).filter(|&other| table_group(self, other) == group).collect();
+                    if tables.iter().all(|&other| self.table_levels[other].is_empty()) {
+                        continue;
+                    }
+                    let total: usize = tables.iter().map(|&other| self.table_count(other, filter)).sum();
+                    items.push(SelectItem::Folder { label: format!("{group} ({total})"), target: SelectFolder::TableGroup(group.to_string()) });
+                }
+                if !self.user_folders.shown.is_empty() {
+                    let total: usize = self.user_folders.shown.iter().map(|folder| self.shown_count(folder.charts.iter().copied(), filter)).sum();
+                    items.push(SelectItem::Folder { label: format!("{USER_FOLDERS_LABEL} ({total})"), target: SelectFolder::UserFolders });
+                }
+                items
+            }
+            Some(SelectFolder::AllSongs) => self.arrange_songs((0..songs.len()).collect(), filter).into_iter().map(SelectItem::Song).collect(),
+            Some(SelectFolder::TableGroup(group)) => {
+                (0..self.table_levels.len()).filter(|&at| table_group(self, at) == group.as_str()).filter_map(|at| self.table_row(at, filter)).collect()
+            }
+            Some(SelectFolder::Table(table)) => {
+                let Some(at) = table.resolve(self) else {
+                    return Vec::new();
+                };
+                let table = TableRef { at, location: table.location.clone() };
+                self.table_levels
+                    .get(at)
+                    .map(|levels| {
+                        levels
+                            .iter()
+                            .map(|(level, songs)| SelectItem::Folder {
+                                label: format!("{} ({})", level_title(self, at, level), self.shown_count(songs.iter().copied(), filter)),
+                                target: SelectFolder::TableLevel(table.clone(), level.clone()),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+            Some(SelectFolder::TableLevel(table, level)) => {
+                table.level(self, level).map(|songs| self.arrange_songs(songs.to_vec(), filter).into_iter().map(SelectItem::Song).collect()).unwrap_or_default()
+            }
+            Some(SelectFolder::UserFolders) => self
+                .user_folders
+                .shown
+                .iter()
+                .map(|folder| SelectItem::Folder {
+                    label: folder.row_label(self.shown_count(folder.charts.iter().copied(), filter)),
+                    target: SelectFolder::UserFolder(folder.id.clone()),
+                })
+                .collect(),
+            Some(SelectFolder::UserFolder(id)) => self
+                .user_folders
+                .shown
+                .iter()
+                .find(|folder| &folder.id == id)
+                .map(|folder| self.arrange_songs(folder.charts.clone(), filter).into_iter().map(SelectItem::Song).collect())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// How many charts of every level of the table at `at` the filter lets through.
+    fn table_count(&self, at: usize, filter: SelectFilter) -> usize {
+        self.table_levels.get(at).map_or(0, |levels| levels.iter().map(|(_, charts)| self.shown_count(charts.iter().copied(), filter)).sum())
+    }
+
+    /// The row of the table at `at`, or `None` for a table that has no levels.
+    fn table_row(&self, at: usize, filter: SelectFilter) -> Option<SelectItem> {
+        if self.table_levels.get(at).is_none_or(Vec::is_empty) {
+            return None;
+        }
+        let label = format!("{} ({})", table_name(self, at), self.table_count(at, filter));
+        Some(SelectItem::Folder { label, target: SelectFolder::Table(TableRef::of(self, at)) })
     }
 
     /// Fold one chart into a comparable row, reading its records only when something being applied
@@ -569,17 +617,6 @@ fn best_score(scores: &ScoreBook, md5: &str) -> Option<BarScore> {
     scores.for_md5(md5).into_iter().max_by_key(|record| record.ex_score).map(|record| BarScore { ex: record.ex_score, max_ex: record.max_ex })
 }
 
-/// Which of the reference's bars a row that opens `target` stands for: a folder of charts for the
-/// flat list, and a table for a difficulty table and for a level of one. The player's own folders
-/// are charts picked by hash too, held by one row the way a table holds its levels, so they are the
-/// same two bars.
-fn folder_kind(target: SelectView) -> BarKind {
-    match target {
-        SelectView::Root | SelectView::AllSongs => BarKind::Folder,
-        SelectView::TableLevels(_) | SelectView::TableLevel(..) | SelectView::UserFolders | SelectView::UserFolder(_) => BarKind::Table,
-    }
-}
-
 /// The lowest lamp any chart of a folder sits on, or `None` for a folder with no charts counted
 /// (`DirectoryBar.getLamp`).
 fn folder_lamp(distribution: &BarDistribution) -> Option<u8> {
@@ -601,8 +638,8 @@ impl AppShared {
             .iter()
             .map(|item| match item {
                 SelectItem::Song(index) => self.chart_bar(*index, facts, skinned),
-                SelectItem::Folder { label, target } if skinned => self.folder_bar(label, *target, mode),
-                SelectItem::Folder { label, target } => SelectBar::new(folder_kind(*target), label.as_str()),
+                SelectItem::Folder { label, target } if skinned => self.folder_bar(label, target, mode),
+                SelectItem::Folder { label, target } => SelectBar::new(target.bar_kind(), label.as_str()),
             })
             .collect()
     }
@@ -653,21 +690,18 @@ impl AppShared {
     /// difficulty table for its `TableBar` and a level of one for the `HashBar` under it, and the
     /// player's own folders and each folder of them the same way. The reference counts the clears
     /// under the first and the last and not under a table itself, whose bars are levels rather than
-    /// charts.
-    fn folder_bar(&self, label: &str, target: SelectView, mode: Option<Mode>) -> SelectBar {
+    /// charts, nor under a group of tables, whose bars are tables.
+    fn folder_bar(&self, label: &str, target: &SelectFolder, mode: Option<Mode>) -> SelectBar {
         let distribution = match target {
-            SelectView::Root | SelectView::TableLevels(_) | SelectView::UserFolders => None,
-            SelectView::AllSongs => Some(self.distribution(0..self.library.len(), mode)),
-            SelectView::UserFolder(at) => {
-                let charts = self.user_folders.shown.get(at).map_or(&[][..], |folder| folder.charts.as_slice());
+            SelectFolder::TableGroup(_) | SelectFolder::Table(_) | SelectFolder::UserFolders => None,
+            SelectFolder::AllSongs => Some(self.distribution(0..self.library.len(), mode)),
+            SelectFolder::UserFolder(id) => {
+                let charts = self.user_folders.shown.iter().find(|folder| &folder.id == id).map_or(&[][..], |folder| folder.charts.as_slice());
                 Some(self.distribution(charts.iter().copied(), mode))
             }
-            SelectView::TableLevel(table, level) => {
-                let charts = self.table_levels.get(table).and_then(|levels| levels.get(level)).map_or(&[][..], |(_, charts)| charts.as_slice());
-                Some(self.distribution(charts.iter().copied(), mode))
-            }
+            SelectFolder::TableLevel(table, level) => Some(self.distribution(table.level(self, level).unwrap_or_default().iter().copied(), mode)),
         };
-        SelectBar { lamp: distribution.as_ref().and_then(folder_lamp), distribution, ..SelectBar::new(folder_kind(target), label) }
+        SelectBar { lamp: distribution.as_ref().and_then(folder_lamp), distribution, ..SelectBar::new(target.bar_kind(), label) }
     }
 
     /// How the charts at `indices` of the library have been cleared and scored

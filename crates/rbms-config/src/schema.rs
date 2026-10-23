@@ -437,6 +437,11 @@ pub const DEFAULT_PLAYER_ID: &str = "guest";
 pub struct TableSource {
     pub name: String,
     pub location: String,
+    /// The row of the song list's root the table is shown under together with the others of the
+    /// same name, or empty for a row of its own. A file written before there were groups has none,
+    /// which reads as empty.
+    #[serde(default)]
+    pub group: String,
 }
 
 /// Everything the player remembers between runs, in one versioned document.

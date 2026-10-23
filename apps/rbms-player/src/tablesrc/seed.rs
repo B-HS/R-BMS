@@ -68,7 +68,7 @@ mod tests {
     use rbms_library::Library;
 
     use super::*;
-    use crate::tablesrc::{TableOrigin, TableStatus, read_and_match_all, table_status};
+    use crate::tablesrc::{TableOrigin, TableStatus, read_and_match_all, split_matched, table_status};
 
     const INSANE_COPY: &str = "https://bms.hyuns.uk/tables/insane1";
 
@@ -110,10 +110,11 @@ mod tests {
         let settings = Settings::new("first");
         let mut config = Config::first_run();
         assert!(seed_default_tables(&mut config, &settings.0), "the settings changed");
-        assert_eq!(config.library.tables, vec![TableSource { name: String::new(), location: INSANE_COPY.into() }]);
+        assert_eq!(config.library.tables, vec![TableSource { name: String::new(), location: INSANE_COPY.into(), group: String::new() }]);
         assert!(TableStore::beside(&settings.0).has_copy_file(INSANE_COPY), "the carried copy was kept");
 
-        let (names, levels) = read_and_match_all(&TableStore::beside(&settings.0), &config.library.tables, &Library::default(), &AtomicUsize::new(0));
+        let (names, levels, _) =
+            split_matched(read_and_match_all(&TableStore::beside(&settings.0), &config.library.tables, &Library::default(), &AtomicUsize::new(0)));
         assert_eq!(names, vec!["\u{767a}\u{72c2}BMS\u{96e3}\u{6613}\u{5ea6}\u{8868}".to_string()]);
         assert_eq!(levels[0].len(), 26, "every level is a folder, owned or not");
         assert!(matches!(table_status(INSANE_COPY), Some(TableStatus::Loaded { entries: 1_035, origin: TableOrigin::Address { fetched_at: None }, .. })));
@@ -160,7 +161,7 @@ mod tests {
     fn a_player_with_the_original_address_is_not_given_the_copy() {
         let settings = Settings::new("original");
         let mut config = Config::default();
-        let original = TableSource { name: "insane".into(), location: "https://darksabun.club/table/archive/insane1/".into() };
+        let original = TableSource { name: "insane".into(), location: "https://darksabun.club/table/archive/insane1/".into(), group: String::new() };
         config.library.tables = vec![original.clone()];
         assert!(seed_default_tables(&mut config, &settings.0), "the table is written down as given");
         assert_eq!(config.library.tables, vec![original], "the player's own row is left as it was, and alone");

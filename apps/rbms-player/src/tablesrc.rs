@@ -31,7 +31,8 @@ use rbms_config::TableSource;
 use rbms_library::Library;
 use rbms_table::{DifficultyTable, Md5Index, SavedTable, TableError};
 
-use crate::{AppShared, SelectItem, SelectView};
+use crate::AppShared;
+use crate::select_tree::{ListPlace, show_the_list_again};
 
 mod seed;
 pub(crate) use seed::seed_default_tables;
@@ -41,11 +42,34 @@ pub(crate) use seed::seed_default_tables;
 /// no indices; a table that could not be loaded has no levels at all.
 pub(crate) type TableLevels = Vec<(String, Vec<usize>)>;
 
+/// What the browser keeps of a table beside its levels: aligned with `table_names` and
+/// `table_levels`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TableExtras {
+    /// The symbol the header names, without the stand-in for none.
+    pub(crate) symbol: Option<String>,
+}
+
+/// A table read and matched against the library.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MatchedTable {
+    pub(crate) name: String,
+    pub(crate) levels: TableLevels,
+    pub(crate) extras: TableExtras,
+}
+
+impl MatchedTable {
+    /// The slot of a source whose table is not there: named after the source, with no levels.
+    fn unloaded(src: &TableSource) -> MatchedTable {
+        MatchedTable { name: fallback_source_name(src), ..MatchedTable::default() }
+    }
+}
+
 /// What a table is called when neither the user nor the table itself named it.
 const UNNAMED_TABLE: &str = "DIFFICULTY TABLE";
 
 /// What a source is called when its table could not be loaded and the user did not name it.
-const UNLOADED_TABLE: &str = "TABLE";
+pub(crate) const UNLOADED_TABLE: &str = "TABLE";
 
 /// How many sources are loaded at once. Each is a handful of http requests that mostly wait, so
 /// a fetch of several tables takes as long as the slowest rather than all of them one after
@@ -411,7 +435,7 @@ fn fallback_source_name(src: &TableSource) -> String {
 
 /// Match a table that was read against the library, and remember what became of it for the table
 /// manager.
-fn match_and_record(src: &TableSource, load: &TableLoad, library: &Md5Index) -> (String, TableLevels) {
+fn match_and_record(src: &TableSource, load: &TableLoad, library: &Md5Index) -> MatchedTable {
     let table = &load.table;
     let lv = table.match_levels_in(library);
     let owned: usize = lv.iter().map(|(_, v)| v.len()).sum();
@@ -421,7 +445,7 @@ fn match_and_record(src: &TableSource, load: &TableLoad, library: &Md5Index) -> 
         &src.location,
         TableStatus::Loaded { name: name.clone(), entries: table.entries.len(), levels: lv.len(), owned, origin: load.origin, stale: None },
     );
-    (name, lv)
+    MatchedTable { name, levels: lv, extras: TableExtras { symbol: table.named_symbol().map(str::to_string) } }
 }
 
 /// Read one table source without asking the network ([`read_table_source`]) and match it against
@@ -434,25 +458,24 @@ fn match_and_record(src: &TableSource, load: &TableLoad, library: &Md5Index) -> 
 /// here: as a notification, and as the status the table manager shows beside the source. A table at
 /// an address that has no copy answers with no levels too, and is noted as not fetched yet rather
 /// than as a failure; nothing is said of it here, since fetching it is what happens next.
-pub(crate) fn read_and_match(store: &TableStore, src: &TableSource, library: &Md5Index) -> (String, TableLevels) {
+pub(crate) fn read_and_match(store: &TableStore, src: &TableSource, library: &Md5Index) -> MatchedTable {
     println!("loading table: {} ({})", src.name, src.location);
     match read_table_source(store, &src.location) {
         Ok(Some(load)) => match_and_record(src, &load, library),
         Ok(None) => {
             record_not_fetched(&src.location);
-            (fallback_source_name(src), Vec::new())
+            MatchedTable::unloaded(src)
         }
         Err(e) => {
             let reason = failure_reason(&src.location, &e);
             crate::notify::notify(crate::notify::Level::Warn, format!("table load failed ({}): {reason}", src.location));
             record_status(&src.location, TableStatus::Failed { reason });
-            (fallback_source_name(src), Vec::new())
+            MatchedTable::unloaded(src)
         }
     }
 }
 
-/// Read every table source (one entry per source, aligned with `sources`). Returns parallel
-/// `(display name, per-level owned-chart groups)` vecs.
+/// Read every table source (one entry per source, aligned with `sources`).
 ///
 /// Nothing here asks the network: a table that has a copy is read from it, a table file is read
 /// from the file, and a table at an address that has no copy keeps its slot with no levels until it
@@ -463,13 +486,12 @@ pub(crate) fn read_and_match(store: &TableStore, src: &TableSource, library: &Md
 ///
 /// `done` is raised as each source is finished, so the screen that started this off-thread can say
 /// how far through the list it is rather than showing a bar that never moves.
-pub(crate) fn read_and_match_all(store: &TableStore, sources: &[TableSource], library: &Library, done: &AtomicUsize) -> (Vec<String>, Vec<TableLevels>) {
+pub(crate) fn read_and_match_all(store: &TableStore, sources: &[TableSource], library: &Library, done: &AtomicUsize) -> Vec<MatchedTable> {
     let index = Md5Index::new(library.md5s());
     let index = &index;
-    let mut names = Vec::with_capacity(sources.len());
-    let mut levels = Vec::with_capacity(sources.len());
+    let mut matched = Vec::with_capacity(sources.len());
     for batch in sources.chunks(MAX_PARALLEL_LOADS) {
-        let loaded: Vec<(String, TableLevels)> = std::thread::scope(|scope| {
+        std::thread::scope(|scope| {
             let workers: Vec<_> = batch
                 .iter()
                 .map(|src| {
@@ -480,23 +502,19 @@ pub(crate) fn read_and_match_all(store: &TableStore, sources: &[TableSource], li
                     })
                 })
                 .collect();
-            workers.into_iter().zip(batch).map(|(worker, src)| worker.join().unwrap_or_else(|_| stopped_load(src, done))).collect()
+            matched.extend(workers.into_iter().zip(batch).map(|(worker, src)| worker.join().unwrap_or_else(|_| stopped_load(src, done))));
         });
-        for (name, lv) in loaded {
-            names.push(name);
-            levels.push(lv);
-        }
     }
-    (names, levels)
+    matched
 }
 
 /// The slot of a source whose loader stopped without answering, reported the way a failed load is.
-fn stopped_load(src: &TableSource, done: &AtomicUsize) -> (String, TableLevels) {
+fn stopped_load(src: &TableSource, done: &AtomicUsize) -> MatchedTable {
     let reason = LOADER_STOPPED.to_string();
     crate::notify::notify(crate::notify::Level::Warn, format!("table load failed ({}): {reason}", src.location));
     record_status(&src.location, TableStatus::Failed { reason });
     done.fetch_add(1, Ordering::Relaxed);
-    (fallback_source_name(src), Vec::new())
+    MatchedTable::unloaded(src)
 }
 
 /// Why a table is being fetched, which is how its arrival and its failure are worded.
@@ -860,7 +878,7 @@ pub(crate) fn start_first_fetches(shared: &mut AppShared) {
 pub(crate) fn register_table(shared: &mut AppShared, source: TableSource) {
     let at = shared.config.library.tables.len();
     shared.config.library.tables.push(source.clone());
-    set_table_slot(shared, at, fallback_source_name(&source), Vec::new());
+    set_table_slot(shared, at, MatchedTable::unloaded(&source));
     shared.save_settings();
     if is_address(&source.location) {
         record_status(&source.location, TableStatus::NotFetched);
@@ -908,11 +926,11 @@ pub(crate) fn apply_finished_fetches(shared: &mut AppShared) -> bool {
             FetchOutcome::Fetched(_) | FetchOutcome::Kept { .. } if rows.is_empty() => store.forget(&done.location),
             FetchOutcome::Fetched(load) => {
                 for (nth, at) in rows.into_iter().enumerate() {
-                    let (name, levels) = match_and_record(&shared.config.library.tables[at], &load, &index);
+                    let matched = match_and_record(&shared.config.library.tables[at], &load, &index);
                     if nth == 0 && why == FetchWhy::Registered {
-                        announce_registered(&name, &levels);
+                        announce_registered(&matched.name, &matched.levels);
                     }
-                    set_table_slot(shared, at, name, levels);
+                    set_table_slot(shared, at, matched);
                 }
                 list_changed = true;
             }
@@ -952,154 +970,53 @@ fn announce_registered(name: &str, levels: &TableLevels) {
     crate::notify::notify(crate::notify::Level::Info, format!("table added: {name} ({owned} local charts)"));
 }
 
-/// Put a table in the slot of its source. The names and the levels are kept in the order of the
-/// sources; a slot that is not there yet is made.
-fn set_table_slot(shared: &mut AppShared, at: usize, name: String, levels: TableLevels) {
+/// Put a table in the slot of its source. The names, the levels and the extras are kept in the
+/// order of the sources; a slot that is not there yet is made.
+fn set_table_slot(shared: &mut AppShared, at: usize, table: MatchedTable) {
     if shared.table_names.len() <= at {
         shared.table_names.resize(at + 1, UNLOADED_TABLE.to_string());
     }
     if shared.table_levels.len() <= at {
         shared.table_levels.resize(at + 1, Vec::new());
     }
-    shared.table_names[at] = name;
-    shared.table_levels[at] = levels;
-}
-
-/// The level of a table the song list is looking into, by the table's place and the level's name,
-/// or `None` while it is looking anywhere else.
-fn shown_level(shared: &AppShared) -> Option<(usize, String)> {
-    let SelectView::TableLevel(table, level) = shared.select_view else {
-        return None;
-    };
-    let (name, _) = shared.table_levels.get(table)?.get(level)?;
-    Some((table, name.clone()))
-}
-
-/// The player's own folder the song list is looking into, by its id, or `None` while it is looking
-/// anywhere else.
-fn shown_user_folder(shared: &AppShared) -> Option<String> {
-    let SelectView::UserFolder(at) = shared.select_view else {
-        return None;
-    };
-    shared.user_folders.shown.get(at).map(|folder| folder.id.clone())
-}
-
-/// The folder the cursor of the song list is on, as something that can be found again in a list
-/// that has been rebuilt around it.
-#[derive(Clone, PartialEq)]
-enum FocusedFolder {
-    /// A level of a table, by the table's place and the level's name: a table that arrives again
-    /// can have a level before this one that it did not have.
-    Level(usize, String),
-    /// One of the player's own folders, by its id: a fetch can add a folder before it, and its name
-    /// can have been changed on the site.
-    UserFolder(String),
-    /// Any other folder, by where it leads.
-    Leading(SelectView),
-}
-
-impl FocusedFolder {
-    /// What the row `item` of the song list is, when it is a folder.
-    fn of(shared: &AppShared, item: &SelectItem) -> Option<FocusedFolder> {
-        match item {
-            SelectItem::Song(_) => None,
-            SelectItem::Folder { target: SelectView::TableLevel(table, level), .. } => Some(
-                shared
-                    .table_levels
-                    .get(*table)
-                    .and_then(|levels| levels.get(*level))
-                    .map_or(FocusedFolder::Leading(SelectView::TableLevel(*table, *level)), |(name, _)| FocusedFolder::Level(*table, name.clone())),
-            ),
-            SelectItem::Folder { target: SelectView::UserFolder(at), .. } => Some(
-                shared
-                    .user_folders
-                    .shown
-                    .get(*at)
-                    .map_or(FocusedFolder::Leading(SelectView::UserFolder(*at)), |folder| FocusedFolder::UserFolder(folder.id.clone())),
-            ),
-            SelectItem::Folder { target, .. } => Some(FocusedFolder::Leading(*target)),
-        }
+    if shared.table_extras.len() <= at {
+        shared.table_extras.resize(at + 1, TableExtras::default());
     }
+    shared.table_names[at] = table.name;
+    shared.table_levels[at] = table.levels;
+    shared.table_extras[at] = table.extras;
 }
 
-/// A place in the song list -- what it is looking into and the row its cursor is on -- kept as
-/// something that can be found again after the tables under the list have changed.
-///
-/// A level is kept by its name: a fetch can add a level before it or take one away, and the level
-/// at the same place in the table that arrived is then another level. One of the player's own
-/// folders is kept by its id, for the same reason and because its name can change on the site. A folder under the cursor is
-/// kept as the folder it is: a table that arrives for the first time is a folder the list did not
-/// have, put among the folders in the order of the sources, and every folder after it is one place
-/// further down than it was. A chart under the cursor is kept by its place in the list: a table
-/// arriving changes no list of charts but its own levels', and the browser lays its filter over the
-/// list after the tables have been put in, so a place found among the unfiltered charts would not
-/// be the chart's place in the list that is shown.
-///
-/// The place is the list's own while a table lands under it ([`apply_finished_fetches`]), and it is
-/// what the browser keeps of where a search was made from for as long as the search is on: a table
-/// that arrives meanwhile must not move what the search goes back to.
-pub(crate) struct ListPlace {
-    view: SelectView,
-    /// The level the list was looking into ([`shown_level`]).
-    shown: Option<(usize, String)>,
-    /// The player's own folder the list was looking into ([`shown_user_folder`]).
-    shown_folder: Option<String>,
-    /// The folder the cursor was on, or `None` when it was on a chart or over an empty list.
-    focused: Option<FocusedFolder>,
-    sel: usize,
-}
-
-impl ListPlace {
-    /// Where the song list is now.
-    pub(crate) fn of(shared: &AppShared) -> ListPlace {
-        ListPlace {
-            view: shared.select_view,
-            shown: shown_level(shared),
-            shown_folder: shown_user_folder(shared),
-            focused: shared.select_items.get(shared.sel).and_then(|item| FocusedFolder::of(shared, item)),
-            sel: shared.sel,
+impl AppShared {
+    /// Take the slot of the source at `at` out of the list, which the source has just left.
+    pub(crate) fn remove_table_slot(&mut self, at: usize) {
+        if at < self.table_names.len() {
+            self.table_names.remove(at);
+        }
+        if at < self.table_levels.len() {
+            self.table_levels.remove(at);
+        }
+        if at < self.table_extras.len() {
+            self.table_extras.remove(at);
         }
     }
 
-    /// What this place is looking into, as the tables stand now. A level the table no longer has is
-    /// the table's levels, and a table that has no levels left is what is still there: the top of
-    /// the library. The player's own folders go the same way: a folder no longer there is the list of
-    /// them, and no folders at all is the top of the library.
-    pub(crate) fn view(&self, shared: &AppShared) -> SelectView {
-        let levels_of = |table: usize| shared.table_levels.get(table).map_or(0, Vec::len);
-        let place_of = |table: usize| {
-            let (_, name) = self.shown.as_ref().filter(|(shown_table, _)| *shown_table == table)?;
-            shared.table_levels.get(table)?.iter().position(|(level, _)| level == name)
-        };
-        match self.view {
-            SelectView::TableLevels(table) | SelectView::TableLevel(table, _) if levels_of(table) == 0 => SelectView::Root,
-            SelectView::TableLevel(table, _) => place_of(table).map_or(SelectView::TableLevels(table), |level| SelectView::TableLevel(table, level)),
-            SelectView::UserFolders | SelectView::UserFolder(_) if shared.user_folders.shown.is_empty() => SelectView::Root,
-            SelectView::UserFolder(_) => self
-                .shown_folder
-                .as_ref()
-                .and_then(|id| shared.user_folders.shown.iter().position(|folder| &folder.id == id))
-                .map_or(SelectView::UserFolders, SelectView::UserFolder),
-            view => view,
-        }
-    }
-
-    /// The row of this place in the list as it is now, the list having been built over
-    /// [`ListPlace::view`]: the row of the folder the cursor was on, or the row the cursor was on
-    /// when it was on a chart or its folder is gone, held to the rows there are.
-    pub(crate) fn row(&self, shared: &AppShared) -> usize {
-        let found =
-            self.focused.as_ref().and_then(|focused| shared.select_items.iter().position(|item| FocusedFolder::of(shared, item).as_ref() == Some(focused)));
-        found.unwrap_or(self.sel).min(shared.select_items.len().saturating_sub(1))
+    /// Put `tables`, one for each source in the order of the sources, in place of the ones the list
+    /// was showing.
+    pub(crate) fn set_tables(&mut self, tables: Vec<MatchedTable>) {
+        (self.table_names, self.table_levels, self.table_extras) = split_matched(tables);
     }
 }
 
-/// Rebuild the song list where it stood after a table under it changed, `place` being where it
-/// stood before the change: looking into the same level, with the cursor on the folder it was on.
-pub(crate) fn show_the_list_again(shared: &mut AppShared, place: &ListPlace) {
-    shared.select_view = place.view(shared);
-    shared.rebuild_select_items();
-    shared.sel = place.row(shared);
+/// `tables` as the names, the levels and the extras the list keeps side by side.
+pub(crate) fn split_matched(tables: Vec<MatchedTable>) -> (Vec<String>, Vec<TableLevels>, Vec<TableExtras>) {
+    let mut split = (Vec::with_capacity(tables.len()), Vec::with_capacity(tables.len()), Vec::with_capacity(tables.len()));
+    for table in tables {
+        split.0.push(table.name);
+        split.1.push(table.levels);
+        split.2.push(table.extras);
+    }
+    split
 }
 
 /// What the tests put in place of the network and of the temporary folder.
@@ -1313,9 +1230,9 @@ mod tests {
         let path = std::env::temp_dir().join(format!("rbms-lib-table-{}.json", std::process::id()));
         std::fs::write(&path, br#"[{"md5":"BBBB","level":"1"},{"md5":"dddd","level":"2"}]"#).expect("write the fixture");
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb"), entry("cccc"), entry("DDDD")]);
-        let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string() };
+        let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string(), group: String::new() };
 
-        let (name, levels) = read_and_match(&nowhere(), &source, &library_md5s(&library));
+        let MatchedTable { name, levels, .. } = read_and_match(&nowhere(), &source, &library_md5s(&library));
         assert_eq!(name, "MINE");
         assert_eq!(levels, vec![("1".to_string(), vec![1]), ("2".to_string(), vec![3])], "levels carry positions in the library's own order");
         let _ = std::fs::remove_file(&path);
@@ -1325,11 +1242,11 @@ mod tests {
     fn every_source_is_counted_as_it_is_finished_so_the_screen_can_say_how_far_it_is() {
         let library = Library::from_songs(vec![entry("aaaa")]);
         let sources = vec![
-            TableSource { name: "one".into(), location: "/no/such/one.json".into() },
-            TableSource { name: "two".into(), location: "/no/such/two.json".into() },
+            TableSource { name: "one".into(), location: "/no/such/one.json".into(), group: String::new() },
+            TableSource { name: "two".into(), location: "/no/such/two.json".into(), group: String::new() },
         ];
         let done = AtomicUsize::new(0);
-        let (names, levels) = read_and_match_all(&nowhere(), &sources, &library, &done);
+        let (names, levels, _) = split_matched(read_and_match_all(&nowhere(), &sources, &library, &done));
         assert_eq!(done.load(Ordering::Relaxed), 2, "a source that failed is still one the screen no longer waits for");
         assert_eq!(names.len(), 2);
         assert_eq!(levels.len(), 2);
@@ -1342,16 +1259,17 @@ mod tests {
         let path = std::env::temp_dir().join(format!("rbms-md5s-table-{}.json", std::process::id()));
         std::fs::write(&path, br#"[{"md5":"BBBB","level":"1"}]"#).expect("write the fixture");
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb")]);
-        let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string() };
-        assert_eq!(read_and_match(&nowhere(), &source, &library_md5s(&library)), ("MINE".to_string(), vec![("1".to_string(), vec![1])]));
+        let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string(), group: String::new() };
+        let MatchedTable { name, levels, .. } = read_and_match(&nowhere(), &source, &library_md5s(&library));
+        assert_eq!((name, levels), ("MINE".to_string(), vec![("1".to_string(), vec![1])]));
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn a_source_that_cannot_be_loaded_keeps_its_slot_with_no_levels() {
         let library = Library::from_songs(vec![entry("aaaa")]);
-        let source = TableSource { name: "gone".into(), location: "/no/such/table.json".into() };
-        let (name, levels) = read_and_match(&nowhere(), &source, &library_md5s(&library));
+        let source = TableSource { name: "gone".into(), location: "/no/such/table.json".into(), group: String::new() };
+        let MatchedTable { name, levels, .. } = read_and_match(&nowhere(), &source, &library_md5s(&library));
         assert_eq!(name, "GONE", "the source name still labels the row");
         assert!(levels.is_empty(), "a failed load must not drop the row and misalign the parallel vecs");
     }
@@ -1367,7 +1285,7 @@ mod tests {
         }
 
         fn source(&self, name: &str) -> TableSource {
-            TableSource { name: name.into(), location: self.0.to_string_lossy().to_string() }
+            TableSource { name: name.into(), location: self.0.to_string_lossy().to_string(), group: String::new() }
         }
     }
 
@@ -1387,13 +1305,13 @@ mod tests {
     /// two folders that can be told apart rather than the same generic label twice.
     #[test]
     fn a_table_is_called_what_it_calls_itself_in_whatever_script_that_is() {
-        let unnamed = TableSource { name: String::new(), location: "https://tables.test/a/".into() };
+        let unnamed = TableSource { name: String::new(), location: "https://tables.test/a/".into(), group: String::new() };
         let table_name = "\u{767a}\u{72c2}BMS\u{96e3}\u{6613}\u{5ea6}\u{8868}";
         assert_eq!(pick_table_name(&unnamed, &table_named(table_name)), table_name);
         assert_eq!(pick_table_name(&unnamed, &table_named("Satellite")), "SATELLITE", "Latin letters are in the list's capitals");
         assert_eq!(pick_table_name(&unnamed, &table_named("  ")), UNNAMED_TABLE, "only a table with no name gets the generic label");
 
-        let named = TableSource { name: " \u{7b2c}2 ".into(), location: "https://tables.test/b/".into() };
+        let named = TableSource { name: " \u{7b2c}2 ".into(), location: "https://tables.test/b/".into(), group: String::new() };
         assert_eq!(pick_table_name(&named, &table_named("Satellite")), "\u{7b2c}2", "the name the user gave the source comes first");
         assert_eq!(fallback_source_name(&named), "\u{7b2c}2");
         assert_eq!(fallback_source_name(&unnamed), UNLOADED_TABLE);
@@ -1407,7 +1325,7 @@ mod tests {
         let source = body.source("");
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb")]);
 
-        let (name, levels) = read_and_match(&nowhere(), &source, &library_md5s(&library));
+        let MatchedTable { name, levels, .. } = read_and_match(&nowhere(), &source, &library_md5s(&library));
         assert_eq!(name, UNNAMED_TABLE);
         assert_eq!(levels, vec![("1".to_string(), Vec::new()), ("2".to_string(), Vec::new())]);
         assert_eq!(
@@ -1463,10 +1381,10 @@ mod tests {
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb")]);
         let bodies: Vec<BodyFile> = (0..MAX_PARALLEL_LOADS + 3).map(|i| BodyFile::written(&format!("order-{i}"), br#"[{"md5":"bbbb","level":"1"}]"#)).collect();
         let mut sources: Vec<TableSource> = bodies.iter().enumerate().map(|(i, body)| body.source(&format!("t{i}"))).collect();
-        sources.insert(2, TableSource { name: "gone".into(), location: "/no/such/side-by-side.json".into() });
+        sources.insert(2, TableSource { name: "gone".into(), location: "/no/such/side-by-side.json".into(), group: String::new() });
 
         let done = AtomicUsize::new(0);
-        let (names, levels) = read_and_match_all(&nowhere(), &sources, &library, &done);
+        let (names, levels, _) = split_matched(read_and_match_all(&nowhere(), &sources, &library, &done));
         assert_eq!(done.load(Ordering::Relaxed), sources.len());
         let expected: Vec<String> = sources.iter().map(|source| source.name.to_ascii_uppercase()).collect();
         assert_eq!(names, expected);
@@ -1515,7 +1433,7 @@ mod tests {
     }
 
     fn at(address: &str) -> TableSource {
-        TableSource { name: String::new(), location: address.to_string() }
+        TableSource { name: String::new(), location: address.to_string(), group: String::new() }
     }
 
     /// Take what `fetches` come back with until nothing of them is out, and answer all of it and
@@ -1576,7 +1494,7 @@ mod tests {
         let left_over: Vec<_> = std::fs::read_dir(home.0.join(TABLES_FOLDER)).expect("the table folder").flatten().map(|file| file.file_name()).collect();
         assert_eq!(left_over.len(), 1, "the copy is written whole and renamed into place, with nothing left beside it: {left_over:?}");
 
-        let (name, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        let MatchedTable { name, levels, .. } = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert_eq!((name.as_str(), tables.asked()), ("KEPT", 1), "the table that was kept is read from the copy");
         assert_eq!(levels, vec![("1".to_string(), vec![1]), ("2".to_string(), vec![0])]);
         assert_eq!(
@@ -1609,13 +1527,13 @@ mod tests {
         let first = table_status(address);
 
         tables.serve(address, "Second", TWO_LEVELS);
-        let (name, levels) = read_and_match(&store, &at(address), &library);
+        let MatchedTable { name, levels, .. } = read_and_match(&store, &at(address), &library);
         assert_eq!(tables.asked(), 1, "a table that has a copy was fetched");
         assert_eq!((name.as_str(), levels.len()), ("FIRST", 1), "the table is the copy, not what the address serves now");
         assert_eq!(table_status(address), first, "the copy still says when it was fetched");
 
         tables.take_down(address);
-        let (name, levels) = read_and_match(&store, &at(address), &library);
+        let MatchedTable { name, levels, .. } = read_and_match(&store, &at(address), &library);
         assert_eq!((name.as_str(), levels, tables.asked()), ("FIRST", vec![("1".to_string(), vec![1])], 1), "the copy is all a load needs");
         forget_table_status(address);
     }
@@ -1633,7 +1551,7 @@ mod tests {
         }
 
         let done = AtomicUsize::new(0);
-        let (names, levels) = read_and_match_all(&store, &sources, &two_charts(), &done);
+        let (names, levels, _) = split_matched(read_and_match_all(&store, &sources, &two_charts(), &done));
         assert_eq!(tables.asked(), 0, "a run in which every table has a copy asked the network");
         assert_eq!(done.load(Ordering::Relaxed), sources.len());
         assert_eq!(names, (0..sources.len()).map(|i| format!("T{i}")).collect::<Vec<_>>());
@@ -1661,7 +1579,7 @@ mod tests {
             tables.serve(&sources[1].location, "new", TWO_LEVELS);
 
             let done = AtomicUsize::new(0);
-            let (names, levels) = read_and_match_all(&store, &sources, &two_charts(), &done);
+            let (names, levels, _) = split_matched(read_and_match_all(&store, &sources, &two_charts(), &done));
             assert_eq!(tables.asked(), 0, "reading the library asked the address of a table that has no copy");
             assert_eq!((names, done.load(Ordering::Relaxed)), (vec!["OLD".to_string(), UNLOADED_TABLE.to_string()], 2));
             assert_eq!((levels[0].len(), levels[1].len()), (1, 0), "the table with no copy has no levels, and holds up none of the others");
@@ -1688,7 +1606,7 @@ mod tests {
         let failed = TableStatus::Failed { reason: "address: no answer".into() };
         record_status(address, failed.clone());
 
-        let (_, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        let MatchedTable { levels, .. } = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert!(levels.is_empty());
         assert_eq!(table_status(address), Some(failed), "reading the library again forgot that the fetch had failed");
         assert_eq!(tables.asked(), 0);
@@ -1718,7 +1636,7 @@ mod tests {
         std::fs::create_dir_all(&store.folder).expect("the table folder");
         std::fs::write(store.copy_path(address), br#"{"name":"Whole","symbol":"*","level_order":["1"],"entr"#).expect("write half a copy");
 
-        let (_, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        let MatchedTable { levels, .. } = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert!(levels.is_empty(), "half a copy was read as a table");
         assert_eq!((table_status(address), tables.asked()), (Some(TableStatus::NotFetched), 0));
 
@@ -1741,13 +1659,13 @@ mod tests {
         let json = SavedTable::json_of(&other, "https://tables.test/somebody-else/", Some(1)).expect("a table is JSON");
         crate::write_atomic(&store.copy_path(address), &json).expect("write the other table's copy");
 
-        let (_, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        let MatchedTable { levels, .. } = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert!(levels.is_empty(), "another address's copy was read as this table");
         assert_eq!(table_status(address), Some(TableStatus::NotFetched));
 
         let (done, _) = fetched(&store, vec![at(address)], FetchWhy::First);
         assert_eq!((arrivals(&done), tables.asked()), (vec![(address, "Mine".to_string())], 1));
-        let (name, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        let MatchedTable { name, levels, .. } = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert_eq!((name.as_str(), levels.len()), ("MINE", 1));
         forget_table_status(address);
     }
@@ -1771,7 +1689,7 @@ mod tests {
             .expect("after the epoch")
             .as_secs();
 
-        let (name, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        let MatchedTable { name, levels, .. } = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert_eq!((name.as_str(), tables.asked()), ("EARLIER", 0), "a table with an earlier copy was fetched");
         assert_eq!(levels, vec![("2".to_string(), vec![0]), ("1".to_string(), vec![1])], "the order the earlier copy kept");
         assert!(!legacy.exists(), "the earlier copy is moved, not copied");

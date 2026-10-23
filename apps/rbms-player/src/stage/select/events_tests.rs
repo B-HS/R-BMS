@@ -54,7 +54,7 @@ const FOLDER_ROW: usize = 0;
 fn browsing() -> (App, SelectState) {
     let mut app = app();
     app.shared.library = Library::from_songs(vec![entry("alpha", "a", "5"), entry("beta", "a", "5")]);
-    app.shared.select_items = vec![SelectItem::Folder { label: "folder".into(), target: SelectView::AllSongs }, SelectItem::Song(0), SelectItem::Song(1)];
+    app.shared.select_items = vec![SelectItem::Folder { label: "folder".into(), target: SelectFolder::AllSongs }, SelectItem::Song(0), SelectItem::Song(1)];
     app.shared.sel = CHART_ROW;
     app.shared.config.play.autoplay = false;
     (app, SelectState::new())
@@ -387,9 +387,9 @@ fn the_play_and_practice_buttons_start_the_chart_and_leave_a_folder_alone() {
     for id in [BUTTON_PLAY, BUTTON_PRACTICE, BUTTON_AUTOPLAY] {
         let (mut app, mut state) = browsing();
         app.shared.sel = FOLDER_ROW;
-        let view = app.shared.select_view;
+        let view = app.shared.opened();
         assert!(matches!(state.run_event(&mut app.shared, id, NO_ARGUMENT), Transition::Stay), "event {id} started something from a folder");
-        assert!(app.shared.select_view == view, "event {id} opened the folder");
+        assert!(app.shared.opened() == view, "event {id} opened the folder");
         assert!(!app.shared.practice_requested && !app.shared.run_plays_itself());
     }
 }
@@ -424,7 +424,7 @@ fn the_autoplay_button_plays_the_chart_by_itself_once() {
 #[test]
 fn an_autoplay_that_starts_nothing_marks_no_run() {
     let (mut app, mut state) = browsing();
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.sel = 0;
     app.shared.rebuild_select_items();
     assert!(matches!(state.run_event(&mut app.shared, BUTTON_AUTOPLAY, NO_ARGUMENT), Transition::Stay));

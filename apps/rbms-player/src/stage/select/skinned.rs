@@ -33,7 +33,7 @@ use crate::skin_host::writers::{BrowserWrite, browser_write};
 use crate::stage::result::SkinStatus;
 use crate::stage::scene_life::{SceneTimes, advance};
 use crate::stage::{FrameCtx, Transition};
-use crate::{AppShared, KeyCode, SKIN_TYPE_MUSIC_SELECT, SelectItem, SelectTab, SelectView, SystemSound};
+use crate::{AppShared, KeyCode, SKIN_TYPE_MUSIC_SELECT, SelectItem, SelectTab, SystemSound};
 
 /// The length of a scene that never ends on its own. The browser reads the `input` time of a
 /// skin's header and neither its `scene` nor its `fadeout` (`MusicSelector.render`).
@@ -350,7 +350,7 @@ impl SelectState {
         if self.tab != SelectTab::Songs {
             return;
         }
-        if self.search_is_on(shared) || shared.select_view != SelectView::Root {
+        if self.search_is_on(shared) || !shared.is_at_root() {
             self.select_back(shared);
         } else {
             self.sort_event(shared, true);

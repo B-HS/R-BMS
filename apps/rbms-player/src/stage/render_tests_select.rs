@@ -4,10 +4,11 @@ use std::time::Instant;
 
 use rbms_library::Library;
 
+use crate::KeyCode;
+use crate::select_tree::SelectFolder;
 use crate::stage::render_tests::{app, render};
 use crate::stage::select::tests::{entry, press, record};
 use crate::stage::{FrameCtx, SelectState, Stage, StageHandler};
-use crate::{KeyCode, SelectView};
 
 /// The browser is the one screen that is entered without anything having been loaded, so an empty
 /// library has to paint a usable frame rather than nothing at all.
@@ -70,7 +71,7 @@ fn the_filter_panel_paints_over_the_browser() {
 fn a_starred_chart_and_its_dj_rank_reach_the_painted_frame() {
     let mut app = app();
     app.shared.library = Library::from_songs(vec![entry("song", "artist", "12")]);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.rebuild_select_items();
     let plain = render(&mut app, Stage::Select(Box::new(SelectState::new()))).pixel_checksum();
 

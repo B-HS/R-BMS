@@ -395,7 +395,7 @@ fn ron_round_trip_preserves_every_field() {
     c.library.favorite_only = true;
     c.library.songs_folder = Some("/songs".into());
     c.library.folders = vec!["/a".into(), "/b/c".into()];
-    c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into() }];
+    c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into(), group: String::new() }];
     c.network.server_url = Some("https://ir.example/api".into());
     c.network.player_id = "dj".into();
     c.network.ir_token = Some("tok-123".into());

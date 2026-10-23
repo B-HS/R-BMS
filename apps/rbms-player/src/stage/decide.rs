@@ -42,13 +42,14 @@ use rbms_skin::timer::TimerState;
 use winit::keyboard::KeyCode;
 
 use crate::app_play::LoadedChart;
+use crate::select_tree::{level_title, table_name};
 use crate::skin_host::overview::ChartOverview;
 use crate::skin_screen::DecideDraw;
 use crate::stage::loading::ChartAssets;
 use crate::stage::scene_life::{ScenePhase, SceneTimes, advance, begin_fadeout, takes_input};
 use crate::stage::{Canvas, FrameCtx, KeyInput, LoadingState, Stage, StageHandler, Transition};
 use crate::syssound::SystemSound;
-use crate::{AppShared, DecodedImage, SKIN_TYPE_DECIDE, SelectView, decode_bga_image};
+use crate::{AppShared, DecodedImage, SKIN_TYPE_DECIDE, decode_bga_image};
 
 /// The key indices that end the scene early while one of them is down: keys 1, 3, 5 and 7
 /// (`MusicDecide.input`).
@@ -306,14 +307,14 @@ impl DecideState {
 }
 
 /// The difficulty table and the level the browser has open, which is where a chart picked now was
-/// picked from; both empty anywhere else in the browser (`MusicSelector.readChart`).
+/// picked from; both empty anywhere else in the browser (`MusicSelector.readChart`). The level is
+/// written as its folder is titled (`setTablelevel(HashBar.getTitle())`): with the symbol of its
+/// table in front.
 fn table_of_the_open_folder(shared: &AppShared) -> (String, String) {
-    let SelectView::TableLevel(table, level) = shared.select_view else {
+    let Some((table, level)) = shared.innermost_level() else {
         return (String::new(), String::new());
     };
-    let name = shared.table_names.get(table).cloned().unwrap_or_default();
-    let level = shared.table_levels.get(table).and_then(|levels| levels.get(level)).map(|(label, _)| label.clone()).unwrap_or_default();
-    (name, level)
+    (table_name(shared, table), level_title(shared, table, &level))
 }
 
 /// What has become of the decide skin, asked after the frame's own preparation of it.

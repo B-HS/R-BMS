@@ -84,7 +84,7 @@ fn route(browser: &mut Browser, key: KeyInput<'_>) -> Transition {
 }
 
 /// A key pressed and let go again through that route, with the character it types if it types one.
-fn stroke(browser: &mut Browser, code: KeyCode, text: Option<&'static str>) -> Transition {
+pub(super) fn stroke(browser: &mut Browser, code: KeyCode, text: Option<&'static str>) -> Transition {
     let asked = route(browser, KeyInput { code, pressed: true, released: false, text });
     route(browser, release(code));
     asked
@@ -334,7 +334,7 @@ fn confirming_an_empty_word_is_the_same_as_cancelling() {
     assert!(!browser.app.shared.searching);
     assert_eq!((titles(&browser).len(), browser.sel()), (TITLES.len(), 2), "the browser is not back on the row the search was opened on");
     assert!(matches!(stroke(&mut browser, KeyCode::Escape, None), Transition::Stay));
-    assert!(browser.app.shared.select_view == SelectView::Root, "Escape after an empty search did not go up a folder as it does on any list");
+    assert!(browser.app.shared.is_at_root(), "Escape after an empty search did not go up a folder as it does on any list");
 }
 
 /// Escape on a list a search left on show leaves the search the way leaving a folder does: back to
@@ -343,7 +343,7 @@ fn confirming_an_empty_word_is_the_same_as_cancelling() {
 fn escape_leaves_a_search_on_show_for_where_it_was_made_from() {
     for skinned in [true, false] {
         let mut browser = browser(&format!("search-escape-{skinned}"), skinned);
-        browser.app.shared.select_view = SelectView::Root;
+        browser.app.shared.open_for_tests([]);
         browser.app.shared.sel = 0;
         browser.app.shared.rebuild_select_items();
         browser.frame_after(SHORT_STEP);
@@ -352,7 +352,7 @@ fn escape_leaves_a_search_on_show_for_where_it_was_made_from() {
         confirm_in_the_skins_box(&mut browser, "alp");
         assert_eq!(titles(&browser), ["alpha"]);
         assert!(matches!(stroke(&mut browser, KeyCode::Escape, None), Transition::Stay));
-        assert!(browser.app.shared.select_view == SelectView::Root, "the browser stayed in the list the search ran over");
+        assert!(browser.app.shared.is_at_root(), "the browser stayed in the list the search ran over");
         assert_eq!(titles(&browser), root);
         assert!(browser.app.shared.search.is_empty(), "the word outlived the search");
         assert!(!browser.state.esc_quit_armed(), "leaving a search armed the quit");
@@ -511,7 +511,7 @@ fn a_word_confirmed_in_the_skins_search_text_opens_no_second_search_box() {
 #[test]
 fn the_search_key_takes_a_word_on_show_up_again() {
     let mut browser = browser("search-again", true);
-    browser.app.shared.select_view = SelectView::Root;
+    browser.app.shared.open_for_tests([]);
     browser.app.shared.rebuild_select_items();
     browser.frame_after(SHORT_STEP);
     confirm_in_the_skins_box(&mut browser, "al");
@@ -522,7 +522,7 @@ fn the_search_key_takes_a_word_on_show_up_again() {
     route(&mut browser, typed(KeyCode::KeyP, "p"));
     assert_eq!(titles(&browser), ["alpha"]);
     stroke(&mut browser, KeyCode::Escape, None);
-    assert!(browser.app.shared.select_view == SelectView::Root, "cancelling the second word did not go back to where the first search was made from");
+    assert!(browser.app.shared.is_at_root(), "cancelling the second word did not go back to where the first search was made from");
 }
 
 /// Leaving the browser for another screen ends the typing, and a screen that put the browser back
@@ -540,13 +540,13 @@ fn leaving_the_browser_ends_the_typing_and_a_reset_list_drops_the_search() {
     browser.frame_after(SHORT_STEP);
     assert_eq!(titles(&browser), ["alpha"], "coming back from a screen that left the list alone lost the search");
 
-    browser.app.shared.select_view = SelectView::Root;
+    browser.app.shared.open_for_tests([]);
     browser.app.shared.rebuild_select_items();
     browser.come_back();
     browser.frame_after(SHORT_STEP);
     assert!(browser.app.shared.search.is_empty(), "a word outlived the list it was searched over");
     assert!(matches!(stroke(&mut browser, KeyCode::Escape, None), Transition::Stay));
-    assert!(browser.app.shared.select_view == SelectView::Root && browser.state.esc_quit_armed(), "Escape at the top went looking for a search to leave");
+    assert!(browser.app.shared.is_at_root() && browser.state.esc_quit_armed(), "Escape at the top went looking for a search to leave");
 }
 
 /// The fixture skin with a text that draws the path of the open folders added to it, drawing a
@@ -833,10 +833,11 @@ fn the_reload_key_fetches_every_table_again_beside_the_browser() {
             let mut browser = browser(&format!("search-reload-{skinned}"), skinned);
             let store = crate::tablesrc::TableStore::beside(&browser.app.shared.settings_path);
             let shared = &mut browser.app.shared;
-            shared.config.library.tables = [&up, &down].map(|address| rbms_config::TableSource { name: String::new(), location: address.clone() }).to_vec();
+            shared.config.library.tables =
+                [&up, &down].map(|address| rbms_config::TableSource { name: String::new(), location: address.clone(), group: String::new() }).to_vec();
             shared.table_names = vec!["UP".to_owned(), "DOWN".to_owned()];
             shared.table_levels = vec![vec![("1".to_owned(), vec![0])], vec![("1".to_owned(), vec![1])]];
-            shared.select_view = SelectView::Root;
+            shared.open_for_tests([]);
             shared.rebuild_select_items();
             browser.frame();
             tables.serve(&up, "Up", br#"[{"md5":"md5-alba","level":"1"},{"md5":"md5-alder","level":"2"},{"md5":"md5-alpha","level":"2"}]"#);
@@ -857,7 +858,7 @@ fn the_reload_key_fetches_every_table_again_beside_the_browser() {
             assert_eq!(tables.asked(), 2, "skinned {skinned}: each table is fetched once");
             assert_eq!(shared.table_levels[0], vec![("1".to_owned(), vec![0]), ("2".to_owned(), vec![1, 2])], "skinned {skinned}: the table that answered");
             assert_eq!(shared.table_levels[1], vec![("1".to_owned(), vec![1])], "skinned {skinned}: the table that did not answer changed");
-            assert!(shared.select_view == SelectView::Root, "skinned {skinned}: the reload moved the browser");
+            assert!(shared.is_at_root(), "skinned {skinned}: the reload moved the browser");
             let labels: Vec<&str> = shared
                 .select_items
                 .iter()
@@ -891,7 +892,7 @@ fn the_reload_key_is_read_under_the_box_and_the_typing_goes_on() {
         let _installed = tables.install();
         tables.serve(&address, "Typed", br#"[{"md5":"md5-alba","level":"1"}]"#);
         let mut browser = browser(&format!("search-reload-typing-{skinned}"), skinned);
-        browser.app.shared.config.library.tables = vec![rbms_config::TableSource { name: String::new(), location: address.clone() }];
+        browser.app.shared.config.library.tables = vec![rbms_config::TableSource { name: String::new(), location: address.clone(), group: String::new() }];
         type_a_search(&mut browser, WORD);
 
         assert!(matches!(stroke(&mut browser, KeyCode::F6, None), Transition::Stay), "skinned {skinned}");
@@ -931,10 +932,9 @@ fn a_table_that_arrives_for_the_first_time_leaves_a_search_as_it_is() {
         let mut browser = browser(&format!("search-first-fetch-{skinned}"), skinned);
         let store = crate::tablesrc::TableStore::beside(&browser.app.shared.settings_path);
         let shared = &mut browser.app.shared;
-        shared.config.library.tables = vec![rbms_config::TableSource { name: String::new(), location: address.clone() }];
-        let (names, levels) =
-            crate::tablesrc::read_and_match_all(&store, &shared.config.library.tables, &shared.library, &std::sync::atomic::AtomicUsize::new(0));
-        (shared.table_names, shared.table_levels) = (names, levels);
+        shared.config.library.tables = vec![rbms_config::TableSource { name: String::new(), location: address.clone(), group: String::new() }];
+        let matched = crate::tablesrc::read_and_match_all(&store, &shared.config.library.tables, &shared.library, &std::sync::atomic::AtomicUsize::new(0));
+        shared.set_tables(matched);
         shared.table_fetches.first_fetches_are_due();
         let open = tables.hold();
         type_a_search(&mut browser, WORD);
@@ -953,7 +953,10 @@ fn a_table_that_arrives_for_the_first_time_leaves_a_search_as_it_is() {
         assert_eq!(tables.asked(), 1, "skinned {skinned}: the table with no copy was not fetched beside the search");
         assert_eq!(browser.app.shared.table_names, vec!["ARRIVED".to_owned()], "skinned {skinned}");
         assert_eq!(browser.app.shared.search, WORD, "skinned {skinned}: the table arriving changed the word");
-        assert!(browser.app.shared.select_view == SelectView::AllSongs, "skinned {skinned}: the table arriving took the browser off the list the search found");
+        assert!(
+            browser.app.shared.opened() == [SelectFolder::AllSongs],
+            "skinned {skinned}: the table arriving took the browser off the list the search found"
+        );
         assert_eq!((titles(&browser), browser.sel()), (found, cursor), "skinned {skinned}: the rows the search found, or the cursor, moved");
 
         store.forget(&address);

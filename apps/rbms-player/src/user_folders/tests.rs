@@ -8,7 +8,8 @@ use rbms_ir::{ChartId, CourseSubmission, PlayerProfile, ReplayData, ScoreRecord,
 
 use super::*;
 use crate::ir_session::AccountSession;
-use crate::{App, Config, LaunchOptions, SelectItem, SelectView};
+use crate::select_tree::SelectFolder;
+use crate::{App, Config, LaunchOptions, SelectItem};
 
 pub(crate) const SERVER: &str = "https://folders.test/api";
 pub(crate) const TOKEN: &str = "token-of-a-test";
@@ -187,8 +188,9 @@ impl Signed {
     }
 
     /// The rows of the song list looking into `view`.
-    fn rows(&mut self, view: SelectView) -> Vec<String> {
-        self.app.shared.select_view = view;
+    fn rows(&mut self, open: fn(&crate::AppShared) -> Vec<SelectFolder>) -> Vec<String> {
+        let folders = open(&self.app.shared);
+        self.app.shared.open_for_tests(folders);
         self.app.shared.rebuild_select_items();
         self.app
             .shared
@@ -229,16 +231,20 @@ pub(crate) fn two_folders() -> Arc<FolderServer> {
 #[test]
 fn the_folders_are_one_row_at_the_top_holding_a_row_per_folder() {
     let mut signed = Signed::new("rows", two_folders());
-    assert!(signed.rows(SelectView::Root).iter().all(|row| !row.starts_with(USER_FOLDERS_LABEL)), "no folders before they are fetched");
+    assert!(signed.rows(|_| Vec::new()).iter().all(|row| !row.starts_with(USER_FOLDERS_LABEL)), "no folders before they are fetched");
 
     signed.fetch(true);
-    assert_eq!(signed.rows(SelectView::Root), vec!["ALL SONGS (2)".to_string(), "MY FOLDERS (3)".to_string()]);
+    assert_eq!(signed.rows(|_| Vec::new()), vec!["ALL SONGS (2)".to_string(), "MY FOLDERS (3)".to_string()]);
     assert_eq!(
-        signed.rows(SelectView::UserFolders),
+        signed.rows(|_| vec![SelectFolder::UserFolders]),
         vec!["PRACTICE 12 (2/3)".to_string(), "LN (1)".to_string()],
         "owned out of listed, or only owned when all are"
     );
-    assert_eq!(signed.rows(SelectView::UserFolder(0)), vec![OWNED_A.to_string(), OWNED_B.to_string()], "a chart the library does not have is no row");
+    assert_eq!(
+        signed.rows(|shared| vec![SelectFolder::UserFolders, shared.user_folder(0)]),
+        vec![OWNED_A.to_string(), OWNED_B.to_string()],
+        "a chart the library does not have is no row"
+    );
     assert_eq!(signed.app.shared.user_folders.chart_counts(), (4, 3));
 }
 
@@ -255,12 +261,12 @@ fn a_second_fetch_asks_only_for_the_folders_that_changed() {
     signed.server.set_folders(&[(LONG_NOTES, &[OWNED_B, OWNED_A])]);
     signed.fetch(false);
     assert_eq!(signed.server.folder_asks(), 3, "only the folder whose stamp moved was asked for again");
-    assert_eq!(signed.rows(SelectView::UserFolders), vec!["LN (2)".to_string()], "the folder the index no longer lists is gone");
+    assert_eq!(signed.rows(|_| vec![SelectFolder::UserFolders]), vec!["LN (2)".to_string()], "the folder the index no longer lists is gone");
 
     signed.server.set_folders(&[]);
     signed.fetch(false);
     assert_eq!(signed.server.folder_asks(), 3, "nothing changed, nothing asked for");
-    assert_eq!(signed.rows(SelectView::UserFolders), vec!["LN (2)".to_string()]);
+    assert_eq!(signed.rows(|_| vec![SelectFolder::UserFolders]), vec!["LN (2)".to_string()]);
 }
 
 /// A folder that fails keeps what the copy held of it, and one the copy did not have is left out
@@ -276,7 +282,7 @@ fn a_folder_that_fails_keeps_what_was_kept_of_it() {
     ]));
     signed.server.set_folders(&[]);
     signed.fetch(true);
-    assert_eq!(signed.rows(SelectView::UserFolders), vec!["PRACTICE 12 (2/3)".to_string(), "LN (1)".to_string()]);
+    assert_eq!(signed.rows(|_| vec![SelectFolder::UserFolders]), vec!["PRACTICE 12 (2/3)".to_string(), "LN (1)".to_string()]);
     assert!(matches!(signed.app.shared.user_folders.status(), FolderStatus::Shown { problem: Some(FolderProblem::Failed(_)), .. }));
 }
 
@@ -302,7 +308,7 @@ fn a_refused_session_hides_the_folders_and_keeps_the_copy() {
     signed.fetch(true);
     assert!(signed.app.shared.user_folders.shown.is_empty(), "the folders of a refused session are on show");
     assert!(signed.copy_path().exists());
-    assert!(signed.rows(SelectView::Root).iter().all(|row| !row.starts_with(USER_FOLDERS_LABEL)));
+    assert!(signed.rows(|_| Vec::new()).iter().all(|row| !row.starts_with(USER_FOLDERS_LABEL)));
 }
 
 /// Signing out deletes the account's folders from the machine, and a fetch of them that was out
@@ -385,21 +391,24 @@ fn what_the_server_sends_is_tidied() {
 fn the_list_keeps_its_place_by_the_folders_id() {
     let mut signed = Signed::new("place", two_folders());
     signed.fetch(false);
-    signed.app.shared.select_view = SelectView::UserFolder(1);
+    signed.app.shared.open_for_tests([SelectFolder::UserFolders, signed.app.shared.user_folder(1)]);
     signed.app.shared.rebuild_select_items();
 
     signed.server.set_index(IndexAnswer::Folders(vec![summary(LONG_NOTES, "long notes", 30, 1), summary(PRACTICE, "practice 12", 10, 3)]));
     signed.server.set_folders(&[(LONG_NOTES, &[OWNED_B])]);
     signed.fetch(false);
-    assert!(signed.app.shared.select_view == SelectView::UserFolder(0), "the list is no longer looking into the folder it was in");
+    assert!(
+        signed.app.shared.opened() == [SelectFolder::UserFolders, signed.app.shared.user_folder(0)],
+        "the list is no longer looking into the folder it was in"
+    );
 
     signed.server.set_index(IndexAnswer::Folders(vec![summary(PRACTICE, "practice 12", 10, 3)]));
     signed.fetch(false);
-    assert!(signed.app.shared.select_view == SelectView::UserFolders, "a folder that is gone is still being looked into");
+    assert!(signed.app.shared.opened() == [SelectFolder::UserFolders], "a folder that is gone is still being looked into");
 
     signed.server.set_index(IndexAnswer::Folders(Vec::new()));
     signed.fetch(false);
-    assert!(signed.app.shared.select_view == SelectView::Root, "no folders left, and the list is still on them");
+    assert!(signed.app.shared.is_at_root(), "no folders left, and the list is still on them");
 }
 
 /// A run that starts signed in has the folders kept from the last one on show from its first frame,

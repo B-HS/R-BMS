@@ -370,8 +370,8 @@ mod tests {
         let mut app = app();
         app.stage = Stage::Select(Box::new(SelectState::new()));
         app.shared.select_items = vec![
-            crate::SelectItem::Folder { label: "one".into(), target: crate::SelectView::AllSongs },
-            crate::SelectItem::Folder { label: "two".into(), target: crate::SelectView::AllSongs },
+            crate::SelectItem::Folder { label: "one".into(), target: crate::select_tree::SelectFolder::AllSongs },
+            crate::SelectItem::Folder { label: "two".into(), target: crate::select_tree::SelectFolder::AllSongs },
         ];
         app.shared.sel = 0;
         let now = std::time::Instant::now();
@@ -387,8 +387,8 @@ mod tests {
         let mut app = app();
         app.stage = Stage::Select(Box::new(SelectState::new()));
         app.shared.select_items = vec![
-            crate::SelectItem::Folder { label: "one".into(), target: crate::SelectView::AllSongs },
-            crate::SelectItem::Folder { label: "two".into(), target: crate::SelectView::AllSongs },
+            crate::SelectItem::Folder { label: "one".into(), target: crate::select_tree::SelectFolder::AllSongs },
+            crate::SelectItem::Folder { label: "two".into(), target: crate::select_tree::SelectFolder::AllSongs },
         ];
         app.shared.sel = 0;
         app.shared.options.open_panel(false);
@@ -558,8 +558,8 @@ mod tests {
         let mut app = app();
         app.stage = Stage::Select(Box::new(SelectState::new()));
         app.shared.select_items = vec![
-            crate::SelectItem::Folder { label: "one".into(), target: crate::SelectView::AllSongs },
-            crate::SelectItem::Folder { label: "two".into(), target: crate::SelectView::AllSongs },
+            crate::SelectItem::Folder { label: "one".into(), target: crate::select_tree::SelectFolder::AllSongs },
+            crate::SelectItem::Folder { label: "two".into(), target: crate::select_tree::SelectFolder::AllSongs },
         ];
         app.shared.sel = 0;
         app.shared.hot.push((Rect::new(0.0, 0.0, 100.0, 100.0), crate::Hot::SelectRow(1)));

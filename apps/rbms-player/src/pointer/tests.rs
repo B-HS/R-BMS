@@ -3,8 +3,9 @@ use std::time::Instant;
 use winit::dpi::PhysicalPosition;
 
 use super::*;
+use crate::select_tree::SelectFolder;
 use crate::stage::{Canvas, KeyInput, SelectState, Stage, StageId};
-use crate::{App, Config, Hot, KeyCode, LaunchOptions, Rect, SelectItem, SelectView};
+use crate::{App, Config, Hot, KeyCode, LaunchOptions, Rect, SelectItem};
 
 const LEFT_PRESS: PointerInput = PointerInput::Button { button: MouseButton::Left, pressed: true };
 const LEFT_RELEASE: PointerInput = PointerInput::Button { button: MouseButton::Left, pressed: false };
@@ -189,8 +190,8 @@ fn the_browser_still_acts_on_a_left_press_and_on_no_other_mouse_event() {
     let mut app = app();
     app.stage = Stage::Select(Box::new(SelectState::new()));
     app.shared.select_items = vec![
-        SelectItem::Folder { label: "one".into(), target: SelectView::AllSongs },
-        SelectItem::Folder { label: "two".into(), target: SelectView::AllSongs },
+        SelectItem::Folder { label: "one".into(), target: SelectFolder::AllSongs },
+        SelectItem::Folder { label: "two".into(), target: SelectFolder::AllSongs },
     ];
     app.shared.sel = 0;
     app.shared.hot.push((Rect::new(0.0, 0.0, 100.0, 100.0), Hot::SelectRow(1)));

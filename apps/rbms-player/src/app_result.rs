@@ -1013,7 +1013,8 @@ mod tests {
     #[test]
     fn the_next_song_steps_over_a_folder_row() {
         let mut shared = browsing(0);
-        shared.select_items = vec![SelectItem::Song(0), SelectItem::Folder { label: "MORE".into(), target: SelectView::Root }, SelectItem::Song(2)];
+        shared.select_items =
+            vec![SelectItem::Song(0), SelectItem::Folder { label: "MORE".into(), target: crate::select_tree::SelectFolder::AllSongs }, SelectItem::Song(2)];
         assert_eq!(following_song(&shared), Some((2, 2)), "the folder row was taken for a song");
         assert!(started_chart(&next_song(&mut shared)));
         assert_eq!(shared.sel, 2);

@@ -21,6 +21,9 @@ const NEW_FOR_SECS: i64 = 86_400;
 /// The colour of the lamp of a course the library cannot supply every chart of.
 const LAMP_UNPLAYABLE: Color = Color::rgb(70, 30, 30);
 
+/// What stands between the titles of the open folders in the built-in browser's header.
+const HEADER_FOLDER_SEPARATOR: &str = " / ";
+
 /// What the first-run hint says under its title. The built-in browser has a row of buttons to point
 /// at; a browser a skin draws has none, so it names the keys instead.
 const WELCOME_BODY: &str = "Add your music folder \u{2014} press O or click FOLDERS below";
@@ -152,22 +155,10 @@ impl SelectState {
         }
         let rows: Vec<SelectRow> = self.bars.bars().iter().map(|bar| row_of(bar, shared.config.display.score_graph)).collect();
 
-        let header = match shared.select_view {
-            SelectView::Root => {
-                shared.config.library.songs_folder.as_deref().and_then(|p| Path::new(p).file_name()).and_then(|n| n.to_str()).unwrap_or("ROOT").to_string()
-            }
-            SelectView::AllSongs => "ALL SONGS".into(),
-            SelectView::TableLevels(ti) => shared.table_names.get(ti).cloned().unwrap_or_default(),
-            SelectView::TableLevel(ti, li) => {
-                let table = shared.table_names.get(ti).cloned().unwrap_or_default();
-                let level = shared.table_levels.get(ti).and_then(|ls| ls.get(li)).map(|(l, _)| format!("LV {l}")).unwrap_or_default();
-                format!("{table} / {level}")
-            }
-            SelectView::UserFolders => crate::user_folders::USER_FOLDERS_LABEL.to_string(),
-            SelectView::UserFolder(at) => {
-                let name = shared.user_folders.shown.get(at).map(|folder| folder.name.as_str()).unwrap_or_default();
-                format!("{} / {name}", crate::user_folders::USER_FOLDERS_LABEL)
-            }
+        let header = if shared.is_at_root() {
+            shared.config.library.songs_folder.as_deref().and_then(|p| Path::new(p).file_name()).and_then(|n| n.to_str()).unwrap_or("ROOT").to_string()
+        } else {
+            shared.open_titles().join(HEADER_FOLDER_SEPARATOR)
         };
 
         let detail = match shared.select_items.get(shared.sel) {

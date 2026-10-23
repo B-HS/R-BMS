@@ -17,14 +17,10 @@ use rbms_render::skin_render::frame::BarKind;
 use rbms_store::scoredb::{BestScore, chart_key, mode_id};
 
 use super::shown::{ChartInputs, CourseShown, SelectInputs, SelectShown, unreachable_keys_of};
+use crate::AppShared;
 use crate::app_result::{local_best_before_reading, target_context};
 use crate::skin_host::ir::IrBrowser;
 use crate::target;
-use crate::{AppShared, SelectView};
-
-/// What the reference writes for the folder that holds every chart, and for a level of a table.
-const ALL_SONGS_TITLE: &str = "ALL SONGS";
-const TABLE_LEVEL_PREFIX: &str = "LV";
 
 /// What the reference writes round the word of the folder it files a search under
 /// (`SearchWordBar`: `"Search : '" + text + "'"`).
@@ -115,27 +111,10 @@ impl AppShared {
     /// a list a search narrows is that folder: its title is what a skin that draws this path has to
     /// say the list on show is what a word found, and which word.
     fn open_folders(&self) -> Vec<String> {
-        let table = |index: usize| self.table_names.get(index).cloned().unwrap_or_default();
         let word = self.search.trim();
-        match self.select_view {
-            SelectView::Root => Vec::new(),
-            SelectView::AllSongs if !word.is_empty() => vec![format!("{SEARCH_TITLE_OPENS}{word}{SEARCH_TITLE_CLOSES}")],
-            SelectView::AllSongs => vec![ALL_SONGS_TITLE.to_string()],
-            SelectView::TableLevels(index) => vec![table(index)],
-            SelectView::TableLevel(index, level) => {
-                let level = self
-                    .table_levels
-                    .get(index)
-                    .and_then(|levels| levels.get(level))
-                    .map(|(level, _)| format!("{TABLE_LEVEL_PREFIX} {level}"))
-                    .unwrap_or_default();
-                vec![table(index), level]
-            }
-            SelectView::UserFolders => vec![crate::user_folders::USER_FOLDERS_LABEL.to_string()],
-            SelectView::UserFolder(at) => {
-                let name = self.user_folders.shown.get(at).map(|folder| folder.name.clone()).unwrap_or_default();
-                vec![crate::user_folders::USER_FOLDERS_LABEL.to_string(), name]
-            }
+        if self.is_in_the_flat_list() && !word.is_empty() {
+            return vec![format!("{SEARCH_TITLE_OPENS}{word}{SEARCH_TITLE_CLOSES}")];
         }
+        self.open_titles()
     }
 }

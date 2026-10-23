@@ -41,7 +41,7 @@ fn signed_in(tag: &str, server: Arc<FolderServer>) -> Browser {
     shared.server = server;
     shared.session = AccountSession::restored(Some(TOKEN.into()), Some(PLAYER.into()));
     crate::user_folders::follow_account(shared);
-    shared.select_view = SelectView::Root;
+    shared.open_for_tests([]);
     shared.sel = 0;
     shared.rebuild_select_items();
     browser.frame();
@@ -111,21 +111,21 @@ fn the_reload_key_fetches_the_folders_and_the_browser_walks_into_and_out_of_them
     capture(&browser, "folders-root");
 
     enter(&mut browser, "MY FOLDERS (3)");
-    assert!(browser.app.shared.select_view == SelectView::UserFolders);
+    assert!(browser.app.shared.opened() == [SelectFolder::UserFolders]);
     assert_eq!(rows(&browser), vec!["PRACTICE 12 (2/3)", "LN (1)"]);
     capture(&browser, "folders-list");
 
     enter(&mut browser, "PRACTICE 12 (2/3)");
-    assert!(browser.app.shared.select_view == SelectView::UserFolder(0));
+    assert!(browser.app.shared.opened() == [SelectFolder::UserFolders, browser.app.shared.user_folder(0)]);
     assert_eq!(rows(&browser), vec!["alba", "alder"], "the chart the library does not have is no row");
     capture(&browser, "folders-inside");
 
     browser.key(KeyCode::Escape);
     browser.frame();
-    assert!(browser.app.shared.select_view == SelectView::UserFolders, "going back from a folder is the list of folders");
+    assert!(browser.app.shared.opened() == [SelectFolder::UserFolders], "going back from a folder is the list of folders");
     browser.key(KeyCode::Escape);
     browser.frame();
-    assert!(browser.app.shared.select_view == SelectView::Root);
+    assert!(browser.app.shared.is_at_root());
 }
 
 /// The first run of a player who has no song folder yet: the table every player is given is a
@@ -138,13 +138,12 @@ fn a_first_run_shows_the_given_table_beside_the_players_folders() {
     let mut config = browser.app.shared.config.clone();
     assert!(seed_default_tables(&mut config, &settings));
     browser.app.shared.config = config;
-    let (names, levels) =
+    let matched =
         read_and_match_all(&TableStore::beside(&settings), &browser.app.shared.config.library.tables, &Library::from_songs(songs()), &AtomicUsize::new(0));
-    browser.app.shared.table_names = names;
-    browser.app.shared.table_levels = levels;
+    browser.app.shared.set_tables(matched);
     assert!(crate::user_folders::start_fetch(&mut browser.app.shared, false), "the folders are fetched as a run that starts signed in fetches them");
     land(&mut browser);
-    browser.app.shared.select_view = SelectView::Root;
+    browser.app.shared.open_for_tests([]);
     browser.app.shared.rebuild_select_items();
     browser.frame();
     assert_eq!(rows(&browser), vec!["ALL SONGS (3)", "\u{767a}\u{72c2}BMS\u{96e3}\u{6613}\u{5ea6}\u{8868} (0)", "MY FOLDERS (3)"]);
@@ -152,6 +151,7 @@ fn a_first_run_shows_the_given_table_beside_the_players_folders() {
 
     enter(&mut browser, "\u{767a}\u{72c2}BMS\u{96e3}\u{6613}\u{5ea6}\u{8868} (0)");
     assert_eq!(rows(&browser).len(), 26, "every level of the table is a folder");
+    assert!(rows(&browser).iter().all(|row| row.starts_with('\u{2605}')), "a level is not titled with the symbol the table names: {:?}", rows(&browser));
     capture(&browser, "first-run-table");
 
     let mut tables = TablesState::new();

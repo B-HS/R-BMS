@@ -167,7 +167,7 @@ impl Browser {
         let mut app = app_in(settings, config);
         app.shared.audio_failed = true;
         app.shared.library = Library::from_songs(songs);
-        app.shared.select_view = SelectView::AllSongs;
+        app.shared.open_for_tests([SelectFolder::AllSongs]);
         app.shared.config.library.sort = SortMode::Title;
         app.shared.rebuild_select_items();
         Browser { app, state: SelectState::new(), pixels: HeadlessCanvas::new(CW, CH), now: Instant::now() }
@@ -201,12 +201,12 @@ impl Browser {
         let mut browser = Browser::three_songs(tag);
         browser.app.shared.table_names = vec!["TABLE".to_owned()];
         browser.app.shared.table_levels = vec![vec![("1".to_owned(), vec![0, 1])]];
-        browser.go_to(SelectView::Root);
+        browser.go_to_the_root();
         browser
     }
 
-    fn go_to(&mut self, view: SelectView) {
-        self.app.shared.select_view = view;
+    fn go_to_the_root(&mut self) {
+        self.app.shared.open_for_tests([]);
         self.app.shared.sel = 0;
         self.app.shared.rebuild_select_items();
         self.frame();
@@ -283,7 +283,7 @@ impl Browser {
         route_pointer(&mut self.state, &mut ctx, at, input);
     }
 
-    fn click(&mut self, slot: usize, button: MouseButton) -> Transition {
+    pub(super) fn click(&mut self, slot: usize, button: MouseButton) -> Transition {
         self.pointer(slot_middle(slot), PointerInput::Button { button, pressed: true });
         self.frame_after(SHORT_STEP)
     }
@@ -358,7 +358,7 @@ fn key_six_is_taken_and_starts_nothing() {
     let mut browser = Browser::three_songs("keys-next-replay");
     assert!(matches!(browser.tap(KEY_SIX), Transition::Stay));
     assert_eq!(browser.sel(), 0);
-    assert!(browser.app.shared.select_view == SelectView::AllSongs);
+    assert!(browser.app.shared.opened() == [SelectFolder::AllSongs]);
 }
 
 /// On a folder every white key opens it (`FOLDER_OPEN`), and a key held through the opening does
@@ -369,7 +369,7 @@ fn a_white_key_opens_the_folder_under_the_cursor_once() {
         let mut browser = Browser::at_the_root(&format!("keys-open-{name}"));
         browser.hold(code);
         assert!(matches!(browser.frame_after(SHORT_STEP), Transition::Stay));
-        assert!(browser.app.shared.select_view == SelectView::AllSongs, "key {name} did not open the folder");
+        assert!(browser.app.shared.opened() == [SelectFolder::AllSongs], "key {name} did not open the folder");
         assert!(matches!(browser.frame_after(SHORT_STEP), Transition::Stay), "key {name}, still held, started the chart inside");
         assert!(!browser.app.shared.practice_requested);
     }
@@ -382,11 +382,11 @@ fn a_black_key_closes_the_folder_and_at_the_top_steps_the_order() {
     for (code, name) in [(KEY_TWO, "two"), (KEY_FOUR, "four")] {
         let mut browser = Browser::three_songs(&format!("keys-close-{name}"));
         assert!(matches!(browser.tap(code), Transition::Stay));
-        assert!(browser.app.shared.select_view == SelectView::Root, "key {name} did not leave the folder");
+        assert!(browser.app.shared.is_at_root(), "key {name} did not leave the folder");
 
         let order = browser.app.shared.config.library.sort;
         assert!(matches!(browser.tap(code), Transition::Stay), "at the top of the list a key that closes must not quit");
-        assert!(browser.app.shared.select_view == SelectView::Root);
+        assert!(browser.app.shared.is_at_root());
         assert_eq!(browser.app.shared.config.library.sort, order.next(), "key {name} at the top did not move the order on");
     }
 }
@@ -467,12 +467,12 @@ fn the_detail_panel_leaves_the_press_of_a_key_it_reads_as_held() {
     browser.hold(SELECT);
     browser.hold(KEY_FOUR);
     browser.frame_after(SHORT_STEP);
-    assert!(browser.app.shared.select_view == SelectView::AllSongs, "the folder closed with the panel up");
+    assert!(browser.app.shared.opened() == [SelectFolder::AllSongs], "the folder closed with the panel up");
 
     browser.let_go(START);
     browser.let_go(SELECT);
     browser.frame_after(SHORT_STEP);
-    assert!(browser.app.shared.select_view == SelectView::Root);
+    assert!(browser.app.shared.is_at_root());
 }
 
 /// A layout with no turntable reads the nine-button table: button five plays, button one plays the
@@ -572,7 +572,7 @@ fn a_left_press_on_a_folder_bar_opens_that_folder() {
     let mut browser = Browser::at_the_root("click-open");
     assert_eq!(browser.app.shared.select_items.len(), 2, "the root lists every chart and the table");
     assert!(matches!(browser.click(SLOT_BELOW, MouseButton::Left), Transition::Stay));
-    assert!(browser.app.shared.select_view == SelectView::TableLevels(0), "the folder below the cursor was not the one opened");
+    assert!(browser.app.shared.opened() == [browser.app.shared.table_folder(0)], "the folder below the cursor was not the one opened");
 }
 
 /// Any other button on a bar closes the folder that is open, and at the top of the list moves the
@@ -581,11 +581,11 @@ fn a_left_press_on_a_folder_bar_opens_that_folder() {
 fn another_button_on_a_bar_closes_the_folder() {
     let mut browser = Browser::three_songs("click-close");
     assert!(matches!(browser.click(SLOT_ABOVE, MouseButton::Right), Transition::Stay));
-    assert!(browser.app.shared.select_view == SelectView::Root);
+    assert!(browser.app.shared.is_at_root());
 
     let order = browser.app.shared.config.library.sort;
     browser.click(SLOT_ABOVE, MouseButton::Right);
-    assert!(browser.app.shared.select_view == SelectView::Root);
+    assert!(browser.app.shared.is_at_root());
     assert_eq!(browser.app.shared.config.library.sort, order.next());
 }
 
@@ -640,7 +640,7 @@ fn the_bar_timer_starts_over_when_the_bar_under_the_cursor_changes() {
     let before = browser.sel();
     restarted_by(&mut browser, "a drag of the scrollbar that left the cursor where it was");
     assert_eq!(browser.sel(), before);
-    browser.go_to(SelectView::Root);
+    browser.go_to_the_root();
     restarted_by(&mut browser, "another folder");
 
     for timer in NEVER_SWITCHED {
@@ -737,14 +737,14 @@ fn the_browsers_own_keys_work_as_they_always_have() {
     browser.key(KeyCode::Slash);
     assert!(browser.app.shared.searching);
     browser.key(KeyCode::Escape);
-    assert!(!browser.app.shared.searching && browser.app.shared.select_view == SelectView::AllSongs);
+    assert!(!browser.app.shared.searching && browser.app.shared.opened() == [SelectFolder::AllSongs]);
 
     assert!(starts_a_chart(&browser.key(KeyCode::Enter)));
     assert!(starts_a_chart(&browser.key(KeyCode::ArrowRight)));
     assert!(starts_a_chart(&browser.key(KeyCode::F4)) && browser.app.shared.practice_requested);
 
     assert!(matches!(browser.key(KeyCode::Escape), Transition::Stay));
-    assert!(browser.app.shared.select_view == SelectView::Root, "Esc goes up a folder");
+    assert!(browser.app.shared.is_at_root(), "Esc goes up a folder");
     assert!(matches!(browser.key(KeyCode::Escape), Transition::Stay), "the first Esc at the top only arms the quit");
     assert!(matches!(browser.key(KeyCode::Escape), Transition::Quit));
 }
@@ -863,7 +863,7 @@ fn a_browser_no_skin_draws_is_untouched() {
     browser.scroll(3.0);
     assert!(matches!(browser.frame_after(SHORT_STEP), Transition::Stay), "a lane key of the keyboard started a chart on the built-in browser");
     assert_eq!(browser.sel(), 0, "the wheel moved the built-in list");
-    assert!(browser.app.shared.select_view == SelectView::AllSongs);
+    assert!(browser.app.shared.opened() == [SelectFolder::AllSongs]);
     for timer in [timer_id::STARTINPUT, timer_id::SONGBAR_CHANGE, timer_id::IR_CONNECT_BEGIN] {
         assert_eq!(browser.timer(timer), None, "a skin's timer went on with no skin");
     }
@@ -923,7 +923,7 @@ fn the_browser_of_a_skin_pack_named_by_the_environment_waits_in_the_dark_and_ope
     app.shared.audio_failed = true;
     app.shared.library =
         Library::from_songs(["Aurora", "Borealis", "Cascade", "Drift", "Ember", "Flux", "Glacier"].map(|title| entry(title, "Fixture", "7")).to_vec());
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.rebuild_select_items();
     app.shared.sel = 3;

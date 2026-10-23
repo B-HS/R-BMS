@@ -20,6 +20,7 @@ use winit::event::MouseButton;
 
 use super::*;
 use crate::pointer::PointerInput;
+use crate::select_tree::SelectFolder;
 use crate::stage::select::tests::entry;
 
 /// The size the default pack's browser is drawn at where only what it does is held: 16 to 9 like
@@ -137,7 +138,7 @@ fn search_in_the_packs_text(
 fn a_word_typed_into_the_default_packs_search_text_is_on_show_and_the_list_stays_a_list() {
     let mut app = first_run_app("search-held");
     app.shared.library = Library::from_songs(HELD_SONGS.iter().map(|title| entry(title, "artist", "7")).collect());
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.config.library.preview = false;
     app.shared.audio_failed = true;
@@ -197,7 +198,7 @@ fn a_word_typed_into_the_default_packs_search_text_is_on_show_and_the_list_stays
 fn capture_search(app: &mut App, prefix: &str) -> Result<Vec<String>, String> {
     let size = authored_size(app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.rebuild_select_items();
     let focus =
         app.shared.library.songs().iter().position(|entry| entry.title == BROWSER_FOCUS_TITLE).ok_or("the scan did not find the chart that names pictures")?;

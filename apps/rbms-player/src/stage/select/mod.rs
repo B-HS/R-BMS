@@ -34,6 +34,7 @@ use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, ShortcutScreen, key_index_of};
+use crate::select_tree::{BarIdentity, OpenedFolder, SelectFolder};
 use crate::skin_host::chart::ChartState;
 use crate::skin_host::select::{BrowserLent, CourseShown};
 use crate::skin_screen::SelectDraw;
@@ -83,6 +84,8 @@ mod target_tests;
 #[cfg(test)]
 pub(super) mod tests;
 #[cfg(test)]
+mod tree_tests;
+#[cfg(test)]
 mod user_folder_tests;
 
 use filter::{FilterKey, FilterPanel, render_filter_panel};
@@ -90,7 +93,8 @@ use guide::GUIDE_KEY;
 use images::{SongImages, Wanted};
 use keys::{KeyLayout, SelectKeys};
 use lent::FocusedRecords;
-use list::{ChartFacts, SelectFilter, chart_under_cursor};
+pub(crate) use list::SelectFilter;
+use list::{ChartFacts, chart_under_cursor};
 use panel::PanelState;
 use preview::PreviewState;
 use scene::BarList;
@@ -170,7 +174,7 @@ pub(crate) struct SelectState {
     /// search is left, which is also what says a search is on ([`search`]). It is kept as a place
     /// that outlasts a difficulty table arriving while the search is on.
     search_edit: ImeEdit,
-    search_resume: Option<crate::tablesrc::ListPlace>,
+    search_resume: Option<crate::select_tree::ListPlace>,
     filter: FilterPanel,
     /// The list generation, the filter and the ordering the rows on screen were built with. Every
     /// other screen rebuilds the list unfiltered, and the settings screen can move the favourites
@@ -380,7 +384,7 @@ impl SelectState {
     /// Go up one folder from a controller. Unlike Esc this never quits: at the root, and on the
     /// course tab, there is no folder to leave.
     fn close_folder(&mut self, shared: &mut AppShared) -> Transition {
-        if self.tab != SelectTab::Songs || shared.select_view == SelectView::Root {
+        if self.tab != SelectTab::Songs || shared.is_at_root() {
             return Transition::Stay;
         }
         self.select_back(shared)
@@ -432,15 +436,36 @@ impl SelectState {
                 Transition::Open(shared.decided_song_stage(i))
             }
             Some(SelectItem::Folder { target, .. }) => {
-                let target = *target;
+                let target = target.clone();
                 shared.play_system_sound(SystemSound::FolderOpen);
-                shared.select_view = target;
-                shared.sel = 0;
-                self.rebuild(shared);
+                self.enter_folder(shared, target);
                 Transition::Stay
             }
             None => Transition::Stay,
         }
+    }
+
+    /// Open `folder`, remembering the bar the cursor is on as the one to come back to
+    /// (`BarManager.updateBar`: `prevbar`, kept in `sourcebars`). A folder opened by a press on a bar
+    /// off the cursor comes back to the cursor's bar, as the reference's does.
+    fn enter_folder(&mut self, shared: &mut AppShared, folder: SelectFolder) {
+        let came_from = shared.select_items.get(shared.sel).and_then(|item| shared.identity_of(item));
+        shared.select_path.push(OpenedFolder { folder, came_from });
+        shared.sel = 0;
+        self.rebuild(shared);
+    }
+
+    /// Close the folder open innermost and put the cursor on the bar it was opened from: the
+    /// folder's own bar when it is the top of the library that comes back, else the bar the cursor
+    /// was on when it was opened, and the first bar when that is no longer there (`BarManager.close`
+    /// and `updateBar`).
+    fn leave_folder(&mut self, shared: &mut AppShared) {
+        let Some(left) = shared.select_path.pop() else {
+            return;
+        };
+        self.rebuild(shared);
+        let back_to = if shared.is_at_root() { Some(BarIdentity::Opens(left.folder)) } else { left.came_from };
+        shared.sel = back_to.and_then(|identity| shared.row_of(&identity)).unwrap_or(0);
     }
 
     /// Start the focused course, unless one of its stages is not in the library — the reference
@@ -849,7 +874,7 @@ impl SelectState {
     /// exit on a second Esc within [`ROOT_ESC_CONFIRM`]. An empty library behaves the same, so a
     /// first-run window can't be closed by a stray keypress.
     fn select_escape(&mut self, shared: &mut AppShared) -> Transition {
-        if shared.select_view != SelectView::Root {
+        if !shared.is_at_root() {
             self.esc_quit_at = None;
             return self.select_back(shared);
         }
@@ -869,28 +894,11 @@ impl SelectState {
             self.exit_search(shared);
             return Transition::Stay;
         }
-        match shared.select_view {
-            SelectView::Root => return Transition::Quit,
-            _ => shared.play_system_sound(SystemSound::FolderClose),
+        if shared.is_at_root() {
+            return Transition::Quit;
         }
-        match shared.select_view {
-            SelectView::Root => return Transition::Quit,
-            SelectView::AllSongs | SelectView::TableLevels(_) | SelectView::UserFolders => {
-                shared.select_view = SelectView::Root;
-                shared.sel = 0;
-                self.rebuild(shared);
-            }
-            SelectView::TableLevel(ti, _) => {
-                shared.select_view = SelectView::TableLevels(ti);
-                shared.sel = 0;
-                self.rebuild(shared);
-            }
-            SelectView::UserFolder(_) => {
-                shared.select_view = SelectView::UserFolders;
-                shared.sel = 0;
-                self.rebuild(shared);
-            }
-        }
+        shared.play_system_sound(SystemSound::FolderClose);
+        self.leave_folder(shared);
         Transition::Stay
     }
 
@@ -1022,8 +1030,9 @@ impl StageHandler for SelectState {
     /// finished may have supplied the very charts a course was missing. A key still held from the
     /// screen that was left is not a press here.
     ///
-    /// A screen that put the browser back at the top of the library -- a scan, the table manager --
-    /// took the list a search was on with it, so the search is dropped too.
+    /// A screen that moved the browser off the list a search was on took the search with it, so the
+    /// search is dropped too. A scan and the table manager leave the browser in the folders it was
+    /// in ([`crate::select_tree::show_the_list_again`]), the search's own list among them.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         SelectState::end_autoplay_run(ctx.shared);
         self.drop_a_search_left_behind(ctx.shared);

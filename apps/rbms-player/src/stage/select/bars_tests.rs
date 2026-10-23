@@ -58,7 +58,7 @@ fn browsing_rows(mut app: App, rows: &[SongRow]) -> App {
     db.upsert_batch(rows).expect("the rows are stored");
     app.shared.library = crate::library::stored_library(&db);
     app.shared.song_db = Some(db);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.rebuild_select_items();
     app
@@ -188,7 +188,7 @@ fn the_rows_that_open_are_folders_and_tables_and_only_some_are_counted() {
     let mut app = fixture_app();
     app.shared.table_names = vec!["TABLE".to_string()];
     app.shared.table_levels = vec![vec![("1".to_string(), vec![0, 1]), ("2".to_string(), vec![2, 3, 4])]];
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
     let root = app.shared.select_bars(&facts_of(&app), None, true);
     assert_eq!(root.iter().map(|bar| bar.kind).collect::<Vec<_>>(), [BarKind::Folder, BarKind::Table]);
@@ -197,7 +197,7 @@ fn the_rows_that_open_are_folders_and_tables_and_only_some_are_counted() {
     assert_eq!((root[1].distribution, root[1].lamp), (None, None), "a table's bars are levels, so there is nothing to count under it");
     assert!(root.iter().all(|bar| bar.chart.is_none() && bar.course.is_none()));
 
-    app.shared.select_view = SelectView::TableLevels(0);
+    app.shared.open_for_tests([app.shared.table_folder(0)]);
     app.shared.rebuild_select_items();
     let levels = app.shared.select_bars(&facts_of(&app), None, true);
     assert_eq!(levels.iter().map(|bar| bar.kind).collect::<Vec<_>>(), [BarKind::Table, BarKind::Table]);
@@ -211,7 +211,7 @@ fn the_rows_that_open_are_folders_and_tables_and_only_some_are_counted() {
 #[test]
 fn a_folder_counts_its_charts_by_lamp_and_by_rank() {
     let mut app = fixture_app();
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
 
     let all = app.shared.select_bars(&facts_of(&app), None, true)[0].distribution.expect("the folder is counted");
@@ -327,7 +327,7 @@ fn the_built_in_rows_made_from_the_model_are_the_rows_the_browser_always_drew() 
         }
     }
 
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.rebuild_select_items();
     let mut state = SelectState::new();
     state.refresh_bars(&app.shared);
@@ -655,7 +655,7 @@ fn a_skins_wheel_is_drawn_from_the_model_with_the_pictures_of_the_chart_under_th
     assert_eq!(slot_colors(&pixels, 1), (song, lamp_color(4), bare), "the bar under the cursor is gamma");
     assert_ne!(pixels.pixel_at(BANNER_SAMPLE.0, BANNER_SAMPLE.1), BANNER_COLOR, "gamma names no banner, so the one of the chart that was left is gone");
 
-    app.shared.select_view = SelectView::Root;
+    app.shared.open_for_tests([]);
     app.shared.sel = 0;
     app.shared.rebuild_select_items();
     frames_until(&mut app, &mut pixels, "the root", |app, pixels| pictures_are_in(app) && slot_colors(pixels, 1).0 == bar_color(1));

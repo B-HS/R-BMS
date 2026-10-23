@@ -92,6 +92,7 @@ mod record_sync;
 mod save_worker;
 mod scene_clock;
 mod scoredb_store;
+mod select_tree;
 mod settings_ui;
 mod settings_view;
 pub mod skin_host;
@@ -450,26 +451,11 @@ fn is_pad_row(row: &KcRow) -> bool {
     matches!(row, KcRow::PadDevice | KcRow::PadAnalogMode | KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_))
 }
 
-/// Where the song-select browser currently is. Navigation is Root → (ALL SONGS | each table →
-/// per-level folder | the player's own folders → one of them) → charts, modelling the reference
-/// implementation's table-as-custom-folder browsing. The indices select a table and a level within
-/// `AppShared::table_levels`, and a folder within `AppShared::user_folders`.
-#[derive(Clone, Copy, PartialEq)]
-enum SelectView {
-    Root,
-    AllSongs,
-    TableLevels(usize),
-    TableLevel(usize, usize),
-    /// The player's own folders, fetched from their account ([`user_folders`]).
-    UserFolders,
-    UserFolder(usize),
-}
-
-/// One row in the select list: either a folder to descend into, or a playable chart (index
-/// into `AppShared::library`).
+/// One row in the select list: either a folder to descend into ([`select_tree::SelectFolder`]), or
+/// a playable chart (index into `AppShared::library`).
 enum SelectItem {
     Song(usize),
-    Folder { label: String, target: SelectView },
+    Folder { label: String, target: select_tree::SelectFolder },
 }
 
 /// The best score the player holds on a chart: the EX of the run that scored highest and the most
@@ -705,14 +691,20 @@ struct AppShared {
     pad: Option<PadState>,
     table_names: Vec<String>,
     table_levels: Vec<TableLevels>,
+    /// What the browser keeps of each table beside its name and its levels, aligned with both.
+    table_extras: Vec<tablesrc::TableExtras>,
     /// The difficulty tables being fetched beside the frame loop, which whichever screen is up
     /// takes as they land. A fetch outlives the screen that started it, so it is kept here.
     table_fetches: tablesrc::TableFetches,
     /// The signed-in player's own folders of charts and the fetch of them, which like a table's
     /// outlives the screen that started it.
     user_folders: user_folders::UserFolders,
-    select_view: SelectView,
+    /// The folders the browser has opened, outermost first; empty at the top of the library.
+    select_path: Vec<select_tree::OpenedFolder>,
     select_items: Vec<SelectItem>,
+    /// The filter `select_items` was last built through, which a list rebuilt where it stood
+    /// ([`select_tree::show_the_list_again`]) is built through again.
+    select_filter: stage::select::SelectFilter,
     /// Incremental song search: `searching` opens the box (`/`), `search` is the live query (filters
     /// the list by title/artist/subtitle). What orders the filtered list is the configuration's own
     /// SORT row, which F3 and the settings screen both move, so the two cannot disagree.
@@ -995,7 +987,7 @@ impl App {
         if let Some(url) = &launch.table_url
             && !config.library.tables.iter().any(|t| &t.location == url)
         {
-            config.library.tables.push(TableSource { name: String::new(), location: url.clone() });
+            config.library.tables.push(TableSource { name: String::new(), location: url.clone(), group: String::new() });
         }
 
         let songdb_path = songdb_path(&settings_path);
@@ -1020,13 +1012,14 @@ impl App {
             (stage, String::new(), false)
         };
         let mut table_fetches = tablesrc::TableFetches::default();
-        let (table_names, table_levels): (Vec<String>, Vec<TableLevels>) = if matches!(stage, Stage::Loading(_)) || config.library.tables.is_empty() {
-            (Vec::new(), Vec::new())
+        let matched = if matches!(stage, Stage::Loading(_)) || config.library.tables.is_empty() {
+            Vec::new()
         } else {
             table_fetches.first_fetches_are_due();
             let store = tablesrc::TableStore::beside(&settings_path);
             tablesrc::read_and_match_all(&store, &config.library.tables, &library, &std::sync::atomic::AtomicUsize::new(0))
         };
+        let (table_names, table_levels, table_extras) = tablesrc::split_matched(matched);
 
         let session = AccountSession::restored(config.network.ir_token.clone(), config.network.ir_login_id.clone());
         let startup_whoami = session.is_logged_in();
@@ -1065,10 +1058,12 @@ impl App {
                 pad,
                 table_names,
                 table_levels,
+                table_extras,
                 table_fetches,
                 user_folders: user_folders::UserFolders::default(),
-                select_view: SelectView::Root,
+                select_path: Vec::new(),
                 select_items: Vec::new(),
+                select_filter: stage::select::SelectFilter::default(),
                 search: String::new(),
                 searching: false,
                 sel: 0,

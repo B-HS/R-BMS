@@ -1136,17 +1136,19 @@ impl AppShared {
         lines
     }
 
+    /// Print the row under the cursor, after the folders the browser has opened.
     pub(crate) fn print_selection(&mut self) {
         self.play_system_sound(SystemSound::Scratch);
         let total = self.select_items.len();
+        let path: String = self.open_titles().iter().map(|title| format!("{title}/")).collect();
         match self.select_items.get(self.sel) {
             Some(SelectItem::Song(i)) => {
                 if let Some(e) = self.library.songs().get(*i) {
-                    println!("[{}/{}] {} [{}]", self.sel + 1, total, e.title, e.mode.name);
+                    println!("[{}/{}] {path}{} [{}]", self.sel + 1, total, e.title, e.mode.name);
                 }
             }
             Some(SelectItem::Folder { label, .. }) => {
-                println!("[{}/{}] {label}/", self.sel + 1, total)
+                println!("[{}/{}] {path}{label}/", self.sel + 1, total)
             }
             None => {}
         }

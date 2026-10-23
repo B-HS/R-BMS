@@ -84,7 +84,7 @@ pub(crate) fn browsing_app(tag: &str) -> App {
     let model = recorded_model();
     let recorded = rbms_library::SongEntry { md5: model.md5, mode: model.mode, path: PathBuf::from("recorded.bms"), ..entry(RECORDED_TITLE, "rbms", "7") };
     app.shared.library = Library::from_songs(vec![entry(TITLE_ABOVE, "rbms", "3"), recorded, entry(TITLE_BELOW, "rbms", "9")]);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.config.library.sort = SortMode::Title;
     app.shared.rebuild_select_items();
     app

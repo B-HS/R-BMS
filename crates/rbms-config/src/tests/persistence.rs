@@ -107,7 +107,7 @@ fn save_then_load_round_trips_on_disk() {
     let mut c = Config::default();
     c.play.hispeed = 5.5;
     c.library.folders = vec!["/songs".into()];
-    c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into() }];
+    c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into(), group: String::new() }];
     for id in tab_rows(SettingTab::Judge, &c) {
         assert_eq!(adjust(&mut c, id, 1), AdjustOutcome::Changed, "{id:?} steps");
     }

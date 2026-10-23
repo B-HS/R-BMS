@@ -28,8 +28,9 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::app_play::{LoadedChart, PendingChart};
 use crate::ghost::{GhostLoad, RunGhosts};
+use crate::select_tree::{ListPlace, show_the_list_again};
 use crate::stage::{Canvas, FrameCtx, KeyInput, PlayState, Stage, StageHandler, Transition};
-use crate::tablesrc::{TableStore, read_and_match_all};
+use crate::tablesrc::{MatchedTable, TableStore, read_and_match_all};
 use crate::*;
 
 /// Width and height of the progress bar under the heading.
@@ -74,8 +75,7 @@ pub(crate) enum ScanStep {
 /// of freezing): the rescanned library and the per-table matched levels.
 pub(crate) struct ScanOutcome {
     pub(crate) library: Library,
-    pub(crate) names: Vec<String>,
-    pub(crate) levels: Vec<TableLevels>,
+    pub(crate) tables: Vec<MatchedTable>,
 }
 
 /// The in-flight keysound decode of a loaded chart: the decoded samples arriving from the worker
@@ -438,16 +438,17 @@ impl LoadingState {
     /// player's own folders are matched against the new library from what was kept of them, asking
     /// the network nothing ([`crate::user_folders::rematch`]). Runs whose chart file was not found
     /// when their traces were made are looked at again ([`AppShared::trace_backfill_after_scan`]).
+    ///
+    /// The browser is left looking into the folders it was in, with the cursor on the bar it was on
+    /// (`BarManager.updateBar` keeps the folder open), found again in the library as it is now.
     fn apply_scan(shared: &mut AppShared, out: ScanOutcome) -> Transition {
+        let place = ListPlace::of(shared);
         shared.library = out.library;
-        shared.table_names = out.names;
-        shared.table_levels = out.levels;
+        shared.set_tables(out.tables);
         shared.table_fetches.first_fetches_are_due();
         crate::user_folders::rematch(shared);
         shared.trace_backfill_after_scan();
-        shared.select_view = SelectView::Root;
-        shared.sel = 0;
-        shared.rebuild_select_items();
+        show_the_list_again(shared, &place);
         notify(Level::Info, format!("scanned {} charts", shared.library.len()));
         shared.print_selection();
         Transition::Back
@@ -488,8 +489,8 @@ impl LoadingState {
     fn spawn_table_match(library: Library, sources: Vec<TableSource>, tables: TableStore, progress: Arc<ScanProgress>) -> Receiver<ScanOutcome> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let (names, levels) = read_and_match_all(&tables, &sources, &library, &progress.tables);
-            let _ = tx.send(ScanOutcome { library, names, levels });
+            let matched = read_and_match_all(&tables, &sources, &library, &progress.tables);
+            let _ = tx.send(ScanOutcome { library, tables: matched });
         });
         rx
     }
@@ -536,9 +537,8 @@ impl LoadingState {
             LoadingTask::Song(_) => {}
         }
         shared.release_play_audio();
-        shared.select_view = SelectView::Root;
-        shared.sel = 0;
-        shared.rebuild_select_items();
+        let place = ListPlace::of(shared);
+        show_the_list_again(shared, &place);
         Self::give_up_on_the_chart(shared)
     }
 
@@ -789,7 +789,8 @@ mod tests {
             [kept, new, dead].into_iter().for_each(|address| store.forget(address));
             store.keep_for_tests(kept, "Kept", BODY, Some(1));
             tables.serve(new, "New", BODY);
-            let sources: Vec<TableSource> = [kept, new, dead].map(|address| TableSource { name: String::new(), location: address.to_string() }).to_vec();
+            let sources: Vec<TableSource> =
+                [kept, new, dead].map(|address| TableSource { name: String::new(), location: address.to_string(), group: String::new() }).to_vec();
             app.shared.config.library.tables = sources.clone();
 
             scanned(&mut app, sources.clone());
@@ -873,6 +874,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// A scan that comes back leaves the browser in the folders it was in, with the cursor on the
+    /// chart it was on, found by the chart itself: a chart the scan found ahead of it moved every
+    /// chart after it one place on (`BarManager.updateBar` keeps the folder open).
+    #[test]
+    fn a_rescan_keeps_the_open_folder_and_the_chart_under_the_cursor() {
+        let mut app = crate::stage::render_tests::app();
+        let chart = |title: &str| crate::stage::select::tests::entry(title, "a", "5");
+        app.shared.library = Library::from_songs(vec![chart("alba"), chart("alpha"), chart("amber")]);
+        app.shared.table_names = vec!["TABLE".to_owned()];
+        app.shared.table_levels = vec![vec![("1".to_owned(), vec![0, 1])]];
+        let (table, level) = (app.shared.table_folder(0), app.shared.level_folder(0, 0));
+        app.shared.open_for_tests([table.clone(), level.clone()]);
+        app.shared.rebuild_select_items();
+        app.shared.sel = 1;
+        assert!(matches!(&app.shared.select_items[1], SelectItem::Song(1)), "the cursor is not on alpha");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut state = LoadingState { task: LoadingTask::Scan { step: ScanStep::Matching { rx }, progress: Arc::new(ScanProgress::default()) }, drawn: false };
+        let library = Library::from_songs(vec![chart("alba"), chart("alder"), chart("alpha"), chart("amber")]);
+        let rescanned = MatchedTable { name: "TABLE".to_owned(), levels: vec![("1".to_owned(), vec![0, 1, 2])], ..MatchedTable::default() };
+        tx.send(ScanOutcome { library, tables: vec![rescanned] }).expect("the screen is waiting for the step");
+        let mut ctx = FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 };
+        assert!(matches!(state.update(&mut ctx), Transition::Back), "the scan did not hand on to the song list");
+
+        assert!(app.shared.opened() == [table, level], "the scan took the browser out of the level it was in");
+        let under_the_cursor = match &app.shared.select_items[app.shared.sel] {
+            SelectItem::Song(index) => app.shared.library.songs()[*index].title.clone(),
+            SelectItem::Folder { label, .. } => label.clone(),
+        };
+        assert_eq!((app.shared.sel, under_the_cursor.as_str()), (2, "alpha"), "the cursor is not on the chart it was on");
+    }
+
     /// Escape during the table step throws nothing away: the step reads a few files and is over
     /// by itself, and what it read -- the library that was just walked, and every table that has a
     /// copy -- is what the song list opens on. Leaving there used to cost the run its tables.
@@ -886,8 +919,8 @@ mod tests {
         assert!(matches!(state.handle_key(&mut ctx, escape), Transition::Stay), "escape left the table step, and its tables behind");
         assert!(matches!(state.update(&mut ctx), Transition::Stay));
 
-        tx.send(ScanOutcome { library: Library::default(), names: vec!["READ".to_string()], levels: vec![vec![("1".to_string(), Vec::new())]] })
-            .expect("the screen is still waiting for the step");
+        let read = MatchedTable { name: "READ".to_string(), levels: vec![("1".to_string(), Vec::new())], ..MatchedTable::default() };
+        tx.send(ScanOutcome { library: Library::default(), tables: vec![read] }).expect("the screen is still waiting for the step");
         assert!(matches!(state.update(&mut ctx), Transition::Back), "the step did not hand on to the song list when it finished");
         assert_eq!(app.shared.table_names, vec!["READ".to_string()], "the tables the step read were thrown away");
     }
@@ -915,7 +948,7 @@ mod tests {
     #[test]
     fn the_scan_names_the_step_it_is_on() {
         let mut app = crate::stage::render_tests::app();
-        app.shared.config.library.tables = vec![TableSource { name: "one".into(), location: "/one.json".into() }];
+        app.shared.config.library.tables = vec![TableSource { name: "one".into(), location: "/one.json".into(), group: String::new() }];
         let db = std::env::temp_dir().join(format!("rbms-step-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&db);
         let walking = LoadingState::scan(Vec::new(), Vec::new(), db.clone(), false);

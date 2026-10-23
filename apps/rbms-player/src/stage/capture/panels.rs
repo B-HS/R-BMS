@@ -17,6 +17,7 @@ use rbms_store::SCRATCH_AUTO_ASSIST;
 
 use super::*;
 use crate::app_play::scratch_auto_lanes;
+use crate::select_tree::SelectFolder;
 
 /// The default pack, from this crate's folder.
 const PANEL_PACK: &str = "../../assets/skins/rbms-default";
@@ -110,7 +111,7 @@ fn capture_graded_browser(pack: &Path) -> Result<Vec<String>, String> {
     grade_the_best(&mut app)?;
     let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
-    app.shared.select_view = SelectView::AllSongs;
+    app.shared.open_for_tests([SelectFolder::AllSongs]);
     app.shared.rebuild_select_items();
     let graded = browser_row_of(&app, GRADED_TITLE).ok_or("the scan did not find the chart with the graded best")?;
     app.shared.sel = graded.checked_sub(1).ok_or("the chart with the graded best is the first of the list")?;
