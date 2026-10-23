@@ -7,7 +7,7 @@
 > 새 세션은 [HANDOFF.md](HANDOFF.md)(맥락, 결정, 작업 규칙, 우선순위 TODO. 항상 덮어쓴다)를 먼저 읽고 이 문서로 체크리스트를 확인한다. 이전 스냅샷은 `history/*-handoff-snapshot.md`.
 > 베이스 룰: 프로젝트 작업 규칙의 단일 출처는 HANDOFF 5절이다. 코딩 컨벤션은 사용자 전역 컨벤션을 따르되 Rust 에는 TS/JS 전용 규칙을 적용하지 않고, 웹(`web/`)은 `web/AGENTS.md` 를 따른다.
 > 위치: 저장소 루트 `/Users/hyunseokbyun/development/R-BMS`, 원격 `B-HS/R-BMS`, 작업 브랜치 `dev`. `prod` 브랜치는 만든 적이 없고(`release.yml` 은 `prod` 푸시도 받게 돼 있지만 쓴 적이 없다) 릴리스는 `dev` 에서 `release.yml` 을 수동 실행한다([ci-release.md](ci-release.md) 2절).
-> 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 2026-10-22 고도화 통합 게이트의 Rust 6,269 통과·0 실패).
+> 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 2026-10-23 Discord 병합 뒤 Rust 6,644 통과·0 실패, 웹 1,808 통과·0 실패).
 > Git: Conventional Commits, 설명은 한국어([acknowledge/2026-09-17-commit-language.md](acknowledge/2026-09-17-commit-language.md)), author 사용자 단독, AI 트레일러 금지, 선별 스테이징, force push 금지. 게이트를 통과하면 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 CI 를 확인한다. `Cargo.lock` 은 추적한다(2026-10-11 부터, 결정 D12). `target/` 과 곡 차트는 커밋하지 않는다.
 
 ## 상태 (2026-10-23)
@@ -16,8 +16,22 @@
 - 2026-10-22 "클라이언트 기능 고도화"(아래 체크리스트) 구현과 웹 배포 완료: 운영 DB 마이그레이션 0011 적용(web-db run 39693988962), 웹 `64c6120`·`47a7f9c`, 운영 낡은 등급 행 0(run 39733088817). 클라이언트 v0.1.7(run 39812316178, `d438294`, 산출물 점검 통과, [ci-release.md](ci-release.md) 2.3)은 사용자가 게시했다(Latest). v0.1.6 도 게시됨, v0.1.5 는 draft. (2026-10-22 기준 서술)
 
 - 클라이언트 `v0.1.4` 는 2026-10-15 07:27 UTC 에 게시됐다(release run 38696475211, 버전 커밋 `87eacd0`). `v0.1.3`·`v0.1.0` draft 는 게시하지 않고 남겨 뒀다. 릴리스 이력은 [ci-release.md](ci-release.md) 2.3절.
-- 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0011 적용(`web/drizzle/`, 실행은 `web-db.yml`. 이 줄의 웹 배포 `51f3a1e` 는 2026-10-15 관찰값).
-- 2026-10-19 "웹 기록 표시와 구동기 Esc·목표 보완" 완료, 클라이언트 `v0.1.5` draft 게시 대기(사용자). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
+- 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0012 적용(0012 는 2026-10-23 run 39909099575. `web/drizzle/`, 실행은 `web-db.yml`. 이 줄의 웹 배포 `51f3a1e` 는 2026-10-15 관찰값).
+- 2026-10-19 "웹 기록 표시와 구동기 Esc·목표 보완" 완료, 클라이언트 `v0.1.5` 는 draft 로 그대로 둔다(2026-10-23 결정 7). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
+
+## 체크리스트 — 다국어·리플레이 대전·랭킹 보기·NOTES RADAR·선곡 UI (2026-10-24)
+
+사용자 요청 원문(2026-10-24): "1. 다국어 지원 (한글, 영어, 일본어) 2. 리플레이를 볼때 해당 리플레이의 배치를 활용하여 나도 플레이하는 모드(battle모드였나? 그거랑비슷한거야) 3. 랭킹 보는 모드 (2, 4, 6 셋중 하나 누르면 해당 곡의 랭킹들을 볼수있어짐) 4. 곡선택에서, NOTES RADAR 구현도 가능하게해줘 CHORD, NOTES, PEAK, SCRATCH, SOF-LAN 이렇게해서 6각형 표시야 5. UI/UX 를 조금 더 꾸며봐봐. 또한 곡선택부분에 보면 곡 + 왼쪽에 스코어도 들어가있는데 이것도 구현하도록하고, 기타 화면에 있는것처럼 조금 더 iidx와 비슷하게끔 구현 진행해봐 현재 r-bms 에있는 내용도 표시 가능하게하고. rival 기능은 당장은 필요없는데 해당 UI 부분에 다른 수치를 넣는다던가 하면되겠지". 참고 화면: IIDX 선곡(NOTES RADAR 6각형 NOTES·PEAK·SCRATCH·SOF-LAN·CHARGE·CHORD, MUSIC DATA·SCORE DATA·RIVAL SCORE DATA 패널, 막대 왼쪽 등급). "restore 끝나면 지시 사항을 끝까지 진행하고, 5시간 세션때문에 멈추면 reset되는 타이밍에 알아서 이어서" — workflow 사용(Workflow 도구만, Fable·Haiku 금지, Opus high·Sonnet xhigh 상한). 세션 안 자동 재개: 매시 17분 Cron 점검(세션 한정, 7일 만료).
+
+- [x] N0. 복원 결과 정리 — 문서-코드 동작 불일치 0, 표현 불일치 10건 문서 수리, 이전 세션 인수인계 커밋 `9fed3c0`
+- [ ] N1. 조사 — 5개 기능의 현재 코드·원본(beatoraja)·IIDX 기준 조사, 결과 `docs/reference/2026-10-24-*.md`
+- [ ] N2. 설계와 결정 — 기능별 설계서 `docs/plan/2026-10-24-*.md`, 사용자 결정 묶음(곡 미러 Q-R·Q-C, 미확인 13~18, PRACTICE 키 포함), 답이 없으면 추천안(ADR 에 사용자 미확인)
+- [ ] N3. 다국어(한·영·일)
+- [ ] N4. 리플레이 배치로 플레이하는 모드
+- [ ] N5. 랭킹 보기(2·4·6 키)
+- [ ] N6. NOTES RADAR(6축)
+- [ ] N7. 선곡 UI 꾸미기(막대 왼쪽 등급, MUSIC DATA·SCORE DATA·다른 수치 패널)
+- [ ] N8. 통합 리뷰, 게이트, 문서·ADR·QA, 커밋·푸시·CI
 
 ## 체크리스트 — Stella·코스·단위와 클라이언트 보완 (2026-10-23)
 
@@ -37,7 +51,7 @@
 - [x] F7. 곡 미러 준비 — 17 R2 업로드 도구·설계와 조사 기록(실행하지 않음, 마지막 보고)
 - [x] F8. 통합 리뷰와 수리 (wf_10322c71-7d7: 확인 5건 수리 `45d09fd`·`76e026a`, 반박된 작업장 스캔도 근본 수리)
 
-  진행 기록: 웨이브 1(wf_53d3eb78-f46) F2 U-A·U-B·U-C, F5 C1, F3 D1, F6 W1 → `9e39262`(커밋 사고: 마이그레이션 전용 커밋에 웨이브 전체가 섞임, [feedback](feedback/2026-10-23-stage-check-before-commit.md)), `db0aa7c`. 운영 0012 적용(사용자 `!` 실행, run 39909099575, 7/7). 웨이브 2(wf_8fbc1c6e-18e) F5 C2 `9f8dfbc`, C5 `f174f2b`, F3 U1 `fc23232`, F6 W2 `db534d1`(게이트 Rust 6,465·웹 1,512 통과, 0 실패). F6 W5 는 W6 과 함께 B2 로 보류(패치 보관). 웨이브 3(wf_088ab9d0-3ca, 세션 한도로 5단위가 끊겨 wf_a67f8781-768 이 같은 worktree 에서 이어받음) F3 U2 `2787264`, DP 제목 88개 `ea5829d`, U6 `6998d95`, U3 `519d7d6`, F5 C3 `c4fcdfa`, F7 U1 `fbae422`, F6 W3 `c79f53f`(게이트 Rust 6,550·웹 1,590 통과, 0 실패). Windows 해제 수리 `a6dc73c`(ci 3 OS 통과). 사이에 사용자 요청으로 `架空ユリカゴ　 [SABOTHER]` 웹 삭제(`a6e7ffe`, 운영 run 39927201095, [ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)). 웨이브 4(wf_9f61ed7d-64e) C6 `a52d9a3`, U4 `0ff2077`, C4 `47e8f70`(코스 시작 때의 COURSE GAUGE 로 스테이지 판정, 메인 수정 포함), W4 `d57c6c2`. 웨이브 5(wf_ceae3e00-e38) U5 `0247561`, W6(보류한 W5 포함) `942ed71`. 웨이브 6(wf_6dc77b43-fac) D2 `8d0a62a`, W7 `f2d8ce5`, W8 `608eae7`, W9 `df52b3c`. 웨이브 7(wf_1b82225e-f89) D3 `5a0eacf`(게이트 Rust 6,611 통과·0 실패, 스킨 덤프 통과, 웹 마지막 1,808 통과). 운영: courses-seed-count(run 39938376095: SP 22·DP 22 inserted), tables-refresh-count(run 39938388900: st 2,350·sl 2,497 저장 가능) 끝, courses-seed·tables-refresh-force 는 사용자 `!` 실행 대기, CRON_SECRET 등록은 사용자. F8 통합 리뷰(wf_10322c71-7d7) 진행 중.
+  진행 기록: 웨이브 1(wf_53d3eb78-f46) F2 U-A·U-B·U-C, F5 C1, F3 D1, F6 W1 → `9e39262`(커밋 사고: 마이그레이션 전용 커밋에 웨이브 전체가 섞임, [feedback](feedback/2026-10-23-stage-check-before-commit.md)), `db0aa7c`. 운영 0012 적용(사용자 `!` 실행, run 39909099575, 7/7). 웨이브 2(wf_8fbc1c6e-18e) F5 C2 `9f8dfbc`, C5 `f174f2b`, F3 U1 `fc23232`, F6 W2 `db534d1`(게이트 Rust 6,465·웹 1,512 통과, 0 실패). F6 W5 는 W6 과 함께 B2 로 보류(패치 보관). 웨이브 3(wf_088ab9d0-3ca, 세션 한도로 5단위가 끊겨 wf_a67f8781-768 이 같은 worktree 에서 이어받음) F3 U2 `2787264`, DP 제목 88개 `ea5829d`, U6 `6998d95`, U3 `519d7d6`, F5 C3 `c4fcdfa`, F7 U1 `fbae422`, F6 W3 `c79f53f`(게이트 Rust 6,550·웹 1,590 통과, 0 실패). Windows 해제 수리 `a6dc73c`(ci 3 OS 통과). 사이에 사용자 요청으로 `架空ユリカゴ　 [SABOTHER]` 웹 삭제(`a6e7ffe`, 운영 run 39927201095, [ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)). 웨이브 4(wf_9f61ed7d-64e) C6 `a52d9a3`, U4 `0ff2077`, C4 `47e8f70`(코스 시작 때의 COURSE GAUGE 로 스테이지 판정, 메인 수정 포함), W4 `d57c6c2`. 웨이브 5(wf_ceae3e00-e38) U5 `0247561`, W6(보류한 W5 포함) `942ed71`. 웨이브 6(wf_6dc77b43-fac) D2 `8d0a62a`, W7 `f2d8ce5`, W8 `608eae7`, W9 `df52b3c`. 웨이브 7(wf_1b82225e-f89) D3 `5a0eacf`(게이트 Rust 6,611 통과·0 실패, 스킨 덤프 통과, 웹 마지막 1,808 통과). 운영: courses-seed-count(run 39938376095: SP 22·DP 22 inserted), tables-refresh-count(run 39938388900: st 2,350·sl 2,497 저장 가능) 끝, courses-seed·tables-refresh-force 는 그 뒤 사용자 `!` 로 실행했다(run 39946701885, 39946847395). CRON_SECRET 등록은 사용자. F8 통합 리뷰는 wf_10322c71-7d7.
 - [x] G. ADR·문서, 전체 게이트, 커밋·푸시, CI, 운영 반영(사용자 승인), 실기 점검표(QA) 추가 (`92a0caa`, 운영: courses-seed run 39946701885, tables-refresh-force run 39946847395. CRON_SECRET 은 사용자)
 - [ ] R. 실기 결과(QA 3.20 은 v0.1.7, 3.21·3.22 는 v0.1.8) 수리 — 결과를 받으면
 - [x] D. Discord 상태 표시(2026-10-23 사용자 요청 "discord에 게임으로 인식되게하는 기능", 답 "좋아 1번대로 하도록하고 Application 만들어서 아이디는 1563156237539999865 / 아이콘이나 기타 꼼꼼하게"). 결정: workflow 사용, v0.1.8 draft 전에 넣음, Rich Presence(로컬 IPC, 새 의존성 없음)로 곡 제목·난이도·모드·코스·경과 시간, 설정 DISCORD STATUS 기본 켬(2~4 는 답이 없어 메인이 추천안으로 정함, 사용자 미확인). Application ID 1563156237539999865(비밀 아님, `apps/rbms-player/src/discord_presence.rs` 의 `DISCORD_APPLICATION_ID`). Developer Portal(앱 아이콘·설명·태그·Art Asset `rbms`)은 사용자 요청 "너가 직접 미리 다 해놔" 로 메인이 Claude in Chrome 으로 설정했다. 설계 `d7892ad`, 구현 `3d21944`, 문서 `41f1a1b`, [ADR](acknowledge/2026-10-23-adr-discord-rich-presence.md)

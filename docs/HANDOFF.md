@@ -48,7 +48,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 | 없는 곡 막대(결정 16) | 표 레벨 안 흐린 막대, 외부 스킨에는 Song exists false | `0ff2077` | `stage/select/{list,scene,missing_tests}.rs`, `crates/rbms-render/src/select.rs` |
 | 코스 제출 필드(결정 6 클라이언트) | `gauge`·`course_gauge`·`stages`, 계약 골든 | `47e8f70` | `apps/rbms-player/src/course_ir.rs`, `crates/rbms-ir/src/dto/score.rs`, `contract/client-requests/course-*.json` |
 | 단위 자동 판정(결정 19·20) | `user_dan`, 표시 선택 API, 판정 이유 코드 | `d57c6c2` | `web/src/server/service/domain/dan/**`, `web/src/app/api/fe/me/dans/**` |
-| 표 COURSE 폴더 | 표 header 코스 + 발광 아래 GENOSIDE 44, 코스 파일 매번 다시 읽기 | `0247561` | `stage/select/*`, `tablesrc.rs` |
+| 표 COURSE 폴더 | 표 header 코스 + 발광 아래 GENOSIDE 44(번들과 같은 차트 구성의 header 코스는 한 번만), 코스 파일 매번 다시 읽기 | `0247561` | `stage/select/*`, `tablesrc.rs` |
 | 웹 Cron·조립 | Vercel Cron `0 15 * * *`, `CRON_SECRET`, 표 스냅샷 저장소, 서비스 조립 | `942ed71` | `web/vercel.json`, `web/src/server/route/cron.ts`, `web/src/server/compose/index.ts` |
 | 다운로드 모달(결정 15) | 차분·곡 URL 안내, 직접 zip 받기, 브라우저 열기 | `8d0a62a` | `stage/select/download_modal.rs`, `apps/rbms-player/src/open_url.rs` |
 | 웹 화면 | `/tables/stella-st`·`/tables/stella-sl` 출처 표기, `/courses`, 단위 배지, 마이페이지 단위 탭 | `f2d8ce5`, `608eae7` | `web/src/app/(app)/{tables,courses}/**`, `web/src/widgets/settings/dan-panel.tsx` |
@@ -93,7 +93,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 | zip 버전 | 게시 14일 지난 9.0.0·typed-path 0.12.3 | 설계서의 9.0.5(게시 14일 미만) | 같은 ADR |
 | 곡 미러 | 업로드 준비만(도구), 조사 기록 보고 | 허락 없이 전곡 업로드(권리) | `song-mirror-prep` |
 | 코스 원천 | GENOSIDE 2018 SP·DP(운영자 공식 코스 파일 + beatoraja 표 제약) + 표 코스 | bms-ir 페이지 파싱(같은 해시, 안정성 낮음) | `genoside-2018-course-data` |
-| 코스 게이지 | 설정 LR2(기본)/BEATORAJA/IIDX, 설정이 제약보다 우선, IIDX 실패선 0%, 코스 시작 때 규칙 고정 | 제약 우선(원본), LR2·BEATORAJA 둘만 | `course-gauge-modes` |
+| 코스 게이지 | 설정 LR2(기본)/BEATORAJA/IIDX, 설정이 제약보다 우선, IIDX 실패선 0%, 코스 시작 때 COURSE GAUGE 규칙 고정(시작 슬롯은 스테이지마다 그때의 GAUGE 설정) | 제약 우선(원본), LR2·BEATORAJA 둘만 | `course-gauge-modes` |
 | 코스 시작·LN(J-4·J-7, 사용자 미확인) | 시작 슬롯이 GAUGE 설정, ln·cn·hcn 강제, 9칸 이월(원본과 같음) | 지금 R-BMS(항상 CLASS, 제약 미적용) | `course-stage-start-and-ln` |
 | 단위 | 서버 자동 판정 `user_dan`, 마이페이지에서 표시 선택, ranked·제약 준수·어시스트 제외, 모드 제한 없음(J-11, 미확인) | 자기 신고, `user.rank` 재사용 | `dan-auto-award` |
 | 곡 삭제 | 웹의 모든 흔적(사용자) | 표에서만 숨김, DB 만 | `chart-removed-at-owner-request` |
@@ -121,7 +121,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 1. **2026-10-23 메인 결정(사용자 미확인)**: J-4 코스 시작 슬롯이 GAUGE 설정을 따름, J-7 ln·cn·hcn 제약을 플레이에 적용, 9칸 이월(셋 다 원본과 같아짐, 지금 R-BMS 대비 체감이 바뀜), J-11 단위에 게이지 모드 제한 없음, J-13 ranked 판만, J-14 레벨 제목 `★12`, 각 설계서의 메인 결정, Discord 결정 2~4(v0.1.8 에 넣음·표시 내용·기본 켬). 목록: `docs/acknowledge/README.md` 미확인 13~18.
 2. **곡 미러(결정 17) 질문 8개**: Q-R1 업로드 가능 근거(A 작자 허락 / B GENOCIDE "各自保管…自由" / C 무료 공개 배포 / D 기타), Q-R2 범위, Q-R3 로그인 사용자만인지, Q-R4 삭제 요청 창구, Q-R5 사전 연락, Q-C1~C3 계정·버킷·결과 폴더(`docs/plan/2026-10-23-song-mirror-prep.md` 3.3·11절). 조사 요지: 어느 곳도 제3자 재배포 허락 문구가 없다, R2 Standard 월 약 $0.45(発狂 ≈ 40GB 추정), 이그레스 무료. 사용자는 아직 이 보고를 받지 못했다(최종 보고에 넣기로 했으나 세션이 릴리스로 이어졌다).
-3. **Vercel `CRON_SECRET`**: 사용자가 등록했는지 확인하지 못했다. 없으면 매일 KST 0시 Cron 이 503 으로 끝나고(사이트는 정상), 16자 미만이면 웹이 뜨지 않는다.
+3. **Vercel `CRON_SECRET`**: 사용자가 등록했는지 확인하지 못했다. 없으면 매일 KST 0시 Cron 이 503 으로 끝나고(사이트는 정상), 1~15자면 첫 `getEnv()` 호출이 던져 DB·인증을 쓰는 요청이 모두 실패한다.
 4. 표 코스(Stella 26·Satellite 13)가 `tables-refresh-force` 에서 등록됐는지 숫자로 확인하지 못했다(스크립트가 코스 수를 출력하지 않음). `/courses` 화면 확인 필요.
 5. 표 코스 막대 위의 PRACTICE 키는 아무 일도 하지 않는다(COURSE 탭에서는 코스 시작). 원본과 맞출지(U5 보고).
 6. 이전 세션의 열린 질문(이전 스냅샷 6절 1~7, 9~12): 순위 `lnmode` 필터 뜻, 코스 램프 서버 검사, 남은 다른 사이트 흔적, 거절 재전송 좁힘, 메뉴 PAD DEBOUNCE, 연습 게이지 사망, TOTAL 행 경고, rate limit 저장소, `user.rank_points`, 기록 목표 설계 선택, 비례 표시.

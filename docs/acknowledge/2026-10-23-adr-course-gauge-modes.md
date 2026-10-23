@@ -31,7 +31,7 @@
 
 ### 3) 코스 시작 때의 규칙으로 모든 스테이지를 판정한다
 
-- 코스를 시작할 때 `config.judge.course_gauge` 를 한 번 읽어 `CourseFacts.gauge_rule` 에 담고(`lib.rs` `start_course`), 이후 스테이지는 설정이 아니라 이 값으로 표를 고른다(`app_play.rs` `stage_judge_setup`). 코스 도중 설정을 바꿔도 이어지는 스테이지는 시작 때의 규칙이다.
+- 코스를 시작할 때 `config.judge.course_gauge` 를 한 번 읽어 `CourseFacts.gauge_rule` 에 담고(`lib.rs` `start_course`), 이후 스테이지는 설정이 아니라 이 값으로 표를 고른다(`app_play.rs` `stage_judge_setup`). 코스 도중 설정을 바꿔도 이어지는 스테이지는 시작 때의 규칙이다. 고정되는 것은 COURSE GAUGE 규칙(표)뿐이고, 시작 슬롯(CLASS·EXCLASS·EXHARDCLASS)은 스테이지마다 그때의 GAUGE 설정으로 정한다(`course_ui.rs` `course_stage_gauge`).
 - 이유: 코스 제출이 `course_gauge` 한 값으로 규칙을 말하므로(제출 ADR) 모든 스테이지가 그 규칙으로 판정돼야 본문과 판정이 일치한다.
 - 구현과 다름: 설계서 `docs/plan/2026-10-23-course-gauge-data.md` 3.3절 (2)는 스테이지마다 설정값을 읽는다고 적었다. 47e8f70 에서 메인이 시작 때의 값으로 고쳤다.
 
