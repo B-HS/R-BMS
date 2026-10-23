@@ -787,7 +787,7 @@ mod tests {
             let _installed = tables.install();
             let store = TableStore::beside(&app.shared.settings_path);
             [kept, new, dead].into_iter().for_each(|address| store.forget(address));
-            store.keep_for_tests(kept, "Kept", BODY, Some(1));
+            store.keep_for_tests(kept, "Kept", BODY, Some(crate::tablesrc::unix_now()));
             tables.serve(new, "New", BODY);
             let sources: Vec<TableSource> =
                 [kept, new, dead].map(|address| TableSource { name: String::new(), location: address.to_string(), group: String::new() }).to_vec();

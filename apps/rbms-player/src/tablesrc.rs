@@ -2,10 +2,11 @@
 //! it (`rbms_table`), match its entries to the local song library by md5
 //! (`DifficultyTable::match_levels_in`), and resolve display names.
 //!
-//! A table at an address is fetched once and kept ([`TableStore`]): every later run reads the copy
-//! and asks the network nothing, so the song list does not wait on somebody else's server each time
-//! the player is started. A table registered as a file on this machine is read from that file every
-//! time and has no copy.
+//! A table at an address is fetched once and kept ([`TableStore`]): every run reads the copy, so the
+//! song list does not wait on somebody else's server each time the player is started. A copy that is
+//! a day old is fetched again by itself, once a run, beside the song list and without a word
+//! ([`start_first_fetches`]). A table registered as a file on this machine is read from that file
+//! every time and has no copy.
 //!
 //! Nothing that reaches the network is waited for by a screen. Reading the library again reads the
 //! copies and the files and nothing else ([`read_and_match_all`]); a table at an address that has no
@@ -87,13 +88,18 @@ const COPY_EXTENSION: &str = "json";
 /// What the copies an earlier version left in the temporary folder are called before the hash.
 const LEGACY_COPY_PREFIX: &str = "rbms-table-";
 
-/// How old a copy is before the table manager points its date out. A table is not fetched again by
-/// itself however old its copy is; this is only when the player is reminded that they can.
+/// How old a copy is before the table manager points its date out. This is only when the player is
+/// reminded that they can fetch the table again; a copy a day old is fetched again by itself
+/// ([`COPY_STALE_AFTER_SECS`]).
 pub(crate) const COPY_OLD_AFTER_DAYS: u64 = 30;
 
 const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 3600;
 const SECONDS_PER_DAY: u64 = 86_400;
+
+/// How old the copy of a table at an address is before the song list fetches the table again by
+/// itself.
+const COPY_STALE_AFTER_SECS: u64 = SECONDS_PER_DAY;
 
 /// What is said of a copy fetched less than a minute ago, and what follows a count of minutes,
 /// hours or days.
@@ -159,7 +165,7 @@ fn record_status(location: &str, status: TableStatus) {
 /// Note that the table at `location` has no copy to read, unless a fetch of it has failed in this
 /// run already. That failure is what goes on being shown beside the source, and it is what keeps a
 /// table whose address does not answer from being fetched again each time the library is read:
-/// only a table that is [`TableStatus::NotFetched`] is fetched by itself.
+/// only a table that is [`TableStatus::NotFetched`] is fetched for the first time by itself.
 fn record_not_fetched(location: &str) {
     if let Ok(mut statuses) = statuses().lock()
         && !matches!(statuses.get(location), Some(TableStatus::Failed { .. }))
@@ -221,6 +227,13 @@ pub(crate) fn copy_age(fetched_at: u64, now: u64) -> String {
         age if age < SECONDS_PER_DAY => counted(age / SECONDS_PER_HOUR, "HOUR"),
         age => counted(age / SECONDS_PER_DAY, "DAY"),
     }
+}
+
+/// Whether a copy fetched at `fetched_at` is old enough at `now` to be fetched again by itself. A
+/// copy that does not say when it was fetched -- the one the binary carries -- is, and one dated
+/// after `now` -- the clock was set back -- is not.
+fn is_copy_stale(fetched_at: Option<u64>, now: u64) -> bool {
+    fetched_at.is_none_or(|fetched_at| now.saturating_sub(fetched_at) >= COPY_STALE_AFTER_SECS)
 }
 
 /// How many whole days ago a copy was fetched.
@@ -526,15 +539,20 @@ pub(crate) enum FetchWhy {
     First,
     /// The table has just been registered.
     Registered,
+    /// The copy of the table is a day old, and the song list fetches it again by itself.
+    Stale,
 }
 
 impl FetchWhy {
-    /// What a fetch that failed is called, ahead of the table's location and the reason.
-    fn failure(self) -> &'static str {
+    /// What a fetch that failed is called, ahead of the table's location and the reason, or `None`
+    /// for a fetch whose failure is not told to the player: the table is what it was, and the table
+    /// manager says beside the source that the reload failed.
+    fn failure(self) -> Option<&'static str> {
         match self {
-            FetchWhy::Reload => "table reload failed",
-            FetchWhy::First => "table fetch failed",
-            FetchWhy::Registered => "table load failed",
+            FetchWhy::Reload => Some("table reload failed"),
+            FetchWhy::First => Some("table fetch failed"),
+            FetchWhy::Registered => Some("table load failed"),
+            FetchWhy::Stale => None,
         }
     }
 
@@ -542,12 +560,14 @@ impl FetchWhy {
     /// and what is said of that table when it lands is all there is to say. So is what is said of
     /// each table of a first fetch that brought nothing: every one of them has said why it failed,
     /// and an address that does not answer is asked again each time the player is started, so a line
-    /// counting the failures would be said over again on every start.
+    /// counting the failures would be said over again on every start. A copy fetched again because
+    /// it is a day old is still the copy that was used, so how that went is said nowhere but beside
+    /// the source in the table manager.
     fn tally(self, updated: usize, failed: usize) -> Option<String> {
         match self {
             FetchWhy::Reload => Some(format!("difficulty tables reloaded: {updated} updated, {failed} failed")),
             FetchWhy::First => (updated > 0).then(|| format!("difficulty tables fetched for the first time: {updated} added, {failed} failed")),
-            FetchWhy::Registered => None,
+            FetchWhy::Registered | FetchWhy::Stale => None,
         }
     }
 }
@@ -671,7 +691,8 @@ fn fetch_one(store: &TableStore, src: &TableSource, removed: &Mutex<HashSet<Stri
     }
 }
 
-/// Every fetch one player has out, and whether the tables that have no copy are due their first.
+/// Every fetch one player has out, whether the tables that have no copy are due their first, and
+/// whether the copies a day old have been looked at in this run.
 ///
 /// A fetch outlives the screen that asked for it -- the table manager can be left, and the song
 /// list is left for a chart -- so the fetches are kept with the state every screen shares and taken
@@ -686,11 +707,12 @@ pub(crate) struct TableFetches {
     jobs: Vec<FetchJob>,
     slots: Arc<Slots>,
     first_due: bool,
+    stale_checked: bool,
 }
 
 impl Default for TableFetches {
     fn default() -> TableFetches {
-        TableFetches { jobs: Vec::new(), slots: Arc::new(Slots::of(MAX_PARALLEL_LOADS)), first_due: false }
+        TableFetches { jobs: Vec::new(), slots: Arc::new(Slots::of(MAX_PARALLEL_LOADS)), first_due: false, stale_checked: false }
     }
 }
 
@@ -754,7 +776,8 @@ impl TableFetches {
     }
 
     /// Note that the library has just been read again, so the tables that turned out to have no
-    /// copy are due their first fetch the next time the song list is up.
+    /// copy are due their first fetch, and the copies a day old their fetch for the run, the next
+    /// time the song list is up.
     pub(crate) fn first_fetches_are_due(&mut self) {
         self.first_due = true;
     }
@@ -855,6 +878,12 @@ pub(crate) fn reload_tables(shared: &mut AppShared, which: Option<usize>) {
 /// already there to be used rather than ahead of it. Only a table that is not fetched yet is
 /// started: one whose fetch has failed in this run stays failed until the player asks for it again
 /// or the player is started again, so an address that does not answer is asked once a run.
+///
+/// The first time in a run that the library has been read, the tables at an address whose copy is a
+/// day old are fetched again too ([`FetchWhy::Stale`]), and never again until the player is started
+/// again. Nothing is said when they are started, and nothing is waited for: the copy stays what the
+/// song list uses until the new one lands, in whichever of the song list and the table manager is
+/// up by then ([`apply_finished_fetches`]).
 pub(crate) fn start_first_fetches(shared: &mut AppShared) {
     if !std::mem::take(&mut shared.table_fetches.first_due) {
         return;
@@ -865,6 +894,28 @@ pub(crate) fn start_first_fetches(shared: &mut AppShared) {
         0 => {}
         started => crate::notify::notify(crate::notify::Level::Info, format!("fetching {started} difficulty table(s) for the first time")),
     }
+    start_stale_fetches(shared);
+}
+
+/// Start fetching again the tables at an address whose copy is a day old, once in a run; every other
+/// call does nothing. A table that is a file has no copy, so it is never one of them.
+fn start_stale_fetches(shared: &mut AppShared) {
+    if std::mem::replace(&mut shared.table_fetches.stale_checked, true) {
+        return;
+    }
+    let now = unix_now();
+    let sources: Vec<TableSource> = shared
+        .config
+        .library
+        .tables
+        .iter()
+        .filter(|source| match table_status(&source.location) {
+            Some(TableStatus::Loaded { origin: TableOrigin::Address { fetched_at }, .. }) => is_copy_stale(fetched_at, now),
+            _ => false,
+        })
+        .cloned()
+        .collect();
+    shared.table_fetches.start(TableStore::beside(&shared.settings_path), sources, FetchWhy::Stale);
 }
 
 /// Add `source` to the player's tables and start fetching it.
@@ -900,8 +951,10 @@ pub(crate) fn forget_table(shared: &AppShared, location: &str) {
 /// A table that arrived is matched against the library as it is now -- which may not be the library
 /// its fetch was started beside -- and takes the place of the one in the song list, which is rebuilt
 /// where it stands. A fetch that failed leaves the table, its copy and its folder as they were, and
-/// says why: beside the source in the table manager, and as a notification. When the last table of
-/// a fetch is in, one line says how the whole of it went.
+/// says why: beside the source in the table manager, and as a notification -- unless the table was
+/// being fetched again only because its copy is a day old ([`FetchWhy::Stale`]), which is said in
+/// the table manager alone. When the last table of a fetch is in, one line says how the whole of it
+/// went.
 ///
 /// A fetch is asked for by location and answered by location. A table that was removed while its
 /// fetch was out is simply not there to update, and is not counted in how the fetch went; the copy
@@ -935,7 +988,9 @@ pub(crate) fn apply_finished_fetches(shared: &mut AppShared) -> bool {
                 list_changed = true;
             }
             FetchOutcome::Kept { reason } => {
-                crate::notify::notify(crate::notify::Level::Warn, format!("{} ({}): {reason}", why.failure(), done.location));
+                if let Some(failure) = why.failure() {
+                    crate::notify::notify(crate::notify::Level::Warn, format!("{failure} ({}): {reason}", done.location));
+                }
                 let kept = match table_status(&done.location) {
                     Some(TableStatus::Loaded { name, entries, levels, owned, origin, .. }) => {
                         TableStatus::Loaded { name, entries, levels, owned, origin, stale: Some(reason) }
@@ -1943,5 +1998,227 @@ mod tests {
         assert_eq!(url_hash(""), "0000000000001505", "the hash is the one the earlier copies were named with");
         assert_eq!(tables_folder(Path::new("/home/player/rbms/settings.ron")), Path::new("/home/player/rbms").join(TABLES_FOLDER));
         assert_eq!(tables_folder(Path::new("/home/player/rbms/songs.sqlite")), tables_folder(Path::new("/home/player/rbms/settings.ron")));
+    }
+
+    const TWO_DAYS: u64 = SECONDS_PER_DAY * 2;
+
+    /// A player of this test's own, reading the settings file of `home`, listing `tables` over
+    /// `library`, with their tables read from the copies the way a scan reads them and the first
+    /// fetches due. The fetches it starts reach what the test installed.
+    fn player_with(home: &Home, tables: &[TableSource], library: Library) -> AppShared {
+        let mut shared = crate::App::new(String::new(), rbms_config::Config::default(), crate::LaunchOptions::default(), home.settings()).shared;
+        shared.config.library.tables = tables.to_vec();
+        shared.library = library;
+        let matched = read_and_match_all(&TableStore::beside(&shared.settings_path), tables, &shared.library, &AtomicUsize::new(0));
+        shared.set_tables(matched);
+        shared.table_fetches.first_fetches_are_due();
+        shared
+    }
+
+    /// Why each fetch that is out was started.
+    fn started_for(fetches: &TableFetches) -> Vec<FetchWhy> {
+        fetches.jobs.iter().map(|job| job.why).collect()
+    }
+
+    /// Take what the player's fetches have come back with, a frame at a time, until nothing is out.
+    fn apply_until_idle(shared: &mut AppShared) {
+        while !shared.table_fetches.is_idle() {
+            apply_finished_fetches(shared);
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn a_copy_is_stale_from_a_whole_day_on_and_one_that_says_nothing_always_is() {
+        const NOW: u64 = 1_760_227_200;
+        assert!(!is_copy_stale(Some(NOW - SECONDS_PER_DAY + 1), NOW));
+        assert!(is_copy_stale(Some(NOW - SECONDS_PER_DAY), NOW));
+        assert!(is_copy_stale(Some(0), NOW));
+        assert!(is_copy_stale(None, NOW), "the copy the binary carries says nothing of when it was fetched");
+        assert!(!is_copy_stale(Some(NOW + SECONDS_PER_DAY), NOW), "a copy dated after now is not stale");
+    }
+
+    /// A copy a day old is fetched again by itself when the song list is first up after the library
+    /// was read, and not again for as long as the player runs, however often the library is read
+    /// again: the table manager and the fetches the player asks for are how it is fetched later.
+    #[test]
+    fn a_copy_older_than_a_day_is_fetched_again_once_a_run() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/stale/old/";
+            let home = Home::of("stale-old");
+            let tables = test_outside::FakeTables::default();
+            let _installed = tables.install();
+            home.store(&tables).keep_for_tests(address, "Before", ONE_LEVEL, Some(unix_now().saturating_sub(TWO_DAYS)));
+            tables.serve(address, "After", TWO_LEVELS);
+            let mut shared = player_with(&home, &[at(address)], two_charts());
+
+            let open = tables.hold();
+            start_first_fetches(&mut shared);
+            assert_eq!(started_for(&shared.table_fetches), vec![FetchWhy::Stale]);
+            assert!(shared.table_fetches.is_fetching(address));
+            drop(open);
+            let (done, tallies) = landed(&mut shared.table_fetches);
+            assert_eq!(arrivals(&done), vec![(address, "After".to_string())]);
+            assert!(done.iter().all(|(why, _)| *why == FetchWhy::Stale));
+            assert_eq!((tallies, tables.asked()), (vec![FetchTally { why: FetchWhy::Stale, updated: 1, failed: 0 }], 1));
+
+            shared.table_fetches.first_fetches_are_due();
+            start_first_fetches(&mut shared);
+            assert_eq!((shared.table_fetches.is_idle(), tables.asked()), (true, 1), "a copy was fetched twice in a run");
+            forget_table_status(address);
+        });
+    }
+
+    #[test]
+    fn a_copy_younger_than_a_day_is_left_alone() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/stale/young/";
+            let home = Home::of("stale-young");
+            let tables = test_outside::FakeTables::default();
+            let _installed = tables.install();
+            home.store(&tables).keep_for_tests(address, "Young", ONE_LEVEL, Some(unix_now().saturating_sub(SECONDS_PER_HOUR)));
+            tables.serve(address, "Newer", TWO_LEVELS);
+            let mut shared = player_with(&home, &[at(address)], two_charts());
+
+            start_first_fetches(&mut shared);
+            assert_eq!((shared.table_fetches.is_idle(), tables.asked()), (true, 0));
+            assert_eq!(home.store(&tables).copy_name(address).as_deref(), Some("Young"));
+            forget_table_status(address);
+        });
+    }
+
+    #[test]
+    fn a_carried_copy_that_has_no_date_is_fetched_again() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/stale/carried/";
+            let home = Home::of("stale-carried");
+            let tables = test_outside::FakeTables::default();
+            let _installed = tables.install();
+            home.store(&tables).keep_for_tests(address, "Carried", ONE_LEVEL, None);
+            tables.serve(address, "Served", TWO_LEVELS);
+            let mut shared = player_with(&home, &[at(address)], two_charts());
+
+            start_first_fetches(&mut shared);
+            assert_eq!(started_for(&shared.table_fetches), vec![FetchWhy::Stale]);
+            apply_until_idle(&mut shared);
+            assert_eq!(home.store(&tables).copy_name(address).as_deref(), Some("Served"));
+            assert_eq!(shared.table_names, vec!["SERVED".to_string()]);
+            forget_table_status(address);
+        });
+    }
+
+    /// A table that has no copy and one whose copy is a day old are fetched in the same look, each
+    /// for its own reason, and nothing is said of the second.
+    #[test]
+    fn a_table_with_no_copy_and_a_stale_one_are_each_fetched_for_their_own_reason() {
+        crate::notify::exclusive(|| {
+            let (new, stale) = ("https://tables.test/stale/both/new/", "https://tables.test/stale/both/stale/");
+            let home = Home::of("stale-both");
+            let tables = test_outside::FakeTables::default();
+            let _installed = tables.install();
+            home.store(&tables).keep_for_tests(stale, "Stale", ONE_LEVEL, Some(unix_now().saturating_sub(TWO_DAYS)));
+            tables.serve(new, "New", ONE_LEVEL);
+            tables.serve(stale, "Fresh", TWO_LEVELS);
+            let mut shared = player_with(&home, &[at(new), at(stale)], two_charts());
+
+            crate::notify::drain(&mut Vec::new());
+            start_first_fetches(&mut shared);
+            assert_eq!(started_for(&shared.table_fetches), vec![FetchWhy::First, FetchWhy::Stale]);
+            apply_until_idle(&mut shared);
+            assert_eq!(shared.table_names, vec!["NEW".to_string(), "FRESH".to_string()]);
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert_eq!(
+                said.iter().map(|(_, line)| line.as_str()).collect::<Vec<_>>(),
+                ["fetching 1 difficulty table(s) for the first time", "difficulty tables fetched for the first time: 1 added, 0 failed"],
+                "the copy that was fetched again was said to have been"
+            );
+            [new, stale].into_iter().for_each(forget_table_status);
+        });
+    }
+
+    /// A refresh that fails is not told to the player as a warning: the copy goes on being the table,
+    /// its folder is what it was, and what the table manager shows beside the source is that the
+    /// reload failed and why.
+    #[test]
+    fn a_refresh_that_fails_keeps_the_copy_and_says_nothing() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/stale/fails/";
+            let home = Home::of("stale-fails");
+            let tables = test_outside::FakeTables::default();
+            let _installed = tables.install();
+            let fetched_at = Some(unix_now().saturating_sub(TWO_DAYS));
+            home.store(&tables).keep_for_tests(address, "Kept", ONE_LEVEL, fetched_at);
+            let mut shared = player_with(&home, &[at(address)], two_charts());
+            let folder = (shared.table_names.clone(), shared.table_levels.clone());
+
+            crate::notify::drain(&mut Vec::new());
+            start_first_fetches(&mut shared);
+            assert_eq!(started_for(&shared.table_fetches), vec![FetchWhy::Stale]);
+            apply_until_idle(&mut shared);
+
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.is_empty(), "a refresh that failed was said: {said:?}");
+            assert_eq!(tables.asked(), 1);
+            let Some(TableStatus::Loaded { stale: Some(reason), origin, .. }) = table_status(address) else {
+                panic!("the table manager is told the reload failed and the table is what it was");
+            };
+            assert_eq!((reason, origin), (test_outside::refused().to_string(), TableOrigin::Address { fetched_at }));
+            assert_eq!((shared.table_names.clone(), shared.table_levels.clone()), folder, "the folder changed");
+            assert_eq!(home.store(&tables).copy_of(address).map(|saved| saved.fetched_at), Some(fetched_at), "the copy was touched");
+            forget_table_status(address);
+        });
+    }
+
+    #[test]
+    fn a_table_file_is_never_fetched_again_for_its_age() {
+        crate::notify::exclusive(|| {
+            let home = Home::of("stale-file");
+            let tables = test_outside::FakeTables::default();
+            let _installed = tables.install();
+            let body = BodyFile::written("stale-file", ONE_LEVEL);
+            let source = body.source("mine");
+            let mut shared = player_with(&home, std::slice::from_ref(&source), two_charts());
+            assert!(matches!(table_status(&source.location), Some(TableStatus::Loaded { origin: TableOrigin::File, .. })));
+
+            start_first_fetches(&mut shared);
+            assert_eq!((shared.table_fetches.is_idle(), tables.asked()), (true, 0));
+            forget_table_status(&source.location);
+        });
+    }
+
+    /// A refresh that lands is a table arriving like any other: the browser is left in the folders it
+    /// was in, with the cursor on the bar it was on, although the table now lists a chart before it.
+    #[test]
+    fn a_refresh_that_lands_keeps_the_browser_where_it_is() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/stale/lands/";
+            let home = Home::of("stale-lands");
+            let tables = test_outside::FakeTables::default();
+            let _installed = tables.install();
+            const KEPT: &[u8] = br#"[{"md5":"bbbb","level":"1"},{"md5":"cccc","level":"1"}]"#;
+            const SERVED: &[u8] = br#"[{"md5":"aaaa","level":"1"},{"md5":"bbbb","level":"1"},{"md5":"cccc","level":"1"},{"md5":"dddd","level":"2"}]"#;
+            home.store(&tables).keep_for_tests(address, "Before", KEPT, Some(unix_now().saturating_sub(TWO_DAYS)));
+            tables.serve(address, "After", SERVED);
+            let named = TableSource { name: "MINE".into(), ..at(address) };
+            let mut shared = player_with(&home, &[named], Library::from_songs(vec![entry("aaaa"), entry("bbbb"), entry("cccc")]));
+            shared.config.library.sort = rbms_config::SortMode::Title;
+            shared.open_for_tests([shared.table_folder(0), shared.level_folder(0, 0)]);
+            shared.rebuild_select_items();
+            shared.sel = 1;
+            let focused = |shared: &AppShared| shared.select_items.get(shared.sel).and_then(|item| shared.identity_of(item));
+            let before = (shared.opened(), shared.open_titles(), focused(&shared));
+            assert_eq!((shared.table_levels[0].len(), shared.select_items.len()), (1, 2));
+
+            start_first_fetches(&mut shared);
+            apply_until_idle(&mut shared);
+
+            assert_eq!(shared.table_levels[0].len(), 2, "the refreshed table did not land");
+            assert_eq!(shared.select_items.len(), 3, "the level does not list the chart the refresh added");
+            assert_eq!((shared.opened(), shared.open_titles(), focused(&shared)), before);
+            assert_eq!(shared.sel, 2, "the cursor did not follow its chart down to the row it has now");
+            forget_table_status(address);
+        });
     }
 }

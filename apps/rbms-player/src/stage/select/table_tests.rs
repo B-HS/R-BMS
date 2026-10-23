@@ -141,7 +141,7 @@ fn a_table_with_no_copy_is_fetched_beside_the_browser_and_its_folder_arrives_und
             tables.serve(&new, "New", &listing(&["alba", "alder"]));
             let mut browser = browser(&tag, skinned);
             let store = TableStore::beside(&browser.app.shared.settings_path);
-            store.keep_for_tests(&kept, "Kept", &listing(&["alpha"]), Some(1));
+            store.keep_for_tests(&kept, "Kept", &listing(&["alpha"]), Some(crate::tablesrc::unix_now()));
             browser.app.shared.config.library.tables = vec![at(&new), at(&kept)];
 
             read_as_a_scan_does(&mut browser);
