@@ -6,18 +6,31 @@
 //! is found again after the tables, the folders or the library under it changed. Leaving a folder
 //! puts the cursor back on the bar it was opened from, found the same way.
 
+use rbms_model::translations::Catalog;
 use rbms_render::skin_render::frame::BarKind;
+use rbms_render::text::language;
 
 use crate::tablesrc::{TableLevels, UNLOADED_TABLE};
-use crate::user_folders::USER_FOLDERS_LABEL;
+use crate::text::menus::course::CourseText;
+use crate::text::select::tree::TreeText;
 use crate::{AppShared, SelectItem};
 
-/// What the reference writes for the folder that holds every chart.
-pub(crate) const ALL_SONGS_TITLE: &str = "ALL SONGS";
+/// What the reference writes for the folder that holds every chart, in the language the screens are
+/// written in.
+pub(crate) fn all_songs_title() -> &'static str {
+    TreeText::AllSongs.get(language())
+}
 
 /// What the folder of the courses a table lists is titled, after the reference's folder of courses
-/// (`BarManager.java:207`).
-pub(crate) const TABLE_COURSES_TITLE: &str = "COURSE";
+/// (`BarManager.java:207`), in the language the screens are written in.
+pub(crate) fn table_courses_title() -> &'static str {
+    CourseText::TabCourses.get(language())
+}
+
+/// What the folder of the player's own folders is titled, in the language the screens are written in.
+pub(crate) fn user_folders_title() -> &'static str {
+    TreeText::MyFolders.get(language())
+}
 
 /// What a level of a table is titled after when the table names no symbol of its own.
 const TABLE_LEVEL_PREFIX: &str = "LV";
@@ -133,14 +146,14 @@ impl SelectFolder {
     /// What the folder is titled, without the count its bar adds.
     pub(crate) fn title(&self, shared: &AppShared) -> String {
         match self {
-            SelectFolder::AllSongs => ALL_SONGS_TITLE.to_string(),
+            SelectFolder::AllSongs => all_songs_title().to_string(),
             SelectFolder::TableGroup(name) => name.clone(),
             SelectFolder::Table(table) => table.resolve(shared).map_or_else(|| UNLOADED_TABLE.to_string(), |at| table_name(shared, at)),
             SelectFolder::TableLevel(table, level) => {
                 table.resolve(shared).map_or_else(|| format!("{TABLE_LEVEL_PREFIX} {level}"), |at| level_title(shared, at, level))
             }
-            SelectFolder::TableCourses(_) => TABLE_COURSES_TITLE.to_string(),
-            SelectFolder::UserFolders => USER_FOLDERS_LABEL.to_string(),
+            SelectFolder::TableCourses(_) => table_courses_title().to_string(),
+            SelectFolder::UserFolders => user_folders_title().to_string(),
             SelectFolder::UserFolder(id) => {
                 shared.user_folders.shown.iter().find(|folder| &folder.id == id).map(|folder| folder.name.clone()).unwrap_or_default()
             }

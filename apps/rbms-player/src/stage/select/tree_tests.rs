@@ -13,12 +13,13 @@
 
 use rbms_config::TableSource;
 use rbms_render::skin_render::frame::BarKind;
+use rbms_skin::property::generated::BUTTON_PRACTICE;
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 use super::list::ChartFacts;
 use super::search_tests::stroke;
-use super::skinned_tests::{Browser, KEY_TWO, SLOT_ABOVE, SLOT_BELOW};
+use super::skinned_tests::{Browser, KEY_THREE, KEY_TWO, SLOT_ABOVE, SLOT_BELOW};
 use super::tests::{entry, press};
 use super::*;
 use crate::select_tree::{BarIdentity, ListPlace, SelectFolder, TableRef, show_the_list_again};
@@ -440,9 +441,7 @@ fn list_courses(browser: &mut Browser, at: usize, course: &str) {
 /// header of the first lists [`listed_course_group`] in the shape the Stella tables write, a list
 /// of groups.
 fn browser_with_courses(tag: &str) -> Browser {
-    let mut browser = browser_with(tag, false, &[PLAIN, Listed { name: "SECOND", ..PLAIN }]);
-    list_courses(&mut browser, 0, &format!("[{}]", listed_course_group()));
-    browser
+    browser_with_courses_drawn_by(tag, false)
 }
 
 #[test]
@@ -479,6 +478,71 @@ fn a_course_whose_charts_are_all_owned_starts_and_one_missing_a_chart_says_so() 
     let run = browser.app.shared.course_run.as_ref().expect("the course is being played");
     assert_eq!(run.course.name, "DAN A");
     assert_eq!(run.index, 0, "the course did not start on its first stage");
+}
+
+/// A browser over the tables [`browser_with_courses`] holds, drawn by the fixture skin when `skinned`.
+fn browser_with_courses_drawn_by(tag: &str, skinned: bool) -> Browser {
+    let mut browser = browser_with(tag, skinned, &[PLAIN, Listed { name: "SECOND", ..PLAIN }]);
+    list_courses(&mut browser, 0, &format!("[{}]", listed_course_group()));
+    browser
+}
+
+/// A course has no practice screen, so the key that opens it on a chart starts the course as it is
+/// on a bar of the folder of the courses a table lists, as the reference does
+/// (`MusicSelector.render`: a practice that reaches a course bar is turned into play): by the
+/// browser's own key, and by the key of the reference's table on a skin's browser. A course with a
+/// stage the library lacks is said so and does not start.
+#[test]
+fn the_practice_key_starts_a_course_of_the_course_folder_of_a_table_as_the_reference_does() {
+    for skinned in [false, true] {
+        let mut browser = browser_with_courses_drawn_by(&format!("tree-courses-practice-{skinned}"), skinned);
+        enter(&mut browser, 1);
+        enter(&mut browser, 3);
+        let practise = |browser: &mut Browser| if skinned { browser.tap(KEY_THREE) } else { browser.key(KeyCode::F4) };
+
+        browser.app.shared.sel = 1;
+        browser.frame();
+        assert!(matches!(practise(&mut browser), Transition::Stay), "skinned {skinned}: a course with a stage the library lacks started");
+        assert!(browser.app.shared.course_run.is_none() && !browser.app.shared.practice_requested, "skinned {skinned}");
+
+        browser.app.shared.sel = 0;
+        browser.frame();
+        assert!(!matches!(practise(&mut browser), Transition::Stay), "skinned {skinned}: the practice key did not start a course whose every chart is owned");
+        let run = browser.app.shared.course_run.as_ref().expect("the course is being played");
+        assert_eq!((run.course.name.as_str(), run.index), ("DAN A", 0), "skinned {skinned}");
+        assert!(!browser.app.shared.practice_requested, "skinned {skinned}: the course was sent to the practice screen");
+    }
+}
+
+/// The practice button of a skin starts the course under the cursor the same way.
+#[test]
+fn the_practice_button_of_a_skin_starts_a_course_of_the_course_folder_of_a_table() {
+    let mut browser = browser_with_courses_drawn_by("tree-courses-practice-button", true);
+    enter(&mut browser, 1);
+    enter(&mut browser, 3);
+    browser.app.shared.sel = 0;
+    browser.frame();
+    let asked = browser.state.run_event(&mut browser.app.shared, BUTTON_PRACTICE, 0);
+    assert!(!matches!(asked, Transition::Stay), "the practice button did not start the course");
+    assert_eq!(browser.app.shared.course_run.as_ref().map(|run| run.course.name.as_str()), Some("DAN A"));
+    assert!(!browser.app.shared.practice_requested, "the course was sent to the practice screen");
+}
+
+/// On the course tab of the browser no skin draws the practice key starts the course under the
+/// cursor, and does not practise the chart the song list has under its own cursor behind it.
+#[test]
+fn the_practice_key_starts_the_course_under_the_cursor_of_the_course_tab() {
+    let mut browser = browser_with("tree-courses-practice-tab", false, &[PLAIN]);
+    let mut own = rbms_course::Course { name: "MINE".to_owned(), ..rbms_course::Course::default() };
+    own.charts = vec![rbms_course::CourseChart { md5: "md5-alba".to_owned(), sha256: String::new(), title: String::new() }];
+    assert!(own.validate());
+    browser.state = SelectState::on_courses(vec![own], &browser.app.shared.library);
+    browser.app.shared.open_for_tests([SelectFolder::AllSongs]);
+    browser.app.shared.sel = 0;
+    browser.frame();
+    assert!(!matches!(browser.key(KeyCode::F4), Transition::Stay), "the practice key did not start the course");
+    assert_eq!(browser.app.shared.course_run.as_ref().map(|run| run.course.name.as_str()), Some("MINE"));
+    assert!(!browser.app.shared.practice_requested, "the chart behind the course tab was practised");
 }
 
 #[test]

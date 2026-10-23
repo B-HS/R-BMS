@@ -21,15 +21,17 @@ use rbms_library::songdb::{
     CONTENT_BGA, CONTENT_TEXT, FEATURE_CHARGE_NOTE, FEATURE_HELL_CHARGE_NOTE, FEATURE_LONG_NOTE, FEATURE_RANDOM, FEATURE_STOP_SEQUENCE, FEATURE_UNDEFINED_LN,
     SongDb, SongRow,
 };
+use rbms_model::translations::Catalog;
 use rbms_render::ReferenceImages;
 use rbms_render::skin_render::frame::{LAMP_KINDS, RANK_KINDS};
+use rbms_render::text::language;
 use rbms_store::RecordLamp;
 use rbms_table::TableEntry;
 
 use crate::course_ui::CourseRow;
-use crate::select_tree::{ALL_SONGS_TITLE, SelectFolder, TABLE_COURSES_TITLE, TableRef, level_title, table_group, table_name};
+use crate::select_tree::{SelectFolder, TableRef, all_songs_title, level_title, table_courses_title, table_group, table_name, user_folders_title};
 use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta};
-use crate::user_folders::USER_FOLDERS_LABEL;
+use crate::text::select::filter::FilterText;
 use crate::*;
 
 /// Level a chart whose `#PLAYLEVEL` is not a number sorts under: after every chart that has one,
@@ -186,15 +188,16 @@ pub(crate) const CLEAR_FILTERS: [ClearFilter; 5] =
     [ClearFilter::Any, ClearFilter::Unplayed, ClearFilter::Unclear, ClearFilter::Cleared, ClearFilter::FullCombo];
 
 impl ClearFilter {
-    /// Name the filter panel shows.
+    /// Name the filter panel shows, in the language the screens are written in.
     pub(crate) fn label(self) -> &'static str {
         match self {
-            ClearFilter::Any => "ALL",
-            ClearFilter::Unplayed => "NO PLAY",
-            ClearFilter::Unclear => "NOT CLEARED",
-            ClearFilter::Cleared => "CLEARED",
-            ClearFilter::FullCombo => "FULL COMBO",
+            ClearFilter::Any => FilterText::All,
+            ClearFilter::Unplayed => FilterText::NoPlay,
+            ClearFilter::Unclear => FilterText::NotCleared,
+            ClearFilter::Cleared => FilterText::Cleared,
+            ClearFilter::FullCombo => FilterText::FullCombo,
         }
+        .get(language())
     }
 
     /// Whether a chart's records let it through.
@@ -312,7 +315,7 @@ impl AppShared {
         match folder {
             None => {
                 let shown = self.shown_count(0..songs.len(), filter);
-                let mut items = vec![SelectItem::Folder { label: format!("{ALL_SONGS_TITLE} ({shown})"), target: SelectFolder::AllSongs }];
+                let mut items = vec![SelectItem::Folder { label: format!("{} ({shown})", all_songs_title()), target: SelectFolder::AllSongs }];
                 let mut groups_shown: Vec<&str> = Vec::new();
                 for at in 0..self.table_levels.len() {
                     let group = table_group(self, at);
@@ -333,7 +336,7 @@ impl AppShared {
                 }
                 if !self.user_folders.shown.is_empty() {
                     let total: usize = self.user_folders.shown.iter().map(|folder| self.shown_count(folder.charts.iter().copied(), filter)).sum();
-                    items.push(SelectItem::Folder { label: format!("{USER_FOLDERS_LABEL} ({total})"), target: SelectFolder::UserFolders });
+                    items.push(SelectItem::Folder { label: format!("{} ({total})", user_folders_title()), target: SelectFolder::UserFolders });
                 }
                 items
             }
@@ -361,7 +364,7 @@ impl AppShared {
                     .unwrap_or_default();
                 let courses = self.table_courses(at).count();
                 if courses > 0 {
-                    rows.push(SelectItem::Folder { label: format!("{TABLE_COURSES_TITLE} ({courses})"), target: SelectFolder::TableCourses(table) });
+                    rows.push(SelectItem::Folder { label: format!("{} ({courses})", table_courses_title()), target: SelectFolder::TableCourses(table) });
                 }
                 rows
             }

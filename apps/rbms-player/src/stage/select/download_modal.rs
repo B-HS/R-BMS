@@ -22,38 +22,26 @@
 //! the way the record modal does, whether a skin draws the browser or not.
 
 use rbms_download::{LinkKind, browsable_url, classify_link};
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, fit_text, theme};
 use rbms_table::TableEntry;
 
 use super::keys::{KeyLayout, SelectKey};
 use super::list::missing_chart_title;
 use super::skinned::skin_status;
-use super::{BUILT_IN_KEY_LAYOUT, NOT_IN_THE_LIBRARY, SelectState};
+use super::{BUILT_IN_KEY_LAYOUT, SelectState};
 use crate::dialog::{DialogHandle, DialogState};
 use crate::download::{JobStatus, Phase, cancel_download, start_download};
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify, notify_text};
 use crate::select_tree::{level_title, table_name};
 use crate::stage::result::SkinStatus;
+use crate::text::select::download_modal::DownloadModalText;
 use crate::{AppShared, CH, CW, Hot, KeyCode, MissingRef, SelectItem};
 
-/// What the modal says above the chart's title.
-const HEADING: &str = "NOT IN THE LIBRARY";
-
 /// What the modal says of the two links of a table's chart.
-const NOTE_LINES: [&str; 2] = [
-    "THE TABLE'S DL IS THE CHART FILE ONLY (A DIFFERENCE CHART).",
-    "THE SONG ITSELF - ITS SOUNDS AND IMAGES - HAS TO BE GOT FROM THE SONG URL AND PUT BESIDE THE CHART.",
-];
-
-/// What the modal says while the folder picker it opened is up.
-const PICKING_THE_FOLDER: &str = "CHOOSE THE FOLDER THE CHART IS UNPACKED INTO";
-
-/// The keys the modal is driven by.
-const KEY_HINT: &str = "LEFT RIGHT CHOOSE   ENTER PRESS   ESC CLOSE";
-
-/// What the modal says while a job is getting another chart.
-const ANOTHER_DOWNLOAD_IS_RUNNING: &str = "ANOTHER DOWNLOAD IS RUNNING";
+const NOTE_LINES: [DownloadModalText; 2] = [DownloadModalText::NoteChartFile, DownloadModalText::NoteSongUrl];
 
 /// How dark the screen under the modal is made.
 const BACKDROP_ALPHA: u8 = 180;
@@ -110,15 +98,16 @@ pub(crate) enum ModalButton {
 }
 
 impl ModalButton {
-    /// What the button says.
-    const fn label(self) -> &'static str {
+    /// What the button says, in the language the screens are written in.
+    fn label(self) -> &'static str {
         match self {
-            ModalButton::GetChart => "GET CHART",
-            ModalButton::OpenSongUrl => "OPEN SONG URL",
-            ModalButton::OpenChartUrl => "OPEN CHART URL",
-            ModalButton::Close => "CLOSE",
-            ModalButton::Cancel => "CANCEL",
+            ModalButton::GetChart => DownloadModalText::GetChart,
+            ModalButton::OpenSongUrl => DownloadModalText::OpenSongUrl,
+            ModalButton::OpenChartUrl => DownloadModalText::OpenChartUrl,
+            ModalButton::Close => DownloadModalText::Close,
+            ModalButton::Cancel => DownloadModalText::Cancel,
         }
+        .get(language())
     }
 
     /// Whether the two buttons stand in one place of the row, which getting the chart and
@@ -191,12 +180,12 @@ impl DownloadModal {
     /// or how it ended, or another chart being got.
     fn status_line(&self) -> Option<String> {
         if self.folder_picker.is_some() {
-            return Some(PICKING_THE_FOLDER.to_owned());
+            return Some(DownloadModalText::PickingTheFolder.get(language()).to_owned());
         }
         if let Some(job) = self.own_job() {
             return Some(job.line());
         }
-        self.job.as_ref().filter(|job| job.is_running()).map(|_| ANOTHER_DOWNLOAD_IS_RUNNING.to_owned())
+        self.job.as_ref().filter(|job| job.is_running()).map(|_| DownloadModalText::AnotherDownloadIsRunning.get(language()).to_owned())
     }
 
     /// The button the cursor is on as the row stands now, when it is on.
@@ -275,13 +264,13 @@ pub(super) fn render_download_modal<R: Renderer>(r: &mut R, modal: &DownloadModa
     outline(r, panel, HAIRLINE, th.divider);
     let x = panel.x + PANEL_PAD_X;
     let room = panel.w - PANEL_PAD_X * 2.0;
-    draw_text(r, x, panel.y + HEADING_Y, HEADING_SCALE, th.accent, HEADING);
+    draw_text(r, x, panel.y + HEADING_Y, HEADING_SCALE, th.accent, DownloadModalText::Heading.get(language()));
     draw_text(r, x, panel.y + TITLE_Y, TITLE_SCALE, th.text, &fit_text(missing_chart_title(&modal.entry), TITLE_SCALE, room));
     draw_text(r, x, panel.y + ARTIST_Y, ARTIST_SCALE, th.text_dim, &fit_text(modal.entry.artist.trim(), ARTIST_SCALE, room));
     let place = format!("{} {}", modal.table_title, modal.level_title);
     draw_text(r, x, panel.y + PLACE_Y, PLACE_SCALE, th.text_muted, &fit_text(&place, PLACE_SCALE, room));
     for (line, text) in NOTE_LINES.iter().enumerate() {
-        draw_text(r, x, panel.y + NOTE_Y + NOTE_GAP * line as f32, NOTE_SCALE, th.text, &fit_text(text, NOTE_SCALE, room));
+        draw_text(r, x, panel.y + NOTE_Y + NOTE_GAP * line as f32, NOTE_SCALE, th.text, &fit_text(text.get(language()), NOTE_SCALE, room));
     }
     if let Some(status) = modal.status_line() {
         draw_text(r, x, panel.y + STATUS_Y, STATUS_SCALE, th.accent, &fit_text(&status, STATUS_SCALE, room));
@@ -305,7 +294,7 @@ pub(super) fn render_download_modal<R: Renderer>(r: &mut R, modal: &DownloadModa
             hot.push((rect, Hot::DownloadButton(slot)));
         }
     }
-    draw_text(r, x, panel.y + panel.h - HINT_FROM_FOOT, HINT_SCALE, th.text_muted, KEY_HINT);
+    draw_text(r, x, panel.y + panel.h - HINT_FROM_FOOT, HINT_SCALE, th.text_muted, DownloadModalText::KeyHint.get(language()));
 }
 
 impl SelectState {
@@ -317,7 +306,7 @@ impl SelectState {
                 self.record_modal = None;
                 self.download_modal = Some(modal);
             }
-            None => notify(Level::Info, NOT_IN_THE_LIBRARY),
+            None => notify_text(Level::Info, DownloadModalText::NotInTheLibrary, &[]),
         }
     }
 
@@ -450,5 +439,35 @@ impl SelectState {
                 modal.job = crate::download::status(shared);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rbms_model::Language;
+
+    use super::*;
+    use crate::text::settings::InstalledLanguage;
+
+    const BUTTONS: [ModalButton; 5] = [ModalButton::GetChart, ModalButton::OpenSongUrl, ModalButton::OpenChartUrl, ModalButton::Close, ModalButton::Cancel];
+
+    #[test]
+    fn a_button_says_what_it_does_in_the_installed_language() {
+        assert_eq!(BUTTONS.map(ModalButton::label), ["GET CHART", "OPEN SONG URL", "OPEN CHART URL", "CLOSE", "CANCEL"]);
+        let _korean = InstalledLanguage::new(Language::Korean);
+        assert_eq!(BUTTONS.map(ModalButton::label), ["차트 받기", "곡 URL 열기", "차트 URL 열기", "닫기", "취소"]);
+        let _japanese = InstalledLanguage::new(Language::Japanese);
+        assert_eq!(BUTTONS.map(ModalButton::label), ["譜面を取得", "曲のURLを開く", "譜面のURLを開く", "閉じる", "キャンセル"]);
+    }
+
+    #[test]
+    fn the_notice_of_a_chart_the_table_no_longer_lists_is_worded_in_the_language_it_is_taken_in() {
+        crate::notify::exclusive(|| {
+            notify_text(Level::Info, DownloadModalText::NotInTheLibrary, &[]);
+            let _korean = InstalledLanguage::new(Language::Korean);
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert_eq!(said, [(Level::Info, "라이브러리에 없습니다".to_string())]);
+        });
     }
 }

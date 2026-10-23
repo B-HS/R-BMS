@@ -112,18 +112,6 @@ pub(crate) const PANEL_TITLE: &str = "IR RANKING";
 /// Placeholder for a value the server has no row for.
 pub(crate) const NO_VALUE: &str = "-";
 
-/// Shown instead of rows while the fetch is in flight.
-pub(crate) const LOADING_TEXT: &str = "LOADING...";
-
-/// Shown when the panel is open but nothing is focused, or the chart has no md5.
-pub(crate) const NO_CHART_TEXT: &str = "SELECT A CHART";
-
-/// Shown when the leaderboard came back empty.
-pub(crate) const NO_SCORES_TEXT: &str = "NO SCORES YET";
-
-/// Shown when no score server is configured, so there is nothing to fetch.
-pub(crate) const OFFLINE_TEXT: &str = "IR OFF - SET SERVER URL IN SETTINGS";
-
 /// Tag marking a row whose replay can be downloaded and played.
 pub(crate) const REPLAY_TAG: &str = "REP";
 
@@ -229,7 +217,7 @@ fn board_lines(board: &RankingBoard) -> Vec<PanelLine> {
     let language = rbms_render::text::language();
     let mut lines = Vec::new();
     if board.rows.is_empty() {
-        lines.push(PanelLine::message(NO_SCORES_TEXT));
+        lines.push(PanelLine::message(RankingText::NoScoresYet.get(language)));
     }
     lines.extend(board.rows.iter().map(|row| PanelLine::from_row(row.player.clone(), row)));
     if board.more {
@@ -247,7 +235,7 @@ fn board_lines(board: &RankingBoard) -> Vec<PanelLine> {
         None => PanelLine::empty_for(LineRole::You, YOU_LABEL.to_string()),
     });
     for (id, row) in &board.rivals {
-        let label = format!("RIVAL {id}");
+        let label = RankingText::Rival.fill(language, &[id]);
         lines.push(match row {
             Some(row) => PanelLine::from_row(label, row),
             None => PanelLine::empty_for(LineRole::Rival, label),
@@ -258,7 +246,7 @@ fn board_lines(board: &RankingBoard) -> Vec<PanelLine> {
 
 /// The panel's only line when the client has no score server configured.
 pub(crate) fn offline_lines() -> Vec<PanelLine> {
-    vec![PanelLine::message(OFFLINE_TEXT)]
+    vec![PanelLine::message(RankingText::Offline.get(rbms_render::text::language()))]
 }
 
 pub(crate) fn profile_line(label: &str, position: usize, count: usize) -> PanelLine {
@@ -267,11 +255,12 @@ pub(crate) fn profile_line(label: &str, position: usize, count: usize) -> PanelL
 
 /// The panel's lines for a chart's state. `None` means no chart is focused.
 pub(crate) fn panel_lines(state: Option<&RankingState>) -> Vec<PanelLine> {
+    let language = rbms_render::text::language();
     match state {
-        None => vec![PanelLine::message(NO_CHART_TEXT)],
-        Some(RankingState::Loading) => vec![PanelLine::message(LOADING_TEXT)],
+        None => vec![PanelLine::message(RankingText::SelectAChart.get(language))],
+        Some(RankingState::Loading) => vec![PanelLine::message(RankingText::Loading.get(language))],
         Some(RankingState::Failed(message)) => {
-            vec![PanelLine::message(format!("ERROR: {message}"))]
+            vec![PanelLine::message(RankingText::Error.fill(language, &[message]))]
         }
         Some(RankingState::Ready(board)) => board_lines(board),
     }
@@ -328,10 +317,11 @@ pub(crate) fn render_ranking_panel_at<R: Renderer>(
         draw_text_right(r, head_right, panel.y + TITLE_Y + HEAD_HINT_DROP, HINT_SCALE, th.text_muted, &fit_text(&layout_hint, HINT_SCALE, room));
     }
     let hint = match (focused, can_switch_profile) {
-        (true, true) => "UP DOWN MOVE   Q/E PROFILE   ENTER REPLAY   I CLOSE",
-        (true, false) => "UP DOWN MOVE   ENTER REPLAY   I CLOSE",
-        (false, _) => "I FOCUS PANEL",
-    };
+        (true, true) => RankingText::KeysWithProfiles,
+        (true, false) => RankingText::Keys,
+        (false, _) => RankingText::FocusPanel,
+    }
+    .get(language);
     match heading {
         Some(chart) => {
             draw_text_right(r, panel.x + panel.w - RANK_X, panel.y + HINT_Y, HINT_SCALE, th.text_muted, hint);
@@ -515,19 +505,50 @@ mod tests {
     #[test]
     fn an_empty_leaderboard_says_so_above_the_you_row() {
         let state = RankingState::Ready(Box::new(build_board(&[], None, &[])));
-        assert_eq!(labels(&panel_lines(Some(&state))), vec![NO_SCORES_TEXT, "YOU"]);
+        assert_eq!(labels(&panel_lines(Some(&state))), vec!["NO SCORES YET", "YOU"]);
     }
 
     #[test]
     fn loading_failed_and_no_chart_each_render_one_message_line() {
-        assert_eq!(labels(&offline_lines()), vec![OFFLINE_TEXT]);
-        assert_eq!(labels(&panel_lines(None)), vec![NO_CHART_TEXT]);
-        assert_eq!(labels(&panel_lines(Some(&RankingState::Loading))), vec![LOADING_TEXT]);
+        assert_eq!(labels(&offline_lines()), vec!["IR OFF - SET SERVER URL IN SETTINGS"]);
+        assert_eq!(labels(&panel_lines(None)), vec!["SELECT A CHART"]);
+        assert_eq!(labels(&panel_lines(Some(&RankingState::Loading))), vec!["LOADING..."]);
         let failed = RankingState::Failed("server down".into());
         assert_eq!(labels(&panel_lines(Some(&failed))), vec!["ERROR: server down"]);
         for line in offline_lines().iter().chain(&panel_lines(None)).chain(&panel_lines(Some(&RankingState::Loading))).chain(&panel_lines(Some(&failed))) {
             assert_eq!(line.role, LineRole::Message, "{line:?}");
         }
+    }
+
+    #[test]
+    fn the_messages_and_the_label_of_a_rival_are_worded_in_the_installed_language() {
+        let _korean = Installed::language(Language::Korean);
+        assert_eq!(labels(&offline_lines()), vec!["IR OFF - 설정에서 SERVER URL을 입력하세요"]);
+        assert_eq!(labels(&panel_lines(None)), vec!["차트를 선택하세요"]);
+        assert_eq!(labels(&panel_lines(Some(&RankingState::Loading))), vec!["불러오는 중..."]);
+        assert_eq!(labels(&panel_lines(Some(&RankingState::Failed("down".into())))), vec!["오류: down"]);
+        let empty = RankingState::Ready(Box::new(build_board(&[], None, &[])));
+        assert_eq!(
+            labels(&panel_lines(Some(&empty))),
+            vec!["아직 스코어가 없습니다", "YOU"],
+            "the label of the player's own row is a term every language keeps"
+        );
+        assert_eq!(labels(&panel_lines(Some(&ready_state())))[3..], ["라이벌 friend", "라이벌 ghost"]);
+    }
+
+    #[test]
+    fn the_keys_under_the_title_are_worded_in_the_installed_language() {
+        let lines = panel_lines(Some(&ready_state()));
+        let english = drawn_selecting(&lines, 1, true);
+        let _japanese = Installed::language(Language::Japanese);
+        let japanese = drawn_selecting(&lines, 1, true);
+        let panel = select_layout().detail_rect;
+        let hint_row = Rect::new(panel.x, panel.y + HINT_Y, panel.w, ROW_H);
+        assert!(
+            (hint_row.x as u32..(hint_row.x + hint_row.w) as u32)
+                .any(|x| (hint_row.y as u32..(hint_row.y + hint_row.h) as u32).any(|y| english.pixel_at(x, y) != japanese.pixel_at(x, y))),
+            "the line of keys is not the language's"
+        );
     }
 
     #[test]

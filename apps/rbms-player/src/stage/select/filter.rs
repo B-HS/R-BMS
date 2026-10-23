@@ -7,9 +7,12 @@
 //! reset with the browser, which is what stops a forgotten filter from looking like a lost library.
 #![allow(clippy::wildcard_imports)]
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Rect, Renderer, draw_text, draw_text_right, select_layout, theme};
 
 use crate::stage::select::list::{CLEAR_FILTERS, ClearFilter, SelectFilter};
+use crate::text::select::filter::FilterText;
 use crate::*;
 
 /// Lowest level either bound can be set to.
@@ -48,12 +51,13 @@ const FILTER_ROWS: [FilterRow; 5] = [FilterRow::LevelFrom, FilterRow::LevelTo, F
 impl FilterRow {
     fn label(self) -> &'static str {
         match self {
-            FilterRow::LevelFrom => "LEVEL FROM",
-            FilterRow::LevelTo => "LEVEL TO",
-            FilterRow::Mode => "MODE",
-            FilterRow::Clear => "CLEAR",
-            FilterRow::Favorites => "FAVOURITES",
+            FilterRow::LevelFrom => FilterText::LevelFrom,
+            FilterRow::LevelTo => FilterText::LevelTo,
+            FilterRow::Mode => FilterText::Mode,
+            FilterRow::Clear => FilterText::Clear,
+            FilterRow::Favorites => FilterText::Favourites,
         }
+        .get(language())
     }
 
     /// What this axis is currently set to, as the panel shows it.
@@ -61,9 +65,9 @@ impl FilterRow {
         match self {
             FilterRow::LevelFrom => level_label(filter.level_from),
             FilterRow::LevelTo => level_label(filter.level_to),
-            FilterRow::Mode => filter.mode.map_or_else(|| "ALL".to_string(), |mode| mode_short(mode).to_string()),
+            FilterRow::Mode => filter.mode.map_or_else(|| FilterText::All.get(language()).to_string(), |mode| mode_short(mode).to_string()),
             FilterRow::Clear => filter.clear.label().to_string(),
-            FilterRow::Favorites => if filter.favorite_only { "STARRED ONLY" } else { "ALL" }.to_string(),
+            FilterRow::Favorites => if filter.favorite_only { FilterText::StarredOnly } else { FilterText::All }.get(language()).to_string(),
         }
     }
 
@@ -106,7 +110,7 @@ impl FilterRow {
 }
 
 fn level_label(level: Option<i32>) -> String {
-    level.map_or_else(|| "ANY".to_string(), |n| n.to_string())
+    level.map_or_else(|| FilterText::AnyLevel.get(language()).to_string(), |n| n.to_string())
 }
 
 /// Move a level bound one step, where the step below the lowest level is "unset".
@@ -203,7 +207,7 @@ impl FilterPanel {
             parts.push(filter.clear.label().to_string());
         }
         if filter.favorite_only {
-            parts.push("FAVOURITES".to_string());
+            parts.push(FilterText::Favourites.get(language()).to_string());
         }
         Some(parts.join("  "))
     }
@@ -281,8 +285,8 @@ pub(super) fn render_filter_panel<R: Renderer>(r: &mut R, panel: &FilterPanel, c
     let filter = panel.filter(config);
     r.fill_rect(filter_panel_rect(), th.panel_hi);
     r.fill_rect(Rect::new(list.x, list.y, list.w, 2.0), th.focus);
-    draw_text(r, list.x + LABEL_X, list.y + 12.0, TITLE_SCALE, th.accent, "FILTER");
-    draw_text(r, list.x + LABEL_X, list.y + 36.0, HINT_SCALE, th.text_muted, "\u{2191}\u{2193} AXIS   \u{2190}\u{2192} VALUE   BACKSPACE RESET   F2 CLOSE");
+    draw_text(r, list.x + LABEL_X, list.y + 12.0, TITLE_SCALE, th.accent, FilterText::Title.get(language()));
+    draw_text(r, list.x + LABEL_X, list.y + 36.0, HINT_SCALE, th.text_muted, FilterText::Hint.get(language()));
     for (index, row) in FILTER_ROWS.iter().enumerate() {
         let y = list.y + ROWS_Y + index as f32 * ROW_PITCH;
         let rect = Rect::new(list.x + 4.0, y, list.w - 8.0, ROW_H);
@@ -297,7 +301,10 @@ pub(super) fn render_filter_panel<R: Renderer>(r: &mut R, panel: &FilterPanel, c
 
 #[cfg(test)]
 mod tests {
+    use rbms_model::Language;
+
     use super::*;
+    use crate::text::settings::InstalledLanguage;
 
     fn panel() -> FilterPanel {
         FilterPanel::default()
@@ -308,6 +315,55 @@ mod tests {
         let panel = panel();
         assert!(!panel.is_open());
         assert!(!panel.filter(&Config::default()).is_active());
+    }
+
+    #[test]
+    fn the_axes_and_their_values_are_worded_in_the_installed_language() {
+        let filter = SelectFilter { level_from: None, level_to: Some(12), mode: Some(Mode::BEAT_7K), clear: ClearFilter::Unclear, favorite_only: true };
+        let worded = || FILTER_ROWS.map(|row| (row.label(), row.value(&filter)));
+        assert_eq!(
+            worded(),
+            [
+                ("LEVEL FROM", "ANY".to_string()),
+                ("LEVEL TO", "12".to_string()),
+                ("MODE", "7K".to_string()),
+                ("CLEAR", "NOT CLEARED".to_string()),
+                ("FAVOURITES", "STARRED ONLY".to_string())
+            ]
+        );
+        let _korean = InstalledLanguage::new(Language::Korean);
+        assert_eq!(
+            worded(),
+            [
+                ("레벨 하한", "제한 없음".to_string()),
+                ("레벨 상한", "12".to_string()),
+                ("모드", "7K".to_string()),
+                ("클리어", "미클리어".to_string()),
+                ("즐겨찾기", "즐겨찾기만".to_string())
+            ]
+        );
+        assert_eq!(FilterRow::Mode.value(&SelectFilter::default()), "전체");
+    }
+
+    #[test]
+    fn the_lamp_filters_are_worded_in_the_installed_language_and_keep_the_lamp_names_the_glossary_keeps() {
+        let labels = || CLEAR_FILTERS.map(ClearFilter::label);
+        assert_eq!(labels(), ["ALL", "NO PLAY", "NOT CLEARED", "CLEARED", "FULL COMBO"]);
+        let _japanese = InstalledLanguage::new(Language::Japanese);
+        assert_eq!(labels(), ["すべて", "NO PLAY", "未クリア", "クリア済み", "FULL COMBO"]);
+    }
+
+    #[test]
+    fn what_the_filter_takes_out_is_said_in_the_installed_language() {
+        let mut config = Config::default();
+        config.library.favorite_only = true;
+        let mut panel = panel();
+        panel.filter.level_from = Some(10);
+        panel.filter.level_to = Some(12);
+        panel.filter.clear = ClearFilter::Cleared;
+        assert_eq!(panel.summary(&config).as_deref(), Some("LV 10\u{2013}12  CLEARED  FAVOURITES"));
+        let _korean = InstalledLanguage::new(Language::Korean);
+        assert_eq!(panel.summary(&config).as_deref(), Some("LV 10\u{2013}12  클리어 완료  즐겨찾기"));
     }
 
     #[test]

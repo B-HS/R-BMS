@@ -11,6 +11,7 @@ use std::sync::mpsc::channel;
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_ir::{ChartId, RandomOption, ReplayData};
+use rbms_model::Language;
 use rbms_store::{Replay, ScoreBook};
 use winit::event::MouseButton;
 
@@ -25,6 +26,7 @@ use crate::ir_ranking::tests::{RankingDouble, record_with_replay};
 use crate::ir_ranking::{RankingState, build_board};
 use crate::keyconfig::Bindable;
 use crate::pointer::{PointerInput, route_pointer};
+use crate::text::settings::InstalledLanguage;
 
 /// The chart the cursor of the fixture browser starts on, its title, and the path it is listed under.
 const FIRST_CHART: &str = "md5-alpha";
@@ -266,6 +268,19 @@ fn a_row_with_no_replay_has_no_layout_to_ask_for() {
     browser.key(layout_key(&browser));
     assert_eq!(browser.app.shared.net_status, "no replay for that row");
     assert!(browser.app.shared.replay_download_rx.is_none() && browser.state.layout_download.is_none());
+}
+
+#[test]
+fn the_status_lines_of_a_replay_are_worded_in_the_language_they_are_set_in() {
+    let mut browser = with_the_ranking_panel_open("layout-panel-status-language");
+    let _korean = InstalledLanguage::new(Language::Korean);
+    browser.key(KeyCode::ArrowDown);
+    browser.key(layout_key(&browser));
+    assert_eq!(browser.app.shared.net_status, "해당 줄에는 리플레이가 없습니다");
+
+    browser.state.layout_download = Some(PLAYER.to_string());
+    deliver(&mut browser, Err(rbms_ir::IrError::Network("down".to_string())));
+    assert!(browser.app.shared.net_status.starts_with("리플레이 다운로드: "), "{}", browser.app.shared.net_status);
 }
 
 #[test]

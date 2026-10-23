@@ -22,6 +22,8 @@
 //!
 //! None of this is drawn for a browser no skin draws, which has all of it already.
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_text_right, fit_text, select_layout, text_width, theme};
 use rbms_skin::property::generated::STRING_DIRECTORY;
 
@@ -31,6 +33,7 @@ use super::filter::{filter_panel_rect, render_filter_panel};
 use super::guide::render_guide;
 use super::search::skin_search_text;
 use crate::ir_ranking_view::{PanelLine, render_ranking_panel_at};
+use crate::text::select::overlay::OverlayText;
 use crate::{AppShared, CH, CW, Hot, SKIN_TYPE_MUSIC_SELECT, SelectScene, SelectTab};
 
 /// Where the strip of the browser's own marks starts: its left edge, and the line its lowest mark
@@ -45,20 +48,17 @@ const STRIP_GAP: f32 = 8.0;
 const SEARCH_W: f32 = 480.0;
 pub(super) const SEARCH_H: f32 = 36.0;
 const SEARCH_SCALE: f32 = 1.4;
-const SEARCH_LABEL: &str = "SEARCH";
 const SEARCH_PAD_X: f32 = 12.0;
 const SEARCH_LABEL_W: f32 = 88.0;
 const HITS_SCALE: f32 = 1.1;
 
-/// The mark of a search that is on show: what it says after the word, and the most room the word
-/// is given. It is set like the mark of the course tab.
-const SEARCH_MARK_HINT: &str = "ESC CLEARS";
+/// The mark of a search that is on show: the most room the word is given. It is set like the mark of
+/// the course tab.
 const SEARCH_MARK_WORD_W: f32 = 220.0;
 
 /// The mark of the course tab.
 pub(super) const TAB_MARK_H: f32 = 28.0;
 const TAB_MARK_SCALE: f32 = 1.3;
-const TAB_MARK_HINT: &str = "SHIFT+TAB FOR SONGS";
 const TAB_MARK_HINT_SCALE: f32 = 1.0;
 const TAB_MARK_PAD_X: f32 = 12.0;
 const TAB_MARK_GAP: f32 = 16.0;
@@ -130,8 +130,8 @@ fn draw_search_box<R: Renderer>(r: &mut R, bottom: f32, query: &str, hits: usize
     r.fill_rect(rect, th.button_active);
     outline(r, rect, SEARCH_OUTLINE, th.focus);
     let text_y = centred_text_y(rect.y, rect.h, SEARCH_SCALE);
-    draw_text(r, rect.x + SEARCH_PAD_X, text_y, SEARCH_SCALE, th.text_dim, SEARCH_LABEL);
-    let hits_label = format!("{hits} HITS");
+    draw_text(r, rect.x + SEARCH_PAD_X, text_y, SEARCH_SCALE, th.text_dim, OverlayText::Search.get(language()));
+    let hits_label = OverlayText::Hits.fill(language(), &[&hits]);
     let room = rect.w - SEARCH_PAD_X * 2.0 - SEARCH_LABEL_W - text_width(&hits_label, HITS_SCALE) - SEARCH_PAD_X;
     draw_text(r, rect.x + SEARCH_PAD_X + SEARCH_LABEL_W, text_y, SEARCH_SCALE, th.text, &fit_text(query, SEARCH_SCALE, room));
     draw_text_right(r, rect.x + rect.w - SEARCH_PAD_X, centred_text_y(rect.y, rect.h, HITS_SCALE), HITS_SCALE, th.text_dim, &hits_label);
@@ -154,12 +154,12 @@ fn skin_draws_the_open_folders(shared: &AppShared) -> bool {
 fn draw_search_mark<R: Renderer>(r: &mut R, bottom: f32, word: &str, hits: usize) -> f32 {
     let th = theme();
     let word = fit_text(word, TAB_MARK_SCALE, SEARCH_MARK_WORD_W);
-    let found = format!("{hits} HITS");
+    let found = OverlayText::Hits.fill(language(), &[&hits]);
     let parts = [
-        (SEARCH_LABEL, TAB_MARK_SCALE, th.accent),
+        (OverlayText::Search.get(language()), TAB_MARK_SCALE, th.accent),
         (word.as_str(), TAB_MARK_SCALE, th.text),
         (found.as_str(), TAB_MARK_HINT_SCALE, th.text_dim),
-        (SEARCH_MARK_HINT, TAB_MARK_HINT_SCALE, th.text_muted),
+        (OverlayText::SearchMarkHint.get(language()), TAB_MARK_HINT_SCALE, th.text_muted),
     ];
     let gaps = TAB_MARK_GAP * (parts.len() - 1) as f32;
     let width = TAB_MARK_PAD_X * 2.0 + gaps + parts.iter().map(|(text, scale, _)| text_width(text, *scale)).sum::<f32>();
@@ -178,13 +178,14 @@ fn draw_search_mark<R: Renderer>(r: &mut R, bottom: f32, word: &str, hits: usize
 fn draw_course_mark<R: Renderer>(r: &mut R, bottom: f32) -> f32 {
     let th = theme();
     let label = SelectTab::Courses.label();
-    let width = TAB_MARK_PAD_X * 2.0 + text_width(label, TAB_MARK_SCALE) + TAB_MARK_GAP + text_width(TAB_MARK_HINT, TAB_MARK_HINT_SCALE);
+    let hint = OverlayText::CourseTabHint.get(language());
+    let width = TAB_MARK_PAD_X * 2.0 + text_width(label, TAB_MARK_SCALE) + TAB_MARK_GAP + text_width(hint, TAB_MARK_HINT_SCALE);
     let rect = Rect::new(STRIP_X, bottom - TAB_MARK_H, width, TAB_MARK_H);
     r.fill_rect(rect, th.button_active);
     outline(r, rect, HAIRLINE, th.focus);
     draw_text(r, rect.x + TAB_MARK_PAD_X, centred_text_y(rect.y, rect.h, TAB_MARK_SCALE), TAB_MARK_SCALE, th.accent, label);
     let hint_x = rect.x + TAB_MARK_PAD_X + text_width(label, TAB_MARK_SCALE) + TAB_MARK_GAP;
-    draw_text(r, hint_x, centred_text_y(rect.y, rect.h, TAB_MARK_HINT_SCALE), TAB_MARK_HINT_SCALE, th.text_muted, TAB_MARK_HINT);
+    draw_text(r, hint_x, centred_text_y(rect.y, rect.h, TAB_MARK_HINT_SCALE), TAB_MARK_HINT_SCALE, th.text_muted, hint);
     rect.y - STRIP_GAP
 }
 

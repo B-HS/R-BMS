@@ -10,5 +10,5 @@ pub(crate) mod layout_play;
 pub(crate) mod menus;
 pub(crate) mod notices;
 pub(crate) mod ranking;
-mod select;
+pub(crate) mod select;
 pub(crate) mod settings;

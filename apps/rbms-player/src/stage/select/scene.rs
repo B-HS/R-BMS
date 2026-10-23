@@ -8,10 +8,15 @@
 //! turns through ([`wheel_bar`]).
 #![allow(clippy::wildcard_imports)]
 
+use rbms_config::SettingId;
+use rbms_model::translations::Catalog;
 use rbms_render::skin_render::frame::SongBar;
+use rbms_render::text::language;
 
 use crate::stage::select::SelectState;
 use crate::stage::select::list::{ChartFacts, course_bars, missing_chart_title};
+use crate::text::select::scene::SceneText;
+use crate::text::settings::shown_choice;
 use crate::*;
 
 /// How long a chart counts as newly added, in seconds: a day (`BarRenderer.prepare`,
@@ -23,16 +28,6 @@ const LAMP_UNPLAYABLE: Color = Color::rgb(70, 30, 30);
 
 /// What stands between the titles of the open folders in the built-in browser's header.
 const HEADER_FOLDER_SEPARATOR: &str = " / ";
-
-/// What the first-run hint says under its title. The built-in browser has a row of buttons to point
-/// at; a browser a skin draws has none, so it names the keys instead.
-const WELCOME_BODY: &str = "Add your music folder \u{2014} press O or click FOLDERS below";
-const WELCOME_BODY_SKINNED: &str = "Add your music folder \u{2014} press O   (H lists every key)";
-
-/// The built-in browser's guide line while a search word is typed, and over the list a word left on
-/// show.
-const SEARCH_TYPING_GUIDE: &str = "TYPE TO FILTER   \u{2191}\u{2193} MOVE   ENTER CONFIRM   ESC CANCEL";
-const SEARCH_ON_SHOW_GUIDE: &str = "\u{2191}\u{2193} MOVE   ENTER OPEN   / EDIT SEARCH   ESC CLEAR SEARCH";
 
 /// What a [`BarList`] was built from: the list's generation, how many records the score book
 /// holds, the tab on show, how often the course list and the chart facts have been read, the play
@@ -159,9 +154,18 @@ impl SelectState {
             return self.build_course_scene(shared);
         }
         let rows: Vec<SelectRow> = self.bars.bars().iter().map(|bar| row_of(bar, shared.config.display.score_graph)).collect();
+        let language = language();
 
         let header = if shared.is_at_root() {
-            shared.config.library.songs_folder.as_deref().and_then(|p| Path::new(p).file_name()).and_then(|n| n.to_str()).unwrap_or("ROOT").to_string()
+            shared
+                .config
+                .library
+                .songs_folder
+                .as_deref()
+                .and_then(|p| Path::new(p).file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or(SceneText::Root.get(language))
+                .to_string()
         } else {
             shared.open_titles().join(HEADER_FOLDER_SEPARATOR)
         };
@@ -216,10 +220,13 @@ impl SelectState {
                     cover: if self.cover_image.is_some() { CoverState::Present } else { CoverState::None },
                     stats: vec![
                         StatCell { label: "BPM", value: bpm },
-                        StatCell { label: "DENSITY", value: d.map(|d| format!("{}/s", d.avg_density.round() as i32)).unwrap_or_else(|| "\u{2026}".into()) },
-                        StatCell { label: "NOTES", value: notes },
-                        StatCell { label: "JUDGE", value: rank_label(e.rank) },
-                        StatCell { label: "LENGTH", value: length },
+                        StatCell {
+                            label: SceneText::StatDensity.get(language),
+                            value: d.map(|d| SceneText::DensityValue.fill(language, &[&(d.avg_density.round() as i32)])).unwrap_or_else(|| "\u{2026}".into()),
+                        },
+                        StatCell { label: SceneText::StatNotes.get(language), value: notes },
+                        StatCell { label: SceneText::StatJudge.get(language), value: rank_label(e.rank) },
+                        StatCell { label: SceneText::StatLength.get(language), value: length },
                         StatCell { label: "TOTAL", value: total },
                     ],
                     density,
@@ -257,7 +264,7 @@ impl SelectState {
                 clear_label,
                 clear_color,
                 when: fmt_datetime(r.played_at),
-                sub: format!("{}   {}   GAUGE {}{}", r.mode, r.random, r.gauge, rule_version_note(r.rule_version)),
+                sub: SceneText::ModalSub.fill(language, &[&r.mode, &r.random, &r.gauge, &rule_version_note(r.rule_version)]),
                 counts: r.counts,
                 ex: r.ex_score,
                 max_ex: r.max_ex,
@@ -276,26 +283,28 @@ impl SelectState {
         });
 
         let guide = if self.esc_quit_armed() {
-            "PRESS ESC AGAIN TO QUIT"
+            SceneText::QuitGuide
         } else if shared.searching {
-            SEARCH_TYPING_GUIDE
+            SceneText::SearchTypingGuide
         } else if self.search_is_on_show(shared) {
-            SEARCH_ON_SHOW_GUIDE
+            SceneText::SearchOnShowGuide
         } else {
-            "\u{2191}\u{2193} MOVE   ENTER OPEN   ESC BACK"
-        };
+            SceneText::BrowseGuide
+        }
+        .get(language);
         let filter = self.filter.summary(&shared.config);
         let empty_hint = if !rows.is_empty() {
             None
         } else if self.search_is_on(shared) {
-            Some(("NO RESULTS", "Try a different search  \u{00B7}  Esc to clear"))
+            Some((SceneText::NoResultsTitle, SceneText::NoResultsBody))
         } else if filter.is_some() {
-            Some(("NO CHARTS MATCH", "Press F2 to change the filter  \u{00B7}  Backspace there clears it"))
+            Some((SceneText::NoChartsMatchTitle, SceneText::NoChartsMatchBody))
         } else if shared.config.library.scan_roots().is_empty() {
-            Some(("WELCOME TO rbms", if self.is_skinned(shared) { WELCOME_BODY_SKINNED } else { WELCOME_BODY }))
+            Some((SceneText::WelcomeTitle, if self.is_skinned(shared) { SceneText::WelcomeBodySkinned } else { SceneText::WelcomeBody }))
         } else {
-            Some(("NO CHARTS", "Press O to manage folders  \u{00B7}  T for difficulty tables"))
-        };
+            Some((SceneText::NoChartsTitle, SceneText::NoChartsBody))
+        }
+        .map(|(title, body)| (title.get(language), body.get(language)));
         SelectScene {
             rows,
             sel: shared.sel,
@@ -305,7 +314,7 @@ impl SelectState {
             modal,
             score_graph: shared.config.display.score_graph,
             search: if shared.searching { Some(self.search_display()) } else { self.search_is_on_show(shared).then(|| shared.search.clone()) },
-            sort: shared.config.library.sort.label(),
+            sort: shown_choice(SettingId::Sort, shared.config.library.sort.label()),
             filter,
             empty_hint,
         }
@@ -322,17 +331,18 @@ impl SelectState {
             Some(SelectBar { title, course: Some(course), .. }) => SelectDetail::Folder { label: title.clone(), count: course.stages },
             _ => SelectDetail::Empty,
         };
-        let empty_hint = rows.is_empty().then_some(("NO COURSES", "Put course json files in the courses folder next to your settings"));
+        let language = language();
+        let empty_hint = rows.is_empty().then_some((SceneText::NoCoursesTitle.get(language), SceneText::NoCoursesBody.get(language)));
         SelectScene {
             rows,
             sel: self.courses.cursor(),
             header: SelectTab::Courses.label().to_string(),
-            guide: "\u{2191}\u{2193} MOVE   ENTER START   SHIFT+TAB SONGS   ESC BACK",
+            guide: SceneText::CourseGuide.get(language),
             detail,
             modal: None,
             score_graph: shared.config.display.score_graph,
             search: None,
-            sort: shared.config.library.sort.label(),
+            sort: shown_choice(SettingId::Sort, shared.config.library.sort.label()),
             filter: None,
             empty_hint,
         }
@@ -343,7 +353,7 @@ impl SelectState {
     /// list.
     pub(super) fn refresh_scene_cache(&mut self, shared: &AppShared) {
         self.refresh_bars(shared);
-        let key = self.select_key(shared);
+        let key = (self.select_key(shared), language());
         if self.cached_key != Some(key) || self.cached_scene.is_none() {
             self.cached_scene = Some(self.build_scene(shared));
             self.cached_key = Some(key);
@@ -361,7 +371,7 @@ impl SelectState {
             self.facts = if skinned { ChartFacts::read(shared.song_db.as_ref(), &shared.library) } else { ChartFacts::unread(&shared.library) };
             self.facts_generation = self.facts_generation.wrapping_add(1);
         }
-        let mode = self.applied.and_then(|(_, filter, _)| filter.mode);
+        let mode = self.applied.and_then(|(_, filter, _, _)| filter.mode);
         let key = (shared.select_gen, shared.scores.records().len(), self.tab, self.courses_generation, self.facts_generation, mode, skinned);
         if self.bars.key == Some(key) {
             return;

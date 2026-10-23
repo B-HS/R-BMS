@@ -30,7 +30,9 @@
 use std::sync::mpsc::TryRecvError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rbms_model::Language;
 use rbms_render::skin_render::frame::{BarHold, BarScroller, SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS};
+use rbms_render::text::language;
 use rbms_render::{BgaFrame, FrameData, ReferenceImages, SongBars, select_layout};
 use rbms_skin::property::generated::{BUTTON_KEYCONFIG, BUTTON_SKINSELECT};
 
@@ -38,6 +40,7 @@ use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line, render_ranking_panel_at};
 use crate::ir_replay::from_ir_replay;
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, ShortcutScreen, key_index_of};
+use crate::notify::notify_text;
 use crate::select_tree::{BarIdentity, OpenedFolder, SelectFolder};
 use crate::skin_host::chart::ChartState;
 use crate::skin_host::select::{BrowserLent, CourseShown};
@@ -47,6 +50,8 @@ use crate::stage::{
     Canvas, FoldersState, FrameCtx, KeyConfigState, KeyInput, PlayMenuState, SettingsState, SkinMenuState, Stage, StageHandler, TablesState, Transition,
     is_left_press,
 };
+use crate::text::notices::{installed, installed_with};
+use crate::text::select::notices::SelectNoticeText;
 use crate::textedit::ImeEdit;
 use crate::*;
 
@@ -64,6 +69,8 @@ mod filter;
 mod guide;
 mod images;
 mod keys;
+#[cfg(test)]
+mod language_tests;
 mod layout_play;
 #[cfg(test)]
 mod layout_play_tests;
@@ -153,16 +160,12 @@ const RANKING_PANEL_SHIPPED_KEY: KeyCode = KeyCode::KeyI;
 const SCRATCH_REPEAT_DELAY: Duration = Duration::from_millis(SCROLL_DURATION_LOW_MS as u64);
 const SCRATCH_REPEAT_INTERVAL: Duration = Duration::from_millis(SCROLL_DURATION_HIGH_MS as u64);
 
-/// What the browser says when a chart a table lists that the library does not hold is asked for and
-/// the table no longer lists it where the bar said ([`download_modal`]).
-const NOT_IN_THE_LIBRARY: &str = "not in the library";
-
 /// Start a course picked on the course tab or in the folder of the courses a table lists, unless
 /// one of its stages is not in the library: the reference will not begin a course it cannot supply
 /// every chart of (`BarRenderer.java:154-155`).
 fn start_the_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
     if !entry.is_playable() {
-        notify(Level::Warn, format!("{} stage(s) missing from the library", entry.missing.len()));
+        notify_text(Level::Warn, SelectNoticeText::StagesMissing, &[&entry.missing.len()]);
         return Transition::Stay;
     }
     shared.play_system_sound(SystemSound::Select);
@@ -210,8 +213,10 @@ pub(crate) struct SelectState {
     /// song index it was decoded for.
     cover_image: Option<crate::DecodedImage>,
     cover_si: Option<usize>,
+    /// The scene the renderer is handed, with what it was assembled from and the language it was
+    /// worded in, so that a change of language assembles it again.
     cached_scene: Option<SelectScene>,
-    cached_key: Option<SelectKey>,
+    cached_key: Option<(SelectKey, Language)>,
     /// Whether a shift key is down, which is what turns the sort key around, and whether a control
     /// key is, which is what turns V into a paste. Tracked here rather than read from the event
     /// because a key event only names the key that moved.
@@ -223,11 +228,11 @@ pub(crate) struct SelectState {
     search_edit: ImeEdit,
     search_resume: Option<crate::select_tree::ListPlace>,
     filter: FilterPanel,
-    /// The list generation, the filter and the ordering the rows on screen were built with. Every
-    /// other screen rebuilds the list unfiltered, and the settings screen can move the favourites
-    /// switch and the SORT row behind the browser's back, so this is what notices any of them and
-    /// rebuilds.
-    applied: Option<(u64, SelectFilter, SortMode)>,
+    /// The list generation, the filter, the ordering and the language the rows on screen were built
+    /// with. Every other screen rebuilds the list unfiltered, and the settings screen can move the
+    /// favourites switch, the SORT row and the LANGUAGE row behind the browser's back, so this is
+    /// what notices any of them and rebuilds.
+    applied: Option<(u64, SelectFilter, SortMode, Language)>,
     preview: PreviewState,
     /// Which of the two lists the browser is showing.
     tab: SelectTab,
@@ -593,7 +598,14 @@ impl SelectState {
     /// Open the practice panel on the focused chart. The panel needs the parsed chart, so the load
     /// path is the one a run takes and the flag is what makes it land on the panel instead. On a
     /// chart the library does not hold it asks for the chart instead, as every key that plays does.
+    ///
+    /// A course has no practice screen: on a course bar, in the folder of the courses a table lists
+    /// as on the course tab, the key starts the course as it is (`MusicSelector.render`, which turns
+    /// the practice mode into play for a course).
     fn start_practice(&mut self, shared: &mut AppShared) -> Transition {
+        if self.tab == SelectTab::Courses || matches!(shared.select_items.get(shared.sel), Some(SelectItem::Course(_))) {
+            return self.select_enter(shared);
+        }
         if self.open_download_modal_at_cursor(shared) {
             return Transition::Stay;
         }
@@ -610,7 +622,7 @@ impl SelectState {
     fn rebuild(&mut self, shared: &mut AppShared) {
         let filter = self.filter.filter(&shared.config);
         shared.rebuild_select_items_with(filter);
-        self.applied = Some((shared.select_gen, filter, shared.config.library.sort));
+        self.applied = Some((shared.select_gen, filter, shared.config.library.sort, language()));
     }
 
     /// Cycle the song-list sort order (F3), or step back through it (Shift+F3).
@@ -787,7 +799,7 @@ impl SelectState {
                 }
             }
             Err(e) => {
-                notify(Level::Error, format!("replay load failed: {e}"));
+                notify_text(Level::Error, SelectNoticeText::ReplayLoadFailed, &[&e]);
                 self.record_modal = None;
                 Transition::Stay
             }
@@ -905,7 +917,7 @@ impl SelectState {
             return;
         };
         let Some(replay_id) = line.replay_id else {
-            shared.net_status = "no replay for that row".to_string();
+            shared.net_status = installed(SelectNoticeText::NoReplayForThatRow).to_string();
             return;
         };
         let Some(index) = shared.focused_song_index() else {
@@ -919,7 +931,7 @@ impl SelectState {
         }
         shared.replay_download_target = Some((entry.path.to_string_lossy().to_string(), entry.md5.clone()));
         self.layout_download = for_layout.then_some(line.label);
-        shared.net_status = format!("downloading replay {replay_id}...");
+        shared.net_status = installed_with(SelectNoticeText::DownloadingReplay, &[&replay_id]);
         shared.replay_download_rx = Some(rbms_ir::spawn_query(shared.primary_ir_server(), move |server| server.download_replay(&replay_id)));
     }
 
@@ -970,10 +982,10 @@ impl SelectState {
                 }
                 let replay = from_ir_replay(&data, &chart_path, &md5);
                 if replay.events.is_empty() {
-                    shared.net_status = "downloaded replay has no inputs".to_string();
+                    shared.net_status = installed(SelectNoticeText::DownloadedReplayHasNoInputs).to_string();
                     return Transition::Stay;
                 }
-                shared.net_status = "replay downloaded".to_string();
+                shared.net_status = installed(SelectNoticeText::ReplayDownloaded).to_string();
                 self.ranking_open = false;
                 self.record_modal = None;
                 shared.chart_path = chart_path;
@@ -987,7 +999,7 @@ impl SelectState {
             Ok(Err(error)) => {
                 shared.replay_download_target = None;
                 self.layout_download = None;
-                shared.net_status = format!("replay download: {}", crate::ir_outcome::short_error(&error));
+                shared.net_status = installed_with(SelectNoticeText::ReplayDownloadFailed, &[&crate::ir_outcome::short_error(&error)]);
                 Transition::Stay
             }
             Err(TryRecvError::Empty) => {
@@ -1251,7 +1263,7 @@ impl StageHandler for SelectState {
         }
         self.bar_changed |= skin == SkinStatus::Ready && SelectState::scrollbar_was_dragged(ctx.shared);
         self.carry_out_skin_writes(ctx.shared);
-        if self.applied != Some((ctx.shared.select_gen, self.filter.filter(&ctx.shared.config), ctx.shared.config.library.sort)) {
+        if self.applied != Some((ctx.shared.select_gen, self.filter.filter(&ctx.shared.config), ctx.shared.config.library.sort, language())) {
             self.rebuild(ctx.shared);
         }
         self.refresh_focused_detail(ctx.shared, ctx.now);

@@ -13,7 +13,9 @@
 //! names, and one they left without a key is shown as having none. The few keys no screen lets go of
 //! ([`FIXED_KEYS`]) are the only ones written down here.
 
+use rbms_model::translations::Catalog;
 use rbms_play::ScratchDir;
+use rbms_render::text::language;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, theme};
 use winit::keyboard::KeyCode;
 
@@ -21,6 +23,7 @@ use super::SelectState;
 use super::keys::{KeyLayout, SelectKey};
 pub(super) use crate::keyconfig::GUIDE_KEY;
 use crate::keyconfig::{ControlAction, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, key_index_of, key_name};
+use crate::text::select::guide::GuideText;
 use crate::{AppShared, CH, CW, Hot};
 
 /// What a key that is bound to nothing is called on the guide.
@@ -29,62 +32,47 @@ const UNBOUND: &str = "-";
 /// One of the browser's keys that cannot be rebound, as the guide lists it.
 pub(super) struct FixedKey {
     pub(super) keys: &'static [KeyCode],
-    pub(super) does: &'static str,
+    pub(super) does: GuideText,
 }
 
 /// The keys of the browser that are its own and fixed: the ones that move through the list, open
 /// what is under the cursor and go back.
 pub(super) const FIXED_KEYS: [FixedKey; 3] = [
-    FixedKey { keys: &[KeyCode::ArrowUp, KeyCode::ArrowDown], does: "MOVE THE LIST" },
-    FixedKey { keys: &[KeyCode::Enter], does: "OPEN A FOLDER / PLAY" },
-    FixedKey { keys: &[KeyCode::Escape], does: "BACK - TWICE QUITS" },
+    FixedKey { keys: &[KeyCode::ArrowUp, KeyCode::ArrowDown], does: GuideText::MoveTheList },
+    FixedKey { keys: &[KeyCode::Enter], does: GuideText::OpenFolderOrPlay },
+    FixedKey { keys: &[KeyCode::Escape], does: GuideText::BackTwiceQuits },
 ];
 
-/// What the guide's own key does, on the last line of the browser's keys.
-const GUIDE_DOES: &str = "THIS GUIDE";
-
-/// What the two keys of the option overlay do, which the guide lists on one line.
-const OPTIONS_DOES: &str = "OPTIONS OVERLAY";
-
 /// What each role of the reference's key table is called on the guide, in the order they are listed.
-const KEY_ROLES: [(SelectKey, &str); 7] = [
-    (SelectKey::Play, "PLAY THE CHART"),
-    (SelectKey::Practice, "PRACTICE"),
-    (SelectKey::Auto, "PLAY IT BY ITSELF"),
-    (SelectKey::FolderOpen, "OPEN A FOLDER"),
-    (SelectKey::FolderClose, "BACK ONE FOLDER"),
-    (SelectKey::Up, "NEXT BAR"),
-    (SelectKey::Down, "PREVIOUS BAR"),
+const KEY_ROLES: [(SelectKey, GuideText); 7] = [
+    (SelectKey::Play, GuideText::PlayTheChart),
+    (SelectKey::Practice, GuideText::Practice),
+    (SelectKey::Auto, GuideText::PlayItByItself),
+    (SelectKey::FolderOpen, GuideText::OpenAFolder),
+    (SelectKey::FolderClose, GuideText::BackOneFolder),
+    (SelectKey::Up, GuideText::NextBar),
+    (SelectKey::Down, GuideText::PreviousBar),
 ];
 
 /// The controls of a run the guide lists two to a line: the pair of keys, the one that lessens
 /// first, and what the pair moves.
-const CONTROL_PAIRS: [(ControlAction, ControlAction, &str); 6] = [
-    (ControlAction::HiSpeedDown, ControlAction::HiSpeedUp, "HI-SPEED DOWN / UP"),
-    (ControlAction::CoverDown, ControlAction::CoverUp, "LANE COVER LESS / MORE"),
-    (ControlAction::LiftDown, ControlAction::LiftUp, "LIFT DOWN / UP"),
-    (ControlAction::HiddenDown, ControlAction::HiddenUp, "HIDDEN+ LESS / MORE"),
-    (ControlAction::GreenDown, ControlAction::GreenUp, "GREEN NUMBER DOWN / UP"),
-    (ControlAction::OffsetDown, ControlAction::OffsetUp, "JUDGE OFFSET -1 / +1 MS (HOLD)"),
+const CONTROL_PAIRS: [(ControlAction, ControlAction, GuideText); 6] = [
+    (ControlAction::HiSpeedDown, ControlAction::HiSpeedUp, GuideText::HiSpeedDownUp),
+    (ControlAction::CoverDown, ControlAction::CoverUp, GuideText::LaneCoverLessMore),
+    (ControlAction::LiftDown, ControlAction::LiftUp, GuideText::LiftDownUp),
+    (ControlAction::HiddenDown, ControlAction::HiddenUp, GuideText::HiddenLessMore),
+    (ControlAction::GreenDown, ControlAction::GreenUp, GuideText::GreenNumberDownUp),
+    (ControlAction::OffsetDown, ControlAction::OffsetUp, GuideText::JudgeOffsetHold),
 ];
 
 /// The controls of a run the guide lists one to a line.
-const CONTROL_SWITCHES: [(ControlAction, &str); 5] = [
-    (ControlAction::CoverToggle, "LANE COVER ON/OFF"),
-    (ControlAction::LiftToggle, "LIFT ON/OFF"),
-    (ControlAction::HiddenToggle, "HIDDEN+ ON/OFF"),
-    (ControlAction::KeepGreenToggle, "KEEP GREEN NUMBER"),
-    (ControlAction::AutoAdjustToggle, "AUTO ADJUST"),
+const CONTROL_SWITCHES: [(ControlAction, GuideText); 5] = [
+    (ControlAction::CoverToggle, GuideText::LaneCoverOnOff),
+    (ControlAction::LiftToggle, GuideText::LiftOnOff),
+    (ControlAction::HiddenToggle, GuideText::HiddenOnOff),
+    (ControlAction::KeepGreenToggle, GuideText::KeepGreenNumber),
+    (ControlAction::AutoAdjustToggle, GuideText::AutoAdjust),
 ];
-
-/// The line of the modifier held for the finer step, and what it is called while it has no key of
-/// its own: the shift that plays no lane ([`AppShared::fine_pressed`]).
-const FINE_DOES: &str = "HOLD: FINE STEP";
-const FINE_UNSET_KEY: &str = "SHIFT (NO LANE)";
-
-/// What the line that names the turntable's two keys says of them: the first brings a lane cover
-/// and a lifted line down and the second takes them up, which is what they do with START held.
-const TURNTABLE_DOES: &str = "THE TURNTABLE: DOWN / UP";
 
 /// The panel's width and the room it keeps round what it lists.
 const GUIDE_W: f32 = 1232.0;
@@ -116,15 +104,6 @@ const HINT_SCALE: f32 = 1.0;
 
 /// How opaque what is behind the panel is dimmed to.
 const BACKDROP_ALPHA: u8 = 150;
-
-const GUIDE_TITLE: &str = "R-BMS KEYS";
-const BROWSER_SECTION: &str = "SELECT";
-const SCREENS_SECTION: &str = "SCREENS";
-const NUMBERS_SECTION: &str = "NUMBER KEYS";
-const PANELS_SECTION: &str = "OPTION PANELS";
-const KEYS_SECTION: &str = "KEYS 1-7 AND THE TURNTABLE";
-const PLAY_SECTION: &str = "IN PLAY";
-const COMBINATIONS_SECTION: &str = "IN PLAY, HELD TOGETHER";
 
 /// What a key is called on the guide: the word the key configuration has for it, with the two the
 /// guide writes shorter and the one key no configuration names.
@@ -165,15 +144,32 @@ pub(super) struct Section {
     pub(super) rows: Vec<GuideRow>,
 }
 
-/// What a shortcut is called on the guide, where a line is shorter than a row of the key editor.
+/// What a shortcut is called on the guide, in the language the screens are written in: the name the
+/// key editor gives it, except where a line here is shorter than a row of the key editor.
 fn shortcut_does(shortcut: Shortcut) -> &'static str {
-    match shortcut {
-        Shortcut::Sort => "SORT (SHIFT: BACKWARDS)",
-        Shortcut::Records => "RECORDS",
-        Shortcut::Settings => "SETTINGS (SHIFT: COURSES)",
-        Shortcut::RefDetail => "HOLD: DETAIL OPTIONS",
-        other => other.label(),
-    }
+    let named = match shortcut {
+        Shortcut::Sort => GuideText::ShortcutSort,
+        Shortcut::Records => GuideText::ShortcutRecords,
+        Shortcut::Settings => GuideText::ShortcutSettings,
+        Shortcut::RefDetail => GuideText::ShortcutDetailOptions,
+        Shortcut::Search | Shortcut::RefSearch => GuideText::Search,
+        Shortcut::Filter => GuideText::FilterPanel,
+        Shortcut::Practice => GuideText::Practice,
+        Shortcut::Favourite | Shortcut::RefFavourite => GuideText::Favourite,
+        Shortcut::Ranking => GuideText::IrRanking,
+        Shortcut::ReloadTables => GuideText::ReloadTables,
+        Shortcut::SkinMenu => GuideText::SkinMenu,
+        Shortcut::PlayMenu => GuideText::PlayMenu,
+        Shortcut::KeyConfig | Shortcut::RefKeyConfig => GuideText::KeyConfig,
+        Shortcut::Folders => GuideText::MusicFolders,
+        Shortcut::Tables => GuideText::DifficultyTables,
+        Shortcut::RefMode => GuideText::ModeFilter,
+        Shortcut::RefSort => GuideText::SortOrder,
+        Shortcut::RefLnMode => GuideText::LongNoteMode,
+        Shortcut::RefReplay => GuideText::ReplaySlot,
+        other => return other.label(),
+    };
+    named.get(language())
 }
 
 /// The key of the keyboard bound to the key index `index` of the reference's table in the mode that
@@ -202,11 +198,12 @@ fn group_rows(shared: &AppShared, group: ShortcutGroup) -> Vec<GuideRow> {
 /// The lines of the browser's own keys: the fixed ones, its shortcuts as they are bound, the two
 /// keys of the option overlay on one line, and the guide's.
 pub(super) fn browser_rows(shared: &AppShared) -> Vec<GuideRow> {
-    let fixed = FIXED_KEYS.iter().map(|fixed| GuideRow::new(keys_label(fixed.keys), fixed.does));
+    let language = language();
+    let fixed = FIXED_KEYS.iter().map(|fixed| GuideRow::new(keys_label(fixed.keys), fixed.does.get(language)));
     let options = format!("{} {}", bound_label(shared.shortcut_key(Shortcut::OptionsPin)), bound_label(shared.shortcut_key(Shortcut::OptionsHold)));
     fixed
         .chain(group_rows(shared, ShortcutGroup::Browser))
-        .chain([GuideRow::new(options, OPTIONS_DOES), GuideRow::new(shortcut_label(GUIDE_KEY), GUIDE_DOES)])
+        .chain([GuideRow::new(options, GuideText::OptionsOverlay.get(language)), GuideRow::new(shortcut_label(GUIDE_KEY), GuideText::ThisGuide.get(language))])
         .collect()
 }
 
@@ -225,19 +222,20 @@ pub(super) fn number_rows(shared: &AppShared) -> Vec<GuideRow> {
 /// turntable of the second and third panels does something only on a skin that names this player's
 /// own ids; to any other it is the reference's, which gives it nothing there.
 pub(super) fn panel_rows(shared: &AppShared) -> Vec<GuideRow> {
+    let language = language();
     let start = control_label(shared, ControlAction::Start);
     let select = control_label(shared, ControlAction::Select);
     let detail = bound_label(shared.shortcut_key(Shortcut::RefDetail));
     let mut rows = vec![
-        GuideRow::new(start, "HOLD FOR THE PLAY OPTIONS"),
-        GuideRow::new(select, "HOLD FOR THE ASSIST OPTIONS"),
-        GuideRow::new(format!("{start} + {select} / {detail}"), "HOLD FOR THE DETAIL OPTIONS"),
-        GuideRow::new(format!("{start} + TURNTABLE"), "TARGET"),
+        GuideRow::new(start, GuideText::HoldForPlayOptions.get(language)),
+        GuideRow::new(select, GuideText::HoldForAssistOptions.get(language)),
+        GuideRow::new(format!("{start} + {select} / {detail}"), GuideText::HoldForDetailOptions.get(language)),
+        GuideRow::new(GuideText::PlusTurntable.fill(language, &[&start]), GuideText::Target.get(language)),
     ];
     if KeyLayout::of_browser(shared).is_extended() {
         rows.extend([
-            GuideRow::new(format!("{select} + TURNTABLE"), "HIDDEN+ ON/OFF"),
-            GuideRow::new(format!("{start}+{select} + TURNTABLE"), "JUDGE ALGORITHM"),
+            GuideRow::new(GuideText::PlusTurntable.fill(language, &[&select]), GuideText::HiddenOnOff.get(language)),
+            GuideRow::new(GuideText::PlusTurntable.fill(language, &[&format!("{start}+{select}")]), GuideText::JudgeAlgorithm.get(language)),
         ]);
     }
     rows
@@ -247,23 +245,27 @@ pub(super) fn panel_rows(shared: &AppShared) -> Vec<GuideRow> {
 /// indices that carry it in the mode that is up.
 pub(super) fn key_rows(shared: &AppShared) -> Vec<GuideRow> {
     let layout = KeyLayout::of_browser(shared);
+    let language = language();
     KEY_ROLES
         .iter()
         .map(|(role, does)| {
             let keys = layout.indices_of(*role).into_iter().map(|index| index_label(shared, index)).collect::<Vec<_>>().join(" ");
-            GuideRow::new(keys, *does)
+            GuideRow::new(keys, does.get(language))
         })
         .collect()
 }
 
 /// The lines of the controls of a run, as they are bound now: the ones that come in pairs two to a
-/// line, then each switch, then the modifier held for the finer step.
+/// line, then each switch, then the modifier held for the finer step, which is called the shift that
+/// plays no lane ([`AppShared::fine_pressed`]) while it has no key of its own.
 pub(super) fn play_rows(shared: &AppShared) -> Vec<GuideRow> {
-    let pairs =
-        CONTROL_PAIRS.iter().map(|(less, more, does)| GuideRow::new(format!("{} {}", control_label(shared, *less), control_label(shared, *more)), *does));
-    let switches = CONTROL_SWITCHES.iter().map(|(action, does)| GuideRow::new(control_label(shared, *action), *does));
-    let fine = shared.control_key_in_force(ControlAction::Fine).map_or(FINE_UNSET_KEY, shortcut_label);
-    pairs.chain(switches).chain([GuideRow::new(fine, FINE_DOES)]).collect()
+    let language = language();
+    let pairs = CONTROL_PAIRS
+        .iter()
+        .map(|(less, more, does)| GuideRow::new(format!("{} {}", control_label(shared, *less), control_label(shared, *more)), does.get(language)));
+    let switches = CONTROL_SWITCHES.iter().map(|(action, does)| GuideRow::new(control_label(shared, *action), does.get(language)));
+    let fine = shared.control_key_in_force(ControlAction::Fine).map_or(GuideText::ShiftNoLane.get(language), shortcut_label);
+    pairs.chain(switches).chain([GuideRow::new(fine, GuideText::HoldFineStep.get(language))]).collect()
 }
 
 /// The lines of what START and SELECT do in a run with the keys held beside them
@@ -271,32 +273,40 @@ pub(super) fn play_rows(shared: &AppShared) -> Vec<GuideRow> {
 /// by the keys they are bound to now. The first line names the keys of the keyboard the lines
 /// after it call the turntable, and which way each moves a shade.
 pub(super) fn combination_rows(shared: &AppShared) -> Vec<GuideRow> {
+    let language = language();
     let start = control_label(shared, ControlAction::Start);
     let select = control_label(shared, ControlAction::Select);
     let turntable = format!("{} {}", index_label(shared, SCRATCH_FORWARD_INDEX), index_label(shared, SCRATCH_BACKWARD_INDEX));
     vec![
-        GuideRow::new(turntable, TURNTABLE_DOES),
-        GuideRow::new(format!("{start} + KEYS"), "HI-SPEED"),
-        GuideRow::new(format!("{start} + TURNTABLE"), "LANE COVER BY 1, GREEN KEPT"),
-        GuideRow::new(format!("{start}+{select} + TURNTABLE"), "LIFT BY 1"),
-        GuideRow::new(format!("{start} TWICE"), "LANE COVER ON/OFF"),
-        GuideRow::new(format!("{select} + KEYS"), "GREEN NUMBER BY 1 MS"),
-        GuideRow::new(format!("{start} + {select}"), "LIFT OR HIDDEN+ TURNS"),
-        GuideRow::new("MOUSE WHEEL", "LANE COVER"),
-        GuideRow::new(shortcut_label(KeyCode::Escape), "STOP THE CHART"),
+        GuideRow::new(turntable, GuideText::TurntableDownUp.get(language)),
+        GuideRow::new(GuideText::PlusKeys.fill(language, &[&start]), GuideText::HiSpeed.get(language)),
+        GuideRow::new(GuideText::PlusTurntable.fill(language, &[&start]), GuideText::LaneCoverByOneGreenKept.get(language)),
+        GuideRow::new(GuideText::PlusTurntable.fill(language, &[&format!("{start}+{select}")]), GuideText::LiftByOne.get(language)),
+        GuideRow::new(GuideText::Twice.fill(language, &[&start]), GuideText::LaneCoverOnOff.get(language)),
+        GuideRow::new(GuideText::PlusKeys.fill(language, &[&select]), GuideText::GreenNumberByOneMs.get(language)),
+        GuideRow::new(format!("{start} + {select}"), GuideText::LiftOrHiddenTurns.get(language)),
+        GuideRow::new(GuideText::MouseWheel.get(language), GuideText::LaneCover.get(language)),
+        GuideRow::new(shortcut_label(KeyCode::Escape), GuideText::StopTheChart.get(language)),
     ]
 }
 
 /// Everything the guide lists, column by column.
 pub(super) fn columns(shared: &AppShared) -> [Vec<Section>; COLUMN_COUNT] {
+    let language = language();
     [
-        vec![Section { heading: BROWSER_SECTION, rows: browser_rows(shared) }, Section { heading: SCREENS_SECTION, rows: screen_rows(shared) }],
         vec![
-            Section { heading: NUMBERS_SECTION, rows: number_rows(shared) },
-            Section { heading: PANELS_SECTION, rows: panel_rows(shared) },
-            Section { heading: KEYS_SECTION, rows: key_rows(shared) },
+            Section { heading: GuideText::SectionSelect.get(language), rows: browser_rows(shared) },
+            Section { heading: GuideText::SectionScreens.get(language), rows: screen_rows(shared) },
         ],
-        vec![Section { heading: PLAY_SECTION, rows: play_rows(shared) }, Section { heading: COMBINATIONS_SECTION, rows: combination_rows(shared) }],
+        vec![
+            Section { heading: GuideText::SectionNumberKeys.get(language), rows: number_rows(shared) },
+            Section { heading: GuideText::SectionOptionPanels.get(language), rows: panel_rows(shared) },
+            Section { heading: GuideText::SectionKeysAndTurntable.get(language), rows: key_rows(shared) },
+        ],
+        vec![
+            Section { heading: GuideText::SectionInPlay.get(language), rows: play_rows(shared) },
+            Section { heading: GuideText::SectionInPlayTogether.get(language), rows: combination_rows(shared) },
+        ],
     ]
 }
 
@@ -339,13 +349,9 @@ pub(super) fn render_guide<R: Renderer>(r: &mut R, shared: &AppShared) -> Vec<(R
     r.fill_rect(screen, Color { r: 0, g: 0, b: 0, a: BACKDROP_ALPHA });
     r.fill_rect(panel, th.panel_hi);
     r.fill_rect(Rect::new(panel.x, panel.y, panel.w, RULE_THICKNESS), th.focus);
-    draw_text(r, panel.x + PAD_X, panel.y + TITLE_Y, TITLE_SCALE, th.text, GUIDE_TITLE);
-    let hint = format!(
-        "{} OR ESC CLOSES     EVERY KEY BUT THE ARROWS, ENTER, ESC AND {} IS SET IN KEY CONFIG ({})",
-        shortcut_label(GUIDE_KEY),
-        shortcut_label(GUIDE_KEY),
-        bound_label(shared.shortcut_key(Shortcut::KeyConfig))
-    );
+    draw_text(r, panel.x + PAD_X, panel.y + TITLE_Y, TITLE_SCALE, th.text, GuideText::Title.get(language()));
+    let hint =
+        GuideText::Hint.fill(language(), &[&shortcut_label(GUIDE_KEY), &shortcut_label(GUIDE_KEY), &bound_label(shared.shortcut_key(Shortcut::KeyConfig))]);
     draw_text_right(r, panel.x + panel.w - PAD_X, panel.y + TITLE_Y + HINT_DROP, HINT_SCALE, th.text_muted, &hint);
 
     let column_w = (panel.w - PAD_X * 2.0 - COLUMN_GAP * (COLUMN_COUNT - 1) as f32) / COLUMN_COUNT as f32;
@@ -365,6 +371,81 @@ impl SelectState {
     pub(super) fn guide_key(&mut self, code: KeyCode) {
         if matches!(code, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter) || code == GUIDE_KEY {
             self.guide_open = false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rbms_model::Language;
+
+    use super::*;
+    use crate::stage::select::tests::app;
+    use crate::text::settings::InstalledLanguage;
+
+    /// The shortcuts whose line on the guide is not the name the key editor gives them.
+    const SHORTER_ON_THE_GUIDE: [Shortcut; 4] = [Shortcut::Sort, Shortcut::Records, Shortcut::Settings, Shortcut::RefDetail];
+
+    /// The shortcuts the guide lists a line for, one each.
+    fn listed() -> impl Iterator<Item = Shortcut> {
+        Shortcut::ALL.into_iter().filter(|shortcut| {
+            matches!(shortcut.group(), ShortcutGroup::Browser | ShortcutGroup::Screens | ShortcutGroup::SkinBrowser)
+                && !matches!(shortcut, Shortcut::OptionsPin | Shortcut::OptionsHold)
+        })
+    }
+
+    #[test]
+    fn a_shortcut_is_called_on_the_guide_as_the_key_editor_calls_it_unless_the_guide_has_a_shorter_line() {
+        for shortcut in listed().filter(|shortcut| !SHORTER_ON_THE_GUIDE.contains(shortcut)) {
+            assert_eq!(shortcut_does(shortcut), shortcut.label(), "{shortcut:?}");
+        }
+        assert_eq!(SHORTER_ON_THE_GUIDE.map(shortcut_does), ["SORT (SHIFT: BACKWARDS)", "RECORDS", "SETTINGS (SHIFT: COURSES)", "HOLD: DETAIL OPTIONS"]);
+    }
+
+    #[test]
+    fn every_shortcut_the_guide_lists_is_named_in_every_language_but_the_terms_the_glossary_keeps() {
+        for language in Language::ALL {
+            let _installed = InstalledLanguage::new(language);
+            for shortcut in listed() {
+                let name = shortcut_does(shortcut);
+                let kept = shortcut == Shortcut::Ranking;
+                assert!(language == Language::English || kept || !name.is_ascii(), "{language:?}: {shortcut:?} is named {name:?} in English");
+            }
+        }
+    }
+
+    #[test]
+    fn the_rows_are_worded_in_the_installed_language_and_keep_the_terms_every_language_keeps() {
+        let app = app();
+        let _korean = InstalledLanguage::new(Language::Korean);
+        let rows: Vec<(String, String)> = columns(&app.shared).into_iter().flatten().flat_map(|section| section.rows).map(|row| (row.keys, row.does)).collect();
+        let does = |wanted: &str| rows.iter().any(|(_, does)| does == wanted);
+        for wanted in [
+            "목록 이동",
+            "폴더 열기 / 플레이",
+            "HI-SPEED 내리기 / 올리기",
+            "레인 커버 ON/OFF",
+            "LIFT ON/OFF",
+            "누르고 있기: 미세 조정",
+            "턴테이블: 내리기 / 올리기",
+        ] {
+            assert!(does(wanted), "{wanted:?} is not on the guide: {rows:#?}");
+        }
+        assert!(rows.iter().any(|(keys, does)| keys.ends_with("+ 턴테이블") && does == "타깃"), "{rows:#?}");
+        assert!(rows.iter().any(|(keys, does)| keys.ends_with("두 번") && does == "레인 커버 ON/OFF"), "{rows:#?}");
+        let headings: Vec<&str> = columns(&app.shared).into_iter().flatten().map(|section| section.heading).collect();
+        assert_eq!(headings, ["선곡", "화면", "숫자 키", "옵션 패널", "건반 1-7 및 턴테이블", "플레이 중", "플레이 중, 함께 누르기"]);
+    }
+
+    #[test]
+    fn the_guide_has_the_same_lines_in_every_language() {
+        let app = app();
+        let counts = |language| {
+            let _installed = InstalledLanguage::new(language);
+            columns(&app.shared).iter().map(|sections| sections.iter().map(|section| section.rows.len()).collect::<Vec<_>>()).collect::<Vec<_>>()
+        };
+        for language in Language::ALL {
+            assert_eq!(counts(language), counts(Language::English), "{language:?}");
         }
     }
 }
