@@ -175,6 +175,52 @@ fn a_detail_that_was_never_cached_is_computed_once_and_kept() {
     assert_eq!(cached.density, computed.density);
 }
 
+/// A radar as this build measures one.
+fn measured_radar() -> RadarRow {
+    RadarRow { version: rbms_chart::RADAR_VERSION, raw: Some(rbms_chart::RadarRaw { notes: 5.0, peak: 12.0, ..rbms_chart::RadarRaw::default() }) }
+}
+
+#[test]
+fn a_detail_computed_on_the_spot_keeps_its_radar_beside_it() {
+    let chart = sample_chart();
+    let key = normalize(&chart);
+    let mut db = db();
+    db.upsert_batch(&[row(&key, "Preview Demo")]).expect("store the chart");
+
+    let computed = chart_detail(&db, &chart, Mode::BEAT_7K).expect("the chart is integrated on the spot");
+    let measured = computed.radar.expect("a seven-key chart is measured");
+    assert!(measured.raw.is_some());
+    assert_eq!(db.radar(&key).expect("read the radar"), Some(measured), "the radar is cached with the detail");
+    assert_eq!(chart_detail(&db, &chart, Mode::BEAT_7K).and_then(|detail| detail.radar), Some(measured), "and served with it from then on");
+}
+
+#[test]
+fn a_radar_of_older_definitions_reads_as_none_until_one_is_kept() {
+    let fixture = Fixture::new("stale-radar");
+    let mut db = db();
+    let missing = fixture.root.join("gone.bms");
+    let key = normalize(&missing);
+    db.upsert_batch(&[row(&key, "Gone")]).expect("store the chart");
+    db.put_detail(&key, &DetailRow { duration_us: 1, peak_density: 0.0, avg_density: 0.0, end_density: 0.0, density: Vec::new() }).expect("cache the detail");
+    let current = measured_radar();
+    db.put_radar(&key, &RadarRow { version: current.version.wrapping_add(1), ..current }).expect("store a radar of other definitions");
+
+    assert_eq!(stored_radar(&db, &missing), None);
+    assert_eq!(chart_detail(&db, &missing, Mode::BEAT_7K).and_then(|detail| detail.radar), None, "the cached detail carries no stale radar");
+
+    keep_radar(&db, &missing, &current);
+    assert_eq!(stored_radar(&db, &missing), Some(current));
+    assert_eq!(chart_detail(&db, &missing, Mode::BEAT_7K).and_then(|detail| detail.radar), Some(current));
+}
+
+#[test]
+fn a_radar_of_a_chart_the_database_does_not_list_is_not_kept() {
+    let db = db();
+    let path = Path::new("/nowhere/unlisted.bms");
+    keep_radar(&db, path, &measured_radar());
+    assert_eq!(stored_radar(&db, path), None);
+}
+
 #[test]
 fn a_chart_that_is_neither_stored_nor_readable_has_no_detail() {
     assert!(chart_detail(&db(), Path::new("/nowhere/gone.bms"), Mode::BEAT_7K).is_none());

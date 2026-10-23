@@ -233,3 +233,37 @@ fn the_notes_are_counted_by_kind_and_add_up_to_the_charts_notes() {
     let read = [NUMBER_TOTALNOTE_NORMAL, NUMBER_TOTALNOTE_LN, NUMBER_TOTALNOTE_SCRATCH, NUMBER_TOTALNOTE_BSS].map(|id| host.integer(id));
     assert_eq!(read, [2, 3, 1, 1]);
 }
+
+/// The notes are counted lane by lane with the same rule as by kind: a long note's end counts only
+/// when it is judged apart from its head, and a mine never does. The lanes add up to the chart's
+/// notes, and a lane with no note is there with nothing on it.
+#[test]
+fn the_notes_are_counted_lane_by_lane_and_add_up_to_the_charts_notes() {
+    let chart = model(vec![
+        with_note(with_note(line(0, OPENING_BPM), KEY_LANE, NoteKind::Normal), SCRATCH_LANE, NoteKind::Normal),
+        with_note(with_note(line(1, OPENING_BPM), KEY_LANE, NoteKind::LongStart { ln: LnKind::Ln }), OTHER_KEY_LANE, NoteKind::LongStart { ln: LnKind::Cn }),
+        with_note(with_note(line(2, OPENING_BPM), KEY_LANE, NoteKind::LongEnd { ln: LnKind::Ln }), OTHER_KEY_LANE, NoteKind::LongEnd { ln: LnKind::Cn }),
+        with_note(line(3, OPENING_BPM), KEY_LANE, NoteKind::Mine { damage: 1.0 }),
+    ]);
+    let lanes = lane_notes(&chart).expect("a seven-key chart is counted lane by lane");
+
+    assert_eq!((0..MODE.key).map(|lane| lanes.on(lane)).collect::<Vec<_>>(), [2, 2, 0, 0, 0, 0, 0, 1].map(Some));
+    assert_eq!(lanes.on(MODE.key), None, "a lane past the mode's is not there");
+    let total: i32 = (0..MODE.key).filter_map(|lane| lanes.on(lane)).sum();
+    assert_eq!(usize::try_from(total), Ok(ChartOverview::of_model(&chart).notes));
+    assert_eq!(lanes.share(KEY_LANE), Some(1.0), "the fullest lane is the whole of the bar");
+    assert_eq!(lanes.share(SCRATCH_LANE), Some(0.5));
+    assert_eq!(lanes.share(2), Some(0.0));
+}
+
+/// A nine-key chart is not counted lane by lane, and a chart with no note at all has every lane at
+/// nothing rather than a share it cannot divide.
+#[test]
+fn a_nine_key_chart_has_no_lane_counts_and_an_empty_chart_has_empty_lanes() {
+    let popn = Model { mode: Mode::POPN_9K, ..model(Vec::new()) };
+    assert_eq!(lane_notes(&popn), None);
+
+    let empty = lane_notes(&model(vec![line(0, OPENING_BPM)])).expect("a seven-key chart");
+    assert_eq!(empty.on(KEY_LANE), Some(0));
+    assert_eq!(empty.share(KEY_LANE), Some(0.0));
+}

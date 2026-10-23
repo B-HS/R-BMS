@@ -1639,8 +1639,8 @@ impl AppShared {
         self.settle_skin_sounds();
     }
 
-    /// What the machine and the player's totals say: the clock, the volumes, the recorded runs and the
-    /// course in progress, which every screen's document can read.
+    /// What the machine and the player's totals say: the clock, the volumes, the recorded runs, the
+    /// course in progress and the language the interface is in, which every screen's document can read.
     fn skin_system_state(&self) -> SystemState<'_> {
         let unix_seconds = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(i64::MAX));
         let audio = &self.config.audio;
@@ -1653,6 +1653,7 @@ impl AppShared {
             history: Some(self.scores.records()),
             volumes: Some(Volumes { system: audio.system, key: audio.key, background: audio.bg }),
             course: self.course_run.as_ref().map(|run| CourseStage { index: run.index, count: run.course.stage_count() }),
+            language: Some(rbms_render::text::language()),
         }
     }
 

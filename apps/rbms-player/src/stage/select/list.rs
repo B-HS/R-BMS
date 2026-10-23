@@ -561,7 +561,8 @@ impl ChartFact {
 ///
 /// The tempo most of the notes are played at is something neither holds (`SongInformation.mainbpm`).
 /// For a chart that keeps one tempo throughout it is that tempo and is said; for a chart that
-/// changes tempo it is left not known rather than guessed.
+/// changes tempo it is left not known rather than guessed, until the browser's parse of the chart
+/// has found it, with the rest of what only a parse finds (`ChartAnalysis::describe`).
 ///
 /// Whether there is a stage image, a banner and a back image is whether one is loaded, as it is on
 /// every other screen. The reference's browser hands the pictures of the bar under its cursor to the

@@ -10,8 +10,12 @@ use rbms_model::Mode;
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT};
 
-use super::{BpmRange, ChartContents, ChartMeta, ChartState, Density, NoteCounts};
+use super::{BpmRange, ChartContents, ChartMeta, ChartState, Density, LaneNotes, NoteCounts};
 use crate::skin_host::ClusterState;
+use crate::skin_host::extension::{
+    LANE_NOTE_SLOTS, RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST, RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST,
+    RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST,
+};
 
 /// The six difficulty options, `OPTION_DIFFICULTY0` to `OPTION_DIFFICULTY5`.
 const DIFFICULTY_OPTIONS: [i32; 6] = [OPTION_DIFFICULTY0, OPTION_DIFFICULTY1, OPTION_DIFFICULTY2, OPTION_DIFFICULTY3, OPTION_DIFFICULTY4, OPTION_DIFFICULTY5];
@@ -21,6 +25,12 @@ const MODE_OPTIONS: [i32; 7] = [OPTION_7KEYSONG, OPTION_5KEYSONG, OPTION_14KEYSO
 
 /// The five judge options, from the hardest to the easiest.
 const JUDGE_OPTIONS: [i32; 5] = [OPTION_JUDGE_VERYHARD, OPTION_JUDGE_HARD, OPTION_JUDGE_NORMAL, OPTION_JUDGE_EASY, OPTION_JUDGE_VERYEASY];
+
+/// The notes on each lane of the known chart: its seven keys, then its turntable.
+const KNOWN_LANES: [i32; 8] = [200, 150, 100, 250, 180, 170, 150, 300];
+
+/// The NOTES RADAR of the known chart as shown, NOTES to CHORD.
+const KNOWN_RADAR: [f32; 6] = [120.75, 99.99, 0.5, 200.0, 0.0, 64.0];
 
 /// A chart the player knows everything about.
 fn known_chart() -> ChartMeta<'static> {
@@ -44,7 +54,9 @@ fn known_chart() -> ChartMeta<'static> {
         bpm: Some(BpmRange { min: 120, max: 180 }),
         main_bpm: Some(150.9),
         note_counts: Some(NoteCounts { normal: 1000, long: 300, scratch: 150, long_scratch: 50 }),
+        lane_notes: LaneNotes::of_counts(&KNOWN_LANES),
         density: Some(Density { average: 9.876, peak: 21.345, end: 13.5 }),
+        notes_radar: Some(KNOWN_RADAR),
         total: Some(350.8),
         contents: ChartContents {
             bga: Some(true),
@@ -439,4 +451,52 @@ fn a_total_the_chart_states_is_kept_when_the_notes_are_measured() {
 
     assert_eq!(state.float(FLOAT_CHART_TOTALGAUGE), Some(321.5));
     assert_eq!(state.boolean(OPTION_NO_BPMCHANGE), Some(true));
+}
+
+#[test]
+fn the_notes_of_each_lane_and_their_share_of_the_fullest_lane_are_read_in_the_modes_lane_order() {
+    let chart = known_chart();
+    let state = ChartState::Chart(&chart);
+    let lanes = (RBMS_NUMBER_LANE_NOTES_FIRST..=RBMS_NUMBER_LANE_NOTES_LAST).map(|id| state.integer(id)).collect::<Vec<_>>();
+    let shares = (RBMS_RATE_LANE_NOTES_FIRST..=RBMS_RATE_LANE_NOTES_LAST).map(|id| state.rate(id)).collect::<Vec<_>>();
+
+    assert_eq!(lanes[..KNOWN_LANES.len()], KNOWN_LANES.map(Some));
+    assert!(lanes[KNOWN_LANES.len()..].iter().all(Option::is_none), "a lane the mode does not have is not answered: {lanes:?}");
+    assert_eq!(shares[0], Some(200.0 / 300.0));
+    assert_eq!(shares[KNOWN_LANES.len() - 1], Some(1.0), "the fullest lane, the turntable here, is the whole bar");
+    assert!(shares[KNOWN_LANES.len()..].iter().all(Option::is_none));
+}
+
+#[test]
+fn the_notes_radar_reads_as_shown_in_floats_and_cut_to_whole_numbers() {
+    let chart = known_chart();
+    let state = ChartState::Chart(&chart);
+
+    let floats = (RBMS_FLOAT_NOTES_RADAR_FIRST..=RBMS_FLOAT_NOTES_RADAR_LAST).map(|id| state.float(id)).collect::<Vec<_>>();
+    let numbers = (RBMS_NUMBER_NOTES_RADAR_FIRST..=RBMS_NUMBER_NOTES_RADAR_LAST).map(|id| state.integer(id)).collect::<Vec<_>>();
+    assert_eq!(floats, KNOWN_RADAR.map(Some));
+    assert_eq!(numbers, [120, 99, 0, 200, 0, 64].map(Some), "the whole numbers are cut, not rounded");
+}
+
+#[test]
+fn a_chart_with_no_lane_counts_or_radar_does_not_answer_them_and_an_empty_slot_reads_them_absent() {
+    let chart = ChartMeta { lane_notes: None, notes_radar: None, ..known_chart() };
+    let state = ChartState::Chart(&chart);
+    assert_eq!(state.integer(RBMS_NUMBER_LANE_NOTES_FIRST), None);
+    assert_eq!(state.rate(RBMS_RATE_LANE_NOTES_FIRST), None);
+    assert_eq!(state.integer(RBMS_NUMBER_NOTES_RADAR_FIRST), None);
+    assert_eq!(state.float(RBMS_FLOAT_NOTES_RADAR_FIRST), None);
+
+    let empty = ChartState::Empty;
+    assert_eq!(empty.integer(RBMS_NUMBER_LANE_NOTES_FIRST), Some(INTEGER_ABSENT));
+    assert_eq!(empty.integer(RBMS_NUMBER_NOTES_RADAR_LAST), Some(INTEGER_ABSENT));
+    assert_eq!(empty.float(RBMS_FLOAT_NOTES_RADAR_FIRST), Some(FLOAT_ABSENT));
+    assert_eq!(empty.rate(RBMS_RATE_LANE_NOTES_FIRST), None, "a rate has no absent value of its own");
+}
+
+#[test]
+fn more_lanes_than_are_counted_give_no_lane_counts() {
+    const COUNTED_LANES: usize = LANE_NOTE_SLOTS as usize;
+    assert_eq!(LaneNotes::of_counts(&[1; COUNTED_LANES + 1]), None);
+    assert!(LaneNotes::of_counts(&[1; COUNTED_LANES]).is_some(), "fourteen keys and two turntables are counted");
 }

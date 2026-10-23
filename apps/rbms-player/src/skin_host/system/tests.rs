@@ -3,19 +3,26 @@
 //! answered.
 
 use std::borrow::Cow;
+use std::path::Path;
 
-use rbms_skin::lua::LocalTime;
+use rbms_model::Language;
+use rbms_skin::lua::{LocalTime, SkinLua, SkinLuaConfig};
 use rbms_skin::property::VolumeBus;
 use rbms_skin::property::generated::*;
+use rbms_skin::timer::TimerState;
 use rbms_store::{SCORE_LN_MODE_FROM_CHART, ScoreRecord};
 
 use super::{CourseStage, PlayerTotals, SystemState, Volumes};
-use crate::skin_host::ClusterState;
+use crate::skin_host::extension::{LANGUAGE_OPTIONS, RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST};
+use crate::skin_host::{ClusterState, ScreenHost};
 
 /// The lamp ids a run can end on that matter to the totals: failed, and the first and last clear.
 const LAMP_FAILED: u8 = 1;
 const LAMP_ASSIST_EASY: u8 = 2;
 const LAMP_MAX: u8 = 10;
+
+/// The default skin pack, from this package's folder.
+const DEFAULT_PACK_FOLDER: &str = "../../assets/skins/rbms-default";
 
 /// A date and a time of day whose six fields all differ.
 const SAMPLE_CLOCK: LocalTime = LocalTime { year: 2023, month: 11, day: 14, hour: 22, minute: 13, second: 20 };
@@ -198,6 +205,7 @@ fn ids_of_other_clusters_are_not_answered() {
         history: Some(&records),
         volumes: Some(Volumes { system: 1.0, key: 1.0, background: 1.0 }),
         course: Some(CourseStage { index: 0, count: 2 }),
+        language: Some(Language::Korean),
     };
 
     assert_eq!(state.integer(NUMBER_PLAYLEVEL), None);
@@ -207,4 +215,67 @@ fn ids_of_other_clusters_are_not_answered() {
     assert_eq!(state.text(STRING_TITLE), None);
     assert_eq!(state.rate(RATE_LOAD_PROGRESS), None);
     assert_eq!(state.key_pressed(0), None, "nothing fills in the keys held yet");
+}
+
+#[test]
+fn exactly_one_language_option_is_on_and_it_is_the_one_of_the_resolved_language() {
+    for language in Language::ALL {
+        let state = SystemState { language: Some(language), ..SystemState::default() };
+        let on: Vec<i32> = (RBMS_OPTION_LANGUAGE_FIRST..=RBMS_OPTION_LANGUAGE_LAST).filter(|id| state.boolean(*id) == Some(true)).collect();
+
+        let id = i32::try_from(language.id()).expect("a language id fits");
+        assert_eq!(on, [RBMS_OPTION_LANGUAGE_FIRST + id], "{language:?}");
+    }
+}
+
+#[test]
+fn every_option_of_the_language_run_answers_and_the_ones_kept_for_later_languages_are_off() {
+    let state = SystemState { language: Some(Language::Japanese), ..SystemState::default() };
+
+    assert_eq!(RBMS_OPTION_LANGUAGE_LAST - RBMS_OPTION_LANGUAGE_FIRST + 1, LANGUAGE_OPTIONS);
+    for id in RBMS_OPTION_LANGUAGE_FIRST..=RBMS_OPTION_LANGUAGE_LAST {
+        assert!(state.boolean(id).is_some(), "option {id} is in the run and is answered");
+    }
+    let written = i32::try_from(Language::ALL.len()).expect("the languages fit");
+    let kept_for_later = (RBMS_OPTION_LANGUAGE_FIRST + written)..=RBMS_OPTION_LANGUAGE_LAST;
+    assert!(kept_for_later.map(|id| state.boolean(id)).all(|answer| answer == Some(false)));
+}
+
+#[test]
+fn a_frame_that_brought_no_language_leaves_the_language_options_unanswered() {
+    let state = SystemState::default();
+
+    for id in RBMS_OPTION_LANGUAGE_FIRST..=RBMS_OPTION_LANGUAGE_LAST {
+        assert_eq!(state.boolean(id), None, "option {id}");
+    }
+}
+
+#[test]
+fn the_ids_beside_the_language_run_are_not_the_languages() {
+    let state = SystemState { language: Some(Language::English), ..SystemState::default() };
+
+    assert_eq!(state.boolean(RBMS_OPTION_LANGUAGE_FIRST - 1), None);
+    assert_eq!(state.boolean(RBMS_OPTION_LANGUAGE_LAST + 1), None);
+    assert_eq!(state.integer(RBMS_OPTION_LANGUAGE_FIRST), None, "the options are a space of their own");
+}
+
+#[test]
+fn a_text_of_the_default_skin_is_read_in_the_language_the_host_answers_for_the_frame() {
+    let pack = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER);
+    let runtime = SkinLua::new(SkinLuaConfig::new(&pack)).expect("the pack's interpreter builds");
+    let timers = TimerState::new();
+    let build = "hello = require('lua.i18n').translator({ { hello = { en = 'Hello', ko = 'Annyeong', ja = 'Konnichiwa' } } })('hello')";
+    runtime.with_host(&ScreenHost::new(0, &timers), || runtime.lua().load(build).exec()).expect("the host binds").expect("the text is built");
+
+    let mut heard = Vec::new();
+    for language in [Language::English, Language::Korean, Language::Japanese, Language::Korean] {
+        let mut host = ScreenHost::new(0, &timers);
+        host.system = SystemState { language: Some(language), ..SystemState::default() };
+        heard.push(runtime.with_host(&host, || runtime.lua().load("return hello()").eval::<String>()).expect("the host binds").expect("the text is read"));
+    }
+    assert_eq!(heard, ["Hello", "Annyeong", "Konnichiwa", "Annyeong"]);
+
+    let silent = ScreenHost::new(0, &timers);
+    let unsaid = runtime.with_host(&silent, || runtime.lua().load("return hello()").eval::<String>()).expect("the host binds").expect("the text is read");
+    assert_eq!(unsaid, "Hello", "a frame that brought no language is read as English");
 }

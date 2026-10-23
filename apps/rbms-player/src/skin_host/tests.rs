@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use rbms_model::Mode;
+use rbms_model::{Language, Mode};
 use rbms_skin::dst::{DrawStateSource, OffsetSource};
 use rbms_skin::lua::LocalTime;
 use rbms_skin::property::generated::*;
@@ -13,10 +13,9 @@ use rbms_skin::property::{
 };
 use rbms_skin::timer::{TIMER_OFF, TimerId, TimerState};
 
-use super::chart::{BpmRange, ChartContents, ChartMeta, ChartState, Density, NoteCounts};
+use super::chart::{BpmRange, ChartContents, ChartMeta, ChartState, Density, LaneNotes, NoteCounts};
 use super::extension::{
-    RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST, RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST, RBMS_NUMBER_NOTES_RADAR_FIRST,
-    RBMS_NUMBER_NOTES_RADAR_LAST, RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST,
+    RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST, RBMS_OPTION_LANGUAGE_FIRST, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST,
 };
 use super::loading::{LoadingScreen, LoadingState};
 use super::system::{CourseStage, SystemState, Volumes};
@@ -116,20 +115,18 @@ const FADEOUT_TIMER: i32 = 2;
 /// The play-time numbers, which the scores a frame borrows do not hold.
 const UNANSWERED_PLAY_TIME: std::ops::RangeInclusive<i32> = NUMBER_TOTALPLAYTIME_HOUR..=NUMBER_TOTALPLAYTIME_SECOND;
 
-/// The runs of this player's own ids that are routed to the chart and the system clusters and that
-/// nothing fills yet, so a filled cluster still does not answer them. Whoever fills one takes its
-/// run off this list.
-const NOT_YET_FILLED: [(IdSpace, i32, i32); 5] = [
-    (IdSpace::Integer, RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST),
-    (IdSpace::Integer, RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST),
-    (IdSpace::Float, RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST),
-    (IdSpace::Rate, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST),
-    (IdSpace::Boolean, RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST),
-];
+/// The lanes the known chart's notes are counted on: those of its seven keys and its turntable.
+const KNOWN_CHART_LANES: [i32; 8] = [120, 110, 100, 90, 80, 70, 60, 150];
 
-/// Whether `id` of `space` is one of [`NOT_YET_FILLED`].
-fn not_yet_filled(space: IdSpace, id: i32) -> bool {
-    NOT_YET_FILLED.iter().any(|(run, first, last)| *run == space && (*first..=*last).contains(&id))
+/// Whether `id` of `space` is one of the per-lane values of a lane the known chart's mode does not
+/// have, which reads as absent on purpose.
+fn lane_the_known_chart_lacks(space: IdSpace, id: i32) -> bool {
+    let lanes = KNOWN_CHART_LANES.len() as i32;
+    match space {
+        IdSpace::Integer => (RBMS_NUMBER_LANE_NOTES_FIRST + lanes..=RBMS_NUMBER_LANE_NOTES_LAST).contains(&id),
+        IdSpace::Rate => (RBMS_RATE_LANE_NOTES_FIRST + lanes..=RBMS_RATE_LANE_NOTES_LAST).contains(&id),
+        _ => false,
+    }
 }
 
 /// A chart the player knows everything about.
@@ -154,7 +151,9 @@ fn known_chart() -> ChartMeta<'static> {
         bpm: Some(BpmRange { min: 140, max: 160 }),
         main_bpm: Some(150.0),
         note_counts: Some(NoteCounts { normal: 800, long: 50, scratch: 40, long_scratch: 10 }),
+        lane_notes: LaneNotes::of_counts(&KNOWN_CHART_LANES),
         density: Some(Density { average: 7.5, peak: 15.0, end: 11.0 }),
+        notes_radar: Some([110.0, 95.5, 40.0, 12.0, 30.0, 150.0]),
         total: Some(300.0),
         contents: ChartContents {
             bga: Some(true),
@@ -199,6 +198,7 @@ fn every_id_routed_to_a_filled_cluster_is_answered_by_it() {
         history: Some(&records),
         volumes: Some(Volumes { system: 0.5, key: 0.5, background: 0.5 }),
         course: Some(CourseStage { index: 0, count: 2 }),
+        language: Some(Language::English),
     };
     let loading = LoadingState { screen: LoadingScreen::Preload, progress: 0.5 };
 
@@ -210,8 +210,8 @@ fn every_id_routed_to_a_filled_cluster_is_answered_by_it() {
             _ => continue,
         };
         for id in route.first..=route.last {
-            let unanswered_on_purpose =
-                (route.cluster == Cluster::System && route.space == IdSpace::Integer && UNANSWERED_PLAY_TIME.contains(&id)) || not_yet_filled(route.space, id);
+            let unanswered_on_purpose = (route.cluster == Cluster::System && route.space == IdSpace::Integer && UNANSWERED_PLAY_TIME.contains(&id))
+                || (route.cluster == Cluster::Chart && lane_the_known_chart_lacks(route.space, id));
             assert_ne!(
                 is_answered(cluster, route.space, id),
                 unanswered_on_purpose,
@@ -301,6 +301,23 @@ fn the_machine_clusters_answer_through_the_host_and_negation_applies_to_them() {
     assert_eq!(host.rate(RATE_LOAD_PROGRESS), Some(0.25));
     assert_eq!(host.float(FLOAT_LOADING_PROGRESS), 0.25);
     assert_eq!((host.boolean(OPTION_NOW_LOADING), host.boolean(OPTION_LOADED)), (Some(true), Some(false)));
+}
+
+#[test]
+fn the_language_options_answer_on_every_screen_and_are_read_afresh_every_frame() {
+    let timers = TimerState::new();
+    for static_screen in [None, Some(StaticScreen::Select), Some(StaticScreen::Result), Some(StaticScreen::Other)] {
+        let mut host = ScreenHost::new(NOW_US, &timers);
+        host.static_screen = static_screen;
+        assert_eq!(host.boolean(RBMS_OPTION_LANGUAGE_FIRST), None, "{static_screen:?}: a frame with no language asks nothing");
+
+        for language in Language::ALL {
+            host.system = SystemState { language: Some(language), ..SystemState::default() };
+            let option = RBMS_OPTION_LANGUAGE_FIRST + i32::try_from(language.id()).expect("a language id fits");
+            assert_eq!((host.boolean(option), host.boolean(-option)), (Some(true), Some(false)), "{static_screen:?} {language:?}");
+            assert!(!host.is_static(option), "{static_screen:?}: the language is asked again on every frame");
+        }
+    }
 }
 
 /// An event id the reference defines nothing for, and the first and last of the ids a skin may

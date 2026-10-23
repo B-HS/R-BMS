@@ -4,8 +4,9 @@
 //! keys held on the keyboard.
 //!
 //! What this cluster answers: numbers 20-37, 57-59 and 333; rates 17-19; options 280-290 (the
-//! course being played); strings 2 and 1010; and what `main_state` asks of the machine itself: the
-//! three volumes.
+//! course being played) and this player's own options for the language of the interface
+//! ([`RBMS_OPTION_LANGUAGE_FIRST`] on); strings 2 and 1010; and what `main_state` asks of the machine
+//! itself: the three volumes.
 //!
 //! A value is read as `IntegerPropertyFactory` and `FloatPropertyFactory` read it from the main
 //! controller, the player's data and the audio configuration. What the player has no source for is
@@ -17,12 +18,14 @@
 use std::borrow::Cow;
 
 use rbms_judge::clear_type_from_id;
+use rbms_model::Language;
 use rbms_skin::lua::LocalTime;
 use rbms_skin::property::VolumeBus;
 use rbms_skin::property::generated::*;
 use rbms_store::ScoreRecord;
 
 use super::ClusterState;
+use super::extension::{RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST};
 
 const MILLIS_PER_SECOND: i64 = 1000;
 const MILLIS_PER_MINUTE: i64 = 60_000;
@@ -120,6 +123,9 @@ pub struct SystemState<'a> {
     pub volumes: Option<Volumes>,
     /// The course in progress, or `None` for a single chart.
     pub course: Option<CourseStage>,
+    /// The language the interface resolved to, which every screen's document reads as the options
+    /// from [`RBMS_OPTION_LANGUAGE_FIRST`] on. `None` leaves them unanswered, and a skin reads them off.
+    pub language: Option<Language>,
 }
 
 impl SystemState<'_> {
@@ -153,6 +159,10 @@ impl ClusterState for SystemState<'_> {
                 Some(index == stage && index.zip(count).is_some_and(|(index, count)| index + 1 != count))
             }
             OPTION_COURSE_STAGE_FINAL => Some(index.zip(count).is_some_and(|(index, count)| index + 1 == count)),
+            RBMS_OPTION_LANGUAGE_FIRST..=RBMS_OPTION_LANGUAGE_LAST => {
+                let place = usize::try_from(id - RBMS_OPTION_LANGUAGE_FIRST).ok()?;
+                self.language.map(|language| language.id() == place)
+            }
             _ => None,
         }
     }

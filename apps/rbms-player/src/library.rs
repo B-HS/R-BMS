@@ -22,7 +22,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use rbms_library::scan::{ScanCounts, ScanOutcomeG, ScanProgress, ScanRequest, normalize, scan_into};
-use rbms_library::songdb::{DetailRow, SongDb, SongDbError, SongRow, mode_from_id};
+use rbms_library::songdb::{DetailRow, RadarRow, SongDb, SongDbError, SongRow, mode_from_id};
 use rbms_library::{ChartDetail, Library, SongEntry, compute_chart_detail};
 use rbms_model::Mode;
 
@@ -109,21 +109,55 @@ pub(crate) fn stored_library(db: &SongDb) -> Library {
 
 /// The detail panel of one chart: the cached row when the scan already computed it, and otherwise
 /// a fresh integration that is cached on the way out so the next visit is a lookup.
+///
+/// A cached detail carries the chart's NOTES RADAR when the database holds one measured under the
+/// current definitions, and none otherwise: measuring it again needs the chart parsed, which the
+/// browser's analysis worker does off the frame loop, and [`keep_radar`] stores what it measured. A
+/// fresh integration measures the radar from its own parse and caches it beside the detail.
 pub(crate) fn chart_detail(db: &SongDb, path: &Path, mode: Mode) -> Option<ChartDetail> {
     let key = normalize(path);
     let row = db.song(&key).ok().flatten();
     if let Some(row) = &row
         && let Some(cached) = db.detail(&key).ok().flatten()
     {
-        return Some(detail_of(row, &cached));
+        return Some(ChartDetail { radar: current_radar(db, &key), ..detail_of(row, &cached) });
     }
     let computed = compute_chart_detail(path, mode)?;
-    if row.is_some()
-        && let Err(e) = db.put_detail(&key, &detail_row_of(&computed))
-    {
-        notify(Level::Warn, format!("chart detail not cached: {e}"));
+    if row.is_some() {
+        let cached = db.put_detail(&key, &detail_row_of(&computed));
+        if let Err(e) = cached.and_then(|()| computed.radar.as_ref().map_or(Ok(()), |radar| db.put_radar(&key, radar))) {
+            report_uncached(&e);
+        }
     }
     Some(computed)
+}
+
+/// The NOTES RADAR the database holds for the chart at `path`, when it was measured under the current
+/// definitions. One measured under older ones reads as none, so it is measured again.
+pub(crate) fn stored_radar(db: &SongDb, path: &Path) -> Option<RadarRow> {
+    current_radar(db, &normalize(path))
+}
+
+/// [`stored_radar`] of a chart keyed the way the database keys it.
+fn current_radar(db: &SongDb, key: &str) -> Option<RadarRow> {
+    db.radar(key).ok().flatten().filter(RadarRow::is_current)
+}
+
+/// Keep the NOTES RADAR measured of the chart at `path`, so the next visit reads it rather than parse
+/// the chart. A chart the database does not list is not kept: its radar would have no row to hang on.
+pub(crate) fn keep_radar(db: &SongDb, path: &Path, radar: &RadarRow) {
+    let key = normalize(path);
+    if db.song(&key).ok().flatten().is_some()
+        && let Err(e) = db.put_radar(&key, radar)
+    {
+        report_uncached(&e);
+    }
+}
+
+/// Say that what was measured of a chart could not be cached, which leaves the next visit to measure
+/// it again.
+fn report_uncached(error: &SongDbError) {
+    notify(Level::Warn, format!("chart detail not cached: {error}"));
 }
 
 /// Assemble the browser's detail from the two rows that hold it: the note counts and BPM range on

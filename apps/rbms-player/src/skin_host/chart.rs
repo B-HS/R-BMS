@@ -7,7 +7,9 @@
 //!
 //! What this cluster answers: numbers 45-49, 74, 90-92, 96, 106, 350-353, 360-365, 368, 400 and
 //! 1163-1164; floats 360, 362, 367 and 368; options 150-155, 160-164, 170-184, 190-195, 1008,
-//! 1160-1161 and 1177; strings 10-16, 1001-1003 and 1030-1031.
+//! 1160-1161 and 1177; strings 10-16, 1001-1003 and 1030-1031. Beyond the reference's own it answers
+//! this player's numbers of notes on each lane and their rates, and the six NOTES RADAR values as
+//! numbers and floats ([`super::extension`]).
 //!
 //! A value is read exactly as the reference reads it from the selected `SongData` and
 //! `SongInformation` (`IntegerPropertyFactory`, `BooleanPropertyFactory`, `StringPropertyFactory`
@@ -21,6 +23,7 @@
 
 use std::borrow::Cow;
 
+use rbms_chart::RADAR_AXIS_COUNT;
 use rbms_library::{ChartDetail, SongEntry};
 use rbms_model::{Mode, default_total_for_mode};
 use rbms_skin::property::generated::*;
@@ -28,6 +31,10 @@ use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT};
 use rbms_skin::timer::MICROS_PER_MILLI;
 
 use super::ClusterState;
+use super::extension::{
+    LANE_NOTE_SLOTS, RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST, RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST,
+    RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST,
+};
 
 /// The difficulty slots a chart can name, from beginner to insane. Anything outside them is the
 /// "unnamed" slot, which is also the one a chart with no `#DIFFICULTY` has.
@@ -69,6 +76,53 @@ pub struct Density {
     pub peak: f64,
     /// The busiest stretch after the gauge's border.
     pub end: f64,
+}
+
+/// How many lanes a chart's notes are counted on, lane by lane: as many as the per-lane ids name.
+const LANE_SLOTS: usize = LANE_NOTE_SLOTS as usize;
+
+/// The modes whose charts are counted lane by lane, the ones a NOTES RADAR is drawn for: five and
+/// seven keys, ten and fourteen. A nine-key or a twenty-four-key chart has neither.
+const LANE_COUNTED_MODES: [Mode; 4] = [Mode::BEAT_5K, Mode::BEAT_7K, Mode::BEAT_10K, Mode::BEAT_14K];
+
+/// Whether a chart of `mode` is counted lane by lane and has a NOTES RADAR.
+pub fn is_lane_counted(mode: &Mode) -> bool {
+    LANE_COUNTED_MODES.contains(mode)
+}
+
+/// How many notes there are to judge on each lane of a chart, in the lane order of its mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LaneNotes {
+    counts: [i32; LANE_SLOTS],
+    lanes: usize,
+}
+
+impl LaneNotes {
+    /// The counts of a chart whose lanes hold `counts` notes in turn, or `None` for a chart with
+    /// more lanes than are counted.
+    pub fn of_counts(counts: &[i32]) -> Option<LaneNotes> {
+        let mut kept = [0; LANE_SLOTS];
+        kept.get_mut(..counts.len())?.copy_from_slice(counts);
+        Some(LaneNotes { counts: kept, lanes: counts.len() })
+    }
+
+    /// The lanes the chart has, each with its count.
+    fn lanes(&self) -> &[i32] {
+        &self.counts[..self.lanes]
+    }
+
+    /// The notes on `lane`, or `None` for a lane the chart does not have.
+    pub fn on(&self, lane: usize) -> Option<i32> {
+        self.lanes().get(lane).copied()
+    }
+
+    /// The notes on `lane` over the notes on the fullest lane: 1 for the fullest, and 0 on every
+    /// lane of a chart with no note.
+    pub fn share(&self, lane: usize) -> Option<f32> {
+        let count = self.on(lane)?;
+        let fullest = self.lanes().iter().copied().max().unwrap_or_default();
+        Some(if fullest > 0 { count as f32 / fullest as f32 } else { 0.0 })
+    }
 }
 
 /// The lowest and highest tempo a chart plays at, in whole BPM.
@@ -135,7 +189,12 @@ pub struct ChartMeta<'a> {
     /// The tempo the most notes are played at.
     pub main_bpm: Option<f64>,
     pub note_counts: Option<NoteCounts>,
+    /// The notes on each lane, for a chart whose mode is counted lane by lane.
+    pub lane_notes: Option<LaneNotes>,
     pub density: Option<Density>,
+    /// The NOTES RADAR as shown, 0 to 200 on each axis in the order of `rbms_chart::RadarAxis`, for a
+    /// chart whose mode has one.
+    pub notes_radar: Option<[f32; RADAR_AXIS_COUNT]>,
     /// The chart's `#TOTAL`.
     pub total: Option<f64>,
     pub contents: ChartContents,
@@ -253,6 +312,16 @@ fn read_boolean(chart: &ChartMeta<'_>, id: i32) -> Option<Option<bool>> {
     })
 }
 
+/// Where `id` stands in the run of ids that starts at `first`.
+fn place_in_run(id: i32, first: i32) -> usize {
+    usize::try_from(id - first).unwrap_or_default()
+}
+
+/// The NOTES RADAR value of the axis `id` names in the run that starts at `first`.
+fn radar_axis(chart: &ChartMeta<'_>, id: i32, first: i32) -> Option<f32> {
+    chart.notes_radar.and_then(|radar| radar.get(place_in_run(id, first)).copied())
+}
+
 /// The number under `id`, read as [`read_boolean`] reads an option.
 fn read_integer(chart: &ChartMeta<'_>, id: i32) -> Option<Option<i32>> {
     let counts = chart.note_counts;
@@ -278,6 +347,10 @@ fn read_integer(chart: &ChartMeta<'_>, id: i32) -> Option<Option<i32>> {
         NUMBER_JUDGERANK => chart.judge,
         NUMBER_SONGLENGTH_MINUTE => chart.length_ms.map(|length| (length / MILLIS_PER_MINUTE) % CLOCK_DIGIT_MODULUS),
         NUMBER_SONGLENGTH_SECOND => chart.length_ms.map(|length| (length / MILLIS_PER_SECOND) % CLOCK_DIGIT_MODULUS),
+        RBMS_NUMBER_LANE_NOTES_FIRST..=RBMS_NUMBER_LANE_NOTES_LAST => {
+            chart.lane_notes.and_then(|lanes| lanes.on(place_in_run(id, RBMS_NUMBER_LANE_NOTES_FIRST)))
+        }
+        RBMS_NUMBER_NOTES_RADAR_FIRST..=RBMS_NUMBER_NOTES_RADAR_LAST => radar_axis(chart, id, RBMS_NUMBER_NOTES_RADAR_FIRST).map(|value| value as i32),
         _ => return None,
     })
 }
@@ -290,6 +363,15 @@ fn read_float(chart: &ChartMeta<'_>, id: i32) -> Option<Option<f32>> {
         FLOAT_CHART_ENDDENSITY => density.map(|density| density.end as f32),
         FLOAT_CHART_AVERAGEDENSITY => density.map(|density| density.average as f32),
         FLOAT_CHART_TOTALGAUGE => chart.total.map(|total| total as f32),
+        RBMS_FLOAT_NOTES_RADAR_FIRST..=RBMS_FLOAT_NOTES_RADAR_LAST => radar_axis(chart, id, RBMS_FLOAT_NOTES_RADAR_FIRST),
+        _ => return None,
+    })
+}
+
+/// The share under a rate id, read as [`read_boolean`] reads an option.
+fn read_rate(chart: &ChartMeta<'_>, id: i32) -> Option<Option<f32>> {
+    Some(match id {
+        RBMS_RATE_LANE_NOTES_FIRST..=RBMS_RATE_LANE_NOTES_LAST => chart.lane_notes.and_then(|lanes| lanes.share(place_in_run(id, RBMS_RATE_LANE_NOTES_FIRST))),
         _ => return None,
     })
 }
@@ -341,6 +423,15 @@ impl ClusterState for ChartState<'_> {
             ChartState::Unconnected => None,
             ChartState::Empty => read_float(&ChartMeta::default(), id).map(|_| FLOAT_ABSENT),
             ChartState::Chart(chart) => read_float(chart, id)?,
+        }
+    }
+
+    /// A slot with no chart has no share to give, and a rate has no absent value of its own: the
+    /// rates of this cluster are not answered there.
+    fn rate(&self, id: i32) -> Option<f32> {
+        match self {
+            ChartState::Unconnected | ChartState::Empty => None,
+            ChartState::Chart(chart) => read_rate(chart, id)?,
         }
     }
 

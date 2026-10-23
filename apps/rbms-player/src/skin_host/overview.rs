@@ -22,7 +22,7 @@ use rbms_render::skin_render::graphs::NOTE_KINDS;
 use rbms_render::{BpmTimeline, FrameSeries, NoteDistribution};
 use rbms_skin::timer::MICROS_PER_MILLI;
 
-use super::chart::{BpmRange, ChartContents, ChartMeta, NoteCounts};
+use super::chart::{BpmRange, ChartContents, ChartMeta, LaneNotes, NoteCounts, is_lane_counted};
 
 /// Microseconds in the second the judgement graph counts a chart's notes by.
 const MICROS_PER_SECOND: i64 = 1_000_000;
@@ -219,6 +219,23 @@ fn note_counts(model: &Model) -> NoteCounts {
         }
     }
     counts
+}
+
+/// How many notes there are to judge on each lane of a chart, in the lane order of its mode, or
+/// `None` for a chart whose mode is not counted lane by lane. The lanes add up to the chart's notes.
+pub fn lane_notes(model: &Model) -> Option<LaneNotes> {
+    if !is_lane_counted(&model.mode) {
+        return None;
+    }
+    let mut counts = vec![0; model.mode.key];
+    for line in &model.timelines {
+        for (count, note) in counts.iter_mut().zip(&line.notes) {
+            if note.as_ref().is_some_and(|note| note.kind.counts_as_playable_note()) {
+                *count += 1;
+            }
+        }
+    }
+    LaneNotes::of_counts(&counts)
 }
 
 /// How many notes of each kind each second of the chart holds, up to the second of its last line

@@ -50,6 +50,7 @@ use crate::stage::{
 use crate::textedit::ImeEdit;
 use crate::*;
 
+mod analysis;
 #[cfg(test)]
 mod bars_tests;
 mod download_modal;
@@ -242,6 +243,8 @@ pub(crate) struct SelectState {
     /// The pictures a skin's frame refers to: those of the chart under the cursor and the back
     /// image of the chart loaded last.
     images: SongImages,
+    /// What a parse of the chart the cursor rests on found, for a skin's frame.
+    analysis: analysis::ChartAnalysis,
     /// The back image of the chart loaded last, with the chart and the reading of the facts it was
     /// looked up for.
     loaded_backbmp: Option<(String, u64, Option<PathBuf>)>,
@@ -316,6 +319,7 @@ impl Default for SelectState {
             facts_generation: 0,
             courses_generation: 0,
             images: SongImages::default(),
+            analysis: analysis::ChartAnalysis::default(),
             loaded_backbmp: None,
             keys: SelectKeys::default(),
             listening: false,
@@ -1240,6 +1244,7 @@ impl StageHandler for SelectState {
             self.rebuild(ctx.shared);
         }
         self.refresh_focused_detail(ctx.shared, ctx.now);
+        self.analysis.follow(ctx.shared, self.focused_detail_si.filter(|_| self.tab == SelectTab::Songs));
         self.refresh_bars(ctx.shared);
         if skin == SkinStatus::Ready {
             self.run_scene_timers(ctx.shared);
@@ -1515,7 +1520,14 @@ impl StageHandler for SelectState {
             ..SongBars::new(bars, cursor)
         };
         let entry = SelectState::search_entry(&self.search_edit, ctx.shared);
-        let data = FrameData { bars: Some(&wheel), images, bga: BgaFrame::of(images.stagefile.or(images.banner)), entry, ..FrameData::default() };
+        let data = FrameData {
+            bars: Some(&wheel),
+            series: self.analysis.series(),
+            images: ReferenceImages { notes_radar: self.analysis.notes_radar(), ..images },
+            bga: BgaFrame::of(images.stagefile.or(images.banner)),
+            entry,
+            ..FrameData::default()
+        };
         let lent = BrowserLent {
             courses: &view.header,
             panel: self.panel.number(),
@@ -1533,7 +1545,7 @@ impl StageHandler for SelectState {
             _ => None,
         };
         let meta = focused
-            .and_then(|index| Some(chart_under_cursor(ctx.shared.library.songs().get(index)?, self.facts.of(index), measured, &images)))
+            .and_then(|index| Some(self.analysis.describe(chart_under_cursor(ctx.shared.library.songs().get(index)?, self.facts.of(index), measured, &images))))
             .or_else(|| missing.map(missing_chart_meta));
         let chart = meta.as_ref().map_or(ChartState::Empty, ChartState::Chart);
         if ctx.shared.draw_select_skin(canvas, &SelectDraw { data, chart, lent }) {

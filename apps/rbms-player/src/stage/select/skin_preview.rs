@@ -20,16 +20,17 @@
 //! turned, and the bar timer starts over as it does whenever the bar under the cursor changes. The
 //! slide is measured on the preview's own time in place of the wall clock the browser reads.
 
+use rbms_chart::{RADAR_AXIS_COUNT, RADAR_DISPLAY_MAX, RadarAxis};
 use rbms_config::Config;
 use rbms_model::Mode;
 use rbms_render::skin_render::frame::{BarDistribution, BarHold, BarKind, BarScroller, BarTrophy, LAMP_KINDS, SongBar};
-use rbms_render::{BgaFrame, FrameData, SongBars};
+use rbms_render::{BgaFrame, FrameData, ReferenceImages, SongBars};
 use rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT;
 use rbms_skin::timer::{MICROS_PER_MILLI, timer_id};
 use rbms_store::scoredb::{BestScore, JUDGE_TIER_COUNT, JudgeCounts};
 
 use crate::AppShared;
-use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta, ChartState, Density, NoteCounts};
+use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta, ChartState, Density, LaneNotes, NoteCounts, is_lane_counted};
 use crate::skin_host::ir::IrBrowser;
 use crate::skin_host::select::{ChartInputs, CourseShown, SelectInputs, SelectShown};
 use crate::skin_preview::SampleStep;
@@ -95,6 +96,18 @@ const PEAK_DENSITY_SHARE: f64 = 2.0;
 const END_DENSITY_SHARE: f64 = 1.5;
 
 const MILLIS_PER_SECOND: i32 = 1_000;
+
+/// How a sample chart's notes on the keys are shared out among them, key by key from the first, and
+/// round again for a mode with more keys than this.
+const KEY_LANE_WEIGHTS: [i32; 7] = [4, 3, 5, 3, 4, 3, 5];
+
+/// How far each NOTES RADAR axis of a sample chart reaches, NOTES to CHORD, as a share of the axis
+/// at [`SAMPLE_RADAR_FULL_LEVEL`]. A chart without long notes has no CHARGE.
+const SAMPLE_RADAR_SHARES: [f32; RADAR_AXIS_COUNT] = [0.8, 0.7, 0.45, 0.2, 0.55, 0.6];
+
+/// The level at which a sample chart's radar reaches [`SAMPLE_RADAR_SHARES`]; one of a lower level
+/// reaches as far below it as its level is.
+const SAMPLE_RADAR_FULL_LEVEL: f32 = 12.0;
 
 /// How many judgements a sample best score is written down with: a perfect great, a great, a good
 /// and a poor.
@@ -366,7 +379,9 @@ impl SampleSong {
             bpm: Some(BpmRange { min: slowest, max: fastest }),
             main_bpm: (slowest == fastest).then(|| f64::from(slowest)),
             note_counts: Some(NoteCounts { normal: self.notes - long - scratch, long, scratch, long_scratch: 0 }),
+            lane_notes: self.lane_notes(scratch),
             density: Some(Density { average, peak: average * PEAK_DENSITY_SHARE, end: average * END_DENSITY_SHARE }),
+            notes_radar: self.notes_radar(has_long_notes),
             total: Some(SAMPLE_TOTAL),
             contents: ChartContents {
                 bga: Some(false),
@@ -380,6 +395,45 @@ impl SampleSong {
             },
             ..ChartMeta::default()
         }
+    }
+}
+
+impl SampleSong {
+    /// The notes on each lane: the turntable's `scratch` shared among the turntables, and the rest
+    /// among the keys by [`KEY_LANE_WEIGHTS`]. A mode that is not counted lane by lane has none.
+    fn lane_notes(&self, scratch: i32) -> Option<LaneNotes> {
+        if !is_lane_counted(&self.mode) {
+            return None;
+        }
+        let turntables = i32::try_from(self.mode.scratch.len()).unwrap_or(1).max(1);
+        let keys = self.mode.key - self.mode.scratch.len();
+        let weight = |key: usize| KEY_LANE_WEIGHTS[key % KEY_LANE_WEIGHTS.len()];
+        let all_weights: i32 = (0..keys).map(weight).sum();
+        let mut key = 0;
+        let counts: Vec<i32> = (0..self.mode.key)
+            .map(|lane| {
+                if self.mode.is_scratch(lane) {
+                    return scratch / turntables;
+                }
+                key += 1;
+                (self.notes - scratch) * weight(key - 1) / all_weights.max(1)
+            })
+            .collect();
+        LaneNotes::of_counts(&counts)
+    }
+
+    /// The NOTES RADAR as shown, reaching further the higher the chart's level. A mode that has no
+    /// radar has none.
+    fn notes_radar(&self, has_long_notes: bool) -> Option<[f32; RADAR_AXIS_COUNT]> {
+        if !is_lane_counted(&self.mode) {
+            return None;
+        }
+        let reach = (self.level as f32 / SAMPLE_RADAR_FULL_LEVEL).min(1.0) * RADAR_DISPLAY_MAX;
+        let mut radar = SAMPLE_RADAR_SHARES.map(|share| share * reach);
+        if !has_long_notes {
+            radar[RadarAxis::Charge as usize] = 0.0;
+        }
+        Some(radar)
     }
 }
 
@@ -506,7 +560,8 @@ impl SelectSample {
         });
         let meta = song.map(|(_, song)| song.meta());
         let chart = meta.as_ref().map_or(ChartState::Empty, ChartState::Chart);
-        let data = FrameData { bars: Some(&wheel), bga: BgaFrame::of(None), ..FrameData::default() };
+        let images = ReferenceImages { notes_radar: meta.as_ref().and_then(|meta| meta.notes_radar), ..ReferenceImages::default() };
+        let data = FrameData { bars: Some(&wheel), images, bga: BgaFrame::of(None), ..FrameData::default() };
         shared.draw_skin_preview(canvas, at, PreviewScene::Select(PreviewSelect { data, chart, shown: &shown }))
     }
 
@@ -514,5 +569,28 @@ impl SelectSample {
     #[cfg(test)]
     pub(crate) fn cursor(&self) -> usize {
         self.cursor
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every sample chart of a mode counted lane by lane has its notes on its lanes and a radar a
+    /// skin can draw; one of another mode has neither, as a chart of that mode would not.
+    #[test]
+    fn a_sample_chart_has_lane_counts_and_a_radar_as_a_chart_of_its_mode_would() {
+        for song in SAMPLE_SONGS {
+            let meta = song.meta();
+            if !is_lane_counted(&song.mode) {
+                assert_eq!((meta.lane_notes, meta.notes_radar), (None, None), "{}", song.title);
+                continue;
+            }
+            let lanes = meta.lane_notes.expect("a counted mode has lane counts");
+            assert_eq!((0..song.mode.key).filter(|lane| lanes.on(*lane).is_some()).count(), song.mode.key, "{}", song.title);
+            assert!((0..song.mode.key).filter_map(|lane| lanes.on(lane)).sum::<i32>() <= song.notes, "{}", song.title);
+            let radar = meta.notes_radar.expect("a counted mode has a radar");
+            assert!(radar.iter().all(|value| (0.0..=RADAR_DISPLAY_MAX).contains(value)), "{}: {radar:?}", song.title);
+        }
     }
 }

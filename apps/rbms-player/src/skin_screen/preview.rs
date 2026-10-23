@@ -161,8 +161,8 @@ impl AppShared {
     }
 
     /// What the machine says to a previewed skin, and what stands in for the player: the clock, the
-    /// volumes and the frame rate are the real ones, the name is a sample and no run was ever
-    /// recorded.
+    /// volumes, the frame rate and the language are the real ones, the name is a sample and no run was
+    /// ever recorded.
     fn preview_system_state(&self, course: Option<CourseStage>) -> SystemState<'_> {
         let unix_seconds = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(i64::MAX));
         let audio = &self.config.audio;
@@ -175,6 +175,7 @@ impl AppShared {
             history: Some(&[]),
             volumes: Some(Volumes { system: audio.system, key: audio.key, background: audio.bg }),
             course,
+            language: Some(rbms_render::text::language()),
         }
     }
 

@@ -13,6 +13,9 @@
 //!   of its line and a string that merely names a library is not taken to call it.
 //! - Every picture sheet has the table the generator wrote for it and the table says what the sheet
 //!   is: the sheet is there, is the size the table gives, and every sprite lies inside it.
+//! - Every text of the pack's language tables (`lua/i18n`) is written in each language the player
+//!   writes its screens in and is kept in one table only, and `t(key)` reads it in the language the
+//!   host says is on, in English where the host says none.
 //!
 //! The documents loading, drawing and costing nothing they should not is the dump tool's strict gate
 //! (`rbms-cli`), and the screens being drawn is the player's.
@@ -22,7 +25,10 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use mlua::{Lua, Table};
+use mlua::{Function, Lua, Table, Value};
+use rbms_model::Language;
+use rbms_skin::lua::{LuaMode, SkinLua, SkinLuaConfig};
+use rbms_skin::property::MapHost;
 
 /// The pack's folder in the repository, from this package's own.
 const PACK_FOLDER: &str = "../../assets/skins/rbms-default";
@@ -34,6 +40,14 @@ const TOOLS_FOLDER: &str = "tools";
 /// The folder of the pack that holds the table of each picture sheet, and the one the sheets are in.
 const ATLAS_FOLDER: &str = "lua/atlas";
 const SHEET_FOLDER: &str = "image";
+
+/// The folder of the pack that holds the language tables, and the first of the language options a
+/// host turns on.
+const LANGUAGE_TABLE_FOLDER: &str = "lua/i18n";
+const LANGUAGE_OPTION_FIRST: i32 = 21_150;
+
+/// The seed every interpreter of these checks starts from.
+const TEST_SEED: u64 = 7;
 
 /// The extensions of the pack's Lua: a module, and a skin document that is Lua too.
 const LUA_EXTENSIONS: [&str; 2] = ["lua", "luaskin"];
@@ -437,4 +451,183 @@ fn every_picture_sheet_is_the_size_its_table_says_and_holds_its_sprites() {
         }
         assert!(count > 0, "{name}.lua holds no sprite");
     }
+}
+
+/// An interpreter over the pack, in `mode`.
+fn pack_runtime(mode: LuaMode) -> SkinLua {
+    SkinLua::new(SkinLuaConfig { seed: Some(TEST_SEED), mode, ..SkinLuaConfig::new(&pack()) }).expect("the pack's interpreter builds")
+}
+
+/// A host that has the language option `first + place` on, or none when `place` is `None`.
+fn host_with_language_on(place: Option<usize>) -> MapHost {
+    let mut host = MapHost::new();
+    if let Some(place) = place {
+        host.booleans.insert(LANGUAGE_OPTION_FIRST + i32::try_from(place).expect("a language place fits"), true);
+    }
+    host
+}
+
+/// Runs `source` in the pack's interpreter with `host` bound and answers what it returns.
+fn eval_in_pack<R: mlua::FromLuaMulti>(runtime: &SkinLua, host: &MapHost, source: &str) -> mlua::Result<R> {
+    runtime.with_host(host, || runtime.lua().load(source).eval::<R>()).expect("the host binds")
+}
+
+/// Every way the entries of one language table fail to be a text in each of `languages`, and
+/// nothing else, one line each.
+fn language_table_problems(area: &str, languages: &[String], table: &Table) -> Vec<String> {
+    let mut problems = Vec::new();
+    for pair in table.pairs::<Value, Value>() {
+        let (key, entry) = pair.unwrap_or_else(|error| panic!("{area} should be walkable: {error}"));
+        let Value::String(key) = key else {
+            problems.push(format!("{area} has a key that is not a string: {key:?}"));
+            continue;
+        };
+        let key = key.to_string_lossy();
+        let Value::Table(entry) = entry else {
+            problems.push(format!("{area}.{key} is not a table of texts"));
+            continue;
+        };
+        for language in languages {
+            match entry.get::<Value>(language.as_str()) {
+                Ok(Value::String(text)) if !text.to_string_lossy().trim().is_empty() => {}
+                _ => problems.push(format!("{area}.{key} has no text in {language}")),
+            }
+        }
+        for pair in entry.pairs::<Value, Value>() {
+            let (language, _) = pair.unwrap_or_else(|error| panic!("{area}.{key} should be walkable: {error}"));
+            let is_known = matches!(&language, Value::String(code) if languages.iter().any(|known| *known == code.to_string_lossy()));
+            if !is_known {
+                problems.push(format!("{area}.{key} names a language the pack is not written in: {language:?}"));
+            }
+        }
+    }
+    problems
+}
+
+/// The check on the language tables finds what it is looking for, and not what only looks like it:
+/// it is the check on the pack's tables, and one that finds nothing would pass them whatever they
+/// held.
+#[test]
+fn the_check_on_a_language_table_finds_a_missing_text_a_stray_language_and_a_key_in_two_tables() {
+    let runtime = pack_runtime(LuaMode::Full);
+    let lua = runtime.lua();
+    let languages: Vec<String> = ["en", "ko", "ja"].map(str::to_owned).to_vec();
+    let table = |source: &str| -> Table { lua.load(source).eval().expect("the probe is a table") };
+    let problems = |source: &str| language_table_problems("probe", &languages, &table(source));
+
+    assert!(problems("return { a = { en = 'A', ko = 'a', ja = 'e' }, b = { en = 'B', ko = 'b', ja = 'i' } }").is_empty());
+    assert!(problems("return {}").is_empty());
+    for source in [
+        "return { a = { en = 'A', ko = 'a' } }",
+        "return { a = { en = 'A', ko = 'a', ja = '' } }",
+        "return { a = { en = 'A', ko = 'a', ja = '   ' } }",
+        "return { a = { en = 'A', ko = 'a', ja = 3 } }",
+        "return { a = { en = 'A', ko = 'a', ja = 'e', fr = 'f' } }",
+        "return { a = { en = 'A', ko = 'a', ja = 'e', [1] = 'x' } }",
+        "return { a = 'A' }",
+        "return { [1] = { en = 'A', ko = 'a', ja = 'e' } }",
+    ] {
+        assert!(!problems(source).is_empty(), "{source:?} was not found");
+    }
+
+    let i18n: Table = eval_in_pack(&runtime, &MapHost::new(), "return require('lua.i18n')").expect("the module loads");
+    let merge: Function = i18n.get("merge").expect("the module merges its areas");
+    let twice = table("return { { a = { en = 'A' } }, { a = { en = 'B' } } }");
+    let message = merge.call::<Table>(twice).expect_err("a key in two tables is refused").to_string();
+    assert!(message.contains("i18n key defined in two areas: a"), "{message}");
+    assert!(merge.call::<Table>(table("return { { a = { en = 'A' } }, { b = { en = 'B' } } }")).is_ok());
+}
+
+/// The language tables of the pack: the folder holds the tables the module names and no others,
+/// each is a table, no key is in two of them, and every text is written in every language the
+/// player writes its screens in, under the code the language option of the same place stands for.
+#[test]
+fn every_text_of_the_packs_language_tables_is_written_in_every_language_and_kept_in_one_table() {
+    let runtime = pack_runtime(LuaMode::Full);
+    let lua = runtime.lua();
+    let host = MapHost::new();
+    let i18n: Table = eval_in_pack(&runtime, &host, "return require('lua.i18n')").expect("the module loads");
+
+    let languages: Vec<String> =
+        i18n.get::<Table>("LANGUAGES").expect("the module names its languages").sequence_values().collect::<Result<_, _>>().expect("a language is a code");
+    assert_eq!(languages, Language::ALL.map(Language::code), "the module's languages are not the player's, in the order of its language options");
+
+    let areas: Vec<String> =
+        i18n.get::<Table>("AREAS").expect("the module names its tables").sequence_values().collect::<Result<_, _>>().expect("a table is a name");
+    let mut on_disk = BTreeSet::new();
+    files_with(&pack(), &pack().join(LANGUAGE_TABLE_FOLDER), &["lua"], &mut on_disk);
+    let named: BTreeSet<String> = areas.iter().map(|area| format!("{LANGUAGE_TABLE_FOLDER}/{area}.lua")).collect();
+    assert_eq!(on_disk, named, "the folder holds a table the module does not name, or the module names one that is not there");
+
+    let mut problems = Vec::new();
+    let mut tables = Vec::new();
+    for area in &areas {
+        let table: Table =
+            eval_in_pack(&runtime, &host, &format!("return require('lua.i18n.{area}')")).unwrap_or_else(|error| panic!("{area} should be a table: {error}"));
+        problems.extend(language_table_problems(area, &languages, &table));
+        tables.push(table);
+    }
+    assert!(problems.is_empty(), "the pack's language tables are not written out:\n{}", problems.join("\n"));
+
+    let merge: Function = i18n.get("merge").expect("the module merges its areas");
+    let all = lua.create_sequence_from(tables).expect("the tables are listed");
+    merge.call::<Table>(all).unwrap_or_else(|error| panic!("the tables do not merge: {error}"));
+}
+
+/// Where a module of the pack builds `t(key)`, the text follows the language the host has on; with
+/// none on, with a language the text is not written in, or where the host reads nothing at all (a
+/// header read, which is given an empty `main_state`), it is the English.
+#[test]
+fn a_text_is_read_in_the_language_the_host_has_on_and_in_english_where_it_has_none() {
+    const PROBE: &str = "
+        local i18n = require('lua.i18n')
+        local t = i18n.translator({
+            { hello = { en = 'Hello', ko = 'Annyeong', ja = 'Konnichiwa' } },
+            { english_only = { en = 'Only English' } },
+        })
+        local hello, english_only = t('hello'), t('english_only')
+        return hello(), english_only(), i18n.language()
+    ";
+    let runtime = pack_runtime(LuaMode::Full);
+    let read = |place: Option<usize>| eval_in_pack::<(String, String, String)>(&runtime, &host_with_language_on(place), PROBE).expect("the probe runs");
+    let english = ("Hello".to_owned(), "Only English".to_owned(), "en".to_owned());
+
+    assert_eq!(read(Some(0)), english);
+    assert_eq!(read(Some(1)), ("Annyeong".to_owned(), "Only English".to_owned(), "ko".to_owned()));
+    assert_eq!(read(Some(2)), ("Konnichiwa".to_owned(), "Only English".to_owned(), "ja".to_owned()));
+    assert_eq!(read(None), english, "a host that has no language on is read as English");
+    assert_eq!(read(Some(3)), english, "a language the pack is not written in is English");
+
+    let header = pack_runtime(LuaMode::HeaderOnly);
+    let read_in_header = eval_in_pack::<(String, String, String)>(&header, &MapHost::new(), PROBE).expect("the probe runs where main_state is empty");
+    assert_eq!(read_in_header, english);
+}
+
+/// One text function follows the host as it changes language: the function is the skin's, kept for
+/// as long as it is shown, and is asked again on every frame.
+#[test]
+fn one_text_function_follows_the_host_as_it_changes_language() {
+    let runtime = pack_runtime(LuaMode::Full);
+    let text: Function = eval_in_pack(
+        &runtime,
+        &MapHost::new(),
+        "return require('lua.i18n').translator({ { hello = { en = 'Hello', ko = 'Annyeong', ja = 'Konnichiwa' } } })('hello')",
+    )
+    .expect("the text is built");
+
+    let mut heard = Vec::new();
+    for place in [0, 1, 2, 1, 0] {
+        let host = host_with_language_on(Some(place));
+        heard.push(runtime.with_host(&host, || text.call::<String>(())).expect("the host binds").expect("the text is read"));
+    }
+    assert_eq!(heard, ["Hello", "Annyeong", "Konnichiwa", "Annyeong", "Hello"]);
+}
+
+/// A key nobody wrote is refused when the text is built, naming the key, so a typo is a skin that
+/// does not load rather than a screen with a hole in it.
+#[test]
+fn a_key_no_table_holds_is_refused_when_the_text_is_built() {
+    let runtime = pack_runtime(LuaMode::Full);
+    let error = eval_in_pack::<Value>(&runtime, &MapHost::new(), "return require('lua.i18n').t('no_such_key')").expect_err("an unknown key is refused");
+    assert!(error.to_string().contains("unknown i18n key: no_such_key"), "{error}");
 }
