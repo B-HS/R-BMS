@@ -150,6 +150,7 @@ const createScoreStub = () => {
             getRivalUserIds: async () => [],
             insertAudit: async () => undefined,
         },
+        listDisplayedDans: async () => new Map(),
         newId: (prefix) => `${prefix}contract`,
         now: () => SERVER_NOW,
     })

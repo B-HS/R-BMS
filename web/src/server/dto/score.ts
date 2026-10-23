@@ -15,6 +15,7 @@ import {
     playerIdSchema,
     seedSchema,
 } from '@server/dto/common'
+import type { DisplayedDan } from '@server/dto/dan'
 
 export const API_VERSION = 1
 
@@ -116,3 +117,6 @@ export type ScoreSubmissionInput = z.infer<typeof scoreSubmissionSchema>
 export type ScoreRecordOutput = z.infer<typeof scoreRecordSchema>
 export type SubmitResponseOutput = z.infer<typeof submitResponseSchema>
 export type RankingQuery = z.infer<typeof rankingQuerySchema>
+
+/** A chart ranking row: a score record whose `extra` also carries the dans its player shows to others (empty when none). */
+export type RankingRecordOutput = ScoreRecordOutput & { extra: { dans: DisplayedDan[] } }

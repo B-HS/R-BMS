@@ -10,7 +10,7 @@ import { createAuthService } from '@server/service/domain/auth/auth.service'
 import { createChartService } from '@server/service/domain/chart/chart.service'
 import { createPlayerService } from '@server/service/domain/player/player.service'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
-import { createScoreService, type ScoreRankedRow, type ScoreRankingRow } from '@server/service/domain/score/score.service'
+import { createScoreService, type ScoreChartRankedRow, type ScoreRankingRow } from '@server/service/domain/score/score.service'
 import { findSnapshotTextByMd5, getSnapshotTables } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { searchMd5sInTables } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import { resolveBuildTrust } from '@server/service/shared/integrity/build-allowlist'
@@ -183,6 +183,7 @@ const composeAll = () => {
     const scoreService = createScoreService({
         newId,
         now: () => Date.now(),
+        listDisplayedDans: danService.listDisplayed,
         db: {
             findScoreByIdempotency: async ({ userId, chartSha256, playedAtFrom, playedAtTo }) => {
                 const [row] = await db
@@ -248,9 +249,9 @@ const composeAll = () => {
                 )
                 return row?.value ?? 0
             },
-            getRanking: async ({ chartSha256, limit, offset, lnmode, userIds, includeScratchAuto }): Promise<ScoreRankedRow[]> => {
+            getRanking: async ({ chartSha256, limit, offset, lnmode, userIds, includeScratchAuto }): Promise<ScoreChartRankedRow[]> => {
                 const rows = await db
-                    .select({ ...rankingSelection, rank: rankInList(chartBest) })
+                    .select({ ...rankingSelection, userId: chartBest.userId, rank: rankInList(chartBest) })
                     .from(chartBest)
                     .innerJoin(score, eq(score.id, chartBest.scoreId))
                     .innerJoin(user, eq(user.id, chartBest.userId))
@@ -265,7 +266,7 @@ const composeAll = () => {
                     .orderBy(...listOrder(chartBest))
                     .limit(limit)
                     .offset(offset)
-                return rows.map((row) => ({ ...toRankingRow(row), rank: row.rank }))
+                return rows.map((row) => ({ ...toRankingRow(row), userId: row.userId, rank: row.rank }))
             },
             getBestByLoginId: async ({ chartSha256, loginId, lnmode, includeScratchAuto }) => {
                 const [row] = await db

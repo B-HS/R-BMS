@@ -12,8 +12,8 @@ import {
     isJudgeCountConsistent,
     isPlayedAtPlausible,
     judgedNoteCount,
+    type ScoreChartRankedRow,
     type ScoreInsertRow,
-    type ScoreRankedRow,
     type ScoreServiceDb,
     type StoredRunForBest,
 } from '@server/service/domain/score/score.service'
@@ -81,7 +81,7 @@ const createStub = (
         existingRun?: StoredRunForBest | null
         currentBest?: { clear: number; assistGrade: 0 | 1 | 2 | 3 | 4; exScore: number; minbp: number } | null
         winsBest?: boolean
-        rankedRows?: ScoreRankedRow[]
+        rankedRows?: ScoreChartRankedRow[]
         remembersInserted?: boolean
         bestFailures?: number
     } = {},
@@ -135,6 +135,7 @@ const createStub = (
     let sequence = 0
     const service = createScoreService({
         db,
+        listDisplayedDans: async () => new Map(),
         newId: (prefix) => `${prefix}${++sequence}`,
         now: () => PLAYED_AT,
     })
@@ -514,8 +515,9 @@ describe('scoreService.submit', () => {
 })
 
 describe('최고 기록 경합 (IR-1)', () => {
-    const ranked = (overrides: Partial<ScoreRankedRow>): ScoreRankedRow => ({
+    const ranked = (overrides: Partial<ScoreChartRankedRow>): ScoreChartRankedRow => ({
         scoreId: 'sc_1',
+        userId: 'usr_1',
         loginId: 'alice',
         playerName: 'Alice',
         clear: 6,
@@ -588,7 +590,12 @@ describe('최고 기록 경합 (IR-1)', () => {
             getRivalUserIds: async () => [],
             insertAudit: async () => undefined,
         }
-        const service = createScoreService({ db, newId: (prefix) => `${prefix}${++sequence.value}`, now: () => PLAYED_AT })
+        const service = createScoreService({
+            db,
+            listDisplayedDans: async () => new Map(),
+            newId: (prefix) => `${prefix}${++sequence.value}`,
+            now: () => PLAYED_AT,
+        })
         const high = submission({ ex_score: 1488 })
         const low = submission({
             ex_score: 1000,

@@ -8,7 +8,8 @@ import {
     type ClearLamp,
     type JudgeBreakdownInput,
 } from '@server/dto/common'
-import type { ScoreRecordOutput, ScoreSubmissionInput, SubmitResponseOutput } from '@server/dto/score'
+import type { DisplayedDan } from '@server/dto/dan'
+import type { RankingRecordOutput, ScoreRecordOutput, ScoreSubmissionInput, SubmitResponseOutput } from '@server/dto/score'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import {
     deriveExScore,
@@ -48,6 +49,9 @@ export type ScoreRankingRow = {
 }
 
 export type ScoreRankedRow = ScoreRankingRow & { rank: number }
+
+/** A chart ranking row also names the user it belongs to, so the dans that user shows can be looked up in one batch. */
+export type ScoreChartRankedRow = ScoreRankedRow & { userId: string }
 
 export type BestScope = { includeScratchAuto: boolean }
 
@@ -98,7 +102,7 @@ export type ScoreServiceDb = {
     ) => Promise<number>
     getRanking: (
         params: BestScope & { chartSha256: string; limit: number; offset: number; lnmode?: number; userIds?: string[] },
-    ) => Promise<ScoreRankedRow[]>
+    ) => Promise<ScoreChartRankedRow[]>
     getBestByLoginId: (params: BestScope & { chartSha256: string; loginId: string; lnmode?: number }) => Promise<ScoreRankingRow | null>
     getScoreById: (scoreId: string) => Promise<ScoreRankingRow | null>
     getRivalUserIds: (loginId: string) => Promise<string[]>
@@ -118,6 +122,7 @@ export type ScoreServiceDb = {
 
 export type ScoreServiceDeps = {
     db: ScoreServiceDb
+    listDisplayedDans: (userIds: string[]) => Promise<Map<string, DisplayedDan[]>>
     newId: (prefix: string) => string
     now: () => number
 }
@@ -504,7 +509,12 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             userIds,
             includeScratchAuto: params.includeScratchAuto,
         })
-        return rows.map((row) => toScoreRecord(row, row.rank))
+        if (rows.length === 0) return []
+        const dansOf = await deps.listDisplayedDans(rows.map((row) => row.userId))
+        return rows.map((row): RankingRecordOutput => {
+            const record = toScoreRecord(row, row.rank)
+            return { ...record, extra: { ...record.extra, dans: dansOf.get(row.userId) ?? [] } }
+        })
     },
 
     getBest: async (params: BestScope & { chartSha256: string; loginId: string; lnmode?: number }) => {

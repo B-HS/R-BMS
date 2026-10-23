@@ -177,9 +177,10 @@
     "played_at":1700000000000, "lntype":1, "option":0, "total_notes":812,
     "judge":{ "epg":700,"lpg":12,"egr":50,"lgr":14,"egd":5,"lgd":16,"ebd":1,"lbd":7,"epr":2,"lpr":3,"ems":0,"lms":2,
               "pgreat":712,"great":64,"good":21,"bad":8,"poor":5,"miss":2,"fast":30,"slow":40,"combobreak":15,"empty_poor":9 },
-    "extra":{ "replay_id":"rp_…" } } ]
+    "extra":{ "replay_id":"rp_…", "dans":[ { "system":"genoside2018_sp", "name":"GENOSIDE 2018 SP", "label":"二段" } ] } } ]
 ```
 - `extra.replay_id`(리플레이가 연결된 판만)와 `extra.scratch_auto: true`(SCRATCH AUTO 판 행만)가 `extra` 에 실린다. 플레이 옵션·시드는 `ScoreRecord` 에 없다(`GET /api/scores/{id}` 상세에서 본다).
+- `extra.dans`(2026-10-24, **이 순위 응답의 줄에만** 실린다): 그 줄 플레이어가 남에게 보이기로 한 단위 `[{ system, name, label }]` 이다. 프로필 `extra.dans`(§3)와 같은 모양·같은 규칙(체계마다 하나, 자동이면 가장 높은 것, 숨김이면 빠진다)이고, 단위가 없으면 빈 배열이다. 줄 수와 상관없이 `danService.listDisplayed(userIds)` 한 번(쿼리 2개)으로 붙이며, 순위·정렬·`rank`·`X-Total-Count`(없음)는 그대로다. `GET /best`·`GET /api/scores/{id}` 와 코스 순위의 행에는 붙지 않는다. 응답이 순위 캐시(태그 `chart-ranking:{sha256}`, `cacheLife('minutes')`)에 같이 들어가므로 단위를 얻거나 표시를 바꿔도 이 응답에는 최대 그 시간만큼 이전 값이 보인다. 마이그레이션은 없고, 추가 키뿐이라 옛 클라이언트는 모르는 `extra` 키로 무시한다.
 - `assist_grade`(2026-10-22, 0~4 정수, 기본 0): `clear` 가 `LightAssistEasy` 일 때만 0 이 아닐 수 있고 SCRATCH AUTO 로 클리어한 게이지를 이름한다(1 ASSIST EASY ← EASY 게이지, 2 ASSIST CLEAR ← NORMAL·CLASS, 3 ASSIST HARD ← HARD·EXCLASS, 4 ASSIST EXHARD ← EX-HARD·HAZARD·EXHARDCLASS). 서버가 `clear` 와 `score.gauge` 로 파생한다(`web/src/server/service/domain/score/assist-grade.ts`). 코스 순위 행은 항상 0 이다. 같은 필드가 `GET /best`, `GET /api/players/{id}/scores`, 코스 순위·best, `GET /api/scores/{id}` 의 `ScoreRecord` 에 실린다(`scoreRecordSchema`, `dto/score.ts:77`). 제출 본문은 바뀌지 않았다. 구 클라이언트는 이 필드를 무시한다. 의미와 설계: [../reference/clear-lamps.md](../reference/clear-lamps.md) 1.8·3절.
 - `judge` 의 합계(`pgreat`~`miss`)는 제출 검사와 EX·BP 가 읽은 값이다(S19 3차 수리, R3-WEB-4): 그 단계의 early/late 합(`epg+lpg` 등)이 0 이 아니면 그 합, 0 이면 저장된 합계다(`effectiveJudgeCounts`, `web/src/server/compose/judge-row.ts` 의 `toJudgeBreakdown`). 분리 필드는 저장한 그대로다. 차트 순위·best·상세(`GET /api/scores/{id}`)·플레이어 기록(`GET /api/players/{id}/scores`)·코스 순위·코스 best 가 모두 같다. 이전에는 차트 쪽만 저장된 합계를 그대로 돌려줘, 분리 필드와 다른 합계(검사를 거치지 않는 값)를 보낸 본문이 EX·BP 와 맞지 않는 판정 내역으로 보였다. 저장된 행은 바꾸지 않으므로 이미 들어온 그런 행도 응답에서 바로잡힌다.
 - `rival_of={id}`: 그 플레이어의 라이벌만(+본인). `lnmode`: 0=LN,1=CN,2=HCN(레퍼런스 구현 `lntype`).
