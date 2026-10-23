@@ -187,6 +187,45 @@ theme.assist_grade_last = 4
 
 theme.rank_name = { "AAA", "AA", "A", "B", "C", "D", "E", "F" }
 
+theme.rank = {
+    f = { 56, 56, 56 },
+    e = { 68, 68, 68 },
+    d = { 80, 80, 80 },
+    c = { 94, 94, 94 },
+    b = { 110, 110, 110 },
+    a = { 176, 112, 72 },
+    aa = { 192, 198, 208 },
+    aaa = { 242, 201, 76 },
+}
+
+theme.rank_ink = {
+    f = { 242, 242, 242 },
+    e = { 242, 242, 242 },
+    d = { 242, 242, 242 },
+    c = { 242, 242, 242 },
+    b = { 242, 242, 242 },
+    a = { 26, 16, 6 },
+    aa = { 26, 28, 32 },
+    aaa = { 38, 28, 8 },
+}
+
+theme.rank_key = { [0] = "f", "e", "d", "c", "b", "a", "aa", "aaa" }
+theme.rank_last = 7
+
+theme.medal = {
+    gold = theme.rank.aaa,
+    silver = theme.rank.aa,
+    bronze = theme.rank.a,
+}
+
+theme.medal_ink = {
+    gold = theme.rank_ink.aaa,
+    silver = theme.rank_ink.aa,
+    bronze = theme.rank_ink.a,
+}
+
+theme.medal_order = { "gold", "silver", "bronze" }
+
 theme.gauge_name = {
     [0] = "ASSIST EASY",
     [1] = "EASY",
@@ -273,6 +312,66 @@ theme.panel = {
     arrow = theme.tone.red,
     green_number = theme.tone.green,
     caution = theme.tone.orange,
+}
+
+local RADAR_AREA = { x = 64, top = 640, width = 256, height = 256 }
+local RADAR_PICTURE = { side = 256, radius = 124 }
+local RADAR_SIDE = 144
+local RADAR_CENTER_DROP = 136
+
+theme.radar = {
+    area = RADAR_AREA,
+    picture = RADAR_PICTURE,
+    side = RADAR_SIDE,
+    radius = RADAR_SIDE * RADAR_PICTURE.radius / RADAR_PICTURE.side,
+    center = { x = RADAR_AREA.x + RADAR_AREA.width / 2, top = RADAR_AREA.top + RADAR_CENTER_DROP },
+    label_gap = 8,
+    outline = theme.grid.rule,
+    outline_color = theme.color.text,
+    axis_line = 1,
+    axis_color = theme.color.muted,
+    fill = { 244, 236, 72 },
+    fill_alpha = 176,
+    star = { 246, 236, 150 },
+    axis_order = { "notes", "peak", "scratch", "soflan", "charge", "chord" },
+    axis = {
+        notes = { 238, 130, 236 },
+        peak = { 250, 164, 82 },
+        scratch = { 238, 78, 78 },
+        soflan = { 104, 188, 232 },
+        charge = { 132, 104, 250 },
+        chord = { 188, 244, 104 },
+    },
+}
+
+theme.ranking = {
+    you = theme.color.accent,
+    you_face = theme.color.raised,
+    rival = theme.color.sub,
+}
+
+theme.select_layout = {
+    head = {
+        chip = { top = 56, height = 36 },
+        style_chip = { x = 232, width = 88 },
+        mode_chip = { x = 336, width = 200 },
+        search = { label_x = 552, x = 640, width = 336 },
+        clock = { x = 992, width = 104 },
+    },
+    cover = { x = 64, top = 352, side = 256 },
+    chart_data = { x = 352, top = 352, width = 744, height = 256 },
+    score = { x = 352, top = 640, width = 400, height = 256 },
+    records = { x = 784, top = 640, width = 312, height = 256, rows = 6, header_height = 40, row_height = 36 },
+    targets = { x = 352, top = 912, width = 744, height = 64 },
+    bar = {
+        badge = { x = 0, width = 56 },
+        lamp = { x = 56, width = 8 },
+        level = { x = 64, width = 64 },
+        title_x = 144,
+        thumb = { x = 664, side = 64 },
+        label_right = 656,
+        selected = { left = 1104, grow = 4, band = 8 },
+    },
 }
 
 function theme.column(index, span)
