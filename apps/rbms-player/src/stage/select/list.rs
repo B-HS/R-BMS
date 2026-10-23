@@ -24,6 +24,7 @@ use rbms_library::songdb::{
 use rbms_render::ReferenceImages;
 use rbms_render::skin_render::frame::{LAMP_KINDS, RANK_KINDS};
 use rbms_store::RecordLamp;
+use rbms_table::TableEntry;
 
 use crate::select_tree::{ALL_SONGS_TITLE, SelectFolder, TableRef, level_title, table_group, table_name};
 use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta};
@@ -249,6 +250,13 @@ impl SelectFilter {
         self.clear != ClearFilter::Any
     }
 
+    /// Whether a chart the library does not hold stays in the list: the rules [`SelectFilter::keeps`]
+    /// applies, to a chart that has no record, no level and no mode anyone can read and that cannot
+    /// have been starred (`BarManager.updateBar` drops it under a mode or a difficulty filter too).
+    fn keeps_missing_charts(&self) -> bool {
+        !self.favorite_only && self.mode.is_none() && self.level_from.is_none() && self.level_to.is_none() && self.clear.keeps(&ChartRecords::default())
+    }
+
     /// Whether this chart stays in the list.
     fn keeps(&self, row: &SortRow<'_>) -> bool {
         if self.favorite_only && !row.favorite {
@@ -349,9 +357,7 @@ impl AppShared {
                     })
                     .unwrap_or_default()
             }
-            Some(SelectFolder::TableLevel(table, level)) => {
-                table.level(self, level).map(|songs| self.arrange_songs(songs.to_vec(), filter).into_iter().map(SelectItem::Song).collect()).unwrap_or_default()
-            }
+            Some(SelectFolder::TableLevel(table, level)) => self.level_rows(table, level, filter),
             Some(SelectFolder::UserFolders) => self
                 .user_folders
                 .shown
@@ -369,6 +375,56 @@ impl AppShared {
                 .map(|folder| self.arrange_songs(folder.charts.clone(), filter).into_iter().map(SelectItem::Song).collect())
                 .unwrap_or_default(),
         }
+    }
+
+    /// The rows of the level called `level` of `table`: the charts of it the library holds, kept
+    /// and ordered as every list's are, and the ones it does not, dimmed (`SongBar` with
+    /// `existsSong` false, which `Config.showNoSongExistingBar` shows).
+    ///
+    /// A chart that is not held is kept as one that has nothing recorded, no level and no mode
+    /// would be ([`SelectFilter::keeps_missing_charts`]), and never answers a search, which looks
+    /// through the library alone. Under the title ordering it is put among the held ones by its
+    /// title, after a held chart of the same title; under no ordering it follows them in the
+    /// table's own order; under any other it follows them by its title, as the reference puts a
+    /// chart it has nothing to compare by last (`BarSorter`).
+    fn level_rows(&self, table: &TableRef, level: &str, filter: SelectFilter) -> Vec<SelectItem> {
+        let Some(at) = table.resolve(self) else {
+            return Vec::new();
+        };
+        let Some((place, (_, owned))) = self.table_levels.get(at).and_then(|levels| levels.iter().enumerate().find(|(_, (name, _))| name == level)) else {
+            return Vec::new();
+        };
+        let owned = self.arrange_songs(owned.clone(), filter);
+        let shows_missing = self.config.library.show_missing_charts && filter.keeps_missing_charts() && self.search.trim().is_empty();
+        let missing: &[TableEntry] = match self.table_extras.get(at).and_then(|extras| extras.missing.get(place)) {
+            Some(missing) if shows_missing => missing,
+            _ => &[],
+        };
+        let mut missing: Vec<(String, MissingRef)> = missing
+            .iter()
+            .enumerate()
+            .map(|(entry, chart)| (missing_chart_title(chart).to_lowercase(), MissingRef { table: at, level: place, entry }))
+            .collect();
+        let sort = self.config.library.sort;
+        if sort == SortMode::Default {
+            return owned.into_iter().map(SelectItem::Song).chain(missing.into_iter().map(|(_, missing)| SelectItem::Missing(missing))).collect();
+        }
+        missing.sort_by(|a, b| a.0.cmp(&b.0));
+        if sort != SortMode::Title {
+            return owned.into_iter().map(SelectItem::Song).chain(missing.into_iter().map(|(_, missing)| SelectItem::Missing(missing))).collect();
+        }
+        let songs = self.library.songs();
+        let mut rows = Vec::with_capacity(owned.len() + missing.len());
+        let mut missing = missing.into_iter().peekable();
+        for index in owned {
+            let title = songs.get(index).map(|entry| entry.title.to_lowercase()).unwrap_or_default();
+            while let Some((_, chart)) = missing.next_if(|(missing_title, _)| *missing_title < title) {
+                rows.push(SelectItem::Missing(chart));
+            }
+            rows.push(SelectItem::Song(index));
+        }
+        rows.extend(missing.map(|(_, chart)| SelectItem::Missing(chart)));
+        rows
     }
 
     /// How many charts of every level of the table at `at` the filter lets through.
@@ -524,6 +580,20 @@ pub(crate) fn chart_under_cursor<'a>(
     ChartMeta { main_bpm: measured.bpm.filter(|bpm| bpm.min == bpm.max).map(|bpm| f64::from(bpm.min)), ..measured }
 }
 
+/// What a chart the library does not hold is called: the title its table writes, or its md5 when
+/// the table writes none.
+pub(crate) fn missing_chart_title(chart: &TableEntry) -> &str {
+    let title = chart.title.trim();
+    if title.is_empty() { chart.md5.trim() } else { title }
+}
+
+/// The chart under the cursor as a skin reads it while the cursor is on a chart the library does not
+/// hold: what its table says of it and nothing else, which is the song the reference hands its skin
+/// for such a bar (`MusicSelector.render`, `resource.setSongdata` with the table's `SongData`).
+pub(crate) fn missing_chart_meta(chart: &TableEntry) -> ChartMeta<'_> {
+    ChartMeta { title: missing_chart_title(chart), artist: chart.artist.trim(), md5: chart.md5.trim(), ..ChartMeta::default() }
+}
+
 /// The [`ChartFact`]s of one library, by a chart's place in it.
 ///
 /// The library's entries are what the built-in browser draws a row from, and they leave these out.
@@ -640,8 +710,20 @@ impl AppShared {
                 SelectItem::Song(index) => self.chart_bar(*index, facts, skinned),
                 SelectItem::Folder { label, target } if skinned => self.folder_bar(label, target, mode),
                 SelectItem::Folder { label, target } => SelectBar::new(target.bar_kind(), label.as_str()),
+                SelectItem::Missing(missing) => self.missing_bar(missing),
             })
             .collect()
+    }
+
+    /// The bar of a chart a table lists that the library does not hold (`SongBar` with
+    /// `existsSong` false): its title and artist as the table writes them, and nothing the library
+    /// or the records would say.
+    fn missing_bar(&self, missing: &MissingRef) -> SelectBar {
+        let chart = self.missing_chart(missing);
+        SelectBar {
+            missing: Some(BarMissing { artist: chart.map(|chart| chart.artist.trim().to_string()).unwrap_or_default() }),
+            ..SelectBar::new(BarKind::Song { exists: false }, chart.map(missing_chart_title).unwrap_or_default())
+        }
     }
 
     /// The bar of the chart at `index` of the library (`SongBar`). An index the library does not

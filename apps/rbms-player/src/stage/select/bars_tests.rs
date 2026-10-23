@@ -284,6 +284,7 @@ fn row_as_it_was_drawn(shared: &AppShared, index: usize) -> SelectRow {
         folder_count: None,
         dj_level: best.filter(|_| shared.config.display.score_graph).map(|best| RANK_BANDS[dj_rank(best.ex_score, best.max_ex)].0),
         favorite: shared.favorites.contains(&entry.md5),
+        missing: false,
     }
 }
 

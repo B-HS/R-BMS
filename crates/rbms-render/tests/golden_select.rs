@@ -6,6 +6,7 @@ use golden_harness::{check, golden_canvas, signature_of};
 use rbms_render::{Color, CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectRow, SelectView, StatCell, render_select};
 
 const GOLDEN_SELECT: u64 = 0xdca2_e6b0_4935_5413;
+const GOLDEN_SELECT_MISSING: u64 = 0xe5e5_223e_62d9_1f7f;
 
 fn select_view() -> SelectView {
     let row = |folder: bool, title: &str, mode: &'static str, level: &str, lamp: Color| SelectRow {
@@ -19,6 +20,7 @@ fn select_view() -> SelectView {
         folder_count: folder.then_some(86),
         dj_level: (!folder).then_some("AA"),
         favorite: !folder,
+        missing: false,
     };
     let rec = |when: &str, ex: u32| RecordRowView { when: when.into(), lamp: Color::WHITE, lamp_label: "HARD", ex, max_ex: 1848, bp: 12, trend: None };
     let detail = DetailView {
@@ -130,4 +132,71 @@ fn the_signature_detects_a_dropped_select_detail_line() {
         render_select(c, &view);
     });
     assert_ne!(base, dropped, "removing the artist line changes the signature");
+}
+
+/// A level of a table that lists charts the library does not hold: the held charts as they are drawn
+/// anywhere, the missing ones after them dimmed with no lamp, mode or level, and the cursor on one of
+/// them, whose panel names it and says it is not here.
+fn missing_charts_view() -> SelectView {
+    let held = |title: &str, level: &str, lamp: Color| SelectRow {
+        folder: false,
+        title: title.into(),
+        mode_short: "7K",
+        mode_color: Color::BLUE,
+        level: level.into(),
+        difficulty_color: Color::RED,
+        lamp,
+        folder_count: None,
+        dj_level: None,
+        favorite: false,
+        missing: false,
+    };
+    let missing = |title: &str| SelectRow { missing: true, mode_short: "", level: String::new(), lamp: Color::GRAY, ..held(title, "", Color::GRAY) };
+    SelectView {
+        rows: vec![
+            held("Owned Chart", "12", Color::GREEN),
+            held("Another Owned One", "12", Color::BLUE),
+            missing("Not Downloaded Yet"),
+            missing("Also Missing"),
+        ],
+        sel: 2,
+        header: "STELLA / STELLA / st3".into(),
+        guide: "UP DOWN  LEFT BACK  RIGHT/ENTER OPEN",
+        detail: SelectDetail::Missing { title: "Not Downloaded Yet".into(), artist: "Some Artist".into() },
+        modal: None,
+        score_graph: true,
+        search: None,
+        sort: "DEFAULT",
+        filter: None,
+        empty_hint: None,
+    }
+}
+
+#[test]
+fn built_in_list_with_missing_charts() {
+    let mut canvas = golden_canvas();
+    render_select(&mut canvas, &missing_charts_view());
+    check(&canvas, "select with missing charts", "GOLDEN_SELECT_MISSING", GOLDEN_SELECT_MISSING);
+}
+
+/// A missing row is drawn apart from a held one, and its panel's artist line reaches the frame.
+#[test]
+fn the_signature_detects_a_missing_row_drawn_as_a_held_one() {
+    let base = signature_of(|c| {
+        render_select(c, &missing_charts_view());
+    });
+    let held = signature_of(|c| {
+        let mut view = missing_charts_view();
+        for row in &mut view.rows {
+            row.missing = false;
+        }
+        render_select(c, &view);
+    });
+    assert_ne!(base, held, "drawing the missing rows as held ones changes the signature");
+    let no_artist = signature_of(|c| {
+        let mut view = missing_charts_view();
+        view.detail = SelectDetail::Missing { title: "Not Downloaded Yet".into(), artist: String::new() };
+        render_select(c, &view);
+    });
+    assert_ne!(base, no_artist, "dropping the artist of the missing chart changes the signature");
 }

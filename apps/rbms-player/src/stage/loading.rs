@@ -902,6 +902,7 @@ mod tests {
         let under_the_cursor = match &app.shared.select_items[app.shared.sel] {
             SelectItem::Song(index) => app.shared.library.songs()[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
+            SelectItem::Missing(missing) => app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
         };
         assert_eq!((app.shared.sel, under_the_cursor.as_str()), (2, "alpha"), "the cursor is not on the chart it was on");
     }

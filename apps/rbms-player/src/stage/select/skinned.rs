@@ -100,6 +100,9 @@ pub(super) enum FocusedBar {
     Playable,
     /// Anything that opens (`DirectoryBar`).
     Folder,
+    /// A chart a difficulty table lists that the library does not hold (`SongBar` with
+    /// `existsSong` false): every key that would play a chart asks for it instead.
+    Missing,
     /// The list is empty.
     Nothing,
 }
@@ -305,6 +308,7 @@ impl SelectState {
         let pick = match self.focused_bar(shared) {
             FocusedBar::Playable => PLAYABLE_PICKS.iter().find(|(role, _)| self.keys.pressed(layout, *role, true)).map(|(_, pick)| *pick),
             FocusedBar::Folder => self.keys.pressed(layout, SelectKey::FolderOpen, true).then_some(Pick::Open),
+            FocusedBar::Missing => PLAYABLE_PICKS.iter().any(|(role, _)| self.keys.pressed(layout, *role, true)).then_some(Pick::Open),
             FocusedBar::Nothing => None,
         };
         if pick == Some(Pick::Open) {
@@ -338,6 +342,7 @@ impl SelectState {
             SelectTab::Songs => match shared.select_items.get(shared.sel) {
                 Some(SelectItem::Song(_)) => FocusedBar::Playable,
                 Some(SelectItem::Folder { .. }) => FocusedBar::Folder,
+                Some(SelectItem::Missing(_)) => FocusedBar::Missing,
                 None => FocusedBar::Nothing,
             },
         }
@@ -388,7 +393,7 @@ impl SelectState {
                 let opens = self.tab == SelectTab::Songs && matches!(shared.select_items.get(bar), Some(SelectItem::Folder { .. }));
                 if opens {
                     self.enter_row(shared, bar)
-                } else if self.focused_bar(shared) == FocusedBar::Playable {
+                } else if matches!(self.focused_bar(shared), FocusedBar::Playable | FocusedBar::Missing) {
                     self.select_enter(shared)
                 } else {
                     Transition::Stay

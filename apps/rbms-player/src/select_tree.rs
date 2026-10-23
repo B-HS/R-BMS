@@ -51,7 +51,7 @@ pub(crate) struct OpenedFolder {
 /// What a bar is, for finding it again in a list built afresh.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BarIdentity {
-    /// A chart, by its md5 in lower case.
+    /// A chart, owned or missing, by its md5 in lower case.
     Chart(String),
     /// A row that opens a folder.
     Opens(SelectFolder),
@@ -183,11 +183,14 @@ impl OpenedFolder {
 }
 
 impl AppShared {
-    /// What the bar of `item` is, for finding it again in a list built afresh.
+    /// What the bar of `item` is, for finding it again in a list built afresh. A chart the library
+    /// does not hold is the same chart as the one it becomes once it is held, so the cursor stays on
+    /// it when it arrives.
     pub(crate) fn identity_of(&self, item: &SelectItem) -> Option<BarIdentity> {
         match item {
             SelectItem::Song(index) => self.library.songs().get(*index).map(|entry| BarIdentity::Chart(entry.md5.to_ascii_lowercase())),
             SelectItem::Folder { target, .. } => Some(BarIdentity::Opens(target.clone())),
+            SelectItem::Missing(missing) => self.missing_chart(missing).map(|entry| BarIdentity::Chart(entry.md5.trim().to_ascii_lowercase())),
         }
     }
 
@@ -195,8 +198,11 @@ impl AppShared {
     pub(crate) fn row_of(&self, identity: &BarIdentity) -> Option<usize> {
         self.select_items.iter().position(|item| match (item, identity) {
             (SelectItem::Song(index), BarIdentity::Chart(md5)) => self.library.songs().get(*index).is_some_and(|entry| entry.md5.eq_ignore_ascii_case(md5)),
+            (SelectItem::Missing(missing), BarIdentity::Chart(md5)) => {
+                self.missing_chart(missing).is_some_and(|entry| entry.md5.trim().eq_ignore_ascii_case(md5))
+            }
             (SelectItem::Folder { target, .. }, BarIdentity::Opens(folder)) => target == folder,
-            (SelectItem::Song(_), BarIdentity::Opens(_)) | (SelectItem::Folder { .. }, BarIdentity::Chart(_)) => false,
+            (SelectItem::Song(_) | SelectItem::Missing(_), BarIdentity::Opens(_)) | (SelectItem::Folder { .. }, BarIdentity::Chart(_)) => false,
         })
     }
 

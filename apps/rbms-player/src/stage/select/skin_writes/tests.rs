@@ -22,7 +22,7 @@ fn titles(app: &crate::App) -> Vec<String> {
         .iter()
         .filter_map(|item| match item {
             SelectItem::Song(si) => Some(app.shared.library.songs()[*si].title.clone()),
-            SelectItem::Folder { .. } => None,
+            SelectItem::Folder { .. } | SelectItem::Missing(_) => None,
         })
         .collect()
 }

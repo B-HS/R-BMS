@@ -1169,6 +1169,11 @@ impl AppShared {
             Some(SelectItem::Folder { label, .. }) => {
                 println!("[{}/{}] {path}{label}/", self.sel + 1, total)
             }
+            Some(SelectItem::Missing(missing)) => {
+                if let Some(chart) = self.missing_chart(missing) {
+                    println!("[{}/{}] {path}{} [not in the library]", self.sel + 1, total, chart.title)
+                }
+            }
             None => {}
         }
     }

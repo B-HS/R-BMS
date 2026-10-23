@@ -59,6 +59,8 @@ mod lent;
 #[cfg(test)]
 mod lent_tests;
 mod list;
+#[cfg(test)]
+mod missing_tests;
 mod overlay;
 #[cfg(test)]
 mod overlay_tests;
@@ -94,7 +96,7 @@ use images::{SongImages, Wanted};
 use keys::{KeyLayout, SelectKeys};
 use lent::FocusedRecords;
 pub(crate) use list::SelectFilter;
-use list::{ChartFacts, chart_under_cursor};
+use list::{ChartFacts, chart_under_cursor, missing_chart_meta};
 use panel::PanelState;
 use preview::PreviewState;
 use scene::BarList;
@@ -130,6 +132,9 @@ const RANKING_PANEL_SHIPPED_KEY: KeyCode = KeyCode::KeyI;
 /// in `Config.java`, which `BarRenderer.input` applies to a held scratch).
 const SCRATCH_REPEAT_DELAY: Duration = Duration::from_millis(SCROLL_DURATION_LOW_MS as u64);
 const SCRATCH_REPEAT_INTERVAL: Duration = Duration::from_millis(SCROLL_DURATION_HIGH_MS as u64);
+
+/// What the browser says when a chart a table lists that the library does not hold is asked for.
+const NOT_IN_THE_LIBRARY: &str = "not in the library";
 
 /// A turntable direction that is being held, so the list keeps moving while it is.
 #[derive(Clone, Copy)]
@@ -439,6 +444,10 @@ impl SelectState {
                 let target = target.clone();
                 shared.play_system_sound(SystemSound::FolderOpen);
                 self.enter_folder(shared, target);
+                Transition::Stay
+            }
+            Some(SelectItem::Missing(_)) => {
+                crate::notify::notify(crate::notify::Level::Info, NOT_IN_THE_LIBRARY);
                 Transition::Stay
             }
             None => Transition::Stay,
@@ -1360,7 +1369,13 @@ impl StageHandler for SelectState {
         };
         let focused = if self.tab == SelectTab::Songs { ctx.shared.focused_song_index() } else { None };
         let measured = self.focused_detail.as_ref().filter(|_| self.focused_detail_si == focused);
-        let meta = focused.and_then(|index| Some(chart_under_cursor(ctx.shared.library.songs().get(index)?, self.facts.of(index), measured, &images)));
+        let missing = match ctx.shared.select_items.get(ctx.shared.sel) {
+            Some(SelectItem::Missing(missing)) if self.tab == SelectTab::Songs => ctx.shared.missing_chart(missing),
+            _ => None,
+        };
+        let meta = focused
+            .and_then(|index| Some(chart_under_cursor(ctx.shared.library.songs().get(index)?, self.facts.of(index), measured, &images)))
+            .or_else(|| missing.map(missing_chart_meta));
         let chart = meta.as_ref().map_or(ChartState::Empty, ChartState::Chart);
         if ctx.shared.draw_select_skin(canvas, &SelectDraw { data, chart, lent }) {
             self.draw_skin_overlays(canvas, ctx.shared, view, &ranking_lines);

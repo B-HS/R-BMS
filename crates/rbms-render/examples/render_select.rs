@@ -25,6 +25,7 @@ fn row(folder: bool, title: &str, badges: RowBadges, lamp: Color, count: Option<
         folder_count: count,
         dj_level: (!folder).then_some("AA"),
         favorite: !folder,
+        missing: false,
     }
 }
 
@@ -87,7 +88,7 @@ fn main() {
     };
 
     let badges = |mode, mode_color, level, difficulty_color| RowBadges { mode, mode_color, level, difficulty_color };
-    let rows = vec![
+    let mut rows = vec![
         row(true, "INSANE BMS DIFFICULTY TABLE", badges("", Color::GRAY, "", Color::GRAY), nolamp, Some(86)),
         row(false, "Legend of Eastern Rabbit -SKY DEFENDER-", badges("7K", blue, "7", red), green, None),
         row(false, "Another Song With A Fairly Long Title Indeed", badges("5K", green, "5", normal), normal, None),
@@ -98,6 +99,16 @@ fn main() {
         row(false, "Mid Tier Track", badges("7K", blue, "8", Color::rgb(240, 200, 70)), normal, None),
         row(false, "Hardest In The Pack", badges("7K", blue, "★12", pink), red, None),
     ];
+    let with_missing = std::env::args().any(|a| a == "missing");
+    if with_missing {
+        let missing = |title: &str| SelectRow {
+            missing: true,
+            favorite: false,
+            dj_level: None,
+            ..row(false, title, badges("", Color::GRAY, "", Color::GRAY), nolamp, None)
+        };
+        rows.extend([missing("A Chart The Table Lists"), missing("Another One Not Downloaded")]);
+    }
 
     let modal = std::env::args().any(|a| a == "modal").then(|| SelectModal {
         title: "Legend of Eastern Rabbit -SKY DEFENDER- [7K ANOTHER]".into(),
@@ -121,12 +132,14 @@ fn main() {
         ir_line: None,
     });
 
+    let missing_detail = SelectDetail::Missing { title: "A Chart The Table Lists".into(), artist: "Somebody feat. Someone".into() };
+    let (sel, detail) = if with_missing { (rows.len() - 2, missing_detail) } else { (5, SelectDetail::Song(Box::new(detail))) };
     let view = SelectView {
         rows,
-        sel: 5,
+        sel,
         header: "ROOT / INSANE TABLE / LEVEL 12".into(),
         guide: "UP DOWN  LEFT BACK  RIGHT/ENTER OPEN  TAB SETTINGS  O FOLDER  T TABLES  R RECORDS",
-        detail: SelectDetail::Song(Box::new(detail)),
+        detail,
         modal,
         score_graph: true,
         search: None,

@@ -34,6 +34,9 @@ pub struct SelectRow {
     pub dj_level: Option<&'static str>,
     /// The chart has been starred, which the row marks next to its clear lamp.
     pub favorite: bool,
+    /// The row is a chart a difficulty table lists that the library does not hold: drawn dimmed,
+    /// with no lamp and no mode or level.
+    pub missing: bool,
 }
 
 /// Per-second note-density readout for the detail panel histogram (`bins`) plus the three scalar
@@ -99,7 +102,15 @@ pub struct DetailView {
 
 pub enum SelectDetail {
     Song(Box<DetailView>),
-    Folder { label: String, count: usize },
+    Folder {
+        label: String,
+        count: usize,
+    },
+    /// A chart a difficulty table lists that the library does not hold, as the table names it.
+    Missing {
+        title: String,
+        artist: String,
+    },
     Empty,
 }
 
@@ -159,6 +170,25 @@ const FAVORITE_W: f32 = 4.0;
 /// Room kept on the right of a row for its DJ rank, so a long title is trimmed to fit rather than
 /// drawn under it.
 const DJ_LEVEL_W: f32 = 48.0;
+
+/// Where a chart row's title starts, past its mode and level badges, and the room it leaves on the
+/// row's right.
+const ROW_TITLE_X: f32 = 116.0;
+const ROW_TITLE_RIGHT_ROOM: f32 = 24.0;
+
+/// What the detail panel says under a chart the library does not hold.
+const MISSING_CHART_NOTICE: &str = "NOT IN THE LIBRARY - ENTER FOR THE DOWNLOAD";
+
+/// The detail panel over a chart the library does not hold: the strip across its head, how far its
+/// text sits in from the panel's edges, and the size and line height of its title, its artist and
+/// its notice.
+const MISSING_DETAIL_STRIP_H: f32 = 6.0;
+const MISSING_DETAIL_INSET: f32 = 40.0;
+const MISSING_DETAIL_TITLE_SCALE: f32 = 2.0;
+const MISSING_DETAIL_TITLE_LINE: f32 = 30.0;
+const MISSING_DETAIL_ARTIST_SCALE: f32 = 1.3;
+const MISSING_DETAIL_ARTIST_LINE: f32 = 24.0;
+const MISSING_DETAIL_NOTICE_SCALE: f32 = 1.2;
 
 /// The cover (`#STAGEFILE`) square in the detail panel. The GPU backend uploads the decoded image
 /// here; the renderer frames it / draws a placeholder. Kept as a function so both sides share it.
@@ -253,6 +283,7 @@ pub fn render_select_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Se
     match &v.detail {
         SelectDetail::Song(d) => render_song_detail(ctx, r, v, d, &mut hot),
         SelectDetail::Folder { label, count } => render_folder_detail(ctx, r, label, *count),
+        SelectDetail::Missing { title, artist } => render_missing_detail(ctx, r, title, artist),
         SelectDetail::Empty => {}
     }
     if let Some(modal) = &v.modal {
@@ -365,8 +396,10 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
             r.fill_rect(Rect::new(list.x, y, 2.0, h), th.focus);
             r.fill_rect(Rect::new(list.x + list.w - 2.0, y, 2.0, h), th.focus);
         }
-        r.fill_rect(Rect::new(list.x, y, 6.0, h), row.lamp);
-        r.fill_rect(Rect::new(list.x + list.w - 10.0, y, 8.0, h), row.lamp);
+        if !row.missing {
+            r.fill_rect(Rect::new(list.x, y, 6.0, h), row.lamp);
+            r.fill_rect(Rect::new(list.x + list.w - 10.0, y, 8.0, h), row.lamp);
+        }
         if row.favorite {
             r.fill_rect(Rect::new(list.x + 6.0, y, FAVORITE_W, h), th.accent);
         }
@@ -377,6 +410,10 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
             if let Some(n) = row.folder_count {
                 ctx.draw_text_right(r, list.x + list.w - 20.0, cy - 8.0, 1.3, th.text_dim, &format!("{n} CHARTS"));
             }
+        } else if row.missing {
+            let title_scale = if focused { 1.7 } else { 1.5 };
+            let fitted = ctx.fit_text(&row.title, title_scale, list.w - ROW_TITLE_X - ROW_TITLE_RIGHT_ROOM);
+            ctx.draw_text(r, list.x + ROW_TITLE_X, cy - title_scale * 7.0, title_scale, th.text_muted, &fitted);
         } else {
             let mode_chip = Badge {
                 rect: Rect::new(list.x + 12.0, cy - 12.0, 46.0, 24.0),
@@ -584,6 +621,30 @@ fn render_folder_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, label: 
     }
 }
 
+/// The detail panel over a chart the library does not hold: what its table calls it and who it is
+/// by, and that it is not here to be played. It is laid out as the folder panel is, dimmed.
+fn render_missing_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, title: &str, artist: &str) {
+    let th = ctx.theme;
+    let detail = th.select_layout.detail_rect;
+    outline(r, detail, 1.0, th.divider);
+    r.fill_rect(Rect::new(detail.x, detail.y, detail.w, MISSING_DETAIL_STRIP_H), th.text_muted);
+    let x = detail.x + MISSING_DETAIL_INSET;
+    let width = detail.w - MISSING_DETAIL_INSET * 2.0;
+    let (first, second) = wrap_two(ctx, title, MISSING_DETAIL_TITLE_SCALE, width);
+    let mut y = detail.y + MISSING_DETAIL_INSET;
+    for line in std::iter::once(first).chain(second) {
+        ctx.draw_text(r, x, y, MISSING_DETAIL_TITLE_SCALE, th.text_muted, &line);
+        y += MISSING_DETAIL_TITLE_LINE;
+    }
+    if !artist.is_empty() {
+        let fitted = ctx.fit_text(artist, MISSING_DETAIL_ARTIST_SCALE, width);
+        ctx.draw_text(r, x, y, MISSING_DETAIL_ARTIST_SCALE, th.text_dim, &fitted);
+        y += MISSING_DETAIL_ARTIST_LINE;
+    }
+    let fitted = ctx.fit_text(MISSING_CHART_NOTICE, MISSING_DETAIL_NOTICE_SCALE, width);
+    ctx.draw_text(r, x, y + MISSING_DETAIL_ARTIST_LINE, MISSING_DETAIL_NOTICE_SCALE, th.accent, &fitted);
+}
+
 /// Where the record modal says how the play stands with the score server: under the judgements and
 /// above the key guide, across the modal's width.
 const MODAL_IR_LINE_Y: f32 = 340.0;
@@ -660,6 +721,7 @@ mod tests {
                 folder_count: Some(1),
                 dj_level: None,
                 favorite: false,
+                missing: false,
             }],
             sel: 0,
             header: String::new(),

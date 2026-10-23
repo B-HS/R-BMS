@@ -70,6 +70,7 @@ fn rows(browser: &Browser) -> Vec<String> {
         .map(|item| match item {
             SelectItem::Song(index) => songs[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
+            SelectItem::Missing(missing) => browser.app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
         })
         .collect()
 }

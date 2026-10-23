@@ -456,11 +456,23 @@ fn is_pad_row(row: &KcRow) -> bool {
     matches!(row, KcRow::PadDevice | KcRow::PadAnalogMode | KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_))
 }
 
-/// One row in the select list: either a folder to descend into ([`select_tree::SelectFolder`]), or
-/// a playable chart (index into `AppShared::library`).
+/// One row in the select list: a folder to descend into ([`select_tree::SelectFolder`]), a playable
+/// chart (index into `AppShared::library`), or a chart a difficulty table lists that the library
+/// does not hold (`SongBar` with `existsSong` false).
 enum SelectItem {
     Song(usize),
     Folder { label: String, target: select_tree::SelectFolder },
+    Missing(MissingRef),
+}
+
+/// Where a chart the library does not hold is listed: the table at `table` of the player's list, the
+/// level at `level` of that table's levels, and the entry at `entry` of the charts that level misses
+/// ([`tablesrc::TableExtras::missing`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MissingRef {
+    pub(crate) table: usize,
+    pub(crate) level: usize,
+    pub(crate) entry: usize,
 }
 
 /// The best score the player holds on a chart: the EX of the run that scored highest and the most
@@ -509,6 +521,13 @@ pub(crate) struct BarChart {
     pub(crate) images: BarImages,
 }
 
+/// What a bar that is a chart the library does not hold knows about it beyond its title: what the
+/// table that lists it says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BarMissing {
+    pub(crate) artist: String,
+}
+
 /// What a bar that is a course knows about its course beyond its name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BarCourse {
@@ -539,6 +558,8 @@ pub(crate) struct SelectBar {
     pub(crate) chart: Option<BarChart>,
     /// The course behind a bar that is one.
     pub(crate) course: Option<BarCourse>,
+    /// The table entry behind a bar that is a chart the library does not hold.
+    pub(crate) missing: Option<BarMissing>,
     /// The best clear the player holds on the bar, as the reference numbers its `ClearType`s, or
     /// `None` when nothing was recorded on it. A folder's is the lowest clear any chart under it
     /// sits on (`DirectoryBar.getLamp`).
@@ -564,6 +585,7 @@ impl SelectBar {
             title: title.into(),
             chart: None,
             course: None,
+            missing: None,
             lamp: None,
             assist_grade: rbms_store::ASSIST_GRADE_NONE,
             rival_lamp: None,

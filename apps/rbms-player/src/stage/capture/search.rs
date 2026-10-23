@@ -87,7 +87,7 @@ fn listed(app: &App) -> Vec<String> {
         .iter()
         .filter_map(|item| match item {
             crate::SelectItem::Song(index) => songs.get(*index).map(|entry| entry.title.clone()),
-            crate::SelectItem::Folder { .. } => None,
+            crate::SelectItem::Folder { .. } | crate::SelectItem::Missing(_) => None,
         })
         .collect()
 }

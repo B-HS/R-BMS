@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 mod dto;
 mod error;
@@ -198,6 +198,28 @@ impl DifficultyTable {
             out.push((level, idxs));
         }
         out
+    }
+
+    /// For each level of [`DifficultyTable::by_level`], the entries whose md5 the library does not
+    /// hold, in the table's own order, each md5 once. An entry that names a chart by sha256 alone is
+    /// in neither this nor [`DifficultyTable::match_levels_in`]: it cannot be told owned or not.
+    ///
+    /// The indices are into [`DifficultyTable::entries`], and the levels are the ones
+    /// [`DifficultyTable::match_levels_in`] hands back, in the same order.
+    pub fn missing_levels_in(&self, library: &Md5Index) -> Vec<Vec<usize>> {
+        self.by_level()
+            .into_iter()
+            .map(|(_, entry_idxs)| {
+                let mut listed = HashSet::new();
+                entry_idxs
+                    .into_iter()
+                    .filter(|&ei| {
+                        let md5 = self.entries[ei].md5.trim().to_ascii_lowercase();
+                        !md5.is_empty() && !library.by_md5.contains_key(&md5) && listed.insert(md5)
+                    })
+                    .collect()
+            })
+            .collect()
     }
 }
 
@@ -768,6 +790,36 @@ mod tests {
         let table = DifficultyTable::from_parts(Some(header), vec![entry("aa", "1")]);
         assert_eq!(table.course, Some(serde_json::json!([[{ "name": "c", "md5": ["aa"] }]])));
         assert_eq!(DifficultyTable::from_parts(None, Vec::new()).course, None, "a table with no header has no courses");
+    }
+
+    fn missing_of(table: &DifficultyTable, library: &[&str]) -> Vec<Vec<String>> {
+        let index = Md5Index::new(library.iter().copied());
+        table.missing_levels_in(&index).iter().map(|level| level.iter().map(|&ei| table.entries[ei].md5.clone()).collect()).collect()
+    }
+
+    #[test]
+    fn missing_levels_list_what_the_library_lacks_in_level_order() {
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: Some(vec!["2".into(), "1".into()]) };
+        let entries = vec![entry("aa", "1"), entry("bb", "2"), entry("CC", "1"), entry("dd", "2"), entry("ee", "1")];
+        let table = DifficultyTable::from_parts(Some(header), entries);
+        let library = ["AA", "dd"];
+        assert_eq!(missing_of(&table, &library), vec![vec!["bb".to_string()], vec!["CC".to_string(), "ee".to_string()]]);
+        let index = Md5Index::new(library.iter().copied());
+        assert_eq!(table.missing_levels_in(&index).len(), table.match_levels_in(&index).len(), "one list for every level the match hands back");
+    }
+
+    #[test]
+    fn an_entry_named_by_sha256_alone_is_neither_owned_nor_missing() {
+        let by_sha256: TableEntry = serde_json::from_value(serde_json::json!({ "sha256": "ff", "level": "1" })).unwrap();
+        let table = DifficultyTable::from_parts(None, vec![by_sha256, entry("aa", "1")]);
+        assert_eq!(missing_of(&table, &[]), vec![vec!["aa".to_string()]]);
+        assert_eq!(matched(&table, &[]), vec![("1".to_string(), Vec::new())]);
+    }
+
+    #[test]
+    fn a_missing_md5_listed_twice_in_a_level_is_one_bar() {
+        let table = DifficultyTable::from_parts(None, vec![entry("aa", "1"), entry(" AA ", "1"), entry("aa", "2")]);
+        assert_eq!(missing_of(&table, &[]), vec![vec!["aa".to_string()], vec!["aa".to_string()]], "once in each level that lists it");
     }
 
     #[test]

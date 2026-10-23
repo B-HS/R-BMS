@@ -11,7 +11,7 @@
 use rbms_render::skin_render::frame::SongBar;
 
 use crate::stage::select::SelectState;
-use crate::stage::select::list::{ChartFacts, course_bars};
+use crate::stage::select::list::{ChartFacts, course_bars, missing_chart_title};
 use crate::*;
 
 /// How long a chart counts as newly added, in seconds: a day (`BarRenderer.prepare`,
@@ -114,7 +114,11 @@ fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
         folder_count: None,
         dj_level: None,
         favorite: false,
+        missing: false,
     };
+    if bar.missing.is_some() {
+        return SelectRow { folder: false, missing: true, ..opens };
+    }
     if let Some(course) = &bar.course {
         let playable = bar.kind == BarKind::Course { complete: true };
         return SelectRow {
@@ -222,6 +226,10 @@ impl SelectState {
                 }))
             }
             Some(SelectItem::Folder { label, .. }) => SelectDetail::Folder { label: label.clone(), count: 0 },
+            Some(SelectItem::Missing(missing)) => shared.missing_chart(missing).map_or(SelectDetail::Empty, |chart| SelectDetail::Missing {
+                title: missing_chart_title(chart).to_string(),
+                artist: chart.artist.trim().to_string(),
+            }),
             None => SelectDetail::Empty,
         };
 
@@ -279,7 +287,7 @@ impl SelectState {
             Some(("NO RESULTS", "Try a different search  \u{00B7}  Esc to clear"))
         } else if filter.is_some() {
             Some(("NO CHARTS MATCH", "Press F2 to change the filter  \u{00B7}  Backspace there clears it"))
-        } else if shared.config.library.folders.is_empty() {
+        } else if shared.config.library.scan_roots().is_empty() {
             Some(("WELCOME TO rbms", if self.is_skinned(shared) { WELCOME_BODY_SKINNED } else { WELCOME_BODY }))
         } else {
             Some(("NO CHARTS", "Press O to manage folders  \u{00B7}  T for difficulty tables"))

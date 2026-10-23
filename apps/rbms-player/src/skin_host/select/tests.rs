@@ -132,6 +132,22 @@ fn a_bar_is_playable_when_it_can_be_started_and_random_bars_have_options_of_thei
     assert_eq!((state_of(&random_course).boolean(OPTION_RANDOMSELECTBAR), state_of(&random_course).boolean(OPTION_RANDOMCOURSEBAR)), (Some(false), Some(true)));
 }
 
+/// A chart a table lists that the library does not hold is a chart's bar the reference cannot start
+/// (`SongBar` with `existsSong` false), and its title is the chart cluster's to give, as a chart's
+/// is: this cluster names only the bars that open.
+#[test]
+fn a_missing_bar_is_a_song_bar_that_cannot_be_played() {
+    let shown = shown_on(SongBar::new(BarKind::Song { exists: false }, "Not Here"), None);
+    let state = state_of(&shown);
+
+    assert_eq!(
+        [OPTION_SONGBAR, OPTION_PLAYABLEBAR, OPTION_FOLDERBAR, OPTION_GRADEBAR].map(|id| state.boolean(id)),
+        [Some(true), Some(false), Some(false), Some(false)]
+    );
+    assert_eq!([STRING_TITLE, STRING_FULLTITLE].map(|id| state.text(id)), [None, None]);
+    assert_eq!(state.integer(NUMBER_SCORE), Some(INTEGER_ABSENT), "a chart that is not there has no score");
+}
+
 #[test]
 fn a_list_with_no_bars_has_no_bar_options_on() {
     let config = Config::default();

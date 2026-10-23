@@ -339,7 +339,10 @@ fn the_decide_screen_names_the_innermost_table_and_level() {
         .to_vec();
     app.shared.table_names = vec!["ONE".to_owned(), "S1".to_owned()];
     app.shared.table_levels = vec![vec![("1".to_owned(), vec![0])], vec![("3".to_owned(), vec![0])]];
-    app.shared.table_extras = vec![crate::tablesrc::TableExtras::default(), crate::tablesrc::TableExtras { symbol: Some("st".to_owned()) }];
+    app.shared.table_extras = vec![
+        crate::tablesrc::TableExtras::default(),
+        crate::tablesrc::TableExtras { symbol: Some("st".to_owned()), ..crate::tablesrc::TableExtras::default() },
+    ];
     assert_eq!(table_of_the_open_folder(&app.shared), (String::new(), String::new()), "the flat list is no table");
 
     let (table, level) = (app.shared.table_folder(1), app.shared.level_folder(1, 0));

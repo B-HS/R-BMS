@@ -121,6 +121,7 @@ fn titles(browser: &Browser) -> Vec<String> {
         .map(|item| match item {
             SelectItem::Song(index) => songs[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
+            SelectItem::Missing(missing) => browser.app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
         })
         .collect()
 }
@@ -864,7 +865,7 @@ fn the_reload_key_fetches_every_table_again_beside_the_browser() {
                 .iter()
                 .filter_map(|item| match item {
                     SelectItem::Folder { label, .. } => Some(label.as_str()),
-                    SelectItem::Song(_) => None,
+                    SelectItem::Song(_) | SelectItem::Missing(_) => None,
                 })
                 .collect();
             assert_eq!(labels, vec!["ALL SONGS (4)", "UP (3)", "DOWN (1)"], "skinned {skinned}: the song list is not the reloaded tables'");

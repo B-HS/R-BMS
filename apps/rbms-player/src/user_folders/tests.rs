@@ -199,6 +199,7 @@ impl Signed {
             .map(|row| match row {
                 SelectItem::Folder { label, .. } => label.clone(),
                 SelectItem::Song(index) => self.app.shared.library.songs()[*index].md5.clone(),
+                SelectItem::Missing(missing) => self.app.shared.missing_chart(missing).map(|chart| chart.md5.clone()).unwrap_or_default(),
             })
             .collect()
     }

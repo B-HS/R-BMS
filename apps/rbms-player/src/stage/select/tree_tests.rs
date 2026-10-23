@@ -62,7 +62,7 @@ fn browser_with(tag: &str, skinned: bool, tables: &[Listed]) -> Browser {
         tables.iter().enumerate().map(|(at, table)| TableSource { name: table.name.into(), location: address(tag, at), group: table.group.into() }).collect();
     shared.table_names = tables.iter().map(|table| table.name.to_owned()).collect();
     shared.table_levels = tables.iter().map(|table| table.levels.iter().map(|(level, charts)| ((*level).to_owned(), charts.to_vec())).collect()).collect();
-    shared.table_extras = tables.iter().map(|table| TableExtras { symbol: table.symbol.map(str::to_owned) }).collect();
+    shared.table_extras = tables.iter().map(|table| TableExtras { symbol: table.symbol.map(str::to_owned), ..TableExtras::default() }).collect();
     shared.open_for_tests([]);
     shared.sel = 0;
     shared.rebuild_select_items();
@@ -81,6 +81,7 @@ fn rows(browser: &Browser) -> Vec<String> {
         .map(|item| match item {
             SelectItem::Song(index) => songs[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
+            SelectItem::Missing(missing) => browser.app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
         })
         .collect()
 }

@@ -30,10 +30,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rbms_config::TableSource;
 use rbms_library::Library;
-use rbms_table::{DifficultyTable, Md5Index, SavedTable, TableError};
+use rbms_table::{DifficultyTable, Md5Index, SavedTable, TableEntry, TableError};
 
-use crate::AppShared;
 use crate::select_tree::{ListPlace, show_the_list_again};
+use crate::{AppShared, MissingRef};
 
 mod seed;
 pub(crate) use seed::seed_default_tables;
@@ -45,14 +45,18 @@ pub(crate) type TableLevels = Vec<(String, Vec<usize>)>;
 
 /// What the browser keeps of a table beside its levels: aligned with `table_names` and
 /// `table_levels`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct TableExtras {
     /// The symbol the header names, without the stand-in for none.
     pub(crate) symbol: Option<String>,
+    /// For each level, aligned with the table's [`TableLevels`], the entries whose chart the library
+    /// does not hold, in the table's own order and each chart once
+    /// ([`DifficultyTable::missing_levels_in`]).
+    pub(crate) missing: Vec<Vec<TableEntry>>,
 }
 
 /// A table read and matched against the library.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct MatchedTable {
     pub(crate) name: String,
     pub(crate) levels: TableLevels,
@@ -63,6 +67,13 @@ impl MatchedTable {
     /// The slot of a source whose table is not there: named after the source, with no levels.
     fn unloaded(src: &TableSource) -> MatchedTable {
         MatchedTable { name: fallback_source_name(src), ..MatchedTable::default() }
+    }
+
+    /// `table`, called `name`, matched against `library`: the charts of each level the library holds
+    /// and the ones it does not.
+    pub(crate) fn of(name: String, table: &DifficultyTable, library: &Md5Index) -> MatchedTable {
+        let missing = table.missing_levels_in(library).into_iter().map(|level| level.into_iter().map(|entry| table.entries[entry].clone()).collect()).collect();
+        MatchedTable { name, levels: table.match_levels_in(library), extras: TableExtras { symbol: table.named_symbol().map(str::to_string), missing } }
     }
 }
 
@@ -450,15 +461,15 @@ fn fallback_source_name(src: &TableSource) -> String {
 /// manager.
 fn match_and_record(src: &TableSource, load: &TableLoad, library: &Md5Index) -> MatchedTable {
     let table = &load.table;
-    let lv = table.match_levels_in(library);
-    let owned: usize = lv.iter().map(|(_, v)| v.len()).sum();
-    println!("  {} entries ({} skipped), matched {owned} local charts across {} levels", table.entries.len(), table.skipped, lv.len());
-    let name = pick_table_name(src, table);
+    let matched = MatchedTable::of(pick_table_name(src, table), table, library);
+    let levels = matched.levels.len();
+    let owned: usize = matched.levels.iter().map(|(_, v)| v.len()).sum();
+    println!("  {} entries ({} skipped), matched {owned} local charts across {levels} levels", table.entries.len(), table.skipped);
     record_status(
         &src.location,
-        TableStatus::Loaded { name: name.clone(), entries: table.entries.len(), levels: lv.len(), owned, origin: load.origin, stale: None },
+        TableStatus::Loaded { name: matched.name.clone(), entries: table.entries.len(), levels, owned, origin: load.origin, stale: None },
     );
-    MatchedTable { name, levels: lv, extras: TableExtras { symbol: table.named_symbol().map(str::to_string) } }
+    matched
 }
 
 /// Read one table source without asking the network ([`read_table_source`]) and match it against
@@ -1043,6 +1054,11 @@ fn set_table_slot(shared: &mut AppShared, at: usize, table: MatchedTable) {
 }
 
 impl AppShared {
+    /// The table entry of a chart the library does not hold, as the table at its place lists it.
+    pub(crate) fn missing_chart(&self, missing: &MissingRef) -> Option<&TableEntry> {
+        self.table_extras.get(missing.table)?.missing.get(missing.level)?.get(missing.entry)
+    }
+
     /// Take the slot of the source at `at` out of the list, which the source has just left.
     pub(crate) fn remove_table_slot(&mut self, at: usize) {
         if at < self.table_names.len() {

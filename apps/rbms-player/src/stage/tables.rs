@@ -866,6 +866,7 @@ mod tests {
             .map(|item| match item {
                 SelectItem::Folder { label, .. } => label.clone(),
                 SelectItem::Song(index) => format!("song {index}"),
+                SelectItem::Missing(missing) => format!("missing {}", missing.entry),
             })
             .collect()
     }
@@ -884,7 +885,10 @@ mod tests {
         assert_eq!(root.len(), 2, "the song list has the table's folder beside ALL SONGS: {root:?}");
         assert!(root[1].ends_with(" (0)"), "the folder says nothing in it is owned: {}", root[1]);
         assert_eq!(folders(&mut app, |shared| vec![shared.table_folder(0)]), vec!["LV 1 (0)", "LV 2 (0)"], "the table's levels, in its order");
-        assert!(folders(&mut app, |shared| vec![shared.table_folder(0), shared.level_folder(0, 0)]).is_empty(), "an unowned level opens onto an empty list");
+        let unowned_level = |shared: &crate::AppShared| vec![shared.table_folder(0), shared.level_folder(0, 0)];
+        assert_eq!(folders(&mut app, unowned_level), vec!["missing 0"], "an unowned level lists its chart the library does not hold");
+        app.shared.config.library.show_missing_charts = false;
+        assert!(folders(&mut app, unowned_level).is_empty(), "with missing charts hidden an unowned level opens onto an empty list");
 
         let status = table_status(&file.location()).expect("the load is remembered");
         assert_eq!(status_summary(&status), ("0 OF 3 CHARTS OWNED  -  2 LEVELS".to_string(), false));
