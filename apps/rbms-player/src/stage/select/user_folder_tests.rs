@@ -71,6 +71,7 @@ fn rows(browser: &Browser) -> Vec<String> {
             SelectItem::Song(index) => songs[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
             SelectItem::Missing(missing) => browser.app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
+            SelectItem::Course(course) => browser.app.shared.table_course(course).map(|course| course.name.clone()).unwrap_or_default(),
         })
         .collect()
 }
@@ -151,8 +152,10 @@ fn a_first_run_shows_the_given_table_beside_the_players_folders() {
     capture(&browser, "first-run-root");
 
     enter(&mut browser, "\u{767a}\u{72c2}BMS\u{96e3}\u{6613}\u{5ea6}\u{8868} (0)");
-    assert_eq!(rows(&browser).len(), 26, "every level of the table is a folder");
-    assert!(rows(&browser).iter().all(|row| row.starts_with('\u{2605}')), "a level is not titled with the symbol the table names: {:?}", rows(&browser));
+    let (courses, levels) = rows(&browser).split_last().map(|(courses, levels)| (courses.clone(), levels.to_vec())).expect("the table has rows");
+    assert_eq!(levels.len(), 26, "every level of the table is a folder");
+    assert!(levels.iter().all(|row| row.starts_with('\u{2605}')), "a level is not titled with the symbol the table names: {levels:?}");
+    assert_eq!(courses, "COURSE (44)", "the table's folder of courses does not hold the bundled GENOSIDE 2018 courses");
     capture(&browser, "first-run-table");
 
     let mut tables = TablesState::new();

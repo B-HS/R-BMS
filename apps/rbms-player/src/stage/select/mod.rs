@@ -136,6 +136,18 @@ const SCRATCH_REPEAT_INTERVAL: Duration = Duration::from_millis(SCROLL_DURATION_
 /// What the browser says when a chart a table lists that the library does not hold is asked for.
 const NOT_IN_THE_LIBRARY: &str = "not in the library";
 
+/// Start a course picked on the course tab or in the folder of the courses a table lists, unless
+/// one of its stages is not in the library: the reference will not begin a course it cannot supply
+/// every chart of (`BarRenderer.java:154-155`).
+fn start_the_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
+    if !entry.is_playable() {
+        notify(Level::Warn, format!("{} stage(s) missing from the library", entry.missing.len()));
+        return Transition::Stay;
+    }
+    shared.play_system_sound(SystemSound::Select);
+    crate::start_course(shared, entry)
+}
+
 /// A turntable direction that is being held, so the list keeps moving while it is.
 #[derive(Clone, Copy)]
 struct ScratchHold {
@@ -450,6 +462,13 @@ impl SelectState {
                 crate::notify::notify(crate::notify::Level::Info, NOT_IN_THE_LIBRARY);
                 Transition::Stay
             }
+            Some(SelectItem::Course(course)) => {
+                let Some(course) = shared.table_course(course).cloned() else {
+                    return Transition::Stay;
+                };
+                let entry = CourseEntry::resolved(course, &shared.library);
+                start_the_course(shared, &entry)
+            }
             None => Transition::Stay,
         }
     }
@@ -477,29 +496,31 @@ impl SelectState {
         shared.sel = back_to.and_then(|identity| shared.row_of(&identity)).unwrap_or(0);
     }
 
-    /// Start the focused course, unless one of its stages is not in the library — the reference
-    /// will not begin a course it cannot supply every chart of.
+    /// Start the focused course of the course tab ([`start_the_course`]).
     fn course_enter(&mut self, shared: &mut AppShared) -> Transition {
-        let Some(entry) = self.courses.focused() else {
+        let Some(entry) = self.courses.focused().cloned() else {
             return Transition::Stay;
         };
-        if !entry.is_playable() {
-            notify(Level::Warn, format!("{} stage(s) missing from the library", entry.missing.len()));
-            return Transition::Stay;
-        }
-        let entry = entry.clone();
-        shared.play_system_sound(SystemSound::Select);
-        crate::start_course(shared, &entry)
+        start_the_course(shared, &entry)
     }
 
-    /// Load the course list, or re-resolve the one already loaded against the library as it stands
-    /// now — a scan that has since found a course's charts clears its missing-stage mark.
+    /// Read the course list again from the course folder beside the settings
+    /// ([`SelectState::reload_courses`]).
     fn refresh_courses(&mut self, shared: &AppShared) {
-        if self.courses.is_empty() {
-            self.courses = CourseList::load(&courses_dir(&crate::config_dir()), &shared.library);
-        } else {
-            self.courses.resolve_in_library(&shared.library);
-        }
+        self.reload_courses(&courses_dir(&crate::config_dir()), &shared.library);
+    }
+
+    /// Read the course files under `dir` again and resolve every course against `library` as it
+    /// stands now, keeping the cursor on the course it was on, or on the row it was on when that
+    /// course is gone. Reading the files each time is what lists a course file put in the folder
+    /// since, and drops one taken out; resolving them is what clears the missing-stage mark of a
+    /// course whose charts a scan has since found.
+    fn reload_courses(&mut self, dir: &Path, library: &rbms_library::Library) {
+        let focused = self.courses.focused().map(|entry| entry.course.hash());
+        let row = self.courses.cursor();
+        self.courses = CourseList::load(dir, library);
+        let found = focused.and_then(|hash| self.courses.entries().iter().position(|entry| entry.course.hash() == hash));
+        self.courses.focus(found.unwrap_or(row));
         self.courses_generation = self.courses_generation.wrapping_add(1);
     }
 

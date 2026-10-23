@@ -50,6 +50,7 @@ fn titles(app: &App) -> Vec<String> {
             SelectItem::Song(si) => app.shared.library.songs()[*si].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
             SelectItem::Missing(missing) => app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
+            SelectItem::Course(course) => app.shared.table_course(course).map(|course| course.name.clone()).unwrap_or_default(),
         })
         .collect()
 }

@@ -340,7 +340,7 @@ impl SelectState {
             SelectTab::Courses if self.courses.focused().is_some() => FocusedBar::Playable,
             SelectTab::Courses => FocusedBar::Nothing,
             SelectTab::Songs => match shared.select_items.get(shared.sel) {
-                Some(SelectItem::Song(_)) => FocusedBar::Playable,
+                Some(SelectItem::Song(_) | SelectItem::Course(_)) => FocusedBar::Playable,
                 Some(SelectItem::Folder { .. }) => FocusedBar::Folder,
                 Some(SelectItem::Missing(_)) => FocusedBar::Missing,
                 None => FocusedBar::Nothing,

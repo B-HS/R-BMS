@@ -86,11 +86,23 @@ pub(crate) struct CourseEntry {
 }
 
 impl CourseEntry {
+    /// `course` with the stages of it `library` cannot supply, which is how the courses a difficulty
+    /// table lists are resolved ([`CourseList::resolve`] is the same rule for the course tab).
+    pub(crate) fn resolved(course: Course, library: &Library) -> CourseEntry {
+        let missing = missing_stages(&course, |chart| library_index(library, chart).is_some());
+        CourseEntry { course, missing }
+    }
+
     /// Whether every stage resolves, which is what the reference requires before a course may be
     /// started (`BarRenderer.java:154-155`).
     pub(crate) fn is_playable(&self) -> bool {
         self.missing.is_empty()
     }
+}
+
+/// The stages of `course` whose chart `exists` says is not there.
+fn missing_stages(course: &Course, exists: impl Fn(&CourseChart) -> bool) -> Vec<usize> {
+    course.charts.iter().enumerate().filter(|(_, chart)| !exists(chart)).map(|(i, _)| i).collect()
 }
 
 /// The course tab's list and its cursor.
@@ -130,7 +142,7 @@ impl CourseList {
     /// Recompute which stages are missing, which the browser does whenever the library changes.
     pub(crate) fn resolve(&mut self, exists: impl Fn(&CourseChart) -> bool) {
         for entry in &mut self.entries {
-            entry.missing = entry.course.charts.iter().enumerate().filter(|(_, chart)| !exists(chart)).map(|(i, _)| i).collect();
+            entry.missing = missing_stages(&entry.course, &exists);
         }
     }
 
@@ -139,6 +151,7 @@ impl CourseList {
         self.resolve(|chart| library_index(library, chart).is_some());
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -179,6 +192,7 @@ impl CourseList {
     }
 
     /// The rows to draw, in list order.
+    #[cfg(test)]
     pub(crate) fn rows(&self) -> Vec<CourseRow> {
         self.entries.iter().map(CourseRow::of).collect()
     }
@@ -199,7 +213,8 @@ pub(crate) struct CourseRow {
 const UNRELEASED_BADGE: &str = "UNRELEASED";
 
 impl CourseRow {
-    fn of(entry: &CourseEntry) -> CourseRow {
+    /// The row `entry` is drawn as.
+    pub(crate) fn of(entry: &CourseEntry) -> CourseRow {
         let stages = entry.course.stage_count();
         let detail = if entry.missing.is_empty() { format!("{stages} STAGES") } else { format!("{stages} STAGES - {} MISSING", entry.missing.len()) };
         let mut badges: Vec<&'static str> = entry.course.constraints.iter().map(|c| constraint_badge(*c)).collect();

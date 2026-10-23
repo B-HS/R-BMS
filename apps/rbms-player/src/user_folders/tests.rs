@@ -200,6 +200,7 @@ impl Signed {
                 SelectItem::Folder { label, .. } => label.clone(),
                 SelectItem::Song(index) => self.app.shared.library.songs()[*index].md5.clone(),
                 SelectItem::Missing(missing) => self.app.shared.missing_chart(missing).map(|chart| chart.md5.clone()).unwrap_or_default(),
+                SelectItem::Course(course) => self.app.shared.table_course(course).map(|course| course.hash()).unwrap_or_default(),
             })
             .collect()
     }

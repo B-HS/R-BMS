@@ -1175,6 +1175,11 @@ impl AppShared {
                     println!("[{}/{}] {path}{} [not in the library]", self.sel + 1, total, chart.title)
                 }
             }
+            Some(SelectItem::Course(course)) => {
+                if let Some(course) = self.table_course(course) {
+                    println!("[{}/{}] {path}{} [course of {} stages]", self.sel + 1, total, course.name, course.stage_count())
+                }
+            }
             None => {}
         }
     }

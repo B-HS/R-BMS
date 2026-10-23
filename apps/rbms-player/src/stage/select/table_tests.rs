@@ -83,6 +83,7 @@ fn rows(browser: &Browser) -> Vec<String> {
             SelectItem::Song(index) => songs[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
             SelectItem::Missing(missing) => browser.app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
+            SelectItem::Course(course) => browser.app.shared.table_course(course).map(|course| course.name.clone()).unwrap_or_default(),
         })
         .collect()
 }

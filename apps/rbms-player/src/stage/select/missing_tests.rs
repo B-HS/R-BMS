@@ -101,6 +101,7 @@ fn rows(shared: &AppShared) -> Vec<String> {
             SelectItem::Song(index) => shared.library.songs()[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
             SelectItem::Missing(missing) => format!("missing {}", shared.missing_chart(missing).map(missing_chart_title).unwrap_or_default()),
+            SelectItem::Course(course) => shared.table_course(course).map(|course| course.name.clone()).unwrap_or_default(),
         })
         .collect()
 }
@@ -266,7 +267,7 @@ fn the_cursor_on_a_missing_chart_stays_when_it_becomes_owned() {
 
     let under = match &shared.select_items[shared.sel] {
         SelectItem::Song(index) => shared.library.songs()[*index].md5.clone(),
-        SelectItem::Folder { .. } | SelectItem::Missing(_) => String::new(),
+        SelectItem::Folder { .. } | SelectItem::Missing(_) | SelectItem::Course(_) => String::new(),
     };
     assert_eq!(under, BETA_MD5, "the cursor is not on the chart that arrived");
     assert_eq!(missing_rows(shared), MISSING_IN_TABLE_ORDER.len() - 1, "the chart is no longer listed as missing");

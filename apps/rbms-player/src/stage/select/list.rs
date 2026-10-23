@@ -26,7 +26,8 @@ use rbms_render::skin_render::frame::{LAMP_KINDS, RANK_KINDS};
 use rbms_store::RecordLamp;
 use rbms_table::TableEntry;
 
-use crate::select_tree::{ALL_SONGS_TITLE, SelectFolder, TableRef, level_title, table_group, table_name};
+use crate::course_ui::CourseRow;
+use crate::select_tree::{ALL_SONGS_TITLE, SelectFolder, TABLE_COURSES_TITLE, TableRef, level_title, table_group, table_name};
 use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta};
 use crate::user_folders::USER_FOLDERS_LABEL;
 use crate::*;
@@ -303,8 +304,9 @@ impl AppShared {
     ///
     /// The top holds the flat list, then the tables in the order of the sources -- the tables of a
     /// group under one row, where the first of them is -- then the player's own folders. A table,
-    /// and a group, none of whose tables has levels is no row. A folder that is no longer there has
-    /// no rows.
+    /// and a group, none of whose tables has levels is no row. A table holds its levels, then the
+    /// folder of the courses it lists when it lists any; the courses are never filtered. A folder
+    /// that is no longer there has no rows.
     fn rows_of(&self, folder: Option<&SelectFolder>, filter: SelectFilter) -> Vec<SelectItem> {
         let songs = self.library.songs();
         match folder {
@@ -344,7 +346,8 @@ impl AppShared {
                     return Vec::new();
                 };
                 let table = TableRef { at, location: table.location.clone() };
-                self.table_levels
+                let mut rows: Vec<SelectItem> = self
+                    .table_levels
                     .get(at)
                     .map(|levels| {
                         levels
@@ -355,9 +358,18 @@ impl AppShared {
                             })
                             .collect()
                     })
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                let courses = self.table_courses(at).count();
+                if courses > 0 {
+                    rows.push(SelectItem::Folder { label: format!("{TABLE_COURSES_TITLE} ({courses})"), target: SelectFolder::TableCourses(table) });
+                }
+                rows
             }
             Some(SelectFolder::TableLevel(table, level)) => self.level_rows(table, level, filter),
+            Some(SelectFolder::TableCourses(table)) => table
+                .resolve(self)
+                .map(|at| (0..self.table_courses(at).count()).map(|course| SelectItem::Course(CourseRef { table: at, course })).collect())
+                .unwrap_or_default(),
             Some(SelectFolder::UserFolders) => self
                 .user_folders
                 .shown
@@ -711,6 +723,10 @@ impl AppShared {
                 SelectItem::Folder { label, target } if skinned => self.folder_bar(label, target, mode),
                 SelectItem::Folder { label, target } => SelectBar::new(target.bar_kind(), label.as_str()),
                 SelectItem::Missing(missing) => self.missing_bar(missing),
+                SelectItem::Course(course) => self.table_course(course).map_or_else(
+                    || SelectBar::new(BarKind::Course { complete: false }, String::new()),
+                    |course| course_bar(&CourseEntry::resolved(course.clone(), &self.library), &self.library, facts),
+                ),
             })
             .collect()
     }
@@ -775,7 +791,7 @@ impl AppShared {
     /// charts, nor under a group of tables, whose bars are tables.
     fn folder_bar(&self, label: &str, target: &SelectFolder, mode: Option<Mode>) -> SelectBar {
         let distribution = match target {
-            SelectFolder::TableGroup(_) | SelectFolder::Table(_) | SelectFolder::UserFolders => None,
+            SelectFolder::TableGroup(_) | SelectFolder::Table(_) | SelectFolder::TableCourses(_) | SelectFolder::UserFolders => None,
             SelectFolder::AllSongs => Some(self.distribution(0..self.library.len(), mode)),
             SelectFolder::UserFolder(id) => {
                 let charts = self.user_folders.shown.iter().find(|folder| &folder.id == id).map_or(&[][..], |folder| folder.charts.as_slice());
@@ -812,33 +828,33 @@ impl AppShared {
 }
 
 /// The course list as bars: one for every course, in order (`GradeBar`).
+pub(crate) fn course_bars(courses: &CourseList, library: &Library, facts: &ChartFacts) -> Vec<SelectBar> {
+    courses.entries().iter().map(|entry| course_bar(entry, library, facts)).collect()
+}
+
+/// The bar of one course (`GradeBar`), on the course tab and in the folder of the courses a table
+/// lists alike.
 ///
 /// A course every chart of which the library holds carries the features of all of them. Its own
 /// clear and medal are not kept anywhere in this build, so it has neither.
-pub(crate) fn course_bars(courses: &CourseList, library: &Library, facts: &ChartFacts) -> Vec<SelectBar> {
-    courses
-        .entries()
-        .iter()
-        .zip(courses.rows())
-        .map(|(entry, row)| {
-            let complete = entry.is_playable();
-            let features = if complete {
-                entry
-                    .course
-                    .charts
-                    .iter()
-                    .filter_map(|chart| library_index(library, chart))
-                    .filter_map(|index| facts.of(index))
-                    .fold(0, |all, fact| all | fact.features)
-            } else {
-                0
-            };
-            SelectBar {
-                course: Some(BarCourse { stages: entry.course.stage_count(), badges: row.badges, features }),
-                ..SelectBar::new(BarKind::Course { complete }, row.title)
-            }
-        })
-        .collect()
+fn course_bar(entry: &CourseEntry, library: &Library, facts: &ChartFacts) -> SelectBar {
+    let row = CourseRow::of(entry);
+    let complete = entry.is_playable();
+    let features = if complete {
+        entry
+            .course
+            .charts
+            .iter()
+            .filter_map(|chart| library_index(library, chart))
+            .filter_map(|index| facts.of(index))
+            .fold(0, |all, fact| all | fact.features)
+    } else {
+        0
+    };
+    SelectBar {
+        course: Some(BarCourse { stages: entry.course.stage_count(), badges: row.badges, features }),
+        ..SelectBar::new(BarKind::Course { complete }, row.title)
+    }
 }
 
 #[cfg(test)]

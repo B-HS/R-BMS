@@ -230,6 +230,9 @@ impl SelectState {
                 title: missing_chart_title(chart).to_string(),
                 artist: chart.artist.trim().to_string(),
             }),
+            Some(SelectItem::Course(course)) => shared
+                .table_course(course)
+                .map_or(SelectDetail::Empty, |course| SelectDetail::Folder { label: course.name.clone(), count: course.stage_count() }),
             None => SelectDetail::Empty,
         };
 

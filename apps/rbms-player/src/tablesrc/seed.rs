@@ -197,7 +197,7 @@ mod tests {
             .iter()
             .filter_map(|item| match item {
                 crate::SelectItem::Folder { label, .. } => Some(label.clone()),
-                crate::SelectItem::Song(_) | crate::SelectItem::Missing(_) => None,
+                crate::SelectItem::Song(_) | crate::SelectItem::Missing(_) | crate::SelectItem::Course(_) => None,
             })
             .collect();
         assert_eq!(labels, vec!["ALL SONGS (0)".to_string(), "\u{767a}\u{72c2}BMS\u{96e3}\u{6613}\u{5ea6}\u{8868} (0)".to_string()]);

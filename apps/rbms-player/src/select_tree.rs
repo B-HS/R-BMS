@@ -15,6 +15,10 @@ use crate::{AppShared, SelectItem};
 /// What the reference writes for the folder that holds every chart.
 pub(crate) const ALL_SONGS_TITLE: &str = "ALL SONGS";
 
+/// What the folder of the courses a table lists is titled, after the reference's folder of courses
+/// (`BarManager.java:207`).
+pub(crate) const TABLE_COURSES_TITLE: &str = "COURSE";
+
 /// What a level of a table is titled after when the table names no symbol of its own.
 const TABLE_LEVEL_PREFIX: &str = "LV";
 
@@ -28,6 +32,8 @@ pub(crate) enum SelectFolder {
     Table(TableRef),
     /// A level of a table, by the level's own name (`HashBar`).
     TableLevel(TableRef, String),
+    /// The courses a table lists, after its levels (the reference's `GradeBar`s inside a `TableBar`).
+    TableCourses(TableRef),
     UserFolders,
     /// One of the player's own folders, by its id.
     UserFolder(String),
@@ -55,6 +61,9 @@ pub(crate) enum BarIdentity {
     Chart(String),
     /// A row that opens a folder.
     Opens(SelectFolder),
+    /// A course, by its id ([`rbms_course::Course::hash`]), which tells apart two courses of one
+    /// name.
+    Course(String),
 }
 
 impl PartialEq for TableRef {
@@ -130,6 +139,7 @@ impl SelectFolder {
             SelectFolder::TableLevel(table, level) => {
                 table.resolve(shared).map_or_else(|| format!("{TABLE_LEVEL_PREFIX} {level}"), |at| level_title(shared, at, level))
             }
+            SelectFolder::TableCourses(_) => TABLE_COURSES_TITLE.to_string(),
             SelectFolder::UserFolders => USER_FOLDERS_LABEL.to_string(),
             SelectFolder::UserFolder(id) => {
                 shared.user_folders.shown.iter().find(|folder| &folder.id == id).map(|folder| folder.name.clone()).unwrap_or_default()
@@ -146,6 +156,7 @@ impl SelectFolder {
             }
             SelectFolder::Table(table) => table.levels(shared).is_some_and(|levels| !levels.is_empty()),
             SelectFolder::TableLevel(table, level) => table.level(shared, level).is_some(),
+            SelectFolder::TableCourses(table) => table.resolve(shared).is_some_and(|at| shared.table_courses(at).next().is_some()),
             SelectFolder::UserFolders => !shared.user_folders.shown.is_empty(),
             SelectFolder::UserFolder(id) => shared.user_folders.shown.iter().any(|folder| &folder.id == id),
         }
@@ -153,14 +164,17 @@ impl SelectFolder {
 
     /// Which of the reference's bars a row that opens this folder stands for: a folder of charts
     /// for the flat list, a container of other bars for a group of tables (`ContainerBar`), and a
-    /// table for a difficulty table and for a level of one (`TableBar`, `HashBar`). The player's
+    /// table for a difficulty table, for a level of one and for its courses (`TableBar`, `HashBar`,
+    /// and the `TableBar` the reference's folder of courses is). The player's
     /// own folders are charts picked by hash too, held by one row the way a table holds its levels,
     /// so they are the same two bars.
     pub(crate) fn bar_kind(&self) -> BarKind {
         match self {
             SelectFolder::AllSongs => BarKind::Folder,
             SelectFolder::TableGroup(_) => BarKind::Command,
-            SelectFolder::Table(_) | SelectFolder::TableLevel(..) | SelectFolder::UserFolders | SelectFolder::UserFolder(_) => BarKind::Table,
+            SelectFolder::Table(_) | SelectFolder::TableLevel(..) | SelectFolder::TableCourses(_) | SelectFolder::UserFolders | SelectFolder::UserFolder(_) => {
+                BarKind::Table
+            }
         }
     }
 
@@ -170,6 +184,7 @@ impl SelectFolder {
         Some(match self {
             SelectFolder::Table(table) => SelectFolder::Table(table.now(shared)?),
             SelectFolder::TableLevel(table, level) => SelectFolder::TableLevel(table.now(shared)?, level.clone()),
+            SelectFolder::TableCourses(table) => SelectFolder::TableCourses(table.now(shared)?),
             folder => folder.clone(),
         })
     }
@@ -191,6 +206,7 @@ impl AppShared {
             SelectItem::Song(index) => self.library.songs().get(*index).map(|entry| BarIdentity::Chart(entry.md5.to_ascii_lowercase())),
             SelectItem::Folder { target, .. } => Some(BarIdentity::Opens(target.clone())),
             SelectItem::Missing(missing) => self.missing_chart(missing).map(|entry| BarIdentity::Chart(entry.md5.trim().to_ascii_lowercase())),
+            SelectItem::Course(course) => self.table_course(course).map(|course| BarIdentity::Course(course.hash())),
         }
     }
 
@@ -202,7 +218,10 @@ impl AppShared {
                 self.missing_chart(missing).is_some_and(|entry| entry.md5.trim().eq_ignore_ascii_case(md5))
             }
             (SelectItem::Folder { target, .. }, BarIdentity::Opens(folder)) => target == folder,
-            (SelectItem::Song(_) | SelectItem::Missing(_), BarIdentity::Opens(_)) | (SelectItem::Folder { .. }, BarIdentity::Chart(_)) => false,
+            (SelectItem::Course(course), BarIdentity::Course(hash)) => self.table_course(course).is_some_and(|course| &course.hash() == hash),
+            (SelectItem::Song(_) | SelectItem::Missing(_), BarIdentity::Opens(_) | BarIdentity::Course(_))
+            | (SelectItem::Folder { .. }, BarIdentity::Chart(_) | BarIdentity::Course(_))
+            | (SelectItem::Course(_), BarIdentity::Chart(_) | BarIdentity::Opens(_)) => false,
         })
     }
 

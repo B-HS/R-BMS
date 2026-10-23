@@ -459,12 +459,23 @@ fn is_pad_row(row: &KcRow) -> bool {
 }
 
 /// One row in the select list: a folder to descend into ([`select_tree::SelectFolder`]), a playable
-/// chart (index into `AppShared::library`), or a chart a difficulty table lists that the library
-/// does not hold (`SongBar` with `existsSong` false).
+/// chart (index into `AppShared::library`), a chart a difficulty table lists that the library
+/// does not hold (`SongBar` with `existsSong` false), or a course a difficulty table lists
+/// (`GradeBar`).
 enum SelectItem {
     Song(usize),
     Folder { label: String, target: select_tree::SelectFolder },
     Missing(MissingRef),
+    Course(CourseRef),
+}
+
+/// Where a course a difficulty table lists is: the table at `table` of the player's list, and the
+/// course at `course` of the courses that table's folder of courses holds
+/// ([`AppShared::table_courses`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CourseRef {
+    pub(crate) table: usize,
+    pub(crate) course: usize,
 }
 
 /// Where a chart the library does not hold is listed: the table at `table` of the player's list, the

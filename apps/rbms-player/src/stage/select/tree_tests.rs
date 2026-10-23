@@ -4,6 +4,9 @@
 //! was in. The root holds a group of tables under one row, and a level of a table is titled with the
 //! symbol the table names.
 //!
+//! A table that lists courses holds them in a folder after its levels, and the 発狂BMS難易度表 every
+//! player is given holds the GENOSIDE 2018 courses the build carries there as well.
+//!
 //! The tables are put in the browser by hand, as a scan leaves them, unless a test is about a table
 //! arriving; nothing asks the network. The frames of a group and of a level inside it are saved for
 //! a person to open when the capture variable names a folder.
@@ -23,7 +26,7 @@ use crate::stage::{FrameCtx, StageHandler, TablesState};
 use crate::tablesrc::TableExtras;
 use crate::tablesrc::test_outside::FakeTables;
 use crate::user_folders::ShownFolder;
-use crate::{CH, CW};
+use crate::{CH, CW, CourseRef};
 
 /// Where the frames below are saved for a person to open, when this names a folder: the variable
 /// the capture harness reads.
@@ -82,6 +85,7 @@ fn rows(browser: &Browser) -> Vec<String> {
             SelectItem::Song(index) => songs[*index].title.clone(),
             SelectItem::Folder { label, .. } => label.clone(),
             SelectItem::Missing(missing) => browser.app.shared.missing_chart(missing).map(|chart| chart.title.clone()).unwrap_or_default(),
+            SelectItem::Course(course) => browser.app.shared.table_course(course).map(|course| course.name.clone()).unwrap_or_default(),
         })
         .collect()
 }
@@ -390,4 +394,181 @@ fn two_tables_of_the_same_name_are_told_apart_by_their_address() {
     assert_eq!(rows(&browser), ["LV 9 (1)"]);
     escape(&mut browser);
     assert_eq!(browser.sel(), 2, "the cursor went to the first table of the name");
+}
+
+/// Where the 発狂BMS難易度表 every player is given is registered, whose folder of courses holds the
+/// bundled GENOSIDE 2018 courses.
+const INSANE_LOCATION: &str = "https://bms.hyuns.uk/tables/insane1";
+
+/// A stage of the courses below that the library does not hold.
+const ABSENT_MD5: &str = "00000000000000000000000000000000";
+
+/// How many GENOSIDE 2018 courses the build carries: single play, then double play.
+const BUNDLED_COURSES: usize = 44;
+
+/// The md5s of the first bundled course, quoted for a table header.
+fn first_bundled_md5s() -> String {
+    let first = &rbms_course::genoside_2018().courses().next().expect("a bundled course").course;
+    first.charts.iter().map(|chart| format!("\"{}\"", chart.md5)).collect::<Vec<_>>().join(",")
+}
+
+/// The courses of a header `course` field written as one group: a course of two owned charts, one
+/// with a stage the library lacks, an entry that is no course, a course of one owned chart, and the
+/// first bundled course under a name of the table's own.
+fn listed_course_group() -> String {
+    format!(
+        r#"[{{"name":"DAN A","md5":["md5-alba","md5-alder"]}},{{"name":"DAN B","md5":["md5-alpha","{ABSENT_MD5}"]}},{{"name":"broken"}},{{"name":"DAN C","md5":["md5-altair"]}},{{"name":"MY SHODAN","md5":[{}]}}]"#,
+        first_bundled_md5s()
+    )
+}
+
+/// Give the table at `at` of the browser the courses its header lists as `course`, read the way a
+/// table that arrives is read, and rebuild the list where it stands.
+fn list_courses(browser: &mut Browser, at: usize, course: &str) {
+    let header = rbms_table::parse_header(format!(r#"{{"name":"COURSED","course":{course}}}"#).as_bytes()).expect("the header reads");
+    let table = rbms_table::DifficultyTable::from_parts(Some(header), Vec::new());
+    let index = rbms_table::Md5Index::new(browser.app.shared.library.md5s());
+    let courses = crate::tablesrc::MatchedTable::of(String::new(), &table, &index).extras.courses;
+    let shared = &mut browser.app.shared;
+    let place = ListPlace::of(shared);
+    shared.table_extras[at].courses = courses;
+    show_the_list_again(shared, &place);
+    browser.frame();
+}
+
+/// A browser over two tables of their own, `PLAIN` and `SECOND`, at the top of the library. The
+/// header of the first lists [`listed_course_group`] in the shape the Stella tables write, a list
+/// of groups.
+fn browser_with_courses(tag: &str) -> Browser {
+    let mut browser = browser_with(tag, false, &[PLAIN, Listed { name: "SECOND", ..PLAIN }]);
+    list_courses(&mut browser, 0, &format!("[{}]", listed_course_group()));
+    browser
+}
+
+#[test]
+fn a_table_that_lists_courses_has_a_course_folder_after_its_levels() {
+    let mut browser = browser_with_courses("tree-courses-folder");
+    enter(&mut browser, 1);
+    assert_eq!(rows(&browser), ["LV 1 (1)", "LV 2 (1)", "LV 3 (2)", "COURSE (4)"], "the entry that is no course was counted");
+    enter(&mut browser, 3);
+    let table = TableRef::of(&browser.app.shared, 0);
+    assert!(browser.app.shared.opened() == [SelectFolder::Table(table.clone()), SelectFolder::TableCourses(table)]);
+    assert_eq!(browser.app.shared.open_titles(), ["PLAIN", "COURSE"]);
+    assert_eq!(
+        rows(&browser),
+        ["DAN A", "DAN B", "DAN C", "GENOSIDE 2018 段位認定 初段"],
+        "the courses are not in the header's order, or the bundled course was not taken for its copy"
+    );
+
+    escape(&mut browser);
+    escape(&mut browser);
+    enter(&mut browser, 2);
+    assert_eq!(rows(&browser), ["LV 1 (1)", "LV 2 (1)", "LV 3 (2)"], "a table that lists no course has a folder of courses");
+}
+
+#[test]
+fn a_course_whose_charts_are_all_owned_starts_and_one_missing_a_chart_says_so() {
+    let mut browser = browser_with_courses("tree-courses-start");
+    enter(&mut browser, 1);
+    enter(&mut browser, 3);
+
+    assert!(matches!(enter(&mut browser, 1), Transition::Stay), "a course with a stage the library lacks started");
+    assert!(browser.app.shared.course_run.is_none());
+
+    assert!(!matches!(enter(&mut browser, 0), Transition::Stay), "a course whose every chart is owned did not start");
+    let run = browser.app.shared.course_run.as_ref().expect("the course is being played");
+    assert_eq!(run.course.name, "DAN A");
+    assert_eq!(run.index, 0, "the course did not start on its first stage");
+}
+
+#[test]
+fn leaving_the_course_folder_puts_the_cursor_on_it() {
+    let mut browser = browser_with_courses("tree-courses-leave");
+    enter(&mut browser, 1);
+    enter(&mut browser, 3);
+    browser.app.shared.sel = 2;
+    let on_dan_c = identity_at(&browser, 2);
+    let dan_c = browser.app.shared.table_course(&CourseRef { table: 0, course: 2 }).expect("the third course").hash();
+    assert_eq!(on_dan_c, Some(BarIdentity::Course(dan_c)), "a course bar is not known by its id");
+
+    let group = listed_course_group();
+    list_courses(&mut browser, 0, &format!(r#"[[{{"name":"DAN 0","md5":["md5-angel"]}}],{group}]"#));
+    assert_eq!(identity_at(&browser, browser.sel()), on_dan_c, "the cursor left the course it was on when a course was put before it");
+    assert_eq!(browser.sel(), 3);
+
+    escape(&mut browser);
+    let folder = SelectFolder::TableCourses(TableRef::of(&browser.app.shared, 0));
+    assert_eq!(browser.sel(), 3, "the cursor is not on the folder of courses that was left");
+    assert_eq!(identity_at(&browser, 3), Some(BarIdentity::Opens(folder)));
+}
+
+#[test]
+fn a_table_course_folder_bar_is_a_table_bar_and_its_courses_are_course_bars() {
+    let mut browser = browser_with_courses("tree-courses-bars");
+    enter(&mut browser, 1);
+    let kinds = |browser: &Browser| browser.app.shared.select_bars(&ChartFacts::default(), None, true).iter().map(|bar| bar.kind).collect::<Vec<_>>();
+    assert_eq!(kinds(&browser), [BarKind::Table; 4]);
+    enter(&mut browser, 3);
+    assert_eq!(
+        kinds(&browser),
+        [BarKind::Course { complete: true }, BarKind::Course { complete: false }, BarKind::Course { complete: true }, BarKind::Course { complete: false }]
+    );
+    let bars = browser.app.shared.select_bars(&ChartFacts::default(), None, false);
+    assert_eq!(bars[0].course.as_ref().map(|course| course.stages), Some(2), "the course bar does not count its stages");
+}
+
+#[test]
+fn the_insane_table_course_folder_lists_the_bundled_genoside_courses() {
+    let mut browser = browser_with("tree-courses-insane", false, &[PLAIN]);
+    browser.app.shared.config.library.tables[0].location = INSANE_LOCATION.to_owned();
+    list_courses(&mut browser, 0, &format!(r#"[{{"name":"OWN","md5":["md5-alba"]}},{{"name":"MY SHODAN","md5":[{}]}}]"#, first_bundled_md5s()));
+    enter(&mut browser, 1);
+    assert_eq!(rows(&browser).last().map(String::as_str), Some("COURSE (45)"), "the bundled course the header copies was listed twice");
+    enter(&mut browser, 3);
+    let titles = rows(&browser);
+    assert_eq!(titles.len(), BUNDLED_COURSES + 1);
+    assert_eq!(titles[0], "OWN", "the header's own course is not before the bundled ones");
+    assert_eq!(titles[1], "GENOSIDE 2018 段位認定 初段");
+    assert_eq!(titles[BUNDLED_COURSES / 2 + 1], "GENOSIDE 2018 DP段位認定 初段", "double play does not follow single play");
+    let first = rbms_course::genoside_2018().courses().next().expect("a bundled course");
+    assert_eq!(identity_at(&browser, 1), Some(BarIdentity::Course(first.course_hash.clone())), "the bundled course is not known by the id the data states");
+
+    let mut other = browser_with("tree-courses-not-insane", false, &[PLAIN]);
+    enter(&mut other, 1);
+    assert_eq!(rows(&other), ["LV 1 (1)", "LV 2 (1)", "LV 3 (2)"], "a table other than the 発狂BMS難易度表 was given the bundled courses");
+}
+
+/// A fresh folder for the course files of the test `tag`.
+fn course_folder(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("rbms-tree-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the course folder can be made");
+    dir
+}
+
+/// The course tab lists the bundled courses whatever the course folder holds, so the list is read
+/// again every time the browser is arrived on: a course file put in the folder since is listed and
+/// one taken out is not, with the cursor kept on the course it was on.
+#[test]
+fn the_course_files_are_read_again_each_time_the_browser_is_arrived_on() {
+    let dir = course_folder("course-files");
+    let library = Library::from_songs(TITLES.map(|title| entry(title, "a", "5")).to_vec());
+    let mut state = SelectState::new();
+    state.reload_courses(&dir, &library);
+    assert_eq!(state.courses.len(), BUNDLED_COURSES);
+    state.courses.focus(2);
+    let focused = state.courses.focused().map(|entry| entry.course.hash());
+
+    let mut own = rbms_course::Course { name: "MINE".to_owned(), ..rbms_course::Course::default() };
+    own.charts = vec![rbms_course::CourseChart { md5: "md5-alba".to_owned(), sha256: String::new(), title: String::new() }];
+    assert!(own.validate());
+    rbms_course::save(&dir, &own).expect("the course file is written");
+    state.reload_courses(&dir, &library);
+    assert_eq!(state.courses.len(), BUNDLED_COURSES + 1, "a course file put in the folder was not listed");
+    assert!(state.courses.entries().last().is_some_and(|entry| entry.course.name == "MINE" && entry.is_playable()));
+    assert_eq!(state.courses.focused().map(|entry| entry.course.hash()), focused, "the cursor left the course it was on");
+
+    std::fs::remove_dir_all(&dir).expect("the course folder is removed");
+    state.reload_courses(&dir, &library);
+    assert_eq!(state.courses.len(), BUNDLED_COURSES, "a course file taken out of the folder is still listed");
 }

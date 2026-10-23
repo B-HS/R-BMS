@@ -750,7 +750,7 @@ pub(crate) fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
     let from = shared.select_items.iter().position(|item| matches!(item, SelectItem::Song(i) if Some(*i) == played)).unwrap_or(shared.sel);
     shared.select_items.iter().enumerate().skip(from + 1).find_map(|(at, item)| match item {
         SelectItem::Song(index) => Some((at, *index)),
-        SelectItem::Folder { .. } | SelectItem::Missing(_) => None,
+        SelectItem::Folder { .. } | SelectItem::Missing(_) | SelectItem::Course(_) => None,
     })
 }
 

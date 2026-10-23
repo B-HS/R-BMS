@@ -28,12 +28,14 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rbms_config::TableSource;
+use rbms_config::{DEFAULT_TABLES, INSANE_TABLE_ID, TableSource};
+use rbms_course::table::TableCourses as HeaderCourses;
+use rbms_course::{Course, bundled_twin, courses_from_table_header, genoside_2018};
 use rbms_library::Library;
 use rbms_table::{DifficultyTable, Md5Index, SavedTable, TableEntry, TableError};
 
 use crate::select_tree::{ListPlace, show_the_list_again};
-use crate::{AppShared, MissingRef};
+use crate::{AppShared, CourseRef, MissingRef};
 
 mod seed;
 pub(crate) use seed::seed_default_tables;
@@ -53,6 +55,9 @@ pub(crate) struct TableExtras {
     /// does not hold, in the table's own order and each chart once
     /// ([`DifficultyTable::missing_levels_in`]).
     pub(crate) missing: Vec<Vec<TableEntry>>,
+    /// The courses the header lists, in its order, a course that plays the charts of a bundled
+    /// course replaced by that bundled course ([`courses_listed_by`]).
+    pub(crate) courses: Vec<Course>,
 }
 
 /// A table read and matched against the library.
@@ -73,8 +78,27 @@ impl MatchedTable {
     /// and the ones it does not.
     pub(crate) fn of(name: String, table: &DifficultyTable, library: &Md5Index) -> MatchedTable {
         let missing = table.missing_levels_in(library).into_iter().map(|level| level.into_iter().map(|entry| table.entries[entry].clone()).collect()).collect();
-        MatchedTable { name, levels: table.match_levels_in(library), extras: TableExtras { symbol: table.named_symbol().map(str::to_string), missing } }
+        let extras = TableExtras { symbol: table.named_symbol().map(str::to_string), missing, courses: courses_listed_by(table) };
+        MatchedTable { name, levels: table.match_levels_in(library), extras }
     }
+}
+
+/// The courses `table`'s header lists (`TableDataAccessor.java:192-213`), in its order. An entry
+/// that is no course is left out without a word. A course playing the same charts as a bundled
+/// course is that bundled course, so the two are ranked as one whatever the table calls it.
+fn courses_listed_by(table: &DifficultyTable) -> Vec<Course> {
+    let Some(header) = &table.course else {
+        return Vec::new();
+    };
+    let HeaderCourses { courses, .. } = courses_from_table_header(header);
+    courses.into_iter().map(|course| bundled_twin(&course).cloned().unwrap_or(course)).collect()
+}
+
+/// Whether the table registered at `location` is the 発狂BMS難易度表 every player is given, whose
+/// folder of courses holds the GENOSIDE 2018 grade courses the build carries: they are that table's
+/// grades, though its header lists none.
+fn carries_the_bundled_courses(location: &str) -> bool {
+    DEFAULT_TABLES.iter().any(|table| table.id == INSANE_TABLE_ID && table.is_at(location))
 }
 
 /// What a table is called when neither the user nor the table itself named it.
@@ -1057,6 +1081,22 @@ impl AppShared {
     /// The table entry of a chart the library does not hold, as the table at its place lists it.
     pub(crate) fn missing_chart(&self, missing: &MissingRef) -> Option<&TableEntry> {
         self.table_extras.get(missing.table)?.missing.get(missing.level)?.get(missing.entry)
+    }
+
+    /// The courses the folder of courses of the table at `at` holds: the ones its header lists, in
+    /// its order, then, for the 発狂BMS難易度表 every player is given, the GENOSIDE 2018 grade courses
+    /// the build carries, single play then double play. A course the header lists that is one of
+    /// those is listed once, among them.
+    pub(crate) fn table_courses(&self, at: usize) -> impl Iterator<Item = &Course> {
+        let carries_bundled = self.config.library.tables.get(at).is_some_and(|source| carries_the_bundled_courses(&source.location));
+        let listed = self.table_extras.get(at).map_or(&[][..], |extras| extras.courses.as_slice());
+        let bundled = genoside_2018().courses().map(|bundled| &bundled.course).filter(move |_| carries_bundled);
+        listed.iter().filter(move |course| !carries_bundled || bundled_twin(course).is_none()).chain(bundled)
+    }
+
+    /// The course a difficulty table lists at `course`.
+    pub(crate) fn table_course(&self, course: &CourseRef) -> Option<&Course> {
+        self.table_courses(course.table).nth(course.course)
     }
 
     /// Take the slot of the source at `at` out of the list, which the source has just left.

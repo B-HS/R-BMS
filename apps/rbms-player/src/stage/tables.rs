@@ -867,6 +867,7 @@ mod tests {
                 SelectItem::Folder { label, .. } => label.clone(),
                 SelectItem::Song(index) => format!("song {index}"),
                 SelectItem::Missing(missing) => format!("missing {}", missing.entry),
+                SelectItem::Course(course) => format!("course {}", course.course),
             })
             .collect()
     }
