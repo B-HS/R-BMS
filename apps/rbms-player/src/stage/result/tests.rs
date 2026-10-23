@@ -1145,8 +1145,9 @@ fn the_wheel_scrolls_the_ranking_within_its_rows() {
         fast_slow: None,
         replay_id: None,
         played_at: 0,
+        ..Default::default()
     };
-    let board = RankingBoard { rows: vec![row; ROWS], you: None, rivals: Vec::new() };
+    let board = RankingBoard { rows: vec![row; ROWS], you: None, rivals: Vec::new(), ..Default::default() };
     app.shared.ranking_cache.insert(md5, RankingState::Ready(Box::new(board)));
     assert_eq!(result(&app).scene_facts(&app.shared).ranking_total, ROWS as i32);
     assert_eq!(scroll(&mut app, 3.0), 3);

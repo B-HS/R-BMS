@@ -1142,6 +1142,7 @@ mod tests {
             fast_slow: None,
             replay_id: None,
             played_at: 0,
+            ..Default::default()
         }
     }
 
@@ -1152,6 +1153,7 @@ mod tests {
             rows: Vec::new(),
             you: Some(ranking_row("me", 1500)),
             rivals: vec![("quiet".into(), None), ("friend".into(), Some(ranking_row("friend", 1400))), ("rival".into(), Some(ranking_row("rival", 1600)))],
+            ..Default::default()
         };
         shared.ranking_cache.insert("md5-0".into(), RankingState::Ready(Box::new(board)));
         let (you, rival) = ranking_targets(&shared, "md5-0");

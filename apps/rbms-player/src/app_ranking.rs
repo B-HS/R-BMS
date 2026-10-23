@@ -16,7 +16,7 @@ use rbms_store::scoredb::ReplayState;
 
 use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_outcome::{IrReport, IrStatus, format_submit_outcome, short_error};
-use crate::ir_ranking::{RankingFetch, RankingState, accept_fetch, fetch_board};
+use crate::ir_ranking::{RankingFetch, RankingState, accept_fetch, fetch_board, fetch_board_page};
 use crate::ir_replay::{replay_download_is_applicable, to_ir_replay, wire_carries_judge};
 use crate::record_sync::{RATE_LIMITED_DETAIL, ScoreOutcome, course_outcome, course_sync_row, sync_row};
 use crate::stage::StageId;
@@ -68,14 +68,15 @@ impl AppShared {
     }
 
     /// Ask the server for a chart's board on a worker thread, unless the cache already holds a
-    /// settled answer for it.
+    /// settled answer for it: a board fetched less than ten minutes ago, or a failure less than
+    /// thirty seconds old.
     ///
     /// Only one fetch is ever in flight: a second one would drop the first receiver, stranding that
     /// chart's `Loading` placeholder in the cache and leaving the panel on LOADING forever.
     pub(crate) fn start_ranking_fetch(&mut self, chart: ChartId) {
         self.ranking_requested = Some(chart.md5.clone());
         self.ranking_generation = self.ranking_generation.wrapping_add(1);
-        if self.ranking_cache.has_settled_answer(&chart.md5) {
+        if self.ranking_cache.has_settled_answer(&chart.md5, Instant::now()) {
             return;
         }
         let generation = self.ranking_generation;
@@ -86,9 +87,53 @@ impl AppShared {
         let source = self.primary_ir_server();
         let rx = spawn_query(source, move |server| {
             let state = fetch_board(server, &chart, &player, &rivals);
-            Ok::<RankingFetch, rbms_ir::IrError>(RankingFetch { generation, md5, state })
+            Ok::<RankingFetch, rbms_ir::IrError>(RankingFetch { generation, md5, state, extends: false })
         });
         self.ranking_rx = Some(rx);
+    }
+
+    /// Ask the server for one more page of a chart's leaderboard, to be added to the board the cache
+    /// holds for it: page `board.pages + 1` for the rows that follow the ones held, or a page
+    /// further down, which the board keeps apart (`your_page`). Returns whether a request was made.
+    ///
+    /// Nothing is asked while another fetch is in flight, while the chart has no finished board, or
+    /// for a page the board holds or cannot be given ([`crate::ir_ranking::RankingBoard::wants_page`]).
+    /// The board stays as it is while the page is on its way, and when the request fails: the failure
+    /// is reported in the network status and the board is kept.
+    pub(crate) fn start_ranking_page(&mut self, chart: ChartId, page: u32) -> bool {
+        if self.ranking_rx.is_some() {
+            return false;
+        }
+        let Some(RankingState::Ready(board)) = self.ranking_cache.peek(&chart.md5) else {
+            return false;
+        };
+        if !board.wants_page(page) {
+            return false;
+        }
+        let board = (**board).clone();
+        self.ranking_requested = Some(chart.md5.clone());
+        self.ranking_generation = self.ranking_generation.wrapping_add(1);
+        let generation = self.ranking_generation;
+        let md5 = chart.md5.clone();
+        let source = self.primary_ir_server();
+        let rx = spawn_query(source, move |server| {
+            let grown = fetch_board_page(server, &chart, board, page)?;
+            Ok(RankingFetch { generation, md5, state: RankingState::Ready(Box::new(grown)), extends: true })
+        });
+        self.ranking_rx = Some(rx);
+        true
+    }
+
+    /// Fetch the page the local player's row is on, once the first page of a chart's board has come
+    /// back without it.
+    fn continue_ranking_toward_you(&mut self, md5: &str) {
+        let Some(RankingState::Ready(board)) = self.ranking_cache.peek(md5) else {
+            return;
+        };
+        let Some(page) = board.page_to_find_you() else {
+            return;
+        };
+        self.start_ranking_page(ChartId { md5: md5.to_string(), sha256: String::new() }, page);
     }
 
     /// The server the ranking panel reads and a course is submitted to: the primary profile, or the
@@ -166,6 +211,7 @@ impl AppShared {
             })
         });
         self.ir_status = IrStatus::Sending;
+        self.ranking_cache.await_score_of(&submission.chart.id.md5);
         self.submit_rx = Some(spawn_submit(self.server.clone(), SubmitJob { submission, replay }));
     }
 
@@ -176,7 +222,24 @@ impl AppShared {
         if secondary.enabled_profiles().next().is_none() {
             return;
         }
+        self.ranking_cache.await_score_of(&submission.chart.id.md5);
         self.profile_submit_rx = Some(spawn_submit_all(secondary, self.profile_servers.clone(), submission.clone()));
+    }
+
+    /// Forget the board cached for the chart of the score the server has just taken, so the next
+    /// time the chart is looked at its ranking is asked for again and shows the score. A fetch of
+    /// that chart still on its way is dropped with it: it may have been answered before the score
+    /// was stored.
+    fn forget_ranking_of_taken_score(&mut self) {
+        let Some(md5) = self.ranking_cache.awaited_score_chart().map(str::to_string) else {
+            return;
+        };
+        self.ranking_cache.remove(&md5);
+        if self.ranking_requested.as_deref() == Some(md5.as_str()) {
+            self.ranking_requested = None;
+            self.ranking_rx = None;
+            self.ranking_generation = self.ranking_generation.wrapping_add(1);
+        }
     }
 
     /// The replay payload to upload with this run, or `None` when the setting is off, no replay was
@@ -194,7 +257,7 @@ impl AppShared {
     /// away from. Called once per frame; the download itself is taken by the select screen, the
     /// only place it can be started.
     pub(crate) fn poll_ir_jobs(&mut self, stage: StageId) {
-        self.poll_ranking();
+        self.poll_ranking(Instant::now());
         if !replay_download_is_applicable(stage) && self.replay_download_rx.take().is_some() {
             self.replay_download_target = None;
             self.net_status = "replay download dropped: left song select".to_string();
@@ -207,13 +270,22 @@ impl AppShared {
         self.poll_saves();
     }
 
-    fn poll_ranking(&mut self) {
+    /// Take the answer of the ranking fetch in flight, if it has come, and let a failed chart be
+    /// asked for again once its retry delay is over.
+    ///
+    /// The first answer of a chart whose local player stands below the page it holds starts the fetch
+    /// of the page they stand on.
+    fn poll_ranking(&mut self, now: Instant) {
         let Some(rx) = self.ranking_rx.take() else {
+            self.retry_failed_ranking(now);
             return;
         };
         match rx.try_recv() {
             Ok(Ok(fetch)) => {
-                accept_fetch(&mut self.ranking_cache, self.ranking_generation, fetch);
+                let (md5, first_answer) = (fetch.md5.clone(), !fetch.extends);
+                if accept_fetch(&mut self.ranking_cache, self.ranking_generation, fetch, now) && first_answer {
+                    self.continue_ranking_toward_you(&md5);
+                }
             }
             Ok(Err(error)) => {
                 self.forget_pending_ranking();
@@ -227,11 +299,22 @@ impl AppShared {
         }
     }
 
+    /// Let the chart the last fetch was for be requested again when that fetch failed and the
+    /// retry delay is over, so a chart that stays focused is not left on its failure.
+    fn retry_failed_ranking(&mut self, now: Instant) {
+        let due = self.ranking_requested.as_deref().is_some_and(|md5| self.ranking_cache.failure_is_due(md5, now));
+        if due {
+            self.ranking_requested = None;
+        }
+    }
+
     /// Drop the `Loading` placeholder of the fetch that just failed or vanished, so the chart is
     /// asked for again the next time it is focused instead of showing LOADING for the rest of the
-    /// session.
+    /// session. A board that was only to grow by a page is kept: it is a finished answer.
     fn forget_pending_ranking(&mut self) {
-        if let Some(md5) = self.ranking_requested.take() {
+        if let Some(md5) = self.ranking_requested.take()
+            && matches!(self.ranking_cache.peek(&md5), Some(RankingState::Loading))
+        {
             self.ranking_cache.remove(&md5);
         }
     }
@@ -243,6 +326,9 @@ impl AppShared {
         };
         match rx.try_recv() {
             Ok(results) => {
+                if results.iter().any(|(_, result)| matches!(result, Ok(response) if response.accepted)) {
+                    self.forget_ranking_of_taken_score();
+                }
                 let report = profile_submit_report(&results);
                 self.net_status = report.score.clone();
                 if self.submit_rx.is_none() && self.ir_status.accepts_report() {
@@ -272,6 +358,9 @@ impl AppShared {
             }
             Err(TryRecvError::Disconnected) => rbms_ir::SubmitOutcome { submit: Err(rbms_ir::IrError::Network("submit worker stopped".into())), replay: None },
         };
+        if matches!(submit_verdict(&outcome.submit), SubmitVerdict::Accepted { .. }) {
+            self.forget_ranking_of_taken_score();
+        }
         if let Some(live) = self.submit_log.take() {
             self.write_live_outcome(&live, &outcome);
         }
@@ -409,6 +498,8 @@ fn profile_submit_report(results: &[ProfileResult<rbms_ir::SubmitResponse>]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir_ranking::tests::{RankingDouble, record};
+    use crate::ir_ranking::{RANKING_FAILED_RETRY_AFTER, RANKING_PAGE_LIMIT, RANKING_READY_LIFETIME, RankingBoard, build_board};
 
     fn shared(config: Config) -> AppShared {
         let dir = std::env::temp_dir().join(format!("rbms-app-ranking-tests-{}", std::process::id()));
@@ -574,5 +665,297 @@ mod tests {
 
         assert!(matches!(shared.ir_status, IrStatus::Sending));
         assert_eq!(shared.net_status, "IR 1/1");
+    }
+
+    fn chart_of(md5: &str) -> ChartId {
+        ChartId { md5: md5.to_string(), sha256: String::new() }
+    }
+
+    /// An app whose primary server is `server`, signed in as `me`.
+    fn shared_reading(server: RankingDouble) -> AppShared {
+        let mut shared = shared(Config::default());
+        shared.server = Arc::new(server);
+        shared.session = crate::ir_session::AccountSession::restored(Some("token".into()), Some("me".into()));
+        shared
+    }
+
+    /// Wait for the ranking fetch in flight to answer, then take its answer as the next frame would.
+    fn take_the_answer_in_flight(shared: &mut AppShared, now: Instant) {
+        let rx = shared.ranking_rx.take().expect("a fetch is in flight");
+        let answer = rx.recv().expect("the worker answers");
+        let (tx, delivered) = std::sync::mpsc::channel();
+        tx.send(answer).expect("the receiver is open");
+        shared.ranking_rx = Some(delivered);
+        shared.poll_ranking(now);
+    }
+
+    fn ready_board_of(rows: u32) -> RankingState {
+        let records: Vec<_> = (0..rows).map(|n| record(&format!("p{n}"), &format!("Player {n}"), 2000 - n, None)).collect();
+        RankingState::Ready(Box::new(build_board(&records, None, &[])))
+    }
+
+    fn board_in(shared: &AppShared, md5: &str) -> RankingBoard {
+        let Some(RankingState::Ready(board)) = shared.ranking_cache.peek(md5) else { panic!("{md5} has no finished board") };
+        (**board).clone()
+    }
+
+    fn accepted_outcome() -> rbms_ir::SubmitOutcome {
+        rbms_ir::SubmitOutcome { submit: Ok(rbms_ir::SubmitResponse { accepted: true, ..Default::default() }), replay: None }
+    }
+
+    fn submitted_through(shared: &mut AppShared, outcome: rbms_ir::SubmitOutcome) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(outcome).expect("the receiver is open");
+        shared.ir_status = IrStatus::Sending;
+        shared.submit_rx = Some(rx);
+        shared.poll_submit();
+    }
+
+    #[test]
+    fn a_failed_ranking_is_requested_again_once_its_retry_delay_is_over() {
+        let mut shared = shared(Config::default());
+        let before = Instant::now();
+        shared.ranking_cache.insert("a".into(), RankingState::Failed("down".into()));
+        shared.ranking_requested = Some("a".into());
+
+        shared.poll_ranking(before);
+        assert_eq!(shared.ranking_requested.as_deref(), Some("a"), "the failure is fresh");
+
+        shared.poll_ranking(before + RANKING_FAILED_RETRY_AFTER * 2);
+        assert!(shared.ranking_requested.is_none(), "the chart can be asked for again");
+        assert!(matches!(shared.ranking_cache.peek("a"), Some(RankingState::Failed(_))), "the failure shows until the new fetch replaces it");
+    }
+
+    #[test]
+    fn a_board_is_not_requested_again_by_the_failure_retry() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("a".into(), ready_board_of(1));
+        shared.ranking_requested = Some("a".into());
+
+        shared.poll_ranking(Instant::now() + RANKING_FAILED_RETRY_AFTER * 2);
+
+        assert_eq!(shared.ranking_requested.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn a_failed_ranking_is_not_retried_while_a_fetch_is_in_flight() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("a".into(), RankingState::Failed("down".into()));
+        shared.ranking_requested = Some("a".into());
+        let (_tx, rx) = std::sync::mpsc::channel::<Result<RankingFetch, rbms_ir::IrError>>();
+        shared.ranking_rx = Some(rx);
+
+        shared.poll_ranking(Instant::now() + RANKING_FAILED_RETRY_AFTER * 2);
+
+        assert_eq!(shared.ranking_requested.as_deref(), Some("a"));
+        assert!(shared.ranking_rx.is_some(), "the fetch in flight is still waited for");
+    }
+
+    #[test]
+    fn a_failed_fetch_forgets_its_loading_placeholder_but_not_a_board_that_was_to_grow() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("first".into(), RankingState::Loading);
+        shared.ranking_requested = Some("first".into());
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Err(rbms_ir::IrError::Network("down".into()))).expect("the receiver is open");
+        shared.ranking_rx = Some(rx);
+        shared.poll_ranking(Instant::now());
+        assert!(shared.ranking_cache.peek("first").is_none(), "a placeholder with no fetch behind it would read LOADING for ever");
+
+        shared.ranking_cache.insert("grown".into(), ready_board_of(1));
+        shared.ranking_requested = Some("grown".into());
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Err(rbms_ir::IrError::Network("down".into()))).expect("the receiver is open");
+        shared.ranking_rx = Some(rx);
+        shared.poll_ranking(Instant::now());
+        assert!(shared.ranking_cache.peek("grown").is_some(), "the page failed, the board it was to grow is still good");
+        assert!(shared.net_status.starts_with("ranking: "), "{}", shared.net_status);
+    }
+
+    #[test]
+    fn a_page_is_asked_for_only_when_it_adds_rows_and_nothing_else_is_in_flight() {
+        let mut shared = shared_reading(RankingDouble::new(Vec::new()));
+        assert!(!shared.start_ranking_page(chart_of("m"), 2), "a chart with no board has no page to grow");
+
+        shared.ranking_cache.insert("m".into(), RankingState::Loading);
+        assert!(!shared.start_ranking_page(chart_of("m"), 2), "a board still on its way has no page to grow");
+
+        shared.ranking_cache.insert("m".into(), ready_board_of(3));
+        assert!(!shared.start_ranking_page(chart_of("m"), 2), "a short first page is the whole board");
+
+        shared.ranking_cache.insert("m".into(), ready_board_of(RANKING_PAGE_LIMIT));
+        assert!(!shared.start_ranking_page(chart_of("m"), 1), "the board holds the first page");
+
+        let (_tx, rx) = std::sync::mpsc::channel::<Result<RankingFetch, rbms_ir::IrError>>();
+        shared.ranking_rx = Some(rx);
+        assert!(!shared.start_ranking_page(chart_of("m"), 2), "one fetch at a time");
+        shared.ranking_rx = None;
+
+        let generation = shared.ranking_generation;
+        assert!(shared.start_ranking_page(chart_of("m"), 2));
+        assert!(shared.ranking_rx.is_some());
+        assert_eq!(shared.ranking_requested.as_deref(), Some("m"));
+        assert_eq!(shared.ranking_generation, generation.wrapping_add(1));
+    }
+
+    #[test]
+    fn the_next_page_grows_the_cached_board_and_keeps_its_age() {
+        let mut server = RankingDouble::new((0..RANKING_PAGE_LIMIT).map(|n| record(&format!("p{n}"), &format!("Player {n}"), 2000 - n, None)).collect());
+        server.later_pages = vec![vec![record("q0", "Player q0", 100, None)]];
+        let mut shared = shared_reading(server);
+        let before = Instant::now();
+
+        shared.start_ranking_fetch(chart_of("m"));
+        take_the_answer_in_flight(&mut shared, before);
+        let first = board_in(&shared, "m");
+        assert_eq!((first.pages, first.more, first.rows.len()), (1, true, RANKING_PAGE_LIMIT as usize));
+        assert!(shared.ranking_rx.is_none(), "nothing below the page is looked for when the player has no rank");
+
+        assert!(shared.start_ranking_page(chart_of("m"), first.pages + 1));
+        take_the_answer_in_flight(&mut shared, before + RANKING_READY_LIFETIME - Duration::from_millis(1));
+        let grown = board_in(&shared, "m");
+        assert_eq!((grown.pages, grown.more, grown.rows.len()), (2, false, RANKING_PAGE_LIMIT as usize + 1));
+        assert_eq!(grown.rows.last().and_then(|row| row.rank), Some(RANKING_PAGE_LIMIT + 1));
+        assert!(!shared.start_ranking_page(chart_of("m"), 3), "the server has no page after a short one");
+        assert!(!shared.ranking_cache.has_settled_answer("m", before + RANKING_READY_LIFETIME), "growing did not renew the board");
+    }
+
+    #[test]
+    fn a_player_below_the_first_page_gets_the_page_they_stand_on() {
+        let mut server = RankingDouble::new((0..RANKING_PAGE_LIMIT).map(|n| record(&format!("p{n}"), &format!("Player {n}"), 2000 - n, None)).collect());
+        server.later_pages = vec![Vec::new(), (0..RANKING_PAGE_LIMIT).map(|n| record(&format!("q{n}"), &format!("Player q{n}"), 900 - n, None)).collect()];
+        server.bests.insert("me".into(), record("me", "Me", 500, Some(250)));
+        let mut shared = shared_reading(server);
+        let now = Instant::now();
+
+        shared.start_ranking_fetch(chart_of("m"));
+        take_the_answer_in_flight(&mut shared, now);
+        assert!(shared.ranking_rx.is_some(), "the page of rank 250 is asked for right after the first page");
+
+        take_the_answer_in_flight(&mut shared, now);
+        let board = board_in(&shared, "m");
+        assert_eq!((board.pages, board.rows.len()), (1, RANKING_PAGE_LIMIT as usize), "the rows still run from the top");
+        let held = board.your_page.expect("the page of the player is held");
+        assert_eq!((held.page, held.rows.len(), held.rows[0].rank), (3, RANKING_PAGE_LIMIT as usize, Some(2 * RANKING_PAGE_LIMIT + 1)));
+        assert!(shared.ranking_rx.is_none(), "one extra page, not a walk down the leaderboard");
+    }
+
+    #[test]
+    fn handing_a_run_to_the_server_notes_its_chart_for_the_ranking() {
+        let mut shared = shared(Config::default());
+        let submission = crate::ir_ext::tests::submission();
+
+        shared.spawn_score_submit(submission.clone(), None, None);
+        assert_eq!(shared.ranking_cache.awaited_score_chart(), None, "a guest run is not sent, so no score is awaited");
+
+        shared.session = crate::ir_session::AccountSession::restored(Some("token".into()), Some("dj".into()));
+        shared.spawn_score_submit(submission.clone(), None, None);
+        assert_eq!(shared.ranking_cache.awaited_score_chart(), Some(submission.chart.id.md5.as_str()));
+    }
+
+    #[test]
+    fn handing_a_run_to_the_extra_profiles_notes_its_chart_for_the_ranking() {
+        let mut config = Config::default();
+        config.network.ir_profiles.push(rbms_config::IrProfile {
+            name: "EXTRA".to_string(),
+            base_url: "http://extra.invalid".to_string(),
+            token: None,
+            enabled: true,
+        });
+        let mut shared = shared(config);
+        shared.profile_servers = vec![Arc::new(RankingDouble::new(Vec::new()))];
+        let submission = crate::ir_ext::tests::submission();
+
+        shared.spawn_profile_submits(&submission);
+
+        assert_eq!(shared.ranking_cache.awaited_score_chart(), Some(submission.chart.id.md5.as_str()));
+    }
+
+    #[test]
+    fn a_score_the_server_took_makes_its_chart_be_asked_for_again_and_no_other() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("scored".into(), ready_board_of(1));
+        shared.ranking_cache.insert("other".into(), ready_board_of(1));
+        shared.ranking_cache.await_score_of("scored");
+        shared.ranking_requested = Some("scored".into());
+
+        submitted_through(&mut shared, accepted_outcome());
+
+        assert!(shared.ranking_cache.peek("scored").is_none(), "the board does not show the new score");
+        assert!(shared.ranking_cache.peek("other").is_some());
+        assert!(shared.ranking_requested.is_none(), "the panel asks for the chart again");
+    }
+
+    #[test]
+    fn a_score_the_server_took_drops_a_fetch_of_its_chart_that_may_predate_it() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("scored".into(), RankingState::Loading);
+        shared.ranking_cache.await_score_of("scored");
+        shared.ranking_requested = Some("scored".into());
+        let (_tx, rx) = std::sync::mpsc::channel::<Result<RankingFetch, rbms_ir::IrError>>();
+        shared.ranking_rx = Some(rx);
+        let generation = shared.ranking_generation;
+
+        submitted_through(&mut shared, accepted_outcome());
+
+        assert!(shared.ranking_rx.is_none());
+        assert_eq!(shared.ranking_generation, generation.wrapping_add(1));
+        assert!(shared.ranking_cache.peek("scored").is_none());
+    }
+
+    #[test]
+    fn a_score_of_another_chart_leaves_the_fetch_in_flight_alone() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("looked-at".into(), RankingState::Loading);
+        shared.ranking_cache.await_score_of("scored");
+        shared.ranking_requested = Some("looked-at".into());
+        let (_tx, rx) = std::sync::mpsc::channel::<Result<RankingFetch, rbms_ir::IrError>>();
+        shared.ranking_rx = Some(rx);
+        let generation = shared.ranking_generation;
+
+        submitted_through(&mut shared, accepted_outcome());
+
+        assert!(shared.ranking_rx.is_some());
+        assert_eq!(shared.ranking_generation, generation);
+        assert_eq!(shared.ranking_requested.as_deref(), Some("looked-at"));
+        assert!(shared.ranking_cache.peek("looked-at").is_some());
+    }
+
+    #[test]
+    fn a_score_the_server_did_not_take_leaves_the_ranking_as_it_was() {
+        for submit in [Ok(rbms_ir::SubmitResponse::default()), Err(rbms_ir::IrError::Network("down".into()))] {
+            let mut shared = shared(Config::default());
+            shared.ranking_cache.insert("scored".into(), ready_board_of(1));
+            shared.ranking_cache.await_score_of("scored");
+            shared.ranking_requested = Some("scored".into());
+
+            submitted_through(&mut shared, rbms_ir::SubmitOutcome { submit, replay: None });
+
+            assert!(shared.ranking_cache.peek("scored").is_some());
+            assert_eq!(shared.ranking_requested.as_deref(), Some("scored"));
+        }
+    }
+
+    #[test]
+    fn a_score_an_extra_profile_took_makes_its_chart_be_asked_for_again() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("scored".into(), ready_board_of(1));
+        shared.ranking_cache.await_score_of("scored");
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(vec![
+            ("REFUSED".to_string(), Ok(rbms_ir::SubmitResponse::default())),
+            ("TOOK IT".to_string(), Ok(rbms_ir::SubmitResponse { accepted: true, ..Default::default() })),
+        ])
+        .expect("profile worker receiver is open");
+        shared.profile_submit_rx = Some(rx);
+        shared.poll_profile_submits();
+        assert!(shared.ranking_cache.peek("scored").is_none());
+
+        shared.ranking_cache.insert("scored".into(), ready_board_of(1));
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(vec![("REFUSED".to_string(), Ok(rbms_ir::SubmitResponse::default()))]).expect("profile worker receiver is open");
+        shared.profile_submit_rx = Some(rx);
+        shared.poll_profile_submits();
+        assert!(shared.ranking_cache.peek("scored").is_some(), "no profile took it");
     }
 }

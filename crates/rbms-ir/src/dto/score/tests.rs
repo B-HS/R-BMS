@@ -632,3 +632,48 @@ fn the_mean_offset_and_the_rule_version_ride_in_extra() {
     let back = ScoreSubmission::from_json(&sub.to_json().expect("a submission serialises")).expect("the stored text reads back");
     assert_eq!((back.mean_offset(), back.rule_version()), (Some(-14_655), Some(4)));
 }
+
+fn row_with_extra(extra: serde_json::Value) -> ScoreRecord {
+    let body = json!({
+        "player": {"id": "p"}, "player_name": "Alice", "clear": "Hard",
+        "ex_score": 1500, "max_combo": 400, "minbp": 3, "rank": 1, "played_at": 7,
+        "extra": extra,
+    });
+    serde_json::from_value(body).expect("a ranking row decodes")
+}
+
+/// A row says which replay is linked to its score and whether SCRATCH AUTO was used in `extra`, and a
+/// row that says neither gives neither.
+#[test]
+fn a_ranking_row_reads_its_replay_and_scratch_auto_from_extra() {
+    let marked = row_with_extra(json!({"replay_id": "rp_1", "scratch_auto": true}));
+    assert_eq!(marked.replay_id(), Some("rp_1"));
+    assert!(marked.is_scratch_auto());
+
+    let plain = row_with_extra(json!({}));
+    assert_eq!(plain.replay_id(), None);
+    assert!(!plain.is_scratch_auto());
+
+    let odd = row_with_extra(json!({"replay_id": "", "scratch_auto": "yes"}));
+    assert_eq!(odd.replay_id(), None, "an empty id names no replay");
+    assert!(!odd.is_scratch_auto(), "only a boolean marks SCRATCH AUTO");
+}
+
+/// The dans of a ranking row are the list a profile carries, and what is not a dan in that list is
+/// left out instead of failing the row.
+#[test]
+fn a_ranking_row_reads_the_dans_its_player_shows() {
+    let row = row_with_extra(json!({"dans": [
+        {"system": "stella", "name": "Stella", "label": "SL 8"},
+        {"system": "satellite", "name": "Satellite"},
+        "junk",
+        {"system": "genocide", "name": "GENOCIDE", "label": "SP 5"},
+    ]}));
+    let dans = row.dans();
+    assert_eq!(dans.len(), 2, "an entry without a label is no dan");
+    assert_eq!((dans[0].system.as_str(), dans[0].name.as_str(), dans[0].label.as_str()), ("stella", "Stella", "SL 8"));
+    assert_eq!(dans[1].label, "SP 5");
+
+    assert!(row_with_extra(json!({})).dans().is_empty(), "a server that predates the list sends none");
+    assert!(row_with_extra(json!({"dans": "none"})).dans().is_empty(), "a list that is not a list is none");
+}

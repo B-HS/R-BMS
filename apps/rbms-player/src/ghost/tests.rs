@@ -124,9 +124,12 @@ fn the_account_best_is_the_local_run_played_at_the_same_second() {
         fast_slow: None,
         replay_id: None,
         played_at,
+        ..Default::default()
     };
     let account_with = |app: &mut App, you: RankingRow| {
-        app.shared.ranking_cache.insert(md5.clone(), RankingState::Ready(Box::new(RankingBoard { rows: Vec::new(), you: Some(you), rivals: Vec::new() })));
+        app.shared
+            .ranking_cache
+            .insert(md5.clone(), RankingState::Ready(Box::new(RankingBoard { rows: Vec::new(), you: Some(you), rivals: Vec::new(), ..Default::default() })));
         ghost_sources(&app.shared, &md5, SCORE_LN_MODE_FROM_CHART).account
     };
     let same_second = stored.played_at + MILLIS_PER_SECOND - 1;

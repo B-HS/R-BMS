@@ -63,6 +63,7 @@ fn ranking_row(player: &str, ex: u32) -> RankingRow {
         fast_slow: None,
         replay_id: None,
         played_at: 0,
+        ..Default::default()
     }
 }
 
@@ -72,6 +73,7 @@ fn rank_the_recorded_chart(shared: &mut AppShared, you: Option<u32>, rival: Opti
         rows: Vec::new(),
         you: you.map(|ex| ranking_row("me", ex)),
         rivals: rival.map(|ex| vec![("friend".to_string(), Some(ranking_row("friend", ex)))]).unwrap_or_default(),
+        ..Default::default()
     };
     shared.ranking_cache.insert(recorded_model().md5, RankingState::Ready(Box::new(board)));
 }

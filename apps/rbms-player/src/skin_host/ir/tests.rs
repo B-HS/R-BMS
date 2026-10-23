@@ -207,6 +207,7 @@ fn graded_row(lamp: ClearType, grade: AssistGrade, rank: Option<u32>) -> Ranking
         fast_slow: None,
         replay_id: None,
         played_at: 0,
+        ..Default::default()
     }
 }
 
@@ -215,7 +216,7 @@ fn graded_row(lamp: ClearType, grade: AssistGrade, rank: Option<u32>) -> Ranking
 #[test]
 fn a_graded_light_assist_clear_is_counted_on_the_light_assist_lamp() {
     let rows = AssistGrade::ALL.into_iter().map(|grade| graded_row(ClearType::LightAssistEasy, grade, None)).chain([row(ClearType::Easy, None)]).collect();
-    let board = RankingState::Ready(Box::new(RankingBoard { rows, you: None, rivals: Vec::new() }));
+    let board = RankingState::Ready(Box::new(RankingBoard { rows, you: None, rivals: Vec::new(), ..Default::default() }));
     let ir = browsing(Some(&board));
     assert_eq!(ir.integer(NUMBER_IR_PLAYER_LIGHTASSIST), Some(5), "a row named ASSIST EASY to ASSIST EXHARD fell out of the spread");
     assert_eq!(ir.integer(NUMBER_IR_PLAYER_EASY), Some(1));
@@ -229,7 +230,7 @@ fn fetched() -> RankingState {
         .into_iter()
         .map(|lamp| row(lamp, None))
         .collect();
-    RankingState::Ready(Box::new(RankingBoard { rows, you: Some(row(ClearType::Hard, Some(3))), rivals: Vec::new() }))
+    RankingState::Ready(Box::new(RankingBoard { rows, you: Some(row(ClearType::Hard, Some(3))), rivals: Vec::new(), ..Default::default() }))
 }
 
 fn browsing(ranking: Option<&RankingState>) -> IrState<'static> {
@@ -278,7 +279,7 @@ fn the_options_of_the_browser_follow_the_state_of_the_ranking() {
         "busy is defined as failed"
     );
     assert_eq!(options(Some(&fetched())), [Some(false), Some(true), Some(false), Some(false), Some(false), Some(false)]);
-    let empty = RankingState::Ready(Box::new(RankingBoard { rows: Vec::new(), you: None, rivals: Vec::new() }));
+    let empty = RankingState::Ready(Box::new(RankingBoard { rows: Vec::new(), you: None, rivals: Vec::new(), ..Default::default() }));
     assert_eq!(browsing(Some(&empty)).boolean(OPTION_IR_NOPLAYER), Some(true), "a ranking that came back with nobody on it");
     let offline = IrState { browser: Some(IrBrowser::of_ranking(false, None)), ..IrState::default() };
     assert_eq!((offline.boolean(OPTION_OFFLINE), offline.boolean(OPTION_ONLINE)), (Some(true), Some(false)));
@@ -297,7 +298,8 @@ fn the_place_of_the_player_and_the_size_of_the_ranking_are_read_once_it_is_fetch
         let ir = browsing(state);
         assert_eq!((ir.integer(NUMBER_IR_RANK), ir.integer(NUMBER_IR_TOTALPLAYER)), (Some(INTEGER_ABSENT), Some(INTEGER_ABSENT)));
     }
-    let unplaced = RankingState::Ready(Box::new(RankingBoard { rows: vec![row(ClearType::Hard, Some(1))], you: None, rivals: Vec::new() }));
+    let unplaced =
+        RankingState::Ready(Box::new(RankingBoard { rows: vec![row(ClearType::Hard, Some(1))], you: None, rivals: Vec::new(), ..Default::default() }));
     assert_eq!(browsing(Some(&unplaced)).integer(NUMBER_IR_RANK), Some(0), "a player who is not on it holds no place");
 }
 
@@ -345,7 +347,7 @@ fn a_ranking_not_fetched_has_no_counts_and_no_shares() {
         assert_eq!(ir.integer(id), Some(INTEGER_ABSENT), "number {id}");
     }
     assert_eq!((ir.float(FLOAT_IR_PLAYER_FAILED_RATE), ir.float(FLOAT_IR_TOTALCLEARRATE)), (Some(FLOAT_ABSENT), Some(FLOAT_ABSENT)));
-    let empty = RankingState::Ready(Box::new(RankingBoard { rows: Vec::new(), you: None, rivals: Vec::new() }));
+    let empty = RankingState::Ready(Box::new(RankingBoard { rows: Vec::new(), you: None, rivals: Vec::new(), ..Default::default() }));
     let ir = browsing(Some(&empty));
     assert_eq!(
         (ir.integer(NUMBER_IR_PLAYER_FAILED), ir.integer(NUMBER_IR_PLAYER_FAILED_RATE), ir.float(FLOAT_IR_PLAYER_FAILED_RATE)),

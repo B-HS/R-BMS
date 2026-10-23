@@ -237,7 +237,7 @@ pub(crate) fn render_ranking_panel_at<R: Renderer>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir_ranking::tests::{record, replay_meta};
+    use crate::ir_ranking::tests::{record, record_with_replay};
     use crate::ir_ranking::{RankingState, build_board};
     use rbms_ir::JudgeBreakdown;
     use rbms_render::CpuCanvas;
@@ -246,12 +246,12 @@ mod tests {
     const CANVAS_H: u32 = 720;
 
     fn ready_state() -> RankingState {
-        let mut top = record("a", "Alice", 1500, None);
+        let mut top = record_with_replay("a", "Alice", 1500, None, "rep-a");
         top.judge = Some(JudgeBreakdown { fast: 12, slow: 8, ..Default::default() });
         let rows = [top, record("b", "Bob", 1400, None)];
         let you = record("me", "Me", 1200, Some(7));
         let rivals = [("friend".to_string(), Some(record("friend", "Friend", 1300, Some(3)))), ("ghost".to_string(), None)];
-        RankingState::Ready(Box::new(build_board(&rows, Some(&you), &rivals, &[replay_meta("rep-a", "a")])))
+        RankingState::Ready(Box::new(build_board(&rows, Some(&you), &rivals)))
     }
 
     fn labels(lines: &[PanelLine]) -> Vec<&str> {
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn a_player_without_a_record_still_gets_a_you_row() {
-        let state = RankingState::Ready(Box::new(build_board(&[record("a", "Alice", 1500, None)], None, &[], &[])));
+        let state = RankingState::Ready(Box::new(build_board(&[record("a", "Alice", 1500, None)], None, &[])));
         let lines = panel_lines(Some(&state));
         assert_eq!(labels(&lines), vec!["Alice", "YOU"]);
         assert_eq!(lines[1].rank, NO_VALUE);
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn an_empty_leaderboard_says_so_above_the_you_row() {
-        let state = RankingState::Ready(Box::new(build_board(&[], None, &[], &[])));
+        let state = RankingState::Ready(Box::new(build_board(&[], None, &[])));
         assert_eq!(labels(&panel_lines(Some(&state))), vec![NO_SCORES_TEXT, "YOU"]);
     }
 
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn a_list_longer_than_the_panel_only_draws_what_fits() {
         let rows: Vec<_> = (0..visible_rows() + 10).map(|i| record(&format!("p{i}"), &format!("Player {i}"), 1000 + i as u32, None)).collect();
-        let state = RankingState::Ready(Box::new(build_board(&rows, None, &[], &[])));
+        let state = RankingState::Ready(Box::new(build_board(&rows, None, &[])));
         let lines = panel_lines(Some(&state));
         let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
         let hot = render_ranking_panel(&mut canvas, &lines, lines.len() - 1, true, false);

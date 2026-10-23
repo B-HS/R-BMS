@@ -205,6 +205,50 @@ pub struct ScoreRecord {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
+/// Key of the `extra` entry that names the replay linked to the row's score. Left out of a row whose
+/// score has no replay.
+pub const REPLAY_ID_EXTRA_KEY: &str = "replay_id";
+
+/// Key of the `extra` entry that marks a row played with SCRATCH AUTO. Left out of any other row.
+pub const SCRATCH_AUTO_EXTRA_KEY: &str = "scratch_auto";
+
+/// Key of the `extra` entry that lists the dans the row's player shows, one [`DisplayedDan`] per dan
+/// system, the same list a player profile carries. Left out of a row by a server that predates it.
+pub const DANS_EXTRA_KEY: &str = "dans";
+
+/// One dan a player shows beside the name: the system it belongs to, the system's display name and
+/// the dan reached in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayedDan {
+    pub system: String,
+    pub name: String,
+    pub label: String,
+}
+
+impl ScoreRecord {
+    /// The replay linked to this row's score ([`REPLAY_ID_EXTRA_KEY`]), if it has one.
+    pub fn replay_id(&self) -> Option<&str> {
+        self.extra.get(REPLAY_ID_EXTRA_KEY).and_then(serde_json::Value::as_str).filter(|id| !id.is_empty())
+    }
+
+    /// Whether the run behind this row used SCRATCH AUTO ([`SCRATCH_AUTO_EXTRA_KEY`]).
+    pub fn is_scratch_auto(&self) -> bool {
+        self.extra.get(SCRATCH_AUTO_EXTRA_KEY).and_then(serde_json::Value::as_bool).unwrap_or(false)
+    }
+
+    /// The dans the row's player shows ([`DANS_EXTRA_KEY`]). A server that does not send them, and
+    /// an entry that is not a dan, give nothing.
+    pub fn dans(&self) -> Vec<DisplayedDan> {
+        self.extra
+            .get(DANS_EXTRA_KEY)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| DisplayedDan::deserialize(entry).ok())
+            .collect()
+    }
+}
+
 /// A condition the server attached to a submission while deciding whether it counts for ranking.
 /// The wire form is the server's `SCORE_FLAG` string; unknown future flags stay as raw strings in
 /// [`SubmitResponse::flags`] rather than being dropped.
