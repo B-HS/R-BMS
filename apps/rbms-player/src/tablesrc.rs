@@ -32,9 +32,13 @@ use rbms_config::{DEFAULT_TABLES, INSANE_TABLE_ID, TableSource};
 use rbms_course::table::TableCourses as HeaderCourses;
 use rbms_course::{Course, bundled_twin, courses_from_table_header, genoside_2018};
 use rbms_library::Library;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_table::{DifficultyTable, Md5Index, SavedTable, TableEntry, TableError};
 
 use crate::select_tree::{ListPlace, show_the_list_again};
+use crate::text::menus::tables::TablesText;
+use crate::text::notices::NoticeText;
 use crate::{AppShared, CourseRef, MissingRef};
 
 mod seed;
@@ -135,11 +139,6 @@ const SECONDS_PER_DAY: u64 = 86_400;
 /// How old the copy of a table at an address is before the song list fetches the table again by
 /// itself.
 const COPY_STALE_AFTER_SECS: u64 = SECONDS_PER_DAY;
-
-/// What is said of a copy fetched less than a minute ago, and what follows a count of minutes,
-/// hours or days.
-const COPY_AGE_NONE: &str = "JUST NOW";
-const COPY_AGE_AGO: &str = "AGO";
 
 /// Why a reload left the copy alone although the address answered: it answered with a table that
 /// lists nothing, and the copy has charts.
@@ -253,14 +252,19 @@ pub(crate) fn unix_now() -> u64 {
 /// the application which zone a day is to be counted in, and a copy fetched in the small hours
 /// would be dated the day before by anyone east of Greenwich. A copy dated after `now` -- the clock
 /// was set back -- was fetched just now.
+///
+/// The age is told in the language the screens are in (`12 MINUTES AGO` in English).
 pub(crate) fn copy_age(fetched_at: u64, now: u64) -> String {
     let age = now.saturating_sub(fetched_at);
-    let counted = |count: u64, unit: &str| format!("{count} {unit}{} {COPY_AGE_AGO}", if count == 1 { "" } else { "S" });
+    let counted = |count: u64, one: TablesText, many: TablesText| {
+        let words = if count == 1 { one } else { many };
+        words.fill(language(), &[&count])
+    };
     match age {
-        age if age < SECONDS_PER_MINUTE => COPY_AGE_NONE.to_string(),
-        age if age < SECONDS_PER_HOUR => counted(age / SECONDS_PER_MINUTE, "MINUTE"),
-        age if age < SECONDS_PER_DAY => counted(age / SECONDS_PER_HOUR, "HOUR"),
-        age => counted(age / SECONDS_PER_DAY, "DAY"),
+        age if age < SECONDS_PER_MINUTE => TablesText::JustNow.get(language()).to_string(),
+        age if age < SECONDS_PER_HOUR => counted(age / SECONDS_PER_MINUTE, TablesText::MinuteAgo, TablesText::MinutesAgo),
+        age if age < SECONDS_PER_DAY => counted(age / SECONDS_PER_HOUR, TablesText::HourAgo, TablesText::HoursAgo),
+        age => counted(age / SECONDS_PER_DAY, TablesText::DayAgo, TablesText::DaysAgo),
     }
 }
 
@@ -598,10 +602,10 @@ impl FetchWhy {
     /// counting the failures would be said over again on every start. A copy fetched again because
     /// it is a day old is still the copy that was used, so how that went is said nowhere but beside
     /// the source in the table manager.
-    fn tally(self, updated: usize, failed: usize) -> Option<String> {
+    fn tally(self, updated: usize, failed: usize) -> Option<(NoticeText, [usize; 2])> {
         match self {
-            FetchWhy::Reload => Some(format!("difficulty tables reloaded: {updated} updated, {failed} failed")),
-            FetchWhy::First => (updated > 0).then(|| format!("difficulty tables fetched for the first time: {updated} added, {failed} failed")),
+            FetchWhy::Reload => Some((NoticeText::TablesReloaded, [updated, failed])),
+            FetchWhy::First => (updated > 0).then_some((NoticeText::TablesFetchedFirstTime, [updated, failed])),
             FetchWhy::Registered | FetchWhy::Stale => None,
         }
     }
@@ -897,12 +901,12 @@ pub(crate) fn reload_tables(shared: &mut AppShared, which: Option<usize>) {
         None => tables.clone(),
     };
     if sources.is_empty() {
-        crate::notify::notify(crate::notify::Level::Info, "no difficulty tables to reload");
+        crate::notify::notify_text(crate::notify::Level::Info, NoticeText::NoTablesToReload, &[]);
         return;
     }
     match shared.table_fetches.start(TableStore::beside(&shared.settings_path), sources, FetchWhy::Reload) {
-        0 => crate::notify::notify(crate::notify::Level::Info, "the tables are being fetched already"),
-        started => crate::notify::notify(crate::notify::Level::Info, format!("reloading {started} difficulty table(s)")),
+        0 => crate::notify::notify_text(crate::notify::Level::Info, NoticeText::TablesBeingFetched, &[]),
+        started => crate::notify::notify_text(crate::notify::Level::Info, NoticeText::ReloadingTables, &[&started]),
     }
 }
 
@@ -927,7 +931,7 @@ pub(crate) fn start_first_fetches(shared: &mut AppShared) {
         shared.config.library.tables.iter().filter(|source| table_status(&source.location) == Some(TableStatus::NotFetched)).cloned().collect();
     match shared.table_fetches.start(TableStore::beside(&shared.settings_path), sources, FetchWhy::First) {
         0 => {}
-        started => crate::notify::notify(crate::notify::Level::Info, format!("fetching {started} difficulty table(s) for the first time")),
+        started => crate::notify::notify_text(crate::notify::Level::Info, NoticeText::FetchingTablesFirstTime, &[&started]),
     }
     start_stale_fetches(shared);
 }
@@ -1041,8 +1045,8 @@ pub(crate) fn apply_finished_fetches(shared: &mut AppShared) -> bool {
     }
     for tally in finished {
         let level = if tally.failed == 0 { crate::notify::Level::Info } else { crate::notify::Level::Warn };
-        if let Some(line) = tally.why.tally(tally.updated, tally.failed) {
-            crate::notify::notify(level, line);
+        if let Some((text, [updated, failed])) = tally.why.tally(tally.updated, tally.failed) {
+            crate::notify::notify_text(level, text, &[&updated, &failed]);
         }
     }
     true
@@ -1053,11 +1057,11 @@ pub(crate) fn apply_finished_fetches(shared: &mut AppShared) -> bool {
 /// folder look like a bug in the song list.
 fn announce_registered(name: &str, levels: &TableLevels) {
     if levels.is_empty() {
-        crate::notify::notify(crate::notify::Level::Warn, format!("table read, but it lists no charts and has no folder: {name}"));
+        crate::notify::notify_text(crate::notify::Level::Warn, NoticeText::TableListsNothing, &[&name]);
         return;
     }
     let owned: usize = levels.iter().map(|(_, charts)| charts.len()).sum();
-    crate::notify::notify(crate::notify::Level::Info, format!("table added: {name} ({owned} local charts)"));
+    crate::notify::notify_text(crate::notify::Level::Info, NoticeText::TableAdded, &[&name, &owned]);
 }
 
 /// Put a table in the slot of its source. The names, the levels and the extras are kept in the

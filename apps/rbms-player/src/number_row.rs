@@ -13,7 +13,7 @@
 //! at that moment, and the screen holds the step it is handed to whatever else the row must keep to.
 //!
 //! A row that holds a length of time ([`rbms_config::NumberSpec::as_clock`]) is written as minutes
-//! and seconds, and is typed either that way or as seconds ([`NumberEdit`], [`EDIT_HINT_CLOCK`]).
+//! and seconds, and is typed either that way or as seconds ([`NumberEdit`]), with a line of keys of its own.
 //!
 //! A key moves a row one step, and ten with Shift held. A press on the slider puts the row where
 //! the press landed and a drag carries it along with the pointer, wherever the pointer goes, until
@@ -24,7 +24,7 @@
 //!
 //! The same editor takes a colour typed in hex into a colour row ([`NumberEdit::hex`],
 //! [`NumberInput::begin_hex_edit`]): it is drawn, committed and called off as a number is, and a
-//! figure that is no colour is refused the same way, with words of its own ([`COLOR_REFUSAL_NOTE`]).
+//! figure that is no colour is refused the same way, with words of its own.
 //!
 //! A row's slider and its arrows need not reach as far as a typed figure does
 //! ([`NumberValue::slider_max`]): an opacity is dragged and stepped between none of a part and all
@@ -34,11 +34,14 @@
 use std::time::{Duration, Instant};
 
 use rbms_config::NumberSpec;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Rect, Renderer, draw_text, draw_text_right, text_width, theme};
 use rbms_skin::dst::SkinColor;
 use winit::keyboard::KeyCode;
 
 use crate::stage::KeyInput;
+use crate::text::settings::screen::NumberRowText;
 use crate::textedit::{TextEdit, edit_key};
 use crate::{AppShared, Hot};
 
@@ -71,13 +74,22 @@ const CARET_GAP: f32 = 2.0;
 /// The most characters a figure typed into a row runs to, which is more than any row's longest.
 const EDIT_MAX_CHARS: usize = 12;
 
-/// The keys of a screen while a row is being typed into, written where the screen names its keys.
+/// The keys of a screen while a row is being typed into, written where the screen names its keys,
+/// in the language the screens are drawn in.
+pub(crate) fn number_edit_hint() -> &'static str {
+    NumberRowText::EditHint.get(language())
+}
+
+/// The same line in English, which the tests of the screens that name it compare theirs with.
+#[cfg(test)]
 pub(crate) const EDIT_HINT: &str = "TYPE A NUMBER   ENTER SET   ESC CANCEL   UP DOWN TAB SET AND MOVE ON";
 
-/// The same while the row being typed into holds a length of time.
+/// The same while the row being typed into holds a length of time, in English.
+#[cfg(test)]
 pub(crate) const EDIT_HINT_CLOCK: &str = "TYPE SECONDS OR MIN:SEC   ENTER SET   ESC CANCEL   UP DOWN TAB SET AND MOVE ON";
 
-/// The same while a colour is being typed into a colour row.
+/// The same while a colour is being typed into a colour row, in English.
+#[cfg(test)]
 pub(crate) const EDIT_HINT_HEX: &str = "TYPE A HEX COLOR: RRGGBB OR RRGGBBAA   ENTER SET   ESC CANCEL   UP DOWN TAB SET AND MOVE ON";
 
 /// What stands between the minutes and the seconds of a length of time as it is typed.
@@ -86,12 +98,11 @@ const CLOCK_SEPARATOR: char = ':';
 /// What may stand before the digits of a colour as it is typed.
 const HEX_PREFIX: char = '#';
 
-/// What a row says in place of its number when what was typed into it was not one, and for how
-/// long it says so.
-pub(crate) const REFUSAL_NOTE: &str = "NOT A NUMBER";
+/// For how long a row says that what was typed into it was not a number.
 pub(crate) const REFUSAL_SHOWN_FOR: Duration = Duration::from_millis(1500);
 
-/// What a colour row says in place of its colour when what was typed into it was not one.
+/// What a colour row says in place of its colour when what was typed into it was not one, in
+/// English. The words in the language the screens are drawn in are `NumberRowText::NotAColor`.
 pub(crate) const COLOR_REFUSAL_NOTE: &str = "NOT A COLOR";
 
 /// The number one row holds, as its screen reads it: how the row is counted, the step it stands
@@ -221,7 +232,7 @@ pub(crate) fn draw_edit<R: Renderer>(r: &mut R, field: Rect, text_y: f32, scale:
 /// Write, with its right edge at `right`, what a row says in place of its number for a while after
 /// what was typed into it was refused.
 pub(crate) fn draw_refusal<R: Renderer>(r: &mut R, right: f32, text_y: f32, scale: f32) {
-    draw_refusal_note(r, right, text_y, scale, REFUSAL_NOTE);
+    draw_refusal_note(r, right, text_y, scale, NumberRowText::NotANumber.get(language()));
 }
 
 /// [`draw_refusal`] in the words `note`, for a row that is refused something other than a number.
@@ -455,9 +466,9 @@ impl<K: Copy + PartialEq> NumberInput<K> {
     /// no row is being typed into.
     pub(crate) fn edit_hint(&self) -> Option<&'static str> {
         self.edit.as_ref().map(|(_, edit)| match edit.kind {
-            EditKind::Number => EDIT_HINT,
-            EditKind::Clock => EDIT_HINT_CLOCK,
-            EditKind::Hex => EDIT_HINT_HEX,
+            EditKind::Number => number_edit_hint(),
+            EditKind::Clock => NumberRowText::EditHintClock.get(language()),
+            EditKind::Hex => NumberRowText::EditHintHex.get(language()),
         })
     }
 
@@ -662,6 +673,34 @@ mod tests {
         assert_eq!(input.typed_steps(row, &CLOCK, &text, Instant::now()), Some(900), "seconds alone are not a length of time");
         input.begin_edit(1, &value(40));
         assert_eq!(input.edit_hint(), Some(EDIT_HINT));
+    }
+
+    /// The lines of keys and the words of a refused figure are written for every language, say in
+    /// English what they always said, and are the ones the screens name in the language installed.
+    #[test]
+    fn the_hints_and_the_refusals_are_written_in_every_language() {
+        use rbms_model::Language;
+        use rbms_model::translations::catalog_problems;
+
+        use crate::text::settings::InstalledLanguage;
+
+        assert_eq!(catalog_problems(NumberRowText::ALL), Vec::<String>::new());
+        assert_eq!(NumberRowText::EditHint.get(Language::English), EDIT_HINT);
+        assert_eq!(NumberRowText::EditHintClock.get(Language::English), EDIT_HINT_CLOCK);
+        assert_eq!(NumberRowText::EditHintHex.get(Language::English), EDIT_HINT_HEX);
+        assert_eq!(NumberRowText::NotAColor.get(Language::English), COLOR_REFUSAL_NOTE);
+        assert_eq!(NumberRowText::NotANumber.get(Language::English), "NOT A NUMBER");
+        for language in Language::ALL {
+            let _installed = InstalledLanguage::new(language);
+            let mut input: NumberInput<usize> = NumberInput::new();
+            input.begin_edit(0, &value(40));
+            assert_eq!(input.edit_hint(), Some(NumberRowText::EditHint.get(language)), "{language:?}");
+            assert_eq!(number_edit_hint(), NumberRowText::EditHint.get(language), "{language:?}");
+            input.begin_edit(1, &NumberValue::of(CLOCK, 834, 0));
+            assert_eq!(input.edit_hint(), Some(NumberRowText::EditHintClock.get(language)), "{language:?}");
+            input.begin_hex_edit(2, "#30E050FF");
+            assert_eq!(input.edit_hint(), Some(NumberRowText::EditHintHex.get(language)), "{language:?}");
+        }
     }
 
     /// A colour is typed in hex, with its `#` or without, in either case; anything else typed is

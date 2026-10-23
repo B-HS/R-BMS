@@ -28,6 +28,10 @@ use rbms_judge::gauge::GaugeIndex;
 use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
 use rbms_judge::ln::LnMode;
 use rbms_library::Library;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
+
+use crate::text::menus::course::CourseText;
 
 /// Directory under the config directory that course files live in.
 pub(crate) const COURSE_DIR_NAME: &str = "courses";
@@ -57,8 +61,8 @@ impl SelectTab {
     /// The tab's name as the header draws it.
     pub(crate) fn label(self) -> &'static str {
         match self {
-            SelectTab::Songs => "SONGS",
-            SelectTab::Courses => "COURSE",
+            SelectTab::Songs => CourseText::TabSongs.get(language()),
+            SelectTab::Courses => CourseText::TabCourses.get(language()),
         }
     }
 
@@ -208,18 +212,18 @@ pub(crate) struct CourseRow {
     pub(crate) playable: bool,
 }
 
-/// Badge shown for a course whose file marks it as not for release, which is playable but never
-/// submitted (`CourseResult.java:96`).
-const UNRELEASED_BADGE: &str = "UNRELEASED";
-
 impl CourseRow {
-    /// The row `entry` is drawn as.
+    /// The row `entry` is drawn as. A course whose file marks it as not for release, which is
+    /// playable but never submitted (`CourseResult.java:96`), has a badge that says so.
     pub(crate) fn of(entry: &CourseEntry) -> CourseRow {
         let stages = entry.course.stage_count();
-        let detail = if entry.missing.is_empty() { format!("{stages} STAGES") } else { format!("{stages} STAGES - {} MISSING", entry.missing.len()) };
+        let detail = match entry.missing.len() {
+            0 => CourseText::Stages.fill(language(), &[&stages]),
+            missing => CourseText::StagesMissing.fill(language(), &[&stages, &missing]),
+        };
         let mut badges: Vec<&'static str> = entry.course.constraints.iter().map(|c| constraint_badge(*c)).collect();
         if !entry.course.release {
-            badges.push(UNRELEASED_BADGE);
+            badges.push(CourseText::Unreleased.get(language()));
         }
         CourseRow { title: entry.course.name.clone(), detail, badges, playable: entry.is_playable() }
     }
@@ -428,26 +432,27 @@ pub(crate) fn course_stage_gauge(rule: CourseGaugeMode, chosen: GaugeKind, mode:
 
 /// The stage line the loading and play screens show during a course.
 pub(crate) fn stage_label(run: &CourseRun) -> String {
-    format!("STAGE {} / {}", run.stage_number(), run.course.stage_count())
+    CourseText::StageProgress.fill(language(), &[&run.stage_number(), &run.course.stage_count()])
 }
 
 /// The rows the course result screen lists, as label and value. The gauge rule the course was
 /// played under (`rule`) follows the gauge, as the badges show the course's own gauge constraint,
 /// which the rule outranks.
 pub(crate) fn result_rows(run: &CourseRun, rule: CourseGaugeMode) -> Vec<(String, String)> {
+    let label = |words: CourseText| words.get(language()).to_string();
     let mut rows = vec![
         ("EX SCORE".to_string(), format!("{} / {}", run.totals.ex, run.totals.max_ex)),
-        ("SCORE RATE".to_string(), format!("{:.2}%", run.totals.score_rate())),
+        (label(CourseText::ScoreRate), format!("{:.2}%", run.totals.score_rate())),
         ("MAX COMBO".to_string(), run.totals.max_combo.to_string()),
         ("MISS COUNT".to_string(), run.totals.min_bp().to_string()),
-        ("GAUGE".to_string(), format!("{:.1}%", run.carry_gauge)),
-        ("GAUGE RULE".to_string(), rbms_config::course_gauge_token(rule).to_string()),
+        (label(CourseText::Gauge), format!("{:.1}%", run.carry_gauge)),
+        (label(CourseText::GaugeRule), rbms_config::course_gauge_token(rule).to_string()),
     ];
     if let Some(stage) = run.failed_at {
-        rows.push(("FAILED AT".to_string(), format!("STAGE {}", stage + 1)));
+        rows.push((label(CourseText::FailedAt), CourseText::StageNumber.fill(language(), &[&(stage + 1)])));
     }
     if let Some(trophy) = run.trophy() {
-        rows.push(("TROPHY".to_string(), trophy.name.clone()));
+        rows.push((label(CourseText::Trophy), trophy.name.clone()));
     }
     rows
 }

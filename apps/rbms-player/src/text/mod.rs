@@ -7,8 +7,8 @@
 //! The terms and their translations are fixed in `docs/reference/2026-10-24-i18n-glossary.md`.
 
 pub(crate) mod layout_play;
-mod menus;
-mod notices;
+pub(crate) mod menus;
+pub(crate) mod notices;
 pub(crate) mod ranking;
 mod select;
-mod settings;
+pub(crate) mod settings;

@@ -211,7 +211,7 @@ fn a_token_whose_owner_is_not_named_yet_makes_no_request_as_anybody() {
     let mut f = Fixture::signed_in("unnamed");
     f.shared.session = AccountSession::restored(Some(TOKEN.into()), None);
     f.shared.start_settings_upload();
-    assert_eq!(f.shared.net_status, ACCOUNT_NOT_CONFIRMED);
+    assert_eq!(f.shared.net_status, "account not confirmed yet");
     f.shared.start_settings_download();
     f.shared.refresh_rivals();
     f.shared.push_rivals();
@@ -412,7 +412,7 @@ fn changing_the_server_during_a_login_lets_it_go_and_lets_the_next_one_start() {
 
     assert!(f.shared.auth_rx.is_none(), "the answer of the old server's login would still be taken");
     assert!(!f.shared.session.is_busy(), "LOGIN stays refused until a restart");
-    assert_eq!(f.shared.net_status, ACCOUNT_REQUESTS_DROPPED);
+    assert_eq!(f.shared.net_status, "account or server changed: the request in flight was dropped");
     f.shared.server = f.server.clone();
     f.shared.password = "hunter2hunter2".into();
     f.shared.start_auth(AuthAction::Login);

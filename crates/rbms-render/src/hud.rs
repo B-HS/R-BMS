@@ -1,6 +1,9 @@
+use rbms_model::translations::Catalog;
+
 use crate::ctx::{RenderCtx, with_render_ctx};
 use crate::result::{KEY_LANE_KIND, LANE_KIND_COUNT, SCRATCH_LANE_KIND, lane_kind_total};
 use crate::skin::Skin;
+use crate::text::hud::HudText;
 use crate::{Color, Rect, Renderer};
 
 /// A judge-text position of this value means "wherever the skin puts it", so a player who has not
@@ -155,11 +158,11 @@ fn draw_score_graph<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, graph: &Sco
         r.fill_rect(Rect::new(bx + bar_w + gap, bt, bar_w, (y + h) - bt), Color::GREEN);
         let d = ex as i64 - b as i64;
         let (txt, col) = if d >= 0 { (format!("+{d}"), Color::GREEN) } else { (format!("{d}"), Color::rgb(230, 90, 70)) };
-        ctx.draw_text_centered(r, x + w * 0.5, y - 18.0, 1.4, col, &format!("vs BEST {txt}"));
+        ctx.draw_text_centered(r, x + w * 0.5, y - 18.0, 1.4, col, &HudText::VsBest.fill(ctx.language, &[&txt]));
     }
-    ctx.draw_text_centered(r, bx + bar_w * 0.5, y + h + 2.0, 1.0, Color::CYAN, "NOW");
+    ctx.draw_text_centered(r, bx + bar_w * 0.5, y + h + 2.0, 1.0, Color::CYAN, HudText::Now.get(ctx.language));
     if best.is_some() {
-        ctx.draw_text_centered(r, bx + bar_w + gap + bar_w * 0.5, y + h + 2.0, 1.0, Color::GREEN, "BEST");
+        ctx.draw_text_centered(r, bx + bar_w + gap + bar_w * 0.5, y + h + 2.0, 1.0, Color::GREEN, HudText::Best.get(ctx.language));
     }
 }
 
@@ -204,7 +207,7 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
     ctx.draw_text_right(r, CW_REFERENCE - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, hud.mode_label);
     ctx.draw_text(r, 14.0, 14.0, 2.4, Color::WHITE, &format!("EX {}", hud.ex_score));
     if let Some(b) = hud.best_ex {
-        ctx.draw_text(r, 14.0, 48.0, 1.4, Color::GREEN, &format!("BEST {b}"));
+        ctx.draw_text(r, 14.0, 48.0, 1.4, Color::GREEN, &HudText::BestLine.fill(ctx.language, &[&b]));
     }
     if hud.green_number > 0.0 {
         ctx.draw_text(r, 14.0, 72.0, 1.4, Color::CYAN, &format!("GREEN {}", hud.green_number.round() as i32));
@@ -264,7 +267,8 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
 mod tests {
     use super::*;
     use crate::CpuCanvas;
-    use rbms_model::Mode;
+    use crate::text::testing::{differs_within, drawn_in};
+    use rbms_model::{Language, Mode};
 
     fn skin() -> Skin {
         Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0)
@@ -402,5 +406,48 @@ mod tests {
         assert!(layout.rect.x >= field_right + GRAPH_FIELD_GAP, "the graph moves over the field");
         assert!(layout.rect.x + layout.rect.w <= bga.x - GRAPH_BGA_GAP, "the graph moves over the BGA");
         assert_eq!(layout.rect.y, skin.top_y + GRAPH_DEFAULT_TOP_OFFSET, "the existing graph vertical placement changes");
+    }
+
+    fn in_language(language: Language, hud: &HudView<'_>) -> CpuCanvas {
+        drawn_in(language, SCREEN_W, SCREEN_H, |ctx, canvas| {
+            canvas.clear(Color::BLACK);
+            render_hud_ctx(ctx, canvas, &skin(), hud);
+        })
+    }
+
+    /// The size of the screen the HUD is drawn on, the column on the left that carries the best
+    /// score, how tall a line of it is, and how far above and below the score graph its figure for
+    /// the difference and its two labels stand.
+    const SCREEN_W: u32 = 1280;
+    const SCREEN_H: u32 = 720;
+    const BEST_LINE_Y: f32 = 48.0;
+    const HUD_LINE_H: f32 = 18.0;
+    const GRAPH_DIFFERENCE_ABOVE: f32 = 20.0;
+    const GRAPH_LABELS_BELOW: f32 = 2.0;
+
+    #[test]
+    fn the_best_score_and_the_score_graph_are_written_in_the_language_asked_for() {
+        let skin = skin();
+        let field_right = skin.x.iter().zip(&skin.w).map(|(x, width)| x + width).fold(f32::MIN, f32::max);
+        let graph = score_graph_layout(&skin, field_right, skin.top_y, skin.judge_y).expect("the default skin has graph space").rect;
+        let best_line = Rect::new(0.0, BEST_LINE_Y, graph.x, HUD_LINE_H);
+        let difference = Rect::new(graph.x, graph.y - GRAPH_DIFFERENCE_ABOVE, graph.w, HUD_LINE_H);
+        let labels = Rect::new(graph.x, graph.y + graph.h + GRAPH_LABELS_BELOW, graph.w, HUD_LINE_H);
+        let english = in_language(Language::English, &hud());
+        let unbeaten = in_language(Language::English, &HudView { best_ex: None, ..hud() });
+        for language in [Language::Korean, Language::Japanese] {
+            let drawn = in_language(language, &hud());
+            assert!(differs_within(&english, &drawn, best_line), "{language:?}: the best score is still English");
+            assert!(differs_within(&english, &drawn, difference), "{language:?}: the difference from the best is still English");
+            assert!(differs_within(&english, &drawn, labels), "{language:?}: the graph's labels are still English");
+            let no_best = in_language(language, &HudView { best_ex: None, ..hud() });
+            assert!(differs_within(&unbeaten, &no_best, labels), "{language:?}: the label of a graph with no best is still English");
+        }
+    }
+
+    #[test]
+    fn a_hud_in_english_is_drawn_as_the_screen_always_was() {
+        let through_the_context = in_language(Language::English, &hud());
+        assert_eq!(drawn(&hud()), through_the_context.pixels(), "an explicit English context draws what the thread's default does");
     }
 }

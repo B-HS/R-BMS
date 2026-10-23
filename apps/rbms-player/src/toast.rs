@@ -128,7 +128,10 @@ pub(crate) fn draw(queue: &ToastQueue, stage: StageId, canvas: &mut Canvas<'_>) 
 
 #[cfg(test)]
 mod tests {
+    use rbms_model::Language;
+
     use super::*;
+    use crate::text::notices::NoticeText;
 
     fn queue_with(now: Instant, count: usize) -> ToastQueue {
         let mut queue = ToastQueue::default();
@@ -229,5 +232,44 @@ mod tests {
             queue.pump(now);
             assert_eq!(queue.active().len(), 1, "pumping again must not show the same message twice");
         });
+    }
+
+    /// A message reported before the language was settled, or from a worker thread, is shown in the
+    /// language the frame thread has installed when it takes the message.
+    #[test]
+    fn pumping_words_a_catalog_message_in_the_language_the_frame_thread_installed() {
+        notify::exclusive(|| {
+            let now = Instant::now();
+            notify::notify_text(Level::Info, NoticeText::CourseSent, &[]);
+            notify::notify_text(Level::Warn, NoticeText::ReloadingTables, &[&2]);
+            rbms_render::text::set_language(Language::Korean);
+            let mut queue = ToastQueue::default();
+            queue.pump(now);
+            rbms_render::text::set_language(Language::English);
+            let shown: Vec<(ToastLevel, &str)> = queue.active().iter().map(|toast| (toast.level, toast.text.as_str())).collect();
+            assert_eq!(shown, vec![(ToastLevel::Info, "코스를 전송했습니다"), (ToastLevel::Warn, "난이도표 2개를 다시 불러오는 중입니다")]);
+        });
+    }
+
+    #[test]
+    fn a_catalog_message_is_shown_in_english_until_another_language_is_installed() {
+        notify::exclusive(|| {
+            let mut queue = ToastQueue::default();
+            notify::notify_text(Level::Info, NoticeText::CourseSent, &[]);
+            queue.pump(Instant::now());
+            assert_eq!(queue.active()[0].text, "course sent");
+        });
+    }
+
+    /// The cut counts characters, not bytes, so a message in a script of wide characters is cut
+    /// where an English one of the same length is.
+    #[test]
+    fn a_message_in_a_wide_script_is_cut_by_characters_like_any_other() {
+        let long: String = std::iter::repeat_n('あ', TOAST_TEXT_CHARS + 40).collect();
+        let shown = shorten(&long);
+        assert_eq!(shown.chars().count(), TOAST_TEXT_CHARS);
+        assert_eq!(shown.chars().last(), Some(TOAST_ELLIPSIS));
+        let fits: String = std::iter::repeat_n('한', TOAST_TEXT_CHARS).collect();
+        assert_eq!(shorten(&fits), fits);
     }
 }

@@ -7,17 +7,19 @@
 //! pair is not a line of its own. The shortcuts follow, group by group.
 
 use rbms_model::Mode;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use winit::keyboard::KeyCode;
 
 use crate::gamepad::{PadBinding, PadConfig};
 use crate::keyconfig::{Bindable, Clash, KeyConfig, Shortcut, ShortcutGroup, clash_among};
+use crate::text::menus::key_editor::KeyEditorText;
 use crate::{KcRow, is_pad_row, kc_rows};
 
-/// The headings of the lines that are not shortcuts.
-const LANES_HEADING: &str = "LANES";
-const PLAY_HEADING: &str = "PLAY";
-const CONTROLLER_HEADING: &str = "CONTROLLER";
-const DEFAULTS_HEADING: &str = "DEFAULTS";
+/// The heading of a line that is not a shortcut, in the language of the screens.
+fn heading(words: KeyEditorText) -> Line {
+    Line::Heading(words.get(language()))
+}
 
 /// One line of the key editor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,9 +63,9 @@ pub(super) fn lines(mode: Mode) -> Vec<Line> {
         .collect();
     let bind = |target: Bindable| Line::Bind { target, pad: on_the_pad.contains(&target) };
     let mut top = Vec::new();
-    let mut lanes = vec![Line::Heading(LANES_HEADING)];
-    let mut play = vec![Line::Heading(PLAY_HEADING)];
-    let mut controller = vec![Line::Heading(CONTROLLER_HEADING)];
+    let mut lanes = vec![heading(KeyEditorText::Lanes)];
+    let mut play = vec![heading(KeyEditorText::Play)];
+    let mut controller = vec![heading(KeyEditorText::Controller)];
     for row in rows {
         match row {
             KcRow::ModeSelect => top.push(Line::Mode),
@@ -82,7 +84,7 @@ pub(super) fn lines(mode: Mode) -> Vec<Line> {
             .map(|shortcut| Line::Bind { target: Bindable::Shortcut(shortcut), pad: shortcut.takes_a_pad() });
         std::iter::once(Line::Heading(group.title())).chain(rows)
     });
-    top.into_iter().chain(lanes).chain(play).chain(shortcuts).chain(controller).chain([Line::Heading(DEFAULTS_HEADING), Line::RestoreAll]).collect()
+    top.into_iter().chain(lanes).chain(play).chain(shortcuts).chain(controller).chain([heading(KeyEditorText::Defaults), Line::RestoreAll]).collect()
 }
 
 /// Everything that can be bound for the mode being edited, with what each is bound to on the

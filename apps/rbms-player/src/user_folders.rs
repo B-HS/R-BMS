@@ -31,9 +31,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppShared;
 use crate::ir_outcome::short_error;
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify, notify_text};
 use crate::select_tree::{ListPlace, show_the_list_again};
 use crate::tablesrc::{unix_now, url_hash};
+use crate::text::notices::NoticeText;
 
 /// The row the folders are under at the top of the song list, and what the table manager calls
 /// them.
@@ -486,13 +487,13 @@ pub(crate) fn apply_finished_fetch(shared: &mut AppShared) -> bool {
             show(shared, Some(saved));
             let owned = shared.user_folders.chart_counts().1;
             if changed || fetch.loud {
-                notify(Level::Info, format!("user folders: {folders} folders, {listed} charts ({owned} owned)"));
+                notify_text(Level::Info, NoticeText::UserFoldersLoaded, &[&folders, &listed, &owned]);
             }
         }
         FetchOutcome::NoFolders => {
             shared.user_folders.problem = Some(FolderProblem::NoFolders);
             if fetch.loud {
-                notify(Level::Info, "the score server has no folders to load");
+                notify_text(Level::Info, NoticeText::NoFoldersOnTheServer, &[]);
             }
         }
         FetchOutcome::Refused(reason) => {

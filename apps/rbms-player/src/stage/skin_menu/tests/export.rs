@@ -99,7 +99,7 @@ fn the_export_row_is_listed_under_the_actions_while_there_is_a_pack() {
     assert_eq!(menu.state.rows[..menu.state.rows.len() - 1], menu.app.shared.settings_rows(SettingTab::Skin));
     let line = &menu.state.lines[menu.at(EXPORT_ROW)];
     assert_eq!((line.label.as_str(), line.value.as_str(), line.number), ("EXPORT", ">", None));
-    assert_eq!(row_help(&menu.app.shared, EXPORT_ROW), EXPORT_HELP);
+    assert_eq!(row_help(&menu.app.shared, EXPORT_ROW), SkinMenuText::ExportHelp.get(language()));
 }
 
 /// Everything the menu says of an export and of a row other screens declare fits the panel it is
@@ -110,10 +110,10 @@ fn what_is_said_of_an_export_and_of_a_shared_row_fits_the_panel() {
     let room = INFO_RECT.w - INFO_PAD * 2.0;
     let most_screens = rbms_config::SKIN_SCREEN_LABELS.len();
     let said = [
-        EXPORT_PICKER_NOTE.to_string(),
-        EXPORT_LISTING_NOTE.to_string(),
-        EXPORT_HELP.to_string(),
-        SAID_HELP.to_string(),
+        SkinMenuText::ExportPickerNote.get(language()).to_string(),
+        SkinMenuText::ExportListingNote.get(language()).to_string(),
+        SkinMenuText::ExportHelp.get(language()).to_string(),
+        SkinMenuText::SaidHelp.get(language()).to_string(),
         export_note(MOST),
         shared_row_note(1).expect("one other screen is said"),
         shared_row_note(most_screens).expect("every other screen is said"),
@@ -122,7 +122,7 @@ fn what_is_said_of_an_export_and_of_a_shared_row_fits_the_panel() {
         assert!(text_width(&line, INFO_SCALE) <= room, "{line}");
     }
     assert_eq!(shared_row_note(0), None);
-    assert_eq!(export_note(ExportStanding::default()), EXPORT_LISTING_NOTE);
+    assert_eq!(export_note(ExportStanding::default()), SkinMenuText::ExportListingNote.get(language()));
     assert_eq!(export_note(RUNNING), "EXPORTING 812 / 2431 FILES - 212 / 640 MB - ESC CANCELS");
 }
 
@@ -187,7 +187,7 @@ fn the_folder_that_is_picked_gets_the_pack_and_the_choices_made_here() {
     assert!(exported.join("select.json").is_file() && exported.join("bg/night.png").is_file(), "the pack was not written to {}", exported.display());
     assert!(exported.join(ADJUSTMENTS_FILE).is_file(), "the choices were not written");
     let (heading, detail) = menu.said();
-    assert!(heading.starts_with(EXPORTED_HEADING) && heading.contains(" FILES "), "{heading}");
+    assert!(heading.starts_with("EXPORTED ") && heading.contains(" FILES "), "{heading}");
     assert_eq!(Path::new(&detail), exported.canonicalize().expect("the export is there").as_path(), "the folder that was written is not the one said");
     assert_eq!(menu.state.focused(), Some(EXPORT_ROW), "the cursor left the row that was run");
     menu.frame();
@@ -212,7 +212,7 @@ fn an_export_that_is_refused_says_why() {
     menu.focus(EXPORT_ROW);
     menu.export_into(&home.join("pack").join("bg"));
     let (heading, detail) = menu.said();
-    assert_eq!(heading, EXPORT_FAILED_HEADING);
+    assert_eq!(heading, SkinMenuText::ExportFailedHeading.get(language()));
     assert!(detail.contains("inside"), "{detail}");
     menu.frame();
     menu.save("export-refused");
@@ -239,7 +239,7 @@ fn a_running_export_says_how_far_it_has_got_and_escape_calls_it_off() {
     tx.send(Err(crate::skin_select::export::ExportError::CalledOff)).expect("the job is still held");
     menu.frame();
     assert!(menu.state.export.is_none());
-    assert_eq!(menu.said().0, EXPORT_CANCELLED_HEADING);
+    assert_eq!(menu.said().0, SkinMenuText::ExportCancelledHeading.get(language()));
     menu.save("export-cancelled");
     assert!(matches!(menu.key(KeyCode::Escape), Transition::Back), "Escape does not leave the menu once the export has ended");
 }
@@ -286,7 +286,7 @@ fn a_row_other_screens_declare_says_so_and_one_key_puts_its_value_on_them() {
     menu.focus(THEME_ROW);
     assert!(matches!(menu.key(APPLY_TO_ALL_KEY), Transition::Stay));
     let (heading, detail) = menu.said();
-    assert_eq!(heading, APPLIED_HEADING);
+    assert_eq!(heading, SkinMenuText::AppliedHeading.get(language()));
     assert_eq!(detail, "THEME: LIGHT APPLIED TO 1 OTHER SCREEN (1 SKIPPED: NO ITEM OF THAT NAME)");
     menu.frame();
     menu.save("apply-done");

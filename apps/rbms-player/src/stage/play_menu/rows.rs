@@ -33,16 +33,23 @@ use rbms_config::{
     AdjustOutcome, Config, HISPEED_DECIMALS, MILLISECOND_UNIT, PlayOptions, SettingId, SettingTab, adjust, descriptor, move_number_steps, number_spec, tab_rows,
 };
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
+
 use crate::AppShared;
 use crate::app_play::{SCRATCH_AUTO_SHIPPED_COLOR, scratch_auto_color};
 use crate::number_row::NumberValue;
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_select::{CHANNEL_STEPS, COLOR_CHANNELS_LABEL, ColorChannel, SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{ONE_STEP, RowLook, SHIFT_STEPS};
-use crate::stage::skin_menu::{CHANNEL_FOLD_HELP, skin_row_help};
+use crate::stage::skin_menu::skin_row_help;
+use crate::text::menus::play_menu::PlayMenuText;
+use crate::text::menus::skin_menu::SkinMenuText;
 
 /// The group the rows that are no setting are listed under.
-pub(super) const GROUP_PREVIEW: &str = "PREVIEW";
+pub(super) fn group_preview() -> &'static str {
+    PlayMenuText::GroupPreview.get(language())
+}
 
 /// The group the options of the previewed play skin are listed at the end of, with the offsets it
 /// declares to move a part of its own: what they change is where the lanes are, how wide, and
@@ -50,37 +57,28 @@ pub(super) const GROUP_PREVIEW: &str = "PREVIEW";
 const SKIN_OPTIONS_GROUP: SettingTab = SettingTab::PlayLane;
 
 /// The group the offsets of the previewed play skin are listed under, at the end of the list.
-pub(super) const GROUP_SKIN: &str = "SKIN";
-
-/// What is said of each fold.
-const COLOR_FOLD_HELP: &str = "The colors of the play skin of this mode, one row each. ENTER shows or hides the rows";
-const OPACITY_FOLD_HELP: &str = "How opaque each part of the play skin of this mode is drawn. ENTER shows or hides the rows";
-const PLACE_FOLD_HELP: &str = "The offsets the game adds to every play skin: its screen, notes and judgement. ENTER shows or hides the rows";
+pub(super) fn group_skin() -> &'static str {
+    PlayMenuText::GroupSkin.get(language())
+}
 
 /// The group the rows of the SCRATCH AUTO colour are listed in, under the row of SCRATCH AUTO itself.
 const SCRATCH_AUTO_COLOR_GROUP: SettingTab = SettingTab::PlayChart;
 
 /// What the row of the SCRATCH AUTO colour is called, and what its channel rows begin with.
-pub(super) const SCRATCH_AUTO_COLOR_LABEL: &str = "SCRATCH AUTO COLOR";
-
-/// What is said of the rows of the SCRATCH AUTO colour.
-const SCRATCH_AUTO_COLOR_HELP: &str =
-    "The color SCRATCH AUTO's notes are drawn in, on every skin. Its alpha is how opaque they are. ENTER types a hex color, 0 gives back the green";
-const SCRATCH_AUTO_CHANNELS_HELP: &str = "The red, green, blue and alpha of SCRATCH AUTO's color. ENTER shows or hides the rows";
-const SCRATCH_AUTO_CHANNEL_HELP: &str = "One channel of SCRATCH AUTO's color, 0 to 255";
+pub(super) fn scratch_auto_color_label() -> &'static str {
+    PlayMenuText::ScratchAutoColor.get(language())
+}
 
 /// The row of the tempo of the sample chart.
-pub(super) const PREVIEW_BPM_LABEL: &str = "PREVIEW BPM";
+pub(super) fn preview_bpm_label() -> &'static str {
+    PlayMenuText::PreviewBpm.get(language())
+}
 
 /// What a tempo is written with after it.
 pub(super) const BPM_UNIT: &str = "BPM";
 
 /// What a scroll speed is written with after it.
 const HISPEED_UNIT: &str = "x";
-
-/// What is written after a scroll speed that stands at an end of its range because the speed that
-/// would hold the green number is outside it.
-const LIMIT_MARK: &str = " (LIMIT)";
 
 /// What is written after the value of a row that is worked out from the others, so the list says
 /// why the arrows leave it alone before the cursor is put on it.
@@ -93,15 +91,6 @@ const WHITE_NUMBER_NAME: &str = "WHITE";
 /// places after the point the fine step is written to in them: its smallest is a tenth of one.
 const WHITE_NUMBER_PER_LANE: f32 = 1000.0;
 const FINE_STEP_WHITE_DECIMALS: usize = 1;
-
-/// What is said of the rows the settings table does not explain.
-const PREVIEW_BPM_HELP: &str = "The tempo of the sample chart. It is not a setting: it shows what the speed options come to on another chart";
-const SKIN_OPTION_HELP: &str = "An option the play skin of this mode declares. It is stored for that skin document";
-
-/// What is said of the two rows that change places with KEEP GREEN NUMBER while each cannot be
-/// stepped.
-const HISPEED_WORKED_OUT_HELP: &str = "Worked out from GREEN NUMBER at the preview tempo. Turn KEEP GREEN NUMBER off to set it";
-const GREEN_NUMBER_WORKED_OUT_HELP: &str = "What HI-SPEED comes to at the preview tempo. Turn KEEP GREEN NUMBER on to set it";
 
 /// One of the folds the colours and the offsets of the previewed play skin are kept in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,11 +117,11 @@ impl Fold {
     /// What the fold's row is called.
     pub(super) fn label(self) -> &'static str {
         match self {
-            Fold::Color => "COLOR",
+            Fold::Color => PlayMenuText::FoldColor.get(language()),
             Fold::ColorChannels => COLOR_CHANNELS_LABEL,
-            Fold::Opacity => "OPACITY",
-            Fold::Place => "POSITION AND SIZE",
-            Fold::AutoChannels => "SCRATCH AUTO CHANNELS",
+            Fold::Opacity => PlayMenuText::FoldOpacity.get(language()),
+            Fold::Place => PlayMenuText::FoldPlace.get(language()),
+            Fold::AutoChannels => PlayMenuText::FoldAutoChannels.get(language()),
         }
     }
 
@@ -152,11 +141,11 @@ impl Fold {
     /// What is said of the fold's row.
     fn help(self) -> &'static str {
         match self {
-            Fold::Color => COLOR_FOLD_HELP,
-            Fold::ColorChannels => CHANNEL_FOLD_HELP,
-            Fold::Opacity => OPACITY_FOLD_HELP,
-            Fold::Place => PLACE_FOLD_HELP,
-            Fold::AutoChannels => SCRATCH_AUTO_CHANNELS_HELP,
+            Fold::Color => PlayMenuText::ColorFoldHelp.get(language()),
+            Fold::ColorChannels => SkinMenuText::ChannelFoldHelp.get(language()),
+            Fold::Opacity => PlayMenuText::OpacityFoldHelp.get(language()),
+            Fold::Place => PlayMenuText::PlaceFoldHelp.get(language()),
+            Fold::AutoChannels => PlayMenuText::ScratchAutoChannelsHelp.get(language()),
         }
     }
 }
@@ -240,7 +229,7 @@ pub(super) struct Line {
 /// A fold the skin has nothing for is not listed, and neither is the group when it has none. A
 /// document's file slots are not listed: they are the skin menu's.
 pub(super) fn listed(shared: &AppShared, screen: i32, open: Folds) -> Vec<Row> {
-    let mut rows = vec![Row::Group(GROUP_PREVIEW), Row::PreviewBpm];
+    let mut rows = vec![Row::Group(group_preview()), Row::PreviewBpm];
     for tab in SettingTab::PLAY_MENU {
         rows.push(Row::Group(tab.label()));
         let mut settings: Vec<Row> = tab_rows(tab, &shared.config).into_iter().map(Row::Setting).collect();
@@ -257,7 +246,7 @@ pub(super) fn listed(shared: &AppShared, screen: i32, open: Folds) -> Vec<Row> {
     let folds: Vec<(Fold, Vec<SkinRow>)> =
         Fold::ALL.into_iter().map(|fold| (fold, folded(shared, screen, fold))).filter(|(_, held)| !held.is_empty()).collect();
     if !folds.is_empty() {
-        rows.push(Row::Group(GROUP_SKIN));
+        rows.push(Row::Group(group_skin()));
     }
     for (fold, held) in folds {
         rows.push(Row::Fold(fold));
@@ -324,7 +313,8 @@ pub(super) fn setting_value(shared: &AppShared, readout: &SpeedReadout, id: Sett
     let stored = shared.setting_line(id).1;
     match id {
         SettingId::HiSpeed if play.keep_green_number => {
-            format!("{}{HISPEED_UNIT}{}{WORKED_OUT_MARK}", hispeed_figure(readout.hispeed), if readout.limited { LIMIT_MARK } else { "" })
+            let limit = if readout.limited { format!(" {}", PlayMenuText::LimitMark.get(language())) } else { String::new() };
+            format!("{}{HISPEED_UNIT}{limit}{WORKED_OUT_MARK}", hispeed_figure(readout.hispeed))
         }
         SettingId::HiSpeed | SettingId::HiSpeedStep => format!("{stored}{HISPEED_UNIT}"),
         SettingId::GreenNumber if play.keep_green_number => format!("{stored} ({}{MILLISECOND_UNIT})", play.duration_ms),
@@ -343,17 +333,17 @@ pub(super) fn setting_value(shared: &AppShared, readout: &SpeedReadout, id: Sett
 pub(super) fn help(play: &PlayOptions, row: Row, kind: Option<SkinRowKind>) -> &'static str {
     match row {
         Row::Group(_) => "",
-        Row::PreviewBpm => PREVIEW_BPM_HELP,
-        Row::Setting(SettingId::HiSpeed) if play.keep_green_number => HISPEED_WORKED_OUT_HELP,
-        Row::Setting(SettingId::GreenNumber) if !play.keep_green_number => GREEN_NUMBER_WORKED_OUT_HELP,
+        Row::PreviewBpm => PlayMenuText::PreviewBpmHelp.get(language()),
+        Row::Setting(SettingId::HiSpeed) if play.keep_green_number => PlayMenuText::HispeedWorkedOutHelp.get(language()),
+        Row::Setting(SettingId::GreenNumber) if !play.keep_green_number => PlayMenuText::GreenNumberWorkedOutHelp.get(language()),
         Row::Setting(id) => descriptor(id).help,
         Row::Skin(_) => match kind {
             Some(kind @ (SkinRowKind::Offset(_) | SkinRowKind::Opacity | SkinRowKind::Color | SkinRowKind::ColorChannel(_))) => skin_row_help(kind),
-            Some(SkinRowKind::Property | SkinRowKind::File) | None => SKIN_OPTION_HELP,
+            Some(SkinRowKind::Property | SkinRowKind::File) | None => PlayMenuText::SkinOptionHelp.get(language()),
         },
         Row::Fold(fold) => fold.help(),
-        Row::AutoColor => SCRATCH_AUTO_COLOR_HELP,
-        Row::AutoChannel(_) => SCRATCH_AUTO_CHANNEL_HELP,
+        Row::AutoColor => PlayMenuText::ScratchAutoColorHelp.get(language()),
+        Row::AutoChannel(_) => PlayMenuText::ScratchAutoChannelHelp.get(language()),
     }
 }
 

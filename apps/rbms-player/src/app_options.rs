@@ -17,11 +17,15 @@
 //! stops no timer of a skin.
 
 use rbms_config::{AdjustOutcome, SettingId, adjust, descriptor, display_value};
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, text_width, theme};
 use winit::keyboard::KeyCode;
 
 use crate::keyconfig::{Shortcut, key_name};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageId};
+use crate::text::settings::screen::OptionsText;
+use crate::text::settings::{row_label, shown_value};
 use crate::{AppShared, CH, CW};
 
 /// The rows the panel shows, top to bottom: what a player changes for one chart and then changes
@@ -83,13 +87,6 @@ const ROW_SCALE: f32 = 1.6;
 
 /// Text scale of the keyboard hint.
 const HINT_SCALE: f32 = 1.1;
-
-/// Title of the panel.
-const OPTIONS_TITLE: &str = "OPTIONS";
-
-/// Keyboard hint along the bottom of the panel, around the name of the key that pins it.
-const OPTIONS_HINT_BEFORE_PIN: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   ";
-const OPTIONS_HINT_AFTER_PIN: &str = " PIN   ESC CLOSE";
 
 /// What the hint names as the key that pins the panel when the player has left it without one.
 const NO_PIN_KEY: &str = "-";
@@ -278,7 +275,7 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
     let x = panel.x;
     let y = panel.y;
     canvas.fill_rect(panel, Color { a: th.options_layout.panel_alpha, ..th.panel });
-    draw_text(canvas, x + PANEL_PAD_X, y + PANEL_PAD_Y, TITLE_SCALE, th.text, OPTIONS_TITLE);
+    draw_text(canvas, x + PANEL_PAD_X, y + PANEL_PAD_Y, TITLE_SCALE, th.text, OptionsText::Title.get(language()));
 
     let mut ry = y + TITLE_H + PANEL_PAD_Y;
     for (index, id) in OPTION_ROWS.into_iter().enumerate() {
@@ -291,14 +288,14 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
             canvas.fill_rect(Rect::new(x + PANEL_PAD_X * 0.5, row_y - 4.0, panel.w - PANEL_PAD_X, ROW_H), th.row_focus);
         }
         let label_color = row_override.and_then(|layout| layout.label_color).unwrap_or(if focused { th.title_focus } else { th.text_dim });
-        draw_text(canvas, label_x, row_y, ROW_SCALE, label_color, descriptor(id).label);
-        let value = display_value(&ctx.shared.config, id);
+        draw_text(canvas, label_x, row_y, ROW_SCALE, label_color, row_label(id));
+        let value = shown_value(id, &display_value(&ctx.shared.config, id));
         let value_color = row_override.and_then(|layout| layout.value_color).unwrap_or(th.text);
         draw_text_right(canvas, value_right_x, row_y, ROW_SCALE, value_color, &value);
         ry += row_pitch;
     }
     let pin = ctx.shared.shortcut_key(Shortcut::OptionsPin).map_or(NO_PIN_KEY, key_name);
-    let hint = format!("{OPTIONS_HINT_BEFORE_PIN}{pin}{OPTIONS_HINT_AFTER_PIN}");
+    let hint = OptionsText::Hint.fill(language(), &[&pin]);
     let hint_x = x + (panel.w - text_width(&hint, HINT_SCALE)) * 0.5;
     draw_text(canvas, hint_x, y + panel.h - HINT_H, HINT_SCALE, th.text_muted, &hint);
 }

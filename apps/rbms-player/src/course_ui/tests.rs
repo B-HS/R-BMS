@@ -8,11 +8,11 @@ use rbms_judge::gauge::GaugeIndex;
 use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
 use rbms_judge::ln::LnMode;
 use rbms_library::{Library, SongEntry};
-use rbms_model::Mode;
+use rbms_model::{Language, Mode};
 
 use super::{
-    COURSE_DIR_NAME, CourseList, CourseOverrides, RandomLock, SelectTab, constraint_badge, course_stage_gauge, courses_dir, library_index, result_rows,
-    stage_label,
+    COURSE_DIR_NAME, CourseEntry, CourseList, CourseOverrides, CourseRow, RandomLock, SelectTab, constraint_badge, course_stage_gauge, courses_dir,
+    library_index, result_rows, stage_label,
 };
 
 const TEST_MD5_PRESENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -449,6 +449,28 @@ fn the_result_rows_report_the_totals_and_the_stage_a_run_failed_on() {
     assert_eq!(labels, vec!["EX SCORE", "SCORE RATE", "MAX COMBO", "MISS COUNT", "GAUGE", "GAUGE RULE", "FAILED AT"]);
     assert_eq!(rows[0].1, "1500 / 4000");
     assert_eq!(rows[6].1, "STAGE 2");
+}
+
+#[test]
+fn the_course_lines_are_told_in_the_language_of_the_screen() {
+    let mut run = CourseRun::new(course("C", vec![chart(TEST_MD5_PRESENT, "One"), chart(TEST_MD5_PRESENT, "Two")], vec![]), 100.0);
+    run.advance(&stage(TEST_EX, 80.0, true));
+    run.advance(&stage(100, 0.0, false));
+    let entry = CourseEntry { course: run.course.clone(), missing: vec![1] };
+    let told = |language| {
+        rbms_render::text::set_language(language);
+        let told = (stage_label(&run), CourseRow::of(&entry).detail, result_rows(&run, CourseGaugeMode::Lr2), SelectTab::Courses.label());
+        rbms_render::text::set_language(Language::English);
+        told
+    };
+    let (stage, detail, rows, tab) = told(Language::Korean);
+    assert_eq!((stage.as_str(), detail.as_str(), tab), ("스테이지 2 / 2", "스테이지 2개 - 1개 없음", "코스"));
+    let labels: Vec<&str> = rows.iter().map(|(label, _)| label.as_str()).collect();
+    assert_eq!(labels, vec!["EX SCORE", "스코어 비율", "MAX COMBO", "MISS COUNT", "게이지", "게이지 규칙", "실패 지점"]);
+    assert_eq!(rows[6].1, "스테이지 2");
+    let (stage, detail, rows, tab) = told(Language::Japanese);
+    assert_eq!((stage.as_str(), detail.as_str(), tab), ("ステージ 2 / 2", "2ステージ - 1件不足", "コース"));
+    assert_eq!(rows[6], ("失敗箇所".to_string(), "ステージ 2".to_string()));
 }
 
 #[test]

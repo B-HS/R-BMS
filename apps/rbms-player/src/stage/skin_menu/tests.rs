@@ -391,10 +391,19 @@ fn the_rows_the_counter_the_hint_and_the_status_fit_where_they_are_written() {
     let lowest_line = INFO_ROW_Y + (1 + INFO_VALUE_LINES) as f32 * INFO_LINE_PITCH;
     assert!(lowest_line + INFO_LINE_H <= INFO_RECT.h, "what is said of a row with a value of {INFO_VALUE_LINES} lines runs off the panel it is said on");
     assert!(INFO_LOADED_Y + INFO_LOADED_LINES as f32 * INFO_LINE_PITCH <= INFO_ROW_Y, "what loaded runs into the row under it");
-    let hint = text_width(HINT, HINT_SCALE);
+    let hint = text_width(SkinMenuText::Hint.get(language()), HINT_SCALE);
     assert!(hint <= CW as f32 - MARGIN * 2.0, "the line of keys is {hint} wide");
-    let said = [PROPERTY_HELP, FILE_HELP, OFFSET_PLACE_HELP, OFFSET_ANGLE_HELP, OFFSET_ALPHA_HELP, OPACITY_HELP, AUTOMATIC_PLACE_HELP, AUTOMATIC_ALPHA_HELP];
-    for help in said.into_iter().chain([PICKER_NOTE]) {
+    let said = [
+        SkinMenuText::PropertyHelp.get(language()),
+        SkinMenuText::FileHelp.get(language()),
+        SkinMenuText::OffsetPlaceHelp.get(language()),
+        SkinMenuText::OffsetAngleHelp.get(language()),
+        SkinMenuText::OffsetAlphaHelp.get(language()),
+        SkinMenuText::OpacityHelp.get(language()),
+        SkinMenuText::AutomaticPlaceHelp.get(language()),
+        SkinMenuText::AutomaticAlphaHelp.get(language()),
+    ];
+    for help in said.into_iter().chain([SkinMenuText::PickerNote.get(language())]) {
         assert!(text_width(help, INFO_SCALE) <= INFO_RECT.w - INFO_PAD * 2.0, "{help}");
     }
     for id in FIXED_ROWS {

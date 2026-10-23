@@ -110,7 +110,7 @@ fn over_black(color: (u8, u8, u8), alpha: u32) -> Color {
 #[test]
 fn the_offsets_of_the_play_skin_are_rows_of_the_lane_group_and_two_closed_folds_at_the_end_of_the_list() {
     let menu = Menu::over(app_with_fading_play("folds"));
-    let tail = [Row::Group(GROUP_SKIN), Row::Fold(Fold::Opacity), Row::Fold(Fold::Place)];
+    let tail = [Row::Group(group_skin()), Row::Fold(Fold::Opacity), Row::Fold(Fold::Place)];
     let own: Vec<Row> = menu.state.rows.iter().copied().filter(|row| matches!(row, Row::Skin(_))).collect();
     let labels: Vec<String> = own.iter().map(|row| menu.line(*row).label).collect();
     assert_eq!(labels, DECLARED_PLACE_ROWS, "the offsets the skin declares to move a part are not rows of the closed list");
@@ -120,7 +120,7 @@ fn the_offsets_of_the_play_skin_are_rows_of_the_lane_group_and_two_closed_folds_
     let without_own: Vec<Row> = menu.state.rows.iter().copied().filter(|row| !own.contains(row)).collect();
     assert_eq!(&without_own[..without_own.len() - tail.len()], rows_without_skin_options(), "the rows above the skin's are not the menu's own");
     assert_eq!(&menu.state.rows[menu.state.rows.len() - tail.len()..], tail);
-    assert_eq!(menu.line(Row::Group(GROUP_SKIN)).look, RowLook::Heading);
+    assert_eq!(menu.line(Row::Group(group_skin())).look, RowLook::Heading);
     let opacity = menu.line(Row::Fold(Fold::Opacity));
     assert_eq!((opacity.label.as_str(), opacity.value.as_str(), opacity.look), ("OPACITY", "HIDDEN (5)", RowLook::Plain));
     assert_eq!(FADING_OPACITIES, 5);
@@ -357,7 +357,11 @@ fn what_the_rows_of_a_fold_write_fits_where_it_is_written() {
         let said = menu.state.help_of(&menu.app.shared, row);
         assert_eq!(fit_text(said, INFO_SCALE, INFO_RECT.w - INFO_PAD * 2.0), said, "what is said of {} is cut short", line.label);
     }
-    assert_eq!(fit_text(HINT, HINT_SCALE, CW as f32 - MARGIN * 2.0), HINT, "the line of keys is cut short");
+    assert_eq!(
+        fit_text(PlayMenuText::Hint.get(language()), HINT_SCALE, CW as f32 - MARGIN * 2.0),
+        PlayMenuText::Hint.get(language()),
+        "the line of keys is cut short"
+    );
 }
 
 /// The folds drawn for a person to look at: both closed, as the menu opens; the opacities open

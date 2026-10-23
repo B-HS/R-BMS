@@ -175,20 +175,20 @@ fn the_panel_says_what_scratch_auto_costs_and_when_the_target_rate_is_unused() {
     let note = |menu: &Menu, id: SettingId| menu.state.row_note(&menu.app.shared, Row::Setting(id));
     menu.app.shared.config.judge.target = ScoreTarget::LocalBest;
     menu.app.shared.config.judge.target_fallback = ScoreTarget::RateAaa;
-    assert_eq!(note(&menu, SettingId::TargetRate).as_deref(), Some(TARGET_RATE_UNUSED_NOTE));
+    assert_eq!(note(&menu, SettingId::TargetRate).as_deref(), Some(PlayMenuText::TargetRateUnusedNote.get(language())));
     menu.app.shared.config.judge.target_fallback = ScoreTarget::RateCustom;
     assert_eq!(note(&menu, SettingId::TargetRate), None, "the fallback is RATE CUSTOM and uses the rate");
     menu.app.shared.config.judge.target = ScoreTarget::RateCustom;
     menu.app.shared.config.judge.target_fallback = ScoreTarget::Max;
     assert_eq!(note(&menu, SettingId::TargetRate), None, "the target is RATE CUSTOM and uses the rate");
-    assert_eq!(note(&menu, SettingId::ScratchAuto).as_deref(), Some(SCRATCH_AUTO_NOTE));
+    assert_eq!(note(&menu, SettingId::ScratchAuto).as_deref(), Some(PlayMenuText::ScratchAutoNote.get(language())));
     assert_eq!(note(&menu, SettingId::AutoReplay), None);
     menu.app.shared.config.judge.target = ScoreTarget::IrBest;
     let ir_best = note(&menu, SettingId::Target).expect("IR BEST says what stands in for it");
     assert_eq!(ir_best, "NO IR SCORE: YOUR LOCAL BEST, THEN MAX");
 
     let room = INFO_RECT.w - INFO_PAD * 2.0;
-    for said in [TARGET_RATE_UNUSED_NOTE, SCRATCH_AUTO_NOTE, ir_best.as_str()] {
+    for said in [PlayMenuText::TargetRateUnusedNote.get(language()), PlayMenuText::ScratchAutoNote.get(language()), ir_best.as_str()] {
         assert_eq!(fit_text(said, INFO_SCALE, room), said, "the panel cuts {said} short");
     }
 }

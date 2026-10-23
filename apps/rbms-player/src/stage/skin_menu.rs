@@ -47,6 +47,8 @@
 //! over the screen it was asked for from, which Escape goes back to.
 
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, descriptor};
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Color, Renderer, text_width, theme};
 use rbms_skin::dst::SkinColor;
 use rbms_skin::loader::{
@@ -71,6 +73,7 @@ use crate::stage::preview_menu::{
     number_part_at, revealed_top, row_room, shift_after, stepped_tab, wheel_scrolled,
 };
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
+use crate::text::menus::skin_menu::SkinMenuText;
 use crate::{AppShared, Hot};
 
 /// The screens the strip offers, left to right, each with the short name on its tab: every screen
@@ -99,68 +102,9 @@ const PATH_SEPARATORS: [char; 2] = ['/', '\\'];
 /// What stands for the part of a path that was left out.
 const PATH_GAP: &str = "\u{2026}";
 
-/// The screen's title.
-const TITLE: &str = "SKIN";
-
-/// The keys of the screen, written along its foot.
-const HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER RUN OR TYPE   0 RESET   A ALL SCREENS   DRAG A SLIDER   TAB SCREEN   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
-
-/// What is written under the preview in place of the row under the cursor while the folder picker is
-/// up.
-const PICKER_NOTE: &str = "CHOOSE THE PACK FOLDER IN THE WINDOW THAT OPENED";
-
-/// What is written there while the picker for where an export goes is up.
-const EXPORT_PICKER_NOTE: &str = "CHOOSE WHERE TO EXPORT IN THE WINDOW THAT OPENED - A NEW FOLDER IS MADE THERE";
-
 /// The key that puts the value of the row under the cursor onto every other screen that declares
 /// the row. No other key of the menu is a letter, and a number being typed takes none.
 pub(crate) const APPLY_TO_ALL_KEY: KeyCode = KeyCode::KeyA;
-
-/// What is said of the EXPORT row.
-const EXPORT_HELP: &str = "Copy this pack, with the choices made in every screen, into a new folder to take elsewhere";
-
-/// What is said while an export is listing the pack and has nothing to count yet.
-const EXPORT_LISTING_NOTE: &str = "EXPORTING - LISTING THE PACK - ESC CANCELS";
-
-/// What is said under what an export or a key came to, which stays until the next key.
-const SAID_HELP: &str = "Any key or press clears this";
-
-/// The headings of what an export came to.
-const EXPORTED_HEADING: &str = "EXPORTED";
-const EXPORT_FAILED_HEADING: &str = "EXPORT FAILED";
-const EXPORT_CANCELLED_HEADING: &str = "EXPORT CANCELLED";
-
-/// The heading of what putting a row's value onto the other screens came to.
-const APPLIED_HEADING: &str = "APPLIED TO ALL SCREENS";
-
-/// What is said of a row the chosen document declares, by the kind of row it is: a row of the
-/// settings table says what it is for itself (`rbms_config::SettingDescriptor::help`).
-///
-/// An offset is said by its axis. A place and a size are counted in pixels of the screen, except for
-/// the one offset that moves a whole play screen, which is a share of it; a row is not told which
-/// offset it is of, so both are said. An offset the player may move along its alpha alone is an
-/// opacity, and is said as one: it reads in percent, a hundred being no offset at all. Its slider
-/// and its arrows end there, so its help says what goes further: a typed figure, for the part a
-/// skin draws with no alpha of its own and lights by adding to it.
-///
-/// A place or a size runs over thousands of pixels, more than its slider has places for, so its
-/// help says what sets it to the pixel.
-const PROPERTY_HELP: &str = "An option this skin declares";
-const FILE_HELP: &str = "A file slot this skin declares: which of its files is used";
-const OFFSET_PLACE_HELP: &str =
-    "An offset of this skin, in pixels - percent for the whole screen. The slider is coarse: arrows or ENTER set it exactly. 0 key resets";
-const OFFSET_ANGLE_HELP: &str = "An offset of this skin: a turn, in degrees. 0 key resets";
-const OFFSET_ALPHA_HELP: &str = "An offset of this skin: added to the opacity, from -255 (gone) to +255. 0 key resets";
-const OPACITY_HELP: &str = "How opaque this part is: 0% hides it, 100% is the skin's own. Typing past 100% (to 200%) adds alpha. 0 key resets";
-const COLOR_HELP: &str = "Color of this part. Left/right: preset, ENTER: type a hex color, 0: back to the skin default. Alpha multiplies its opacity";
-pub(crate) const CHANNEL_FOLD_HELP: &str = "The red, green, blue and alpha of each color, set one at a time. ENTER shows or hides the rows";
-const CHANNEL_HELP: &str = "One channel of a color of this skin, from 0 to 255. Alpha multiplies the part's opacity. 0 key resets";
-
-/// What is said of a row of an offset the game adds to every play skin, which no document declares:
-/// a row of that name in a skin's own list would be read as the skin's.
-const AUTOMATIC_PLACE_HELP: &str =
-    "An offset the game adds to every play skin, in pixels - percent for the whole screen. Arrows or ENTER set it exactly. 0 key resets";
-const AUTOMATIC_ALPHA_HELP: &str = "An offset the game adds to every play skin: added to the opacity, from -255 (gone) to +255. 0 key resets";
 
 /// The skin menu's own state: the rows it lists and where the cursor and the list are, the folder
 /// picker while it is up, the preview on its right, and the modifier that turns the key for the next
@@ -549,8 +493,8 @@ impl SkinMenuState {
         match outcome {
             Ok(exported) => self.say_export(Ok(exported)),
             Err(ExportError::CalledOff) => {
-                notify(Level::Info, "skin export cancelled");
-                self.said = Some((EXPORT_CANCELLED_HEADING.to_string(), ExportError::CalledOff.to_string().to_ascii_uppercase()));
+                notify(Level::Info, SkinMenuText::ExportCancelledNotice.get(language()));
+                self.said = Some((SkinMenuText::ExportCancelledHeading.get(language()).to_string(), ExportError::CalledOff.to_string().to_ascii_uppercase()));
             }
             Err(error) => self.say_export(Err(error.to_string())),
         }
@@ -563,14 +507,15 @@ impl SkinMenuState {
                 let folder = exported.folder.to_string_lossy();
                 let links = match exported.links_skipped {
                     0 => String::new(),
-                    links => format!(", {links} LINKS LEFT OUT"),
+                    links => SkinMenuText::LinksLeftOut.fill(language(), &[&links]),
                 };
-                notify(Level::Info, format!("skin exported: {} files to {folder}", exported.files));
-                self.said = Some((format!("{EXPORTED_HEADING} {} FILES ({} MB{links}) TO", exported.files, megabytes(exported.bytes)), folder.into_owned()));
+                notify(Level::Info, SkinMenuText::ExportedNotice.fill(language(), &[&exported.files, &folder]));
+                let heading = SkinMenuText::ExportedHeading.fill(language(), &[&exported.files, &megabytes(exported.bytes), &links]);
+                self.said = Some((heading, folder.into_owned()));
             }
             Err(reason) => {
-                notify(Level::Error, format!("skin export failed: {reason}"));
-                self.said = Some((EXPORT_FAILED_HEADING.to_string(), reason));
+                notify(Level::Error, SkinMenuText::ExportFailedNotice.fill(language(), &[&reason]));
+                self.said = Some((SkinMenuText::ExportFailedHeading.get(language()).to_string(), reason));
             }
         }
     }
@@ -589,7 +534,7 @@ impl SkinMenuState {
         };
         ctx.shared.save_settings();
         notify(Level::Info, applied.message());
-        self.said = Some((APPLIED_HEADING.to_string(), applied.message().to_ascii_uppercase()));
+        self.said = Some((SkinMenuText::AppliedHeading.get(language()).to_string(), applied.message().to_ascii_uppercase()));
         self.settings_moved(ctx);
     }
 
@@ -720,11 +665,11 @@ impl SkinMenuState {
             draw_info_lead(canvas, &loaded.label, &loaded.value);
         }
         if self.pack_picker.is_some() {
-            draw_info_note(canvas, PICKER_NOTE);
+            draw_info_note(canvas, SkinMenuText::PickerNote.get(language()));
             return;
         }
         if self.export_picker.is_some() {
-            draw_info_note(canvas, EXPORT_PICKER_NOTE);
+            draw_info_note(canvas, SkinMenuText::ExportPickerNote.get(language()));
             return;
         }
         if let Some(export) = self.export.as_ref() {
@@ -732,7 +677,7 @@ impl SkinMenuState {
             return;
         }
         if let Some((heading, detail)) = self.said.as_ref() {
-            draw_info_row(canvas, heading, detail, SAID_HELP);
+            draw_info_row(canvas, heading, detail, SkinMenuText::SaidHelp.get(language()));
             return;
         }
         if let (Some(row), Some(line)) = (self.focused(), self.lines.get(self.sel)) {
@@ -774,15 +719,9 @@ fn channel_rows(shared: &AppShared) -> Vec<SkinRow> {
 /// What is said while an export runs: how many of the pack's files and how much of it are written.
 fn export_note(standing: ExportStanding) -> String {
     if standing.files == 0 {
-        return EXPORT_LISTING_NOTE.to_string();
+        return SkinMenuText::ExportListingNote.get(language()).to_string();
     }
-    format!(
-        "EXPORTING {} / {} FILES - {} / {} MB - ESC CANCELS",
-        standing.files_done,
-        standing.files,
-        megabytes(standing.bytes_done),
-        megabytes(standing.bytes)
-    )
+    SkinMenuText::ExportProgressNote.fill(language(), &[&standing.files_done, &standing.files, &megabytes(standing.bytes_done), &megabytes(standing.bytes)])
 }
 
 /// What is said of a row of the chosen document that other screens' documents declare too: how
@@ -799,8 +738,8 @@ fn peers_note(shared: &AppShared, row: SettingRow) -> Option<String> {
 pub(crate) fn shared_row_note(peers: usize) -> Option<String> {
     match peers {
         0 => None,
-        1 => Some("ALSO ON 1 OTHER SCREEN - A APPLIES THIS VALUE TO IT".to_string()),
-        peers => Some(format!("ALSO ON {peers} OTHER SCREENS - A APPLIES THIS VALUE TO THEM ALL")),
+        1 => Some(SkinMenuText::AlsoOnOneOtherScreen.get(language()).to_string()),
+        peers => Some(SkinMenuText::AlsoOnOtherScreens.fill(language(), &[&peers])),
     }
 }
 
@@ -820,8 +759,8 @@ fn pack_value_room(label: &str) -> f32 {
 fn row_help(shared: &AppShared, row: SettingRow) -> &'static str {
     let listed = match row {
         SettingRow::Fixed(id) => return descriptor(id).help,
-        SettingRow::Skin(SkinRow::Export) => return EXPORT_HELP,
-        SettingRow::Skin(SkinRow::ColorChannels) => return CHANNEL_FOLD_HELP,
+        SettingRow::Skin(SkinRow::Export) => return SkinMenuText::ExportHelp.get(language()),
+        SettingRow::Skin(SkinRow::ColorChannels) => return SkinMenuText::ChannelFoldHelp.get(language()),
         SettingRow::Skin(listed) => listed,
     };
     let kind = shared.skins.kind(&shared.config, listed).unwrap_or(match listed {
@@ -837,26 +776,38 @@ fn row_help(shared: &AppShared, row: SettingRow) -> &'static str {
     }
 }
 
-/// What is said of one axis of an offset the game adds to every play skin.
+/// What is said of one axis of an offset the game adds to every play skin, which no document
+/// declares: a row of that name in a skin's own list would be read as the skin's.
 pub(crate) fn automatic_offset_help(axis: OffsetAxis) -> &'static str {
     match axis {
-        OffsetAxis::X | OffsetAxis::Y | OffsetAxis::W | OffsetAxis::H => AUTOMATIC_PLACE_HELP,
-        OffsetAxis::R => OFFSET_ANGLE_HELP,
-        OffsetAxis::A => AUTOMATIC_ALPHA_HELP,
+        OffsetAxis::X | OffsetAxis::Y | OffsetAxis::W | OffsetAxis::H => SkinMenuText::AutomaticPlaceHelp.get(language()),
+        OffsetAxis::R => SkinMenuText::OffsetAngleHelp.get(language()),
+        OffsetAxis::A => SkinMenuText::AutomaticAlphaHelp.get(language()),
     }
 }
 
-/// What is said of a row a skin document declares, by the kind of row it is.
+/// What is said of a row a skin document declares, by the kind of row it is: a row of the settings
+/// table says what it is for itself (`rbms_config::SettingDescriptor::help`).
+///
+/// An offset is said by its axis. A place and a size are counted in pixels of the screen, except for
+/// the one offset that moves a whole play screen, which is a share of it; a row is not told which
+/// offset it is of, so both are said. An offset the player may move along its alpha alone is an
+/// opacity, and is said as one: it reads in percent, a hundred being no offset at all. Its slider
+/// and its arrows end there, so its help says what goes further: a typed figure, for the part a
+/// skin draws with no alpha of its own and lights by adding to it.
+///
+/// A place or a size runs over thousands of pixels, more than its slider has places for, so its
+/// help says what sets it to the pixel.
 pub(crate) fn skin_row_help(kind: SkinRowKind) -> &'static str {
     match kind {
-        SkinRowKind::Property => PROPERTY_HELP,
-        SkinRowKind::File => FILE_HELP,
-        SkinRowKind::Offset(OffsetAxis::X | OffsetAxis::Y | OffsetAxis::W | OffsetAxis::H) => OFFSET_PLACE_HELP,
-        SkinRowKind::Offset(OffsetAxis::R) => OFFSET_ANGLE_HELP,
-        SkinRowKind::Offset(OffsetAxis::A) => OFFSET_ALPHA_HELP,
-        SkinRowKind::Opacity => OPACITY_HELP,
-        SkinRowKind::Color => COLOR_HELP,
-        SkinRowKind::ColorChannel(_) => CHANNEL_HELP,
+        SkinRowKind::Property => SkinMenuText::PropertyHelp.get(language()),
+        SkinRowKind::File => SkinMenuText::FileHelp.get(language()),
+        SkinRowKind::Offset(OffsetAxis::X | OffsetAxis::Y | OffsetAxis::W | OffsetAxis::H) => SkinMenuText::OffsetPlaceHelp.get(language()),
+        SkinRowKind::Offset(OffsetAxis::R) => SkinMenuText::OffsetAngleHelp.get(language()),
+        SkinRowKind::Offset(OffsetAxis::A) => SkinMenuText::OffsetAlphaHelp.get(language()),
+        SkinRowKind::Opacity => SkinMenuText::OpacityHelp.get(language()),
+        SkinRowKind::Color => SkinMenuText::ColorHelp.get(language()),
+        SkinRowKind::ColorChannel(_) => SkinMenuText::ChannelHelp.get(language()),
     }
 }
 
@@ -1022,13 +973,13 @@ impl StageHandler for SkinMenuState {
         self.ensure_rows(ctx.shared);
         canvas.clear_bga();
         canvas.clear(theme().bg);
-        draw_head(canvas, TITLE, &ctx.shared.setting_line(SettingId::SkinScreen).1);
+        draw_head(canvas, SkinMenuText::Title.get(language()), &ctx.shared.setting_line(SettingId::SkinScreen).1);
         let chosen = kind_index(ctx.shared.config.skin.screen);
         draw_tabs(ctx.shared, canvas, SCREEN_KINDS.iter().map(|(_, name)| *name), chosen, Hot::SkinMenuKind);
         self.draw_rows(ctx.shared, canvas, ctx.now);
         self.draw_info(ctx.shared, canvas);
         draw_preview(&mut self.preview, ctx, canvas);
-        draw_hint(canvas, self.numbers.edit_hint().unwrap_or(HINT));
+        draw_hint(canvas, self.numbers.edit_hint().unwrap_or(SkinMenuText::Hint.get(language())));
     }
 
     /// The browser's lines, and what the preview last left in its rectangle.

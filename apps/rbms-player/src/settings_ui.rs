@@ -20,14 +20,18 @@
 use rbms_audio::{AudioOpenReport, Bus};
 
 use rbms_config::{
-    AdjustOutcome, AudioOptions, CUSTOM_VALUE, NONE_VALUE, ON_VALUE, SettingId, SettingKind, SettingTab, UNSET_VALUE, cycle_device, descriptor, display_value,
-    number_spec, number_steps, set_number_steps, shipped_number_steps, skinned_note, tab_rows,
+    AdjustOutcome, AudioOptions, CUSTOM_VALUE, NONE_VALUE, ON_VALUE, SettingId, SettingKind, SettingTab, UNSET_VALUE, cycle_device, cycle_values, descriptor,
+    display_value, number_spec, number_steps, set_number_steps, shipped_number_steps, skinned_note, tab_rows,
 };
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_skin::loader::is_supported_skin_type;
 
 use crate::number_row::NumberValue;
 use crate::settings_view::{RowControl, SettingsLine, segments_fit};
 use crate::skin_select::SkinRow;
+use crate::text::settings::screen::AudioStatusText;
+use crate::text::settings::{row_label, shown_choice, shown_value};
 use crate::*;
 
 /// The row the skin document's own customisation rows are listed directly above.
@@ -47,14 +51,10 @@ pub(crate) enum SettingRow {
     Skin(SkinRow),
 }
 
-/// Shown while the rows describe a stream the app has not been able to open at all.
-pub(crate) const AUDIO_UNAVAILABLE_STATUS: &str = "NO OUTPUT DEVICE - RUNNING SILENT";
-
-/// Shown when the opened stream is exactly what the rows ask for.
-pub(crate) const AUDIO_MATCHED_STATUS: &str = "OUTPUT MATCHES THESE SETTINGS";
-
 /// The AUDIO tab's status line. A stream that had to be downgraded says so in the engine's own
 /// words, so a row reading 96000 while the device runs at 48000 is visible rather than silent.
+/// What the line says of a stream that could not be opened at all, and of one that is exactly what
+/// the rows ask for, is written in the language the screens are drawn in.
 ///
 /// There is no "waiting for the song to end" state: the settings screen is only ever opened over
 /// the browser, and a chart owns the stream only on LOADING, PLAY and RESULT — none of which the
@@ -62,13 +62,18 @@ pub(crate) const AUDIO_MATCHED_STATUS: &str = "OUTPUT MATCHES THESE SETTINGS";
 /// elapses, which is why the line only ever describes the stream that is open.
 pub(crate) fn audio_status_text(report: Option<&AudioOpenReport>, failed: bool) -> String {
     let Some(report) = report else {
-        return if failed { AUDIO_UNAVAILABLE_STATUS.to_string() } else { String::new() };
+        return if failed { AudioStatusText::Unavailable.get(language()).to_string() } else { String::new() };
     };
     let opened = format!("{} - {} HZ - {} CH", report.device_name, report.sample_rate, report.channels);
     if report.notes.is_empty() {
-        return format!("{AUDIO_MATCHED_STATUS}: {opened}");
+        return AudioStatusText::Matched.fill(language(), &[&opened]);
     }
     format!("{opened} ({})", report.notes.join("; "))
+}
+
+/// The values of a choice as they are drawn, one for each of the values the table steps through.
+fn shown_choices(id: SettingId) -> Vec<String> {
+    cycle_values(id).iter().map(|value| shown_choice(id, value).to_string()).collect()
 }
 
 /// Whether the settings screen can put a row back to what it ships as, which is also whether the row
@@ -123,7 +128,7 @@ impl AppShared {
         if let Some(line) = self.network_setting_line(id) {
             return line;
         }
-        let label = descriptor(id).label;
+        let label = row_label(id);
         let value = match id {
             SettingId::Gauge => gauge_name(self.config.play.gauge).to_string(),
             SettingId::Skin if self.launch.skin_path.is_some() => CUSTOM_VALUE.to_string(),
@@ -170,6 +175,10 @@ impl AppShared {
     ///
     /// The FONT row reads the path of the file chosen for it, which the row cuts short from its
     /// front; what the row holds is still said as it always was by [`AppShared::setting_line`].
+    ///
+    /// The value stays the English of the settings table, which the screen compares; `shown` is
+    /// what it is drawn as in the language the screens are drawn in, and a choice drawn with all
+    /// its values on show carries them written the same way.
     pub(crate) fn settings_scene_line(&self, row: SettingRow) -> SettingsLine {
         let (label, value) = self.settings_line(row);
         let number = self.row_number(row);
@@ -181,7 +190,11 @@ impl AppShared {
             (SettingRow::Fixed(SettingId::Font), Some(path)) => path.clone(),
             _ => value,
         };
-        SettingsLine { label, value, note: self.settings_note(row), number, control, changed }
+        let (shown, choices) = match row {
+            SettingRow::Fixed(id) => (shown_value(id, &value), if matches!(control, RowControl::Segments { .. }) { shown_choices(id) } else { Vec::new() }),
+            SettingRow::Skin(_) => (value.clone(), Vec::new()),
+        };
+        SettingsLine { label, value, shown, choices, note: self.settings_note(row), number, control, changed }
     }
 
     /// What sets the value of one row of the settings table, which reads `value`: a slider for a
@@ -195,7 +208,7 @@ impl AppShared {
         }
         match descriptor(id).kind {
             SettingKind::Toggle => RowControl::Switch { on: value == ON_VALUE },
-            SettingKind::Cycle { values } if id != SettingId::AudioDevice && segments_fit(values) => {
+            SettingKind::Cycle { values } if id != SettingId::AudioDevice && segments_fit(&shown_choices(id)) => {
                 RowControl::Segments { values, chosen: values.iter().position(|entry| *entry == value) }
             }
             SettingKind::Cycle { .. } | SettingKind::IntRange { .. } | SettingKind::FloatRange { .. } | SettingKind::Percent { .. } => RowControl::Stepper,
@@ -805,13 +818,13 @@ mod tests {
     #[test]
     fn the_audio_status_says_so_when_nothing_had_to_be_downgraded() {
         let line = audio_status_text(Some(&report(48_000, &[])), false);
-        assert!(line.starts_with(AUDIO_MATCHED_STATUS), "got {line}");
+        assert!(line.starts_with("OUTPUT MATCHES THESE SETTINGS"), "got {line}");
         assert!(line.contains("48000"));
     }
 
     #[test]
     fn the_audio_status_reports_a_stream_that_never_opened() {
-        assert_eq!(audio_status_text(None, true), AUDIO_UNAVAILABLE_STATUS);
+        assert_eq!(audio_status_text(None, true), "NO OUTPUT DEVICE - RUNNING SILENT");
         assert_eq!(audio_status_text(None, false), "", "before the first open attempt there is nothing to say");
     }
 

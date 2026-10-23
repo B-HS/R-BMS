@@ -364,6 +364,20 @@ fn one_step_of(element: PracticeElement) -> f64 {
 }
 
 #[test]
+fn every_row_has_a_label_of_its_own_in_every_language() {
+    for language in rbms_model::Language::ALL {
+        rbms_render::text::set_language(language);
+        let labels: Vec<&str> = PracticeElement::ALL.iter().map(|element| element.label()).collect();
+        rbms_render::text::set_language(rbms_model::Language::English);
+        assert!(labels.iter().all(|label| !label.is_empty()), "{language:?}");
+        let mut distinct = labels.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(distinct.len(), labels.len(), "{language:?}: two rows are called the same: {labels:?}");
+    }
+}
+
+#[test]
 fn every_row_is_a_number_or_a_choice_and_has_a_label_and_a_value() {
     let panel = long_panel();
     for element in PracticeElement::ALL {

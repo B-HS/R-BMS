@@ -4,7 +4,10 @@
 //! The run's own report is a table of numbers; these are the shapes behind them, drawn only when the
 //! RESULT GRAPHS setting asks for them.
 
+use rbms_model::translations::Catalog;
+
 use crate::ctx::RenderCtx;
+use crate::text::result::ResultText;
 use crate::{Color, Rect, Renderer};
 
 use super::{CONTENT_RIGHT, CONTENT_X, ResultPalette, ResultView};
@@ -61,10 +64,6 @@ const JUDGE_LEGEND_ROWS: usize = 2;
 /// Height of one judge legend row.
 const JUDGE_LEGEND_ROW_H: f32 = 22.0;
 
-/// Shown in a panel whose measurement is empty, so a run nothing was recorded for still reads as a
-/// finished panel rather than a drawing bug.
-const NO_DATA: &str = "NO DATA";
-
 /// Where the graph panel at `at` sits. The three share the content column evenly.
 fn graph_panel_rect(at: usize) -> Rect {
     let w = (CONTENT_RIGHT - CONTENT_X - GRAPH_GAP * (GRAPH_COUNT as f32 - 1.0)) / GRAPH_COUNT as f32;
@@ -83,10 +82,11 @@ fn draw_graph_frame<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, panel: Rect
     Rect::new(panel.x + GRAPH_PAD, panel.y + GRAPH_TITLE_H, panel.w - GRAPH_PAD * 2.0, panel.h - GRAPH_TITLE_H - GRAPH_PAD)
 }
 
-/// Say that a panel's measurement is empty, in the middle of where its plot would have been.
+/// Say that a panel's measurement is empty, in the middle of where its plot would have been, so a
+/// run nothing was recorded for still reads as a finished panel rather than a drawing bug.
 fn draw_no_data<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, plot: Rect) {
     let th = ctx.theme;
-    ctx.draw_text_centered(r, plot.x + plot.w * 0.5, plot.y + plot.h * 0.5, GRAPH_LABEL_SCALE, th.text_muted, NO_DATA);
+    ctx.draw_text_centered(r, plot.x + plot.w * 0.5, plot.y + plot.h * 0.5, GRAPH_LABEL_SCALE, th.text_muted, ResultText::NoData.get(ctx.language));
 }
 
 /// Plot the gauge once a second through the run, oldest on the left, against a full 0..100 axis so
@@ -132,8 +132,8 @@ fn draw_timing_histogram<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, plot: 
     }
     r.fill_rect(Rect::new(bars.x + pitch * (hist.len() / 2) as f32, bars.y, AXIS_W, bars.h), th.divider);
     let label_y = plot.y + plot.h - GRAPH_LABEL_H;
-    ctx.draw_text(r, plot.x, label_y, GRAPH_LABEL_SCALE, th.text_muted, "EARLY");
-    ctx.draw_text_right(r, plot.x + plot.w, label_y, GRAPH_LABEL_SCALE, th.text_muted, "LATE");
+    ctx.draw_text(r, plot.x, label_y, GRAPH_LABEL_SCALE, th.text_muted, ResultText::Early.get(ctx.language));
+    ctx.draw_text_right(r, plot.x + plot.w, label_y, GRAPH_LABEL_SCALE, th.text_muted, ResultText::Late.get(ctx.language));
 }
 
 /// Show what share of the judged inputs took each judgement: one stacked bar in the judge colours,
@@ -168,11 +168,11 @@ fn draw_judge_distribution<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, plot
 pub(super) fn draw_result_graphs<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView, palette: &ResultPalette) {
     let measured: u32 = view.timing_hist.iter().sum();
     let gauge_note = view.gauge_series.last().map(|v| format!("{}%", v.round() as i32)).unwrap_or_default();
-    let plot = draw_graph_frame(ctx, r, graph_panel_rect(0), "GAUGE", &gauge_note);
+    let plot = draw_graph_frame(ctx, r, graph_panel_rect(0), ResultText::GraphGauge.get(ctx.language), &gauge_note);
     draw_gauge_trend(ctx, r, plot, &view.gauge_series, view.clear_color);
-    let plot = draw_graph_frame(ctx, r, graph_panel_rect(1), "TIMING", &measured.to_string());
+    let plot = draw_graph_frame(ctx, r, graph_panel_rect(1), ResultText::GraphTiming.get(ctx.language), &measured.to_string());
     draw_timing_histogram(ctx, r, plot, &view.timing_hist, ctx.theme.accent);
-    let plot = draw_graph_frame(ctx, r, graph_panel_rect(2), "JUDGE", "");
+    let plot = draw_graph_frame(ctx, r, graph_panel_rect(2), ResultText::GraphJudge.get(ctx.language), "");
     draw_judge_distribution(ctx, r, plot, &view.judge_dist, palette);
 }
 

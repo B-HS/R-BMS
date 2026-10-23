@@ -42,6 +42,9 @@ use rbms_ir::mapping::{AUTO_SCRATCH_FLAG, CUSTOM_JUDGE_FLAG};
 use rbms_ir::{
     ChartId, CourseSubmission, IrError, PlayTrace, Rejection, SubmitResponse, SubmitVerdict, TRACE_MAX_BYTES, UploadVerdict, submit_verdict, upload_verdict,
 };
+use rbms_model::Language;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_store::scoredb::{
     CourseSyncRow, IrSyncRow, JUDGE_BAD, JUDGE_GOOD, JUDGE_GREAT, JUDGE_MISS, JUDGE_PGREAT, JUDGE_POOR, JUDGE_TIER_COUNT, KeptCourse, PlayLog, ReplayAnswer,
     ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, ScoreDb, SyncCandidate, SyncState, SyncWalk, TraceAnswer, UNSET_MINIMUM, charged_minbp, gauge_token, mode_name,
@@ -51,6 +54,8 @@ use rbms_store::{REFERENCE_RECORD_RULE_VERSION, SCRATCH_AUTO_ASSIST};
 
 use crate::ir_outcome::{IrLineKind, truncate};
 use crate::ir_replay::{to_ir_replay, wire_carries_judge};
+use crate::notify::{notify_text, notify_with};
+use crate::text::notices::{StatusText, installed, installed_with};
 use crate::*;
 
 /// Gap between the starts of two score submissions. The server takes 60 a minute from an account;
@@ -1068,56 +1073,69 @@ impl SyncTally {
         self.rejected + self.failed + self.replays_failed + self.traces_failed + self.courses_rejected + self.courses_failed > 0
     }
 
+    /// The status line of a sync that ran to its end, in the language the frame thread has
+    /// installed.
+    pub(crate) fn summary(&self) -> String {
+        self.summary_in(language())
+    }
+
     /// The status line of a sync that ran to its end: what happened to the plays and to the
     /// replays, leaving out what did not happen at all.
-    pub(crate) fn summary(&self) -> String {
-        let part = |count: usize, label: &str| (count > 0).then(|| format!("{count} {label}"));
+    pub(crate) fn summary_in(&self, language: Language) -> String {
+        let part = |count: usize, label: StatusText| (count > 0).then(|| label.fill(language, &[&count]));
         let records: Vec<String> = [
-            part(self.sent, "sent"),
-            part(self.already, "already on server"),
-            part(self.rejected, "rejected"),
-            part(self.failed, "failed"),
-            part(self.skipped, "skipped"),
+            part(self.sent, StatusText::PartSent),
+            part(self.already, StatusText::PartAlreadyOnTheServer),
+            part(self.rejected, StatusText::PartRejected),
+            part(self.failed, StatusText::PartFailed),
+            part(self.skipped, StatusText::PartSkipped),
         ]
         .into_iter()
         .flatten()
         .collect();
-        let replays: Vec<String> = [part(self.replays_uploaded, "uploaded"), part(self.replays_failed, "failed")].into_iter().flatten().collect();
-        let traces: Vec<String> = [part(self.traces_uploaded, "uploaded"), part(self.traces_failed, "failed")].into_iter().flatten().collect();
-        let courses: Vec<String> =
-            [part(self.courses_sent, "sent"), part(self.courses_rejected, "rejected"), part(self.courses_failed, "failed")].into_iter().flatten().collect();
-        let records = if records.is_empty() { NOTHING_SENT.to_string() } else { records.join(", ") };
-        let mut line = format!("records: {records}");
-        if !courses.is_empty() {
-            line.push_str(&format!("; courses: {}", courses.join(", ")));
+        let replays: Vec<String> =
+            [part(self.replays_uploaded, StatusText::PartUploaded), part(self.replays_failed, StatusText::PartFailed)].into_iter().flatten().collect();
+        let traces: Vec<String> =
+            [part(self.traces_uploaded, StatusText::PartUploaded), part(self.traces_failed, StatusText::PartFailed)].into_iter().flatten().collect();
+        let courses: Vec<String> = [
+            part(self.courses_sent, StatusText::PartSent),
+            part(self.courses_rejected, StatusText::PartRejected),
+            part(self.courses_failed, StatusText::PartFailed),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let records = if records.is_empty() { StatusText::NothingSent.get(language).to_string() } else { records.join(SYNC_PART_SEPARATOR) };
+        let mut sections = vec![StatusText::SectionRecords.fill(language, &[&records])];
+        for (label, parts) in [(StatusText::SectionCourses, courses), (StatusText::SectionTraces, traces), (StatusText::SectionReplays, replays)] {
+            if !parts.is_empty() {
+                sections.push(label.fill(language, &[&parts.join(SYNC_PART_SEPARATOR)]));
+            }
         }
-        if !traces.is_empty() {
-            line.push_str(&format!("; traces: {}", traces.join(", ")));
-        }
-        if !replays.is_empty() {
-            line.push_str(&format!("; replays: {}", replays.join(", ")));
-        }
-        line
+        sections.join(SYNC_SECTION_SEPARATOR)
     }
 }
 
-/// What a sync that sent no play at all says of the plays.
-const NOTHING_SENT: &str = "nothing sent";
+/// What parts of one section of a sync's status line are joined with.
+const SYNC_PART_SEPARATOR: &str = ", ";
 
-/// What SYNC RECORDS NOW says when the walk found nothing the server lacks.
-pub(crate) const NOTHING_TO_SEND: &str = "records: nothing to send";
+/// What the sections of a sync's status line are joined with.
+const SYNC_SECTION_SEPARATOR: &str = "; ";
 
-/// What SYNC RECORDS NOW says while a token is held and the server has not yet named its owner.
-pub(crate) const ACCOUNT_NOT_CONFIRMED: &str = "account not confirmed yet";
+/// The status line of a sync that stopped before its end, in the language the frame thread has
+/// installed.
+pub(crate) fn stop_line(stop: &SyncStop) -> String {
+    stop_line_in(stop, language())
+}
 
 /// The status line of a sync that stopped before its end.
-pub(crate) fn stop_line(stop: &SyncStop) -> String {
+pub(crate) fn stop_line_in(stop: &SyncStop, language: Language) -> String {
     match stop {
-        SyncStop::Unauthorized(detail) => format!("records sync stopped: {}", truncate(detail)),
-        SyncStop::Unreachable(_) => "records sync stopped: server unreachable".to_string(),
-        SyncStop::RateLimited => "records sync stopped: rate limited".to_string(),
-        SyncStop::Cancelled => "records sync cancelled".to_string(),
-        SyncStop::Unreadable(detail) => format!("records sync not started: {}", truncate(detail)),
+        SyncStop::Unauthorized(detail) => StatusText::SyncStoppedWith.fill(language, &[&truncate(detail)]),
+        SyncStop::Unreachable(_) => StatusText::SyncStoppedServerUnreachable.get(language).to_string(),
+        SyncStop::RateLimited => StatusText::SyncStoppedRateLimited.get(language).to_string(),
+        SyncStop::Cancelled => StatusText::SyncCancelled.get(language).to_string(),
+        SyncStop::Unreadable(detail) => StatusText::SyncNotStarted.fill(language, &[&truncate(detail)]),
     }
 }
 
@@ -1151,17 +1169,17 @@ impl RecordSyncRun {
     /// The value of the SYNC RECORDS NOW row while this sync runs.
     pub(crate) fn progress_value(&self) -> String {
         match (self.replays_total, self.traces_total) {
-            (Some(total), _) => format!("REPLAYS {}/{total}", self.replays_done),
-            (None, Some(total)) => format!("TRACES {}/{total}", self.traces_done),
-            (None, None) => format!("SENDING {}/{}", self.tally.scores_done(), self.scores_total),
+            (Some(total), _) => installed_with(StatusText::RowReplays, &[&self.replays_done, &total]),
+            (None, Some(total)) => installed_with(StatusText::RowTraces, &[&self.traces_done, &total]),
+            (None, None) => installed_with(StatusText::RowSending, &[&self.tally.scores_done(), &self.scores_total]),
         }
     }
 
     fn progress_line(&self) -> String {
         match (self.replays_total, self.traces_total) {
-            (Some(total), _) => format!("syncing replays {}/{total}", self.replays_done),
-            (None, Some(total)) => format!("syncing traces {}/{total}", self.traces_done),
-            (None, None) => format!("syncing records {}/{}", self.tally.scores_done(), self.scores_total),
+            (Some(total), _) => installed_with(StatusText::SyncingReplays, &[&self.replays_done, &total]),
+            (None, Some(total)) => installed_with(StatusText::SyncingTraces, &[&self.traces_done, &total]),
+            (None, None) => installed_with(StatusText::SyncingRecords, &[&self.tally.scores_done(), &self.scores_total]),
         }
     }
 }
@@ -1262,19 +1280,19 @@ impl AppShared {
     /// when there is nothing to send.
     pub(crate) fn sync_records_now(&mut self) {
         if self.config.network.server_url.is_none() {
-            self.net_status = "set SERVER URL first".to_string();
+            self.net_status = installed(StatusText::SetServerUrlFirst).to_string();
             return;
         }
         if !self.session.is_logged_in() {
-            self.net_status = "log in first".to_string();
+            self.net_status = installed(StatusText::LogInFirst).to_string();
             return;
         }
         if self.session.login_id().is_none_or(|login_id| login_id.trim().is_empty()) {
-            self.net_status = ACCOUNT_NOT_CONFIRMED.to_string();
+            self.net_status = installed(StatusText::AccountNotConfirmed).to_string();
             return;
         }
         if self.record_sync.is_some() {
-            self.net_status = "records sync already running".to_string();
+            self.net_status = installed(StatusText::RecordsSyncAlreadyRunning).to_string();
             return;
         }
         self.start_sync(SyncScope::All, true);
@@ -1313,7 +1331,7 @@ impl AppShared {
         let (up_to, courses_up_to) = match newest {
             Ok(newest) => newest,
             Err(e) => {
-                notify(Level::Warn, format!("records sync not started: {e}"));
+                notify_text(Level::Warn, StatusText::SyncNotStarted, &[&e]);
                 return false;
             }
         };
@@ -1357,7 +1375,7 @@ impl AppShared {
             tally: SyncTally::default(),
         });
         if by_hand {
-            self.net_status = "records: picking what to send".to_string();
+            self.net_status = installed(StatusText::RecordsPickingWhatToSend).to_string();
         }
         true
     }
@@ -1495,17 +1513,16 @@ impl AppShared {
                 self.record_sync = None;
                 match &stop {
                     Some(stop) => {
-                        let line = stop_line(stop);
-                        self.net_status = line.clone();
-                        notify(Level::Warn, line);
+                        self.net_status = stop_line(stop);
+                        let stopped = stop.clone();
+                        notify_with(Level::Warn, move |language| stop_line_in(&stopped, language));
                     }
                     None if quiet => {}
-                    None if by_hand && found_nothing => self.net_status = NOTHING_TO_SEND.to_string(),
+                    None if by_hand && found_nothing => self.net_status = installed(StatusText::RecordsNothingToSend).to_string(),
                     None => {
-                        let line = tally.summary();
                         let level = if tally.is_troubled() { Level::Warn } else { Level::Info };
-                        self.net_status = line.clone();
-                        notify(level, line);
+                        self.net_status = tally.summary();
+                        notify_with(level, move |language| tally.summary_in(language));
                     }
                 }
                 if stop.is_none() && !self.record_sync_pending.is_empty() {

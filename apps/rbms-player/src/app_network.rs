@@ -18,11 +18,9 @@ use crate::ir_session::{AuthAction, GUEST_PLAYER_ID, auth_request, run_auth, run
 use crate::ir_sync::{
     SETTINGS_BLOB_NAME, SyncOutcome, SyncPayload, build_blob, merge_downloaded, parse_blob, sanitise_for_upload, sync_error_message, upload_outcome,
 };
-use crate::record_sync::ACCOUNT_NOT_CONFIRMED;
+use crate::notify::notify_text;
+use crate::text::notices::{NoticeText, StatusText, installed, installed_with};
 use crate::*;
-
-/// What the status line says when a change of account or server let go of a request in flight.
-const ACCOUNT_REQUESTS_DROPPED: &str = "account or server changed: the request in flight was dropped";
 
 /// Gap between connection probes of the configured server.
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -68,17 +66,16 @@ pub(crate) fn build_server(config: &Config, token: Option<String>) -> BuiltServe
     BuiltServer { server, connected, probe_stop }
 }
 
-/// What the message bus says when a logout could not tell the server to refuse the token. The token
-/// is gone from this machine either way; it stays valid on the server until it is deleted from the
-/// account page of the web site.
-const TOKEN_NOT_REVOKED: &str = "logged out, but the server did not revoke the token (delete it on the web site)";
-
 /// Tell the server to refuse the token `server` carries, on a thread of its own: a logout finishes
 /// on this machine whether or not the server can be reached, and nothing waits on the answer.
+///
+/// When the server cannot be told, the token is gone from this machine all the same, and it stays
+/// valid on the server until it is deleted from the account page of the web site, which the notice
+/// says.
 fn revoke_token_in_background(server: Arc<dyn ScoreServer>) {
     std::thread::spawn(move || {
         if let Err(error) = run_revoke(server.as_ref()) {
-            notify(Level::Warn, format!("{TOKEN_NOT_REVOKED}: {}", crate::ir_outcome::short_error(&error)));
+            notify_text(Level::Warn, NoticeText::TokenNotRevoked, &[&crate::ir_outcome::short_error(&error)]);
         }
     });
 }
@@ -151,16 +148,12 @@ fn revoke_unclaimed_token(server_url: Option<String>, token: String) {
     match rbms_ir::HttpScoreServer::try_new(url, Some(token)) {
         Ok(server) => {
             if let Err(error) = run_revoke(&server) {
-                notify(Level::Warn, format!("{UNCLAIMED_TOKEN_NOT_REVOKED}: {}", crate::ir_outcome::short_error(&error)));
+                notify_text(Level::Warn, NoticeText::LetGoOfLoginTokenNotRevoked, &[&crate::ir_outcome::short_error(&error)]);
             }
         }
-        Err(error) => notify(Level::Warn, format!("{UNCLAIMED_TOKEN_NOT_REVOKED}: {error}")),
+        Err(error) => notify_text(Level::Warn, NoticeText::LetGoOfLoginTokenNotRevoked, &[&error]),
     }
 }
-
-/// What the message bus says when a token issued for a login or register this machine let go of
-/// could not be revoked.
-const UNCLAIMED_TOKEN_NOT_REVOKED: &str = "a login that was let go of left its token valid on the server (delete it on the web site)";
 
 /// Wall-clock milliseconds since the epoch, the stamp the sync blob is versioned by.
 fn now_ms() -> i64 {
@@ -212,7 +205,7 @@ impl AppShared {
         self.sync_base_rx = None;
         self.sync_download_rx = None;
         if in_flight.contains(&true) {
-            self.net_status = ACCOUNT_REQUESTS_DROPPED.to_string();
+            self.net_status = installed(StatusText::AccountRequestsDropped).to_string();
         }
     }
 
@@ -271,7 +264,7 @@ impl AppShared {
     /// Whether a request needs a configured server, reporting why it cannot run when it does not.
     fn require_server(&mut self) -> bool {
         if self.config.network.server_url.is_none() {
-            self.net_status = "set SERVER URL first".to_string();
+            self.net_status = installed(StatusText::SetServerUrlFirst).to_string();
             return false;
         }
         true
@@ -283,12 +276,12 @@ impl AppShared {
             return None;
         }
         if !self.session.is_logged_in() {
-            self.net_status = "log in first".to_string();
+            self.net_status = installed(StatusText::LogInFirst).to_string();
             return None;
         }
         let player = self.account_player();
         if player.is_none() {
-            self.net_status = ACCOUNT_NOT_CONFIRMED.to_string();
+            self.net_status = installed(StatusText::AccountNotConfirmed).to_string();
         }
         player
     }
@@ -300,16 +293,16 @@ impl AppShared {
         }
         let login_id = self.config.network.player_id.trim().to_string();
         if login_id.is_empty() || login_id == GUEST_PLAYER_ID {
-            self.net_status = "set PLAYER ID to your account id first".to_string();
+            self.net_status = installed(StatusText::SetPlayerIdFirst).to_string();
             return;
         }
         if self.password.is_empty() {
-            self.net_status = "set PASSWORD first".to_string();
+            self.net_status = installed(StatusText::SetPasswordFirst).to_string();
             return;
         }
         let email = self.config.network.ir_email.clone().unwrap_or_default();
         if action == AuthAction::Register && email.trim().is_empty() {
-            self.net_status = "set EMAIL first".to_string();
+            self.net_status = installed(StatusText::SetEmailFirst).to_string();
             return;
         }
         let request = auth_request(action, &login_id, &self.password, &email);
@@ -346,7 +339,7 @@ impl AppShared {
         if let Some(account) = folders_of {
             crate::user_folders::forget_account(self, &account);
         }
-        self.net_status = "logged out".to_string();
+        self.net_status = installed(StatusText::LoggedOut).to_string();
         self.save_settings();
     }
 
@@ -368,7 +361,7 @@ impl AppShared {
                 return;
             }
         };
-        self.net_status = "uploading settings...".to_string();
+        self.net_status = installed(StatusText::UploadingSettings).to_string();
         self.sync_upload_rx = Some(spawn_query(self.server.clone(), move |server| server.put_settings(&player, &blob)));
     }
 
@@ -396,7 +389,7 @@ impl AppShared {
         let Some(player) = self.require_account() else {
             return;
         };
-        self.net_status = "downloading settings...".to_string();
+        self.net_status = installed(StatusText::DownloadingSettings).to_string();
         self.sync_download_rx = Some(spawn_query(self.server.clone(), move |server| server.get_settings(&player, SETTINGS_BLOB_NAME)));
     }
 
@@ -406,7 +399,7 @@ impl AppShared {
         let payload = match parse_blob(blob) {
             Ok(payload) => payload,
             Err(message) => {
-                self.net_status = format!("settings blob unreadable: {message}");
+                self.net_status = installed_with(StatusText::SettingsBlobUnreadable, &[&message]);
                 return;
             }
         };
@@ -420,7 +413,7 @@ impl AppShared {
         self.rebuild_skin();
         self.sync_lock.apply(SyncOutcome::Read(blob.updated_at));
         self.save_settings();
-        self.net_status = "settings downloaded".to_string();
+        self.net_status = installed(StatusText::SettingsDownloaded).to_string();
     }
 
     /// Send the current rival list to the server (and keep the local cache either way).
@@ -433,7 +426,7 @@ impl AppShared {
             return;
         };
         let rivals = self.config.network.rivals.clone();
-        self.net_status = "saving rivals...".to_string();
+        self.net_status = installed(StatusText::SavingRivals).to_string();
         self.rivals_rx = Some(spawn_query(self.server.clone(), move |server| server.put_rivals(&player, &rivals)));
     }
 
@@ -542,7 +535,7 @@ impl AppShared {
         if let Some(rx) = self.sync_base_rx.take() {
             match rx.try_recv() {
                 Ok(Ok(blob)) => self.sync_lock.apply(SyncOutcome::Read(blob.updated_at)),
-                Ok(Err(_)) => self.net_status = "settings uploaded (lock not refreshed; download before the next save)".to_string(),
+                Ok(Err(_)) => self.net_status = installed(StatusText::SettingsUploadedLockNotRefreshed).to_string(),
                 Err(TryRecvError::Empty) => self.sync_base_rx = Some(rx),
                 Err(TryRecvError::Disconnected) => {}
             }
@@ -550,7 +543,7 @@ impl AppShared {
         if let Some(rx) = self.sync_upload_rx.take() {
             match rx.try_recv() {
                 Ok(Ok(stored)) => {
-                    self.net_status = "settings uploaded".to_string();
+                    self.net_status = installed(StatusText::SettingsUploaded).to_string();
                     match upload_outcome(stored) {
                         Some(outcome) => self.sync_lock.apply(outcome),
                         None => self.refresh_sync_base(),
@@ -559,12 +552,12 @@ impl AppShared {
                 Ok(Err(error)) => {
                     self.sync_lock.apply(SyncOutcome::Conflict);
                     self.net_status = match crate::ir_sync::conflict_server_copy(&error) {
-                        Some(server_copy) => format!("{} (server copy {})", sync_error_message(&error), server_copy.updated_at),
+                        Some(server_copy) => installed_with(StatusText::ServerCopy, &[&sync_error_message(&error), &server_copy.updated_at]),
                         None => sync_error_message(&error),
                     };
                 }
                 Err(TryRecvError::Empty) => self.sync_upload_rx = Some(rx),
-                Err(TryRecvError::Disconnected) => self.net_status = "settings upload worker stopped".to_string(),
+                Err(TryRecvError::Disconnected) => self.net_status = installed(StatusText::SettingsUploadWorkerStopped).to_string(),
             }
         }
         if let Some(rx) = self.sync_download_rx.take() {
@@ -572,7 +565,7 @@ impl AppShared {
                 Ok(Ok(blob)) => self.apply_downloaded_settings(&blob),
                 Ok(Err(error)) => self.net_status = sync_error_message(&error),
                 Err(TryRecvError::Empty) => self.sync_download_rx = Some(rx),
-                Err(TryRecvError::Disconnected) => self.net_status = "settings download worker stopped".to_string(),
+                Err(TryRecvError::Disconnected) => self.net_status = installed(StatusText::SettingsDownloadWorkerStopped).to_string(),
             }
         }
     }
@@ -584,10 +577,10 @@ impl AppShared {
         match rx.try_recv() {
             Ok(Ok(profiles)) => {
                 self.config.network.rivals = profiles.into_iter().map(|profile| profile.id).collect();
-                self.net_status = format!("rivals: {}", self.config.network.rivals.len());
+                self.net_status = installed_with(StatusText::Rivals, &[&self.config.network.rivals.len()]);
                 self.save_settings();
             }
-            Ok(Err(error)) => self.net_status = format!("rivals: {}", crate::ir_outcome::short_error(&error)),
+            Ok(Err(error)) => self.net_status = installed_with(StatusText::Rivals, &[&crate::ir_outcome::short_error(&error)]),
             Err(TryRecvError::Empty) => self.rivals_rx = Some(rx),
             Err(TryRecvError::Disconnected) => {}
         }

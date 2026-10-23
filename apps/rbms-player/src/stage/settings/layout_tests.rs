@@ -297,7 +297,7 @@ fn a_press_on_a_field_or_a_mark_opens_or_runs_the_row() {
     screen.press(middle(row_open(screen.row_of(email))), MouseButton::Left);
     assert_eq!(screen.state.text_edit_row, Some(email));
     assert_eq!(screen.scene().editor.map(|(at, _)| at), Some(screen.at(email)));
-    assert_eq!(screen.scene().hint, info::TEXT_EDIT_HINT);
+    assert_eq!(screen.scene().hint, info::text_edit_hint());
     for text in ["d", "j", "@", "x", ".", "t"] {
         screen.typed(text);
     }
@@ -312,7 +312,7 @@ fn a_press_on_a_field_or_a_mark_opens_or_runs_the_row() {
     screen.frame();
     screen.press(middle(row_open(screen.row_of(SettingId::Rivals))), MouseButton::Left);
     assert!(screen.state.rivals_open, "a press on the mark of the RIVALS row did not open the list");
-    assert_eq!(screen.scene().hint, RIVALS_HINT);
+    assert_eq!(screen.scene().hint, rivals_hint());
 
     let mut input = screen_on("layout-open-keys", SettingTab::Input);
     let on_the_mark = middle(row_open(input.row_of(SettingId::KeyConfig)));
@@ -395,7 +395,7 @@ fn putting_a_whole_group_back_is_asked_about_first() {
     screen.shifted(KeyCode::Digit0);
     let asked = screen.scene().confirm.expect("the screen did not ask");
     assert!(asked.title.contains(SettingTab::Audio.label()) && asked.body.starts_with("5 CHANGED ROWS GO ") && !asked.body.contains("TEXT"), "{asked:?}");
-    assert_eq!(screen.scene().hint, CONFIRM_HINT);
+    assert_eq!(screen.scene().hint, confirm_hint());
     for code in [KeyCode::ArrowDown, KeyCode::ArrowRight, KeyCode::Tab, KeyCode::Digit0, KeyCode::F8, KeyCode::F12, KeyCode::F5] {
         assert!(matches!(screen.key(code), Transition::Stay), "{code:?} left the screen from under the question");
     }
@@ -647,7 +647,7 @@ fn the_panel_follows_what_has_the_keys() {
     audio.key(KeyCode::Enter);
     audio.typed("4");
     audio.typed("5");
-    assert_eq!(keys_of(&mut audio), listed(&info::NUMBER_EDIT_KEYS));
+    assert_eq!(keys_of(&mut audio), listed(&info::number_edit_keys()));
     assert_eq!(value_of(&mut audio).as_deref(), Some("45"), "the panel does not show the number being typed");
     audio.key(KeyCode::Escape);
     assert_eq!(keys_of(&mut audio), own, "the row's own keys did not come back");
@@ -656,7 +656,7 @@ fn the_panel_follows_what_has_the_keys() {
     network.press(middle(row_open(network.row_of(SettingId::Email))), MouseButton::Left);
     network.typed("d");
     network.typed("j");
-    assert_eq!(keys_of(&mut network), listed(&info::TEXT_EDIT_KEYS));
+    assert_eq!(keys_of(&mut network), listed(&info::text_edit_keys()));
     assert!(value_of(&mut network).is_some_and(|value| value.starts_with("dj")), "{:?}", value_of(&mut network));
     network.key(KeyCode::Escape);
     network.press(middle(row_open(network.row_of(SettingId::Password))), MouseButton::Left);
@@ -665,12 +665,12 @@ fn the_panel_follows_what_has_the_keys() {
     assert!(value_of(&mut network).is_some_and(|value| !value.contains("se")), "the panel shows a password: {:?}", value_of(&mut network));
     network.key(KeyCode::Escape);
     network.press(middle(row_open(network.row_of(SettingId::Rivals))), MouseButton::Left);
-    assert_eq!(keys_of(&mut network), listed(&info::LIST_KEYS));
+    assert_eq!(keys_of(&mut network), listed(&info::list_keys()));
 
     let mut judge = screen_on("layout-busy-question", SettingTab::Judge);
     change(&mut judge, SettingId::LnMode);
     judge.shifted(KeyCode::Digit0);
-    assert_eq!(keys_of(&mut judge), listed(&info::CONFIRM_KEYS));
+    assert_eq!(keys_of(&mut judge), listed(&info::confirm_keys()));
 }
 
 /// Every group of the screen and the states of it worth looking at, drawn and saved for a person to

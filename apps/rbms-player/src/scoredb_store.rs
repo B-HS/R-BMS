@@ -36,7 +36,8 @@ use rbms_store::scoredb::{
 };
 use rbms_store::{SCORE_RULE_VERSION, ScoreBook, ScoreRecord};
 
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify, notify_text};
+use crate::text::notices::NoticeText;
 
 /// Name of the score database inside the config directory, next to the settings and the song
 /// database.
@@ -63,13 +64,13 @@ pub(crate) fn import_pending_runs(db: &mut ScoreDb, dir: &Path) {
     match db.import_pending_runs(dir) {
         Ok(report) => {
             if report.imported > 0 {
-                notify(Level::Info, format!("{} runs kept while the score database was closed are in it now", report.imported));
+                notify_text(Level::Info, NoticeText::ImportedPendingRuns, &[&report.imported]);
             }
             for file in report.unreadable {
-                notify(Level::Warn, format!("kept run not read ({}): left where it is", file.display()));
+                notify_text(Level::Warn, NoticeText::KeptRunNotRead, &[&file.display()]);
             }
             for file in report.stuck {
-                notify(Level::Warn, format!("kept run read in but not removed ({}): remove it by hand", file.display()));
+                notify_text(Level::Warn, NoticeText::KeptRunNotRemoved, &[&file.display()]);
             }
             for (file, error) in report.refused {
                 notify(Level::Warn, format!("kept run not read in ({}): {error}; left where it is", file.display()));
@@ -133,7 +134,7 @@ fn put_course_stages_on_their_gauge(db: &mut ScoreDb) {
     let moved = crate::trace_backfill::course_stages(db).and_then(|stages| db.put_course_stages_on_class(&stages.into_iter().collect::<Vec<_>>()));
     match moved {
         Ok(0) => {}
-        Ok(moved) => notify(Level::Info, format!("{moved} course stages stored on the gauge the settings chose are on the course gauge they ran on now")),
+        Ok(moved) => notify_text(Level::Info, NoticeText::CourseStagesMoved, &[&moved]),
         Err(e) => notify(Level::Warn, format!("course stages not put on their gauge: {e}")),
     }
 }
@@ -143,15 +144,7 @@ fn report_import(report: &MigrationReport, ron_path: &Path) {
     if report.records == 0 {
         return;
     }
-    notify(
-        Level::Info,
-        format!(
-            "{} score records imported into the database ({} assisted, kept as history only); {} moved aside",
-            report.records,
-            report.assisted,
-            ron_path.display()
-        ),
-    );
+    notify_text(Level::Info, NoticeText::ScoreRecordsImported, &[&report.records, &report.assisted, &ron_path.display()]);
 }
 
 /// Microseconds per millisecond, the step between the song clock and the play time a day

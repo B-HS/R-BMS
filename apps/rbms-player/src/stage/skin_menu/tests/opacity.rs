@@ -89,12 +89,25 @@ fn the_opacities_of_a_skin_are_listed_together_under_their_own_names() {
     assert_eq!(labels[first - 1], "JUDGE DETAIL OFFSET ALPHA", "an offset that moves is listed among the opacities");
     for label in opacities {
         assert_eq!(menu.value_of(menu.row_called(label)), "100%", "{label}");
-        assert_eq!(row_help(&menu.app.shared, menu.row_called(label)), OPACITY_HELP);
+        assert_eq!(row_help(&menu.app.shared, menu.row_called(label)), SkinMenuText::OpacityHelp.get(language()));
     }
-    assert_eq!(row_help(&menu.app.shared, menu.row_called("GLOW ALPHA")), OFFSET_ALPHA_HELP, "the alpha of an offset that also moves is said as an opacity");
-    assert!(OFFSET_ALPHA_HELP.contains("-255") && OFFSET_ALPHA_HELP.contains("+255"), "the range of a raw alpha is not said: {OFFSET_ALPHA_HELP}");
-    assert_eq!(row_help(&menu.app.shared, menu.row_called("MARK PLACE Y")), OFFSET_PLACE_HELP, "an offset the skin declares is not said as the skin's");
-    let added = [("JUDGE OFFSET Y", AUTOMATIC_PLACE_HELP), ("ALL OFFSET(%) X", AUTOMATIC_PLACE_HELP), ("JUDGE DETAIL OFFSET ALPHA", AUTOMATIC_ALPHA_HELP)];
+    assert_eq!(
+        row_help(&menu.app.shared, menu.row_called("GLOW ALPHA")),
+        SkinMenuText::OffsetAlphaHelp.get(language()),
+        "the alpha of an offset that also moves is said as an opacity"
+    );
+    let alpha_help = SkinMenuText::OffsetAlphaHelp.get(language());
+    assert!(alpha_help.contains("-255") && alpha_help.contains("+255"), "the range of a raw alpha is not said: {alpha_help}");
+    assert_eq!(
+        row_help(&menu.app.shared, menu.row_called("MARK PLACE Y")),
+        SkinMenuText::OffsetPlaceHelp.get(language()),
+        "an offset the skin declares is not said as the skin's"
+    );
+    let added = [
+        ("JUDGE OFFSET Y", SkinMenuText::AutomaticPlaceHelp.get(language())),
+        ("ALL OFFSET(%) X", SkinMenuText::AutomaticPlaceHelp.get(language())),
+        ("JUDGE DETAIL OFFSET ALPHA", SkinMenuText::AutomaticAlphaHelp.get(language())),
+    ];
     for (label, help) in added {
         assert_eq!(row_help(&menu.app.shared, menu.row_called(label)), help, "{label} is not said as an offset the game adds to every play skin");
     }
@@ -293,7 +306,7 @@ fn the_offset_rows_of_the_pack_the_environment_names_behave_as_their_kind_says()
                 assert_eq!(menu.value_of(row), "150% (+128)", "{label} cannot be added to");
                 menu.key(KeyCode::ArrowLeft);
                 assert_eq!(menu.value_of(row), "149% (+125)", "{label} is not stepped from where a typed figure put it");
-                assert_eq!(row_help(&menu.app.shared, row), OPACITY_HELP, "{label}");
+                assert_eq!(row_help(&menu.app.shared, row), SkinMenuText::OpacityHelp.get(language()), "{label}");
             }
             Some(SkinRowKind::Offset(axis)) => {
                 assert_eq!(menu.value_of(row), "+0", "{label} does not open at no offset");
@@ -355,7 +368,7 @@ fn the_parts_of_the_shipped_play_skin_are_taken_off_its_preview_with_the_keys_of
     for label in SHIPPED_BARE_ROWS {
         let row = menu.row_called(label);
         assert_eq!(menu.value_of(row), "100%", "{label} does not open at a hundred percent");
-        assert_eq!(row_help(&menu.app.shared, row), OPACITY_HELP, "{label}");
+        assert_eq!(row_help(&menu.app.shared, row), SkinMenuText::OpacityHelp.get(language()), "{label}");
         menu.focus(row);
         for _ in 0..10 {
             menu.shifted(KeyCode::ArrowLeft);

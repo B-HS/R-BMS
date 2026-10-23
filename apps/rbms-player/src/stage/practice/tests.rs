@@ -843,7 +843,7 @@ fn the_rows_are_where_the_pointer_finds_them_at_every_size() {
             let above = (knob.x + knob.w * 0.5, slider.y + 1.0);
             assert_ne!(screen.pixel(above), theme().focus, "{size:?} {element:?}: the knob is as tall as its row");
         }
-        for hint in [HINT_KEYS, HINT_MOUSE, EDIT_HINT, EDIT_HINT_CLOCK] {
+        for hint in [PracticeText::HintKeys.get(language()), PracticeText::HintMouse.get(language()), EDIT_HINT, EDIT_HINT_CLOCK] {
             assert!(text_width(hint, HINT_SCALE) <= CW as f32 - row_rect(0).x, "{size:?}: {hint:?} runs off the screen");
         }
     }

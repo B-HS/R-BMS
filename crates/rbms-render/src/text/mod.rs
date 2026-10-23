@@ -11,8 +11,8 @@
 //! keeps words it composed for later frames remembers the language it composed them in and composes
 //! them again once [`language`] answers another.
 
-mod hud;
-mod result;
+pub(crate) mod hud;
+pub(crate) mod result;
 pub(crate) mod select;
 
 use std::cell::Cell;
@@ -32,6 +32,36 @@ pub fn set_language(language: Language) {
 /// [`set_language`], English until then.
 pub fn language() -> Language {
     LANGUAGE.with(Cell::get)
+}
+
+/// Drawing a screen in a chosen language, for the tests of the screens that read the catalogs.
+///
+/// The test engine holds the bundled font alone, which has no Korean or Japanese letters, so a
+/// screen in either language cannot be checked by its glyphs. What can be checked is that the words
+/// the screen is drawn with are the language's: a region that holds a fixed word of the catalog
+/// paints differently in another language than in English.
+#[cfg(test)]
+pub(crate) mod testing {
+    use rbms_model::Language;
+
+    use crate::font::TextContext;
+    use crate::theme::Theme;
+    use crate::{CpuCanvas, Rect, RenderCtx};
+
+    /// A blank canvas of `width` x `height` that `draw` paints through a context writing in `language`.
+    pub(crate) fn drawn_in(language: Language, width: u32, height: u32, draw: impl FnOnce(&mut RenderCtx<'_>, &mut CpuCanvas)) -> CpuCanvas {
+        let mut text = TextContext::embedded_only();
+        let mut ctx = RenderCtx::new(Theme::default(), &mut text).with_language(language);
+        let mut canvas = CpuCanvas::new(width, height);
+        draw(&mut ctx, &mut canvas);
+        canvas
+    }
+
+    /// Whether the two canvases paint any pixel of `rect` differently.
+    pub(crate) fn differs_within(a: &CpuCanvas, b: &CpuCanvas, rect: Rect) -> bool {
+        let (x0, y0) = (rect.x as u32, rect.y as u32);
+        (y0..y0 + rect.h as u32).any(|y| (x0..x0 + rect.w as u32).any(|x| a.pixel_at(x, y) != b.pixel_at(x, y)))
+    }
 }
 
 #[cfg(test)]

@@ -18,8 +18,10 @@ use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_outcome::{IrReport, IrStatus, format_submit_outcome, short_error};
 use crate::ir_ranking::{RankingFetch, RankingState, accept_fetch, fetch_board, fetch_board_page};
 use crate::ir_replay::{replay_download_is_applicable, to_ir_replay, wire_carries_judge};
+use crate::notify::notify_text;
 use crate::record_sync::{RATE_LIMITED_DETAIL, ScoreOutcome, course_outcome, course_sync_row, sync_row};
 use crate::stage::StageId;
+use crate::text::notices::{NoticeText, StatusText, installed, installed_with};
 use crate::*;
 
 /// The play a submission on its way to the main server was made for, and where to write its answer
@@ -53,9 +55,6 @@ pub(crate) struct CourseSubmit {
     rx: Receiver<Result<SubmitResponse, IrError>>,
     kept: Option<(i64, String, String)>,
 }
-
-/// What the message bus says of a course the server holds now.
-pub(crate) const COURSE_SENT: &str = "course sent";
 
 /// Why a run was not sent to the main score server: nobody is signed in to it, and the server takes
 /// a score only from an account (a tokenless submission is refused 401). The run is kept locally.
@@ -260,7 +259,7 @@ impl AppShared {
         self.poll_ranking(Instant::now());
         if !replay_download_is_applicable(stage) && self.replay_download_rx.take().is_some() {
             self.replay_download_target = None;
-            self.net_status = "replay download dropped: left song select".to_string();
+            self.net_status = installed(StatusText::ReplayDownloadDropped).to_string();
         }
         self.poll_submit();
         self.poll_profile_submits();
@@ -289,12 +288,12 @@ impl AppShared {
             }
             Ok(Err(error)) => {
                 self.forget_pending_ranking();
-                self.net_status = format!("ranking: {}", short_error(&error));
+                self.net_status = installed_with(StatusText::RankingError, &[&short_error(&error)]);
             }
             Err(TryRecvError::Empty) => self.ranking_rx = Some(rx),
             Err(TryRecvError::Disconnected) => {
                 self.forget_pending_ranking();
-                self.net_status = "ranking worker stopped".to_string();
+                self.net_status = installed(StatusText::RankingWorkerStopped).to_string();
             }
         }
     }
@@ -449,7 +448,7 @@ impl AppShared {
                 None
             }
             (Some(_), None) => {
-                notify(Level::Error, "course not kept: score database not open");
+                notify_text(Level::Error, NoticeText::CourseNotKeptScoreDatabaseClosed, &[]);
                 None
             }
         }
@@ -473,7 +472,7 @@ impl AppShared {
         for (result, kept) in answered {
             let outcome = course_outcome(&result);
             match &outcome {
-                ScoreOutcome::Accepted { .. } => notify(Level::Info, COURSE_SENT),
+                ScoreOutcome::Accepted { .. } => notify_text(Level::Info, NoticeText::CourseSent, &[]),
                 ScoreOutcome::Rejected(rejection) => notify(Level::Warn, format!("course rejected: {}", rejection.detail)),
                 ScoreOutcome::Retry { detail } => notify(Level::Warn, format!("course not sent yet ({detail}): sent again on the next records sync")),
                 ScoreOutcome::Skipped { .. } => {}

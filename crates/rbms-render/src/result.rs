@@ -1,8 +1,12 @@
 use std::sync::LazyLock;
 
+use rbms_model::Language;
+use rbms_model::translations::Catalog;
+
 use crate::ctx::{RenderCtx, with_render_ctx};
 use crate::hud::{MODE_LABEL_MARGIN, MODE_LABEL_SCALE, MODE_LABEL_Y};
 use crate::skin::{Skin, SkinConfig};
+use crate::text::result::ResultText;
 use crate::{Color, Rect, Renderer};
 
 mod grade;
@@ -244,6 +248,7 @@ pub fn render_result_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: 
 /// [`render_result_with_palette`] against a caller-supplied context.
 pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView, palette: &ResultPalette, extras: &ResultExtras) {
     let th = ctx.theme;
+    let language = ctx.language;
     let w = r.size().0 as f32;
     r.clear(th.bg);
     r.fill_rect(Rect::new(0.0, 0.0, w, 52.0), th.topbar);
@@ -265,17 +270,17 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
         match view.prev_best_ex {
             Some(pb) => {
                 let (t, c) = ex_delta_label(view.ex_score as i64 - pb as i64);
-                ctx.draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs BEST"));
+                ctx.draw_text(r, 44.0, dy, 1.8, c, &ResultText::VsBest.fill(language, &[&t]));
                 if view.ex_score > pb {
-                    ctx.draw_text_right(r, 420.0, dy, 1.8, th.title_focus, "NEW RECORD");
+                    ctx.draw_text_right(r, 420.0, dy, 1.8, th.title_focus, ResultText::NewRecord.get(language));
                 }
             }
-            None => ctx.draw_text(r, 44.0, dy, 1.8, th.text_muted, "FIRST PLAY"),
+            None => ctx.draw_text(r, 44.0, dy, 1.8, th.text_muted, ResultText::FirstPlay.get(language)),
         }
         if let Some(pp) = view.prev_ex {
             dy += 28.0;
             let (t, c) = ex_delta_label(view.ex_score as i64 - pp as i64);
-            ctx.draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs PREV"));
+            ctx.draw_text(r, 44.0, dy, 1.8, c, &ResultText::VsPrev.fill(language, &[&t]));
         }
     }
     if let Some(target) = &extras.target {
@@ -290,7 +295,7 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
     ctx.draw_text(r, rx, y, 2.0, th.text_dim, "MAX COMBO");
     ctx.draw_text_right(r, rr, y, 2.0, Color::GREEN, &format!("{} / {}", view.max_combo, view.total_notes));
     y += 30.0;
-    ctx.draw_text(r, rx, y, 2.0, th.text_dim, "TOTAL NOTES");
+    ctx.draw_text(r, rx, y, 2.0, th.text_dim, ResultText::TotalNotes.get(language));
     ctx.draw_text_right(r, rr, y, 2.0, th.text, &view.total_notes.to_string());
     y += 30.0;
     r.fill_rect(Rect::new(rx, y, rr - rx, 2.0), th.divider);
@@ -308,12 +313,12 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
     y += 10.0;
     ctx.draw_text(r, rx, y, 1.8, Color::CYAN, &format!("FAST {}", lane_kind_total(view.fast)));
     ctx.draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", lane_kind_total(view.slow)));
-    ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
+    ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &ResultText::GaugeValue.fill(language, &[&(view.gauge.round() as i32)]));
 
     if view.show_result_graphs {
         draw_result_graphs(ctx, r, view, palette);
     }
-    ctx.draw_text_centered(r, w * 0.5, HINT_Y, HINT_SCALE, th.text_muted, result_hint_text(extras.run_again));
+    ctx.draw_text_centered(r, w * 0.5, HINT_Y, HINT_SCALE, th.text_muted, result_hint_text(language, extras.run_again));
 }
 
 /// Where the key hint sits and how large it is drawn.
@@ -321,13 +326,14 @@ const HINT_Y: f32 = 692.0;
 const HINT_SCALE: f32 = 1.2;
 
 /// The keys the score screen answers to, as the hint along its bottom edge spells them out.
-fn result_hint_text(run_again: bool) -> &'static str {
-    if run_again { "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG" } else { "ENTER / ESC  SELECT" }
+fn result_hint_text(language: Language, run_again: bool) -> &'static str {
+    if run_again { ResultText::HintSelectRetryNext.get(language) } else { ResultText::HintSelect.get(language) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text::testing::{differs_within, drawn_in};
 
     fn sample_view() -> ResultView {
         ResultView {
@@ -753,5 +759,101 @@ mod tests {
         let plain = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &ResultExtras::default()));
         let defaulted = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &ResultExtras::default()));
         assert_eq!(plain, defaulted, "the older entry point has to keep drawing exactly what it drew");
+    }
+
+    fn in_language(language: Language, view: &ResultView, extras: &ResultExtras) -> crate::CpuCanvas {
+        drawn_in(language, SCREEN_W, SCREEN_H, |ctx, canvas| render_result_with_palette_ctx(ctx, canvas, view, &ResultPalette::default(), extras))
+    }
+
+    fn translated() -> impl Iterator<Item = Language> {
+        Language::ALL.into_iter().filter(|language| *language != Language::English)
+    }
+
+    /// The size of the screen the result is drawn on, and where the lines the tests look at stand:
+    /// the score deltas under the rank bar, the line of the chart's notes in the report, the line of
+    /// the run's timing and gauge under the judgement rows, the strip of graph panels, and how tall a
+    /// line is.
+    const SCREEN_W: u32 = 1280;
+    const SCREEN_H: u32 = 720;
+    const DELTAS_Y: f32 = 380.0;
+    const DELTAS_H: f32 = 56.0;
+    const TOTAL_NOTES_Y: f32 = 150.0;
+    const GAUGE_LINE_Y: f32 = 410.0;
+    const GRAPHS_Y: f32 = 556.0;
+    const GRAPHS_H: f32 = 120.0;
+    const GRAPH_PLOTS_FROM: f32 = 30.0;
+    const GRAPH_PLOTS_H: f32 = 70.0;
+    const GRAPH_TIMING_LABELS_FROM: f32 = 94.0;
+    const REPORT_LINE_H: f32 = 24.0;
+
+    #[test]
+    fn the_score_deltas_are_written_in_the_language_asked_for() {
+        let deltas = Rect::new(CONTENT_X, DELTAS_Y, LEFT_COLUMN_RIGHT - CONTENT_X, DELTAS_H);
+        let first = ResultView { prev_best_ex: None, prev_ex: None, ..sample_view() };
+        let beaten = ResultView { prev_best_ex: Some(200), prev_ex: Some(230), ..sample_view() };
+        let extras = ResultExtras::default();
+        let (english_first, english_beaten) = (in_language(Language::English, &first, &extras), in_language(Language::English, &beaten, &extras));
+        for language in translated() {
+            assert!(differs_within(&english_first, &in_language(language, &first, &extras), deltas), "{language:?}: FIRST PLAY is still English");
+            assert!(
+                differs_within(&english_beaten, &in_language(language, &beaten, &extras), deltas),
+                "{language:?}: the deltas and NEW RECORD are still English"
+            );
+        }
+    }
+
+    #[test]
+    fn the_report_the_graphs_and_the_hint_are_written_in_the_language_asked_for() {
+        let notes = Rect::new(CONTENT_X, TOTAL_NOTES_Y, CONTENT_RIGHT - CONTENT_X, REPORT_LINE_H);
+        let gauge = Rect::new(CONTENT_X, GAUGE_LINE_Y, CONTENT_RIGHT - CONTENT_X, REPORT_LINE_H);
+        let hint = Rect::new(0.0, HINT_Y, SCREEN_W as f32, REPORT_LINE_H);
+        let graphs = Rect::new(CONTENT_X, GRAPHS_Y, CONTENT_RIGHT - CONTENT_X, GRAPHS_H);
+        let (plain, again) = (ResultExtras::default(), ResultExtras { run_again: true, ..ResultExtras::default() });
+        let english = in_language(Language::English, &measured_view(), &plain);
+        let english_again = in_language(Language::English, &measured_view(), &again);
+        for language in translated() {
+            let drawn = in_language(language, &measured_view(), &plain);
+            assert!(differs_within(&english, &drawn, notes), "{language:?}: TOTAL NOTES is still English");
+            assert!(differs_within(&english, &drawn, gauge), "{language:?}: the gauge line is still English");
+            assert!(differs_within(&english, &drawn, hint), "{language:?}: the hint is still English");
+            assert!(differs_within(&english, &drawn, graphs), "{language:?}: the graph panels are still English");
+            assert!(
+                differs_within(&english_again, &in_language(language, &measured_view(), &again), hint),
+                "{language:?}: the run-again hint is still English"
+            );
+        }
+    }
+
+    #[test]
+    fn the_notes_of_the_graph_panels_are_written_in_the_language_asked_for() {
+        let width = CONTENT_RIGHT - CONTENT_X;
+        let plots = Rect::new(CONTENT_X, GRAPHS_Y + GRAPH_PLOTS_FROM, width, GRAPH_PLOTS_H);
+        let timing_labels = Rect::new(CONTENT_X, GRAPHS_Y + GRAPH_TIMING_LABELS_FROM, width, REPORT_LINE_H);
+        let extras = ResultExtras::default();
+        let (english_empty, english_measured) =
+            (in_language(Language::English, &sample_view(), &extras), in_language(Language::English, &measured_view(), &extras));
+        for language in translated() {
+            assert!(differs_within(&english_empty, &in_language(language, &sample_view(), &extras), plots), "{language:?}: NO DATA is still English");
+            assert!(
+                differs_within(&english_measured, &in_language(language, &measured_view(), &extras), timing_labels),
+                "{language:?}: EARLY and LATE are still English"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hint_that_offers_a_retry_begins_with_the_one_that_does_not_in_every_language() {
+        for language in Language::ALL {
+            let (short, long) = (result_hint_text(language, false), result_hint_text(language, true));
+            assert!(long.starts_with(short), "{language:?}: the long hint does not begin with the short one: {short:?} {long:?}");
+        }
+    }
+
+    #[test]
+    fn a_result_in_english_is_drawn_as_the_screen_always_was() {
+        let extras = ResultExtras { target: Some(TargetView { name: "RANK AAA".into(), ex: 240 }), run_again: true };
+        let through_the_thread = painted(|c| render_result_with_palette(c, &measured_view(), &ResultPalette::default(), &extras));
+        let through_the_context = in_language(Language::English, &measured_view(), &extras);
+        assert_eq!(through_the_thread, through_the_context.pixels(), "an explicit English context draws what the thread's default does");
     }
 }

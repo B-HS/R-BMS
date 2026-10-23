@@ -75,9 +75,9 @@ fn the_colours_of_a_skin_are_listed_with_a_row_that_shows_their_channels() {
     let fold = SettingRow::Skin(SkinRow::ColorChannels);
     assert_eq!(menu.value_of(fold), format!("HIDDEN ({CHANNEL_ROWS})"));
     assert!(!labels.iter().any(|label| label.ends_with(" R")), "a channel is on show with its row closed");
-    assert_eq!(row_help(&menu.app.shared, menu.listed_as(PANEL_COLOR_ROW)), COLOR_HELP);
-    assert_eq!(row_help(&menu.app.shared, fold), CHANNEL_FOLD_HELP);
-    for help in [COLOR_HELP, CHANNEL_HELP, CHANNEL_FOLD_HELP] {
+    assert_eq!(row_help(&menu.app.shared, menu.listed_as(PANEL_COLOR_ROW)), SkinMenuText::ColorHelp.get(language()));
+    assert_eq!(row_help(&menu.app.shared, fold), SkinMenuText::ChannelFoldHelp.get(language()));
+    for help in [SkinMenuText::ColorHelp.get(language()), SkinMenuText::ChannelHelp.get(language()), SkinMenuText::ChannelFoldHelp.get(language())] {
         assert_eq!(fit_text(help, INFO_SCALE, INFO_RECT.w - INFO_PAD * 2.0), help, "what is said of a colour row is cut short");
     }
 
@@ -91,7 +91,7 @@ fn the_colours_of_a_skin_are_listed_with_a_row_that_shows_their_channels() {
         [PANEL_COLOR_ROW, NOTE_COLOR_ROW].iter().flat_map(|name| ["R", "G", "B", "A"].map(|channel| format!("{name} {channel}"))).collect();
     assert_eq!(shown, expected);
     assert_eq!(menu.value_of(menu.listed_as(&format!("{PANEL_COLOR_ROW} B"))), "64", "a channel does not read the skin's default");
-    assert_eq!(row_help(&menu.app.shared, menu.listed_as(&format!("{PANEL_COLOR_ROW} B"))), CHANNEL_HELP);
+    assert_eq!(row_help(&menu.app.shared, menu.listed_as(&format!("{PANEL_COLOR_ROW} B"))), SkinMenuText::ChannelHelp.get(language()));
     menu.key(KeyCode::ArrowLeft);
     assert_eq!(menu.value_of(fold), format!("HIDDEN ({CHANNEL_ROWS})"), "an arrow did not hide the channels");
     assert!(menu.app.shared.config.skin.custom.is_empty(), "showing the channels stored something");

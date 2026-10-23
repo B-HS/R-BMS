@@ -28,10 +28,14 @@
 //! folded into the IR gate, so a practice run updates no best and reaches no score server.
 #![allow(clippy::wildcard_imports)]
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
+
 use crate::number_row::{EditKey, NumberInput, RowPart, SliderLook, draw_edit, draw_refusal, draw_slider, hot_rect, row_part};
 use crate::practice::{PracticeElement, PracticePanel, PracticeProperty, practice_path};
 use crate::stage::preview_menu::{ROW_STEP_BACK, ROW_STEP_FORWARD, click_step, shift_after};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
+use crate::text::menus::practice::PracticeText;
 use crate::*;
 
 /// Width of the panel the rows are laid out in.
@@ -68,13 +72,8 @@ const NUMBER_W: f32 = 92.0;
 const SLIDER_W: f32 = 220.0;
 const SLIDER_GAP: f32 = 14.0;
 
-/// The label of the row that starts the slice, and what is written where a row's value is.
-const START_LABEL: &str = "START";
+/// What is written where the value of the row that starts the slice is: the key that starts it.
 const START_VALUE: &str = "ENTER";
-
-/// The keys of the panel and what the mouse does on it, written under the chart's title.
-const HINT_KEYS: &str = "UP DOWN ROW   LEFT RIGHT VALUE   SHIFT x10   0 DEFAULT   ENTER START, OR TYPE ON A NUMBER   ESC BACK";
-const HINT_MOUSE: &str = "DRAG A SLIDER   CLICK A NUMBER TO TYPE   CLICK A ROW TO STEP IT   RIGHT CLICK STEP BACK";
 
 /// One row of the panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -169,7 +168,7 @@ impl PracticeState {
                 Transition::Open(Stage::Play(Box::new(play)))
             }
             None => {
-                notify(Level::Warn, "practice chart is no longer loaded".to_string());
+                notify(Level::Warn, PracticeText::ChartNoLongerLoaded.get(language()));
                 Transition::Back
             }
         }
@@ -402,13 +401,13 @@ impl StageHandler for PracticeState {
         canvas.clear_bga();
         canvas.clear(th.bg);
         let x0 = row_rect(0).x;
-        draw_text(canvas, x0, HEADING_Y, HEADING_SCALE, th.text, "PRACTICE");
+        draw_text(canvas, x0, HEADING_Y, HEADING_SCALE, th.text, PracticeText::Heading.get(language()));
         draw_text(canvas, x0, TITLE_Y, ROW_SCALE, th.text_dim, &self.title);
         match self.numbers.edit_hint() {
             Some(hint) => draw_text(canvas, x0, HINT_Y, HINT_SCALE, th.text_muted, hint),
             None => {
-                draw_text(canvas, x0, HINT_Y, HINT_SCALE, th.text_muted, HINT_KEYS);
-                draw_text(canvas, x0, HINT_SECOND_Y, HINT_SCALE, th.text_muted, HINT_MOUSE);
+                draw_text(canvas, x0, HINT_Y, HINT_SCALE, th.text_muted, PracticeText::HintKeys.get(language()));
+                draw_text(canvas, x0, HINT_SECOND_Y, HINT_SCALE, th.text_muted, PracticeText::HintMouse.get(language()));
             }
         }
         for index in 0..ROW_COUNT {
@@ -417,7 +416,14 @@ impl StageHandler for PracticeState {
             canvas.fill_rect(rect, if on { th.button } else { th.panel });
             match row_at(index) {
                 PracticeRow::Start => {
-                    draw_text(canvas, rect.x + LABEL_INSET, rect.y + TEXT_DROP, ROW_SCALE, if on { th.text } else { th.accent }, START_LABEL);
+                    draw_text(
+                        canvas,
+                        rect.x + LABEL_INSET,
+                        rect.y + TEXT_DROP,
+                        ROW_SCALE,
+                        if on { th.text } else { th.accent },
+                        PracticeText::Start.get(language()),
+                    );
                     draw_text_right(canvas, rect.x + rect.w - VALUE_INSET, rect.y + TEXT_DROP, ROW_SCALE, th.text_muted, START_VALUE);
                 }
                 PracticeRow::Value(element) => self.draw_value_row(canvas, rect, element, on, ctx.now),

@@ -20,9 +20,10 @@ use crate::AppShared;
 use crate::app_play::OwnPlayOptions;
 use crate::format::fmt_datetime;
 use crate::ghost::GhostSource;
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_text};
 use crate::stage::{LoadingState, Stage, Transition};
 use crate::text::layout_play::LayoutPlayText;
+use crate::text::notices::NoticeText;
 
 /// How much of a chart hash a refusal quotes.
 const QUOTED_HASH_CHARS: usize = 8;
@@ -90,17 +91,18 @@ pub(crate) enum LayoutRefusal {
 
 impl fmt::Display for LayoutRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let language = language();
         match self {
             LayoutRefusal::ChartMismatch { replay, chart } if chart.is_empty() => {
-                write!(f, "layout not borrowed: the chart of that replay ({}) is not in the library", quoted_hash(replay))
+                f.write_str(&NoticeText::LayoutRefusedChartNotInTheLibrary.fill(language, &[&quoted_hash(replay)]))
             }
             LayoutRefusal::ChartMismatch { replay, chart } => {
-                write!(f, "layout not borrowed: that replay is of another chart (replay {}, chart {})", quoted_hash(replay), quoted_hash(chart))
+                f.write_str(&NoticeText::LayoutRefusedAnotherChart.fill(language, &[&quoted_hash(replay), &quoted_hash(chart)]))
             }
-            LayoutRefusal::UnknownLayout => write!(f, "layout not borrowed: that replay does not state the seed its lanes were laid out from"),
-            LayoutRefusal::UnsupportedOption(label) => write!(f, "layout not borrowed: that replay was played on {label}, which this player cannot lay out"),
-            LayoutRefusal::NotFreePlay => write!(f, "layout not borrowed: only a run played by hand outside a course or practice can borrow one"),
-            LayoutRefusal::ArrangementUnknown => f.write_str(LayoutPlayText::ArrangementUnknown.get(language())),
+            LayoutRefusal::UnknownLayout => f.write_str(NoticeText::LayoutRefusedNoSeed.get(language)),
+            LayoutRefusal::UnsupportedOption(label) => f.write_str(&NoticeText::LayoutRefusedUnsupportedOption.fill(language, &[label])),
+            LayoutRefusal::NotFreePlay => f.write_str(NoticeText::LayoutRefusedNotFreePlay.get(language)),
+            LayoutRefusal::ArrangementUnknown => f.write_str(LayoutPlayText::ArrangementUnknown.get(language)),
         }
     }
 }
@@ -191,7 +193,7 @@ impl AppShared {
         let layout = check_layout_request(&request, self.chart_md5_at(chart_index), self.plays_by_hand())?;
         let over_a_watched_replay = self.replay.is_some();
         self.end_replay();
-        notify(Level::Info, format!("layout of {} ({})", layout.source, layout.random.label()));
+        notify_text(Level::Info, NoticeText::LayoutOf, &[&layout.source, &layout.random.label()]);
         self.borrowed_layout = Some(Borrowing { layout, md5: request.md5, for_next_load: true, kept: None });
         if over_a_watched_replay {
             self.release_play_audio();
@@ -324,14 +326,7 @@ impl AppShared {
         let Some(layout) = self.borrowed_layout().filter(|layout| ln_mode_decides_flavour && lays_out_note_by_note(layout.random)) else {
             return;
         };
-        notify(
-            Level::Warn,
-            format!(
-                "layout of {}: {} lays out this chart's long notes as LN MODE {ln_mode} resolves them, so it matches the replay only if it was recorded on {ln_mode}",
-                layout.source,
-                layout.random.label()
-            ),
-        );
+        notify_text(Level::Warn, NoticeText::LayoutOfLnModeDecides, &[&layout.source, &layout.random.label(), &ln_mode]);
     }
 }
 
@@ -643,6 +638,43 @@ pub(crate) mod tests {
         let missing = LayoutRefusal::ChartMismatch { replay: "0123456789abcdef".to_string(), chart: String::new() };
         assert!(missing.to_string().contains("(01234567)"), "{missing}");
         assert!(LayoutRefusal::UnsupportedOption("Converge".to_string()).to_string().contains("Converge"));
+    }
+
+    #[test]
+    fn a_refusal_is_worded_in_the_installed_language_and_quotes_what_it_names() {
+        let refusals = [
+            LayoutRefusal::ChartMismatch { replay: "0123456789abcdef".to_string(), chart: "fedcba9876543210".to_string() },
+            LayoutRefusal::ChartMismatch { replay: "0123456789abcdef".to_string(), chart: String::new() },
+            LayoutRefusal::UnknownLayout,
+            LayoutRefusal::UnsupportedOption("Converge".to_string()),
+            LayoutRefusal::NotFreePlay,
+            LayoutRefusal::ArrangementUnknown,
+        ];
+        let english: Vec<String> = refusals.iter().map(ToString::to_string).collect();
+        assert!(english.iter().all(|said| said.starts_with("layout not borrowed: ")), "{english:?}");
+        rbms_render::text::set_language(rbms_model::Language::Korean);
+        let korean: Vec<String> = refusals.iter().map(ToString::to_string).collect();
+        rbms_render::text::set_language(rbms_model::Language::Japanese);
+        let japanese: Vec<String> = refusals.iter().map(ToString::to_string).collect();
+        rbms_render::text::set_language(rbms_model::Language::English);
+        assert!(korean.iter().all(|said| said.starts_with("배치를 빌리지 않음: ")), "{korean:?}");
+        assert!(japanese.iter().all(|said| said.starts_with("配置を借りません: ")), "{japanese:?}");
+        assert!(korean[0].contains("01234567") && korean[0].contains("fedcba98"), "{}", korean[0]);
+        assert!(japanese[1].contains("01234567") && !japanese[1].contains("fedcba98"), "{}", japanese[1]);
+        assert!(korean[3].contains("Converge") && japanese[3].contains("Converge"));
+    }
+
+    #[test]
+    fn the_notice_of_a_borrowed_layout_is_worded_when_it_is_taken() {
+        crate::notify::exclusive(|| {
+            let mut shared = a_library_of_one_chart("layout-notice");
+            shared.borrow_layout(request("RANDOM", REPLAY_SEED), 0).expect("the layout is borrowed");
+            let mut said = Vec::new();
+            rbms_render::text::set_language(rbms_model::Language::Korean);
+            crate::notify::drain(&mut said);
+            rbms_render::text::set_language(rbms_model::Language::English);
+            assert!(said.iter().any(|(_, line)| line.ends_with("(RANDOM)") && line.contains("의 배치")), "{said:?}");
+        });
     }
 
     #[test]

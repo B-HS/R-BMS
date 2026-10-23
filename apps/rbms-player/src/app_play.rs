@@ -5,9 +5,11 @@ use rbms_render::skin_render::frame::AUTO_LANE_NOTE;
 
 use crate::assets::{bga_jobs, spawn_bga_decode};
 use crate::ghost::{GhostJob, GhostLoad, GhostSources};
+use crate::notify::notify_text;
 use crate::skin_host::overview::ChartOverview;
 use crate::stage::loading::{BgaLoad, ChartAssets};
 use crate::stage::{KeysoundLoad, LoadingState, PlayState, Stage, StageId, Transition};
+use crate::text::notices::NoticeText;
 use crate::*;
 
 /// How much of the output device's name the debug overlay shows before it is cut.
@@ -483,7 +485,7 @@ impl AppShared {
         let decoded = match decode_chart(&bytes, &self.chart_path) {
             Some(decoded) => decoded,
             None => {
-                notify(Level::Error, format!("chart could not be read: {}", self.chart_path));
+                notify_text(Level::Error, NoticeText::ChartCouldNotBeRead, &[&self.chart_path]);
                 return None;
             }
         };
@@ -492,7 +494,7 @@ impl AppShared {
             && !rp.md5.is_empty()
             && rp.md5 != decoded.md5
         {
-            notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, decoded.md5));
+            notify_text(Level::Warn, NoticeText::ChartMd5Mismatch, &[&rp.md5, &decoded.md5]);
         }
         let (random, seed) = self.layout_to_load(&decoded.md5, carried_seed);
         let (judge_setup, course_stage) = self.stage_judge_setup(&mode);
@@ -911,7 +913,7 @@ impl AppShared {
             if self.audio.is_some() {
                 return;
             }
-            notify(Level::Warn, "audio: reopen failed — trying the previous device settings");
+            notify_text(Level::Warn, NoticeText::AudioReopenFailed, &[]);
         }
         self.audio_failed = true;
     }
@@ -1004,7 +1006,7 @@ impl AppShared {
             None => {
                 let v = (audio.audible_us(now), now);
                 self.audio_dead_at.set(Some(v));
-                notify(Level::Warn, "audio stream stopped — falling back to the wall clock");
+                notify_text(Level::Warn, NoticeText::AudioStreamStopped, &[]);
                 v
             }
         };

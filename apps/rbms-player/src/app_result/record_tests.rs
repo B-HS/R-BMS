@@ -1446,7 +1446,8 @@ fn a_run_played_while_the_score_database_is_unavailable_is_kept_and_read_in_late
         crate::notify::drain(&mut out);
         out
     });
-    assert!(notices.iter().any(|(_, line)| line == crate::app_result::RUN_KEPT_ON_THE_SIDE), "{notices:?}");
+    let told = rbms_model::translations::Catalog::get(crate::text::notices::NoticeText::RunKeptOnTheSide, rbms_model::Language::English);
+    assert!(notices.iter().any(|(_, line)| line == told), "{notices:?}");
     let pending = crate::scoredb_store::pending_runs_dir(shared.settings_path.parent().expect("a folder"));
     assert_eq!(std::fs::read_dir(&pending).expect("the run is kept on the side").count(), 1);
     let replay = shared.scores.for_md5(&recorded_model().md5)[0].replay_file.clone().expect("the replay is named");

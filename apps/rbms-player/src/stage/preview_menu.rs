@@ -22,6 +22,8 @@
 //! Everything is laid out in the fixed space every built-in screen is laid out in
 //! ([`crate::stage::canvas::UI_SIZE`]).
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_text_right, fit_text, text_width, theme};
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
@@ -31,6 +33,7 @@ pub(crate) use crate::number_row::{ONE_STEP, SHIFT_STEPS};
 use crate::skin_preview::region::with_region;
 use crate::skin_preview::{PreviewStatus, SkinPreview};
 use crate::stage::{Canvas, FrameCtx, KeyInput};
+use crate::text::menus::preview_menu::PreviewMenuText;
 use crate::{AppShared, CW, Hot};
 
 /// The room kept between the screen's edges and everything on it.
@@ -202,15 +205,11 @@ pub(crate) const INFO_ROW_UNDER_FIGURES_Y: f32 = 54.0;
 pub(crate) const ROW_STEP_FORWARD: i32 = 1;
 pub(crate) const ROW_STEP_BACK: i32 = -1;
 
-/// What a row that shows or hides other rows reads while they are on show and while they are not,
-/// before how many they are.
-const FOLD_OPEN: &str = "SHOWN";
-const FOLD_CLOSED: &str = "HIDDEN";
-
 /// What a row that shows or hides other rows reads: whether its rows are on show, and how many they
 /// are.
 pub(crate) fn fold_value(open: bool, rows: usize) -> String {
-    format!("{} ({rows})", if open { FOLD_OPEN } else { FOLD_CLOSED })
+    let shown = if open { PreviewMenuText::FoldShown } else { PreviewMenuText::FoldHidden };
+    format!("{} ({rows})", shown.get(language()))
 }
 
 /// One step along the strip of tabs: forwards, and back.

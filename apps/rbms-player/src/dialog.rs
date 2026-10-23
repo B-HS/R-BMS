@@ -10,33 +10,20 @@
 //! screen asks [`DialogHandle`] each frame whether an answer has come back.
 //!
 //! Each one hands back the path the user picked, or nothing if the dialog was dismissed.
+//!
+//! The title of a picker is the operating system's window title, so it is worded when the picker is
+//! opened, in the language the frame thread has installed ([`DialogText`]).
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
+
+use crate::text::notices::DialogText;
+
 /// File extensions the font picker offers.
 const FONT_EXTENSIONS: [&str; 3] = ["ttf", "otf", "ttc"];
-
-/// Title of the font picker.
-const FONT_TITLE: &str = "Select UI font";
-
-/// Title of the song-folder picker.
-const SONG_FOLDER_TITLE: &str = "Add song folder";
-
-/// Title of the difficulty-table picker.
-const TABLE_TITLE: &str = "Select table json";
-
-/// Title of the system sound folder picker.
-const SOUND_FOLDER_TITLE: &str = "Select system sound folder";
-
-/// Title of the download folder picker.
-const DOWNLOAD_FOLDER_TITLE: &str = "Select download folder";
-
-/// Title of the skin pack folder picker.
-const SKIN_PACK_TITLE: &str = "Select skin pack folder";
-
-/// Title of the picker for the folder an exported skin pack is written into.
-const SKIN_EXPORT_TITLE: &str = "Select folder to export the skin into";
 
 /// File extension the table picker offers.
 const TABLE_EXTENSION: &str = "json";
@@ -88,37 +75,44 @@ fn open(picker: impl FnOnce() -> Option<rfd::FileHandle> + Send + 'static) -> Di
 
 /// Ask for a UI font file.
 pub(crate) fn pick_font_file() -> DialogHandle {
-    open(|| pollster::block_on(rfd::AsyncFileDialog::new().add_filter("font", &FONT_EXTENSIONS).set_title(FONT_TITLE).pick_file()))
+    let title = DialogText::SelectUiFont.get(language());
+    open(move || pollster::block_on(rfd::AsyncFileDialog::new().add_filter("font", &FONT_EXTENSIONS).set_title(title).pick_file()))
 }
 
 /// Ask for a folder to add to the song library.
 pub(crate) fn pick_song_folder() -> DialogHandle {
-    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SONG_FOLDER_TITLE).pick_folder()))
+    let title = DialogText::AddSongFolder.get(language());
+    open(move || pollster::block_on(rfd::AsyncFileDialog::new().set_title(title).pick_folder()))
 }
 
 /// Ask for the folder the system sound set is read from.
 pub(crate) fn pick_sound_folder() -> DialogHandle {
-    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SOUND_FOLDER_TITLE).pick_folder()))
+    let title = DialogText::SelectSystemSoundFolder.get(language());
+    open(move || pollster::block_on(rfd::AsyncFileDialog::new().set_title(title).pick_folder()))
 }
 
 /// Ask for the folder the charts downloaded from the song list are unpacked into.
 pub(crate) fn pick_download_folder() -> DialogHandle {
-    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(DOWNLOAD_FOLDER_TITLE).pick_folder()))
+    let title = DialogText::SelectDownloadFolder.get(language());
+    open(move || pollster::block_on(rfd::AsyncFileDialog::new().set_title(title).pick_folder()))
 }
 
 /// Ask for the folder of the skin pack every screen takes its document from.
 pub(crate) fn pick_skin_pack_folder() -> DialogHandle {
-    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SKIN_PACK_TITLE).pick_folder()))
+    let title = DialogText::SelectSkinPackFolder.get(language());
+    open(move || pollster::block_on(rfd::AsyncFileDialog::new().set_title(title).pick_folder()))
 }
 
 /// Ask for the folder a copy of the skin pack in effect is exported into, as a new folder inside it.
 pub(crate) fn pick_skin_export_folder() -> DialogHandle {
-    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SKIN_EXPORT_TITLE).pick_folder()))
+    let title = DialogText::SelectFolderToExportTheSkinInto.get(language());
+    open(move || pollster::block_on(rfd::AsyncFileDialog::new().set_title(title).pick_folder()))
 }
 
 /// Ask for a difficulty-table json to add to the library.
 pub(crate) fn pick_table_file() -> DialogHandle {
-    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(TABLE_TITLE).add_filter(TABLE_EXTENSION, &[TABLE_EXTENSION]).pick_file()))
+    let title = DialogText::SelectTableJson.get(language());
+    open(move || pollster::block_on(rfd::AsyncFileDialog::new().set_title(title).add_filter(TABLE_EXTENSION, &[TABLE_EXTENSION]).pick_file()))
 }
 
 /// A handle whose answer a test supplies, so a screen's waiting can be checked without a user in
@@ -134,20 +128,16 @@ mod tests {
     use super::*;
 
     /// The pickers themselves cannot be opened without a user, so what is pinned here is that they
-    /// stay distinct and keep offering the file kinds their screens expect — a font picker that
-    /// offered json would silently stop finding fonts.
+    /// stay distinct, in every language, and keep offering the file kinds their screens expect — a
+    /// font picker that offered json would silently stop finding fonts.
     #[test]
     fn each_picker_keeps_its_own_title() {
-        let titles = [FONT_TITLE, SONG_FOLDER_TITLE, TABLE_TITLE, SOUND_FOLDER_TITLE, DOWNLOAD_FOLDER_TITLE, SKIN_PACK_TITLE, SKIN_EXPORT_TITLE];
-        for title in titles {
-            assert!(!title.is_empty());
+        for language in rbms_model::Language::ALL {
+            let mut titles: Vec<&str> = DialogText::ALL.iter().map(|title| title.get(language)).collect();
+            assert!(titles.iter().all(|title| !title.is_empty()), "{language:?}");
+            titles.sort_unstable();
+            assert!(titles.windows(2).all(|pair| pair[0] != pair[1]), "two pickers share a title in {language:?}");
         }
-        let mut sorted = titles;
-        sorted.sort_unstable();
-        sorted.iter().reduce(|a, b| {
-            assert_ne!(a, b, "two pickers share a title");
-            b
-        });
     }
 
     #[test]

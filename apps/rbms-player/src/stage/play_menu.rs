@@ -54,6 +54,8 @@
 //! settings have been written out.
 
 use rbms_config::{ScoreTarget, SettingId, skin_screen_label};
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Color, Renderer, theme};
 use rbms_skin::dst::SkinColor;
 use rbms_skin::loader::{SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS};
@@ -73,17 +75,19 @@ use crate::stage::preview_menu::{
 };
 use crate::stage::skin_menu::{APPLY_TO_ALL_KEY, automatic_offset_help, shared_row_note};
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
+use crate::text::menus::play_menu::PlayMenuText;
 use crate::{AppShared, Hot};
 
 mod rows;
 
 use rows::{
-    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, SCRATCH_AUTO_COLOR_LABEL, bpm_value, folded, help, hispeed_figure, is_read_only, listed,
-    number_figure, number_of, reset_setting, setting_value, step_setting,
+    BPM_UNIT, Fold, Folds, Line, Row, bpm_value, folded, help, hispeed_figure, is_read_only, listed, number_figure, number_of, preview_bpm_label,
+    reset_setting, scratch_auto_color_label, setting_value, step_setting,
 };
 
-/// The screen's title.
-const TITLE: &str = "PLAY";
+/// What the names of the play screens in the settings table begin with, which the screen's title
+/// already says.
+const SCREEN_LABEL_LEAD: &str = "PLAY";
 
 /// The modes the strip offers, left to right, each with the short name on its tab: the play screens
 /// a sample chart is written for, in the order the skin menu lists them.
@@ -95,41 +99,15 @@ pub(crate) const PREVIEW_MODES: [(i32, &str); 5] =
 pub(crate) const PREVIEW_BPMS: [u32; 5] = [100, 120, 150, 180, 200];
 const OPENING_BPM: usize = 2;
 
-/// What each figure of the summary under the preview is called, left to right.
+/// What each figure of the summary under the preview is called, left to right, where it is a term
+/// every language keeps. The travel time is called by [`PlayMenuText::FigureTravel`].
 const FIGURE_BPM: &str = BPM_UNIT;
 const FIGURE_HISPEED: &str = "HI-SPEED";
-const FIGURE_TRAVEL: &str = "TRAVEL";
 const FIGURE_GREEN: &str = "GREEN";
 const FIGURE_WHITE: &str = "WHITE";
 
-/// What is written after the tempo the summary is worked out at while the field scrolls at one
-/// tempo of its own, which is why it is not the tempo of the sample chart.
-const CONSTANT_MARK: &str = "(CONSTANT)";
-
-/// What is written after the scroll speed while it is worked out from a held green number, and
-/// while the speed that would hold the number is outside what a speed can be.
-const HELD_MARK: &str = "(HELD)";
-const LIMIT_MARK: &str = "(LIMIT)";
-
 /// What the travel time is measured in, written after it.
 const TRAVEL_UNIT: &str = "MS";
-
-/// What is written after the white number while the lane cover it measures is switched off.
-const COVER_OFF_MARK: &str = "(COVER OFF)";
-
-/// What is said under the figures while the scroll speed stands at an end of its range.
-const LIMIT_NOTE: &str = "HI-SPEED IS AT THE END OF ITS RANGE: NO SPEED HOLDS THIS GREEN NUMBER AT THIS TEMPO";
-
-/// What is said under the TARGET RATE row while neither target names the rate it holds.
-const TARGET_RATE_UNUSED_NOTE: &str = "NOT IN USE: NO TARGET IS RATE CUSTOM";
-
-/// What is said under the SCRATCH AUTO row: the turntable notes it plays count for nothing, and a
-/// run it plays one for is an assist, whose clear is named for the gauge it was cleared on, from
-/// ASSIST EASY to ASSIST EXHARD.
-const SCRATCH_AUTO_NOTE: &str = "WHILE ON: TURNTABLE NOT COUNTED, ASSIST LAMP BY GAUGE (E.G. ASSIST HARD)";
-
-/// The keys of the screen, written along its foot.
-const HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER NEXT OR TYPE   0 DEFAULT   A ALL SCREENS   DRAG A SLIDER   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
 
 /// The play menu's own state: the preview on its right, the mode and the tempo it is shown on, the
 /// rows it lists and where the cursor and the list are, and the modifier that turns the key for the
@@ -212,7 +190,7 @@ impl PlayMenuState {
     fn subtitle(&self) -> String {
         let target = self.target();
         let screen = skin_screen_label(target.screen).unwrap_or_default();
-        format!("{}  {}", screen.strip_prefix(TITLE).map_or(screen, str::trim_start), bpm_value(target.bpm))
+        format!("{}  {}", screen.strip_prefix(SCREEN_LABEL_LEAD).map_or(screen, str::trim_start), bpm_value(target.bpm))
     }
 
     /// Read the list again, keeping the cursor on the row it was on.
@@ -608,9 +586,9 @@ impl PlayMenuState {
         match row {
             Row::Setting(SettingId::Target) => self.target_note(shared, row),
             Row::Setting(SettingId::TargetRate) if ![judge.target, judge.target_fallback].contains(&ScoreTarget::RateCustom) => {
-                Some(TARGET_RATE_UNUSED_NOTE.to_string())
+                Some(PlayMenuText::TargetRateUnusedNote.get(language()).to_string())
             }
-            Row::Setting(SettingId::ScratchAuto) => Some(SCRATCH_AUTO_NOTE.to_string()),
+            Row::Setting(SettingId::ScratchAuto) => Some(PlayMenuText::ScratchAutoNote.get(language()).to_string()),
             _ => None,
         }
     }
@@ -620,7 +598,7 @@ impl PlayMenuState {
         let look = if is_read_only(&shared.config.play, row) { RowLook::ReadOnly } else { RowLook::Plain };
         match row {
             Row::Group(name) => Line { label: name.to_string(), value: String::new(), look: RowLook::Heading },
-            Row::PreviewBpm => Line { label: PREVIEW_BPM_LABEL.to_string(), value: bpm_value(self.target().bpm), look },
+            Row::PreviewBpm => Line { label: preview_bpm_label().to_string(), value: bpm_value(self.target().bpm), look },
             Row::Setting(id) => Line { label: shared.setting_line(id).0.to_string(), value: setting_value(shared, readout, id), look },
             Row::Skin(option) => {
                 let (label, value) = shared.skins.line_for(&shared.config, self.target().screen, option);
@@ -633,9 +611,9 @@ impl PlayMenuState {
                 };
                 Line { label: fold.label().to_string(), value: fold_value(self.folds.is_open(fold), held), look }
             }
-            Row::AutoColor => Line { label: SCRATCH_AUTO_COLOR_LABEL.to_string(), value: color_value(shared.config.play.scratch_auto_color), look },
+            Row::AutoColor => Line { label: scratch_auto_color_label().to_string(), value: color_value(shared.config.play.scratch_auto_color), look },
             Row::AutoChannel(channel) => Line {
-                label: format!("{SCRATCH_AUTO_COLOR_LABEL} {}", channel.label()),
+                label: format!("{} {}", scratch_auto_color_label(), channel.label()),
                 value: number_of(shared, readout, self.target().screen, row).map_or_else(String::new, |value| number_figure(row, &value)),
                 look,
             },
@@ -749,26 +727,26 @@ fn summary(readout: &SpeedReadout, constant: bool) -> [InfoFigure; 5] {
     let colors = theme();
     let figure = |name, value: String, tag| InfoFigure { name, value, color: colors.text, tag, tag_color: colors.accent };
     let speed_tag = match (readout.held, readout.limited) {
-        (_, true) => LIMIT_MARK,
-        (true, false) => HELD_MARK,
+        (_, true) => PlayMenuText::LimitMark.get(language()),
+        (true, false) => PlayMenuText::HeldMark.get(language()),
         (false, false) => "",
     };
     [
-        figure(FIGURE_BPM, (readout.bpm.round() as i64).to_string(), if constant { CONSTANT_MARK } else { "" }),
+        figure(FIGURE_BPM, (readout.bpm.round() as i64).to_string(), if constant { PlayMenuText::ConstantMark.get(language()) } else { "" }),
         InfoFigure {
             tag_color: if readout.limited { colors.warn } else { colors.accent },
             ..figure(FIGURE_HISPEED, hispeed_figure(readout.hispeed), speed_tag)
         },
-        InfoFigure { tag_color: colors.text_muted, ..figure(FIGURE_TRAVEL, readout.duration_ms.to_string(), TRAVEL_UNIT) },
+        InfoFigure { tag_color: colors.text_muted, ..figure(PlayMenuText::FigureTravel.get(language()), readout.duration_ms.to_string(), TRAVEL_UNIT) },
         InfoFigure { color: Color::GREEN, ..figure(FIGURE_GREEN, readout.green_number.to_string(), "") },
-        figure(FIGURE_WHITE, readout.white_number.to_string(), if readout.cover_on { "" } else { COVER_OFF_MARK }),
+        figure(FIGURE_WHITE, readout.white_number.to_string(), if readout.cover_on { "" } else { PlayMenuText::CoverOffMark.get(language()) }),
     ]
 }
 
 /// What is said under the figures: that the scroll speed stands at an end of its range, when it
 /// does, so the green number on show is not the one asked for.
 fn summary_note(readout: &SpeedReadout) -> Option<&'static str> {
-    readout.limited.then_some(LIMIT_NOTE)
+    readout.limited.then_some(PlayMenuText::LimitNote.get(language()))
 }
 
 impl StageHandler for PlayMenuState {
@@ -879,12 +857,12 @@ impl StageHandler for PlayMenuState {
         let readout = self.target().readout(&ctx.shared.config.play);
         canvas.clear_bga();
         canvas.clear(theme().bg);
-        draw_head(canvas, TITLE, &self.subtitle());
+        draw_head(canvas, PlayMenuText::Title.get(language()), &self.subtitle());
         draw_tabs(ctx.shared, canvas, PREVIEW_MODES.iter().map(|(_, name)| *name), Some(self.mode), Hot::PlayMenuMode);
         self.draw_rows(ctx.shared, canvas, &readout, ctx.now);
         self.draw_info(ctx.shared, canvas, &readout);
         draw_preview(&mut self.preview, ctx, canvas);
-        draw_hint(canvas, self.numbers.edit_hint().unwrap_or(HINT));
+        draw_hint(canvas, self.numbers.edit_hint().unwrap_or(PlayMenuText::Hint.get(language())));
     }
 
     /// The browser's lines, and what the preview is of and last left in its rectangle.

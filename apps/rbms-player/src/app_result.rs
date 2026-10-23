@@ -16,10 +16,12 @@ use crate::ir_ranking::RankingState;
 use crate::ir_replay::wire_carries_judge;
 use crate::ir_session::submission_player_id;
 use crate::keyconfig::mode_config_key;
+use crate::notify::notify_text;
 use crate::skin_host::result::snapshot::PreviousScore;
 use crate::stage::result::{ResultRun, RunStanding};
 use crate::stage::{PlayState, ResultState, Stage, Transition};
 use crate::target::{self, TargetContext};
+use crate::text::notices::NoticeText;
 use crate::*;
 
 /// How much of the chart title the result screen shows before it is cut.
@@ -495,9 +497,6 @@ fn submission_body(sub: &ScoreSubmission) -> Option<String> {
     body
 }
 
-/// What the message bus says of a run the score database could not take, kept on the side.
-pub(crate) const RUN_KEPT_ON_THE_SIDE: &str = "score database not open: this run is kept on the side and goes into it when it opens";
-
 /// Keep a run the score database could not take in a file of its own, read in the next time the
 /// database opens ([`crate::scoredb_store::import_pending_runs`]), and say so: a run is never lost
 /// with the session. Its trace is laid out and added to the file on the save thread. Returns
@@ -508,7 +507,7 @@ fn keep_on_the_side(shared: &AppShared, run: PendingRun, name: &str, trace: crat
     match run.to_ron() {
         Ok(text) => {
             shared.saves.keep_run_on_the_side(dir.join(name), run, text, trace);
-            notify(Level::Error, RUN_KEPT_ON_THE_SIDE);
+            notify_text(Level::Error, NoticeText::RunKeptOnTheSide, &[]);
             true
         }
         Err(e) => {
@@ -535,9 +534,6 @@ pub(crate) enum Sending {
     NextStart,
 }
 
-/// What the message bus says of a course ended before its last stage, once it is kept.
-pub(crate) const ABANDONED_COURSE_KEPT: &str = "course ended before its last stage kept as FAILED";
-
 /// End the course being played between two stages, keeping what was played of it.
 ///
 /// The course stands on a stage not yet played: the LOADING or decide screen of it was left with
@@ -555,13 +551,10 @@ pub(crate) fn abandon_course(shared: &mut AppShared, sending: Sending) -> Transi
     });
     if failed_here.is_some() {
         keep_finished_course(shared, sending);
-        notify(Level::Info, ABANDONED_COURSE_KEPT);
+        notify_text(Level::Info, NoticeText::AbandonedCourseKept, &[]);
     }
     crate::end_course(shared)
 }
-
-/// What the message bus says of the run on screen when the app quit, once it is kept.
-pub(crate) const QUIT_RUN_KEPT: &str = "run cut short by quitting kept; it is sent on the next start";
 
 /// Keep the run on screen as the app quits, as Escape would have kept it ([`PlayState::has_ended`]
 /// says which way, `ended`), but with nothing sent: the records sync of the next start sends it.
@@ -588,7 +581,7 @@ pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, sha
     }
     let summary = if ended { state.session.summary() } else { state.session.summary().left_unfinished() };
     let recorded = record_run(state, shared, &summary, &state.session.record());
-    notify(Level::Info, QUIT_RUN_KEPT);
+    notify_text(Level::Info, NoticeText::QuitRunKept, &[]);
     if shared.course_run.is_none() {
         return;
     }
@@ -607,9 +600,6 @@ pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, sha
     }
 }
 
-/// What the message bus says of a failed run that START or SELECT started again, once it is kept.
-pub(crate) const RETRIED_RUN_KEPT: &str = "failed run kept before starting again";
-
 /// Keep a run that failed and is being started again at once with START or SELECT
 /// (`BMSPlayer.java:696-710`), as the result screen would have kept it, and send it.
 ///
@@ -624,7 +614,7 @@ pub(crate) fn record_retried_run(state: &PlayState, shared: &mut AppShared) {
     let summary = state.session.summary();
     let recorded = record_run(state, shared, &summary, &state.session.record());
     send_without_a_screen(shared, &recorded);
-    notify(Level::Info, RETRIED_RUN_KEPT);
+    notify_text(Level::Info, NoticeText::RetriedRunKept, &[]);
 }
 
 /// Send a run that was kept with no result screen to report on: to the extra profiles at once, and

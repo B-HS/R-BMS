@@ -72,7 +72,7 @@ impl Menu {
 #[test]
 fn the_colours_of_the_play_skin_are_a_fold_and_their_channels_another() {
     let mut menu = Menu::over(app_with_tinted_play("color-folds"));
-    let skin_group = menu.at(Row::Group(GROUP_SKIN));
+    let skin_group = menu.at(Row::Group(group_skin()));
     assert_eq!(&menu.state.rows[skin_group + 1..skin_group + 3], [Row::Fold(Fold::Color), Row::Fold(Fold::ColorChannels)]);
     let folds = menu.line(Row::Fold(Fold::Color));
     assert_eq!((folds.label.as_str(), folds.value.as_str()), ("COLOR", "HIDDEN (2)"));

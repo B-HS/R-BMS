@@ -349,10 +349,17 @@ fn the_number_of_a_number_row_fits_beside_its_slider() {
         assert!(width <= number_value_room(), "{figure} is {width} wide in a room of {}", number_value_room());
     }
     assert!(number_label_room() > number_value_room(), "the name of a row has less room than its number");
-    for hint in [HINT, EDIT_HINT] {
+    for hint in [SkinMenuText::Hint.get(language()), EDIT_HINT] {
         assert_eq!(fit_text(hint, HINT_SCALE, CW as f32 - MARGIN * 2.0), hint, "a line of keys is cut short");
     }
-    for help in [OFFSET_PLACE_HELP, OFFSET_ANGLE_HELP, OFFSET_ALPHA_HELP, OPACITY_HELP, AUTOMATIC_PLACE_HELP, AUTOMATIC_ALPHA_HELP] {
+    for help in [
+        SkinMenuText::OffsetPlaceHelp.get(language()),
+        SkinMenuText::OffsetAngleHelp.get(language()),
+        SkinMenuText::OffsetAlphaHelp.get(language()),
+        SkinMenuText::OpacityHelp.get(language()),
+        SkinMenuText::AutomaticPlaceHelp.get(language()),
+        SkinMenuText::AutomaticAlphaHelp.get(language()),
+    ] {
         assert_eq!(fit_text(help, INFO_SCALE, INFO_RECT.w - INFO_PAD * 2.0), help, "what is said of a row is cut short");
     }
 }

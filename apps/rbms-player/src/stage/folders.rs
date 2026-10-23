@@ -5,8 +5,12 @@
 //! app until the user answers it.
 #![allow(clippy::wildcard_imports)]
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
+
 use crate::dialog::{DialogHandle, DialogState};
 use crate::stage::{Canvas, FrameCtx, KeyInput, LoadingState, Stage, StageHandler, Transition};
+use crate::text::menus::folders::FoldersText;
 use crate::*;
 
 /// Width of the folder list panel.
@@ -15,12 +19,6 @@ const PANEL_W: f32 = 980.0;
 /// Path length past which the head of a folder path is elided so its name stays visible.
 const PATH_ELIDE_CHARS: usize = 78;
 const PATH_TAIL_CHARS: usize = 76;
-
-/// What the row of the download folder reads before its path.
-const DOWNLOADS_LABEL: &str = "DOWNLOADS  ";
-
-/// What is said when a key that removes a folder is pressed on the row of the download folder.
-const DOWNLOAD_FOLDER_ELSEWHERE: &str = "the download folder is changed in SETTINGS > SELECT";
 
 /// Vertical layout of the folder rows.
 const ROW_TOP: f32 = 124.0;
@@ -61,7 +59,7 @@ impl FoldersState {
     fn add_picked_folder(shared: &mut AppShared, dir: &std::path::Path) {
         let path = dir.to_string_lossy().to_string();
         if shared.config.library.folders.iter().any(|f| f == &path) {
-            notify(Level::Warn, format!("folder already added: {path}"));
+            notify(Level::Warn, FoldersText::AlreadyAdded.fill(language(), &[&path]));
             return;
         }
         shared.config.library.folders.push(path);
@@ -109,7 +107,9 @@ impl StageHandler for FoldersState {
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.folders.len() => self.remove_folder(ctx.shared, self.sel),
-            KeyCode::KeyD | KeyCode::Delete if FoldersState::is_download_row(ctx.shared, self.sel) => notify(Level::Info, DOWNLOAD_FOLDER_ELSEWHERE),
+            KeyCode::KeyD | KeyCode::Delete if FoldersState::is_download_row(ctx.shared, self.sel) => {
+                notify(Level::Info, FoldersText::DownloadFolderElsewhere.get(language()));
+            }
             KeyCode::Enter | KeyCode::NumpadEnter if self.sel == add_row => self.picker = Some(crate::dialog::pick_song_folder()),
             _ => {}
         }
@@ -121,10 +121,10 @@ impl StageHandler for FoldersState {
         canvas.clear_bga();
         canvas.clear(th.bg);
         let x0 = (CW as f32 - PANEL_W) * 0.5;
-        draw_text(canvas, x0, 40.0, 3.0, th.text, "SONG FOLDERS");
+        draw_text(canvas, x0, 40.0, 3.0, th.text, FoldersText::Title.get(language()));
         match self.picker.is_some() {
-            true => draw_text(canvas, x0, 84.0, 1.4, th.accent, "PICK A SONG FOLDER IN THE OPEN DIALOG"),
-            false => draw_text(canvas, x0, 84.0, 1.3, th.text_muted, "UP DOWN MOVE   ENTER ADD FOLDER   D REMOVE   ESC SAVE/RESCAN"),
+            true => draw_text(canvas, x0, 84.0, 1.4, th.accent, FoldersText::PickInDialog.get(language())),
+            false => draw_text(canvas, x0, 84.0, 1.3, th.text_muted, FoldersText::Keys.get(language())),
         }
         let folders = &ctx.shared.config.library.folders;
         let add_row = FoldersState::add_row(ctx.shared);
@@ -141,9 +141,9 @@ impl StageHandler for FoldersState {
             let label = if i < folders.len() {
                 elided(&folders[i])
             } else if FoldersState::is_download_row(ctx.shared, i) {
-                format!("{DOWNLOADS_LABEL}{}", elided(ctx.shared.config.library.download_folder_path().unwrap_or_default()))
+                format!("{}{}", FoldersText::DownloadsLabel.get(language()), elided(ctx.shared.config.library.download_folder_path().unwrap_or_default()))
             } else {
-                "+ ADD FOLDER".to_string()
+                FoldersText::AddFolder.get(language()).to_string()
             };
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });
             let col = if i == add_row {
@@ -156,7 +156,7 @@ impl StageHandler for FoldersState {
             draw_text(canvas, x0 + 16.0, y + 10.0, 1.4, col, &label);
         }
         if add_row == 0 {
-            draw_text(canvas, x0, ROW_TOP + ROW_PITCH * 2.0, 1.2, th.text_muted, "No folders yet — ENTER on \"+ ADD FOLDER\" to pick one.");
+            draw_text(canvas, x0, ROW_TOP + ROW_PITCH * 2.0, 1.2, th.text_muted, FoldersText::NoFolders.get(language()));
         }
     }
 }
@@ -229,7 +229,7 @@ mod tests {
             crate::notify::drain(&mut said);
             said
         });
-        assert_eq!(said, vec![(Level::Info, DOWNLOAD_FOLDER_ELSEWHERE.to_string()); 2]);
+        assert_eq!(said, vec![(Level::Info, FoldersText::DownloadFolderElsewhere.get(language()).to_string()); 2]);
         assert_eq!(app.shared.config.library.download_folder.as_deref(), Some("/downloads"), "the row was removed from here");
         assert_eq!(app.shared.config.library.folders, vec!["/songs/a".to_string()]);
 

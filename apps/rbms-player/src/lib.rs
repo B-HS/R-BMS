@@ -133,7 +133,7 @@ use ir_session::AccountSession;
 use ir_sync::SyncLock;
 use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};
 use keyconfig::{ControlAction, KeyConfig, key_name};
-use notify::{Level, notify};
+use notify::{Level, notify, notify_text};
 use play_sink::PlayAudioSink;
 use pointer::{HeldButtons, PointerInput, is_tracked};
 use settings_view::{SettingsHot, render_settings};
@@ -142,6 +142,7 @@ use skin_select::SkinLibrary;
 use stage::{Canvas, CourseResultState, FrameCtx, KeyInput, LoadingState, SelectState, Stage, StageId, Transition};
 use syssound::{SYSTEM_SOUND_GAIN, SystemSound, SystemSoundSet};
 use tablesrc::TableLevels;
+use text::notices::NoticeText;
 use textedit::{TextEdit, edit_key};
 use timing::{SoakLogger, SoakSnapshot, TIMING_CSV_ENV, TimingProbe, TimingSample, env_path, us_to_millis};
 use toast::ToastQueue;
@@ -305,7 +306,7 @@ fn load_course_stage(shared: &mut AppShared) -> Transition {
         return end_course(shared);
     };
     let Some(index) = library_index(&shared.library, &chart) else {
-        notify(Level::Warn, format!("course stage not in the library: {}", chart.title));
+        notify_text(Level::Warn, NoticeText::CourseStageNotInTheLibrary, &[&chart.title]);
         return crate::app_result::abandon_course(shared, crate::app_result::Sending::Now);
     };
     shared.release_play_audio();
@@ -1373,6 +1374,7 @@ impl App {
         }
         self.shared.frame_count = self.shared.frame_count.wrapping_add(1);
         self.shared.soak.record_frame(dt);
+        self.shared.language.follow(self.shared.config.display.language);
         self.shared.toasts.pump(now);
         if let Some(audio) = self.shared.audio.as_mut() {
             audio.collect_retired();
@@ -1726,14 +1728,7 @@ fn run_in(args: impl Iterator<Item = String>, config_dir: &Path) -> ExitCode {
 
     let installed = install_default_pack(&settings_path);
     if !installed.is_complete() {
-        notify(
-            Level::Warn,
-            format!(
-                "default skin not fully installed: {} files could not be written beside {}; a screen without its skin uses the built-in layout",
-                installed.failed,
-                settings_path.display()
-            ),
-        );
+        notify_text(Level::Warn, NoticeText::DefaultSkinNotFullyInstalled, &[&installed.failed, &settings_path.display()]);
     }
 
     let mut launch = LaunchOptions {
@@ -1757,7 +1752,7 @@ fn run_in(args: impl Iterator<Item = String>, config_dir: &Path) -> ExitCode {
                     rbms_render::set_ui_family(&family);
                     println!("font: {fp} ({family})");
                 }
-                None => notify(Level::Warn, format!("font load failed (no usable face): {fp}")),
+                None => notify_text(Level::Warn, NoticeText::FontNotLoadedNoUsableFace, &[&fp]),
             },
             Err(e) => notify(Level::Warn, format!("font not found: {fp} ({e})")),
         }

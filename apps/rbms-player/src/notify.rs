@@ -7,9 +7,20 @@
 //!
 //! The sink is process-wide and locked, so a worker thread may report from wherever it is without
 //! having to reach the frame loop.
+//!
+//! A message a player acts on is worded by a catalog entry ([`notify_text`]) or by a function of the
+//! language ([`notify_with`]) rather than reported as a finished string. Standard error gets it in
+//! English at once, as a run from a shell has always read it. The queue keeps the entry and its
+//! values, and the frame thread words it in the language it has installed when it takes the message
+//! ([`drain`]), so a message reported from a worker thread, or before the language was settled,
+//! still reaches the screen in the language the screen is drawn in.
 
 use std::collections::VecDeque;
+use std::fmt::Display;
 use std::sync::{Mutex, OnceLock};
+
+use rbms_model::Language;
+use rbms_model::translations::{Catalog, fill};
 
 /// How loud a message is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,9 +37,27 @@ pub(crate) enum Level {
 /// grow the queue without end, and nothing older than the last few is worth showing.
 const NOTIFY_CAPACITY: usize = 64;
 
+/// What a queued message is made of until it is taken.
+enum Said {
+    /// A finished string, as it was reported.
+    Plain(String),
+    /// A message worded in whichever language it is taken in.
+    Worded(Box<dyn Fn(Language) -> String + Send>),
+}
+
+impl Said {
+    /// The message in `language`.
+    fn in_language(&self, language: Language) -> String {
+        match self {
+            Said::Plain(text) => text.clone(),
+            Said::Worded(word) => word(language),
+        }
+    }
+}
+
 /// The process-wide queue of messages not yet taken by the frame loop.
-fn queue() -> &'static Mutex<VecDeque<(Level, String)>> {
-    static QUEUE: OnceLock<Mutex<VecDeque<(Level, String)>>> = OnceLock::new();
+fn queue() -> &'static Mutex<VecDeque<(Level, Said)>> {
+    static QUEUE: OnceLock<Mutex<VecDeque<(Level, Said)>>> = OnceLock::new();
     QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
@@ -39,6 +68,33 @@ fn queue() -> &'static Mutex<VecDeque<(Level, String)>> {
 pub(crate) fn notify(level: Level, message: impl Into<String>) {
     let message = message.into();
     eprintln!("{message}");
+    enqueue(level, Said::Plain(message));
+}
+
+/// Report a catalog entry with the values its placeholders take.
+///
+/// Standard error gets the entry in English at once. The queue keeps the entry and the values, and
+/// the message is worded in the language the frame thread has installed when it takes it
+/// ([`drain`]).
+pub(crate) fn notify_text(level: Level, text: impl Catalog, args: &[&dyn Display]) {
+    let strings = text.strings();
+    let args: Vec<String> = args.iter().map(ToString::to_string).collect();
+    notify_with(level, move |language| {
+        let values: Vec<&dyn Display> = args.iter().map(|value| value as &dyn Display).collect();
+        fill(strings[language.id()], &values)
+    });
+}
+
+/// Report a message that `word` words in a language, for one that more than one catalog entry goes
+/// into. Standard error gets it in English at once, and the queue keeps `word` to call again with
+/// the language the frame thread has installed when it takes the message ([`drain`]).
+pub(crate) fn notify_with(level: Level, word: impl Fn(Language) -> String + Send + 'static) {
+    eprintln!("{}", word(Language::English));
+    enqueue(level, Said::Worded(Box::new(word)));
+}
+
+/// Put a message on the queue, dropping the oldest when it is full.
+fn enqueue(level: Level, said: Said) {
     if is_kept_out_of_the_queue() {
         return;
     }
@@ -48,15 +104,19 @@ pub(crate) fn notify(level: Level, message: impl Into<String>) {
     if queue.len() == NOTIFY_CAPACITY {
         queue.pop_front();
     }
-    queue.push_back((level, message));
+    queue.push_back((level, said));
 }
 
-/// Take everything reported since the last call, oldest first, appending onto `out`.
+/// Take everything reported since the last call, oldest first, appending onto `out`, each message
+/// worded in the language this thread has installed ([`rbms_render::text::language`]).
 pub(crate) fn drain(out: &mut Vec<(Level, String)>) {
     let Ok(mut queue) = queue().lock() else {
         return;
     };
-    out.extend(queue.drain(..));
+    let taken: Vec<(Level, Said)> = queue.drain(..).collect();
+    drop(queue);
+    let language = rbms_render::text::language();
+    out.extend(taken.into_iter().map(|(level, said)| (level, said.in_language(language))));
 }
 
 /// Whether the queue is held by a test on another thread, in which case what this thread reports is
@@ -126,10 +186,93 @@ pub(crate) fn exclusive<T>(body: impl FnOnce() -> T) -> T {
 mod tests {
     use super::*;
 
+    rbms_model::translations! {
+        /// Words of a message a test reports.
+        enum SampleText {
+            ChartCount => ("{0} CHARTS", "차트 {0}개", "{0}譜面"),
+            Swapped => ("{0} OF {1}", "{1} 중 {0}", "{1}の{0}"),
+        }
+    }
+
     fn drained() -> Vec<(Level, String)> {
         let mut out = Vec::new();
         drain(&mut out);
         out
+    }
+
+    #[test]
+    fn a_catalog_message_is_worded_in_english_by_a_thread_that_installed_no_language() {
+        exclusive(|| {
+            notify_text(Level::Info, SampleText::ChartCount, &[&12]);
+            notify_text(Level::Warn, SampleText::Swapped, &[&"A", &"B"]);
+            assert_eq!(drained(), vec![(Level::Info, "12 CHARTS".to_string()), (Level::Warn, "A OF B".to_string())]);
+        });
+    }
+
+    #[test]
+    fn a_catalog_message_is_worded_when_it_is_taken_in_the_language_installed_then() {
+        exclusive(|| {
+            notify_text(Level::Info, SampleText::ChartCount, &[&12]);
+            rbms_render::text::set_language(Language::Korean);
+            let korean = drained();
+            notify_text(Level::Info, SampleText::Swapped, &[&"A", &"B"]);
+            rbms_render::text::set_language(Language::Japanese);
+            let japanese = drained();
+            rbms_render::text::set_language(Language::English);
+            assert_eq!(korean, vec![(Level::Info, "차트 12개".to_string())]);
+            assert_eq!(japanese, vec![(Level::Info, "BのA".to_string())]);
+        });
+    }
+
+    #[test]
+    fn a_catalog_message_is_not_worded_in_the_language_of_the_thread_that_reports_it() {
+        exclusive(|| {
+            rbms_render::text::set_language(Language::Korean);
+            notify_text(Level::Info, SampleText::ChartCount, &[&12]);
+            rbms_render::text::set_language(Language::English);
+            assert_eq!(drained(), vec![(Level::Info, "12 CHARTS".to_string())], "the message waits for the thread that shows it");
+        });
+    }
+
+    #[test]
+    fn a_message_worded_by_a_function_is_asked_again_in_the_language_it_is_taken_in() {
+        exclusive(|| {
+            notify_with(Level::Warn, |language| format!("said in {}", language.code()));
+            rbms_render::text::set_language(Language::Korean);
+            let taken = drained();
+            rbms_render::text::set_language(Language::English);
+            assert_eq!(taken, vec![(Level::Warn, "said in ko".to_string())]);
+        });
+    }
+
+    #[test]
+    fn a_plain_message_is_not_worded_again_in_another_language() {
+        exclusive(|| {
+            notify(Level::Error, "chart not found");
+            rbms_render::text::set_language(Language::Japanese);
+            let taken = drained();
+            rbms_render::text::set_language(Language::English);
+            assert_eq!(taken, vec![(Level::Error, "chart not found".to_string())]);
+        });
+    }
+
+    #[test]
+    fn a_catalog_message_keeps_the_order_it_was_reported_in_among_plain_ones() {
+        exclusive(|| {
+            notify(Level::Info, "first");
+            notify_text(Level::Info, SampleText::ChartCount, &[&1]);
+            notify_with(Level::Info, |_| "third".to_string());
+            let texts: Vec<String> = drained().into_iter().map(|(_, text)| text).collect();
+            assert_eq!(texts, vec!["first", "1 CHARTS", "third"]);
+        });
+    }
+
+    #[test]
+    fn a_placeholder_with_no_value_is_left_as_written() {
+        exclusive(|| {
+            notify_text(Level::Info, SampleText::Swapped, &[&"only"]);
+            assert_eq!(drained(), vec![(Level::Info, "only OF {1}".to_string())]);
+        });
     }
 
     #[test]

@@ -6,7 +6,11 @@
 //! [`rbms_config::SettingId`]. Nothing in this file numbers a row.
 
 use rbms_config::{SettingId, SettingKind, SettingTab, descriptor};
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 
+use crate::text::settings::row_label;
+use crate::text::settings::screen::ScreenText;
 use crate::textedit::TextEdit;
 
 /// Value shown on a row that runs an action rather than holding a value; matches the KEY CONFIG
@@ -35,10 +39,14 @@ const EDITOR_CARET_CHAR: char = '_';
 const EDITOR_WINDOW_CHARS: usize = 28;
 
 /// Row appended under the rival ids in the inline rival list.
-pub(crate) const RIVAL_ADD_ROW: &str = "+ ADD RIVAL (PLAYER ID)";
+pub(crate) fn rival_add_row() -> &'static str {
+    ScreenText::RivalAddRow.get(language())
+}
 
 /// The last row of the inline IR profile list, which opens the editor for a new server URL.
-pub(crate) const PROFILE_ADD_ROW: &str = "+ ADD IR PROFILE (BASE URL)";
+pub(crate) fn profile_add_row() -> &'static str {
+    ScreenText::ProfileAddRow.get(language())
+}
 
 /// What a profile row shows for a server a score is, or is not, sent to.
 const PROFILE_ON: &str = "ON";
@@ -79,10 +87,10 @@ pub(crate) fn is_secret_row(id: SettingId) -> bool {
     matches!(descriptor(id).kind, SettingKind::Text { secret: true, .. })
 }
 
-/// Row label, or `None` when the row is not on the NETWORK tab.
+/// Row label in the language the screens are drawn in, or `None` when the row is not on the
+/// NETWORK tab.
 pub(crate) fn network_row_label(id: SettingId) -> Option<&'static str> {
-    let row = descriptor(id);
-    (row.tab == SettingTab::Network).then_some(row.label)
+    (descriptor(id).tab == SettingTab::Network).then(|| row_label(id))
 }
 
 /// Value of an optional text row.
@@ -121,7 +129,7 @@ pub(crate) fn editor_display(edit: &TextEdit, secret: bool) -> String {
 /// The inline rival list: one row per rival id, then the add row.
 pub(crate) fn rival_rows(rivals: &[String]) -> Vec<String> {
     let mut rows: Vec<String> = rivals.to_vec();
-    rows.push(RIVAL_ADD_ROW.to_string());
+    rows.push(rival_add_row().to_string());
     rows
 }
 
@@ -138,7 +146,7 @@ pub(crate) fn ir_profile_rows(profiles: &[rbms_config::IrProfile]) -> Vec<String
             format!("{name}  [{state}]")
         })
         .collect();
-    rows.push(PROFILE_ADD_ROW.to_string());
+    rows.push(profile_add_row().to_string());
     rows
 }
 
@@ -225,9 +233,9 @@ mod tests {
 
     #[test]
     fn the_rival_list_always_ends_with_the_add_row() {
-        assert_eq!(rival_rows(&[]), vec![RIVAL_ADD_ROW.to_string()]);
+        assert_eq!(rival_rows(&[]), vec![rival_add_row().to_string()]);
         let rows = rival_rows(&["one".to_string(), "two".to_string()]);
-        assert_eq!(rows, vec!["one".to_string(), "two".to_string(), RIVAL_ADD_ROW.to_string()]);
+        assert_eq!(rows, vec!["one".to_string(), "two".to_string(), rival_add_row().to_string()]);
     }
 
     #[test]

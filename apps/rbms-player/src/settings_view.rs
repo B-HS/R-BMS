@@ -22,6 +22,8 @@
 //! ([`control_part_at`]). Everything is laid out in the fixed space every built-in screen is laid
 //! out in, and drawn through [`Renderer`] so a frame can be made headless in tests.
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_render::{Rect, Renderer, draw_text, draw_text_centered, draw_text_right, fit_text, text_width, theme};
 
 use crate::number_row::{NumberEdit, NumberValue, RowPart, SliderLook, draw_edit, draw_refusal, draw_slider, row_part};
@@ -29,12 +31,13 @@ use crate::stage::preview_menu::{
     COLUMN_GAP, HINT_GAP, HINT_SCALE, HINT_Y, MARGIN, SCROLL_BAR_INSET, SCROLL_BAR_ROOM, SCROLL_BAR_W, SUBTITLE_SCALE, SUBTITLE_Y, TITLE_SCALE, TITLE_Y,
     contains, scroll_thumb_in, wrapped,
 };
+use crate::text::settings::screen::ScreenText;
+use crate::text::settings::shown_note;
 
 /// How wide the space the screen is laid out in is.
 const CANVAS_W: f32 = 1280.0;
 
 /// The screen's title, and the room between it and what is written beside it.
-const TITLE: &str = "SETTINGS";
 const SUBTITLE_GAP: f32 = 20.0;
 
 /// The top of the three columns, under the title, and their foot, above the line of keys.
@@ -68,27 +71,21 @@ const RESET_H: f32 = 30.0;
 const RESET_SCALE: f32 = 1.2;
 const RESET_TEXT_Y: f32 = 10.0;
 
-/// What the button reads, and the key that does the same.
-const RESET_GROUP_LABEL: &str = "RESET GROUP";
+/// The key that does what the button does. A key is written as it is in every language.
 pub(crate) const RESET_GROUP_KEY: &str = "SHIFT+0";
 
 /// The ways to the other screens at the foot of the rail: how many there are, the heading over
 /// them with how far above the first it is written and how large, and how large the name of a
 /// screen and the key that opens it are written on its button.
 const LINK_COUNT: usize = 3;
-const LINKS_HEADING: &str = "OTHER SCREENS";
 const LINKS_HEADING_RISE: f32 = 16.0;
 const LINKS_HEADING_SCALE: f32 = 1.1;
 const LINK_NAME_SCALE: f32 = 1.4;
 const LINK_KEY_SCALE: f32 = 1.2;
 const LINK_KEY_Y: f32 = 12.0;
 
-/// What the three buttons read, top to bottom: the play menu, the skin menu and the key editor.
-const PLAY_MENU_LINK: &str = "PLAY MENU";
-const SKIN_MENU_LINK: &str = "SKIN MENU";
-const KEY_CONFIG_LINK: &str = "KEY CONFIG";
-
-/// Which of the buttons each of them is, top to bottom.
+/// Which of the buttons each of them is, top to bottom: the play menu, the skin menu and the key
+/// editor.
 const PLAY_MENU_PLACE: usize = 0;
 const SKIN_MENU_PLACE: usize = 1;
 const KEY_CONFIG_PLACE: usize = 2;
@@ -217,7 +214,6 @@ const STATUS_LINES: usize = 3;
 const FACT_VALUE_X: f32 = 78.0;
 const FACT_NAME_DROP: f32 = 2.0;
 const REMARK_GAP: f32 = 8.0;
-const KEYS_HEADING: &str = "KEYS";
 const KEYS_FIRST_Y: f32 = 18.0;
 
 /// Where what a key does is written beside the key, and the room kept between the two.
@@ -227,7 +223,6 @@ const KEY_NAME_GAP: f32 = 8.0;
 /// How far above the panel's foot the last line of the status ends, and the heading over the
 /// status, which is as far above its first line as the heading over the keys is above the first key.
 const STATUS_FOOT: f32 = 12.0;
-const STATUS_HEADING: &str = "STATUS";
 
 /// How thick the line round a panel drawn over the row list is.
 const OVERLAY_BORDER: f32 = 2.0;
@@ -272,18 +267,15 @@ const CONFIRM_TITLE_SCALE: f32 = 1.6;
 const CONFIRM_BUTTON_SCALE: f32 = 1.3;
 const CONFIRM_BUTTON_TEXT_Y: f32 = 9.0;
 
-/// What the two buttons of the question read.
-const CONFIRM_YES: &str = "ENTER  RESET";
-const CONFIRM_NO: &str = "ESC  KEEP";
-
 /// The keys of the screen while the question is up, written where the screen names its keys.
-pub(crate) const CONFIRM_HINT: &str = "ENTER RESET THE GROUP   ESC KEEP IT AS IT IS";
+pub(crate) fn confirm_hint() -> &'static str {
+    ScreenText::ConfirmHint.get(language())
+}
 
 /// Keyboard hint inside the inline rival list.
-pub(crate) const RIVALS_HINT: &str = "UP DOWN MOVE   ENTER ADD   D REMOVE   ESC SAVE/CLOSE";
-
-/// Title of the inline rival list.
-const RIVALS_TITLE: &str = "RIVALS";
+pub(crate) fn rivals_hint() -> &'static str {
+    ScreenText::RivalsHint.get(language())
+}
 
 /// What sets the value of a row, which is how the row is drawn and what a press on it does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -312,7 +304,14 @@ pub(crate) enum RowControl {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct SettingsLine {
     pub(crate) label: String,
+    /// What the row holds as the settings table writes it, in English. The screen tells a switch
+    /// that is on from one that is off, and where a choice stands, by this and never by `shown`.
     pub(crate) value: String,
+    /// What the row holds as it is drawn, in the language the screens are drawn in.
+    pub(crate) shown: String,
+    /// The values of a choice drawn with all of them on show, as they are drawn; empty for a row
+    /// that is not, which draws the values its control names.
+    pub(crate) choices: Vec<String>,
     /// What is said beside the row, or `None` for a row shown bare. A note is written small after
     /// the label, and the value of an annotated row is dimmed until the row is focused.
     pub(crate) note: Option<&'static str>,
@@ -329,7 +328,16 @@ impl SettingsLine {
     /// A row that reports `value`, with nothing said beside it.
     #[cfg(test)]
     pub(crate) fn bare(label: &str, value: &str) -> SettingsLine {
-        SettingsLine { label: label.to_string(), value: value.to_string(), note: None, number: None, control: RowControl::Info, changed: false }
+        SettingsLine {
+            label: label.to_string(),
+            value: value.to_string(),
+            shown: value.to_string(),
+            choices: Vec::new(),
+            note: None,
+            number: None,
+            control: RowControl::Info,
+            changed: false,
+        }
     }
 }
 
@@ -357,7 +365,7 @@ pub(crate) struct InfoScene {
     /// What kind of row it is, in a word or two: a switch, a choice and where it stands in it.
     pub(crate) kind: String,
     /// What the row is for.
-    pub(crate) description: &'static str,
+    pub(crate) description: String,
     /// What the row holds, each under a name: its value, what it ships as, its range and its step.
     pub(crate) facts: Vec<(&'static str, String)>,
     /// What is said of this row in particular as it stands: what the note beside it means.
@@ -545,11 +553,11 @@ pub(crate) fn row_segment(row: Rect, place: usize, count: usize) -> Rect {
     Rect::new(left, row.y + ((row.h - SEGMENT_H) * 0.5).round(), width, SEGMENT_H)
 }
 
-/// Whether every one of `values` can be written whole in a cell of a choice of that many, which is
-/// what lets the choice be drawn with all of them on show.
-pub(crate) fn segments_fit(values: &[&str]) -> bool {
+/// Whether every one of `values`, as they are drawn, can be written whole in a cell of a choice of
+/// that many, which is what lets the choice be drawn with all of them on show.
+pub(crate) fn segments_fit<S: AsRef<str>>(values: &[S]) -> bool {
     let room = segment_width(values.len()) - SEGMENT_PAD * 2.0;
-    !values.is_empty() && values.len() <= SEGMENTS_MAX && values.iter().all(|value| text_width(value, SEGMENT_SCALE) <= room)
+    !values.is_empty() && values.len() <= SEGMENTS_MAX && values.iter().all(|value| text_width(value.as_ref(), SEGMENT_SCALE) <= room)
 }
 
 /// The cell a mark is drawn in at the right end of what sets a row's value.
@@ -717,7 +725,7 @@ fn draw_control<R: Renderer>(r: &mut R, row: Rect, line: &SettingsLine, on: bool
             let knob_x = if switched { track.x + track.w - SWITCH_INSET - knob_w } else { track.x + SWITCH_INSET };
             r.fill_rect(track, if switched { th.text_dim } else { th.divider });
             r.fill_rect(Rect::new(knob_x, track.y + SWITCH_INSET, knob_w, track.h - SWITCH_INSET * 2.0), if switched { th.bg } else { th.text_muted });
-            draw_text_right(r, track.x - SWITCH_WORD_GAP, text_y, VALUE_SCALE, if switched { value_color } else { th.text_muted }, &line.value);
+            draw_text_right(r, track.x - SWITCH_WORD_GAP, text_y, VALUE_SCALE, if switched { value_color } else { th.text_muted }, &line.shown);
         }
         RowControl::Segments { values, chosen } => {
             for (place, value) in values.iter().enumerate() {
@@ -729,7 +737,8 @@ fn draw_control<R: Renderer>(r: &mut R, row: Rect, line: &SettingsLine, on: bool
                     (false, false) => th.panel_hi,
                 };
                 r.fill_rect(cell, fill);
-                draw_text_centered(r, cell.x + cell.w * 0.5, cell.y + SEGMENT_TEXT_Y, SEGMENT_SCALE, if lit { th.bg } else { th.text_muted }, value);
+                let words = line.choices.get(place).map_or(*value, String::as_str);
+                draw_text_centered(r, cell.x + cell.w * 0.5, cell.y + SEGMENT_TEXT_Y, SEGMENT_SCALE, if lit { th.bg } else { th.text_muted }, words);
             }
         }
         RowControl::Stepper => {
@@ -738,7 +747,7 @@ fn draw_control<R: Renderer>(r: &mut R, row: Rect, line: &SettingsLine, on: bool
             draw_cell(r, forward, FORWARD_MARK, on);
             let room = forward.x - (back.x + back.w) - STEPPER_PAD * 2.0;
             let middle = (back.x + back.w + forward.x) * 0.5;
-            draw_text_centered(r, middle, text_y, VALUE_SCALE, value_color, &fit_text(&line.value, VALUE_SCALE, room));
+            draw_text_centered(r, middle, text_y, VALUE_SCALE, value_color, &fit_text(&line.shown, VALUE_SCALE, room));
         }
         RowControl::Field { filled } => {
             let field = field_rect(row);
@@ -750,7 +759,7 @@ fn draw_control<R: Renderer>(r: &mut R, row: Rect, line: &SettingsLine, on: bool
             } else {
                 r.fill_rect(field, th.bg);
                 let color = if filled { value_color } else { th.text_muted };
-                draw_text(r, field.x + FIELD_PAD, text_y, VALUE_SCALE, color, &fit_text(&line.value, VALUE_SCALE, room));
+                draw_text(r, field.x + FIELD_PAD, text_y, VALUE_SCALE, color, &fit_text(&line.shown, VALUE_SCALE, room));
             }
         }
         RowControl::Path { chosen } => {
@@ -758,18 +767,18 @@ fn draw_control<R: Renderer>(r: &mut R, row: Rect, line: &SettingsLine, on: bool
             draw_cell(r, cell, FORWARD_MARK, on);
             let room = cell.x - STEPPER_PAD - control_rect(row).x;
             let color = if chosen { value_color } else { th.text_muted };
-            draw_text_right(r, cell.x - STEPPER_PAD, text_y, VALUE_SCALE, color, &fit_tail(&line.value, VALUE_SCALE, room));
+            draw_text_right(r, cell.x - STEPPER_PAD, text_y, VALUE_SCALE, color, &fit_tail(&line.shown, VALUE_SCALE, room));
         }
         RowControl::Action => {
             let cell = end_cell(row);
             draw_cell(r, cell, FORWARD_MARK, on);
             if line.value != FORWARD_MARK {
                 let room = cell.x - STEPPER_PAD - control_rect(row).x;
-                draw_text_right(r, cell.x - STEPPER_PAD, text_y, VALUE_SCALE, value_color, &fit_text(&line.value, VALUE_SCALE, room));
+                draw_text_right(r, cell.x - STEPPER_PAD, text_y, VALUE_SCALE, value_color, &fit_text(&line.shown, VALUE_SCALE, room));
             }
         }
         RowControl::Info | RowControl::Slider => {
-            draw_text_right(r, right, text_y, VALUE_SCALE, if on { th.text_dim } else { th.text_muted }, &fit_text(&line.value, VALUE_SCALE, CONTROL_W));
+            draw_text_right(r, right, text_y, VALUE_SCALE, if on { th.text_dim } else { th.text_muted }, &fit_text(&line.shown, VALUE_SCALE, CONTROL_W));
         }
     }
 }
@@ -800,14 +809,15 @@ fn draw_number<R: Renderer>(r: &mut R, row: Rect, line: &SettingsLine, number: &
         (false, true) => th.text_dim,
         (false, false) => th.text,
     };
-    draw_text_right(r, control_right(row), text_y, VALUE_SCALE, color, &fit_text(&line.value, VALUE_SCALE, NUMBER_VALUE_W));
+    draw_text_right(r, control_right(row), text_y, VALUE_SCALE, color, &fit_text(&line.shown, VALUE_SCALE, NUMBER_VALUE_W));
 }
 
 /// Draw the title and what the open group holds beside it.
 fn draw_head<R: Renderer>(r: &mut R, scene: &SettingsScene) {
     let th = theme();
-    draw_text(r, MARGIN, TITLE_Y, TITLE_SCALE, th.text, TITLE);
-    let left = MARGIN + text_width(TITLE, TITLE_SCALE) + SUBTITLE_GAP;
+    let title = ScreenText::Title.get(language());
+    draw_text(r, MARGIN, TITLE_Y, TITLE_SCALE, th.text, title);
+    let left = MARGIN + text_width(title, TITLE_SCALE) + SUBTITLE_GAP;
     draw_text(r, left, SUBTITLE_Y, SUBTITLE_SCALE, th.text_dim, &fit_text(&scene.summary, SUBTITLE_SCALE, CANVAS_W - MARGIN - left));
 }
 
@@ -834,15 +844,15 @@ fn draw_rail<R: Renderer>(r: &mut R, scene: &SettingsScene, hot: &mut Vec<(Rect,
     let reset = reset_group_rect(scene.groups.len());
     r.fill_rect(reset, if changed > 0 { th.panel_hi } else { th.panel });
     let (name_color, key_color) = if changed > 0 { (th.accent, th.text_dim) } else { (th.text_muted, th.text_muted) };
-    draw_text(r, reset.x + RAIL_PAD, reset.y + RESET_TEXT_Y, RESET_SCALE, name_color, RESET_GROUP_LABEL);
+    draw_text(r, reset.x + RAIL_PAD, reset.y + RESET_TEXT_Y, RESET_SCALE, name_color, ScreenText::ResetGroup.get(language()));
     draw_text_right(r, reset.x + reset.w - RAIL_PAD, reset.y + RESET_TEXT_Y, RESET_SCALE, key_color, RESET_GROUP_KEY);
 
     let first = link_rect(PLAY_MENU_PLACE);
-    draw_text(r, first.x, first.y - LINKS_HEADING_RISE, LINKS_HEADING_SCALE, th.text_muted, LINKS_HEADING);
+    draw_text(r, first.x, first.y - LINKS_HEADING_RISE, LINKS_HEADING_SCALE, th.text_muted, ScreenText::OtherScreens.get(language()));
     let links = [
-        (PLAY_MENU_PLACE, PLAY_MENU_LINK, SettingsHot::PlayMenuLink),
-        (SKIN_MENU_PLACE, SKIN_MENU_LINK, SettingsHot::SkinMenuLink),
-        (KEY_CONFIG_PLACE, KEY_CONFIG_LINK, SettingsHot::KeyConfigLink),
+        (PLAY_MENU_PLACE, ScreenText::PlayMenu.get(language()), SettingsHot::PlayMenuLink),
+        (SKIN_MENU_PLACE, ScreenText::SkinMenu.get(language()), SettingsHot::SkinMenuLink),
+        (KEY_CONFIG_PLACE, ScreenText::KeyConfig.get(language()), SettingsHot::KeyConfigLink),
     ];
     for (place, name, link) in links {
         let rect = link_rect(place);
@@ -888,7 +898,14 @@ fn draw_list<R: Renderer>(r: &mut R, scene: &SettingsScene, hot: &mut Vec<(Rect,
         if let Some(note) = line.note {
             let (left, room) = note_span(rect, &label);
             if room > 0.0 {
-                draw_text(r, left, rect.y + NOTE_TEXT_Y, NOTE_SCALE, if on { th.text_dim } else { th.text_muted }, &fit_text(note, NOTE_SCALE, room));
+                draw_text(
+                    r,
+                    left,
+                    rect.y + NOTE_TEXT_Y,
+                    NOTE_SCALE,
+                    if on { th.text_dim } else { th.text_muted },
+                    &fit_text(shown_note(note), NOTE_SCALE, room),
+                );
             }
         }
         match &line.number {
@@ -928,7 +945,7 @@ fn draw_info<R: Renderer>(r: &mut R, scene: &SettingsScene) {
     if let Some(info) = &scene.info {
         draw_text(r, left, INFO_RECT.y + INFO_LABEL_Y, INFO_LABEL_SCALE, th.text, &fit_text(&info.label, INFO_LABEL_SCALE, room));
         draw_text(r, left, INFO_RECT.y + INFO_KIND_Y, INFO_SMALL_SCALE, th.text_muted, &fit_text(&info.kind, INFO_SMALL_SCALE, room));
-        for (at, line) in description_lines(info.description).iter().enumerate() {
+        for (at, line) in description_lines(&info.description).iter().enumerate() {
             draw_text(r, left, INFO_RECT.y + INFO_DESCRIPTION_Y + at as f32 * INFO_LINE_PITCH, INFO_SCALE, th.text_dim, line);
         }
         r.fill_rect(Rect::new(left, INFO_RECT.y + INFO_RULE_Y, room, RULE_H), th.divider);
@@ -956,7 +973,7 @@ fn draw_info<R: Renderer>(r: &mut R, scene: &SettingsScene) {
         }
 
         let keys_top = INFO_RECT.y + INFO_KEYS_Y;
-        draw_text(r, left, keys_top, INFO_SMALL_SCALE, th.text_muted, KEYS_HEADING);
+        draw_text(r, left, keys_top, INFO_SMALL_SCALE, th.text_muted, ScreenText::KeysHeading.get(language()));
         for (at, (key, action)) in info.keys.iter().take(INFO_KEY_LINES).enumerate() {
             let line_y = keys_top + KEYS_FIRST_Y + at as f32 * INFO_LINE_PITCH;
             draw_text(r, left, line_y, INFO_SCALE, th.text, &fit_text(key, INFO_SCALE, KEY_ACTION_X - KEY_NAME_GAP));
@@ -966,7 +983,7 @@ fn draw_info<R: Renderer>(r: &mut R, scene: &SettingsScene) {
     let status = wrapped(&scene.status, INFO_SCALE, room, STATUS_LINES);
     let status_top = INFO_RECT.y + INFO_RECT.h - STATUS_FOOT - STATUS_LINES as f32 * INFO_LINE_PITCH;
     if !status.is_empty() {
-        draw_text(r, left, status_top - KEYS_FIRST_Y, INFO_SMALL_SCALE, th.text_muted, STATUS_HEADING);
+        draw_text(r, left, status_top - KEYS_FIRST_Y, INFO_SMALL_SCALE, th.text_muted, ScreenText::StatusHeading.get(language()));
     }
     for (at, line) in status.iter().enumerate() {
         draw_text(r, left, status_top + at as f32 * INFO_LINE_PITCH, INFO_SCALE, th.accent, line);
@@ -982,7 +999,10 @@ fn draw_confirm<R: Renderer>(r: &mut R, confirm: &ConfirmScene) {
     let room = panel.w - CONFIRM_PAD * 2.0;
     draw_text(r, panel.x + CONFIRM_PAD, panel.y + CONFIRM_TITLE_Y, CONFIRM_TITLE_SCALE, th.text, &fit_text(&confirm.title, CONFIRM_TITLE_SCALE, room));
     draw_text(r, panel.x + CONFIRM_PAD, panel.y + CONFIRM_BODY_Y, INFO_SCALE, th.text_dim, &fit_text(&confirm.body, INFO_SCALE, room));
-    for (rect, words, fill, ink) in [(confirm_yes_rect(), CONFIRM_YES, th.text_dim, th.bg), (confirm_no_rect(), CONFIRM_NO, th.button_active, th.text)] {
+    for (rect, words, fill, ink) in [
+        (confirm_yes_rect(), ScreenText::ConfirmYes.get(language()), th.text_dim, th.bg),
+        (confirm_no_rect(), ScreenText::ConfirmNo.get(language()), th.button_active, th.text),
+    ] {
         r.fill_rect(rect, fill);
         draw_text_centered(r, rect.x + rect.w * 0.5, rect.y + CONFIRM_BUTTON_TEXT_Y, CONFIRM_BUTTON_SCALE, ink, words);
     }
@@ -1013,8 +1033,8 @@ fn render_rivals<R: Renderer>(r: &mut R, scene: &RivalsScene) -> Vec<(Rect, Sett
     let panel = Rect::new(RIVALS_X, RIVALS_Y, RIVALS_W, RIVALS_H);
     r.fill_rect(Rect::new(panel.x - OVERLAY_BORDER, panel.y - OVERLAY_BORDER, panel.w + OVERLAY_BORDER * 2.0, panel.h + OVERLAY_BORDER * 2.0), th.divider);
     r.fill_rect(panel, th.panel_hi);
-    draw_text(r, RIVALS_X + RIVALS_PAD, RIVALS_Y + RIVALS_TITLE_Y, RIVALS_TITLE_SCALE, th.text, RIVALS_TITLE);
-    draw_text(r, RIVALS_X + RIVALS_PAD, RIVALS_Y + RIVALS_HINT_Y, RIVALS_HINT_SCALE, th.text_muted, RIVALS_HINT);
+    draw_text(r, RIVALS_X + RIVALS_PAD, RIVALS_Y + RIVALS_TITLE_Y, RIVALS_TITLE_SCALE, th.text, ScreenText::RivalsTitle.get(language()));
+    draw_text(r, RIVALS_X + RIVALS_PAD, RIVALS_Y + RIVALS_HINT_Y, RIVALS_HINT_SCALE, th.text_muted, rivals_hint());
 
     let start = rivals_scroll_start(scene.rows.len(), scene.sel);
     for (slot, index) in (start..(start + rivals_visible_rows()).min(scene.rows.len())).enumerate() {

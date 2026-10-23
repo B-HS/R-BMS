@@ -26,11 +26,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
+
 use crate::app_play::{LoadedChart, PendingChart};
 use crate::ghost::{GhostLoad, RunGhosts};
 use crate::select_tree::{ListPlace, show_the_list_again};
 use crate::stage::{Canvas, FrameCtx, KeyInput, PlayState, Stage, StageHandler, Transition};
 use crate::tablesrc::{MatchedTable, TableStore, read_and_match_all};
+use crate::text::menus::loading::LoadingText;
 use crate::*;
 
 /// Width and height of the progress bar under the heading.
@@ -208,13 +212,13 @@ impl ChartLoads {
     fn step(&self) -> String {
         let mut steps = Vec::new();
         if let Some(load) = self.keysounds.as_ref() {
-            steps.push(format!("{} / {} keysounds", load.progress.load(Ordering::Relaxed).min(load.total), load.total));
+            steps.push(LoadingText::KeysoundsStep.fill(language(), &[&load.progress.load(Ordering::Relaxed).min(load.total), &load.total]));
         }
         if let Some(load) = self.bga.as_ref() {
-            steps.push(format!("{} / {} images", load.progress.load(Ordering::Relaxed).min(load.total), load.total));
+            steps.push(LoadingText::ImagesStep.fill(language(), &[&load.progress.load(Ordering::Relaxed).min(load.total), &load.total]));
         }
         if self.ghost.is_some() {
-            steps.push("record run".to_string());
+            steps.push(LoadingText::RecordRunStep.get(language()).to_string());
         }
         steps.join("   ")
     }
@@ -233,7 +237,7 @@ impl ChartLoads {
     /// The heading and the line under it while these decodes are what is waited for: the course
     /// and its stage on a course, and otherwise the step still outstanding.
     fn heading(&self, shared: &AppShared) -> (&'static str, String) {
-        course_heading(shared).unwrap_or_else(|| ("LOADING", self.step()))
+        course_heading(shared).unwrap_or_else(|| (LoadingText::Loading.get(language()), self.step()))
     }
 
     /// The built-in LOADING screen for these decodes: the heading, the step under it, and the bar
@@ -244,14 +248,14 @@ impl ChartLoads {
         let (bx, by) = draw_heading(canvas, shared.frame_count, heading, &sub);
         let (done, total) = self.progress();
         if total > 0 {
-            LoadingState::draw_determinate(canvas, bx, by, done, total, "files");
+            LoadingState::draw_determinate(canvas, bx, by, done, total, LoadingText::FilesUnit.get(language()));
         }
     }
 }
 
 /// The heading of a chart that is loading as a stage of a course, or `None` outside one.
 fn course_heading(shared: &AppShared) -> Option<(&'static str, String)> {
-    shared.course_run.as_ref().map(|run| ("COURSE", format!("{} - {}", run.course.name, stage_label(run))))
+    shared.course_run.as_ref().map(|run| (LoadingText::Course.get(language()), format!("{} - {}", run.course.name, stage_label(run))))
 }
 
 /// Paints the screen's ground, the heading with its ellipsis and the line under it, and answers
@@ -465,7 +469,7 @@ impl LoadingState {
         crate::user_folders::rematch(shared);
         shared.trace_backfill_after_scan();
         show_the_list_again(shared, &place);
-        notify(Level::Info, format!("scanned {} charts", shared.library.len()));
+        notify(Level::Info, LoadingText::Scanned.fill(language(), &[&shared.library.len()]));
         shared.print_selection();
         Transition::Back
     }
@@ -482,9 +486,9 @@ impl LoadingState {
                     notify(Level::Error, format!("library scan failed: {failure}"));
                 }
                 if report.cancelled {
-                    notify(Level::Info, format!("library scan stopped early ({} charts read)", report.upserted));
+                    notify(Level::Info, LoadingText::ScanStoppedEarly.fill(language(), &[&report.upserted]));
                 } else if report.upserted > 0 || report.removed > 0 {
-                    notify(Level::Info, format!("library: {} chart(s) read, {} dropped", report.upserted, report.removed));
+                    notify(Level::Info, LoadingText::LibraryRead.fill(language(), &[&report.upserted, &report.removed]));
                 }
                 *step =
                     ScanStep::Matching { rx: LoadingState::spawn_table_match(report.library, std::mem::take(sources), tables.clone(), Arc::clone(progress)) };
@@ -571,14 +575,15 @@ impl LoadingState {
     /// The heading and the line under it: what is being waited for, and which one of it.
     fn heading(&self, shared: &AppShared) -> (&'static str, String) {
         match &self.task {
-            LoadingTask::Song(i) => course_heading(shared)
-                .unwrap_or_else(|| ("LOADING", shared.library.songs().get(*i).map(|e| e.title.chars().take(TITLE_CHARS).collect()).unwrap_or_default())),
+            LoadingTask::Song(i) => course_heading(shared).unwrap_or_else(|| {
+                (LoadingText::Loading.get(language()), shared.library.songs().get(*i).map(|e| e.title.chars().take(TITLE_CHARS).collect()).unwrap_or_default())
+            }),
             LoadingTask::Scan { step: ScanStep::Matching { .. }, progress } => {
-                ("MATCHING TABLES", format!("{} / {}", progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len()))
+                (LoadingText::MatchingTables.get(language()), format!("{} / {}", progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len()))
             }
             LoadingTask::Scan { step: ScanStep::Walking { scan, .. }, .. } => match scan.counts().found {
-                0 => ("SCANNING", format!("{} folder(s)", shared.config.library.scan_roots().len())),
-                found => ("SCANNING", format!("{found} charts found")),
+                0 => (LoadingText::Scanning.get(language()), LoadingText::FoldersToScan.fill(language(), &[&shared.config.library.scan_roots().len()])),
+                found => (LoadingText::Scanning.get(language()), LoadingText::ChartsFound.fill(language(), &[&found])),
             },
             LoadingTask::Assets(assets) => assets.loads.heading(shared),
         }
@@ -642,11 +647,11 @@ impl StageHandler for LoadingState {
         match &self.task {
             LoadingTask::Assets(assets) => {
                 let (done, total) = assets.progress();
-                LoadingState::draw_determinate(canvas, bx, by, done, total, "files");
+                LoadingState::draw_determinate(canvas, bx, by, done, total, LoadingText::FilesUnit.get(language()));
             }
             LoadingTask::Scan { step: ScanStep::Matching { .. }, progress } => {
                 let done = progress.tables.load(Ordering::Relaxed);
-                LoadingState::draw_determinate(canvas, bx, by, done, ctx.shared.config.library.tables.len(), "tables");
+                LoadingState::draw_determinate(canvas, bx, by, done, ctx.shared.config.library.tables.len(), LoadingText::TablesUnit.get(language()));
             }
             LoadingTask::Scan { .. } => LoadingState::draw_sweep(canvas, bx, by, ctx.shared.frame_count),
             LoadingTask::Song(_) => {}
@@ -1017,6 +1022,25 @@ mod tests {
         assert_eq!(sub, "0 / 1");
         progress.tables.store(1, Ordering::Relaxed);
         assert_eq!(matching.heading(&app.shared).1, "1 / 1");
+        let _ = std::fs::remove_file(&db);
+    }
+
+    /// The step the scan is on, and what it has counted, are told in the language of the screen.
+    #[test]
+    fn the_scan_and_the_decodes_are_told_in_the_language_of_the_screen() {
+        let mut app = crate::stage::render_tests::app();
+        let db = std::env::temp_dir().join(format!("rbms-step-language-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&db);
+        let walking = LoadingState::scan(Vec::new(), Vec::new(), db.clone(), false);
+        app.shared.config.library.download_folder = Some("/downloads".into());
+        let told = |language| {
+            rbms_render::text::set_language(language);
+            let told = (walking.heading(&app.shared), assets(Some(keysounds(4)), None).loads.step());
+            rbms_render::text::set_language(rbms_model::Language::English);
+            told
+        };
+        assert_eq!(told(rbms_model::Language::Korean), (("스캔 중", "폴더 1개".to_string()), "0 / 4 키음".to_string()));
+        assert_eq!(told(rbms_model::Language::Japanese), (("スキャン中", "1フォルダ".to_string()), "0 / 4 キー音".to_string()));
         let _ = std::fs::remove_file(&db);
     }
 }

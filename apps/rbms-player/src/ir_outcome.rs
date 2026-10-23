@@ -3,7 +3,12 @@
 //! server.
 
 use rbms_ir::{IrError, ScoreFlag, SubmitOutcome};
+use rbms_model::Language;
+use rbms_model::translations::Catalog;
 use rbms_render::Color;
+use rbms_render::text::language;
+
+use crate::text::menus::ir_outcome::IrOutcomeText;
 
 /// Where the IR block sits on the result screen: the left column, below the EX-delta lines the
 /// rank bar draws, one row per status line.
@@ -15,10 +20,6 @@ pub(crate) const IR_RESULT_SCALE: f32 = 1.8;
 /// Longest server/error text kept in a result line before it is cut with [`TRUNCATION_MARK`].
 /// Long enough for a sentence, short enough to stay inside the result panel column.
 pub(crate) const IR_LINE_MAX_CHARS: usize = 56;
-
-/// Appended to the placement of a SCRATCH AUTO run, whose rank is its place on the server's list
-/// that includes SCRATCH AUTO runs rather than on the default one.
-pub(crate) const SCRATCH_AUTO_RANK_MARK: &str = "(SCRATCH AUTO)";
 
 /// Appended when a message is cut to [`IR_LINE_MAX_CHARS`]. ASCII so it renders in every bundled
 /// font.
@@ -74,13 +75,13 @@ impl IrStatus {
         match self {
             IrStatus::Off => vec![("IR: OFF".to_string(), IrLineKind::Info)],
             IrStatus::Skipped(reason) => {
-                vec![(format!("IR: SKIPPED ({reason})"), IrLineKind::Info)]
+                vec![(IrOutcomeText::Skipped.fill(language(), &[reason]), IrLineKind::Info)]
             }
-            IrStatus::Sending => vec![("IR: SENDING...".to_string(), IrLineKind::Info)],
+            IrStatus::Sending => vec![(IrOutcomeText::Sending.get(language()).to_string(), IrLineKind::Info)],
             IrStatus::Reported(report) => {
                 let score_kind = if report.failed {
                     IrLineKind::Bad
-                } else if report.score.starts_with("UNRANKED") {
+                } else if leads_with(&report.score, IrOutcomeText::UnrankedLead) {
                     IrLineKind::Warn
                 } else {
                     IrLineKind::Info
@@ -90,13 +91,20 @@ impl IrStatus {
                     out.push(("NEW BEST".to_string(), IrLineKind::Good));
                 }
                 if let Some(replay) = &report.replay {
-                    let kind = if replay.starts_with("REPLAY ERROR") { IrLineKind::Bad } else { IrLineKind::Good };
+                    let kind = if leads_with(replay, IrOutcomeText::ReplayErrorLead) { IrLineKind::Bad } else { IrLineKind::Good };
                     out.push((replay.clone(), kind));
                 }
                 out
             }
         }
     }
+}
+
+/// Whether a result line begins with `lead` as any of the languages writes it. A line is told in the
+/// language the screen was in when the server answered, so the language it is read in now may not be
+/// the one it was told in.
+fn leads_with(line: &str, lead: IrOutcomeText) -> bool {
+    Language::ALL.into_iter().any(|language| line.starts_with(lead.get(language)))
 }
 
 /// Colour a result line is drawn in.
@@ -133,21 +141,21 @@ pub(crate) fn truncate(text: &str) -> String {
 /// then a bare acknowledgement. `NEW BEST` and the replay-upload outcome are reported alongside it.
 pub(crate) fn format_submit_outcome(outcome: &SubmitOutcome) -> IrReport {
     let (score, failed) = match &outcome.submit {
-        Err(error) => (format!("IR ERROR: {}", short_error(error)), true),
+        Err(error) => (format!("{}: {}", IrOutcomeText::ErrorLead.get(language()), short_error(error)), true),
         Ok(response) if !response.accepted => {
             let line = match response.message.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
-                Some(message) => format!("IR: REJECTED ({})", truncate(message)),
-                None => "IR: REJECTED".to_string(),
+                Some(message) => IrOutcomeText::RejectedWithReason.fill(language(), &[&truncate(message)]),
+                None => IrOutcomeText::Rejected.get(language()).to_string(),
             };
             (line, true)
         }
         Ok(response) => {
             let line = match response.unranked_summary() {
-                Some(reasons) => format!("UNRANKED: {}", truncate(&reasons)),
+                Some(reasons) => format!("{}: {}", IrOutcomeText::UnrankedLead.get(language()), truncate(&reasons)),
                 None => match response.rank {
-                    Some(rank) if response.has_flag(ScoreFlag::ScratchAuto) => format!("IR: RANK #{rank} {SCRATCH_AUTO_RANK_MARK}"),
-                    Some(rank) => format!("IR: RANK #{rank}"),
-                    None => "IR: SENT".to_string(),
+                    Some(rank) if response.has_flag(ScoreFlag::ScratchAuto) => IrOutcomeText::RankScratchAuto.fill(language(), &[&rank]),
+                    Some(rank) => IrOutcomeText::Rank.fill(language(), &[&rank]),
+                    None => IrOutcomeText::Sent.get(language()).to_string(),
                 },
             };
             (line, false)
@@ -155,8 +163,8 @@ pub(crate) fn format_submit_outcome(outcome: &SubmitOutcome) -> IrReport {
     };
     let new_best = matches!(&outcome.submit, Ok(response) if response.accepted && response.is_new_best);
     let replay = outcome.replay.as_ref().map(|result| match result {
-        Ok(_) => "REPLAY UPLOADED".to_string(),
-        Err(error) => format!("REPLAY ERROR: {}", short_error(error)),
+        Ok(_) => IrOutcomeText::ReplayUploaded.get(language()).to_string(),
+        Err(error) => format!("{}: {}", IrOutcomeText::ReplayErrorLead.get(language()), short_error(error)),
     });
     IrReport { score, new_best, replay, failed }
 }
@@ -334,5 +342,33 @@ mod tests {
         assert!(!IrStatus::Skipped("autoplay").accepts_report(), "an earlier run's outcome must not relabel a skipped run");
         let report = IrReport { score: "RANK #3".into(), new_best: true, replay: None, failed: false };
         assert!(!IrStatus::Reported(report).accepts_report(), "a landed report is final");
+    }
+
+    #[test]
+    fn the_lines_are_told_in_the_language_of_the_screen() {
+        rbms_render::text::set_language(Language::Korean);
+        let ranked = format_submit_outcome(&SubmitOutcome { submit: Ok(accepted(Some(3))), replay: Some(Ok("rep-1".into())) });
+        let rejected = format_submit_outcome(&SubmitOutcome {
+            submit: Ok(SubmitResponse { accepted: false, message: Some("chart unknown".into()), ..Default::default() }),
+            replay: None,
+        });
+        rbms_render::text::set_language(Language::Japanese);
+        let skipped = IrStatus::Skipped("autoplay").lines();
+        rbms_render::text::set_language(Language::English);
+        assert_eq!((ranked.score.as_str(), ranked.replay.as_deref()), ("IR: 3위", Some("리플레이 업로드 완료")));
+        assert_eq!(rejected.score, "IR: 거부됨 (chart unknown)");
+        assert_eq!(skipped, vec![("IR: スキップ（autoplay）".to_string(), IrLineKind::Info)]);
+    }
+
+    #[test]
+    fn a_line_told_in_another_language_is_still_coloured_by_what_it_says() {
+        rbms_render::text::set_language(Language::Japanese);
+        let response = SubmitResponse { accepted: true, flags: vec![ScoreFlag::Assist.as_wire().to_string()], ..Default::default() };
+        let outcome = SubmitOutcome { submit: Ok(response), replay: Some(Err(IrError::PayloadTooLarge("too big".into()))) };
+        let report = format_submit_outcome(&outcome);
+        rbms_render::text::set_language(Language::English);
+        assert!(report.score.starts_with("ランキング外: "), "{}", report.score);
+        let kinds: Vec<IrLineKind> = IrStatus::Reported(report).lines().into_iter().map(|(_, kind)| kind).collect();
+        assert_eq!(kinds, vec![IrLineKind::Warn, IrLineKind::Bad]);
     }
 }

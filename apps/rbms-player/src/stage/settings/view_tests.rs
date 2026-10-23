@@ -8,8 +8,11 @@
 
 use super::*;
 use crate::settings_ui::SettingRow;
+use crate::stage::settings::language_tests::{em_width, lines_needed};
+use crate::text::settings::{InstalledLanguage, row_label, tab_label};
 use crate::{Config, LaunchOptions};
 use rbms_config::{SettingId, SettingKind, SettingTab, cycle_values, descriptor, number_spec, tab_rows};
+use rbms_model::Language;
 use rbms_render::CpuCanvas;
 
 /// The size the screen is laid out for.
@@ -233,7 +236,7 @@ fn a_choice_is_drawn_whole_only_when_every_value_fits_its_cell() {
     assert!(segments_fit(&["COMBO", "DURATION", "LOWEST", "SCORE"]));
     assert!(!segments_fit(&["A", "B", "C", "D", "E"]), "more values than are shown side by side");
     assert!(!segments_fit(&["NONE", "CONTINUE", "SURVIVAL TO GROOVE", "BEST"]), "a value too long for its cell");
-    assert!(!segments_fit(&[]));
+    assert!(!segments_fit::<&str>(&[]));
 
     let shared = shared("choices");
     let whole = [SettingId::JudgeAlgorithm, SettingId::LnMode, SettingId::GaugeSet, SettingId::BottomShiftableGauge, SettingId::WindowMode, SettingId::Skin];
@@ -292,7 +295,7 @@ fn nothing_the_screen_writes_is_cut_short_at_the_size_it_is_laid_out_for() {
     for tab in SettingTab::SHOWN {
         assert!(text_width(tab.label(), RAIL_NAME_SCALE) + text_width(WIDEST_COUNT, RAIL_COUNT_SCALE) + MARK_X + MARK_SIZE <= rail_room(), "{tab:?}");
         let summary = crate::stage::settings::catalog::group_summary(tab);
-        let left = MARGIN + text_width(TITLE, TITLE_SCALE) + SUBTITLE_GAP;
+        let left = MARGIN + text_width(ScreenText::Title.get(language()), TITLE_SCALE) + SUBTITLE_GAP;
         assert_eq!(fit_text(summary, SUBTITLE_SCALE, WIDTH as f32 - MARGIN - left), summary, "{tab:?}");
         for section in crate::stage::settings::catalog::sections(tab) {
             assert!(text_width(section.heading, HEADING_SCALE) + HEADING_X + HEADING_RULE_GAP < row.w * 0.5, "{}", section.heading);
@@ -321,13 +324,13 @@ fn nothing_the_screen_writes_is_cut_short_at_the_size_it_is_laid_out_for() {
             }
         }
     }
-    for name in [PLAY_MENU_LINK, SKIN_MENU_LINK, KEY_CONFIG_LINK] {
+    for name in [ScreenText::PlayMenu, ScreenText::SkinMenu, ScreenText::KeyConfig].map(|entry| entry.get(language())) {
         let key = format!("BACKSLASH {FORWARD_MARK}");
         let room = rail_room() - text_width(name, LINK_NAME_SCALE);
         assert_eq!(fit_text(&key, LINK_KEY_SCALE, room), key, "{name} leaves no room for a long key");
     }
-    assert!(text_width(RESET_GROUP_LABEL, RESET_SCALE) + text_width(RESET_GROUP_KEY, RESET_SCALE) <= rail_room());
-    for words in [CONFIRM_YES, CONFIRM_NO] {
+    assert!(text_width(ScreenText::ResetGroup.get(language()), RESET_SCALE) + text_width(RESET_GROUP_KEY, RESET_SCALE) <= rail_room());
+    for words in [ScreenText::ConfirmYes, ScreenText::ConfirmNo].map(|entry| entry.get(language())) {
         assert!(text_width(words, CONFIRM_BUTTON_SCALE) <= confirm_button_w() - CONFIRM_PAD);
     }
     assert!(confirm_no_rect().x + confirm_no_rect().w <= confirm_rect().x + confirm_rect().w - CONFIRM_PAD + f32::EPSILON);
@@ -341,8 +344,8 @@ fn every_description_is_written_whole_on_the_panel() {
     for tab in SettingTab::SHOWN {
         for id in tab_rows(tab, &shared.config) {
             let said = crate::stage::settings::catalog::description(id);
-            let lines = description_lines(said);
-            assert!(lines.len() <= DESCRIPTION_LINES && says_all_of(&lines, said), "{id:?} is cut short on the panel: {lines:?}");
+            let lines = description_lines(&said);
+            assert!(lines.len() <= DESCRIPTION_LINES && says_all_of(&lines, &said), "{id:?} is cut short on the panel: {lines:?}");
             assert!(INFO_DESCRIPTION_Y + lines.len() as f32 * INFO_LINE_PITCH <= INFO_RULE_Y, "{id:?} runs under the line below it");
         }
     }
@@ -405,7 +408,7 @@ fn the_panel_says_what_it_is_handed_within_its_room() {
     let info = InfoScene {
         label: "A ROW".to_string(),
         kind: "SWITCH".to_string(),
-        description: "What the row is for.",
+        description: "What the row is for.".to_string(),
         facts: vec![("VALUE", "ON".to_string()), ("DEFAULT", "OFF".to_string())],
         remark: Some("What is said of it in particular."),
         caution: Some("A CAUTION."),
@@ -425,7 +428,7 @@ fn the_panel_says_what_it_is_handed_within_its_room() {
 fn the_inline_list_and_the_question_are_drawn_over_the_rows() {
     let rows = || (0..6).map(|at| line(&format!("ROW {at}"), ">", RowControl::Action)).collect::<Vec<_>>();
     let (plain, _) = drawn(&scene_of(rows()));
-    let listed = RivalsScene { rows: vec!["friend".into(), crate::ir_panel::RIVAL_ADD_ROW.into()], sel: 1, editor: Some("typing_".into()) };
+    let listed = RivalsScene { rows: vec!["friend".into(), crate::ir_panel::rival_add_row().into()], sel: 1, editor: Some("typing_".into()) };
     let (with_list, hot) = drawn(&SettingsScene { rivals: Some(listed), ..scene_of(rows()) });
     let rivals: Vec<usize> = hot.iter().filter_map(|(_, hot)| if let SettingsHot::RivalRow(at) = hot { Some(*at) } else { None }).collect();
     assert_eq!(rivals, vec![0, 1]);
@@ -454,4 +457,50 @@ fn a_field_is_drawn_with_what_is_being_typed_into_it() {
     assert!(typing != plain);
     let first = slot_rect(1);
     assert!(outside_the_rows_of(&typing, first) == outside_the_rows_of(&plain, first), "typing into one row changed another");
+}
+
+/// How wide a character the panel writes with is, in pixels: a full-width character is as wide as
+/// the size it is written at, which is `round(1.3 * 8.5)` for the panel's text. The same for the
+/// labels of the rows and the names on the rail, which are written at 1.3 and 1.5.
+const PANEL_EM_PX: f32 = 11.0;
+const LABEL_EM_PX: f32 = 11.0;
+const RAIL_NAME_EM_PX: f32 = 13.0;
+
+/// The Korean and the Japanese sentences the panel gives a row fit its six lines: the fonts of the
+/// tests cannot measure them, so they are broken the way the panel breaks a sentence by the count
+/// of [`lines_needed`]. The English is measured by the font itself, above.
+#[test]
+fn every_description_fits_the_panel_in_korean_and_japanese() {
+    let room_em = (INFO_W - INFO_PAD * 2.0) / PANEL_EM_PX;
+    let config = rbms_config::Config::default();
+    let mut too_long = Vec::new();
+    for tab in SettingTab::SHOWN {
+        for id in tab_rows(tab, &config) {
+            for language in [Language::Korean, Language::Japanese] {
+                let _installed = InstalledLanguage::new(language);
+                let lines = lines_needed(&crate::stage::settings::catalog::description(id), room_em);
+                if lines > DESCRIPTION_LINES {
+                    too_long.push(format!("{id:?} in {language:?}: {lines} lines"));
+                }
+            }
+        }
+    }
+    assert!(too_long.is_empty(), "these do not fit the {DESCRIPTION_LINES} lines of the panel: {too_long:?}");
+}
+
+/// What a row is called, in any language, fits the room its row gives it, and what a group is called
+/// fits its place on the rail, by the same count.
+#[test]
+fn every_label_fits_its_room_in_every_language() {
+    let config = rbms_config::Config::default();
+    for language in Language::ALL {
+        let _installed = InstalledLanguage::new(language);
+        for tab in SettingTab::SHOWN {
+            for id in tab_rows(tab, &config) {
+                let label = row_label(id);
+                assert!(em_width(label) * LABEL_EM_PX <= label_room(slot_rect(0)), "{id:?} in {language:?}: {label}");
+            }
+            assert!(em_width(tab_label(tab)) * RAIL_NAME_EM_PX <= rail_room(), "{tab:?} in {language:?}");
+        }
+    }
 }

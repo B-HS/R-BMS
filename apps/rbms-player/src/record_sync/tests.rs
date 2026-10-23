@@ -561,6 +561,30 @@ fn the_summary_names_only_what_happened() {
 }
 
 #[test]
+fn the_summary_and_the_stop_line_are_worded_in_the_language_asked_for() {
+    let tally = SyncTally { sent: 120, already: 30, rejected: 5, courses_sent: 2, replays_uploaded: 80, replays_failed: 3, ..SyncTally::default() };
+    assert_eq!(tally.summary_in(Language::Korean), "기록: 전송 120건, 서버에 이미 있음 30건, 거부 5건; 코스: 전송 2건; 리플레이: 업로드 80건, 실패 3건");
+    assert_eq!(tally.summary_in(Language::Japanese), "記録: 送信120件, サーバーに登録済み30件, 拒否5件; コース: 送信2件; リプレイ: アップロード80件, 失敗3件");
+    assert_eq!(SyncTally::default().summary_in(Language::Korean), "기록: 전송한 것 없음");
+    assert_eq!(stop_line_in(&SyncStop::Unreachable("x".into()), Language::Korean), "기록 동기화를 중단했습니다: 서버에 연결할 수 없습니다");
+    assert_eq!(stop_line_in(&SyncStop::Unreadable("locked".into()), Language::Japanese), "記録の同期を開始できませんでした: locked");
+    assert_eq!(stop_line_in(&SyncStop::Cancelled, Language::English), stop_line(&SyncStop::Cancelled));
+}
+
+#[test]
+fn a_finished_sync_is_noticed_in_the_language_installed_when_the_notice_is_taken() {
+    let tally = SyncTally { sent: 2, ..SyncTally::default() };
+    crate::notify::exclusive(|| {
+        crate::notify::notify_with(crate::notify::Level::Info, move |language| tally.summary_in(language));
+        rbms_render::text::set_language(Language::Korean);
+        let mut said = Vec::new();
+        crate::notify::drain(&mut said);
+        rbms_render::text::set_language(Language::English);
+        assert_eq!(said, vec![(crate::notify::Level::Info, "기록: 전송 2건".to_string())]);
+    });
+}
+
+#[test]
 fn the_record_modal_says_why_the_server_refused_the_run() {
     let refused = IrSyncRow {
         http_status: Some(400),
@@ -669,7 +693,7 @@ fn a_sync_writes_every_answer_down_and_sends_only_what_the_server_lacks_next_tim
     assert_eq!(shared.record_sync_states[&second].state, SyncState::Accepted);
     shared.sync_records_now();
     poll_to_the_end(&mut shared);
-    assert_eq!((server.submitted().len(), shared.net_status.as_str()), (3, NOTHING_TO_SEND), "nothing is left to send");
+    assert_eq!((server.submitted().len(), shared.net_status.as_str()), (3, "records: nothing to send"), "nothing is left to send");
 }
 
 /// A server that names its build: a refusal it gave is not sent again on its own until the server
@@ -900,7 +924,7 @@ fn a_typed_player_id_is_never_the_account_a_sync_sends_under() {
     assert_eq!(shared.record_sync_target(), None);
     assert!(!shared.start_record_sync(SyncScope::All));
     shared.sync_records_now();
-    assert_eq!(shared.net_status, ACCOUNT_NOT_CONFIRMED);
+    assert_eq!(shared.net_status, "account not confirmed yet");
     assert!(shared.record_sync.is_none() && server.submitted().is_empty());
 
     shared.session = AccountSession::restored(Some(ACCOUNT_TOKEN.into()), Some(ACCOUNT_ID.into()));

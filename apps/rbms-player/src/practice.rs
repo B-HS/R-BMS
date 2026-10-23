@@ -35,12 +35,15 @@ use rbms_chart::shuffle::NoteOption;
 use rbms_config::{NO_UNIT, NumberSpec};
 use rbms_judge::gauge::{GaugeAutoShift, GaugeIndex};
 use rbms_judge::gauge_tables::{GaugeSetId, element_of};
+use rbms_model::translations::Catalog;
 use rbms_model::{Mode, Model};
+use rbms_render::text::language;
 use serde::{Deserialize, Serialize};
 
 use crate::format::gauge_name;
 use crate::notify::{Level, notify};
 use crate::number_row::NumberValue;
+use crate::text::menus::practice::PracticeText;
 use crate::write_atomic;
 
 /// Name of the file the per-chart practice properties are kept in, next to `scores.ron`.
@@ -450,17 +453,18 @@ impl PracticeElement {
 
     /// Label drawn on the left of the row.
     pub(crate) fn label(self) -> &'static str {
-        match self {
-            PracticeElement::StartTime => "START TIME",
-            PracticeElement::EndTime => "END TIME",
-            PracticeElement::GaugeType => "GAUGE TYPE",
-            PracticeElement::GaugeCategory => "GAUGE CATEGORY",
-            PracticeElement::GaugeValue => "GAUGE VALUE",
-            PracticeElement::JudgeRank => "JUDGERANK",
-            PracticeElement::Total => "TOTAL",
-            PracticeElement::Freq => "FREQUENCY",
-            PracticeElement::Random => "OPTION-1P",
-        }
+        let words = match self {
+            PracticeElement::StartTime => PracticeText::StartTime,
+            PracticeElement::EndTime => PracticeText::EndTime,
+            PracticeElement::GaugeType => PracticeText::GaugeType,
+            PracticeElement::GaugeCategory => PracticeText::GaugeCategory,
+            PracticeElement::GaugeValue => PracticeText::GaugeValue,
+            PracticeElement::JudgeRank => PracticeText::JudgeRank,
+            PracticeElement::Total => PracticeText::Total,
+            PracticeElement::Freq => PracticeText::Frequency,
+            PracticeElement::Random => PracticeText::Option1p,
+        };
+        words.get(language())
     }
 }
 

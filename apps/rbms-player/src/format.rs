@@ -4,8 +4,12 @@
 
 use rbms_judge::{AssistGrade, ClearType, GaugeKind, clear_type_from_id};
 use rbms_model::Mode;
+use rbms_model::translations::Catalog;
 use rbms_render::Color;
+use rbms_render::text::language;
 use rbms_store::RecordLamp;
+
+use crate::text::menus::record_note::RecordNoteText;
 
 /// Short marker appended to a record's timestamp when it was judged under a rule version this
 /// build no longer produces.
@@ -15,7 +19,7 @@ pub(crate) fn rule_version_mark(rule_version: u32) -> &'static str {
 
 /// Spelled-out counterpart of [`rule_version_mark`] for the record-detail modal.
 pub(crate) fn rule_version_note(rule_version: u32) -> &'static str {
-    if rbms_store::is_stale_rule_version(rule_version) { "   OLD RULE" } else { "" }
+    if rbms_store::is_stale_rule_version(rule_version) { RecordNoteText::OldRule.get(language()) } else { "" }
 }
 
 pub(crate) fn gauge_name(g: GaugeKind) -> &'static str {
@@ -164,7 +168,22 @@ pub(crate) fn stored_lamp_label_color(lamp: RecordLamp) -> (&'static str, Color)
 
 #[cfg(test)]
 mod tests {
+    use rbms_model::Language;
+
     use super::*;
+
+    #[test]
+    fn the_old_rule_note_is_told_in_the_language_of_the_screen() {
+        let told = |language| {
+            rbms_render::text::set_language(language);
+            let told = (rule_version_note(0), rule_version_note(u32::MAX));
+            rbms_render::text::set_language(Language::English);
+            told
+        };
+        assert_eq!(told(Language::English), ("   OLD RULE", ""));
+        assert_eq!(told(Language::Korean), ("   이전 규칙", ""));
+        assert_eq!(told(Language::Japanese), ("   旧ルール", ""));
+    }
 
     const ALL_CLEARS: [ClearType; 11] = [
         ClearType::NoPlay,

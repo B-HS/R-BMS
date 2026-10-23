@@ -19,7 +19,7 @@ use rbms_config::{
 use rbms_render::{Rect, fit_text, text_width};
 use rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT;
 
-use super::rows::{Fold, GROUP_PREVIEW, GROUP_SKIN, declared, holds_a_number};
+use super::rows::{Fold, declared, group_preview, group_skin, holds_a_number};
 use super::*;
 use crate::keyconfig::Shortcut;
 use crate::skin_preview::{PreviewAbsence, PreviewStatus, PreviewTarget};
@@ -338,7 +338,7 @@ fn middle(rect: Rect) -> (f32, f32) {
 /// its row and its closed fold of channels -- under the row of SCRATCH AUTO.
 fn rows_without_skin_options() -> Vec<Row> {
     let groups: [(&str, &[SettingId]); 4] = [("SPEED", &SPEED_ROWS), ("LANE", &LANE_ROWS), ("JUDGE", &JUDGE_ROWS), ("CHART", &CHART_ROWS)];
-    let mut rows = vec![Row::Group(GROUP_PREVIEW), Row::PreviewBpm];
+    let mut rows = vec![Row::Group(group_preview()), Row::PreviewBpm];
     for (name, ids) in groups {
         rows.push(Row::Group(name));
         for id in ids {
@@ -1093,7 +1093,7 @@ fn the_wheel_scrolls_the_list_under_the_pointer_and_nothing_anywhere_else() {
 #[test]
 fn what_the_menu_writes_fits_where_it_is_written() {
     let mut menu = Menu::over(app_with_shipped_pack("fits"));
-    let hint = text_width(HINT, HINT_SCALE);
+    let hint = text_width(PlayMenuText::Hint.get(language()), HINT_SCALE);
     assert!(hint <= CW as f32 - MARGIN * 2.0, "the line of keys is {hint} wide");
 
     let fits = |menu: &Menu, case: &str| {

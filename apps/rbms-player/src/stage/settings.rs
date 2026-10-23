@@ -37,15 +37,20 @@ use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::keyconfig::Shortcut;
-use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, hot_rect};
+use crate::number_row::{EditKey, NumberInput, NumberValue, hot_rect, number_edit_hint};
 use crate::settings_ui::{SettingRow, audio_status_text, is_resettable, shipped_value, step_audio_device};
 use crate::settings_view::{
-    CONFIRM_HINT, ConfirmScene, ControlPart, InfoScene, ListItem, RIVALS_HINT, RailGroup, RivalsScene, RowControl, SettingsLine, SettingsScene,
-    confirm_yes_rect, control_part_at, key_config_link, list_rect, reset_group_rect, visible_rows,
+    ConfirmScene, ControlPart, InfoScene, ListItem, RailGroup, RivalsScene, RowControl, SettingsLine, SettingsScene, confirm_hint, confirm_yes_rect,
+    control_part_at, key_config_link, list_rect, reset_group_rect, rivals_hint, visible_rows,
 };
 use crate::stage::preview_menu::{NEXT_TAB, PREVIOUS_TAB, contains, revealed_top_of, shift_after, stepped_tab, wheel_scrolled_over};
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, PlayMenuState, SkinMenuState, Stage, StageHandler, Transition, is_left_press};
+use crate::text::settings::screen::ScreenText;
+use crate::text::settings::tab_label;
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, cycle_values, step_skin};
+use rbms_model::Language;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 
 use crate::*;
 
@@ -60,10 +65,6 @@ const ROW_STEP_BACK: i32 = -1;
 
 /// How many values a switch has, which is the most steps that bring one back to what it ships as.
 const SWITCH_VALUES: usize = 2;
-
-/// What the question about a group adds in a group that holds lines of text, which it does not
-/// put back.
-const KEPT_TEXT_NOTE: &str = " TEXT IS KEPT.";
 
 /// The settings screen's own state: the open group and row, the rows it is showing, the in-place
 /// editor, and the inline rival list.
@@ -104,6 +105,9 @@ pub(crate) struct SettingsState {
     rows: Vec<SettingRow>,
     lines: Vec<SettingsLine>,
     dirty: bool,
+    /// The language the rows, their headings and the rail were last written in; the screen writes
+    /// them again as soon as the language the screens are drawn in is another.
+    composed_in: Language,
     /// How the open group is listed and what the rail says of every group. Kept behind a pointer,
     /// because this state is moved with every screen change.
     list: Box<Listing>,
@@ -185,6 +189,7 @@ impl SettingsState {
             rows: Vec::new(),
             lines: Vec::new(),
             dirty: true,
+            composed_in: language(),
             list: Box::default(),
             numbers: Box::new(NumberRows { input: NumberInput::new(), carried: None, shift_held: false }),
         }
@@ -220,7 +225,7 @@ impl SettingsState {
         self.lines = self.rows.iter().map(|&row| shared.settings_scene_line(row)).collect();
         self.list.groups = SettingTab::SHOWN
             .iter()
-            .map(|group| RailGroup { name: group.label(), rows: shared.settings_rows(*group).len(), changed: shared.changed_rows(*group) })
+            .map(|group| RailGroup { name: tab_label(*group), rows: shared.settings_rows(*group).len(), changed: shared.changed_rows(*group) })
             .collect();
         if let Some((id, steps)) = self.numbers.carried
             && let Some(line) = self.rows.iter().position(|row| *row == SettingRow::Fixed(id)).and_then(|at| self.lines.get_mut(at))
@@ -228,9 +233,11 @@ impl SettingsState {
         {
             number.steps = steps;
             line.value = number.spec.text(steps);
+            line.shown = line.value.clone();
         }
         self.sel = self.sel.min(self.rows.len().saturating_sub(1));
         self.list.top = self.list.top.min(self.list.entries.len().saturating_sub(visible_rows()));
+        self.composed_in = language();
         self.dirty = false;
     }
 
@@ -282,9 +289,10 @@ impl SettingsState {
         self.dirty = true;
     }
 
-    /// Re-read the rows if anything has moved since they were last built.
+    /// Re-read the rows if anything has moved since they were last built, or if the language the
+    /// screens are drawn in is not the one they were written in.
     fn ensure_rows(&mut self, shared: &AppShared) {
-        if self.dirty {
+        if self.dirty || self.composed_in != language() {
             self.refresh(shared);
         }
     }
@@ -893,10 +901,14 @@ impl SettingsState {
         let sel = self.sel.min(self.lines.len().saturating_sub(1));
         let confirm = self.list.confirming.then(|| {
             let changed = self.changed_here();
-            let go = if changed == 1 { "ROW GOES" } else { "ROWS GO" };
             let holds_text = self.lines.iter().any(|line| matches!(line.control, RowControl::Field { .. }));
-            let kept = if holds_text { KEPT_TEXT_NOTE } else { "" };
-            ConfirmScene { title: format!("RESET {}?", tab.label()), body: format!("{changed} CHANGED {go} BACK TO DEFAULT.{kept}") }
+            let body = match (changed == 1, holds_text) {
+                (true, false) => ScreenText::ConfirmOne,
+                (false, false) => ScreenText::ConfirmMany,
+                (true, true) => ScreenText::ConfirmOneKeepsText,
+                (false, true) => ScreenText::ConfirmManyKeepsText,
+            };
+            ConfirmScene { title: ScreenText::ConfirmTitle.fill(language(), &[&tab_label(tab)]), body: body.fill(language(), &[&changed]) }
         });
         SettingsScene {
             groups: self.list.groups.clone(),
@@ -926,18 +938,18 @@ impl SettingsState {
     fn busy_info(&self, info: InfoScene) -> InfoScene {
         let focused = self.focused_fixed();
         if self.list.confirming {
-            return info::while_busy(info, &info::CONFIRM_KEYS, None);
+            return info::while_busy(info, &info::confirm_keys(), None);
         }
         if let Some(id) = self.numbers.input.editing() {
             let typed = self.numbers.input.edit_of(id).filter(|_| Some(id) == focused).map(|edit| edit.text().to_string());
-            return info::while_busy(info, &info::NUMBER_EDIT_KEYS, typed);
+            return info::while_busy(info, &info::number_edit_keys(), typed);
         }
         if self.rivals_open || self.profiles_open {
-            return info::while_busy(info, &info::LIST_KEYS, None);
+            return info::while_busy(info, &info::list_keys(), None);
         }
         if let Some(edit) = &self.text_input {
             let typed = self.text_edit_row.filter(|id| Some(*id) == focused).map(|_| editor_display(edit, self.text_secret));
-            return info::while_busy(info, &info::TEXT_EDIT_KEYS, typed);
+            return info::while_busy(info, &info::text_edit_keys(), typed);
         }
         info
     }
@@ -959,16 +971,16 @@ impl SettingsState {
     /// the keys of the screen and the three that open the other screens.
     fn hint(&self, shared: &AppShared) -> String {
         if self.list.confirming {
-            return CONFIRM_HINT.to_string();
+            return confirm_hint().to_string();
         }
         if self.numbers.input.editing().is_some() {
-            return EDIT_HINT.to_string();
+            return number_edit_hint().to_string();
         }
         if self.rivals_open || self.profiles_open {
-            return RIVALS_HINT.to_string();
+            return rivals_hint().to_string();
         }
         if self.text_input.is_some() {
-            return info::TEXT_EDIT_HINT.to_string();
+            return info::text_edit_hint().to_string();
         }
         let row = self.focused_fixed().zip(self.lines.get(self.sel)).map_or_else(Vec::new, |(id, line)| info::row_keys(id, line.control));
         info::hint(&row, &self.link_keys(shared))
@@ -1224,6 +1236,8 @@ impl StageHandler for SettingsState {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod language_tests;
 #[cfg(test)]
 mod layout_tests;
 #[cfg(test)]

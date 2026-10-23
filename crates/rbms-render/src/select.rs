@@ -181,9 +181,6 @@ const DJ_LEVEL_W: f32 = 48.0;
 const ROW_TITLE_X: f32 = 116.0;
 const ROW_TITLE_RIGHT_ROOM: f32 = 24.0;
 
-/// What the detail panel says under a chart the library does not hold.
-const MISSING_CHART_NOTICE: &str = "NOT IN THE LIBRARY - ENTER FOR THE DOWNLOAD";
-
 /// The detail panel over a chart the library does not hold: the strip across its head, how far its
 /// text sits in from the panel's edges, and the size and line height of its title, its artist and
 /// its notice.
@@ -313,9 +310,10 @@ pub fn render_select_modal<R: Renderer>(r: &mut R, modal: &SelectModal) -> Vec<(
 /// ordering with the cursor's place in the list.
 fn render_top_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) {
     let th = ctx.theme;
+    let language = ctx.language;
     let list = th.select_layout.list_rect;
     r.fill_rect(Rect::new(0.0, 0.0, 1280.0, 52.0), select_panel_color(th.topbar, th.select_panel_alpha));
-    ctx.draw_text(r, list.x, 12.0, 2.6, th.text, "MUSIC SELECT");
+    ctx.draw_text(r, list.x, 12.0, 2.6, th.text, SelectText::Title.get(language));
     let m = v.rows.len();
     if let Some(q) = &v.search {
         let bx = list.x + list.w - 326.0;
@@ -324,15 +322,15 @@ fn render_top_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectVie
         outline(r, Rect::new(bx, 10.0, bw, 32.0), 1.5, th.focus);
         let fitted = ctx.fit_text(&format!("\u{1F50D} {q}"), 1.4, bw - 20.0);
         ctx.draw_text(r, bx + 10.0, 18.0, 1.4, th.text, &fitted);
-        ctx.draw_text(r, bx + bw + 12.0, 20.0, 1.2, th.text_dim, &format!("{m} HITS"));
+        ctx.draw_text(r, bx + bw + 12.0, 20.0, 1.2, th.text_dim, &SelectText::SearchHits.fill(language, &[&m]));
     } else if !v.header.is_empty() {
         let header_x = list.x + 268.0;
         let fitted = ctx.fit_text(&v.header, 1.3, list.x + list.w - header_x - 80.0);
         ctx.draw_text(r, header_x, 22.0, 1.3, th.text_dim, &fitted);
     }
     let sort_line = match &v.filter {
-        Some(filter) => format!("SORT: {}   FILTER: {filter}", v.sort),
-        None => format!("SORT: {}", v.sort),
+        Some(filter) => SelectText::SortAndFilter.fill(language, &[&v.sort, filter]),
+        None => SelectText::SortLine.fill(language, &[&v.sort]),
     };
     ctx.draw_text_right(r, list.x + list.w, 6.0, 1.0, th.accent, &sort_line);
     ctx.draw_text_right(r, list.x + list.w, 24.0, 1.4, th.text_dim, &format!("{}/{}", (v.sel + 1).min(m.max(1)), m));
@@ -341,17 +339,19 @@ fn render_top_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectVie
 /// The row of buttons under the list, each the clickable equivalent of one of the browser's keys.
 fn render_nav_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, hot: &mut Vec<(Rect, SelectHot)>) {
     let th = ctx.theme;
+    let language = ctx.language;
     let list = th.select_layout.list_rect;
     let by = list.y + list.h + 8.0;
-    let sort_btn = format!("SORT: {}", v.sort);
-    let search_btn = if v.search.is_some() { "\u{2715} SEARCH" } else { "SEARCH" };
+    let sort_btn = SelectText::SortLine.fill(language, &[&v.sort]);
+    let search = SelectText::Search.get(language);
+    let search_open = v.search.is_some().then(|| format!("\u{2715} {search}"));
     let buttons: [(&str, &str, SelectHot); 6] = [
-        (search_btn, "/", SelectHot::Search),
+        (search_open.as_deref().unwrap_or(search), "/", SelectHot::Search),
         (&sort_btn, "F3", SelectHot::Sort),
-        ("FOLDERS", "O", SelectHot::Folders),
-        ("TABLES", "T", SelectHot::Tables),
-        ("RECORDS", "R", SelectHot::Records),
-        ("SETTINGS", "TAB", SelectHot::Settings),
+        (SelectText::Folders.get(language), "O", SelectHot::Folders),
+        (SelectText::Tables.get(language), "T", SelectHot::Tables),
+        (SelectText::Records.get(language), "R", SelectHot::Records),
+        (SelectText::Settings.get(language), "TAB", SelectHot::Settings),
     ];
     let mut bx = list.x.min(th.select_layout.detail_rect.x);
     for (label, key, h) in buttons {
@@ -365,6 +365,7 @@ fn render_nav_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectVie
 
 fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, hot: &mut Vec<(Rect, SelectHot)>) {
     let th = ctx.theme;
+    let language = ctx.language;
     let layout = th.select_layout;
     let list = layout.list_rect;
     let m = v.rows.len();
@@ -375,7 +376,7 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
                 ctx.draw_text_centered(r, cx, list.y + 80.0, 2.2, th.text, title);
                 ctx.draw_text_centered(r, cx, list.y + 124.0, 1.3, th.text_dim, body);
             }
-            None => ctx.draw_text(r, list.x + 12.0, list.y + 40.0, 1.5, th.text_dim, "NO CHARTS"),
+            None => ctx.draw_text(r, list.x + 12.0, list.y + 40.0, 1.5, th.text_dim, SelectText::NoCharts.get(language)),
         }
         return;
     }
@@ -413,7 +414,7 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
             let fitted = ctx.fit_text(&format!("\u{25B8} {}", row.title), 1.6, list.w - 120.0);
             ctx.draw_text(r, list.x + 16.0, cy - 9.0, 1.6, th.text, &fitted);
             if let Some(n) = row.folder_count {
-                ctx.draw_text_right(r, list.x + list.w - 20.0, cy - 8.0, 1.3, th.text_dim, &format!("{n} CHARTS"));
+                ctx.draw_text_right(r, list.x + list.w - 20.0, cy - 8.0, 1.3, th.text_dim, &SelectText::ChartCount.fill(language, &[&n]));
             }
         } else if row.missing {
             let title_scale = if focused { 1.7 } else { 1.5 };
@@ -454,6 +455,7 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
 
 fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, d: &DetailView, hot: &mut Vec<(Rect, SelectHot)>) {
     let th = ctx.theme;
+    let language = ctx.language;
     let detail = th.select_layout.detail_rect;
     outline(r, detail, 1.0, th.divider);
     r.fill_rect(Rect::new(detail.x, detail.y, detail.w, 6.0), d.accent);
@@ -463,11 +465,11 @@ fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Selec
         CoverState::Present => {}
         CoverState::Loading => {
             r.fill_rect(cr, th.panel);
-            ctx.draw_text_centered(r, cr.x + cr.w * 0.5, cr.y + cr.h * 0.5 - 7.0, 1.2, th.text_dim, "LOADING");
+            ctx.draw_text_centered(r, cr.x + cr.w * 0.5, cr.y + cr.h * 0.5 - 7.0, 1.2, th.text_dim, SelectText::Loading.get(language));
         }
         CoverState::None => {
             r.fill_rect(cr, th.panel);
-            ctx.draw_text_centered(r, cr.x + cr.w * 0.5, cr.y + cr.h * 0.5 - 7.0, 1.2, th.text_muted, "NO IMAGE");
+            ctx.draw_text_centered(r, cr.x + cr.w * 0.5, cr.y + cr.h * 0.5 - 7.0, 1.2, th.text_muted, SelectText::NoImage.get(language));
         }
     }
     outline(r, cr, 2.0, th.divider);
@@ -526,7 +528,7 @@ fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Selec
     }
 
     r.fill_rect(Rect::new(inner_x, detail.y + 288.0, inner_w, 2.0), th.divider);
-    ctx.draw_text(r, inner_x, detail.y + 302.0, 1.3, th.text_dim, "DENSITY");
+    ctx.draw_text(r, inner_x, detail.y + 302.0, 1.3, th.text_dim, SelectText::Density.get(language));
     let box_y = detail.y + 320.0;
     let box_h = 74.0;
     let box_rect = Rect::new(inner_x, box_y, inner_w, box_h);
@@ -539,7 +541,7 @@ fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Selec
                 detail.y + 304.0,
                 1.0,
                 th.text_dim,
-                &format!("PEAK {}  AVG {}  END {}  /s", dens.peak.round() as i32, dens.avg.round() as i32, dens.end.round() as i32),
+                &SelectText::DensityLine.fill(language, &[&(dens.peak.round() as i32), &(dens.avg.round() as i32), &(dens.end.round() as i32)]),
             );
             let n = dens.bins.len();
             let step = inner_w / n as f32;
@@ -568,13 +570,21 @@ fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Selec
 
 fn render_records<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, rec: &RecordsView, hot: &mut Vec<(Rect, SelectHot)>) {
     let th = ctx.theme;
+    let language = ctx.language;
     let detail = th.select_layout.detail_rect;
     let inner_x = detail.x + 16.0;
     let inner_w = detail.w - 32.0;
-    ctx.draw_text(r, inner_x, detail.y + 408.0, 1.4, th.text, "RECORDS");
-    ctx.draw_text_right(r, detail.x + detail.w - 16.0, detail.y + 412.0, 1.2, th.text_dim, &format!("{} CLEAR / {} PLAYS", rec.clears, rec.plays));
+    ctx.draw_text(r, inner_x, detail.y + 408.0, 1.4, th.text, SelectText::Records.get(language));
+    ctx.draw_text_right(
+        r,
+        detail.x + detail.w - 16.0,
+        detail.y + 412.0,
+        1.2,
+        th.text_dim,
+        &SelectText::ClearAndPlays.fill(language, &[&rec.clears, &rec.plays]),
+    );
     let Some(best) = &rec.best else {
-        ctx.draw_text(r, inner_x, detail.y + 448.0, 1.3, th.text_dim, "NO PLAY YET");
+        ctx.draw_text(r, inner_x, detail.y + 448.0, 1.3, th.text_dim, SelectText::NoPlayYet.get(language));
         return;
     };
     r.fill_rect(Rect::new(inner_x, detail.y + 432.0, inner_w, 28.0), best.lamp);
@@ -583,7 +593,7 @@ fn render_records<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectVie
     let mut list_top = detail.y + 472.0;
     if let Some((ex, max_ex)) = rec.rank_bar {
         let (rank, rcol) = RANK_BANDS[dj_rank(ex, max_ex)];
-        ctx.draw_text(r, inner_x, detail.y + 470.0, 1.3, rcol, &format!("RANK {rank}"));
+        ctx.draw_text(r, inner_x, detail.y + 470.0, 1.3, rcol, &SelectText::RankLine.fill(language, &[&rank]));
         draw_rank_bar(r, inner_x + 92.0, detail.y + 474.0, inner_w - 92.0, 12.0, ex, max_ex);
         list_top = detail.y + 498.0;
     }
@@ -614,15 +624,16 @@ fn render_records<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectVie
 
 fn render_folder_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, label: &str, count: usize) {
     let th = ctx.theme;
+    let language = ctx.language;
     let detail = th.select_layout.detail_rect;
     outline(r, detail, 1.0, th.divider);
     r.fill_rect(Rect::new(detail.x, detail.y, detail.w, 6.0), th.text_muted);
     r.fill_rect(Rect::new(detail.x + 16.0, detail.y + 36.0, detail.w - 32.0, 120.0), select_panel_color(th.panel_hi, th.select_panel_alpha));
-    ctx.draw_text(r, detail.x + 40.0, detail.y + 60.0, 2.4, th.text, "FOLDER");
+    ctx.draw_text(r, detail.x + 40.0, detail.y + 60.0, 2.4, th.text, SelectText::FolderTitle.get(language));
     let fitted = ctx.fit_text(label, 1.6, detail.w - 80.0);
     ctx.draw_text(r, detail.x + 40.0, detail.y + 108.0, 1.6, th.text, &fitted);
     if count > 0 {
-        ctx.draw_text(r, detail.x + 40.0, detail.y + 180.0, 1.4, th.text_dim, &format!("{count} CHARTS"));
+        ctx.draw_text(r, detail.x + 40.0, detail.y + 180.0, 1.4, th.text_dim, &SelectText::ChartCount.fill(language, &[&count]));
     }
 }
 
@@ -646,7 +657,7 @@ fn render_missing_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, title:
         ctx.draw_text(r, x, y, MISSING_DETAIL_ARTIST_SCALE, th.text_dim, &fitted);
         y += MISSING_DETAIL_ARTIST_LINE;
     }
-    let fitted = ctx.fit_text(MISSING_CHART_NOTICE, MISSING_DETAIL_NOTICE_SCALE, width);
+    let fitted = ctx.fit_text(SelectText::MissingChartNotice.get(ctx.language), MISSING_DETAIL_NOTICE_SCALE, width);
     ctx.draw_text(r, x, y + MISSING_DETAIL_ARTIST_LINE, MISSING_DETAIL_NOTICE_SCALE, th.accent, &fitted);
 }
 
@@ -699,7 +710,7 @@ fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectM
     ctx.draw_text(r, rx, my + 168.0, 1.7, Color::GREEN, &format!("COMBO  {} / {}", modal.max_combo, modal.total_notes));
     ctx.draw_text(r, rx, my + 198.0, 1.7, Color::ORANGE, &format!("BP  {}", modal.bp));
     ctx.draw_text(r, rx, my + 228.0, 1.7, th.text_dim, &format!("EMPTY POOR  {}", modal.empty_poor));
-    ctx.draw_text(r, rx, my + 258.0, 1.7, modal.clear_color, &format!("GAUGE  {}%", modal.gauge_value));
+    ctx.draw_text(r, rx, my + 258.0, 1.7, modal.clear_color, &SelectText::ModalGauge.fill(ctx.language, &[&modal.gauge_value]));
     ctx.draw_text(r, rx, my + 288.0, 1.3, th.text_dim, &format!("{} / {}", modal.index + 1, modal.total));
     if let Some((line, color)) = &modal.ir_line {
         let fitted = ctx.fit_text(line, MODAL_IR_LINE_SCALE, mw - MODAL_IR_LINE_INSET * 2.0);
@@ -710,7 +721,7 @@ fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectM
     if modal.has_replay {
         let rect = Rect::new(mx + 20.0, by, 220.0, 36.0);
         r.fill_rect(rect, th.button);
-        ctx.draw_text(r, mx + 36.0, by + 9.0, 1.6, th.text, "PLAY REPLAY");
+        ctx.draw_text(r, mx + 36.0, by + 9.0, 1.6, th.text, SelectText::PlayReplay.get(ctx.language));
         hot.push((rect, SelectHot::ModalReplay));
         let layout = Rect::new(mx + MODAL_REPLAY_BUTTON_RIGHT + MODAL_LAYOUT_BUTTON_GAP, by, MODAL_LAYOUT_BUTTON_W, MODAL_BUTTON_H);
         r.fill_rect(layout, th.button);
@@ -718,23 +729,26 @@ fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectM
         ctx.draw_text(r, layout.x + MODAL_LAYOUT_LABEL_INSET, by + MODAL_BUTTON_LABEL_DROP, MODAL_BUTTON_LABEL_SCALE, th.text, &label);
         hot.push((layout, SelectHot::ModalLayout));
     } else {
-        ctx.draw_text(r, mx + 24.0, by + 9.0, 1.3, th.text_dim, "NO REPLAY SAVED");
+        ctx.draw_text(r, mx + 24.0, by + 9.0, 1.3, th.text_dim, SelectText::NoReplaySaved.get(ctx.language));
     }
-    ctx.draw_text(r, mx + 20.0, my + mh - 92.0, 1.1, th.text_dim, "UP DOWN PREV/NEXT   ENTER REPLAY   ESC CLOSE");
+    ctx.draw_text(r, mx + 20.0, my + mh - 92.0, 1.1, th.text_dim, SelectText::ModalKeys.get(ctx.language));
     if modal.has_replay {
         let keys = SelectText::ModalLayoutKey.get(ctx.language);
         ctx.draw_text_right(r, mx + mw - MODAL_KEYS_LINE_INSET, my + mh - MODAL_KEYS_LINE_FROM_BOTTOM, MODAL_KEYS_LINE_SCALE, th.text_dim, keys);
     }
     let close = Rect::new(mx + mw - 120.0, by, 100.0, 36.0);
     r.fill_rect(close, th.button_active);
-    ctx.draw_text(r, mx + mw - 96.0, by + 9.0, 1.6, th.text, "CLOSE");
+    ctx.draw_text(r, mx + mw - 96.0, by + 9.0, 1.6, th.text, SelectText::Close.get(ctx.language));
     hot.push((close, SelectHot::ModalClose));
 }
 
 #[cfg(test)]
 mod tests {
+    use rbms_model::Language;
+
     use super::*;
-    use crate::{CpuCanvas, ThemeConfig, set_theme};
+    use crate::text::testing::{differs_within, drawn_in};
+    use crate::{CpuCanvas, Theme, ThemeConfig, set_theme};
 
     fn view() -> SelectView {
         SelectView {
@@ -851,5 +865,161 @@ mod tests {
         assert!(hot.iter().all(|(rect, _)| rect.x + rect.w <= 1280.0));
         assert_eq!(cover_rect(), Rect::new(48.0, 78.0, 160.0, 160.0));
         set_theme(crate::Theme::default());
+    }
+
+    fn translated() -> impl Iterator<Item = Language> {
+        Language::ALL.into_iter().filter(|language| *language != Language::English)
+    }
+
+    fn in_language(language: Language, view: &SelectView) -> CpuCanvas {
+        drawn_in(language, SCREEN_W, SCREEN_H, |ctx, canvas| {
+            render_select_ctx(ctx, canvas, view);
+        })
+    }
+
+    fn modal_in(language: Language, modal: &SelectModal) -> (CpuCanvas, Vec<(Rect, SelectHot)>) {
+        let mut hot = Vec::new();
+        let canvas = drawn_in(language, SCREEN_W, SCREEN_H, |ctx, canvas| render_modal(ctx, canvas, modal, &mut hot));
+        (canvas, hot)
+    }
+
+    fn record_row() -> RecordRowView {
+        RecordRowView { when: "2026-05-31 01:02".to_string(), lamp: Color::WHITE, lamp_label: "HARD", ex: 1602, max_ex: 1848, bp: 12, trend: None }
+    }
+
+    fn song_detail(best: bool) -> SelectDetail {
+        SelectDetail::Song(Box::new(DetailView {
+            accent: Color::BLUE,
+            title: "Chart".to_string(),
+            subtitle: String::new(),
+            artist: "Artist".to_string(),
+            genre_maker: String::new(),
+            mode_short: "7K",
+            mode_color: Color::BLUE,
+            level: "12".to_string(),
+            difficulty_color: Color::RED,
+            difficulty_name: "ANOTHER",
+            cover: CoverState::Loading,
+            stats: Vec::new(),
+            density: Some(DensityView { bins: vec![1, 3, 2, 5], peak: 5.0, avg: 3.0, end: 2.0 }),
+            records: RecordsView {
+                plays: 3,
+                clears: 2,
+                best: best.then(record_row),
+                rank_bar: best.then_some((1602, 1848)),
+                recent: if best { vec![record_row()] } else { Vec::new() },
+            },
+        }))
+    }
+
+    /// How tall the strip across the head of the screen is, and the row of buttons under the list.
+    const HEAD_H: f32 = 52.0;
+    const NAV_ROW_GAP: f32 = 8.0;
+    const NAV_ROW_H: f32 = 30.0;
+
+    #[test]
+    fn the_title_the_buttons_and_the_list_are_written_in_the_language_asked_for() {
+        let layout = Theme::default().select_layout;
+        let head = Rect::new(0.0, 0.0, SCREEN_W as f32, HEAD_H);
+        let buttons = Rect::new(0.0, layout.list_rect.y + layout.list_rect.h + NAV_ROW_GAP, SCREEN_W as f32, NAV_ROW_H);
+        let english = in_language(Language::English, &view());
+        for language in translated() {
+            let drawn = in_language(language, &view());
+            assert!(differs_within(&english, &drawn, head), "{language:?}: the title is still English");
+            assert!(differs_within(&english, &drawn, buttons), "{language:?}: the buttons are still English");
+            assert!(differs_within(&english, &drawn, layout.list_rect), "{language:?}: a folder row's chart count is still English");
+        }
+    }
+
+    #[test]
+    fn the_sort_line_the_search_hits_and_an_empty_list_are_written_in_the_language_asked_for() {
+        let layout = Theme::default().select_layout;
+        let list = layout.list_rect;
+        let sort_line = Rect::new(list.x, 0.0, list.w, 20.0);
+        let hits = Rect::new(list.x + list.w - 80.0, 20.0, 80.0, 14.0);
+        let empty = SelectView { rows: Vec::new(), ..view() };
+        let searching = SelectView { search: Some("abc".to_string()), filter: Some("LV 10".to_string()), ..view() };
+        let (english_empty, english_searching) = (in_language(Language::English, &empty), in_language(Language::English, &searching));
+        for language in translated() {
+            assert!(differs_within(&english_empty, &in_language(language, &empty), list), "{language:?}: the empty list is still English");
+            let drawn = in_language(language, &searching);
+            assert!(differs_within(&english_searching, &drawn, sort_line), "{language:?}: the sort and filter line is still English");
+            assert!(differs_within(&english_searching, &drawn, hits), "{language:?}: the number of hits is still English");
+        }
+    }
+
+    /// Where the lines of a chart's detail panel stand, from the panel's top: the density heading and
+    /// its figures, the records heading and its counts, the note on a chart nobody has played and the
+    /// rank of the best record; and how far in from the panel's edge, how wide and how tall the left
+    /// and right ends of a line are.
+    const DENSITY_HEADING_Y: f32 = 302.0;
+    const DENSITY_FIGURES_Y: f32 = 304.0;
+    const RECORDS_HEADING_Y: f32 = 408.0;
+    const RECORDS_COUNTS_Y: f32 = 412.0;
+    const NO_PLAY_Y: f32 = 448.0;
+    const BEST_RANK_Y: f32 = 470.0;
+    const DETAIL_INSET: f32 = 16.0;
+    const DETAIL_HEADING_W: f32 = 90.0;
+    const DETAIL_FIGURES_W: f32 = 200.0;
+    const DETAIL_LINE_H: f32 = 14.0;
+
+    #[test]
+    fn the_detail_panel_of_a_chart_is_written_in_the_language_asked_for() {
+        let layout = Theme::default().select_layout;
+        let detail = layout.detail_rect;
+        let heading = |from: f32| Rect::new(detail.x + DETAIL_INSET, detail.y + from, DETAIL_HEADING_W, DETAIL_LINE_H);
+        let figures = |from: f32| Rect::new(detail.x + detail.w - DETAIL_INSET - DETAIL_FIGURES_W, detail.y + from, DETAIL_FIGURES_W, DETAIL_LINE_H);
+        let (played, unplayed) = (SelectView { detail: song_detail(true), ..view() }, SelectView { detail: song_detail(false), ..view() });
+        let (english_played, english_unplayed) = (in_language(Language::English, &played), in_language(Language::English, &unplayed));
+        for language in translated() {
+            let drawn = in_language(language, &played);
+            assert!(differs_within(&english_played, &drawn, layout.cover_rect), "{language:?}: the cover's note is still English");
+            assert!(differs_within(&english_played, &drawn, heading(DENSITY_HEADING_Y)), "{language:?}: the density heading is still English");
+            assert!(differs_within(&english_played, &drawn, figures(DENSITY_FIGURES_Y)), "{language:?}: the density figures are still English");
+            assert!(differs_within(&english_played, &drawn, heading(RECORDS_HEADING_Y)), "{language:?}: the records heading is still English");
+            assert!(differs_within(&english_played, &drawn, figures(RECORDS_COUNTS_Y)), "{language:?}: the clear and play counts are still English");
+            assert!(differs_within(&english_played, &drawn, heading(BEST_RANK_Y)), "{language:?}: the rank of the best record is still English");
+            let unplayed_drawn = in_language(language, &unplayed);
+            assert!(differs_within(&english_unplayed, &unplayed_drawn, heading(NO_PLAY_Y)), "{language:?}: the note on an unplayed chart is still English");
+        }
+    }
+
+    #[test]
+    fn the_detail_panel_of_a_folder_or_a_missing_chart_is_written_in_the_language_asked_for() {
+        let detail = Theme::default().select_layout.detail_rect;
+        let folder = SelectView { detail: SelectDetail::Folder { label: "Folder".to_string(), count: 12 }, ..view() };
+        let missing = SelectView { detail: SelectDetail::Missing { title: "Absent".to_string(), artist: String::new() }, ..view() };
+        let (english_folder, english_missing) = (in_language(Language::English, &folder), in_language(Language::English, &missing));
+        for language in translated() {
+            assert!(differs_within(&english_folder, &in_language(language, &folder), detail), "{language:?}: the folder panel is still English");
+            assert!(differs_within(&english_missing, &in_language(language, &missing), detail), "{language:?}: the missing chart's notice is still English");
+        }
+    }
+
+    /// Where the modal's lines stand relative to its close button: the left end of the row of buttons
+    /// and of the line of keys, how far above it the line of keys and the gauge line are, how far
+    /// left of it the gauge line starts, and how tall a line is.
+    const MODAL_BUTTONS_LEFT_OF_CLOSE: f32 = 580.0;
+    const MODAL_KEYS_ABOVE_CLOSE: f32 = 40.0;
+    const MODAL_GAUGE_ABOVE_CLOSE: f32 = 160.0;
+    const MODAL_GAUGE_LEFT_OF_CLOSE: f32 = 220.0;
+    const MODAL_LINE_H: f32 = 22.0;
+
+    #[test]
+    fn the_record_modal_is_written_in_the_language_asked_for() {
+        for has_replay in [true, false] {
+            let (english, english_hot) = modal_in(Language::English, &modal(has_replay));
+            let close = region_of(&english_hot, SelectHot::ModalClose).expect("the close button");
+            let bottom = Rect::new(close.x - MODAL_BUTTONS_LEFT_OF_CLOSE, close.y, MODAL_BUTTONS_LEFT_OF_CLOSE, close.h);
+            let keys = Rect::new(close.x - MODAL_BUTTONS_LEFT_OF_CLOSE, close.y - MODAL_KEYS_ABOVE_CLOSE, MODAL_BUTTONS_LEFT_OF_CLOSE + close.w, MODAL_LINE_H);
+            let gauge = Rect::new(close.x - MODAL_GAUGE_LEFT_OF_CLOSE, close.y - MODAL_GAUGE_ABOVE_CLOSE, MODAL_GAUGE_LEFT_OF_CLOSE + close.w, MODAL_LINE_H);
+            for language in translated() {
+                let (drawn, _) = modal_in(language, &modal(has_replay));
+                assert!(differs_within(&english, &drawn, close), "{language:?}: the close button is still English");
+                assert!(differs_within(&english, &drawn, bottom), "{language:?}: the buttons of a record with replay {has_replay} are still English");
+                assert!(differs_within(&english, &drawn, keys), "{language:?}: the line of keys is still English");
+                assert!(differs_within(&english, &drawn, gauge), "{language:?}: the gauge line is still English");
+            }
+        }
     }
 }

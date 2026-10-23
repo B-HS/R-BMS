@@ -24,6 +24,9 @@
 //! on the web site.
 #![allow(clippy::wildcard_imports)]
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
+
 use crate::dialog::{DialogHandle, DialogState};
 use crate::select_tree::{ListPlace, show_the_list_again};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
@@ -31,6 +34,7 @@ use crate::tablesrc::{
     COPY_OLD_AFTER_DAYS, TableOrigin, TableStatus, apply_finished_fetches, copy_age, copy_age_days, forget_table, is_address, register_table, reload_tables,
     table_is_fetching, table_status, unix_now,
 };
+use crate::text::menus::tables::TablesText;
 use crate::user_folders::{FolderProblem, FolderStatus, USER_FOLDERS_LABEL};
 use crate::*;
 
@@ -74,50 +78,9 @@ const STATUS_GAP: f32 = 24.0;
 /// The room between the age of a copy and the rest of the status it stands at the end of.
 const SAVED_GAP: f32 = 18.0;
 
-/// The keys of the list, under the title.
-const LIST_KEYS: &str = "UP DOWN MOVE   ENTER SELECT   R RELOAD   A RELOAD ALL   D REMOVE   ESC BACK";
-
-/// What the row of the player's own folders says while nobody is signed in, and under the list.
-const FOLDERS_SIGNED_OUT: &str = "LOG IN TO LOAD YOUR FOLDERS";
-const FOLDERS_SIGNED_OUT_DETAIL: &str = "LOG IN ON THE NETWORK TAB OF THE SETTINGS - YOUR FOLDERS ARE MADE AND EDITED ON THE WEB SITE";
-
-/// What the row of the player's own folders says when the server has none to give.
-const FOLDERS_NONE: &str = "THE SERVER HAS NO FOLDERS";
-
-/// What is said under the list of the player's own folders when there is nothing wrong with them,
-/// and what D says of them: they are not this screen's to remove.
-const FOLDERS_DETAIL: &str = "YOUR FOLDERS ARE MADE AND EDITED ON THE WEB SITE - R FETCHES THEM AGAIN";
-const FOLDERS_NOT_REMOVED: &str = "your folders are edited on the web site and cannot be removed here";
-
-/// What the row of a table that is being fetched again says in place of its status, and what is
-/// said under the list of the table under the cursor while it is: whatever its last reload came
-/// to is not what is happening to it now.
-const RELOADING: &str = "RELOADING...";
-const RELOADING_DETAIL: &str = "FETCHING THE TABLE AGAIN - IT STAYS AS IT IS UNTIL THE NEW ONE ARRIVES";
-
-/// The same two for a table that is on its way and is not in the song list yet: one at an address
-/// that has never arrived, and one that is a file being read.
-const FETCHING: &str = "FETCHING...";
-const FETCHING_DETAIL: &str = "FETCHING THE TABLE - ITS FOLDER APPEARS IN THE SONG LIST WHEN IT ARRIVES";
-const READING: &str = "READING...";
-const READING_DETAIL: &str = "READING THE TABLE FILE - ITS FOLDER APPEARS IN THE SONG LIST WHEN IT HAS BEEN READ";
-
-/// What the row of a table at an address says when nothing has been fetched of it and nothing is
-/// fetching it, and what is said of it under the list.
-const NOT_FETCHED: &str = "NOT FETCHED YET";
-const NOT_FETCHED_DETAIL: &str = "NOT FETCHED YET - THE SONG LIST FETCHES IT WHEN IT IS NEXT UP, AND R FETCHES IT NOW";
-
-/// What is said of a copy before how long ago it was fetched, and all that is said of one that
-/// does not record when that was.
-const SAVED_UNDATED: &str = "SAVED";
-
-/// What reloading is, along the bottom of the screen: where the lines end above the bottom edge,
-/// their pitch and their scale.
-const RELOAD_NOTE: [&str; 3] = [
-    "A TABLE AT AN ADDRESS IS FETCHED ONCE AND READ FROM ITS SAVED COPY AFTER THAT - THE ROW SHOWS HOW LONG AGO THE COPY WAS FETCHED.",
-    "A TABLE IS FETCHED WHILE YOU GO ON USING THE PLAYER, HERE OR IN THE SONG LIST - ITS FOLDER APPEARS WHEN IT ARRIVES.",
-    "R FETCHES THE TABLE UNDER THE CURSOR AGAIN, A EVERY TABLE. A TABLE REGISTERED AS A FILE IS READ FROM THE FILE AGAIN.",
-];
+/// What reloading is, along the bottom of the screen, a line each: where the lines end above the
+/// bottom edge, their pitch and their scale.
+const RELOAD_NOTE: [TablesText; 3] = [TablesText::ReloadNoteSaved, TablesText::ReloadNoteBeside, TablesText::ReloadNoteKeys];
 const NOTE_BOTTOM: f32 = 40.0;
 const NOTE_PITCH: f32 = 20.0;
 const NOTE_SCALE: f32 = 1.1;
@@ -145,11 +108,11 @@ fn source_label(source: &TableSource, status: Option<&TableStatus>) -> String {
 /// The few words at the right edge of a source's row, and whether they report a problem.
 fn status_summary(status: &TableStatus) -> (String, bool) {
     match status {
-        TableStatus::Loaded { entries: 0, stale: None, .. } => ("NO CHARTS LISTED".to_string(), true),
-        TableStatus::Loaded { entries, levels, owned, stale: None, .. } => (format!("{owned} OF {entries} CHARTS OWNED  -  {levels} LEVELS"), false),
-        TableStatus::Loaded { entries, owned, stale: Some(_), .. } => (format!("RELOAD FAILED  -  {owned} OF {entries} CHARTS OWNED"), true),
-        TableStatus::Failed { .. } => ("LOAD FAILED".to_string(), true),
-        TableStatus::NotFetched => (NOT_FETCHED.to_string(), false),
+        TableStatus::Loaded { entries: 0, stale: None, .. } => (TablesText::NoChartsListed.get(language()).to_string(), true),
+        TableStatus::Loaded { entries, levels, owned, stale: None, .. } => (TablesText::ChartsOwned.fill(language(), &[owned, entries, levels]), false),
+        TableStatus::Loaded { entries, owned, stale: Some(_), .. } => (TablesText::ReloadFailedOwned.fill(language(), &[owned, entries]), true),
+        TableStatus::Failed { .. } => (TablesText::LoadFailed.get(language()).to_string(), true),
+        TableStatus::NotFetched => (TablesText::NotFetched.get(language()).to_string(), false),
     }
 }
 
@@ -158,12 +121,12 @@ fn status_summary(status: &TableStatus) -> (String, bool) {
 /// library.
 fn status_detail(status: &TableStatus) -> Option<String> {
     match status {
-        TableStatus::Failed { reason } => Some(format!("LOAD FAILED: {reason}")),
-        TableStatus::Loaded { stale: Some(reason), .. } => Some(format!("RELOAD FAILED, THE TABLE IS AS IT WAS: {reason}")),
-        TableStatus::Loaded { entries: 0, .. } => Some("THE TABLE WAS READ BUT LISTS NO CHARTS - IT HAS NO FOLDER IN THE SONG LIST".to_string()),
-        TableStatus::Loaded { owned: 0, .. } => Some("NONE OF THIS TABLE'S CHARTS ARE IN THE LIBRARY YET - ITS FOLDER IS EMPTY".to_string()),
+        TableStatus::Failed { reason } => Some(TablesText::LoadFailedDetail.fill(language(), &[reason])),
+        TableStatus::Loaded { stale: Some(reason), .. } => Some(TablesText::ReloadFailedDetail.fill(language(), &[reason])),
+        TableStatus::Loaded { entries: 0, .. } => Some(TablesText::ListsNoCharts.get(language()).to_string()),
+        TableStatus::Loaded { owned: 0, .. } => Some(TablesText::NoneInLibrary.get(language()).to_string()),
         TableStatus::Loaded { .. } => None,
-        TableStatus::NotFetched => Some(NOT_FETCHED_DETAIL.to_string()),
+        TableStatus::NotFetched => Some(TablesText::NotFetchedDetail.get(language()).to_string()),
     }
 }
 
@@ -173,9 +136,9 @@ fn status_detail(status: &TableStatus) -> Option<String> {
 fn saved_note(status: &TableStatus, now: u64) -> Option<(String, bool)> {
     match status {
         TableStatus::Loaded { origin: TableOrigin::Address { fetched_at: Some(at) }, .. } => {
-            Some((format!("{SAVED_UNDATED} {}", copy_age(*at, now)), copy_age_days(*at, now) > COPY_OLD_AFTER_DAYS))
+            Some((TablesText::SavedAgo.fill(language(), &[&copy_age(*at, now)]), copy_age_days(*at, now) > COPY_OLD_AFTER_DAYS))
         }
-        TableStatus::Loaded { origin: TableOrigin::Address { fetched_at: None }, .. } => Some((SAVED_UNDATED.to_string(), false)),
+        TableStatus::Loaded { origin: TableOrigin::Address { fetched_at: None }, .. } => Some((TablesText::Saved.get(language()).to_string(), false)),
         TableStatus::Loaded { origin: TableOrigin::File, .. } | TableStatus::Failed { .. } | TableStatus::NotFetched => None,
     }
 }
@@ -186,11 +149,12 @@ fn saved_note(status: &TableStatus, now: u64) -> Option<(String, bool)> {
 /// is not -- never fetched, or failed the last time -- has no folder until this fetch lands, and
 /// one registered as a file is being read rather than fetched.
 fn on_its_way(source: &TableSource, status: Option<&TableStatus>) -> (&'static str, &'static str) {
-    match status {
-        Some(TableStatus::Loaded { .. }) => (RELOADING, RELOADING_DETAIL),
-        _ if is_address(&source.location) => (FETCHING, FETCHING_DETAIL),
-        _ => (READING, READING_DETAIL),
-    }
+    let (summary, detail) = match status {
+        Some(TableStatus::Loaded { .. }) => (TablesText::Reloading, TablesText::ReloadingDetail),
+        _ if is_address(&source.location) => (TablesText::Fetching, TablesText::FetchingDetail),
+        _ => (TablesText::Reading, TablesText::ReadingDetail),
+    };
+    (summary.get(language()), detail.get(language()))
 }
 
 /// What is said under the list of the source under the cursor, and whether it reports a problem:
@@ -213,38 +177,38 @@ fn old_copy_note(status: &TableStatus, now: u64) -> Option<String> {
         return None;
     };
     let days = copy_age_days(*at, now);
-    (days > COPY_OLD_AFTER_DAYS).then(|| format!("THE SAVED COPY IS {days} DAYS OLD - R FETCHES THE TABLE AGAIN"))
+    (days > COPY_OLD_AFTER_DAYS).then(|| TablesText::OldCopy.fill(language(), &[&days]))
 }
 
 /// The few words at the right edge of the row of the player's own folders, and whether they report
 /// a problem.
 fn folders_summary(status: &FolderStatus) -> (String, bool) {
     match status {
-        FolderStatus::SignedOut => (FOLDERS_SIGNED_OUT.to_string(), false),
-        FolderStatus::Fetching => (FETCHING.to_string(), false),
-        FolderStatus::Shown { folders, listed, owned, problem: None, .. } => (format!("{owned} OF {listed} CHARTS OWNED  -  {folders} FOLDERS"), false),
-        FolderStatus::Shown { listed, owned, problem: Some(_), .. } => (format!("RELOAD FAILED  -  {owned} OF {listed} CHARTS OWNED"), true),
-        FolderStatus::NotFetched { problem: None } => (NOT_FETCHED.to_string(), false),
-        FolderStatus::NotFetched { problem: Some(FolderProblem::NoFolders) } => (FOLDERS_NONE.to_string(), false),
-        FolderStatus::NotFetched { problem: Some(FolderProblem::Failed(_)) } => ("LOAD FAILED".to_string(), true),
+        FolderStatus::SignedOut => (TablesText::FoldersSignedOut.get(language()).to_string(), false),
+        FolderStatus::Fetching => (TablesText::Fetching.get(language()).to_string(), false),
+        FolderStatus::Shown { folders, listed, owned, problem: None, .. } => (TablesText::FoldersOwned.fill(language(), &[owned, listed, folders]), false),
+        FolderStatus::Shown { listed, owned, problem: Some(_), .. } => (TablesText::ReloadFailedOwned.fill(language(), &[owned, listed]), true),
+        FolderStatus::NotFetched { problem: None } => (TablesText::NotFetched.get(language()).to_string(), false),
+        FolderStatus::NotFetched { problem: Some(FolderProblem::NoFolders) } => (TablesText::FoldersNone.get(language()).to_string(), false),
+        FolderStatus::NotFetched { problem: Some(FolderProblem::Failed(_)) } => (TablesText::LoadFailed.get(language()).to_string(), true),
     }
 }
 
 /// What is said under the list of the player's own folders, and whether it reports a problem.
 fn folders_detail(status: &FolderStatus) -> (String, bool) {
     match status {
-        FolderStatus::SignedOut => (FOLDERS_SIGNED_OUT_DETAIL.to_string(), false),
-        FolderStatus::Shown { problem: Some(FolderProblem::Failed(reason)), .. } => (format!("RELOAD FAILED, THE FOLDERS ARE AS THEY WERE: {reason}"), true),
-        FolderStatus::NotFetched { problem: Some(FolderProblem::Failed(reason)) } => (format!("LOAD FAILED: {reason}"), true),
-        FolderStatus::Fetching | FolderStatus::Shown { .. } | FolderStatus::NotFetched { .. } => (FOLDERS_DETAIL.to_string(), false),
+        FolderStatus::SignedOut => (TablesText::FoldersSignedOutDetail.get(language()).to_string(), false),
+        FolderStatus::Shown { problem: Some(FolderProblem::Failed(reason)), .. } => (TablesText::FoldersReloadFailedDetail.fill(language(), &[reason]), true),
+        FolderStatus::NotFetched { problem: Some(FolderProblem::Failed(reason)) } => (TablesText::LoadFailedDetail.fill(language(), &[reason]), true),
+        FolderStatus::Fetching | FolderStatus::Shown { .. } | FolderStatus::NotFetched { .. } => (TablesText::FoldersDetail.get(language()).to_string(), false),
     }
 }
 
 /// How long ago the player's own folders were fetched, as the end of their row says it.
 fn folders_saved_note(status: &FolderStatus, now: u64) -> Option<String> {
     match status {
-        FolderStatus::Shown { fetched_at: Some(at), .. } => Some(format!("{SAVED_UNDATED} {}", copy_age(*at, now))),
-        FolderStatus::Shown { fetched_at: None, .. } => Some(SAVED_UNDATED.to_string()),
+        FolderStatus::Shown { fetched_at: Some(at), .. } => Some(TablesText::SavedAgo.fill(language(), &[&copy_age(*at, now)])),
+        FolderStatus::Shown { fetched_at: None, .. } => Some(TablesText::Saved.get(language()).to_string()),
         FolderStatus::SignedOut | FolderStatus::Fetching | FolderStatus::NotFetched { .. } => None,
     }
 }
@@ -282,7 +246,7 @@ impl TablesState {
     /// still out.
     fn add_source(&mut self, shared: &mut AppShared, source: TableSource) {
         if shared.config.library.tables.iter().any(|t| t.location == source.location) {
-            notify(Level::Warn, format!("table already added: {}", source.location));
+            notify(Level::Warn, TablesText::AlreadyAdded.fill(language(), &[&source.location]));
             return;
         }
         self.sel = shared.config.library.tables.len();
@@ -342,7 +306,7 @@ impl TablesState {
     /// The URL entry box, with the stretch of a long URL the caret is in and the caret itself.
     fn draw_url_entry(&self, canvas: &mut Canvas<'_>, edit: &TextEdit, x0: f32) {
         let th = rbms_render::theme();
-        draw_text(canvas, x0, 84.0, 1.4, th.accent, "TYPE TABLE URL  -  ENTER ADD  ESC CANCEL  CTRL+V PASTE");
+        draw_text(canvas, x0, 84.0, 1.4, th.accent, TablesText::UrlEntryKeys.get(language()));
         canvas.fill_rect(Rect::new(x0, 116.0, PANEL_W, 40.0), th.button_active);
         let (shown, caret) = edit.window(URL_ENTRY_CHARS);
         let text_x = x0 + 14.0;
@@ -416,7 +380,9 @@ impl StageHandler for TablesState {
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.tables.len() => self.remove_table_source(ctx.shared, self.sel),
-            KeyCode::KeyD | KeyCode::Delete if self.sel == TablesState::folders_row(ctx.shared) => notify(Level::Info, FOLDERS_NOT_REMOVED),
+            KeyCode::KeyD | KeyCode::Delete if self.sel == TablesState::folders_row(ctx.shared) => {
+                notify(Level::Info, TablesText::FoldersNotRemoved.get(language()))
+            }
             KeyCode::KeyR if self.sel < ctx.shared.config.library.tables.len() => reload_tables(ctx.shared, Some(self.sel)),
             KeyCode::KeyR if self.sel == TablesState::folders_row(ctx.shared) => {
                 crate::user_folders::start_fetch(ctx.shared, true);
@@ -442,16 +408,16 @@ impl StageHandler for TablesState {
         canvas.clear_bga();
         canvas.clear(th.bg);
         let x0 = (CW as f32 - PANEL_W) * 0.5;
-        draw_text(canvas, x0, 40.0, 3.0, th.text, "DIFFICULTY TABLES");
+        draw_text(canvas, x0, 40.0, 3.0, th.text, TablesText::Title.get(language()));
         if let Some(edit) = self.text_input.as_ref() {
             self.draw_url_entry(canvas, edit, x0);
             return;
         }
         if self.picker.is_some() {
-            draw_text(canvas, x0, 84.0, 1.4, th.accent, "PICK A TABLE FILE IN THE OPEN DIALOG");
+            draw_text(canvas, x0, 84.0, 1.4, th.accent, TablesText::PickFile.get(language()));
             return;
         }
-        draw_text(canvas, x0, 84.0, 1.3, th.text_muted, LIST_KEYS);
+        draw_text(canvas, x0, 84.0, 1.3, th.text_muted, TablesText::ListKeys.get(language()));
         let now = unix_now();
         let shared = &*ctx.shared;
         let tables = &shared.config.library.tables;
@@ -465,9 +431,9 @@ impl StageHandler for TablesState {
             let status = tables.get(i).and_then(|source| table_status(&source.location));
             let label = match tables.get(i) {
                 Some(source) => source_label(source, status.as_ref()),
-                None if i == add_url => "+ ADD TABLE (URL)".to_string(),
+                None if i == add_url => TablesText::AddByUrl.get(language()).to_string(),
                 None if i == folders_row => USER_FOLDERS_LABEL.to_string(),
-                None => "+ ADD TABLE (FILE)".to_string(),
+                None => TablesText::AddByFile.get(language()).to_string(),
             };
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });
             let col = if i >= tables.len() && i != folders_row {
@@ -536,7 +502,14 @@ impl StageHandler for TablesState {
         }
         let note_top = CH as f32 - NOTE_BOTTOM - NOTE_PITCH * (RELOAD_NOTE.len() - 1) as f32;
         for (line, note) in RELOAD_NOTE.iter().enumerate() {
-            draw_text(canvas, x0, note_top + line as f32 * NOTE_PITCH, NOTE_SCALE, th.text_muted, &rbms_render::fit_text(note, NOTE_SCALE, PANEL_W));
+            draw_text(
+                canvas,
+                x0,
+                note_top + line as f32 * NOTE_PITCH,
+                NOTE_SCALE,
+                th.text_muted,
+                &rbms_render::fit_text(note.get(language()), NOTE_SCALE, PANEL_W),
+            );
         }
     }
 }
@@ -802,7 +775,10 @@ mod tests {
         assert!(state.picker.is_none());
         assert_eq!(app.shared.config.library.tables.len(), 1, "the row is not there until the file has been read");
         assert_eq!(state.sel, 0, "the cursor is not on the row that was added");
-        assert_eq!(on_its_way(&app.shared.config.library.tables[0], table_status(&file.location()).as_ref()), (READING, READING_DETAIL));
+        assert_eq!(
+            on_its_way(&app.shared.config.library.tables[0], table_status(&file.location()).as_ref()),
+            (TablesText::Reading.get(language()), TablesText::ReadingDetail.get(language()))
+        );
         while !app.shared.table_fetches.is_idle() {
             state.update(&mut ctx(&mut app));
             std::thread::yield_now();
@@ -1378,20 +1354,33 @@ mod tests {
         };
         let failed = TableStatus::Failed { reason: "address: HTTP 404 Not Found".into() };
         for status in [Some(&stale), Some(&failed), Some(&TableStatus::NotFetched), None] {
-            assert_eq!(focused_detail(status, Some(RELOADING_DETAIL)), Some((RELOADING_DETAIL.to_string(), false)), "{status:?}");
+            assert_eq!(
+                focused_detail(status, Some(TablesText::ReloadingDetail.get(language()))),
+                Some((TablesText::ReloadingDetail.get(language()).to_string(), false)),
+                "{status:?}"
+            );
         }
         assert_eq!(focused_detail(Some(&stale), None), Some(("RELOAD FAILED, THE TABLE IS AS IT WAS: the address lists no charts now".to_string(), true)));
         assert_eq!(focused_detail(Some(&failed), None), Some(("LOAD FAILED: address: HTTP 404 Not Found".to_string(), true)));
         let unowned = TableStatus::Loaded { name: "T".into(), entries: 3, levels: 2, owned: 0, origin: TableOrigin::File, stale: None };
         assert!(focused_detail(Some(&unowned), None).is_some_and(|(detail, is_problem)| detail.contains("NONE OF THIS TABLE'S CHARTS") && !is_problem));
-        assert_eq!(focused_detail(Some(&TableStatus::NotFetched), None), Some((NOT_FETCHED_DETAIL.to_string(), false)), "a table not fetched yet is a problem");
+        assert_eq!(
+            focused_detail(Some(&TableStatus::NotFetched), None),
+            Some((TablesText::NotFetchedDetail.get(language()).to_string(), false)),
+            "a table not fetched yet is a problem"
+        );
         assert_eq!(focused_detail(None, None), None);
         rbms_render::font::use_embedded_fonts_only();
-        for detail in [RELOADING_DETAIL, FETCHING_DETAIL, READING_DETAIL, NOT_FETCHED_DETAIL] {
+        for detail in [
+            TablesText::ReloadingDetail.get(language()),
+            TablesText::FetchingDetail.get(language()),
+            TablesText::ReadingDetail.get(language()),
+            TablesText::NotFetchedDetail.get(language()),
+        ] {
             assert_eq!(rbms_render::fit_text(detail, DETAIL_SCALE, PANEL_W), detail, "what is said under the list is cut short");
             assert!(detail.chars().count() <= DETAIL_LINE_CHARS, "what is said of a table on its way is broken over two lines: {detail}");
         }
-        for note in RELOAD_NOTE {
+        for note in RELOAD_NOTE.map(|note| note.get(language())) {
             assert_eq!(rbms_render::fit_text(note, NOTE_SCALE, PANEL_W), note, "a line of the note along the bottom is cut short");
         }
     }
@@ -1429,8 +1418,8 @@ mod tests {
         };
         assert_eq!(said_of(&app, 1).0, "LOAD FAILED");
         assert!(said_of(&app, 1).1.is_some_and(|detail| detail.starts_with("LOAD FAILED: ")));
-        assert_eq!(said_of(&app, 2), (NOT_FETCHED.to_string(), Some(NOT_FETCHED_DETAIL.to_string())));
-        assert_eq!(said_of(&app, 3), (FETCHING.to_string(), Some(FETCHING_DETAIL.to_string())));
+        assert_eq!(said_of(&app, 2), (TablesText::NotFetched.get(language()).to_string(), Some(TablesText::NotFetchedDetail.get(language()).to_string())));
+        assert_eq!(said_of(&app, 3), (TablesText::Fetching.get(language()).to_string(), Some(TablesText::FetchingDetail.get(language()).to_string())));
 
         let loaded = drawn(&mut app, 0, "tables-state-loaded");
         let failed = drawn(&mut app, 1, "tables-state-failed");
@@ -1497,6 +1486,8 @@ mod tests {
 
 #[cfg(test)]
 mod folder_row_tests {
+    use rbms_model::Language;
+
     use super::*;
     use crate::ir_session::AccountSession;
     use crate::stage::render_tests::app;
@@ -1510,19 +1501,64 @@ mod folder_row_tests {
         FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }
     }
 
+    /// What the end of a table's row says, and how old its saved copy is, are told in the language
+    /// of the screen, with the numbers where that language puts them.
+    #[test]
+    fn the_end_of_a_row_is_told_in_the_language_of_the_screen() {
+        const NOW: u64 = 1_760_227_200;
+        const TWO_HOURS: u64 = 7_200;
+        const THREE_DAYS: u64 = 259_200;
+        let saved = |ago: u64| TableStatus::Loaded {
+            name: "T".into(),
+            entries: 10,
+            levels: 2,
+            owned: 3,
+            origin: TableOrigin::Address { fetched_at: Some(NOW - ago) },
+            stale: None,
+        };
+        let told = |language| {
+            rbms_render::text::set_language(language);
+            let told = (saved_note(&saved(TWO_HOURS), NOW), saved_note(&saved(THREE_DAYS), NOW), saved_note(&saved(0), NOW), status_summary(&saved(0)));
+            rbms_render::text::set_language(Language::English);
+            told
+        };
+        assert_eq!(
+            told(Language::Korean),
+            (
+                Some(("2시간 전 저장".to_string(), false)),
+                Some(("3일 전 저장".to_string(), false)),
+                Some(("방금 저장".to_string(), false)),
+                ("차트 10개 중 3개 보유  -  레벨 2개".to_string(), false)
+            )
+        );
+        assert_eq!(
+            told(Language::Japanese),
+            (
+                Some(("2時間前保存".to_string(), false)),
+                Some(("3日前保存".to_string(), false)),
+                Some(("たった今保存".to_string(), false)),
+                ("10譜面中3譜面を所持  -  2レベル".to_string(), false)
+            )
+        );
+        assert_eq!(told(Language::English).0, Some(("SAVED 2 HOURS AGO".to_string(), false)));
+    }
+
     /// The row of the player's own folders says what became of them in each state they can be in.
     #[test]
     fn the_folders_row_says_what_became_of_the_folders() {
-        assert_eq!(folders_summary(&FolderStatus::SignedOut), (FOLDERS_SIGNED_OUT.to_string(), false));
-        assert_eq!(folders_summary(&FolderStatus::Fetching), (FETCHING.to_string(), false));
+        assert_eq!(folders_summary(&FolderStatus::SignedOut), (TablesText::FoldersSignedOut.get(language()).to_string(), false));
+        assert_eq!(folders_summary(&FolderStatus::Fetching), (TablesText::Fetching.get(language()).to_string(), false));
         let shown = FolderStatus::Shown { folders: 5, listed: 120, owned: 87, fetched_at: Some(0), problem: None };
         assert_eq!(folders_summary(&shown), ("87 OF 120 CHARTS OWNED  -  5 FOLDERS".to_string(), false));
         assert_eq!(folders_saved_note(&shown, 3_600).as_deref(), Some("SAVED 1 HOUR AGO"));
         let stale = FolderStatus::Shown { folders: 5, listed: 120, owned: 87, fetched_at: None, problem: Some(FolderProblem::Failed("timed out".into())) };
         assert_eq!(folders_summary(&stale), ("RELOAD FAILED  -  87 OF 120 CHARTS OWNED".to_string(), true));
         assert_eq!(folders_detail(&stale), ("RELOAD FAILED, THE FOLDERS ARE AS THEY WERE: timed out".to_string(), true));
-        assert_eq!(folders_summary(&FolderStatus::NotFetched { problem: None }), (NOT_FETCHED.to_string(), false));
-        assert_eq!(folders_summary(&FolderStatus::NotFetched { problem: Some(FolderProblem::NoFolders) }), (FOLDERS_NONE.to_string(), false));
+        assert_eq!(folders_summary(&FolderStatus::NotFetched { problem: None }), (TablesText::NotFetched.get(language()).to_string(), false));
+        assert_eq!(
+            folders_summary(&FolderStatus::NotFetched { problem: Some(FolderProblem::NoFolders) }),
+            (TablesText::FoldersNone.get(language()).to_string(), false)
+        );
         let failed = FolderStatus::NotFetched { problem: Some(FolderProblem::Failed("refused".into())) };
         assert_eq!(folders_summary(&failed), ("LOAD FAILED".to_string(), true));
         assert_eq!(folders_detail(&failed), ("LOAD FAILED: refused".to_string(), true));
