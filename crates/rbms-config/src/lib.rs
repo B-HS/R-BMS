@@ -17,6 +17,7 @@ mod error;
 mod gauge;
 mod io;
 mod judge;
+mod language;
 mod legacy;
 mod number;
 mod options;
@@ -44,6 +45,7 @@ pub use judge::{
     gauge_auto_shift_from_token, gauge_auto_shift_token, gauge_set_from_token, gauge_set_token, ln_mode_from_token, ln_mode_token, target_fallback_from_token,
     target_from_token,
 };
+pub use language::{LANGUAGE_CHOICE_COUNT, LANGUAGE_LABELS, LanguageChoice};
 pub use legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
 pub use number::NumberSpec;
 pub use options::{FIX_HISPEED_COUNT, FixHiSpeed, LANE_OPTION_COUNT, LaneOption, PLAY_ESCAPE_COUNT, PLAY_ESCAPE_DOUBLE_MS, PLAY_ESCAPE_HOLD_MS, PlayEscape};

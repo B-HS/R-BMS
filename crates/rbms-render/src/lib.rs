@@ -13,6 +13,7 @@ pub mod result;
 pub mod select;
 pub mod skin;
 pub mod skin_render;
+pub mod text;
 pub mod theme;
 pub mod toast;
 
@@ -22,7 +23,7 @@ pub use cpu::{CpuCanvas, apply_blend, apply_tint, distance_field_fragment};
 pub use ctx::{RenderCtx, with_render_ctx};
 pub use font::{
     FontWeight, LAYOUT_CACHE_LIMIT, RUN_CACHE_LIMIT, TextContext, TextStyle, cache_stats, draw_text, draw_text_centered, draw_text_centered_styled,
-    draw_text_right, draw_text_right_styled, draw_text_styled, fit_text, fit_text_styled, load_font, reset_ui_family, set_ui_family, text_width,
+    draw_text_right, draw_text_right_styled, draw_text_styled, fit_text, fit_text_styled, load_font, reset_ui_family, set_ui_family, system_locale, text_width,
     text_width_styled, with_text_context,
 };
 pub use glyph_atlas::{ATLAS_MAX_DIM, ATLAS_TEXTURE_KEY, AtlasEntry, GlyphAtlas, GlyphAtlasBinding};

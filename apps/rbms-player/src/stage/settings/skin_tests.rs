@@ -170,7 +170,7 @@ fn the_button_on_the_rail_opens_the_skin_menu() {
 const MENU_LINKS: usize = 2;
 
 /// Every row on show, every group of the rail and the two buttons to the menus are regions of the
-/// frame, and nothing else is. Every group of the screen as it ships is on show whole but NETWORK,
+/// frame, and nothing else is. Every group of the screen as it ships is on show whole but NETWORK and DISPLAY,
 /// whose rows past the screen are reached by scrolling.
 #[test]
 fn every_row_every_tab_and_the_two_buttons_are_clickable() {
@@ -183,7 +183,7 @@ fn every_row_every_tab_and_the_two_buttons_are_clickable() {
         };
         let on_show = state.list.entries.iter().take(visible_rows()).filter(|entry| matches!(entry, ListItem::Row(_))).count();
         let whole = state.rows.len();
-        assert_eq!(on_show < whole, tab == SettingTab::Network, "{tab:?}");
+        assert_eq!(on_show < whole, matches!(tab, SettingTab::Network | SettingTab::Display), "{tab:?}");
         assert_eq!(app.shared.hot.len(), on_show + SettingTab::SHOWN.len() + MENU_LINKS, "{tab:?}");
     }
 }

@@ -1,25 +1,36 @@
-//! Render context — the palette and text engine a screen composer draws with, passed in as an
-//! argument instead of read from a global.
+//! Render context — the palette, text engine and language a screen composer draws with, passed in
+//! as an argument instead of read from a global.
 //!
 //! Every composed screen has two forms: a `*_ctx` entry point taking a [`RenderCtx`], and a legacy
 //! wrapper of the same name minus the suffix that builds one from this thread's
-//! [`crate::theme::set_theme`] palette and shared [`TextContext`] via [`with_render_ctx`]. New code
-//! should take a context; the wrappers exist so the player keeps compiling while it migrates.
+//! [`crate::theme::set_theme`] palette, [`crate::text::set_language`] language and shared
+//! [`TextContext`] via [`with_render_ctx`]. New code should take a context; the wrappers exist so
+//! the player keeps compiling while it migrates.
+
+use rbms_model::Language;
 
 use crate::font::TextContext;
 use crate::theme::Theme;
 use crate::{Color, Renderer};
 
-/// The inputs every screen composer needs: the resolved UI palette and the text engine to shape and
-/// rasterize with. Cheap to build — the palette is a `Copy` struct and the engine is borrowed.
+/// The inputs every screen composer needs: the resolved UI palette, the text engine to shape and
+/// rasterize with and the language its fixed words are written in. Cheap to build — the palette is
+/// a `Copy` struct and the engine is borrowed.
 pub struct RenderCtx<'a> {
     pub theme: Theme,
     pub text: &'a mut TextContext,
+    pub language: Language,
 }
 
 impl<'a> RenderCtx<'a> {
+    /// A context writing in English; [`RenderCtx::with_language`] picks another language.
     pub fn new(theme: Theme, text: &'a mut TextContext) -> Self {
-        RenderCtx { theme, text }
+        RenderCtx { theme, text, language: Language::default() }
+    }
+
+    /// The same context writing in `language`.
+    pub fn with_language(self, language: Language) -> Self {
+        RenderCtx { language, ..self }
     }
 
     /// Draw a left-aligned string with its top-left near `(x, y)`.
@@ -48,12 +59,13 @@ impl<'a> RenderCtx<'a> {
     }
 }
 
-/// Build a context from this thread's installed theme and shared text engine and run `f` with it.
-/// Backs every legacy no-context render entry point; `f` must not call a global text helper, since
-/// the engine is borrowed for the whole closure.
+/// Build a context from this thread's installed theme, installed language and shared text engine
+/// and run `f` with it. Backs every legacy no-context render entry point; `f` must not call a global
+/// text helper, since the engine is borrowed for the whole closure.
 pub fn with_render_ctx<T>(f: impl FnOnce(&mut RenderCtx<'_>) -> T) -> T {
     let theme = crate::theme::theme();
-    crate::font::with_text_context(|text| f(&mut RenderCtx::new(theme, text)))
+    let language = crate::text::language();
+    crate::font::with_text_context(|text| f(&mut RenderCtx::new(theme, text).with_language(language)))
 }
 
 #[cfg(test)]
@@ -120,6 +132,21 @@ mod tests {
 
         assert_eq!(canvas.pixel_at(0, H - 1), marker, "the background is cleared with the context's palette");
         assert_eq!(theme(), Theme::default(), "rendering through a context leaves the installed theme untouched");
+    }
+
+    /// A context built by hand writes in English unless told otherwise, and one built from the
+    /// thread's globals writes in the language installed on the thread.
+    #[test]
+    fn the_language_comes_from_the_context_and_the_legacy_one_from_the_thread() {
+        let mut text = TextContext::embedded_only();
+        assert_eq!(RenderCtx::new(Theme::default(), &mut text).language, Language::English);
+        assert_eq!(RenderCtx::new(Theme::default(), &mut text).with_language(Language::Korean).language, Language::Korean);
+
+        use_embedded_fonts_only();
+        assert_eq!(with_render_ctx(|ctx| ctx.language), Language::English, "a thread that installed none writes in English");
+        crate::text::set_language(Language::Japanese);
+        assert_eq!(with_render_ctx(|ctx| ctx.language), Language::Japanese);
+        crate::text::set_language(Language::English);
     }
 
     /// A context-owned text engine is independent of the thread-local one: text drawn through it is

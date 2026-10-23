@@ -271,6 +271,9 @@ pub struct TextContext {
     design: HashMap<(String, u32), block::DesignMetrics>,
     /// The blend the last skin object that set one left the batch in ([`TextContext::inherited_blend`]).
     left_blend: BlendMode,
+    /// The locale the host was set to when the engine was built, as the system reported it
+    /// ([`TextContext::system_locale`]).
+    system_locale: String,
 }
 
 impl Default for TextContext {
@@ -282,7 +285,7 @@ impl Default for TextContext {
 impl TextContext {
     /// Adopt a font system whose database already ends with the family this engine should treat as
     /// its default (the last-loaded face wins, matching how [`load_font`] reports a family).
-    fn with_font_system(fs: FontSystem) -> Self {
+    fn with_font_system(fs: FontSystem, system_locale: String) -> Self {
         let family = fs.db().faces().last().and_then(|f| f.families.first().map(|(n, _)| n.clone())).unwrap_or_else(|| FALLBACK_FAMILY.to_string());
         TextContext {
             fs,
@@ -297,6 +300,7 @@ impl TextContext {
             loaded: HashMap::new(),
             design: HashMap::new(),
             left_blend: BlendMode::Alpha,
+            system_locale,
         }
     }
 
@@ -332,7 +336,7 @@ impl TextContext {
     pub fn new() -> Self {
         let (locale, mut db) = FontSystem::new().into_locale_and_db();
         db.load_font_data(BUNDLED_FONT.to_vec());
-        Self::with_font_system(FontSystem::new_with_locale_and_db(han_locale(&locale).to_string(), db))
+        Self::with_font_system(FontSystem::new_with_locale_and_db(han_locale(&locale).to_string(), db), locale)
     }
 
     /// Build a context whose database holds nothing but the bundled font, on a pinned locale, so
@@ -341,7 +345,15 @@ impl TextContext {
     pub fn embedded_only() -> Self {
         let mut db = fontdb::Database::new();
         db.load_font_data(BUNDLED_FONT.to_vec());
-        Self::with_font_system(FontSystem::new_with_locale_and_db(DETERMINISTIC_LOCALE.to_string(), db))
+        Self::with_font_system(FontSystem::new_with_locale_and_db(DETERMINISTIC_LOCALE.to_string(), db), DETERMINISTIC_LOCALE.to_string())
+    }
+
+    /// The locale the host was set to when this engine was built, as the system reported it: the
+    /// first of its preferred languages (`ko-KR`, `en-US`). The engine itself matches ideographs
+    /// under another one ([`han_locale`]); this is the one the interface language is read from. An
+    /// engine of the bundled font alone reports its pinned locale.
+    pub fn system_locale(&self) -> &str {
+        &self.system_locale
     }
 
     fn layout_len(&self) -> usize {
@@ -790,6 +802,12 @@ pub fn text_width(text: &str, scale: f32) -> f32 {
     with_text_context(|e| e.text_width(text, scale))
 }
 
+/// The locale the host was set to, as this thread's [`TextContext`] read it when it was built
+/// ([`TextContext::system_locale`]).
+pub fn system_locale() -> String {
+    with_text_context(|e| e.system_locale().to_string())
+}
+
 /// Live occupancy of the two text caches as `(layout entries, glyph-run entries)`, bounded by
 /// [`LAYOUT_CACHE_LIMIT`] and [`RUN_CACHE_LIMIT`]. Always available (not test-only) so an app debug
 /// overlay can show cache pressure next to its frame stats.
@@ -1209,6 +1227,7 @@ mod tests {
         assert_eq!(faces, 1, "only the bundled font is loaded");
         assert_eq!(family, ENGINE.with(|c| c.borrow().default_family.clone()), "the bundled family is the default");
         assert_eq!(locale, DETERMINISTIC_LOCALE, "the locale is pinned, not read from the host");
+        assert_eq!(system_locale(), DETERMINISTIC_LOCALE, "the engine reports the pinned locale as the host's");
     }
 
     /// A codepoint the bundled font lacks (the song-select folder marker) has nowhere to fall back

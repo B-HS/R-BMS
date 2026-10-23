@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
+pub mod language;
 pub mod mode;
+pub mod translations;
 
+pub use language::{LANGUAGE_COUNT, Language};
 pub use mode::Mode;
 
 /// Absolute time, microseconds. The global time unit across rbms.

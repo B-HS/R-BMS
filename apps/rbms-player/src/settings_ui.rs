@@ -463,6 +463,7 @@ mod tests {
         (SettingId::Letterbox, "LETTERBOX", "ON"),
         (SettingId::WindowResolution, "RESOLUTION", "1280x720"),
         (SettingId::WindowMode, "WINDOW MODE", "WINDOWED"),
+        (SettingId::Language, "LANGUAGE", "AUTO"),
         (SettingId::Sort, "SORT", "DEFAULT"),
         (SettingId::FavoriteOnly, "FAVORITE ONLY", "OFF"),
         (SettingId::PreviewVolume, "PREVIEW VOLUME", "85%"),

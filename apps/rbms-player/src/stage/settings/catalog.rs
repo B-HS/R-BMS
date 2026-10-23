@@ -48,6 +48,7 @@ const JUDGE_SECTIONS: &[Section] = &[
 ];
 
 const DISPLAY_SECTIONS: &[Section] = &[
+    Section { heading: "LANGUAGE", rows: &[SettingId::Language] },
     Section { heading: "WINDOW", rows: &[SettingId::WindowMode, SettingId::WindowResolution, SettingId::Letterbox, SettingId::Font] },
     Section { heading: "SCREENS", rows: &[SettingId::Bga, SettingId::ScoreGraph, SettingId::ResultGraphs, SettingId::ReplayAnalysis, SettingId::Preview] },
     Section { heading: "BUILT-IN PLAY FIELD", rows: &[SettingId::Skin, SettingId::FiveKeyLayout, SettingId::WhiteNumber, SettingId::JudgeTextY] },
@@ -193,6 +194,10 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         SettingId::Total => {
             "The TOTAL every chart is played with, which sets how much the gauge gains from a note. AUTO, the lowest step, keeps each chart's own TOTAL; \
              a number from 1 to 5000 is used for every chart instead."
+        }
+        SettingId::Language => {
+            "The language the screens are written in, from the next frame on. AUTO follows the first language the system prefers, \
+             and English when the screens are not written in it. Each language is named in itself. Words a skin or a chart supplies stay as they are."
         }
         SettingId::WindowMode => "WINDOWED is an ordinary window of the size RESOLUTION names. BORDERLESS covers the whole monitor the window is on.",
         SettingId::WindowResolution => "The size of the window in WINDOWED mode. A BORDERLESS window takes the size of its monitor instead.",

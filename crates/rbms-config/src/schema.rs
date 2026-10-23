@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use crate::audio::AudioOptions;
 use crate::judge::ScoreTarget;
+use crate::language::LanguageChoice;
 use crate::options::{FixHiSpeed, LaneOption, PlayEscape};
 use crate::sort::SortMode;
 use crate::window::{WindowMode, WindowResolution};
@@ -761,6 +762,10 @@ pub struct DisplayOptions {
     /// Lay a five-key chart out on its own lane widths rather than on the seven-key ones.
     pub five_key_layout: bool,
     pub debug: bool,
+    /// The language the screens are written in. A file from before the row reads as AUTO, which
+    /// follows the system the player runs on.
+    #[serde(default, with = "crate::language::language_token")]
+    pub language: LanguageChoice,
 }
 
 impl Default for DisplayOptions {
@@ -779,6 +784,7 @@ impl Default for DisplayOptions {
             window_mode: WindowMode::default(),
             five_key_layout: false,
             debug: false,
+            language: LanguageChoice::default(),
         }
     }
 }

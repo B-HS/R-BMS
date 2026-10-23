@@ -118,7 +118,8 @@ fn cursor_is_on_show(screen: &Screen) -> bool {
 
 /// Every group lists exactly the rows the table gives it, under the headings of its sections and in
 /// their order. As the screen ships every group is on show whole but NETWORK, which the DISCORD
-/// section made two entries longer than the screen: it draws the rows on show and scrolls to the rest.
+/// section made two entries longer than the screen, and DISPLAY, which the LANGUAGE section did: each
+/// draws the rows on show and scrolls to the rest.
 #[test]
 fn every_group_lists_its_rows_under_the_headings_of_its_sections() {
     for tab in SettingTab::SHOWN {
@@ -134,7 +135,7 @@ fn every_group_lists_its_rows_under_the_headings_of_its_sections() {
         assert!(matches!(screen.state.list.entries.first(), Some(ListItem::Heading(_))), "{tab:?} does not begin with a heading");
         assert_eq!(
             screen.state.list.entries.len() > visible_rows(),
-            tab == SettingTab::Network,
+            matches!(tab, SettingTab::Network | SettingTab::Display),
             "{tab:?} has {} entries and the screen shows {}",
             screen.state.list.entries.len(),
             visible_rows()

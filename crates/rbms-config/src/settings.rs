@@ -28,6 +28,7 @@ use crate::judge::{
     COURSE_GAUGE_LABELS, GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget,
     TARGET_FALLBACK_LABELS, TARGET_LABELS, gauge_set_token,
 };
+use crate::language::{LANGUAGE_LABELS, LanguageChoice};
 use crate::number::NumberSpec;
 use crate::options;
 use crate::schema::{
@@ -234,6 +235,7 @@ pub enum SettingId {
     Letterbox,
     WindowResolution,
     WindowMode,
+    Language,
     Sort,
     FavoriteOnly,
     PreviewVolume,
@@ -272,7 +274,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 97;
+pub const SETTING_COUNT: usize = 98;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -339,6 +341,7 @@ impl SettingId {
         SettingId::Letterbox,
         SettingId::WindowResolution,
         SettingId::WindowMode,
+        SettingId::Language,
         SettingId::Sort,
         SettingId::FavoriteOnly,
         SettingId::PreviewVolume,
@@ -732,6 +735,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingKind::FloatRange { min: TOTAL_FROM_CHART, max: TOTAL_MAX, step: TOTAL_STEP, decimals: TOTAL_DECIMALS, unit: NO_UNIT },
         "Override the chart's own gauge total",
     ),
+    row(SettingId::Language, SettingTab::Display, "LANGUAGE", SettingKind::Cycle { values: LANGUAGE_LABELS }, "The language the screens are written in"),
     host_row(SettingId::Skin, SettingTab::Display, "SKIN", SettingKind::Cycle { values: SKIN_LABELS }, "Which bundled skin the play screen uses")
         .unread_by_skins(PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(SettingId::Font, SettingTab::Display, "FONT", SettingKind::FilePick, "Font the screens are drawn with"),
@@ -1140,6 +1144,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::Letterbox => on_off(config.display.letterbox),
         SettingId::WindowResolution => config.display.window_resolution.label().to_string(),
         SettingId::WindowMode => config.display.window_mode.label().to_string(),
+        SettingId::Language => config.display.language.label().to_string(),
         SettingId::Sort => config.library.sort.label().to_string(),
         SettingId::FavoriteOnly => on_off(config.library.favorite_only),
         SettingId::ShowMissingCharts => on_off(config.library.show_missing_charts),
@@ -1343,6 +1348,10 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::WindowMode => {
             let at = stepped(cycle_at(WindowMode::ALL, config.display.window_mode), WindowMode::ALL.len(), delta);
             store(&mut config.display.window_mode, WindowMode::ALL[at])
+        }
+        SettingId::Language => {
+            let at = stepped(cycle_at(LanguageChoice::ALL, config.display.language), LanguageChoice::ALL.len(), delta);
+            store(&mut config.display.language, LanguageChoice::ALL[at])
         }
         SettingId::FavoriteOnly => toggle(&mut config.library.favorite_only),
         SettingId::ShowMissingCharts => toggle(&mut config.library.show_missing_charts),
@@ -2154,6 +2163,23 @@ mod tests {
     }
 
     #[test]
+    fn the_language_row_names_each_language_in_itself_and_steps_through_every_one() {
+        let mut config = Config::default();
+        assert_eq!(display_value(&config, SettingId::Language), "AUTO");
+        assert_eq!(cycle_values(SettingId::Language), LANGUAGE_LABELS);
+        for expected in &LANGUAGE_LABELS[1..] {
+            assert_eq!(adjust(&mut config, SettingId::Language, 1), AdjustOutcome::Changed);
+            assert_eq!(display_value(&config, SettingId::Language), *expected);
+        }
+        assert_eq!(config.display.language, LanguageChoice::Japanese);
+        assert_eq!(adjust(&mut config, SettingId::Language, 1), AdjustOutcome::Changed, "the list wraps");
+        assert_eq!(config.display.language, LanguageChoice::Auto);
+        adjust(&mut config, SettingId::Language, -1);
+        assert_eq!(display_value(&config, SettingId::Language), "日本語");
+        assert_eq!(tab_rows(SettingTab::Display, &config).first(), Some(&SettingId::Language), "the row heads its tab");
+    }
+
+    #[test]
     fn the_skin_row_steps_between_the_bundled_skins() {
         let mut config = Config::default();
         assert_eq!(display_value(&config, SettingId::Skin), "NORMAL");
@@ -2306,6 +2332,7 @@ mod tests {
         assert_eq!(
             tab_rows(SettingTab::Display, &config),
             vec![
+                SettingId::Language,
                 SettingId::Skin,
                 SettingId::Font,
                 SettingId::ScoreGraph,

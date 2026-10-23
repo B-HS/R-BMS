@@ -51,6 +51,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::WindowId;
 
 mod app_input;
+mod app_language;
 mod app_network;
 mod app_options;
 mod app_play;
@@ -106,6 +107,7 @@ mod stage;
 mod syssound;
 mod tablesrc;
 pub mod target;
+mod text;
 mod textedit;
 mod timing;
 mod toast;
@@ -718,6 +720,8 @@ struct AppShared {
     /// Everything the player remembers between runs, in one document. The settings screen edits it
     /// in place and every save writes the whole thing.
     config: Config,
+    /// The language the screens are written in, settled from the LANGUAGE row every frame.
+    language: app_language::AppLanguage,
     /// This run's command-line overrides, which the configuration never sees.
     launch: LaunchOptions,
     mode: Mode,
@@ -1113,6 +1117,7 @@ impl App {
             shared: AppShared {
                 chart_path,
                 config,
+                language: app_language::AppLanguage::default(),
                 launch,
                 mode: MODE,
                 library,
@@ -1388,6 +1393,7 @@ impl App {
             self.apply(transition, event_loop);
         }
 
+        self.shared.language.follow(self.shared.config.display.language);
         let transition = self.stage.update(&mut FrameCtx { shared: &mut self.shared, now, dt });
         self.apply(transition, event_loop);
 
