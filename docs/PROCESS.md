@@ -34,7 +34,7 @@
 - [ ] N9. 표 코스 막대 위 PRACTICE 키로 코스 시작(결정 21, 원본과 같게)
 - [ ] N8. 통합 리뷰, 게이트, 문서·ADR·QA, 커밋·푸시·CI
 
-  진행 기록: W1(wf_240136df-843) K0 `72726c7`, I0 `b7efac1`(LANGUAGE 행 포함, SETTING_COUNT 98, DISPLAY 탭도 스크롤), R1 `0e74d08`, RK-D `d727923`, RK-W `d74794b`. L1 은 호출부가 없어 clippy dead_code 8건이라 커밋하지 않고 W2 RP-P 가 먼저 적용(패치 보관). W1 게이트: Rust 6,765 통과·0 실패·6 무시, clippy·fmt 통과, 스킨 덤프 통과, 웹 1,818 통과·DB 153 통과(임시 MySQL 8.4.11)·빌드 통과. W2(R2·R4·RK-M·RK-V·RK-S·RP-P) 다음.
+  진행 기록: W1(wf_240136df-843) K0 `72726c7`, I0 `b7efac1`(LANGUAGE 행 포함, SETTING_COUNT 98, DISPLAY 탭도 스크롤), R1 `0e74d08`, RK-D `d727923`, RK-W `d74794b`. L1 은 호출부가 없어 clippy dead_code 8건이라 커밋하지 않고 W2 RP-P 가 먼저 적용(패치 보관). W1 게이트: Rust 6,765 통과·0 실패·6 무시, clippy·fmt 통과, 스킨 덤프 통과, 웹 1,818 통과·DB 153 통과(임시 MySQL 8.4.11)·빌드 통과. W2(wf_b6e33e9b-58c): 레이더 저장·칠하기(R2·R4) `54ff02c`, 랭킹 모드·오버레이·스킨 순위 슬롯(RK-M·RK-V·RK-S) `423484b`(SETTING_COUNT 99 RANKING KEYS), 배치 플레이 단축키 J·고스트·L1(RP-P) `30264b8`. 병합 충돌 2곳(`bridge.rs`, `text/mod.rs`)은 메인이 손으로. W2 게이트: Rust 6,866 통과·0 실패·6 무시, clippy·fmt·스킨 덤프·설정 계약 234 통과. W3 로 넘김: 외부 스킨 순위 목록 스크롤(rate 8 쓰기, RK-S 미완) → S3, 기록 모달의 로컬 기록 고스트 진입·내장 선곡 랭킹 머리 곡 제목 → L2. W1 푸시 CI 통과(ci 40001562553, web 40001562460).
 
 ## 체크리스트 — Stella·코스·단위와 클라이언트 보완 (2026-10-23)
 
