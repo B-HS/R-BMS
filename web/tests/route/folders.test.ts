@@ -23,7 +23,7 @@ const createRoutes = () => {
         db: memory.db,
         newId: (prefix) => `${prefix}${(++counter).toString(16).padStart(30, '0')}`,
         now: () => 1_760_000_000_000,
-        loadTableEntries: (tableId) => (tableId === 'insane1' ? [{ md5: MD5, sha256: '', title: 'T', artist: 'A', level: '1' }] : null),
+        loadTableEntries: async (tableId) => (tableId === 'insane1' ? [{ md5: MD5, sha256: '', title: 'T', artist: 'A', level: '1' }] : null),
         lookupTableText: () => null,
     })
     return createFolderRoutes(() => ({

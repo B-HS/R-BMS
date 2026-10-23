@@ -1,4 +1,5 @@
 import type { PlayerProfileOutput } from '@server/dto/auth'
+import type { DisplayedDan } from '@server/dto/dan'
 
 export type PlayerRow = {
     id: string
@@ -24,19 +25,28 @@ export const toPlayerProfile = (row: PlayerRow, totalPlays: number): PlayerProfi
     extra: { rank: row.rank },
 })
 
-export const createPlayerService = (deps: { db: PlayerServiceDb }) => ({
-    getProfileByLoginId: async (loginId: string) => {
-        const row = await deps.db.findByLoginId(loginId)
-        if (!row) return null
-        const totalPlays = await deps.db.countScores(row.id)
-        return toPlayerProfile(row, totalPlays)
-    },
-    getProfileById: async (id: string) => {
-        const row = await deps.db.findById(id)
-        if (!row) return null
-        const totalPlays = await deps.db.countScores(row.id)
-        return toPlayerProfile(row, totalPlays)
-    },
-})
+export type PlayerServiceDeps = {
+    db: PlayerServiceDb
+    listDisplayedDans: (userId: string) => Promise<DisplayedDan[]>
+}
+
+export const createPlayerService = (deps: PlayerServiceDeps) => {
+    const toProfileWithDans = async (row: PlayerRow): Promise<PlayerProfileOutput> => {
+        const [totalPlays, dans] = await Promise.all([deps.db.countScores(row.id), deps.listDisplayedDans(row.id)])
+        const profile = toPlayerProfile(row, totalPlays)
+        return { ...profile, extra: { ...profile.extra, dans } }
+    }
+
+    return {
+        getProfileByLoginId: async (loginId: string) => {
+            const row = await deps.db.findByLoginId(loginId)
+            return row ? toProfileWithDans(row) : null
+        },
+        getProfileById: async (id: string) => {
+            const row = await deps.db.findById(id)
+            return row ? toProfileWithDans(row) : null
+        },
+    }
+}
 
 export type PlayerService = ReturnType<typeof createPlayerService>

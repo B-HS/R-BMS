@@ -22,12 +22,15 @@ import { composeAiPlayFeatures } from '@server/compose/ai-play-features'
 import { composeAiScoreFeatures } from '@server/compose/ai-score-features'
 import { composeChartPattern } from '@server/compose/chart-pattern'
 import { composeCourse } from '@server/compose/course'
+import { composeCourseCatalog } from '@server/compose/course-catalog'
+import { composeDan } from '@server/compose/dan'
 import { composeFe } from '@server/compose/fe'
 import { composeReplay } from '@server/compose/replay'
 import { composeRival } from '@server/compose/rival'
 import { composeSetting } from '@server/compose/setting'
 import { composeFolder } from '@server/compose/folder'
 import { composeTable } from '@server/compose/table'
+import { composeTableRefresh, tableCourseSyncOf } from '@server/compose/table-refresh'
 import { composeTableSnapshot } from '@server/compose/table-snapshot'
 import { composeTrace } from '@server/compose/trace'
 import { chartBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
@@ -136,7 +139,11 @@ const composeAll = () => {
         },
     })
 
+    const { danService } = composeDan(db)
+    const { courseCatalogService } = composeCourseCatalog(db)
+
     const playerService = createPlayerService({
+        listDisplayedDans: async (userId) => (await danService.listDisplayed([userId])).get(userId) ?? [],
         db: {
             findByLoginId: async (loginId) => {
                 const [row] = await db.select().from(user).where(eq(user.loginId, loginId)).limit(1)
@@ -383,6 +390,9 @@ const composeAll = () => {
         scoreService,
         authService,
         courseService,
+        danService,
+        courseCatalogService,
+        ...composeTableRefresh(db, { courses: tableCourseSyncOf(courseCatalogService), dan: danService }),
         ...composeReplay(db),
         ...composeSetting(db),
         ...composeRival(db),
@@ -390,6 +400,7 @@ const composeAll = () => {
         ...composeFe(db, {
             lookupTableText: findSnapshotTextByMd5,
             searchTableMd5s: (query) => searchMd5sInTables(getSnapshotTables(), query),
+            listDisplayedDans: danService.listDisplayed,
         }),
         ...composeTable(db, courseService),
         ...tableSnapshot,

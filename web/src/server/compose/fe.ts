@@ -3,7 +3,7 @@ import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { apiToken, chart, chartBest, score } from '@server/db/schema'
 import { MIN_CLEAR_LAMP_ID } from '@server/dto/common'
-import { createFeService, type ActivityRow, type LeaderboardRow } from '@server/service/domain/fe/fe.service'
+import { createFeService, type ActivityRow, type FeServiceDeps, type LeaderboardRow } from '@server/service/domain/fe/fe.service'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toChartRow } from '@server/compose/chart-row'
@@ -66,7 +66,10 @@ const LIKE_WILDCARDS = /[\\%_]/g
 
 const escapeLike = (value: string) => value.replace(LIKE_WILDCARDS, (character) => `\\${character}`)
 
-export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup; searchTableMd5s: (query: string) => string[] }) => {
+export const composeFe = (
+    db: Database,
+    deps: { lookupTableText: TableTextLookup; searchTableMd5s: (query: string) => string[]; listDisplayedDans: FeServiceDeps['listDisplayedDans'] },
+) => {
     const buildLeaderboardStats = (includeScratchAuto: boolean) => {
         const playStats = db
             .select({ userId: score.userId, plays: count().as('plays') })
@@ -109,6 +112,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
     const feService = createFeService({
         lookupTableText: deps.lookupTableText,
         searchTableMd5s: deps.searchTableMd5s,
+        listDisplayedDans: deps.listDisplayedDans,
         db: {
             searchCharts: async (query, { extraMd5s }) => {
                 const keyword = query.q ? `%${escapeLike(query.q)}%` : null

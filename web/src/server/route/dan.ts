@@ -1,7 +1,5 @@
 import { NextResponse, connection } from 'next/server'
 import { compose } from '@server/compose'
-import { composeDan } from '@server/compose/dan'
-import { getDb } from '@server/db'
 import { DAN_DISPLAY_BODY_MAX_BYTES, danDisplayInputSchema } from '@server/dto/dan'
 import { successResponse } from '@server/lib/api-response'
 import { parseLimitedJsonBody } from '@server/lib/parse-request'
@@ -20,18 +18,10 @@ export type DanRouteDeps = {
 
 const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store' }
 
-let composedDan: ReturnType<typeof composeDan> | null = null
-
-export const resolveDanService = () => {
-    composedDan ??= composeDan(getDb())
-    return composedDan.danService
+const resolveDanRouteDeps = (): DanRouteDeps => {
+    const { authService, danService } = compose()
+    return { authService, danService, revalidate: { onDanAward: revalidateOnDanAward } }
 }
-
-const resolveDanRouteDeps = (): DanRouteDeps => ({
-    authService: compose().authService,
-    danService: resolveDanService(),
-    revalidate: { onDanAward: revalidateOnDanAward },
-})
 
 const privateJson = (body: unknown) => NextResponse.json(body, { headers: PRIVATE_HEADERS })
 

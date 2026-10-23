@@ -1,6 +1,7 @@
 import { MIN_CLEAR_LAMP_ID, clearLampFromId, type AssistGrade } from '@server/dto/common'
 import { fillBlankText, toChartMeta, type ChartRow, type TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toPlayerProfile, type PlayerRow } from '@server/service/domain/player/player.service'
+import type { DisplayedDan } from '@server/dto/dan'
 import type { ChartSearchQuery, PlayerLeaderboardQuery } from '@server/dto/fe'
 
 export type ActivityRow = {
@@ -76,13 +77,21 @@ export const toLampDistribution = (rows: LampCountRow[]) => {
     return [...counts.values()].map((entry) => ({ clear: clearLampFromId(entry.clear), assist_grade: entry.assistGrade, count: entry.count }))
 }
 
-export const toLeaderboardItem = (row: LeaderboardRow) => ({
+export const toLeaderboardItem = (row: LeaderboardRow, dans: DisplayedDan[]) => ({
     ...toPlayerProfile(row, row.plays),
+    dans,
     cleared_charts: row.clearedCharts,
     played_charts: row.playedCharts,
 })
 
-export const createFeService = (deps: { db: FeServiceDb; lookupTableText?: TableTextLookup; searchTableMd5s?: (query: string) => string[] }) => ({
+export type FeServiceDeps = {
+    db: FeServiceDb
+    listDisplayedDans: (userIds: string[]) => Promise<Map<string, DisplayedDan[]>>
+    lookupTableText?: TableTextLookup
+    searchTableMd5s?: (query: string) => string[]
+}
+
+export const createFeService = (deps: FeServiceDeps) => ({
     searchCharts: async (query: ChartSearchQuery) => {
         const extraMd5s = query.q && deps.searchTableMd5s ? deps.searchTableMd5s(query.q) : []
         const { rows, total } = await deps.db.searchCharts(query, { extraMd5s })
@@ -98,7 +107,8 @@ export const createFeService = (deps: { db: FeServiceDb; lookupTableText?: Table
 
     playerLeaderboard: async (query: PlayerLeaderboardQuery) => {
         const { rows, total } = await deps.db.listPlayerLeaderboard(query)
-        return { items: rows.map(toLeaderboardItem), total }
+        const dansOf = await deps.listDisplayedDans(rows.map((row) => row.id))
+        return { items: rows.map((row) => toLeaderboardItem(row, dansOf.get(row.id) ?? [])), total }
     },
 
     playerStats: async (params: { userId: string; totalPlays: number }) => {

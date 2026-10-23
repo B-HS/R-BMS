@@ -43,18 +43,21 @@ describe('리더보드 정렬', () => {
     })
 
     test('응답 항목에 클리어한 차트 수와 플레이한 차트 수가 실린다', () => {
-        const item = toLeaderboardItem({
-            id: 'u1',
-            loginId: 'alice',
-            name: 'Alice',
-            rank: '',
-            rankPoints: 0,
-            totalPlays: 0,
-            role: 'user',
-            plays: 12,
-            clearedCharts: 7,
-            playedCharts: 9,
-        })
+        const item = toLeaderboardItem(
+            {
+                id: 'u1',
+                loginId: 'alice',
+                name: 'Alice',
+                rank: '',
+                rankPoints: 0,
+                totalPlays: 0,
+                role: 'user',
+                plays: 12,
+                clearedCharts: 7,
+                playedCharts: 9,
+            },
+            [],
+        )
         expect(item).toMatchObject({ id: 'alice', total_plays: 12, cleared_charts: 7, played_charts: 9 })
     })
 })

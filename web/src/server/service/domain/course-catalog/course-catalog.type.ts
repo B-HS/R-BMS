@@ -41,18 +41,6 @@ export type CatalogGroup = {
 
 export type CatalogDefinition = { source: CatalogSource; groups: CatalogGroup[] }
 
-/** The part of a table's definition a table's courses are registered from. `TableSourceDefinition` of the table refresh satisfies it. */
-export type TableCatalogSource = {
-    id: string
-    expectedName: string
-    sourceName: string
-    maker: string
-    pageUrl: string
-    headerUrl: string
-    keys: number
-    groupPosition: number
-}
-
 export type CatalogGroupPlan = {
     id: string
     inserted: number

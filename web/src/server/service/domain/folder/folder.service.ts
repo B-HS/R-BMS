@@ -105,7 +105,7 @@ export type FolderServiceDeps = {
     db: FolderServiceDb
     newId: (prefix: string) => string
     now: () => number
-    loadTableEntries: (tableId: string) => TableImportEntry[] | null
+    loadTableEntries: (tableId: string) => Promise<TableImportEntry[] | null>
     lookupTableText: (md5: string) => { title: string; artist: string } | null
 }
 
@@ -422,7 +422,7 @@ export const createFolderService = (deps: FolderServiceDeps) => {
 
         importFromTable: async (params: { userId: string; folderId: string; tableId: string; levels?: string[] }) =>
             withFolder<FolderItemChangeOutput>(params, async (folder) => {
-                const entries = deps.loadTableEntries(params.tableId)
+                const entries = await deps.loadTableEntries(params.tableId)
                 if (!entries) return fail({ reason: 'table_not_found' })
                 const wanted = params.levels && params.levels.length > 0 ? new Set(params.levels) : null
                 const incoming = entries

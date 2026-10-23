@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { createRemoteSnapshotCache, createTableLoader } from '@server/compose/table-snapshot'
 import type { AuthUser } from '@server/lib/auth-context'
 import { resetRateLimits } from '@server/lib/with-rate-limit'
 import { createTableSnapshotRoutes } from '@server/route/table-snapshot'
 import { getSnapshotTables } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { createTableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
+import { STELLA, createMemoryStore, remoteEntries, rowOf, stellaHeader } from '../support/remote-table-fixture'
 
 const ORIGIN = 'https://bms.hyuns.uk'
 const ALICE: AuthUser = { id: 'user-alice', loginId: 'alice', name: 'Alice', role: 'user' }
@@ -13,7 +15,7 @@ const createRoutes = () =>
     createTableSnapshotRoutes(() => ({
         authService: { resolveSessionUser: async (request) => (request.headers.get('x-session-user') === 'alice' ? ALICE : null) },
         tableSnapshotService: createTableSnapshotService({
-            loadTables: getSnapshotTables,
+            loadTables: async () => getSnapshotTables(),
             db: {
                 listBestByMd5: async ({ md5s }) => [
                     {
@@ -150,5 +152,53 @@ describe('FE 표 API', () => {
         resetRateLimits()
         const unknown = await routes.records(new Request(`${ORIGIN}/x`, { headers: { 'x-session-user': 'alice' } }), tableContext('nope'))
         expect(unknown.status).toBe(404)
+    })
+})
+
+describe('저장된 Stella 표의 표준 형식', () => {
+    const STELLA_SIZE = 600
+    const stored = rowOf(STELLA, stellaHeader(), remoteEntries(STELLA_SIZE))
+
+    const createStellaRoutes = () =>
+        createTableSnapshotRoutes(() => ({
+            authService: { resolveSessionUser: async () => null },
+            tableSnapshotService: createTableSnapshotService({
+                loadTables: createTableLoader(createRemoteSnapshotCache(createMemoryStore([stored]).store)),
+                db: { listBestByMd5: async () => [] },
+            }),
+        }))
+
+    test('header.json 은 우리 주소의 data_url 과 원본의 course 를 싣는다', async () => {
+        const response = await createStellaRoutes().standardHeader(new Request(`${ORIGIN}/tables/stella-st/header.json`), tableContext('stella-st'))
+        expect(response.status).toBe(200)
+        expect(response.headers.get('access-control-allow-origin')).toBe('*')
+        expect(await response.json()).toMatchObject({
+            name: 'Stella',
+            symbol: 'st',
+            data_url: `${ORIGIN}/tables/stella-st/data.json`,
+            course: stellaHeader().course,
+        })
+    })
+
+    test('data.json 은 받은 본문 그대로이고 ETag 가 같으면 304 이다', async () => {
+        const first = await createStellaRoutes().standardData(new Request(`${ORIGIN}/tables/stella-st/data.json`), tableContext('stella-st'))
+        expect(await first.text()).toBe(new TextDecoder().decode(stored.dataBytes))
+        const etag = first.headers.get('etag')
+        expect(etag).toBe(`"${stored.dataSha256.slice(0, 32)}"`)
+        const second = await createStellaRoutes().standardData(
+            new Request(`${ORIGIN}/tables/stella-st/data.json`, { headers: { 'if-none-match': etag ?? '' } }),
+            tableContext('stella-st'),
+        )
+        expect(second.status).toBe(304)
+    })
+
+    test('FE 목록과 상세에도 나가고 목록의 요약에 출처가 실린다', async () => {
+        const list = await createStellaRoutes().list(new Request(`${ORIGIN}/api/fe/tables`), undefined)
+        const body = await list.json()
+        expect(body.data.map((table: { id: string }) => table.id)).toEqual(['insane1', 'stella-st'])
+        expect(body.data[0].source).toBeNull()
+        expect(body.data[1].source).toMatchObject({ name: 'Stella', maker: 'stellabms.xyz' })
+        const detail = await createStellaRoutes().detail(new Request(`${ORIGIN}/api/fe/tables/stella-st`), tableContext('stella-st'))
+        expect((await detail.json()).data.table.entry_count).toBe(STELLA_SIZE)
     })
 })

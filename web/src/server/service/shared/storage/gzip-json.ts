@@ -9,3 +9,9 @@ export const gzipJsonText = async (text: string) => gzipAsync(Buffer.from(text, 
 
 /** The value a `gzipJsonText` blob holds, parsed but not validated: the reader narrows it with its own schema. */
 export const gunzipJson = async (bytes: Uint8Array): Promise<unknown> => JSON.parse((await gunzipAsync(bytes)).toString('utf8'))
+
+/** Raw bytes gzip-compressed for a binary column, kept exactly as they were received. */
+export const gzipBytes = async (bytes: Uint8Array) => gzipAsync(bytes)
+
+/** The bytes a `gzipBytes` blob holds. */
+export const gunzipBytes = async (bytes: Uint8Array): Promise<Uint8Array> => gunzipAsync(bytes)

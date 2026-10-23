@@ -4,6 +4,7 @@ import { createFeService, type ActivityRow, type FeServiceDb, type LampCountRow 
 
 const SHA = 'a'.repeat(64)
 const MD5 = 'b'.repeat(32)
+const noDisplayedDans = async () => new Map()
 
 const activityRow = (overrides: Partial<ActivityRow> = {}): ActivityRow => ({
     scoreId: 'sc_1',
@@ -52,6 +53,7 @@ describe('feService.playerRecent 는 플레이 기록을 페이지로 준다', (
     test('페이지와 개수를 DB 에 그대로 넘기고 전체 판 수를 함께 돌려준다', async () => {
         const seen: unknown[] = []
         const service = createFeService({
+            listDisplayedDans: noDisplayedDans,
             db: stubDb({
                 listPlayerRecent: async (params) => {
                     seen.push(params)
@@ -66,12 +68,16 @@ describe('feService.playerRecent 는 플레이 기록을 페이지로 준다', (
     })
 
     test('기록이 없는 범위는 빈 목록과 전체 판 수를 돌려준다', async () => {
-        const service = createFeService({ db: stubDb({ listPlayerRecent: async () => ({ rows: [], total: 3 }) }) })
+        const service = createFeService({
+            listDisplayedDans: noDisplayedDans,
+            db: stubDb({ listPlayerRecent: async () => ({ rows: [], total: 3 }) }),
+        })
         expect(await service.playerRecent({ userId: 'u_alice', page: 9, limit: 20 })).toEqual({ items: [], total: 3 })
     })
 
     test('표 제목으로 빈 제목을 채운다', async () => {
         const service = createFeService({
+            listDisplayedDans: noDisplayedDans,
             db: stubDb({ listPlayerRecent: async () => ({ rows: [activityRow()], total: 1 }) }),
             lookupTableText: (md5) => (md5 === MD5 ? { title: 'Table Title', artist: 'Table Artist' } : null),
         })
@@ -83,6 +89,7 @@ describe('feService.playerRecent 는 플레이 기록을 페이지로 준다', (
 describe('feService.playerStats 의 클리어 수', () => {
     test('ASSIST 와 L-ASSIST 도 클리어로 세고 NO PLAY 와 FAILED 만 뺀다', async () => {
         const service = createFeService({
+            listDisplayedDans: noDisplayedDans,
             db: stubDb({
                 countLampsByUser: async () => [
                     lampRow('NoPlay', 3),
@@ -102,6 +109,7 @@ describe('feService.playerStats 의 클리어 수', () => {
 
     test('LIGHT ASSIST 는 어시스트 등급마다 따로 세고 일반 칸과 SCRATCH AUTO 칸의 같은 램프는 합친다', async () => {
         const service = createFeService({
+            listDisplayedDans: noDisplayedDans,
             db: stubDb({
                 countLampsByUser: async () => [
                     lampRow('LightAssistEasy', 2, true, 3),
@@ -121,7 +129,7 @@ describe('feService.playerStats 의 클리어 수', () => {
     })
 
     test('FAILED 만 있으면 클리어는 0 이다', async () => {
-        const service = createFeService({ db: stubDb({ countLampsByUser: async () => [lampRow('Failed', 8)] }) })
+        const service = createFeService({ listDisplayedDans: noDisplayedDans, db: stubDb({ countLampsByUser: async () => [lampRow('Failed', 8)] }) })
         expect((await service.playerStats({ userId: 'u_alice', totalPlays: 8 })).cleared).toBe(0)
     })
 })

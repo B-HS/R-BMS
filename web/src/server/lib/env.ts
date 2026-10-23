@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 const DEFAULT_DB_PORT = 3306
 const DEFAULT_REPLAY_MAX_BYTES = 4 * 1024 * 1024
+export const CRON_SECRET_MIN_LENGTH = 16
 
 const envSchema = z.object({
     DATABASE_URL: z.string().min(1).optional(),
@@ -23,6 +24,7 @@ const envSchema = z.object({
     VERCEL_GIT_COMMIT_SHA: z.string().min(1).optional(),
     AI_CREDENTIAL_KEKS: z.string().min(1).optional(),
     AI_CREDENTIAL_KEK_CURRENT: z.string().min(1).optional(),
+    CRON_SECRET: z.string().min(CRON_SECRET_MIN_LENGTH).optional(),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 })
 

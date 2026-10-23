@@ -4,17 +4,40 @@ import insane1Source from '../../../../../data/tables/insane1/source.json'
 import { snapshotEntriesSchema, snapshotHeaderSchema, snapshotSourceSchema } from '@server/dto/table-snapshot'
 import type { SnapshotEntry, SnapshotHeader, SnapshotSource } from '@server/dto/table-snapshot'
 
+/** Where a table copied from another site came from and when this server last downloaded it. */
+export type TableAttribution = {
+    sourceName: string
+    maker: string
+    pageUrl: string
+    fetchedAt: number
+    checkedAt: number
+    dataSha256: string
+}
+
 export type SnapshotTable = {
     id: string
     header: SnapshotHeader
     entries: SnapshotEntry[]
-    rawEntries: unknown
+    /** The text of the standard `data.json`: the committed file for a bundled table, the downloaded bytes for a copied one. */
+    standardData: () => string
     source: SnapshotSource
+    /** Null for a bundled table, which carries no trace of the site it was taken from. */
+    attribution: TableAttribution | null
+    /** The `course` list of the header as its maker wrote it, or null when the table has none. */
+    course: unknown
 }
 
 const RAW_SNAPSHOTS: { id: string; header: unknown; entries: unknown; source: unknown }[] = [
     { id: 'insane1', header: insane1Header, entries: insane1Data, source: insane1Source },
 ]
+
+const serialiseOnce = (entries: unknown) => {
+    let text: string | null = null
+    return () => {
+        text ??= JSON.stringify(entries)
+        return text
+    }
+}
 
 let loaded: Map<string, SnapshotTable> | null = null
 
@@ -27,8 +50,10 @@ export const getSnapshotTables = () => {
                 id: raw.id,
                 header: snapshotHeaderSchema.parse(raw.header),
                 entries: snapshotEntriesSchema.parse(raw.entries),
-                rawEntries: raw.entries,
+                standardData: serialiseOnce(raw.entries),
                 source: snapshotSourceSchema.parse(raw.source),
+                attribution: null,
+                course: null,
             },
         ]),
     )

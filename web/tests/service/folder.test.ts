@@ -33,7 +33,7 @@ const createHarness = (options: { now?: () => number; charts?: Parameters<typeof
         db: memory.db,
         newId: (prefix) => `${prefix}${(++counter).toString(16).padStart(30, '0')}`,
         now: options.now ?? (() => NOW),
-        loadTableEntries: (tableId) => (tableId === 'insane1' ? TABLE_ENTRIES : null),
+        loadTableEntries: async (tableId) => (tableId === 'insane1' ? TABLE_ENTRIES : null),
         lookupTableText: (md5) => (md5 === md5Of(777) ? { title: 'From Table', artist: 'Table Maker' } : null),
     })
     const createFolder = async (name = 'main', userId = OWNER) => {

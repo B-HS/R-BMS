@@ -6,9 +6,10 @@ import type {
     TableEntryOutput,
     TableRecordOutput,
     TableRecordsOutput,
+    TableSourceOutput,
     TableSummaryOutput,
 } from '@server/dto/table-snapshot'
-import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
+import type { SnapshotTable, TableAttribution } from '@server/service/domain/table-snapshot/table-snapshot.data'
 
 export type BestRecordRow = {
     md5: string
@@ -28,7 +29,7 @@ export type TableSnapshotServiceDb = {
 
 export type TableSnapshotServiceDeps = {
     db: TableSnapshotServiceDb
-    loadTables: () => Map<string, SnapshotTable>
+    loadTables: () => Promise<Map<string, SnapshotTable>>
 }
 
 const TABLES_PATH = '/tables'
@@ -57,6 +58,18 @@ export const toTableEntry = (entry: SnapshotEntry): TableEntryOutput => ({
     name_diff: entry.name_diff,
 })
 
+const toSourceOutput = (attribution: TableAttribution | null): TableSourceOutput | null =>
+    attribution
+        ? {
+              name: attribution.sourceName,
+              maker: attribution.maker,
+              page_url: attribution.pageUrl,
+              fetched_at: attribution.fetchedAt,
+              checked_at: attribution.checkedAt,
+              data_sha256: attribution.dataSha256,
+          }
+        : null
+
 export const summariseTable = (table: SnapshotTable): TableSummaryOutput => {
     const counts = new Map<string, number>()
     for (const entry of table.entries) counts.set(entry.level, (counts.get(entry.level) ?? 0) + 1)
@@ -72,6 +85,7 @@ export const summariseTable = (table: SnapshotTable): TableSummaryOutput => {
         last_update: table.header.last_update,
         levels,
         standard_paths: standardPaths(table.id),
+        source: toSourceOutput(table.attribution),
     }
 }
 
@@ -96,6 +110,7 @@ export const toStandardHeader = (table: SnapshotTable, origin: string) => ({
     data_url: `${origin}${standardPaths(table.id).data}`,
     level_order: table.header.level_order,
     last_update: table.header.last_update,
+    ...(table.course === null ? {} : { course: table.course }),
 })
 
 const normaliseSearchText = (value: string) => value.normalize('NFKC').toLowerCase()
@@ -139,53 +154,41 @@ export const toTableRecord = (row: BestRecordRow): TableRecordOutput => ({
 })
 
 export const createTableSnapshotService = (deps: TableSnapshotServiceDeps) => {
-    const serialisedData = new Map<string, string>()
-
-    const list = () => [...deps.loadTables().values()].map(summariseTable)
-
-    const find = (tableId: string) => deps.loadTables().get(tableId) ?? null
+    const find = async (tableId: string) => (await deps.loadTables()).get(tableId) ?? null
 
     return {
-        list,
+        list: async () => [...(await deps.loadTables()).values()].map(summariseTable),
 
-        getDetail: (tableId: string) => {
-            const table = find(tableId)
+        getDetail: async (tableId: string) => {
+            const table = await find(tableId)
             return table ? groupTableByLevel(table) : null
         },
 
-        getStandardHeader: (tableId: string, origin: string) => {
-            const table = find(tableId)
+        getStandardHeader: async (tableId: string, origin: string) => {
+            const table = await find(tableId)
             return table ? toStandardHeader(table, origin) : null
         },
 
-        getStandardDataText: (tableId: string) => {
-            const table = find(tableId)
-            if (!table) return null
-            const cached = serialisedData.get(tableId)
-            if (cached) return cached
-            const text = JSON.stringify(table.rawEntries)
-            serialisedData.set(tableId, text)
-            return text
-        },
+        getStandardDataText: async (tableId: string) => (await find(tableId))?.standardData() ?? null,
 
-        getDataEtag: (tableId: string) => {
-            const table = find(tableId)
+        getDataEtag: async (tableId: string) => {
+            const table = await find(tableId)
             return table ? `"${table.source.snapshot.data_file_sha256.slice(0, ETAG_HASH_LENGTH)}"` : null
         },
 
-        searchEntries: (tableId: string, query: TableEntriesQuery) => {
-            const table = find(tableId)
+        searchEntries: async (tableId: string, query: TableEntriesQuery) => {
+            const table = await find(tableId)
             return table ? searchTableEntries(table, query) : null
         },
 
-        loadEntriesForImport: (tableId: string) => {
-            const table = find(tableId)
+        loadEntriesForImport: async (tableId: string) => {
+            const table = await find(tableId)
             if (!table) return null
             return table.entries.map((entry) => ({ md5: entry.md5, sha256: '', title: entry.title, artist: entry.artist, level: entry.level }))
         },
 
         getRecords: async (params: { tableId: string; userId: string }): Promise<TableRecordsOutput | null> => {
-            const table = find(params.tableId)
+            const table = await find(params.tableId)
             if (!table) return null
             const rows = await deps.db.listBestByMd5({ userId: params.userId, md5s: table.entries.map((entry) => entry.md5) })
             return { table_id: table.id, records: Object.fromEntries(rows.map((row) => [row.md5, toTableRecord(row)])) }

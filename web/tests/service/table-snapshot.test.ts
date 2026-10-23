@@ -24,7 +24,7 @@ const requireTable = () => {
 
 const createService = (rows: BestRecordRow[] = [], observe: (md5s: string[]) => void = () => undefined) =>
     createTableSnapshotService({
-        loadTables: getSnapshotTables,
+        loadTables: async () => getSnapshotTables(),
         db: {
             listBestByMd5: async ({ md5s }) => {
                 observe(md5s)
@@ -88,12 +88,12 @@ describe('요약과 레벨 묶음', () => {
         expect(detail.levels.reduce((sum, group) => sum + group.entries.length, 0)).toBe(ENTRY_COUNT)
     })
 
-    test('list 는 등록된 표마다 요약 하나이다', () => {
-        expect(
-            createService()
-                .list()
-                .map((summary) => summary.id),
-        ).toEqual([TABLE_ID])
+    test('list 는 등록된 표마다 요약 하나이다', async () => {
+        expect((await createService().list()).map((summary) => summary.id)).toEqual([TABLE_ID])
+    })
+
+    test('번들 표의 요약 source 는 null 이라 출처 흔적이 없다', () => {
+        expect(summariseTable(requireTable()).source).toBeNull()
     })
 })
 
@@ -108,8 +108,8 @@ describe('표준 표 형식', () => {
         expect(toStandardHeader(requireTable(), 'http://localhost:3102').data_url).toBe('http://localhost:3102/tables/insane1/data.json')
     })
 
-    test('data 본문은 표준 필드와 곡 다운로드 링크를 갖되 원본 표의 메모와 주소는 담지 않는다', () => {
-        const text = createService().getStandardDataText(TABLE_ID)
+    test('data 본문은 표준 필드와 곡 다운로드 링크를 갖되 원본 표의 메모와 주소는 담지 않는다', async () => {
+        const text = await createService().getStandardDataText(TABLE_ID)
         const parsed: Record<string, string>[] = JSON.parse(text ?? '[]')
         expect(parsed).toHaveLength(ENTRY_COUNT)
         expect(Object.keys(parsed[0]).sort()).toEqual(['artist', 'comment', 'level', 'lr2_bmsid', 'md5', 'name_diff', 'title', 'url', 'url_diff'])
@@ -119,50 +119,50 @@ describe('표준 표 형식', () => {
         expect(parsed.map((entry) => entry.md5)).toEqual(requireTable().entries.map((entry) => entry.md5))
     })
 
-    test('같은 본문을 두 번 만들지 않고 모르는 표는 null 이다', () => {
+    test('같은 본문을 두 번 만들지 않고 모르는 표는 null 이다', async () => {
         const service = createService()
-        expect(service.getStandardDataText(TABLE_ID)).toBe(service.getStandardDataText(TABLE_ID))
-        expect(service.getStandardDataText('nope')).toBeNull()
-        expect(service.getStandardHeader('nope', ORIGIN)).toBeNull()
-        expect(service.getDataEtag('nope')).toBeNull()
+        expect(await service.getStandardDataText(TABLE_ID)).toBe(await service.getStandardDataText(TABLE_ID))
+        expect(await service.getStandardDataText('nope')).toBeNull()
+        expect(await service.getStandardHeader('nope', ORIGIN)).toBeNull()
+        expect(await service.getDataEtag('nope')).toBeNull()
     })
 
-    test('ETag 는 정규화한 data 파일의 해시 앞 32자이다', () => {
-        const etag = createService().getDataEtag(TABLE_ID)
+    test('ETag 는 정규화한 data 파일의 해시 앞 32자이다', async () => {
+        const etag = await createService().getDataEtag(TABLE_ID)
         expect(etag).toBe(`"${requireTable().source.snapshot.data_file_sha256.slice(0, 32)}"`)
     })
 })
 
 describe('곡 검색', () => {
-    test('제목은 대소문자를 구분하지 않고 전각도 같은 글자로 본다', () => {
+    test('제목은 대소문자를 구분하지 않고 전각도 같은 글자로 본다', async () => {
         const service = createService()
-        const lower = service.searchEntries(TABLE_ID, query({ q: 'born [29another]' }))
-        const fullwidth = service.searchEntries(TABLE_ID, query({ q: 'ＢＯＲＮ [29ANOTHER]' }))
+        const lower = await service.searchEntries(TABLE_ID, query({ q: 'born [29another]' }))
+        const fullwidth = await service.searchEntries(TABLE_ID, query({ q: 'ＢＯＲＮ [29ANOTHER]' }))
         expect(lower?.items.map((entry) => entry.title)).toContain('Born [29Another]')
         expect(fullwidth?.total).toBe(lower?.total)
     })
 
-    test('아티스트로도 찾고 레벨로 좁힌다', () => {
+    test('아티스트로도 찾고 레벨로 좁힌다', async () => {
         const service = createService()
-        const byArtist = service.searchEntries(TABLE_ID, query({ q: 'ninja action team' }))
+        const byArtist = await service.searchEntries(TABLE_ID, query({ q: 'ninja action team' }))
         expect(byArtist?.items.some((entry) => entry.artist.includes('Ninja Action Team'))).toBe(true)
-        const byLevel = service.searchEntries(TABLE_ID, query({ level: '25' }))
+        const byLevel = await service.searchEntries(TABLE_ID, query({ level: '25' }))
         expect(byLevel?.total).toBe(2)
     })
 
-    test('md5 앞 6자 이상이면 그 곡을 찾는다', () => {
+    test('md5 앞 6자 이상이면 그 곡을 찾는다', async () => {
         const entry = requireTable().entries[10]
-        const found = createService().searchEntries(TABLE_ID, query({ q: entry.md5.slice(0, 8) }))
+        const found = await createService().searchEntries(TABLE_ID, query({ q: entry.md5.slice(0, 8) }))
         expect(found?.items.map((item) => item.md5)).toContain(entry.md5)
     })
 
-    test('쪽 나누기와 맞는 곡 없음', () => {
+    test('쪽 나누기와 맞는 곡 없음', async () => {
         const service = createService()
-        const page = service.searchEntries(TABLE_ID, query({ limit: '10', page: '2' }))
+        const page = await service.searchEntries(TABLE_ID, query({ limit: '10', page: '2' }))
         expect(page?.items).toHaveLength(10)
         expect(page?.total).toBe(ENTRY_COUNT)
-        expect(service.searchEntries(TABLE_ID, query({ q: 'zzzz-no-such-title-zzzz' }))).toEqual({ items: [], total: 0 })
-        expect(service.searchEntries('nope', query())).toBeNull()
+        expect(await service.searchEntries(TABLE_ID, query({ q: 'zzzz-no-such-title-zzzz' }))).toEqual({ items: [], total: 0 })
+        expect(await service.searchEntries('nope', query())).toBeNull()
     })
 
     test('searchMd5sInTables 는 개수 상한을 지킨다', () => {

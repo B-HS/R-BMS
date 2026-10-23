@@ -122,7 +122,7 @@ export const setupScoreFeatures = (options: ScoreSetupOptions = {}) => {
         db: folderMemory.db,
         newId,
         now,
-        loadTableEntries: () => null,
+        loadTableEntries: async () => null,
         lookupTableText: () => null,
     })
     const goalMemory = createMemoryGoalDb()

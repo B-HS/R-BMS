@@ -12,7 +12,6 @@ import { withApiToken } from '@server/lib/with-api-token'
 import { withAdmin } from '@server/lib/with-session'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { RATE_LIMIT, enforceUserRateLimit, getClientIp } from '@server/lib/with-rate-limit'
-import { resolveDanService } from '@server/route/dan'
 import type { AuthService } from '@server/service/domain/auth/auth.service'
 import { findCourseIntegrityFailure, type CourseService } from '@server/service/domain/course/course.service'
 import type { DanService } from '@server/service/domain/dan/dan.service'
@@ -39,13 +38,13 @@ const SUPPORTED_API_VERSION = 1
 export const resolvePathCourseHash = async (context: OptionalCourseContext) => (context?.params ? ((await context.params).courseHash ?? null) : null)
 
 const resolveCourseSubmitDeps = (): CourseSubmitRouteDeps => {
-    const { authService, courseService, scoreService, resolveBuildTrust } = compose()
+    const { authService, courseService, scoreService, resolveBuildTrust, danService } = compose()
     return {
         authService,
         courseService,
         scoreService,
         resolveBuildTrust,
-        danService: resolveDanService(),
+        danService,
         revalidate: { onCourseSubmit: revalidateOnCourseSubmit, onDanAward: revalidateOnDanAward },
     }
 }

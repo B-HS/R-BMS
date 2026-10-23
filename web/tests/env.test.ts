@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { assertProductionAuthEnv, findMissingProductionAuthEnv, parseEnv, readAiCredentialKeyRing, resolveDatabaseUrl } from '@server/lib/env'
+import {
+    CRON_SECRET_MIN_LENGTH,
+    assertProductionAuthEnv,
+    findMissingProductionAuthEnv,
+    parseEnv,
+    readAiCredentialKeyRing,
+    resolveDatabaseUrl,
+} from '@server/lib/env'
 
 describe('parseEnv', () => {
     test('필수 값이 없어도 기본값으로 파싱한다', () => {
@@ -21,6 +28,16 @@ describe('parseEnv', () => {
 
     test('REPLAY_MAX_BYTES 가 음수면 실패한다', () => {
         expect(() => parseEnv({ REPLAY_MAX_BYTES: '-1' })).toThrow()
+    })
+
+    test('CRON_SECRET 은 16자 미만이면 환경 파싱이 실패한다', () => {
+        expect(() => parseEnv({ CRON_SECRET: 'x'.repeat(CRON_SECRET_MIN_LENGTH - 1) })).toThrow()
+        expect(parseEnv({ CRON_SECRET: 'x'.repeat(CRON_SECRET_MIN_LENGTH) }).CRON_SECRET).toHaveLength(CRON_SECRET_MIN_LENGTH)
+    })
+
+    test('CRON_SECRET 은 없어도 된다', () => {
+        expect(parseEnv({}).CRON_SECRET).toBeUndefined()
+        expect(parseEnv({ CRON_SECRET: '' }).CRON_SECRET).toBeUndefined()
     })
 })
 

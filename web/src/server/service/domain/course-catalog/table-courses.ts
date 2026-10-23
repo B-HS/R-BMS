@@ -3,8 +3,9 @@ import { columnTextSchema, isMd5Hash, isSha256Hash } from '@server/dto/common'
 import { CATALOG_NAME_MAX_LENGTH } from '@server/dto/course-catalog'
 import { canonicalConstraints, lntypeOfConstraints } from '@server/service/domain/course-catalog/constraint-tokens'
 import { asciiLowercase, courseHashOf } from '@server/service/domain/course-catalog/course-hash'
-import type { CatalogChart, CatalogCourse, CatalogDefinition, TableCatalogSource } from '@server/service/domain/course-catalog/course-catalog.type'
+import type { CatalogChart, CatalogCourse, CatalogDefinition } from '@server/service/domain/course-catalog/course-catalog.type'
 import { danOfCourse } from '@server/service/domain/course-catalog/dan-of-course'
+import type { TableSourceDefinition } from '@server/service/domain/table-refresh/table-sources'
 
 export const DEFAULT_COURSE_NAME = 'No Course Title'
 
@@ -105,7 +106,7 @@ const readCourse = (entry: unknown, titleOfMd5: ReadonlyMap<string, string>): Re
  * of the table entry with the same MD5. A header without a `course` field lists no course.
  */
 export const tableCatalog = (params: {
-    table: TableCatalogSource
+    table: TableSourceDefinition
     headerCourse: unknown
     entries: readonly { md5: string; title: string }[]
     headerSha256: string

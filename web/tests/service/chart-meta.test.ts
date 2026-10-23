@@ -181,7 +181,12 @@ describe('표 제목으로 읽을 때 보강', () => {
             listTokens: async () => [],
             deleteToken: async () => false,
         }
-        const service = createFeService({ db, lookupTableText: lookup, searchTableMd5s: (query) => (query === 'table' ? [MD5] : []) })
+        const service = createFeService({
+            db,
+            listDisplayedDans: async () => new Map(),
+            lookupTableText: lookup,
+            searchTableMd5s: (query) => (query === 'table' ? [MD5] : []),
+        })
         const withQuery = await service.searchCharts({ q: 'table', sort: 'title', page: 1, limit: 50 })
         expect(seen[0]).toEqual([MD5])
         expect(withQuery.items[0]).toMatchObject({ title: 'Table Title' })

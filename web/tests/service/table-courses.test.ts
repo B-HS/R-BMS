@@ -1,15 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { DEFAULT_COURSE_NAME, tableCatalog } from '@server/service/domain/course-catalog/table-courses'
-import type { TableCatalogSource } from '@server/service/domain/course-catalog/course-catalog.type'
+import type { TableSourceDefinition } from '@server/service/domain/table-refresh/table-sources'
 
-const STELLA_TABLE: TableCatalogSource = {
+const STELLA_TABLE: TableSourceDefinition = {
     id: 'stella-st',
     expectedName: 'Stella',
+    symbol: 'st',
     sourceName: 'Stella',
     maker: 'Stella',
     pageUrl: 'https://stellabms.xyz/st/table.html',
     headerUrl: 'https://stellabms.xyz/st/header.json',
+    allowedHost: 'stellabms.xyz',
     keys: 7,
     groupPosition: 3,
 }
@@ -25,7 +27,7 @@ const md5Of = (seed: string) => createHash('md5').update(seed).digest('hex')
 const sha256Of = (seed: string) => createHash('sha256').update(seed).digest('hex')
 const md5s = (...seeds: string[]) => seeds.map(md5Of)
 
-const readTable = (headerCourse: unknown, entries: readonly { md5: string; title: string }[] = [], table: TableCatalogSource = STELLA_TABLE) =>
+const readTable = (headerCourse: unknown, entries: readonly { md5: string; title: string }[] = [], table: TableSourceDefinition = STELLA_TABLE) =>
     tableCatalog({ table, headerCourse, entries, headerSha256: HEADER_SHA256, dataSha256: DATA_SHA256, dataUrl: DATA_URL, fetchedAt: FETCHED_AT })
 
 const coursesOf = (result: ReturnType<typeof readTable>) => result.definition.groups[0].courses
@@ -230,8 +232,8 @@ describe('tableCatalog — 표 header 의 course 읽기', () => {
         ])
     })
 
-    test('단위 코스 묶음이 아닌 표의 코스는 단위를 주지 않는다', () => {
-        const courses = coursesOf(readTable([stCourse(0)], [], { ...STELLA_TABLE, id: 'some-other-table' }))
+    test('Stella 단위 이름이라도 다른 표(Satellite)의 묶음에 있으면 단위를 주지 않는다', () => {
+        const courses = coursesOf(readTable([stCourse(0)], [], { ...STELLA_TABLE, id: 'stella-sl' }))
         expect(courses[0].dan).toBeNull()
     })
 

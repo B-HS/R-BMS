@@ -42,10 +42,12 @@ const stella = (levels: number[]) =>
         table: {
             id: STELLA_GROUP,
             expectedName: 'Stella',
+            symbol: 'st',
             sourceName: 'Stella',
             maker: 'Stella',
             pageUrl: 'https://example.test/st',
             headerUrl: 'https://example.test/st/header.json',
+            allowedHost: 'example.test',
             keys: 7,
             groupPosition: 2,
         },

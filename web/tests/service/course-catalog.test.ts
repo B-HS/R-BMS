@@ -84,10 +84,12 @@ const stella = (levels: number[]): CatalogDefinition =>
         table: {
             id: 'stella-st',
             expectedName: 'Stella',
+            symbol: 'st',
             sourceName: 'Stella',
             maker: 'Stella',
             pageUrl: 'https://example.test/st',
             headerUrl: 'https://example.test/st/header.json',
+            allowedHost: 'example.test',
             keys: 7,
             groupPosition: 2,
         },

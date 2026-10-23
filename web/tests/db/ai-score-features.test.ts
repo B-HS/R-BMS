@@ -159,7 +159,7 @@ describe.skipIf(!hasDatabase)('점수 기반 AI 기능 DB (임시 MySQL)', () =>
         const results = { findLatest: async () => null }
         const shared = { runner: unusedRunner, results }
         const folders = composeFolder(db, {
-            tableSnapshotService: createTableSnapshotService({ db: { listBestByMd5: async () => [] }, loadTables: () => new Map() }),
+            tableSnapshotService: createTableSnapshotService({ db: { listBestByMd5: async () => [] }, loadTables: async () => new Map() }),
             lookupTableText: () => null,
         }).folderService
         const recommend = createAiRecommendService({ ...tableDeps, ...shared })

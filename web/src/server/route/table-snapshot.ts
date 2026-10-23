@@ -51,17 +51,17 @@ export const createTableSnapshotRoutes = (resolveDeps: () => TableSnapshotRouteD
         )
 
     return {
-        list: withPublicRead<unknown>(async (_request, _context, deps) => publicJson(deps.tableSnapshotService.list())),
+        list: withPublicRead<unknown>(async (_request, _context, deps) => publicJson(await deps.tableSnapshotService.list())),
 
         detail: withPublicRead<TableContext>(async (_request, context, deps) => {
             const tableId = await parseTableId(context)
-            return publicJson(requireTable(deps.tableSnapshotService.getDetail(tableId), tableId))
+            return publicJson(requireTable(await deps.tableSnapshotService.getDetail(tableId), tableId))
         }),
 
         entries: withPublicRead<TableContext>(async (request, context, deps) => {
             const tableId = await parseTableId(context)
             const query = parseSearchParams(request, tableEntriesQuerySchema)
-            const result = requireTable(deps.tableSnapshotService.searchEntries(tableId, query), tableId)
+            const result = requireTable(await deps.tableSnapshotService.searchEntries(tableId, query), tableId)
             return NextResponse.json(
                 {
                     ...successResponse(result.items),
@@ -90,15 +90,15 @@ export const createTableSnapshotRoutes = (resolveDeps: () => TableSnapshotRouteD
 
         standardHeader: withErrorHandling(async (request: Request, context: TableContext) => {
             const tableId = await parseTableId(context)
-            const header = requireTable(resolveDeps().tableSnapshotService.getStandardHeader(tableId, new URL(request.url).origin), tableId)
+            const header = requireTable(await resolveDeps().tableSnapshotService.getStandardHeader(tableId, new URL(request.url).origin), tableId)
             return new NextResponse(JSON.stringify(header), { headers: STANDARD_FORMAT_HEADERS })
         }),
 
         standardData: withErrorHandling(async (request: Request, context: TableContext) => {
             const tableId = await parseTableId(context)
             const service = resolveDeps().tableSnapshotService
-            const text = requireTable(service.getStandardDataText(tableId), tableId)
-            const etag = service.getDataEtag(tableId)
+            const text = requireTable(await service.getStandardDataText(tableId), tableId)
+            const etag = await service.getDataEtag(tableId)
             const headers = etag ? { ...STANDARD_FORMAT_HEADERS, ETag: etag } : STANDARD_FORMAT_HEADERS
             if (etag && request.headers.get('if-none-match') === etag) return new NextResponse(null, { status: NOT_MODIFIED_STATUS, headers })
             return new NextResponse(text, { headers })

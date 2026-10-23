@@ -4,13 +4,13 @@ import { assistGradeSchema, clearLampSchema, isMd5Hash } from '@server/dto/commo
 const MAX_SEARCH_LIMIT = 100
 const DEFAULT_SEARCH_LIMIT = 50
 const MAX_SEARCH_TEXT = 100
-const MAX_LEVEL_TEXT = 32
+export const MAX_LEVEL_TEXT = 32
 
 export const snapshotHeaderSchema = z.object({
     name: z.string().min(1),
     symbol: z.string().default(''),
     data_url: z.string().min(1),
-    level_order: z.array(z.string()),
+    level_order: z.array(z.string()).default([]),
     last_update: z.string().default(''),
 })
 
@@ -58,6 +58,15 @@ export const tableEntryOutputSchema = z.object({
     name_diff: z.string(),
 })
 
+export const tableSourceOutputSchema = z.object({
+    name: z.string(),
+    maker: z.string(),
+    page_url: z.string(),
+    fetched_at: z.number().int(),
+    checked_at: z.number().int(),
+    data_sha256: z.string(),
+})
+
 export const tableSummaryOutputSchema = z.object({
     id: z.string(),
     name: z.string(),
@@ -67,6 +76,7 @@ export const tableSummaryOutputSchema = z.object({
     last_update: z.string(),
     levels: z.array(z.object({ level: z.string(), count: z.number().int() })),
     standard_paths: z.object({ page: z.string(), header: z.string(), data: z.string() }),
+    source: tableSourceOutputSchema.nullable(),
 })
 
 export const tableDetailOutputSchema = z.object({
@@ -90,6 +100,7 @@ export const tableRecordsOutputSchema = z.object({
     records: z.record(z.string(), tableRecordOutputSchema),
 })
 
+export type TableSourceOutput = z.infer<typeof tableSourceOutputSchema>
 export type TableEntryOutput = z.infer<typeof tableEntryOutputSchema>
 export type TableSummaryOutput = z.infer<typeof tableSummaryOutputSchema>
 export type TableDetailOutput = z.infer<typeof tableDetailOutputSchema>
