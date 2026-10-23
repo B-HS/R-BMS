@@ -98,6 +98,7 @@ use mlua::{FromLuaMulti, IntoLuaMulti, Lua, Scope, Table, Value, Variadic};
 
 use super::{LuaFnKind, LuaMode, LuaShared, coerce, package};
 use crate::dst::SkinOffset;
+use crate::property::extension::implements;
 use crate::property::generated::OFFSET_MAX;
 use crate::property::{AudioCommand, NameSpace, ScoreSlot, SkinHost, VolumeBus, id_of_name, reference_implements, reference_writes};
 use crate::timer::{TIMER_OFF, TimerId, timer_id};
@@ -852,20 +853,21 @@ impl Binding<'_> {
         self.state.property_id(NameSpace::Boolean, value).and_then(|id| self.host.boolean(id)).unwrap_or(false)
     }
 
-    /// `number`: the host's value, sentinel included, for a property the reference has, and zero for
-    /// one it does not.
+    /// `number`: the host's value, sentinel included, for a property the reference has or one of this
+    /// player's own, and zero for an id that is neither.
     fn number(&self, value: &Value) -> i32 {
         match self.state.property_id(NameSpace::Integer, value) {
-            Some(id) if reference_implements(NameSpace::Integer, id) => self.host.integer(id),
+            Some(id) if implements(NameSpace::Integer, id) => self.host.integer(id),
             _ => NUMBER_WITHOUT_PROPERTY,
         }
     }
 
-    /// `float_number`: the host's value, sentinel included, for a property the reference has in
-    /// either of the two spaces a float is looked up in, and zero for one it does not.
+    /// `float_number`: the host's value, sentinel included, for a property the reference has or one
+    /// of this player's own in either of the two spaces a float is looked up in, and zero for an id
+    /// that is neither.
     fn float_number(&self, value: &Value) -> f32 {
         match self.state.property_id(NameSpace::Float, value) {
-            Some(id) if reference_implements(NameSpace::Float, id) || reference_implements(NameSpace::Rate, id) => self.host.float(id),
+            Some(id) if implements(NameSpace::Float, id) || implements(NameSpace::Rate, id) => self.host.float(id),
             _ => FLOAT_WITHOUT_PROPERTY,
         }
     }
@@ -1113,6 +1115,32 @@ mod tests {
         assert!(!is_property_name(LuaFnKind::TextWriter, "title"));
         assert!(!is_property_name(LuaFnKind::Timer, "play"), "a timer has no names");
         assert!(!is_property_name(LuaFnKind::Boolean, "main_state.option(33)"));
+    }
+
+    #[test]
+    fn a_number_or_a_float_of_this_player_s_band_is_the_host_s_and_one_past_the_band_is_zero() {
+        use crate::lua::{SkinLua, SkinLuaConfig};
+        use crate::property::extension::{EXTENSION_VALUE_FIRST, EXTENSION_VALUE_LAST};
+        use crate::property::{INTEGER_ABSENT, MapHost};
+
+        const NUMBER: i32 = 150;
+        const FLOAT: f32 = 150.5;
+        const RATE: f32 = 0.5;
+        const PAST_THE_BAND_NUMBER: i32 = 99;
+        const PAST_THE_BAND_FLOAT: f32 = 9.5;
+        let (first, last, past) = (EXTENSION_VALUE_FIRST, EXTENSION_VALUE_LAST, EXTENSION_VALUE_LAST + 1);
+        let runtime = SkinLua::new(SkinLuaConfig::new(Path::new(env!("CARGO_MANIFEST_DIR")))).expect("the runtime builds");
+        runtime.lua().load("ms = require('main_state')").exec().expect("the module is published");
+        let mut host = MapHost::new();
+        host.integers.extend([(first, NUMBER), (past, PAST_THE_BAND_NUMBER)]);
+        host.floats.extend([(first, FLOAT), (past, PAST_THE_BAND_FLOAT)]);
+        host.rates.insert(last, RATE);
+        let source = format!(
+            "return ms.number({first}), ms.number({last}), ms.number({past}), ms.float_number({first}), ms.float_number({last}), ms.float_number({past})"
+        );
+        let read: (i32, i32, i32, f32, f32, f32) =
+            runtime.with_host(&host, || runtime.lua().load(&source).eval()).expect("the host binds").expect("the chunk runs");
+        assert_eq!(read, (NUMBER, INTEGER_ABSENT, 0, FLOAT, RATE, 0.0), "a float of the band falls back to its rate as any float does");
     }
 
     #[test]

@@ -11,7 +11,7 @@
 use rbms_skin::dst::{Resolved, SkinRect};
 use rbms_skin::loader::{Filtering, filtering_for, stretch_rect};
 use rbms_skin::model::PropertyRef;
-use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT, NameSpace, reference_implements};
+use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT, NameSpace, extension, reference_implements};
 
 use super::object::{
     Body, DigitLayout, FloatBody, GraphBody, ImageBody, MovieBody, NumberBody, SkinObject, SliderBody, Sprite, ValueSource, fraction_glyphs, integer_glyphs,
@@ -306,10 +306,11 @@ impl ImageSelect {
     /// A `value` written as an id is a number, not an image index, because the reference resolves
     /// that field through its whole-number lookup. One the reference has no number under resolves to
     /// nothing there, which leaves the set reading its `ref` as though no `value` had been written;
-    /// so does source the loader never compiled.
+    /// so does source the loader never compiled. A number of this player's own band is read as the
+    /// reference reads its own ([`extension::implements`]).
     pub(crate) fn of_set(value: Option<&PropertyRef>, reference: i32) -> ImageSelect {
         match value {
-            Some(PropertyRef::Id(id)) if !reference_implements(NameSpace::Integer, *id) => ImageSelect::of_index(reference),
+            Some(PropertyRef::Id(id)) if !extension::implements(NameSpace::Integer, *id) => ImageSelect::of_index(reference),
             Some(PropertyRef::Expr(_)) | None => ImageSelect::of_index(reference),
             Some(property) => ImageSelect::Value(ValueSource::new(Some(property), 0)),
         }

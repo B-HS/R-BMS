@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rbms_skin::dst::SkinRect;
 use rbms_skin::model::TextDef;
-use rbms_skin::property::{NameSpace, reference_implements};
+use rbms_skin::property::{NameSpace, extension};
 
 use super::SkinFrame;
 use super::draw::Placement;
@@ -184,11 +184,12 @@ pub(crate) struct TextBody {
 impl TextBody {
     /// Whether the document names a property the reference would read the text from
     /// (`JsonSkinObjectLoader.createText`): any function or name it handed over, or an id the
-    /// reference has a string under. An id it has none under is no property at all.
+    /// reference has a string under. An id it has none under is no property at all, unless it is one
+    /// of this player's own ([`extension::implements`]).
     fn reads_property(&self) -> bool {
         match &self.value {
             ValueSource::None => false,
-            ValueSource::Id(id) => reference_implements(NameSpace::Text, *id),
+            ValueSource::Id(id) => extension::implements(NameSpace::Text, *id),
             ValueSource::Function(_) | ValueSource::Name(_) => true,
         }
     }

@@ -13,8 +13,10 @@
 //!
 //! [`names`] holds the other way a skin addresses a property -- by the reference's name for it --
 //! together with the reference's own list of the ids it implements and of the options it settles
-//! once per screen.
+//! once per screen. [`extension`] holds the bands of ids this player answers beyond the reference's,
+//! and the check a gate asks of an id with those bands let through.
 
+pub mod extension;
 pub mod generated;
 pub mod host;
 pub mod names;

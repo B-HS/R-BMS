@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use rbms_skin::dst::DestinationTrack;
 use rbms_skin::loader::{LoadedSkin, NamedTrack, StretchKind};
 use rbms_skin::model::{GraphDef, ImageDef, PropertyRef, SkinDef, ValueDef};
-use rbms_skin::property::{NameSpace, reference_implements};
+use rbms_skin::property::{NameSpace, extension};
 
 use super::bars::{BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_SLOTS, BAR_TEXTS, BAR_TROPHIES, LAMP_KINDS, RANK_KINDS};
 use super::{BarArea, BarPart, GraphPart, ImagePart, Kept, LevelPart, PADDING_ALTERNATE_ZERO, Slot, SongListBody, TextPart};
@@ -165,7 +165,7 @@ impl Builder<'_, '_> {
             zero_padding: if per_set > DIGITS { PADDING_ALTERNATE_ZERO } else { 0 },
             space: def.space as f32,
             align: def.align,
-            own_value: reference_implements(NameSpace::Integer, def.reference).then_some(def.reference),
+            own_value: extension::implements(NameSpace::Integer, def.reference).then_some(def.reference),
         })
     }
 

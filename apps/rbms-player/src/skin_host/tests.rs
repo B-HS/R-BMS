@@ -14,6 +14,10 @@ use rbms_skin::property::{
 use rbms_skin::timer::{TIMER_OFF, TimerId, TimerState};
 
 use super::chart::{BpmRange, ChartContents, ChartMeta, ChartState, Density, NoteCounts};
+use super::extension::{
+    RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST, RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST, RBMS_NUMBER_NOTES_RADAR_FIRST,
+    RBMS_NUMBER_NOTES_RADAR_LAST, RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST,
+};
 use super::loading::{LoadingScreen, LoadingState};
 use super::system::{CourseStage, SystemState, Volumes};
 use super::{
@@ -112,6 +116,22 @@ const FADEOUT_TIMER: i32 = 2;
 /// The play-time numbers, which the scores a frame borrows do not hold.
 const UNANSWERED_PLAY_TIME: std::ops::RangeInclusive<i32> = NUMBER_TOTALPLAYTIME_HOUR..=NUMBER_TOTALPLAYTIME_SECOND;
 
+/// The runs of this player's own ids that are routed to the chart and the system clusters and that
+/// nothing fills yet, so a filled cluster still does not answer them. Whoever fills one takes its
+/// run off this list.
+const NOT_YET_FILLED: [(IdSpace, i32, i32); 5] = [
+    (IdSpace::Integer, RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST),
+    (IdSpace::Integer, RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST),
+    (IdSpace::Float, RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST),
+    (IdSpace::Rate, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST),
+    (IdSpace::Boolean, RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST),
+];
+
+/// Whether `id` of `space` is one of [`NOT_YET_FILLED`].
+fn not_yet_filled(space: IdSpace, id: i32) -> bool {
+    NOT_YET_FILLED.iter().any(|(run, first, last)| *run == space && (*first..=*last).contains(&id))
+}
+
 /// A chart the player knows everything about.
 fn known_chart() -> ChartMeta<'static> {
     ChartMeta {
@@ -190,7 +210,8 @@ fn every_id_routed_to_a_filled_cluster_is_answered_by_it() {
             _ => continue,
         };
         for id in route.first..=route.last {
-            let unanswered_on_purpose = route.cluster == Cluster::System && route.space == IdSpace::Integer && UNANSWERED_PLAY_TIME.contains(&id);
+            let unanswered_on_purpose =
+                (route.cluster == Cluster::System && route.space == IdSpace::Integer && UNANSWERED_PLAY_TIME.contains(&id)) || not_yet_filled(route.space, id);
             assert_ne!(
                 is_answered(cluster, route.space, id),
                 unanswered_on_purpose,
@@ -454,6 +475,113 @@ fn this_players_own_events_are_routed_to_the_settings() {
         assert_eq!(event_clusters(id).collect::<Vec<_>>(), [Cluster::Options], "event {id}");
     }
     assert_eq!(event_clusters(EXTENSION_EVENT_LAST).count(), 0);
+}
+
+/// The events of this player's own that the song browser runs reach it, the ones kept for the replay
+/// patterns too, and an id between two runs reaches nobody.
+#[test]
+fn this_players_own_browser_events_are_routed_to_the_browser() {
+    use super::extension::{
+        RBMS_EVENT_RANKING_MODE, RBMS_EVENT_REPLAY_PATTERN_FIRST, RBMS_EVENT_REPLAY_PATTERN_LAST, RBMS_EVENT_SIBLING_CHART_FIRST, RBMS_EVENT_SIBLING_CHART_LAST,
+    };
+    let runs = [
+        (RBMS_EVENT_RANKING_MODE, RBMS_EVENT_RANKING_MODE),
+        (RBMS_EVENT_REPLAY_PATTERN_FIRST, RBMS_EVENT_REPLAY_PATTERN_LAST),
+        (RBMS_EVENT_SIBLING_CHART_FIRST, RBMS_EVENT_SIBLING_CHART_LAST),
+    ];
+    for id in runs.iter().flat_map(|(first, last)| *first..=*last) {
+        assert_eq!(event_clusters(id).collect::<Vec<_>>(), [Cluster::Select], "event {id}");
+    }
+    for nothing in [RBMS_EVENT_REPLAY_PATTERN_LAST + 1, RBMS_EVENT_SIBLING_CHART_FIRST - 1, RBMS_EVENT_SIBLING_CHART_LAST + 1] {
+        assert_eq!(event_clusters(nothing).count(), 0, "event {nothing} names nothing");
+    }
+}
+
+/// Every value of this player's own is asked of the cluster that will have it first, and reads as
+/// the absent value of its kind from a host whose clusters know nothing.
+#[test]
+fn this_players_own_values_are_routed_and_read_absent_until_a_cluster_knows_them() {
+    use super::extension::*;
+    let runs = [
+        (IdSpace::Integer, RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST, Cluster::Chart),
+        (IdSpace::Integer, RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST, Cluster::Chart),
+        (IdSpace::Integer, RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_NUMBER_SIBLING_CHART_LEVEL_LAST, Cluster::Select),
+        (IdSpace::Integer, RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_FOLDER_LAMP_COUNT_LAST, Cluster::Select),
+        (IdSpace::Integer, RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_CHART_COUNT, Cluster::Select),
+        (IdSpace::Integer, RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAST, Cluster::Select),
+        (IdSpace::Float, RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST, Cluster::Chart),
+        (IdSpace::Rate, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST, Cluster::Chart),
+        (IdSpace::Rate, RBMS_RATE_FOLDER_LAMP_FIRST, RBMS_RATE_FOLDER_LAMP_LAST, Cluster::Select),
+        (IdSpace::Text, RBMS_TEXT_MY_RECORD_DATE_FIRST, RBMS_TEXT_MY_RECORD_DATE_LAST, Cluster::Select),
+        (IdSpace::Boolean, RBMS_OPTION_RANKING_MODE_ON, RBMS_OPTION_RANKING_MODE_ON, Cluster::Select),
+        (IdSpace::Boolean, RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_OPTION_SIBLING_CHART_LAST, Cluster::Select),
+        (IdSpace::Boolean, RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST, Cluster::System),
+    ];
+    let timers = TimerState::new();
+    let host = ScreenHost::new(NOW_US, &timers);
+    for (space, first, last, cluster) in runs {
+        for id in first..=last {
+            assert_eq!(clusters_of(space, id).next(), Some(cluster), "{space:?} {id}");
+            match space {
+                IdSpace::Integer => assert_eq!(host.integer(id), INTEGER_ABSENT, "number {id}"),
+                IdSpace::Float => assert_eq!(host.float(id), FLOAT_ABSENT, "float {id}"),
+                IdSpace::Rate => assert_eq!((host.rate(id), host.float(id)), (None, FLOAT_ABSENT), "rate {id}"),
+                IdSpace::Text => assert_eq!(host.text(id), Cow::Borrowed(TEXT_ABSENT), "text {id}"),
+                IdSpace::Boolean => assert_eq!((host.boolean(id), host.boolean(-id)), (None, None), "option {id}"),
+                IdSpace::ImageIndex | IdSpace::Offset => unreachable!("no id of this player's is kept in {space:?}"),
+            }
+        }
+    }
+}
+
+/// The default skin names this player's own ids in `props.lua` by the numbers this player answers.
+#[test]
+fn the_default_skin_names_this_players_own_ids_by_the_numbers_answered() {
+    use super::extension::*;
+    let props = crate::assets::default_pack::DEFAULT_PACK_FILES
+        .iter()
+        .find(|file| file.name == "lua/props.lua")
+        .map(|file| std::str::from_utf8(file.bytes).expect("the script is text"))
+        .expect("the pack ships its property table");
+    let named: [(&str, &str, i32); 31] = [
+        ("extension", "SCRATCH_AUTO_ON", RBMS_OPTION_SCRATCH_AUTO_ON),
+        ("extension", "KEEP_GREEN_NUMBER_ON", RBMS_OPTION_KEEP_GREEN_NUMBER_ON),
+        ("extension", "LANE_COVER_ON", RBMS_OPTION_LANE_COVER_ON),
+        ("extension", "LIFT_ON", RBMS_OPTION_LIFT_ON),
+        ("extension", "HIDDEN_ON", RBMS_OPTION_HIDDEN_ON),
+        ("extension", "RANKING_MODE_ON", RBMS_OPTION_RANKING_MODE_ON),
+        ("extension", "SELECTED_BEST_ASSIST_GRADE_FIRST", RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST),
+        ("extension", "SIBLING_CHART_FIRST", RBMS_OPTION_SIBLING_CHART_FIRST),
+        ("extension", "RESULT_ASSIST_GRADE_FIRST", RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST),
+        ("extension", "RESULT_PREVIOUS_ASSIST_GRADE_FIRST", RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST),
+        ("extension", "UNREACHABLE_KEY_FIRST", RBMS_OPTION_UNREACHABLE_KEY_FIRST),
+        ("extension", "LANGUAGE_FIRST", RBMS_OPTION_LANGUAGE_FIRST),
+        ("extension_event", "SCRATCH_AUTO", RBMS_EVENT_SCRATCH_AUTO),
+        ("extension_event", "KEEP_GREEN_NUMBER", RBMS_EVENT_KEEP_GREEN_NUMBER),
+        ("extension_event", "RANKING_MODE", RBMS_EVENT_RANKING_MODE),
+        ("extension_event", "REPLAY_PATTERN_FIRST", RBMS_EVENT_REPLAY_PATTERN_FIRST),
+        ("extension_event", "SIBLING_CHART_FIRST", RBMS_EVENT_SIBLING_CHART_FIRST),
+        ("extension_number", "LANE_NOTES_FIRST", RBMS_NUMBER_LANE_NOTES_FIRST),
+        ("extension_number", "NOTES_RADAR_FIRST", RBMS_NUMBER_NOTES_RADAR_FIRST),
+        ("extension_number", "SIBLING_CHART_LEVEL_FIRST", RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST),
+        ("extension_number", "FOLDER_LAMP_COUNT_FIRST", RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST),
+        ("extension_number", "FOLDER_CHART_COUNT", RBMS_NUMBER_FOLDER_CHART_COUNT),
+        ("extension_number", "MY_RECORD_EX_FIRST", RBMS_NUMBER_MY_RECORD_EX_FIRST),
+        ("extension_number", "MY_RECORD_LAMP_FIRST", RBMS_NUMBER_MY_RECORD_LAMP_FIRST),
+        ("extension_number", "MY_RECORD_MISS_COUNT_FIRST", RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST),
+        ("extension_number", "MY_RECORD_DJ_LEVEL_FIRST", RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST),
+        ("extension_float", "NOTES_RADAR_FIRST", RBMS_FLOAT_NOTES_RADAR_FIRST),
+        ("extension_rate", "LANE_NOTES_FIRST", RBMS_RATE_LANE_NOTES_FIRST),
+        ("extension_rate", "FOLDER_LAMP_FIRST", RBMS_RATE_FOLDER_LAMP_FIRST),
+        ("extension_text", "MY_RECORD_DATE_FIRST", RBMS_TEXT_MY_RECORD_DATE_FIRST),
+        ("extension_image", "NOTES_RADAR", -RBMS_IMAGE_NOTES_RADAR),
+    ];
+    for (table, name, id) in named {
+        let opening = format!("\nprops.{table} = {{\n");
+        let start = props.find(&opening).unwrap_or_else(|| panic!("props.lua has no table props.{table}")) + opening.len();
+        let body = &props[start..start + props[start..].find("\n}").expect("the table is closed")];
+        assert!(body.lines().any(|line| line.trim() == format!("{name} = {id},")), "props.{table}.{name} is not {id}");
+    }
 }
 
 /// This player's own options are asked of the cluster that has them first.
