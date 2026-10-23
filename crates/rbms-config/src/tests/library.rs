@@ -13,6 +13,62 @@ fn the_folder_list_defaults_to_empty_and_keeps_its_order() {
 }
 
 #[test]
+fn the_download_folder_is_scanned_after_the_song_folders() {
+    let mut library = LibraryOptions::default();
+    assert!(library.scan_roots().is_empty(), "no song folder and no download folder scans nothing");
+    library.folders = vec!["/a".into(), "/b".into()];
+    assert_eq!(library.scan_roots(), vec!["/a".to_string(), "/b".into()], "without a download folder the song folders are the whole scan");
+    library.download_folder = Some("/downloads".into());
+    assert_eq!(library.scan_roots(), vec!["/a".to_string(), "/b".into(), "/downloads".into()]);
+    library.folders.clear();
+    assert_eq!(library.scan_roots(), vec!["/downloads".to_string()], "a player with only a download folder still has it scanned");
+}
+
+#[test]
+fn a_download_folder_listed_already_is_scanned_once() {
+    for spelling in ["/songs", "/songs/", "  /songs  ", "/songs\\"] {
+        let library = LibraryOptions { folders: vec!["/songs".into()], download_folder: Some(spelling.into()), ..LibraryOptions::default() };
+        assert_eq!(library.scan_roots(), vec!["/songs".to_string()], "{spelling:?} is the song folder listed");
+    }
+    let library = LibraryOptions { folders: vec!["D:\\songs\\".into()], download_folder: Some("D:\\songs".into()), ..LibraryOptions::default() };
+    assert_eq!(library.scan_roots(), vec!["D:\\songs\\".to_string()]);
+    let library = LibraryOptions { folders: vec!["/songs".into()], download_folder: Some("/songs/downloads".into()), ..LibraryOptions::default() };
+    assert_eq!(library.scan_roots().len(), 2, "a folder inside a song folder is another folder");
+}
+
+#[test]
+fn a_blank_download_folder_is_none_chosen() {
+    for blank in ["", "   "] {
+        let library = LibraryOptions { download_folder: Some(blank.into()), ..LibraryOptions::default() };
+        assert_eq!(library.download_folder_path(), None, "{blank:?}");
+        assert!(library.scan_roots().is_empty(), "{blank:?} was scanned as a folder");
+    }
+    let library = LibraryOptions { download_folder: Some("  /downloads ".into()), ..LibraryOptions::default() };
+    assert_eq!(library.download_folder_path(), Some("/downloads"));
+}
+
+#[test]
+fn a_file_without_the_download_settings_reads_as_none_chosen_and_missing_charts_shown() {
+    let library: LibraryOptions = ron::from_str("(folders: [\"/songs\"], preview: false)").expect("a file from before the rows reads");
+    assert_eq!(library.download_folder, None);
+    assert!(library.show_missing_charts, "a file that never asked to hide them lists them");
+    assert_eq!(library.folders, vec!["/songs".to_string()]);
+}
+
+#[test]
+fn the_download_settings_survive_a_round_trip() {
+    let mut c = Config::default();
+    c.library.download_folder = Some("/downloads".into());
+    c.library.show_missing_charts = false;
+    let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
+    assert_eq!(back.library.download_folder.as_deref(), Some("/downloads"));
+    assert!(!back.library.show_missing_charts);
+    let unset: Config = ron::from_str(&ron_of(&Config::default())).expect("a config round-trips");
+    assert_eq!(unset.library.download_folder, None);
+    assert!(unset.library.show_missing_charts);
+}
+
+#[test]
 fn the_table_list_defaults_to_empty_and_keeps_its_order() {
     assert!(LibraryOptions::default().tables.is_empty());
     let mut c = Config::default();

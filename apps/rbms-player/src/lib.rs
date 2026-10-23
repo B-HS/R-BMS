@@ -1005,10 +1005,10 @@ impl App {
             (Stage::Select(Box::new(SelectState::new())), rp.chart_path.clone(), true)
         } else if p.is_file() {
             (Stage::Select(Box::new(SelectState::new())), input, true)
-        } else if config.library.folders.is_empty() {
+        } else if config.library.scan_roots().is_empty() {
             (Stage::Select(Box::new(SelectState::new())), String::new(), false)
         } else {
-            let stage = Stage::Loading(LoadingState::scan(config.library.folders.clone(), config.library.tables.clone(), songdb_path.clone(), full_rescan));
+            let stage = Stage::Loading(LoadingState::scan(config.library.scan_roots(), config.library.tables.clone(), songdb_path.clone(), full_rescan));
             (stage, String::new(), false)
         };
         let mut table_fetches = tablesrc::TableFetches::default();

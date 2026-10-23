@@ -411,10 +411,10 @@ impl LoadingState {
         LoadingState { task: LoadingTask::Scan { step, progress: Arc::new(ScanProgress::default()) }, drawn: false }
     }
 
-    /// Rescan the folder list as it stands now.
+    /// Rescan the folder list as it stands now, the download folder with it.
     pub(crate) fn rescan(shared: &AppShared) -> LoadingState {
         let full = shared.song_db.as_ref().is_none_or(|db| db.needs_full_rescan().unwrap_or(false));
-        LoadingState::scan(shared.config.library.folders.clone(), shared.config.library.tables.clone(), songdb_path(&shared.settings_path), full)
+        LoadingState::scan(shared.config.library.scan_roots(), shared.config.library.tables.clone(), songdb_path(&shared.settings_path), full)
     }
 
     /// Whether keysounds are still decoding, which is what holds an audio-settings reopen back.
@@ -561,7 +561,7 @@ impl LoadingState {
                 ("MATCHING TABLES", format!("{} / {}", progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len()))
             }
             LoadingTask::Scan { step: ScanStep::Walking { scan, .. }, .. } => match scan.counts().found {
-                0 => ("SCANNING", format!("{} folder(s)", shared.config.library.folders.len())),
+                0 => ("SCANNING", format!("{} folder(s)", shared.config.library.scan_roots().len())),
                 found => ("SCANNING", format!("{found} charts found")),
             },
             LoadingTask::Assets(assets) => assets.loads.heading(shared),
@@ -906,6 +906,38 @@ mod tests {
         assert_eq!((app.shared.sel, under_the_cursor.as_str()), (2, "alpha"), "the cursor is not on the chart it was on");
     }
 
+    /// The folder downloads are unpacked into is walked with the song folders, by the scan the app
+    /// starts with and by every rescan, so a chart unpacked there is in the library without being
+    /// listed among the song folders.
+    #[test]
+    fn a_rescan_walks_the_download_folder_too() {
+        let home = std::env::temp_dir().join(format!("rbms-loading-download-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let (songs, downloads) = (home.join("songs"), home.join("downloads"));
+        for (folder, title) in [(&songs, "Owned"), (&downloads, "Downloaded")] {
+            std::fs::create_dir_all(folder).expect("the test's folder is made");
+            let chart = format!("#TITLE {title}\n#ARTIST tester\n#PLAYLEVEL 7\n#BPM 130\n#WAV01 kick.wav\n#00111:01010101\n");
+            std::fs::write(folder.join("song.bms"), chart).expect("the test's chart is written");
+        }
+        let mut app = crate::stage::render_tests::app();
+        app.shared.settings_path = home.join("settings.ron");
+        app.shared.config.library.folders = vec![songs.to_string_lossy().into_owned()];
+        app.shared.config.library.download_folder = Some(downloads.to_string_lossy().into_owned());
+
+        let mut state = LoadingState::rescan(&app.shared);
+        loop {
+            match state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }) {
+                Transition::Stay => std::thread::yield_now(),
+                Transition::Back => break,
+                _ => panic!("a scan hands back to the screen it was opened over"),
+            }
+        }
+        let mut titles: Vec<&str> = app.shared.library.songs().iter().map(|song| song.title.as_str()).collect();
+        titles.sort_unstable();
+        assert_eq!(titles, vec!["Downloaded", "Owned"], "the chart in the download folder was not found");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     /// Escape during the table step throws nothing away: the step reads a few files and is over
     /// by itself, and what it read -- the library that was just walked, and every table that has a
     /// copy -- is what the song list opens on. Leaving there used to cost the run its tables.
@@ -954,6 +986,8 @@ mod tests {
         let walking = LoadingState::scan(Vec::new(), Vec::new(), db.clone(), false);
         assert_eq!(walking.heading(&app.shared).0, "SCANNING");
         assert_eq!(walking.heading(&app.shared).1, "0 folder(s)");
+        app.shared.config.library.download_folder = Some("/downloads".into());
+        assert_eq!(walking.heading(&app.shared).1, "1 folder(s)", "the download folder is a folder the scan walks");
 
         let progress = Arc::new(ScanProgress::default());
         let matching = LoadingState {

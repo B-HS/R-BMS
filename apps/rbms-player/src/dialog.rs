@@ -29,6 +29,9 @@ const TABLE_TITLE: &str = "Select table json";
 /// Title of the system sound folder picker.
 const SOUND_FOLDER_TITLE: &str = "Select system sound folder";
 
+/// Title of the download folder picker.
+const DOWNLOAD_FOLDER_TITLE: &str = "Select download folder";
+
 /// Title of the skin pack folder picker.
 const SKIN_PACK_TITLE: &str = "Select skin pack folder";
 
@@ -98,6 +101,11 @@ pub(crate) fn pick_sound_folder() -> DialogHandle {
     open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SOUND_FOLDER_TITLE).pick_folder()))
 }
 
+/// Ask for the folder the charts downloaded from the song list are unpacked into.
+pub(crate) fn pick_download_folder() -> DialogHandle {
+    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(DOWNLOAD_FOLDER_TITLE).pick_folder()))
+}
+
 /// Ask for the folder of the skin pack every screen takes its document from.
 pub(crate) fn pick_skin_pack_folder() -> DialogHandle {
     open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SKIN_PACK_TITLE).pick_folder()))
@@ -130,7 +138,7 @@ mod tests {
     /// offered json would silently stop finding fonts.
     #[test]
     fn each_picker_keeps_its_own_title() {
-        let titles = [FONT_TITLE, SONG_FOLDER_TITLE, TABLE_TITLE, SOUND_FOLDER_TITLE, SKIN_PACK_TITLE, SKIN_EXPORT_TITLE];
+        let titles = [FONT_TITLE, SONG_FOLDER_TITLE, TABLE_TITLE, SOUND_FOLDER_TITLE, DOWNLOAD_FOLDER_TITLE, SKIN_PACK_TITLE, SKIN_EXPORT_TITLE];
         for title in titles {
             assert!(!title.is_empty());
         }

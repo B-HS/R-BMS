@@ -16,6 +16,12 @@ const PANEL_W: f32 = 980.0;
 const PATH_ELIDE_CHARS: usize = 78;
 const PATH_TAIL_CHARS: usize = 76;
 
+/// What the row of the download folder reads before its path.
+const DOWNLOADS_LABEL: &str = "DOWNLOADS  ";
+
+/// What is said when a key that removes a folder is pressed on the row of the download folder.
+const DOWNLOAD_FOLDER_ELSEWHERE: &str = "the download folder is changed in SETTINGS > SELECT";
+
 /// Vertical layout of the folder rows.
 const ROW_TOP: f32 = 124.0;
 const ROW_PITCH: f32 = 44.0;
@@ -33,9 +39,21 @@ impl FoldersState {
         FoldersState::default()
     }
 
-    /// The folders plus a trailing "+ ADD FOLDER" row.
+    /// Where the "+ ADD FOLDER" row is: after the folders and after the download folder, when one is
+    /// chosen.
+    fn add_row(shared: &AppShared) -> usize {
+        shared.config.library.folders.len() + usize::from(shared.config.library.download_folder_path().is_some())
+    }
+
+    /// The folders, the download folder when one is chosen, and a trailing "+ ADD FOLDER" row.
     fn row_count(shared: &AppShared) -> usize {
-        shared.config.library.folders.len() + 1
+        FoldersState::add_row(shared) + 1
+    }
+
+    /// Whether `row` is the download folder's, which the settings screen changes and this one only
+    /// shows.
+    fn is_download_row(shared: &AppShared, row: usize) -> bool {
+        row == shared.config.library.folders.len() && row < FoldersState::add_row(shared)
     }
 
     /// Add the folder the picker came back with (deduped, persisted). The merged rescan happens
@@ -85,12 +103,13 @@ impl StageHandler for FoldersState {
             return Transition::Stay;
         }
         let n = FoldersState::row_count(ctx.shared);
-        let add_row = ctx.shared.config.library.folders.len();
+        let add_row = FoldersState::add_row(ctx.shared);
         match key.code {
             KeyCode::Escape => return Transition::To(Stage::Loading(LoadingState::rescan(ctx.shared))),
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.folders.len() => self.remove_folder(ctx.shared, self.sel),
+            KeyCode::KeyD | KeyCode::Delete if FoldersState::is_download_row(ctx.shared, self.sel) => notify(Level::Info, DOWNLOAD_FOLDER_ELSEWHERE),
             KeyCode::Enter | KeyCode::NumpadEnter if self.sel == add_row => self.picker = Some(crate::dialog::pick_song_folder()),
             _ => {}
         }
@@ -108,17 +127,21 @@ impl StageHandler for FoldersState {
             false => draw_text(canvas, x0, 84.0, 1.3, th.text_muted, "UP DOWN MOVE   ENTER ADD FOLDER   D REMOVE   ESC SAVE/RESCAN"),
         }
         let folders = &ctx.shared.config.library.folders;
-        let add_row = folders.len();
-        for i in 0..folders.len() + 1 {
+        let add_row = FoldersState::add_row(ctx.shared);
+        let elided = |path: &str| {
+            if path.chars().count() > PATH_ELIDE_CHARS {
+                format!("…{}", path.chars().rev().take(PATH_TAIL_CHARS).collect::<Vec<_>>().into_iter().rev().collect::<String>())
+            } else {
+                path.to_string()
+            }
+        };
+        for i in 0..add_row + 1 {
             let y = ROW_TOP + i as f32 * ROW_PITCH;
             let on = i == self.sel;
             let label = if i < folders.len() {
-                let f = &folders[i];
-                if f.chars().count() > PATH_ELIDE_CHARS {
-                    format!("…{}", f.chars().rev().take(PATH_TAIL_CHARS).collect::<Vec<_>>().into_iter().rev().collect::<String>())
-                } else {
-                    f.clone()
-                }
+                elided(&folders[i])
+            } else if FoldersState::is_download_row(ctx.shared, i) {
+                format!("{DOWNLOADS_LABEL}{}", elided(ctx.shared.config.library.download_folder_path().unwrap_or_default()))
             } else {
                 "+ ADD FOLDER".to_string()
             };
@@ -132,7 +155,7 @@ impl StageHandler for FoldersState {
             };
             draw_text(canvas, x0 + 16.0, y + 10.0, 1.4, col, &label);
         }
-        if ctx.shared.config.library.folders.is_empty() {
+        if add_row == 0 {
             draw_text(canvas, x0, ROW_TOP + ROW_PITCH * 2.0, 1.2, th.text_muted, "No folders yet — ENTER on \"+ ADD FOLDER\" to pick one.");
         }
     }
@@ -183,6 +206,48 @@ mod tests {
         app.shared.config.library.folders = vec!["/songs/new".to_string()];
         FoldersState::add_picked_folder(&mut app.shared, std::path::Path::new("/songs/new"));
         assert_eq!(app.shared.config.library.folders.len(), 1);
+    }
+
+    #[test]
+    fn the_download_folder_is_listed_and_not_removed_here() {
+        let mut app = app();
+        app.shared.config.library.folders = vec!["/songs/a".to_string()];
+        app.shared.config.library.download_folder = Some("/downloads".to_string());
+        let mut state = FoldersState::new();
+        assert_eq!(FoldersState::row_count(&app.shared), 3, "the song folder, the download folder and the row that adds one");
+        assert_eq!(FoldersState::add_row(&app.shared), 2);
+        assert!(!FoldersState::is_download_row(&app.shared, 0));
+        assert!(FoldersState::is_download_row(&app.shared, 1));
+        assert!(!FoldersState::is_download_row(&app.shared, 2));
+
+        state.sel = 1;
+        let said = crate::notify::exclusive(|| {
+            for code in [KeyCode::KeyD, KeyCode::Delete] {
+                state.handle_key(&mut ctx(&mut app), press(code));
+            }
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            said
+        });
+        assert_eq!(said, vec![(Level::Info, DOWNLOAD_FOLDER_ELSEWHERE.to_string()); 2]);
+        assert_eq!(app.shared.config.library.download_folder.as_deref(), Some("/downloads"), "the row was removed from here");
+        assert_eq!(app.shared.config.library.folders, vec!["/songs/a".to_string()]);
+
+        state.sel = 0;
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyD));
+        assert!(app.shared.config.library.folders.is_empty(), "a song folder is still removed here");
+        assert_eq!(app.shared.config.library.download_folder.as_deref(), Some("/downloads"));
+        assert_eq!(FoldersState::row_count(&app.shared), 2, "the download folder and the row that adds one");
+    }
+
+    #[test]
+    fn a_folder_list_without_a_download_folder_has_only_the_row_that_adds_one_after_it() {
+        let mut app = app();
+        app.shared.config.library.folders = vec!["/songs/a".to_string()];
+        app.shared.config.library.download_folder = Some("   ".to_string());
+        assert_eq!(FoldersState::row_count(&app.shared), 2);
+        assert_eq!(FoldersState::add_row(&app.shared), 1);
+        assert!(!FoldersState::is_download_row(&app.shared, 1), "a blank download folder is none chosen");
     }
 
     #[test]

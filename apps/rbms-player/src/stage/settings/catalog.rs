@@ -87,8 +87,9 @@ const AUDIO_SECTIONS: &[Section] = &[
 ];
 
 const SELECT_SECTIONS: &[Section] = &[
-    Section { heading: "SONG LIST", rows: &[SettingId::Sort, SettingId::FavoriteOnly] },
+    Section { heading: "SONG LIST", rows: &[SettingId::Sort, SettingId::FavoriteOnly, SettingId::ShowMissingCharts] },
     Section { heading: "PREVIEW", rows: &[SettingId::PreviewVolume, SettingId::PreviewFade] },
+    Section { heading: "DOWNLOADS", rows: &[SettingId::DownloadFolder] },
 ];
 
 /// The sections one group of the settings screen is listed in, top to bottom. A group another
@@ -269,6 +270,10 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         SettingId::GuideSe => "Sounds a guide cue at every judgement of a run. The cues are system sounds, read from SOUND FOLDER.",
         SettingId::Sort => "The order of the song list. The sort key of the song select steps the same value.",
         SettingId::FavoriteOnly => "Lists only the charts marked as favourites.",
+        SettingId::ShowMissingCharts => "Lists the charts a difficulty table names that the library does not have, dimmed. Choosing one offers its download.",
+        SettingId::DownloadFolder => {
+            "The folder the song list unpacks a chart it downloads into. It is scanned with the song folders. With none chosen, the first download asks for one."
+        }
         SettingId::PreviewVolume => "How loud the preview of the song under the cursor is played.",
         SettingId::PreviewFade => "How long the preview takes to fade in and to fade out. 0 MS starts and stops it at once.",
         _ => descriptor(id).help,

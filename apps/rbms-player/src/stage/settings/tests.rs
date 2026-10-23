@@ -81,6 +81,60 @@ fn a_picked_font_that_cannot_be_read_is_not_stored() {
     assert_eq!(app.shared.config.display.font_path, None, "a font that could not be read was stored anyway");
 }
 
+/// The download folder row picks its folder the way the font row picks its file: beside the frame
+/// loop, keeping what the picker came back with and leaving the row alone when it is dismissed. A
+/// step to the left, which is also what the zero key does, puts it back to none chosen without
+/// opening a picker.
+#[test]
+fn the_download_folder_row_opens_a_picker_and_zero_clears_it() {
+    let mut app = app();
+    let mut state = SettingsState::on_tab(SettingTab::Select);
+    let (tx, handle) = crate::dialog::handle_for_tests();
+    state.folder_pickers.download = Some(handle);
+    state.update(&mut ctx(&mut app));
+    assert!(state.folder_pickers.download.is_some(), "the screen gave up on a picker nobody has answered");
+
+    tx.send(Some(std::path::PathBuf::from("/downloads/charts"))).expect("the handle is still held");
+    state.update(&mut ctx(&mut app));
+    assert!(state.folder_pickers.download.is_none(), "the screen kept waiting after the picker answered");
+    assert_eq!(app.shared.config.library.download_folder.as_deref(), Some("/downloads/charts"));
+    assert_eq!(app.shared.setting_line(SettingId::DownloadFolder).1, "/downloads/charts");
+
+    let (tx, handle) = crate::dialog::handle_for_tests();
+    state.folder_pickers.download = Some(handle);
+    tx.send(None).expect("the handle is still held");
+    state.update(&mut ctx(&mut app));
+    assert!(state.folder_pickers.download.is_none(), "the screen kept waiting after the picker was dismissed");
+    assert_eq!(app.shared.config.library.download_folder.as_deref(), Some("/downloads/charts"), "a dismissed picker changed the folder");
+
+    state.run_action(&mut ctx(&mut app), SettingId::DownloadFolder, -1);
+    assert_eq!(app.shared.config.library.download_folder, None, "a step to the left left the folder chosen");
+    assert!(state.folder_pickers.download.is_none(), "a step to the left opened a picker");
+
+    app.shared.config.library.download_folder = Some("/downloads/charts".to_string());
+    assert!(state.reset_row(&mut ctx(&mut app), SettingId::DownloadFolder), "the zero key did not put the row back");
+    assert_eq!(app.shared.config.library.download_folder, None);
+    assert!(!state.reset_row(&mut ctx(&mut app), SettingId::DownloadFolder), "a row that ships as it is was said to have moved");
+}
+
+/// The row that lists the charts a table names and the library lacks is a switch: it ships on, a
+/// step turns it off, and the zero key turns it back on.
+#[test]
+fn the_missing_charts_row_toggles() {
+    let mut app = app();
+    let mut state = SettingsState::on_tab(SettingTab::Select);
+    let row = SettingRow::Fixed(SettingId::ShowMissingCharts);
+    assert!(app.shared.config.library.show_missing_charts);
+    assert_eq!(app.shared.setting_line(SettingId::ShowMissingCharts).1, "ON");
+
+    state.step(&mut ctx(&mut app), row, 1, false);
+    assert!(!app.shared.config.library.show_missing_charts);
+    assert_eq!(app.shared.setting_line(SettingId::ShowMissingCharts).1, "OFF");
+
+    assert!(state.reset_row(&mut ctx(&mut app), SettingId::ShowMissingCharts));
+    assert!(app.shared.config.library.show_missing_charts, "the zero key left the charts hidden");
+}
+
 /// Names the folder the frames of the settings screen are saved in. Nothing is saved without it.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 

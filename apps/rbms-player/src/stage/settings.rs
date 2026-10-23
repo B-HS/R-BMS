@@ -95,8 +95,9 @@ pub(crate) struct SettingsState {
     profiles_open: bool,
     profiles_sel: usize,
     audio_devices: Vec<String>,
-    /// The system sound folder picker while it is up, on the same terms as the font picker below.
-    sound_picker: Option<DialogHandle>,
+    /// The pickers of the two folders a row chooses, while one is up. Kept behind a pointer,
+    /// because this state is moved with every screen change.
+    folder_pickers: Box<FolderPickers>,
     /// The font picker while it is up. It runs beside the frame loop, so the screen keeps drawing
     /// while the user is in front of it and the answer is collected in `update`.
     font_picker: Option<DialogHandle>,
@@ -109,6 +110,16 @@ pub(crate) struct SettingsState {
     /// What the screen keeps about its rows that hold a number. Kept behind a pointer, because this
     /// state is moved with every screen change.
     numbers: Box<NumberRows>,
+}
+
+/// The folder pickers of the settings screen while they are up, on the same terms as the font
+/// picker: each runs beside the frame loop and its answer is collected in `update`.
+#[derive(Default)]
+struct FolderPickers {
+    /// The picker of the system sound folder.
+    sound: Option<DialogHandle>,
+    /// The picker of the folder downloads are unpacked into.
+    download: Option<DialogHandle>,
 }
 
 /// How the settings screen lists the open group, beyond the rows themselves.
@@ -169,7 +180,7 @@ impl SettingsState {
             profiles_open: false,
             profiles_sel: 0,
             audio_devices: Vec::new(),
-            sound_picker: None,
+            folder_pickers: Box::default(),
             font_picker: None,
             rows: Vec::new(),
             lines: Vec::new(),
@@ -453,8 +464,8 @@ impl SettingsState {
     /// put back ([`is_resettable`]) and a row that is already what it ships as are left alone.
     ///
     /// A number is put on the step it ships on. The font, the folder of the system sounds, the
-    /// output device and the layout of the built-in note field are named outright, since each is
-    /// stepped by something only the running program can do. A switch and any other choice are
+    /// folder of the downloads, the output device and the layout of the built-in note field are
+    /// named outright, since each is stepped by something only the running program can do. A switch and any other choice are
     /// stepped forward until they read what a fresh configuration reads, which runs whatever a step
     /// of that row runs.
     fn reset_row(&mut self, ctx: &mut FrameCtx<'_>, id: SettingId) -> bool {
@@ -479,6 +490,7 @@ impl SettingsState {
                 ctx.shared.config.audio.sound_folder = None;
                 ctx.shared.reload_system_sounds();
             }
+            SettingId::DownloadFolder => ctx.shared.config.library.download_folder = None,
             SettingId::AudioDevice => {
                 ctx.shared.config.audio.device = None;
                 ctx.shared.config.audio.mark_reopen_pending();
@@ -550,7 +562,7 @@ impl SettingsState {
 
     /// A row that opens a screen or a picker, steps something only this process can enumerate, or
     /// reaches the score server. Stepping left runs nothing but the rows that have a meaningful
-    /// other direction: the font and the sound folder, which reset, and the device, which cycles
+    /// other direction: the font and the two folders, which reset, and the device, which cycles
     /// either way.
     fn run_action(&mut self, ctx: &mut FrameCtx<'_>, id: SettingId, delta: i32) -> Transition {
         self.dirty = true;
@@ -578,8 +590,15 @@ impl SettingsState {
                 if delta < 0 {
                     ctx.shared.config.audio.sound_folder = None;
                     ctx.shared.reload_system_sounds();
-                } else if self.sound_picker.is_none() {
-                    self.sound_picker = Some(crate::dialog::pick_sound_folder());
+                } else if self.folder_pickers.sound.is_none() {
+                    self.folder_pickers.sound = Some(crate::dialog::pick_sound_folder());
+                }
+            }
+            SettingId::DownloadFolder => {
+                if delta < 0 {
+                    ctx.shared.config.library.download_folder = None;
+                } else if self.folder_pickers.download.is_none() {
+                    self.folder_pickers.download = Some(crate::dialog::pick_download_folder());
                 }
             }
             _ => {
@@ -593,17 +612,33 @@ impl SettingsState {
 
     /// Collect the sound folder picker's answer, and read the set it names.
     fn poll_sound_picker(&mut self, shared: &mut AppShared) {
-        let Some(picker) = self.sound_picker.as_ref() else {
+        let Some(picker) = self.folder_pickers.sound.as_ref() else {
             return;
         };
         match picker.poll() {
             DialogState::Open => return,
             DialogState::Picked(path) => {
-                self.sound_picker = None;
+                self.folder_pickers.sound = None;
                 shared.config.audio.sound_folder = Some(path.to_string_lossy().into_owned());
                 shared.reload_system_sounds();
             }
-            DialogState::Dismissed => self.sound_picker = None,
+            DialogState::Dismissed => self.folder_pickers.sound = None,
+        }
+        self.dirty = true;
+    }
+
+    /// Collect the download folder picker's answer, and keep the folder it names.
+    fn poll_download_picker(&mut self, shared: &mut AppShared) {
+        let Some(picker) = self.folder_pickers.download.as_ref() else {
+            return;
+        };
+        match picker.poll() {
+            DialogState::Open => return,
+            DialogState::Picked(path) => {
+                self.folder_pickers.download = None;
+                shared.config.library.download_folder = Some(path.to_string_lossy().into_owned());
+            }
+            DialogState::Dismissed => self.folder_pickers.download = None,
         }
         self.dirty = true;
     }
@@ -1026,6 +1061,7 @@ impl StageHandler for SettingsState {
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.poll_font_picker(ctx.shared);
         self.poll_sound_picker(ctx.shared);
+        self.poll_download_picker(ctx.shared);
         let rows = rival_rows(&ctx.shared.config.network.rivals).len();
         self.rivals_sel = self.rivals_sel.min(rows.saturating_sub(1));
         if self.rows.contains(&SettingRow::Fixed(SettingId::Account)) {

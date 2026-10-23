@@ -72,12 +72,13 @@ pub(crate) fn audio_status_text(report: Option<&AudioOpenReport>, failed: bool) 
 }
 
 /// Whether the settings screen can put a row back to what it ships as, which is also whether the row
-/// is marked when it is not: a switch, a choice, a number, the font and the system sound folder, on
-/// one of the groups the screen shows. A line of text -- the address of the score server, the id
+/// is marked when it is not: a switch, a choice, a number, the font, the system sound folder and the
+/// download folder, on one of the groups the screen shows. A line of text -- the address of the score server, the id
 /// scores are sent under -- is not something a key should wipe, and an action holds nothing.
 pub(crate) fn is_resettable(id: SettingId) -> bool {
     let row = descriptor(id);
-    let held = matches!(row.kind, SettingKind::Toggle | SettingKind::Cycle { .. } | SettingKind::FilePick) || id == SettingId::SoundFolder;
+    let held = matches!(row.kind, SettingKind::Toggle | SettingKind::Cycle { .. } | SettingKind::FilePick)
+        || matches!(id, SettingId::SoundFolder | SettingId::DownloadFolder);
     SettingTab::SHOWN.contains(&row.tab) && (held || number_spec(id).is_some())
 }
 
@@ -201,6 +202,7 @@ impl AppShared {
             SettingKind::Text { .. } => RowControl::Field { filled: value != NONE_VALUE && value != UNSET_VALUE },
             SettingKind::FilePick => RowControl::Path { chosen: self.config.display.font_path.is_some() },
             SettingKind::Action if id == SettingId::SoundFolder => RowControl::Path { chosen: self.config.audio.sound_folder.is_some() },
+            SettingKind::Action if id == SettingId::DownloadFolder => RowControl::Path { chosen: self.config.library.download_folder_path().is_some() },
             SettingKind::Action => RowControl::Action,
             SettingKind::Info => RowControl::Info,
         }
@@ -493,6 +495,8 @@ mod tests {
         (SettingId::GuideSe, "GUIDE SE", "OFF"),
         (SettingId::KeepGreenNumber, "KEEP GREEN NUMBER", "OFF"),
         (SettingId::GreenNumber, "GREEN NUMBER", "300"),
+        (SettingId::ShowMissingCharts, "MISSING CHARTS", "ON"),
+        (SettingId::DownloadFolder, "DOWNLOAD FOLDER", "(none)"),
     ];
 
     /// An app with no library, no window and no server, so every row reads out of a fresh document.

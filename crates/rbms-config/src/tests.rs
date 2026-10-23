@@ -60,6 +60,8 @@ fn default_values_are_sane() {
     assert_eq!(c.library.songs_folder, None);
     assert!(c.library.folders.is_empty());
     assert!(c.library.tables.is_empty());
+    assert_eq!(c.library.download_folder, None, "the player chooses where downloads go; the app does not");
+    assert!(c.library.show_missing_charts, "the reference lists the charts a table names that are not in the library");
     assert_eq!(c.display.font_path, None);
     assert_eq!(c.display.skin, DEFAULT_SKIN);
     assert_eq!(c.network.server_url, None);
@@ -393,6 +395,8 @@ fn ron_round_trip_preserves_every_field() {
     c.library.preview_fade_ms = 350;
     c.library.sort = SortMode::LastUpdate;
     c.library.favorite_only = true;
+    c.library.show_missing_charts = false;
+    c.library.download_folder = Some("/downloads".into());
     c.library.songs_folder = Some("/songs".into());
     c.library.folders = vec!["/a".into(), "/b/c".into()];
     c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into(), group: String::new() }];

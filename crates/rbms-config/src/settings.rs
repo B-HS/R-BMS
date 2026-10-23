@@ -266,10 +266,12 @@ pub enum SettingId {
     GuideSe,
     KeepGreenNumber,
     GreenNumber,
+    ShowMissingCharts,
+    DownloadFolder,
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 94;
+pub const SETTING_COUNT: usize = 96;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -368,6 +370,8 @@ impl SettingId {
         SettingId::GuideSe,
         SettingId::KeepGreenNumber,
         SettingId::GreenNumber,
+        SettingId::ShowMissingCharts,
+        SettingId::DownloadFolder,
     ];
 
     /// Position of the row in the whole settings list, which is also its index in [`SettingId::ALL`].
@@ -886,6 +890,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     row(SettingId::Sort, SettingTab::Select, "SORT", SettingKind::Cycle { values: SORT_LABELS }, "How the song list is ordered"),
     row(SettingId::FavoriteOnly, SettingTab::Select, "FAVORITE ONLY", SettingKind::Toggle, "List only the charts marked as favourites"),
     row(
+        SettingId::ShowMissingCharts,
+        SettingTab::Select,
+        "MISSING CHARTS",
+        SettingKind::Toggle,
+        "List the charts a difficulty table names that the library does not have, dimmed",
+    ),
+    row(
         SettingId::PreviewVolume,
         SettingTab::Select,
         "PREVIEW VOLUME",
@@ -898,6 +909,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "PREVIEW FADE",
         SettingKind::IntRange { min: PREVIEW_FADE_MIN_MS as i32, max: PREVIEW_FADE_MAX_MS as i32, step: PREVIEW_FADE_STEP_MS as i32, unit: MILLISECOND_UNIT },
         "How long the hover preview fades in and out over",
+    ),
+    row(
+        SettingId::DownloadFolder,
+        SettingTab::Select,
+        "DOWNLOAD FOLDER",
+        SettingKind::Action,
+        "Folder the charts downloaded from the song list are unpacked into; scanned with the song folders",
     ),
 ];
 
@@ -1121,6 +1139,8 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::WindowMode => config.display.window_mode.label().to_string(),
         SettingId::Sort => config.library.sort.label().to_string(),
         SettingId::FavoriteOnly => on_off(config.library.favorite_only),
+        SettingId::ShowMissingCharts => on_off(config.library.show_missing_charts),
+        SettingId::DownloadFolder => optional_text(config.library.download_folder.as_deref()),
         SettingId::PreviewVolume => shade_value(config.library.preview_volume, id),
         SettingId::PreviewFade => format!("{}{}", config.library.preview_fade_ms, unit_of(id)),
         SettingId::KeyDebounce => format!("{}{}", config.play.key_debounce_ms, unit_of(id)),
@@ -1321,6 +1341,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
             store(&mut config.display.window_mode, WindowMode::ALL[at])
         }
         SettingId::FavoriteOnly => toggle(&mut config.library.favorite_only),
+        SettingId::ShowMissingCharts => toggle(&mut config.library.show_missing_charts),
         SettingId::Hidden => {
             let next = stepped_share(config.play.hidden, delta, LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
             store(&mut config.play.hidden, next)
@@ -1413,6 +1434,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         | SettingId::Rivals
         | SettingId::IrProfiles
         | SettingId::SoundFolder
+        | SettingId::DownloadFolder
         | SettingId::AudioDevice
         | SettingId::PadDebounce => AdjustOutcome::Action(id),
     }
@@ -1987,6 +2009,7 @@ mod tests {
                 SettingId::IrProfiles,
                 SettingId::AudioDevice,
                 SettingId::SoundFolder,
+                SettingId::DownloadFolder,
             ]
         );
     }
@@ -2294,7 +2317,17 @@ mod tests {
                 SettingId::DebugMode,
             ]
         );
-        assert_eq!(tab_rows(SettingTab::Select, &config), vec![SettingId::Sort, SettingId::FavoriteOnly, SettingId::PreviewVolume, SettingId::PreviewFade]);
+        assert_eq!(
+            tab_rows(SettingTab::Select, &config),
+            vec![
+                SettingId::Sort,
+                SettingId::FavoriteOnly,
+                SettingId::ShowMissingCharts,
+                SettingId::PreviewVolume,
+                SettingId::PreviewFade,
+                SettingId::DownloadFolder
+            ]
+        );
         assert_eq!(tab_rows(SettingTab::Input, &config), vec![SettingId::ScratchSide, SettingId::KeyConfig, SettingId::KeyDebounce, SettingId::PadDebounce]);
         assert_eq!(
             tab_rows(SettingTab::Network, &config),

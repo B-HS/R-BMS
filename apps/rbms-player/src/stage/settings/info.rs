@@ -85,17 +85,17 @@ const CUSTOM_JUDGE_CAUTION: &str = "OVER 100%: A RUN PLAYED LIKE THIS SETS NO BE
 /// The keys one row hears, each with what it does to that row. `control` is what sets the row.
 ///
 /// Enter does what a step to the right does, as it does on the skin and play menus: it turns a
-/// switch over, takes a choice to its next value, picks the folder of the system sounds, runs an
-/// action of the score server and opens a line of text or a list; on a number it opens the number
-/// to be typed into, and it opens the key editor and the font picker. No row leaves the screen on
-/// Enter: Escape does, and the line of keys says so.
+/// switch over, takes a choice to its next value, picks the folder of the system sounds or of the
+/// downloads, runs an action of the score server and opens a line of text or a list; on a number it
+/// opens the number to be typed into, and it opens the key editor and the font picker. No row
+/// leaves the screen on Enter: Escape does, and the line of keys says so.
 pub(super) fn row_keys(id: SettingId, control: RowControl) -> Vec<(&'static str, &'static str)> {
     let resets = ("0", TO_DEFAULT);
     match (id, control) {
         (_, RowControl::Slider) => vec![("LEFT RIGHT", "1 STEP"), ("SHIFT", "x10"), ("ENTER", "TYPE"), resets, ("DRAG", "SLIDER")],
         (SettingId::KeyConfig, _) => vec![("ENTER", "OPEN")],
         (SettingId::Font, _) => vec![("ENTER", "CHOOSE A FILE"), resets],
-        (SettingId::SoundFolder, _) => vec![("ENTER RIGHT", "CHOOSE A FOLDER"), ("0", "NONE")],
+        (SettingId::SoundFolder | SettingId::DownloadFolder, _) => vec![("ENTER RIGHT", "CHOOSE A FOLDER"), ("0", "NONE")],
         (SettingId::Account, _) => vec![("ENTER", "SHOW ITS STATE")],
         (SettingId::Rivals | SettingId::IrProfiles, _) => vec![("ENTER", "OPEN THE LIST")],
         (_, RowControl::Field { .. }) => vec![("ENTER", "EDIT")],
@@ -130,7 +130,7 @@ fn kind(id: SettingId, line: &SettingsLine, devices: &[String]) -> String {
         RowControl::Slider => KIND_NUMBER,
         RowControl::Field { .. } if is_secret_row(id) => KIND_SECRET,
         RowControl::Field { .. } => KIND_TEXT,
-        RowControl::Path { .. } if id == SettingId::SoundFolder => KIND_FOLDER,
+        RowControl::Path { .. } if matches!(id, SettingId::SoundFolder | SettingId::DownloadFolder) => KIND_FOLDER,
         RowControl::Path { .. } => KIND_FILE,
         RowControl::Action => KIND_ACTION,
         RowControl::Info => KIND_STATUS,

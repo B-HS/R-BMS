@@ -886,6 +886,12 @@ pub struct LibraryOptions {
     /// The ids of the tables every player is given ([`crate::DEFAULT_TABLES`]) that this player
     /// has been given already, whether or not they kept them: a table here is never given again.
     pub seeded_default_tables: Vec<String>,
+    /// The folder the charts the song list downloads are unpacked into. It is scanned with the song
+    /// folders ([`LibraryOptions::scan_roots`]). `None` until one is chosen.
+    pub download_folder: Option<String>,
+    /// List the charts a difficulty table names that the library does not have, dimmed, among the
+    /// ones it has (`Config.showNoSongExistingBar` of the reference).
+    pub show_missing_charts: bool,
 }
 
 impl Default for LibraryOptions {
@@ -900,7 +906,36 @@ impl Default for LibraryOptions {
             favorite_only: false,
             tables: Vec::new(),
             seeded_default_tables: Vec::new(),
+            download_folder: None,
+            show_missing_charts: true,
         }
+    }
+}
+
+/// What a folder path may end with without naming another folder.
+const PATH_TRAILING_SEPARATORS: [char; 2] = ['/', '\\'];
+
+/// A folder path without the white space around it and the separators at its end.
+fn bare_folder_path(path: &str) -> &str {
+    path.trim().trim_end_matches(PATH_TRAILING_SEPARATORS)
+}
+
+impl LibraryOptions {
+    /// The download folder to use, or `None` while none is chosen or the one stored is blank.
+    pub fn download_folder_path(&self) -> Option<&str> {
+        self.download_folder.as_deref().map(str::trim).filter(|folder| !folder.is_empty())
+    }
+
+    /// Every folder the song list is scanned from: the song folders in their order, then the
+    /// download folder, unless it is one of the song folders already.
+    pub fn scan_roots(&self) -> Vec<String> {
+        let mut roots = self.folders.clone();
+        if let Some(download) = self.download_folder_path()
+            && !roots.iter().any(|root| bare_folder_path(root) == bare_folder_path(download))
+        {
+            roots.push(download.to_string());
+        }
+        roots
     }
 }
 

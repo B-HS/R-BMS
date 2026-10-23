@@ -74,8 +74,9 @@ fn resettable_rows() -> Vec<(SettingTab, SettingId)> {
 }
 
 /// Make one row something it does not ship as, without opening a picker: a number is put at an end
-/// of its range, the font and the folder of the system sounds are named in the configuration, the
-/// output device is stepped onto one the host reported, and any other row is stepped forward once.
+/// of its range, the font and the folders of the system sounds and of the downloads are named in
+/// the configuration, the output device is stepped onto one the host reported, and any other row is
+/// stepped forward once.
 fn change(screen: &mut Screen, id: SettingId) {
     if let Some(spec) = number_spec(id) {
         let shipped = screen.steps_of(id);
@@ -84,6 +85,8 @@ fn change(screen: &mut Screen, id: SettingId) {
         screen.app.shared.config.display.font_path = Some("/fonts/a-face-of-the-test.ttf".to_string());
     } else if id == SettingId::SoundFolder {
         screen.app.shared.config.audio.sound_folder = Some("/sounds/a-set-of-the-test".to_string());
+    } else if id == SettingId::DownloadFolder {
+        screen.app.shared.config.library.download_folder = Some("/downloads/a-folder-of-the-test".to_string());
     } else {
         screen.focus(id);
         screen.key(KeyCode::ArrowRight);
@@ -525,7 +528,7 @@ fn the_line_of_keys_says_what_the_row_under_the_cursor_hears() {
                 assert_eq!(enter, Some("CHOOSE A FILE"));
                 continue;
             }
-            if id == SettingId::SoundFolder {
+            if matches!(id, SettingId::SoundFolder | SettingId::DownloadFolder) {
                 assert!(keys.contains(&("ENTER RIGHT", "CHOOSE A FOLDER")), "{keys:?}");
                 continue;
             }

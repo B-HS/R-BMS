@@ -51,7 +51,9 @@ pub(crate) struct SyncPayload {
 /// left on goes with them, being nothing but where this machine's cursor stood.
 ///
 /// The system sound folder is a folder picked on this machine's disk too. Taken onto another one, it
-/// names a folder that is not there and every system sound there falls silent.
+/// names a folder that is not there and every system sound there falls silent. The download folder
+/// is the same: charts unpacked into a folder that is not there would be lost. Whether the charts a
+/// table lacks are listed is a preference, and goes with the rest.
 fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.network.ir_token = local.network.ir_token.clone();
     incoming.network.ir_login_id = local.network.ir_login_id.clone();
@@ -61,6 +63,7 @@ fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.network.ir_profiles = local.network.ir_profiles.clone();
     incoming.library.songs_folder = local.library.songs_folder.clone();
     incoming.library.folders = local.library.folders.clone();
+    incoming.library.download_folder = local.library.download_folder.clone();
     incoming.library.tables = local.library.tables.clone();
     incoming.library.seeded_default_tables = local.library.seeded_default_tables.clone();
     incoming.display.font_path = local.display.font_path.clone();
@@ -279,6 +282,11 @@ mod tests {
     const LOCAL_SOUND_FOLDER: &str = "/local/sounds";
     const REMOTE_SOUND_FOLDER: &str = "/their/sounds";
 
+    /// The download folder picked on this machine, and the one picked on the machine that uploaded
+    /// the account's copy.
+    const LOCAL_DOWNLOAD_FOLDER: &str = "/local/downloads";
+    const REMOTE_DOWNLOAD_FOLDER: &str = "/their/downloads";
+
     /// The option id this machine chose for [`STORED_PROPERTY`] in a document of its own.
     const LOCAL_PROPERTY_OPTION: i32 = 912;
 
@@ -419,7 +427,7 @@ mod tests {
     /// table list, the skin menu). A field this build gains that names a place on
     /// disk fails the test below until `keep_local` keeps it and it is added to this list.
     const PATH_WORDS: [&str; 5] = ["folder", "path", "dir", "location", "file"];
-    const PATH_FIELDS_KEPT_LOCAL: [&str; 7] = ["folder", "folders", "font_path", "ir_profiles", "location", "songs_folder", "sound_folder"];
+    const PATH_FIELDS_KEPT_LOCAL: [&str; 8] = ["download_folder", "folder", "folders", "font_path", "ir_profiles", "location", "songs_folder", "sound_folder"];
 
     #[test]
     fn a_field_of_the_configuration_that_names_a_place_on_disk_is_one_the_upload_blanks() {
@@ -435,6 +443,24 @@ mod tests {
         fields.sort_unstable();
         fields.dedup();
         assert_eq!(fields, PATH_FIELDS_KEPT_LOCAL, "a new field naming a place on disk must be added to `keep_local` and to this list");
+    }
+
+    #[test]
+    fn the_download_folder_stays_on_this_machine() {
+        let mut local = local_settings();
+        local.library.download_folder = Some(LOCAL_DOWNLOAD_FOLDER.into());
+        assert_eq!(sanitise_for_upload(&local).library.download_folder, None, "the download folder is a folder on this machine's disk");
+        let sent = build_blob(&payload_of(sanitise_for_upload(&local)), 1_000, None).unwrap();
+        assert!(!sent.content.contains(LOCAL_DOWNLOAD_FOLDER), "the download folder reached the blob");
+
+        let mut remote = Config::default();
+        remote.library.download_folder = Some(REMOTE_DOWNLOAD_FOLDER.into());
+        remote.library.show_missing_charts = false;
+        let merged = merge_downloaded(&local, remote.clone());
+        assert_eq!(merged.library.download_folder.as_deref(), Some(LOCAL_DOWNLOAD_FOLDER), "a downloaded download folder replaced this machine's");
+        assert!(!merged.library.show_missing_charts, "whether missing charts are listed is a preference and comes down with the rest");
+        let fresh_machine = merge_downloaded(&Config::default(), remote);
+        assert_eq!(fresh_machine.library.download_folder, None, "a machine with no download folder took another machine's");
     }
 
     #[test]

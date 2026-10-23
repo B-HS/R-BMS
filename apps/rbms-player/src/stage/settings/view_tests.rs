@@ -253,8 +253,8 @@ fn a_choice_is_drawn_whole_only_when_every_value_fits_its_cell() {
 }
 
 /// Every row of the screen is set by what its kind asks for: a switch for what is on or off, a
-/// slider for a number, a field for text, the mark of a picker for the font and the folder of the
-/// system sounds, and the mark of an action for what is run or opened.
+/// slider for a number, a field for text, the mark of a picker for the font and the folders of the
+/// system sounds and of the downloads, and the mark of an action for what is run or opened.
 #[test]
 fn every_row_is_set_by_what_its_kind_asks_for() {
     let shared = shared("kinds");
@@ -266,7 +266,9 @@ fn every_row_is_set_by_what_its_kind_asks_for() {
                 (SettingKind::Cycle { .. }, _) => matches!(line.control, RowControl::Segments { .. } | RowControl::Stepper),
                 (SettingKind::Text { .. }, _) => matches!(line.control, RowControl::Field { .. }),
                 (SettingKind::FilePick, _) => line.control == RowControl::Path { chosen: false },
-                (SettingKind::Action, _) if id == SettingId::SoundFolder => line.control == RowControl::Path { chosen: false },
+                (SettingKind::Action, _) if matches!(id, SettingId::SoundFolder | SettingId::DownloadFolder) => {
+                    line.control == RowControl::Path { chosen: false }
+                }
                 (SettingKind::Action, _) => line.control == RowControl::Action,
                 (kind, _) => panic!("{id:?} is a {kind:?}, which no row of the screen was"),
             };
