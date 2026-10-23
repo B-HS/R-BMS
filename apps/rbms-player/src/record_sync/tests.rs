@@ -616,6 +616,24 @@ fn the_record_modal_of_a_run_on_the_server_says_so() {
     assert_eq!(ir_line_of(None, false, None).0, "IR: NOT SENT (NOT SIGNED IN)");
 }
 
+/// The lines of the record modal are the words of the result screen's lines, in the language the
+/// screens are drawn in, and the colour of a line does not depend on it.
+#[test]
+fn the_record_modal_lines_are_written_in_the_language_of_the_screens() {
+    let row = |state| IrSyncRow::new(1, "s", ACCOUNT_ID, state);
+    let rejected = IrSyncRow { error_code: Some("VALIDATION_ERROR".into()), error_field: Some("judge".into()), ..row(SyncState::Rejected) };
+    for (language, accepted, rejected_line, unsent) in [
+        (Language::English, "IR: ON SERVER", "IR: REJECTED VALIDATION_ERROR: judge", "IR: NOT SENT YET"),
+        (Language::Korean, "IR: 서버에 있음", "IR: 거부됨 VALIDATION_ERROR: judge", "IR: 아직 전송하지 않음"),
+        (Language::Japanese, "IR: サーバーに登録済み", "IR: 拒否 VALIDATION_ERROR: judge", "IR: 未送信"),
+    ] {
+        let _installed = crate::text::settings::InstalledLanguage::new(language);
+        assert_eq!(ir_line_of(Some(&row(SyncState::Accepted)), true, Some(ACCOUNT_ID)), (accepted.to_string(), IrLineKind::Good), "{language:?}");
+        assert_eq!(ir_line_of(Some(&rejected), true, Some(ACCOUNT_ID)), (rejected_line.to_string(), IrLineKind::Bad), "{language:?}");
+        assert_eq!(ir_line_of(None, true, Some(ACCOUNT_ID)), (unsent.to_string(), IrLineKind::Info), "{language:?}");
+    }
+}
+
 /// A play the server holds under another account is said to be that account's, so the signed-in
 /// player does not take it for one of their own.
 #[test]

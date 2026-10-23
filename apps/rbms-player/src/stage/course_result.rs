@@ -20,6 +20,8 @@ mod skin_run;
 #[cfg(test)]
 mod tests;
 
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_skin::loader::SKIN_TYPE_COURSE_RESULT;
 use winit::keyboard::KeyCode;
 
@@ -28,6 +30,7 @@ use crate::skin_screen::ResultDraw;
 use crate::stage::result::{Scene, SceneInput, SkinStatus, begin_scene_with_skin, has_result_scene, held_key_indices, run_scene_frame};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::syssound::{SystemSound, course_result_sound};
+use crate::text::menus::course::CourseText;
 use crate::{AppShared, CW, Color, Rect, draw_text, draw_text_right, end_course};
 use rbms_render::{FrameData, ReferenceImages, Renderer};
 use skin_run::CourseSkinRun;
@@ -186,12 +189,12 @@ impl CourseResultState {
         canvas.clear(th.bg);
         let x0 = (CW as f32 - PANEL_W) * 0.5;
         let (heading, colour) = match self.cleared {
-            true => ("COURSE CLEAR", Color::GREEN),
-            false => ("COURSE FAILED", Color::RED),
+            true => (CourseText::ResultCleared, Color::GREEN),
+            false => (CourseText::ResultFailed, Color::RED),
         };
-        draw_text(canvas, x0, HEADING_Y, HEADING_SCALE, colour, heading);
+        draw_text(canvas, x0, HEADING_Y, HEADING_SCALE, colour, heading.get(language()));
         draw_text(canvas, x0, NAME_Y, NAME_SCALE, th.text, &self.course_name);
-        draw_text(canvas, x0, HINT_Y, 1.2, th.text_muted, "ENTER / ESC  BACK TO SELECT");
+        draw_text(canvas, x0, HINT_Y, 1.2, th.text_muted, CourseText::ResultBack.get(language()));
         for (i, (label, value)) in self.rows.iter().enumerate() {
             let y = ROW_TOP + i as f32 * ROW_PITCH;
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), th.panel);

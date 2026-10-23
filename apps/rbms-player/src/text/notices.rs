@@ -2,11 +2,14 @@
 //! sync, and of the native pickers' titles, by language.
 //!
 //! A notice is reported with [`crate::notify::notify_text`] and worded by the frame thread in the
-//! language it has installed. What stays as it was written is a notice that is, or ends in, the text
-//! of an operating system, a library or the score server, and one that only says how the program
-//! got on inside (an audio device, a state that was not kept): they are for whoever reads standard
-//! error. The terms every language keeps (judgements, gauges, lamps, options) and the names of the
-//! rows of the settings are written as they are in every language.
+//! language it has installed. A notice that tells the player that something they did or asked for
+//! did not happen (a save, a file read, a download, a score recorded) is worded here, and where it
+//! ends in the text of an operating system, a library or the score server, that text follows as it
+//! came. What stays as it was written is a notice that only says how the program got on inside (an
+//! audio device, a decoder, a texture, a state that was not kept) or that is a command line's own:
+//! they are for whoever reads standard error. The terms every language keeps (judgements, gauges,
+//! lamps, options) are written as they are in every language, and a sentence that names a row of
+//! the settings names it as the settings screen does in that language.
 
 use std::fmt::Display;
 
@@ -201,6 +204,266 @@ rbms_model::translations! {
             "배치를 빌리지 않음: 코스나 연습이 아닌 직접 플레이에서만 배치를 빌릴 수 있음",
             "配置を借りません: コースや練習ではなく、手で行うプレーでのみ配置を借りられます",
         ),
+        SettingsSaveFailed => (
+            "settings save failed ({0}): {1}",
+            "설정을 저장하지 못했습니다 ({0}): {1}",
+            "設定を保存できませんでした（{0}）: {1}",
+        ),
+        SettingsSaveFailedNoPath => (
+            "settings save failed: {0}",
+            "설정을 저장하지 못했습니다: {0}",
+            "設定を保存できませんでした: {0}",
+        ),
+        SettingsNotLoaded => (
+            "settings not loaded ({0}); running on defaults and leaving the file alone",
+            "설정을 불러오지 못했습니다 ({0}). 기본값으로 실행하고 파일은 그대로 둡니다",
+            "設定を読み込めませんでした（{0}）。初期値で起動し、ファイルはそのまま残します",
+        ),
+        FontNotFound => (
+            "font not found: {0} ({1})",
+            "글꼴을 찾을 수 없습니다: {0} ({1})",
+            "フォントが見つかりません: {0}（{1}）",
+        ),
+        FontNotRead => (
+            "font read failed ({0}): {1}",
+            "글꼴 파일을 읽지 못했습니다 ({0}): {1}",
+            "フォントを読み込めませんでした（{0}）: {1}",
+        ),
+        ReplayLoadFailed => (
+            "replay load failed: {0}",
+            "리플레이를 불러오지 못했습니다: {0}",
+            "リプレイを読み込めませんでした: {0}",
+        ),
+        ChartNotFound => (
+            "chart not found: {0} ({1})",
+            "차트를 찾을 수 없습니다: {0} ({1})",
+            "譜面が見つかりません: {0}（{1}）",
+        ),
+        ReplayNotSaved => (
+            "replay not saved: {0} ({1})",
+            "리플레이를 저장하지 못했습니다: {0} ({1})",
+            "リプレイを保存できませんでした: {0}（{1}）",
+        ),
+        ReplayNotSavedNoPath => (
+            "replay not saved: {0}",
+            "리플레이를 저장하지 못했습니다: {0}",
+            "リプレイを保存できませんでした: {0}",
+        ),
+        RunNotKept => (
+            "run not kept: {0}",
+            "플레이를 보관하지 못했습니다: {0}",
+            "プレーを保管できませんでした: {0}",
+        ),
+        ScoreNotRecorded => (
+            "score not recorded: {0}",
+            "스코어를 기록하지 못했습니다: {0}",
+            "スコアを記録できませんでした: {0}",
+        ),
+        ScoreRecordsNotRead => (
+            "score records not read: {0}",
+            "스코어 기록을 읽지 못했습니다: {0}",
+            "スコア記録を読み込めませんでした: {0}",
+        ),
+        ScoreDatabaseNotOpened => (
+            "score database not opened ({0}): {1}",
+            "스코어 데이터베이스를 열지 못했습니다 ({0}): {1}",
+            "スコアデータベースを開けませんでした（{0}）: {1}",
+        ),
+        KeptRunNotReadIn => (
+            "kept run not read in ({0}): {1}; left where it is",
+            "보관한 플레이를 가져오지 못했습니다 ({0}): {1}. 그대로 둡니다",
+            "保管したプレーを取り込めませんでした（{0}）: {1}。そのまま残します",
+        ),
+        KeptRunsNotReadIn => (
+            "kept runs not read in ({0}): {1}",
+            "보관한 플레이를 가져오지 못했습니다 ({0}): {1}",
+            "保管したプレーを取り込めませんでした（{0}）: {1}",
+        ),
+        SongDatabaseNotOpened => (
+            "song database not opened ({0}): {1}",
+            "곡 데이터베이스를 열지 못했습니다 ({0}): {1}",
+            "曲データベースを開けませんでした（{0}）: {1}",
+        ),
+        SongListNotRead => (
+            "song list not read: {0}",
+            "곡 목록을 읽지 못했습니다: {0}",
+            "曲リストを読み込めませんでした: {0}",
+        ),
+        PracticeSettingsNotLoaded => (
+            "practice settings not loaded ({0}); starting with none",
+            "연습 설정을 불러오지 못했습니다 ({0}). 설정 없이 시작합니다",
+            "練習設定を読み込めませんでした（{0}）。設定なしで開始します",
+        ),
+        PracticeSettingsSaveFailed => (
+            "practice settings save failed: {0}",
+            "연습 설정을 저장하지 못했습니다: {0}",
+            "練習設定を保存できませんでした: {0}",
+        ),
+        PracticeSettingsSaveFailedAt => (
+            "practice settings save failed ({0}): {1}",
+            "연습 설정을 저장하지 못했습니다 ({0}): {1}",
+            "練習設定を保存できませんでした（{0}）: {1}",
+        ),
+        FavoritesNotLoaded => (
+            "favorites not loaded ({0}); starting with none",
+            "즐겨찾기를 불러오지 못했습니다 ({0}). 비어 있는 상태로 시작합니다",
+            "お気に入りを読み込めませんでした（{0}）。空の状態で開始します",
+        ),
+        FavoritesSaveFailed => (
+            "favorites save failed: {0}",
+            "즐겨찾기를 저장하지 못했습니다: {0}",
+            "お気に入りを保存できませんでした: {0}",
+        ),
+        FavoritesSaveFailedAt => (
+            "favorites save failed ({0}): {1}",
+            "즐겨찾기를 저장하지 못했습니다 ({0}): {1}",
+            "お気に入りを保存できませんでした（{0}）: {1}",
+        ),
+        KeyConfigUnknownKey => (
+            "keyconfig: mode {0} lane {1} has unknown key {2}; using default",
+            "키 설정: {0} 모드 레인 {1}의 키를 알 수 없습니다 ({2}). 기본값을 사용합니다",
+            "キー設定: {0}モードのレーン{1}に不明なキーがあります（{2}）。初期値を使います",
+        ),
+        KeyConfigUnknownReverseKey => (
+            "keyconfig: mode {0} scratch lane {1} has unknown reverse key {2}; leaving it unbound",
+            "키 설정: {0} 모드 스크래치 레인 {1}의 역방향 키를 알 수 없습니다 ({2}). 지정하지 않은 상태로 둡니다",
+            "キー設定: {0}モードのスクラッチレーン{1}に不明な逆回転キーがあります（{2}）。未設定のままにします",
+        ),
+        KeyConfigParseFailedBackedUp => (
+            "keyconfig parse failed ({0}); backed up to {1} and using defaults",
+            "키 설정 파일을 읽지 못했습니다 ({0}). {1}에 백업하고 기본값을 사용합니다",
+            "キー設定ファイルを読み込めませんでした（{0}）。{1}にバックアップし、初期値を使います",
+        ),
+        KeyConfigParseFailedNoBackup => (
+            "keyconfig parse failed ({0}); backup failed ({1}); using defaults",
+            "키 설정 파일을 읽지 못했습니다 ({0}). 백업에도 실패했습니다 ({1}). 기본값을 사용합니다",
+            "キー設定ファイルを読み込めませんでした（{0}）。バックアップにも失敗しました（{1}）。初期値を使います",
+        ),
+        KeyConfigWriteFailed => (
+            "keyconfig write failed ({0}): {1}",
+            "키 설정 파일을 쓰지 못했습니다 ({0}): {1}",
+            "キー設定ファイルを書き込めませんでした（{0}）: {1}",
+        ),
+        KeyConfigSaveFailed => (
+            "keyconfig save failed: {0}",
+            "키 설정을 저장하지 못했습니다: {0}",
+            "キー設定を保存できませんでした: {0}",
+        ),
+        UserFoldersNotSaved => (
+            "user folders not saved: {0}",
+            "사용자 폴더를 저장하지 못했습니다: {0}",
+            "ユーザーフォルダを保存できませんでした: {0}",
+        ),
+        UserFoldersNotFullyRefreshed => (
+            "user folders not fully refreshed ({0} failed): {1}",
+            "사용자 폴더를 일부 갱신하지 못했습니다 (실패 {0}건): {1}",
+            "ユーザーフォルダを一部更新できませんでした（失敗{0}件）: {1}",
+        ),
+        UserFoldersNotRefreshed => (
+            "user folders not refreshed: {0}",
+            "사용자 폴더를 갱신하지 못했습니다: {0}",
+            "ユーザーフォルダを更新できませんでした: {0}",
+        ),
+        TableCopyNotSaved => (
+            "table copy not saved ({0}): {1}",
+            "난이도표 사본을 저장하지 못했습니다 ({0}): {1}",
+            "難易度表のコピーを保存できませんでした（{0}）: {1}",
+        ),
+        TableLoadFailed => (
+            "table load failed ({0}): {1}",
+            "난이도표를 불러오지 못했습니다 ({0}): {1}",
+            "難易度表を読み込めませんでした（{0}）: {1}",
+        ),
+        TableReloadFailed => (
+            "table reload failed ({0}): {1}",
+            "난이도표를 다시 불러오지 못했습니다 ({0}): {1}",
+            "難易度表を再読み込みできませんでした（{0}）: {1}",
+        ),
+        TableFetchFailed => (
+            "table fetch failed ({0}): {1}",
+            "난이도표를 받아 오지 못했습니다 ({0}): {1}",
+            "難易度表を取得できませんでした（{0}）: {1}",
+        ),
+        LibraryScanFailed => (
+            "library scan failed: {0}",
+            "라이브러리 스캔에 실패했습니다: {0}",
+            "ライブラリのスキャンに失敗しました: {0}",
+        ),
+        BrowserNotOpened => (
+            "could not open the browser: {0}",
+            "브라우저를 열 수 없습니다: {0}",
+            "ブラウザを開けませんでした: {0}",
+        ),
+        PasteFailed => (
+            "paste failed: {0}",
+            "붙여넣지 못했습니다: {0}",
+            "貼り付けに失敗しました: {0}",
+        ),
+        CourseNotKept => (
+            "course not kept: {0}",
+            "코스를 보관하지 못했습니다: {0}",
+            "コースを保管できませんでした: {0}",
+        ),
+        CourseRejected => (
+            "course rejected: {0}",
+            "코스가 거부되었습니다: {0}",
+            "コースが拒否されました: {0}",
+        ),
+        CourseNotSentYet => (
+            "course not sent yet ({0}): sent again on the next records sync",
+            "코스를 아직 전송하지 못했습니다 ({0}). 다음 기록 동기화 때 다시 전송합니다",
+            "コースはまだ送信できていません（{0}）。次回の記録同期で再送します",
+        ),
+        DownloadAnotherIsRunning => (
+            "another download is running",
+            "다른 다운로드가 진행 중입니다",
+            "別のダウンロードが実行中です",
+        ),
+        DownloadLinkIsNoZip => (
+            "the chart's link is not a zip archive",
+            "이 차트의 링크는 zip 압축 파일이 아닙니다",
+            "この譜面のリンクはzipアーカイブではありません",
+        ),
+        DownloadNoFolder => (
+            "no download folder is chosen",
+            "다운로드 폴더가 선택되지 않았습니다",
+            "ダウンロードフォルダが選択されていません",
+        ),
+        DownloadDone => (
+            "downloaded: {0} ({1} chart(s))",
+            "다운로드했습니다: {0} (차트 {1}개)",
+            "ダウンロードしました: {0}（譜面{1}件）",
+        ),
+        DownloadArchiveLacksChart => (
+            "the archive had {0} chart(s) but not this one",
+            "압축 파일에 차트 {0}개가 있었지만 이 차트는 없었습니다",
+            "アーカイブには譜面が{0}件ありましたが、この譜面は含まれていませんでした",
+        ),
+        DownloadFailed => (
+            "download failed: {0}",
+            "다운로드에 실패했습니다: {0}",
+            "ダウンロードに失敗しました: {0}",
+        ),
+        DownloadCancelled => (
+            "download cancelled",
+            "다운로드를 취소했습니다",
+            "ダウンロードをキャンセルしました",
+        ),
+        DownloadProgress => (
+            "DOWNLOADING {0} / {1}",
+            "다운로드 중 {0} / {1}",
+            "ダウンロード中 {0} / {1}",
+        ),
+        DownloadProgressUnknownSize => (
+            "DOWNLOADING {0}",
+            "다운로드 중 {0}",
+            "ダウンロード中 {0}",
+        ),
+        DownloadExtracting => (
+            "EXTRACTING",
+            "압축 해제 중",
+            "展開中",
+        ),
     }
 }
 
@@ -210,8 +473,8 @@ rbms_model::translations! {
     pub(crate) enum StatusText {
         SetServerUrlFirst => (
             "set SERVER URL first",
-            "먼저 SERVER URL 행을 설정해 주세요",
-            "先にSERVER URLを設定してください",
+            "먼저 서버 URL 행을 설정해 주세요",
+            "先にサーバーURLを設定してください",
         ),
         LogInFirst => (
             "log in first",
@@ -230,23 +493,63 @@ rbms_model::translations! {
         ),
         SetPlayerIdFirst => (
             "set PLAYER ID to your account id first",
-            "먼저 PLAYER ID 행에 계정 ID를 입력해 주세요",
-            "先にPLAYER IDにアカウントIDを入力してください",
+            "먼저 플레이어 ID 행에 계정 ID를 입력해 주세요",
+            "先にプレーヤーIDにアカウントIDを入力してください",
         ),
         SetPasswordFirst => (
             "set PASSWORD first",
-            "먼저 PASSWORD 행을 입력해 주세요",
-            "先にPASSWORDを入力してください",
+            "먼저 비밀번호 행을 입력해 주세요",
+            "先にパスワードを入力してください",
         ),
         SetEmailFirst => (
             "set EMAIL first",
-            "먼저 EMAIL 행을 입력해 주세요",
-            "先にEMAILを入力してください",
+            "먼저 이메일 행을 입력해 주세요",
+            "先にメールアドレスを入力してください",
         ),
         LoggedOut => (
             "logged out",
             "로그아웃했습니다",
             "ログアウトしました",
+        ),
+        LoggingIn => (
+            "logging in...",
+            "로그인하는 중...",
+            "ログイン中...",
+        ),
+        Registering => (
+            "registering...",
+            "회원가입하는 중...",
+            "新規登録中...",
+        ),
+        LoggedInAs => (
+            "logged in as {0}",
+            "로그인한 계정: {0}",
+            "ログイン済み: {0}",
+        ),
+        LoggedIn => (
+            "logged in",
+            "로그인 상태",
+            "ログイン済み",
+        ),
+        LoginFailed => (
+            "login failed: {0}",
+            "로그인 실패: {0}",
+            "ログイン失敗: {0}",
+        ),
+        RegisterFailed => (
+            "register failed: {0}",
+            "회원가입 실패: {0}",
+            "新規登録失敗: {0}",
+        ),
+        SessionExpired => (
+            "session expired: {0}",
+            "세션이 만료되었습니다: {0}",
+            "セッションの有効期限が切れました: {0}",
+        ),
+        SettingsConflict => (
+            "conflict: server newer, download first",
+            "충돌: 서버 쪽이 더 최신입니다. 먼저 다운로드해 주세요",
+            "競合: サーバー側が新しいです。先にダウンロードしてください",
         ),
         UploadingSettings => (
             "uploading settings...",
@@ -500,10 +803,12 @@ pub(crate) fn installed_with(text: impl Catalog, args: &[&dyn Display]) -> Strin
 
 #[cfg(test)]
 mod tests {
+    use rbms_config::SettingId;
     use rbms_model::Language;
     use rbms_model::translations::catalog_problems;
 
     use super::*;
+    use crate::text::settings::{InstalledLanguage, row_label};
 
     #[test]
     fn a_status_line_is_worded_in_the_installed_language() {
@@ -585,6 +890,66 @@ mod tests {
             (NoticeText::LayoutRefusedNoSeed, vec![], "layout not borrowed: that replay does not state the seed its lanes were laid out from"),
             (NoticeText::LayoutRefusedUnsupportedOption, vec![&"X"], "layout not borrowed: that replay was played on X, which this player cannot lay out"),
             (NoticeText::LayoutRefusedNotFreePlay, vec![], "layout not borrowed: only a run played by hand outside a course or practice can borrow one"),
+            (NoticeText::SettingsSaveFailed, vec![&"/cfg/settings.ron", &"disk full"], "settings save failed (/cfg/settings.ron): disk full"),
+            (NoticeText::SettingsSaveFailedNoPath, vec![&"disk full"], "settings save failed: disk full"),
+            (NoticeText::SettingsNotLoaded, vec![&"bad ron"], "settings not loaded (bad ron); running on defaults and leaving the file alone"),
+            (NoticeText::FontNotFound, vec![&"f.ttf", &"no such file"], "font not found: f.ttf (no such file)"),
+            (NoticeText::FontNotRead, vec![&"f.ttf", &"denied"], "font read failed (f.ttf): denied"),
+            (NoticeText::ReplayLoadFailed, vec![&"truncated"], "replay load failed: truncated"),
+            (NoticeText::ChartNotFound, vec![&"a.bms", &"no such file"], "chart not found: a.bms (no such file)"),
+            (NoticeText::ReplayNotSaved, vec![&"disk full", &"r.ron"], "replay not saved: disk full (r.ron)"),
+            (NoticeText::ReplayNotSavedNoPath, vec![&"disk full"], "replay not saved: disk full"),
+            (NoticeText::RunNotKept, vec![&"disk full"], "run not kept: disk full"),
+            (NoticeText::ScoreNotRecorded, vec![&"locked"], "score not recorded: locked"),
+            (NoticeText::ScoreRecordsNotRead, vec![&"locked"], "score records not read: locked"),
+            (NoticeText::ScoreDatabaseNotOpened, vec![&"scores.db", &"locked"], "score database not opened (scores.db): locked"),
+            (NoticeText::KeptRunNotReadIn, vec![&"a.ron", &"bad"], "kept run not read in (a.ron): bad; left where it is"),
+            (NoticeText::KeptRunsNotReadIn, vec![&"kept", &"denied"], "kept runs not read in (kept): denied"),
+            (NoticeText::SongDatabaseNotOpened, vec![&"songs.db", &"locked"], "song database not opened (songs.db): locked"),
+            (NoticeText::SongListNotRead, vec![&"locked"], "song list not read: locked"),
+            (NoticeText::PracticeSettingsNotLoaded, vec![&"bad ron"], "practice settings not loaded (bad ron); starting with none"),
+            (NoticeText::PracticeSettingsSaveFailed, vec![&"disk full"], "practice settings save failed: disk full"),
+            (NoticeText::PracticeSettingsSaveFailedAt, vec![&"p.ron", &"disk full"], "practice settings save failed (p.ron): disk full"),
+            (NoticeText::FavoritesNotLoaded, vec![&"bad ron"], "favorites not loaded (bad ron); starting with none"),
+            (NoticeText::FavoritesSaveFailed, vec![&"disk full"], "favorites save failed: disk full"),
+            (NoticeText::FavoritesSaveFailedAt, vec![&"f.ron", &"disk full"], "favorites save failed (f.ron): disk full"),
+            (NoticeText::KeyConfigUnknownKey, vec![&"7K", &2, &"\"ZZ\""], "keyconfig: mode 7K lane 2 has unknown key \"ZZ\"; using default"),
+            (
+                NoticeText::KeyConfigUnknownReverseKey,
+                vec![&"7K", &0, &"\"ZZ\""],
+                "keyconfig: mode 7K scratch lane 0 has unknown reverse key \"ZZ\"; leaving it unbound",
+            ),
+            (
+                NoticeText::KeyConfigParseFailedBackedUp,
+                vec![&"bad ron", &"k.ron.bak"],
+                "keyconfig parse failed (bad ron); backed up to k.ron.bak and using defaults",
+            ),
+            (NoticeText::KeyConfigParseFailedNoBackup, vec![&"bad ron", &"denied"], "keyconfig parse failed (bad ron); backup failed (denied); using defaults"),
+            (NoticeText::KeyConfigWriteFailed, vec![&"k.ron", &"disk full"], "keyconfig write failed (k.ron): disk full"),
+            (NoticeText::KeyConfigSaveFailed, vec![&"bad ron"], "keyconfig save failed: bad ron"),
+            (NoticeText::UserFoldersNotSaved, vec![&"disk full"], "user folders not saved: disk full"),
+            (NoticeText::UserFoldersNotFullyRefreshed, vec![&2, &"timeout"], "user folders not fully refreshed (2 failed): timeout"),
+            (NoticeText::UserFoldersNotRefreshed, vec![&"timeout"], "user folders not refreshed: timeout"),
+            (NoticeText::TableCopyNotSaved, vec![&"https://t/", &"disk full"], "table copy not saved (https://t/): disk full"),
+            (NoticeText::TableLoadFailed, vec![&"https://t/", &"timeout"], "table load failed (https://t/): timeout"),
+            (NoticeText::TableReloadFailed, vec![&"https://t/", &"timeout"], "table reload failed (https://t/): timeout"),
+            (NoticeText::TableFetchFailed, vec![&"https://t/", &"timeout"], "table fetch failed (https://t/): timeout"),
+            (NoticeText::LibraryScanFailed, vec![&"denied"], "library scan failed: denied"),
+            (NoticeText::BrowserNotOpened, vec![&"xdg-open exited with 1"], "could not open the browser: xdg-open exited with 1"),
+            (NoticeText::PasteFailed, vec![&"no display"], "paste failed: no display"),
+            (NoticeText::CourseNotKept, vec![&"locked"], "course not kept: locked"),
+            (NoticeText::CourseRejected, vec![&"bad hash"], "course rejected: bad hash"),
+            (NoticeText::CourseNotSentYet, vec![&"timeout"], "course not sent yet (timeout): sent again on the next records sync"),
+            (NoticeText::DownloadAnotherIsRunning, vec![], "another download is running"),
+            (NoticeText::DownloadLinkIsNoZip, vec![], "the chart's link is not a zip archive"),
+            (NoticeText::DownloadNoFolder, vec![], "no download folder is chosen"),
+            (NoticeText::DownloadDone, vec![&"Song", &3], "downloaded: Song (3 chart(s))"),
+            (NoticeText::DownloadArchiveLacksChart, vec![&3], "the archive had 3 chart(s) but not this one"),
+            (NoticeText::DownloadFailed, vec![&"timeout"], "download failed: timeout"),
+            (NoticeText::DownloadCancelled, vec![], "download cancelled"),
+            (NoticeText::DownloadProgress, vec![&"1.0 MB", &"2.0 MB"], "DOWNLOADING 1.0 MB / 2.0 MB"),
+            (NoticeText::DownloadProgressUnknownSize, vec![&"1.0 MB"], "DOWNLOADING 1.0 MB"),
+            (NoticeText::DownloadExtracting, vec![], "EXTRACTING"),
         ];
         assert_eq!(table.len(), NoticeText::ALL.len(), "an entry has no row in this table");
         for (text, args, expected) in table {
@@ -603,6 +968,14 @@ mod tests {
             (StatusText::SetPasswordFirst, vec![], "set PASSWORD first"),
             (StatusText::SetEmailFirst, vec![], "set EMAIL first"),
             (StatusText::LoggedOut, vec![], "logged out"),
+            (StatusText::LoggingIn, vec![], "logging in..."),
+            (StatusText::Registering, vec![], "registering..."),
+            (StatusText::LoggedInAs, vec![&"dj"], "logged in as dj"),
+            (StatusText::LoggedIn, vec![], "logged in"),
+            (StatusText::LoginFailed, vec![&"bad credentials"], "login failed: bad credentials"),
+            (StatusText::RegisterFailed, vec![&"bad credentials"], "register failed: bad credentials"),
+            (StatusText::SessionExpired, vec![&"token expired"], "session expired: token expired"),
+            (StatusText::SettingsConflict, vec![], "conflict: server newer, download first"),
             (StatusText::UploadingSettings, vec![], "uploading settings..."),
             (StatusText::DownloadingSettings, vec![], "downloading settings..."),
             (StatusText::SettingsDownloaded, vec![], "settings downloaded"),
@@ -678,10 +1051,22 @@ mod tests {
         for language in Language::ALL {
             assert!(NoticeText::AbandonedCourseKept.get(language).contains("FAILED"), "{language:?}");
             assert!(NoticeText::LayoutOfLnModeDecides.get(language).contains("LN MODE {2}"), "{language:?}");
-            assert!(StatusText::SetServerUrlFirst.get(language).contains("SERVER URL"), "{language:?}");
-            assert!(StatusText::SetPlayerIdFirst.get(language).contains("PLAYER ID"), "{language:?}");
-            assert!(StatusText::SetPasswordFirst.get(language).contains("PASSWORD"), "{language:?}");
-            assert!(StatusText::SetEmailFirst.get(language).contains("EMAIL"), "{language:?}");
+        }
+    }
+
+    #[test]
+    fn a_sentence_that_names_a_row_names_it_as_the_settings_screen_does_in_that_language() {
+        let sentences = [
+            (StatusText::SetServerUrlFirst, SettingId::ServerUrl),
+            (StatusText::SetPlayerIdFirst, SettingId::PlayerId),
+            (StatusText::SetPasswordFirst, SettingId::Password),
+            (StatusText::SetEmailFirst, SettingId::Email),
+        ];
+        for language in Language::ALL {
+            let _installed = InstalledLanguage::new(language);
+            for (sentence, row) in sentences {
+                assert!(sentence.get(language).contains(row_label(row)), "{sentence:?} {language:?} does not name the row as {:?}", row_label(row));
+            }
         }
     }
 }

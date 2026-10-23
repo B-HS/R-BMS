@@ -51,14 +51,23 @@ pub(crate) fn shown_choice(id: SettingId, english: &'static str) -> &'static str
     entry.get(language())
 }
 
+/// What a value that belongs to no row of the table is drawn as, such as the value of a row a skin
+/// document declares: the empty marks are written in the language, and anything else is a name the
+/// skin or the program supplied and is drawn as it is.
+pub(crate) fn shown_skin_value(value: &str) -> String {
+    match value {
+        NONE_VALUE => EmptyValueText::Empty.get(language()).to_string(),
+        UNSET_VALUE => EmptyValueText::NotSet.get(language()).to_string(),
+        _ => value.to_string(),
+    }
+}
+
 /// What a row whose stored value is `value` is drawn as. The empty marks are written in the
 /// language; a value of a choice is written by [`shown_choice`]; anything else is a number, a
 /// name or a path the user or the program supplied, and is drawn as it is.
 pub(crate) fn shown_value(id: SettingId, value: &str) -> String {
-    match value {
-        NONE_VALUE => return EmptyValueText::Empty.get(language()).to_string(),
-        UNSET_VALUE => return EmptyValueText::NotSet.get(language()).to_string(),
-        _ => {}
+    if matches!(value, NONE_VALUE | UNSET_VALUE) {
+        return shown_skin_value(value);
     }
     match descriptor(id).kind {
         SettingKind::Cycle { values } => {
@@ -103,6 +112,17 @@ mod tests {
                 rows.iter().any(|id| cycle_values(*id).iter().any(|value| *value == english && shown_choice(*id, value) == entry.get(Language::Korean)));
             assert!(found, "{entry:?} names a value no row steps through");
         }
+    }
+
+    #[test]
+    fn a_value_of_a_skin_row_is_drawn_as_it_is_but_for_the_empty_marks() {
+        assert_eq!(shown_skin_value(NONE_VALUE), NONE_VALUE);
+        assert_eq!(shown_skin_value("DEFAULT"), "DEFAULT");
+        let _korean = InstalledLanguage::new(Language::Korean);
+        assert_eq!(shown_skin_value(NONE_VALUE), "(없음)");
+        assert_eq!(shown_skin_value(UNSET_VALUE), "(설정 안 됨)");
+        assert_eq!(shown_skin_value("DEFAULT"), "DEFAULT");
+        assert_eq!(shown_skin_value("PACK: ARCADE"), "PACK: ARCADE", "the name a skin gives an item is the skin's own");
     }
 
     #[test]

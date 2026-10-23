@@ -422,6 +422,35 @@ fn a_reason_leaves_out_the_folder_of_a_document_named_with_the_verbatim_prefix()
 /// A Lua skin whose program does not parse, so its header never answers.
 const UNPARSED_SKIN: &str = "return { type = 6, name = 'Unparsed' w = 1280 }";
 
+/// The words of the LOADED row, the pack rows and the offset rows are the ones the tests have always
+/// compared with in English, and are written in the language of the screens when it is another.
+#[test]
+fn the_words_of_the_skin_rows_are_written_in_the_language_of_the_screens() {
+    use crate::text::settings::InstalledLanguage;
+
+    for (english, text) in [
+        (BUILT_IN_INFO, SkinInfoText::BuiltInScreen),
+        (NOT_READ_INFO, SkinInfoText::NotReadYet),
+        (UNSUPPORTED_INFO, SkinInfoText::ScreenNotSupported),
+        (WAITING_INFO, SkinInfoText::ReadWhenOpens),
+        (MISSING_PACK_PREFIX, SkinInfoText::MissingPackPrefix),
+        (MISSING_PACK_NOTE, SkinInfoText::PackFolderMissing),
+        (UNREAD_SKIN_NOTE, SkinInfoText::DidNotRead),
+    ] {
+        assert_eq!(text.get(Language::English), english);
+    }
+    let mut fixture = Fixture::new("language-info");
+    fixture.config.skin.screen = DECIDE;
+    let _korean = InstalledLanguage::new(Language::Korean);
+    assert_eq!(fixture.skins.info(&fixture.config), "내장 화면");
+    let missing = fixture.settings.with_file_name("no-such-pack");
+    fixture.name_pack(&missing);
+    assert_eq!(fixture.skins.info(&fixture.config), "내장 화면 - 팩 폴더가 없습니다");
+    assert_eq!(fixture.skins.pack_value(&fixture.config), format!("(없음) {}", missing.to_string_lossy()));
+    assert_eq!(color_channels_label(), "색상 채널");
+    assert_eq!(OffsetAxis::R.label(), "각도");
+}
+
 /// A pack that may be why a screen has no document says so: a folder that is not on the disk, and a
 /// Lua skin whose header does not answer -- the first by file name, with how many more there are.
 /// A screen that has a document, and a pack with nothing wrong with it, say nothing.

@@ -4,11 +4,14 @@ use std::path::Path;
 use rbms_model::Mode;
 use rbms_model::translations::Catalog;
 use rbms_play::ScratchDir;
+use rbms_render::text::language;
 use serde::{Deserialize, Serialize};
 use winit::keyboard::KeyCode;
 
 use crate::gamepad::PadConfig;
 use crate::text::layout_play::LayoutPlayText;
+use crate::text::menus::key_editor::{ControlLabelText, LaneLabelText, ShortcutGroupText, ShortcutLabelText};
+use crate::text::notices::NoticeText;
 
 /// Parse a key token (the vocabulary used in the keyconfig file and `--keys`) into a `KeyCode`.
 pub fn key_from_name(s: &str) -> Option<KeyCode> {
@@ -413,28 +416,29 @@ impl ControlAction {
     /// raises the judgment line and the hidden cover grows upwards from it, and their rows say so
     /// the same way.
     pub fn label(self) -> &'static str {
-        match self {
-            ControlAction::HiSpeedUp => "HI-SPEED UP",
-            ControlAction::HiSpeedDown => "HI-SPEED DOWN",
-            ControlAction::CoverUp => "LANE COVER DOWN (COVER MORE)",
-            ControlAction::CoverDown => "LANE COVER UP (COVER LESS)",
-            ControlAction::CoverToggle => "LANE COVER ON/OFF",
-            ControlAction::LiftUp => "LIFT UP (RAISE THE LINE)",
-            ControlAction::LiftDown => "LIFT DOWN (LOWER THE LINE)",
-            ControlAction::LiftToggle => "LIFT ON/OFF",
-            ControlAction::HiddenUp => "HIDDEN+ UP (COVER MORE)",
-            ControlAction::HiddenDown => "HIDDEN+ DOWN (COVER LESS)",
-            ControlAction::HiddenToggle => "HIDDEN+ ON/OFF",
-            ControlAction::GreenUp => "GREEN NUMBER UP (SLOWER)",
-            ControlAction::GreenDown => "GREEN NUMBER DOWN (FASTER)",
-            ControlAction::KeepGreenToggle => "KEEP GREEN NUMBER ON/OFF",
-            ControlAction::OffsetUp => "JUDGE OFFSET +1 MS (HITTING LATE)",
-            ControlAction::OffsetDown => "JUDGE OFFSET -1 MS (HITTING EARLY)",
-            ControlAction::AutoAdjustToggle => "AUTO ADJUST ON/OFF",
-            ControlAction::Fine => "FINE STEP WHILE HELD (UNSET: SHIFT)",
-            ControlAction::Start => "START",
-            ControlAction::Select => "SELECT",
-        }
+        let text = match self {
+            ControlAction::HiSpeedUp => ControlLabelText::HiSpeedUp,
+            ControlAction::HiSpeedDown => ControlLabelText::HiSpeedDown,
+            ControlAction::CoverUp => ControlLabelText::CoverUp,
+            ControlAction::CoverDown => ControlLabelText::CoverDown,
+            ControlAction::CoverToggle => ControlLabelText::CoverToggle,
+            ControlAction::LiftUp => ControlLabelText::LiftUp,
+            ControlAction::LiftDown => ControlLabelText::LiftDown,
+            ControlAction::LiftToggle => ControlLabelText::LiftToggle,
+            ControlAction::HiddenUp => ControlLabelText::HiddenUp,
+            ControlAction::HiddenDown => ControlLabelText::HiddenDown,
+            ControlAction::HiddenToggle => ControlLabelText::HiddenToggle,
+            ControlAction::GreenUp => ControlLabelText::GreenUp,
+            ControlAction::GreenDown => ControlLabelText::GreenDown,
+            ControlAction::KeepGreenToggle => ControlLabelText::KeepGreenToggle,
+            ControlAction::OffsetUp => ControlLabelText::OffsetUp,
+            ControlAction::OffsetDown => ControlLabelText::OffsetDown,
+            ControlAction::AutoAdjustToggle => ControlLabelText::AutoAdjustToggle,
+            ControlAction::Fine => ControlLabelText::Fine,
+            ControlAction::Start => ControlLabelText::Start,
+            ControlAction::Select => ControlLabelText::Select,
+        };
+        text.get(language())
     }
 
     /// The name the control is stored under in the pad block of the key config file.
@@ -702,13 +706,14 @@ impl ShortcutGroup {
         [ShortcutGroup::Browser, ShortcutGroup::Screens, ShortcutGroup::SkinBrowser, ShortcutGroup::Result, ShortcutGroup::Replay];
 
     pub fn title(self) -> &'static str {
-        match self {
-            ShortcutGroup::Browser => "SELECT",
-            ShortcutGroup::Screens => "SCREENS (OPENED FROM SELECT)",
-            ShortcutGroup::SkinBrowser => "SELECT - NUMBER KEYS OF A SKIN'S BROWSER",
-            ShortcutGroup::Result => "RESULT",
-            ShortcutGroup::Replay => "REPLAY ANALYSIS",
-        }
+        let text = match self {
+            ShortcutGroup::Browser => ShortcutGroupText::Browser,
+            ShortcutGroup::Screens => ShortcutGroupText::Screens,
+            ShortcutGroup::SkinBrowser => ShortcutGroupText::SkinBrowser,
+            ShortcutGroup::Result => ShortcutGroupText::Result,
+            ShortcutGroup::Replay => ShortcutGroupText::Replay,
+        };
+        text.get(language())
     }
 }
 
@@ -837,40 +842,38 @@ impl Shortcut {
 
     /// What the shortcut is called in the key editor.
     pub fn label(self) -> &'static str {
-        match self {
-            Shortcut::Search => "SEARCH",
-            Shortcut::Filter => "FILTER PANEL",
-            Shortcut::Sort => "SORT ORDER (SHIFT: BACKWARDS)",
-            Shortcut::Practice => "PRACTICE",
-            Shortcut::Favourite => "FAVOURITE",
-            Shortcut::Records => "RECORDS OF THE CHART",
-            Shortcut::Ranking => "IR RANKING",
-            Shortcut::ReloadTables => "RELOAD DIFFICULTY TABLES",
-            Shortcut::OptionsPin => "OPTIONS OVERLAY (PIN)",
-            Shortcut::OptionsHold => "OPTIONS OVERLAY (HOLD)",
-            Shortcut::Settings => "SETTINGS (SHIFT: COURSE LIST)",
-            Shortcut::SkinMenu => "SKIN MENU",
-            Shortcut::PlayMenu => "PLAY MENU",
-            Shortcut::KeyConfig => "KEY CONFIG",
-            Shortcut::Folders => "MUSIC FOLDERS",
-            Shortcut::Tables => "DIFFICULTY TABLES",
-            Shortcut::RefMode => "MODE FILTER",
-            Shortcut::RefSort => "SORT ORDER",
-            Shortcut::RefLnMode => "LONG NOTE MODE",
-            Shortcut::RefReplay => "REPLAY SLOT",
-            Shortcut::RefDetail => "DETAIL OPTIONS (HOLD)",
-            Shortcut::RefKeyConfig => "KEY CONFIG",
-            Shortcut::RefSearch => "SEARCH",
-            Shortcut::RefFavourite => "FAVOURITE",
-            Shortcut::Retry => "PLAY THE CHART AGAIN",
-            Shortcut::NextSong => "NEXT SONG",
-            Shortcut::ReplayPause => "PAUSE / RESUME",
-            Shortcut::ReplayFaster => "PLAYBACK RATE UP",
-            Shortcut::ReplaySlower => "PLAYBACK RATE DOWN",
-            Shortcut::ReplayForward => "SEEK FORWARD",
-            Shortcut::ReplayBack => "SEEK BACK",
-            Shortcut::ReplayPlayLayout => LayoutPlayText::ShortcutLabel.get(rbms_render::text::language()),
-        }
+        let text = match self {
+            Shortcut::Search | Shortcut::RefSearch => ShortcutLabelText::Search,
+            Shortcut::Filter => ShortcutLabelText::Filter,
+            Shortcut::Sort => ShortcutLabelText::Sort,
+            Shortcut::Practice => ShortcutLabelText::Practice,
+            Shortcut::Favourite | Shortcut::RefFavourite => ShortcutLabelText::Favourite,
+            Shortcut::Records => ShortcutLabelText::Records,
+            Shortcut::Ranking => ShortcutLabelText::Ranking,
+            Shortcut::ReloadTables => ShortcutLabelText::ReloadTables,
+            Shortcut::OptionsPin => ShortcutLabelText::OptionsPin,
+            Shortcut::OptionsHold => ShortcutLabelText::OptionsHold,
+            Shortcut::Settings => ShortcutLabelText::Settings,
+            Shortcut::SkinMenu => ShortcutLabelText::SkinMenu,
+            Shortcut::PlayMenu => ShortcutLabelText::PlayMenu,
+            Shortcut::KeyConfig | Shortcut::RefKeyConfig => ShortcutLabelText::KeyConfig,
+            Shortcut::Folders => ShortcutLabelText::Folders,
+            Shortcut::Tables => ShortcutLabelText::Tables,
+            Shortcut::RefMode => ShortcutLabelText::ModeFilter,
+            Shortcut::RefSort => ShortcutLabelText::SortOrder,
+            Shortcut::RefLnMode => ShortcutLabelText::LongNoteMode,
+            Shortcut::RefReplay => ShortcutLabelText::ReplaySlot,
+            Shortcut::RefDetail => ShortcutLabelText::DetailOptions,
+            Shortcut::Retry => ShortcutLabelText::Retry,
+            Shortcut::NextSong => ShortcutLabelText::NextSong,
+            Shortcut::ReplayPause => ShortcutLabelText::ReplayPause,
+            Shortcut::ReplayFaster => ShortcutLabelText::ReplayFaster,
+            Shortcut::ReplaySlower => ShortcutLabelText::ReplaySlower,
+            Shortcut::ReplayForward => ShortcutLabelText::ReplayForward,
+            Shortcut::ReplayBack => ShortcutLabelText::ReplayBack,
+            Shortcut::ReplayPlayLayout => return LayoutPlayText::ShortcutLabel.get(language()),
+        };
+        text.get(language())
     }
 
     /// The name the shortcut is stored under in the key config file.
@@ -995,9 +998,9 @@ impl Bindable {
     /// What it is called in a message of the key editor.
     pub fn label(self, mode: Mode) -> String {
         match self {
-            Bindable::Lane(lane) if mode.is_scratch(lane) => format!("SCRATCH {}", lane + 1),
-            Bindable::Lane(lane) => format!("LANE {}", lane + 1),
-            Bindable::ScratchReverse(lane) => format!("SCRATCH {} REVERSE", lane + 1),
+            Bindable::Lane(lane) if mode.is_scratch(lane) => LaneLabelText::Scratch.fill(language(), &[&(lane + 1)]),
+            Bindable::Lane(lane) => LaneLabelText::Lane.fill(language(), &[&(lane + 1)]),
+            Bindable::ScratchReverse(lane) => LaneLabelText::ScratchReverse.fill(language(), &[&(lane + 1)]),
             Bindable::Control(action) => action.label().to_string(),
             Bindable::Shortcut(shortcut) => shortcut.label().to_string(),
         }
@@ -1230,10 +1233,7 @@ impl KeyConfig {
                 }
                 match key_from_name(tok) {
                     Some(code) => by_lane[lane] = Some(code),
-                    None => crate::notify::notify(
-                        crate::notify::Level::Warn,
-                        format!("keyconfig: mode {} lane {} has unknown key {tok:?}; using default", mode.name, lane),
-                    ),
+                    None => crate::notify::notify_text(crate::notify::Level::Warn, NoticeText::KeyConfigUnknownKey, &[&mode.name, &lane, &format!("{tok:?}")]),
                 }
             }
         }
@@ -1258,10 +1258,7 @@ impl KeyConfig {
                 }
                 let code = key_from_name(token);
                 if code.is_none() {
-                    crate::notify::notify(
-                        crate::notify::Level::Warn,
-                        format!("keyconfig: mode {} scratch lane {lane} has unknown reverse key {token:?}; leaving it unbound", mode.name),
-                    );
+                    crate::notify::notify_text(crate::notify::Level::Warn, NoticeText::KeyConfigUnknownReverseKey, &[&mode.name, &lane, &format!("{token:?}")]);
                 }
                 code.map(|code| (code, lane))
             })
@@ -1532,13 +1529,8 @@ impl KeyConfig {
                 Err(e) => {
                     let backup = path.with_extension("ron.bak");
                     match std::fs::rename(path, &backup) {
-                        Ok(_) => crate::notify::notify(
-                            crate::notify::Level::Warn,
-                            format!("keyconfig parse failed ({e}); backed up to {} and using defaults", backup.display()),
-                        ),
-                        Err(err) => {
-                            crate::notify::notify(crate::notify::Level::Error, format!("keyconfig parse failed ({e}); backup failed ({err}); using defaults"))
-                        }
+                        Ok(_) => crate::notify::notify_text(crate::notify::Level::Warn, NoticeText::KeyConfigParseFailedBackedUp, &[&e, &backup.display()]),
+                        Err(err) => crate::notify::notify_text(crate::notify::Level::Error, NoticeText::KeyConfigParseFailedNoBackup, &[&e, &err]),
                     }
                     KeyConfig::default()
                 }
@@ -1555,9 +1547,9 @@ impl KeyConfig {
         match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
             Ok(s) => match crate::write_atomic(path, &s) {
                 Ok(()) => println!("keyconfig saved: {}", path.display()),
-                Err(e) => crate::notify::notify(crate::notify::Level::Error, format!("keyconfig write failed ({}): {e}", path.display())),
+                Err(e) => crate::notify::notify_text(crate::notify::Level::Error, NoticeText::KeyConfigWriteFailed, &[&path.display(), &e]),
             },
-            Err(e) => crate::notify::notify(crate::notify::Level::Error, format!("keyconfig save failed: {e}")),
+            Err(e) => crate::notify::notify_text(crate::notify::Level::Error, NoticeText::KeyConfigSaveFailed, &[&e]),
         }
     }
 }

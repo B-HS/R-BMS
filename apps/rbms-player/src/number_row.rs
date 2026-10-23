@@ -103,6 +103,7 @@ pub(crate) const REFUSAL_SHOWN_FOR: Duration = Duration::from_millis(1500);
 
 /// What a colour row says in place of its colour when what was typed into it was not one, in
 /// English. The words in the language the screens are drawn in are `NumberRowText::NotAColor`.
+#[cfg(test)]
 pub(crate) const COLOR_REFUSAL_NOTE: &str = "NOT A COLOR";
 
 /// The number one row holds, as its screen reads it: how the row is counted, the step it stands

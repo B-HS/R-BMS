@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppShared;
 use crate::ir_outcome::short_error;
-use crate::notify::{Level, notify, notify_text};
+use crate::notify::{Level, notify_text};
 use crate::select_tree::{ListPlace, show_the_list_again};
 use crate::tablesrc::{unix_now, url_hash};
 use crate::text::notices::NoticeText;
@@ -447,7 +447,7 @@ pub(crate) fn start_fetch(shared: &mut AppShared, loud: bool) -> bool {
 fn keep(path: &Path, saved: &SavedFolders) {
     let written = ron::to_string(saved).map_err(|error| error.to_string()).and_then(|text| crate::write_atomic(path, &text).map_err(|error| error.to_string()));
     if let Err(reason) = written {
-        notify(Level::Warn, format!("user folders not saved: {reason}"));
+        notify_text(Level::Warn, NoticeText::UserFoldersNotSaved, &[&reason]);
     }
 }
 
@@ -481,7 +481,7 @@ pub(crate) fn apply_finished_fetch(shared: &mut AppShared) -> bool {
             let changed = shared.user_folders.saved.as_ref().is_none_or(|before| before.folders != saved.folders);
             shared.user_folders.problem = failures.first().map(|failure| FolderProblem::Failed(failure.clone()));
             if let Some(failure) = failures.first() {
-                notify(Level::Warn, format!("user folders not fully refreshed ({} failed): {failure}", failures.len()));
+                notify_text(Level::Warn, NoticeText::UserFoldersNotFullyRefreshed, &[&failures.len(), &failure]);
             }
             let (folders, listed) = (saved.folders.len(), saved.charts());
             show(shared, Some(saved));
@@ -500,13 +500,13 @@ pub(crate) fn apply_finished_fetch(shared: &mut AppShared) -> bool {
             shared.user_folders.problem = Some(FolderProblem::Failed(reason.clone()));
             show(shared, None);
             if fetch.loud {
-                notify(Level::Warn, format!("user folders not refreshed: {reason}"));
+                notify_text(Level::Warn, NoticeText::UserFoldersNotRefreshed, &[&reason]);
             }
         }
         FetchOutcome::Failed(reason) => {
             shared.user_folders.problem = Some(FolderProblem::Failed(reason.clone()));
             if fetch.loud {
-                notify(Level::Warn, format!("user folders not refreshed: {reason}"));
+                notify_text(Level::Warn, NoticeText::UserFoldersNotRefreshed, &[&reason]);
             }
         }
     }

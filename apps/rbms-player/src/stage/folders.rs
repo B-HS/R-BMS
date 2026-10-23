@@ -59,7 +59,7 @@ impl FoldersState {
     fn add_picked_folder(shared: &mut AppShared, dir: &std::path::Path) {
         let path = dir.to_string_lossy().to_string();
         if shared.config.library.folders.iter().any(|f| f == &path) {
-            notify(Level::Warn, FoldersText::AlreadyAdded.fill(language(), &[&path]));
+            notify_text(Level::Warn, FoldersText::AlreadyAdded, &[&path]);
             return;
         }
         shared.config.library.folders.push(path);
@@ -108,7 +108,7 @@ impl StageHandler for FoldersState {
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.folders.len() => self.remove_folder(ctx.shared, self.sel),
             KeyCode::KeyD | KeyCode::Delete if FoldersState::is_download_row(ctx.shared, self.sel) => {
-                notify(Level::Info, FoldersText::DownloadFolderElsewhere.get(language()));
+                notify_text(Level::Info, FoldersText::DownloadFolderElsewhere, &[]);
             }
             KeyCode::Enter | KeyCode::NumpadEnter if self.sel == add_row => self.picker = Some(crate::dialog::pick_song_folder()),
             _ => {}

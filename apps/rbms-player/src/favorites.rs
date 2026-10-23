@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_text};
+use crate::text::notices::NoticeText;
 use crate::write_atomic;
 
 /// Name of the file the favourites are kept in, next to `scores.ron`.
@@ -34,7 +35,7 @@ impl Favorites {
         match ron::from_str::<Favorites>(&text) {
             Ok(favorites) => favorites,
             Err(e) => {
-                notify(Level::Warn, format!("favorites not loaded ({e}); starting with none"));
+                notify_text(Level::Warn, NoticeText::FavoritesNotLoaded, &[&e]);
                 Favorites::default()
             }
         }
@@ -45,12 +46,12 @@ impl Favorites {
         let text = match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
             Ok(text) => text,
             Err(e) => {
-                notify(Level::Error, format!("favorites save failed: {e}"));
+                notify_text(Level::Error, NoticeText::FavoritesSaveFailed, &[&e]);
                 return;
             }
         };
         if let Err(e) = write_atomic(path, &text) {
-            notify(Level::Error, format!("favorites save failed ({}): {e}", path.display()));
+            notify_text(Level::Error, NoticeText::FavoritesSaveFailedAt, &[&path.display(), &e]);
         }
     }
 

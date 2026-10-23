@@ -960,6 +960,12 @@ fn only_a_run_played_with_an_assist_on_is_told_what_it_did() {
     for note in [SCRATCH_AUTO_NOTE, WIDENED_JUDGE_NOTE] {
         assert!(note.chars().count() <= crate::ir_outcome::IR_LINE_MAX_CHARS, "{note:?} is longer than a line of the built-in screen's column");
     }
+    {
+        let _korean = crate::text::settings::InstalledLanguage::new(rbms_model::Language::Korean);
+        assert_eq!(assist_note(false, false, true), Some("SCRATCH AUTO: 턴테이블 제외, 어시스트 램프"));
+        assert_eq!(assist_note(true, true, true), Some("판정 폭 확대: 전송·보관됨, 최고 스코어 없음"));
+        assert_eq!(assist_note(false, true, true), Some("자체 TOTAL: 전송·보관됨, 최고 스코어 없음"));
+    }
 
     let mut app = app_with_result_skin("assist-note", SKIN);
     assert_eq!(ResultRun::of(&finished_session_of(TURNTABLE_CHART), &app.shared, standing(false)).assist_note, None, "a run with no assist on");

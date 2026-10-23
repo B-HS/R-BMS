@@ -431,6 +431,14 @@ fn a_summary_of_nothing_says_so() {
 }
 
 #[test]
+fn a_summary_is_written_in_the_language_of_the_screens_but_for_the_names_it_quotes() {
+    let _korean = crate::text::settings::InstalledLanguage::new(rbms_model::Language::Korean);
+    assert_eq!(submit_summary(&[]), "IR 프로필 없음");
+    let results = vec![("A".to_string(), Ok(SubmitResponse::default()))];
+    assert_eq!(submit_summary(&results), "IR 0/1 — A: 거부됨");
+}
+
+#[test]
 fn the_secondary_view_leaves_the_legacy_server_to_the_single_server_path() {
     let main = StubServer::accepting();
     let second = StubServer::accepting();

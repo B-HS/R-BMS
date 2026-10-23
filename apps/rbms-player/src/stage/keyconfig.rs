@@ -20,8 +20,11 @@ mod tests;
 use crate::gamepad::{AnalogMode, PadBinding};
 use crate::keyconfig::{Bindable, Clash, KeyConfig, UNNAMED_KEY};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
+use crate::text::menus::key_editor::{KeyEditorNoticeText, KeyEditorText};
 use crate::*;
+use rbms_model::translations::Catalog;
 use rbms_render::fit_text;
+use rbms_render::text::language;
 use table::{Bindings, Line, lines};
 
 /// The editor's panel: how wide it is, and where its columns end. A value is set against the right
@@ -55,30 +58,15 @@ const VISIBLE_ROWS: usize = 21;
 const COUNTER_Y: f32 = 690.0;
 const COUNTER_SCALE: f32 = 1.1;
 
-/// What an unbound cell and a cell being captured show.
+/// What an unbound cell shows.
 const UNBOUND: &str = "-";
-const CAPTURING: &str = "PRESS...";
 
-/// What the controller's device row shows when it listens to every controller.
-const ANY_DEVICE: &str = "ANY";
+/// What the restore row shows until Enter is pressed: the name of the key, which every language writes alike.
+const RESTORE_VALUE: &str = "ENTER";
 
 /// One step forwards and one back, for the rows that are stepped rather than bound.
 const STEP_FORWARD: i32 = 1;
 const STEP_BACK: i32 = -1;
-
-const TITLE: &str = "KEY CONFIG";
-const KEYS_HINT: &str = "UP DOWN MOVE   LEFT RIGHT KEYBOARD / CONTROLLER   ENTER BIND   DEL CLEAR   BACKSPACE DEFAULT   TAB MODE   PGUP PGDN GROUP   ESC SAVE";
-const CAPTURE_KEY_HINT: &str = "PRESS THE KEY TO BIND   ESC CANCELS";
-const CAPTURE_PAD_HINT: &str = "PRESS A BUTTON OR MOVE AN AXIS OF THE CONTROLLER   ESC CANCELS";
-const ACTION_COLUMN: &str = "ACTION";
-const KEYBOARD_COLUMN: &str = "KEYBOARD";
-const PAD_COLUMN: &str = "CONTROLLER";
-const MODE_LABEL: &str = "EDIT MODE (LANES OF)";
-const PAD_DEVICE_LABEL: &str = "CONTROLLER DEVICE";
-const PAD_ANALOG_LABEL: &str = "TURNTABLE ALGORITHM";
-const RESTORE_LABEL: &str = "RESTORE EVERY KEY AND BUTTON";
-const RESTORE_VALUE: &str = "ENTER";
-const RESTORE_ARMED_VALUE: &str = "ENTER AGAIN";
 
 /// Which of a line's two cells the cursor is on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -325,15 +313,13 @@ impl KeyConfigState {
         let theme = rbms_render::theme();
         let in_red = |text: String| (text, Color::RED);
         match self.notice {
-            Notice::Taken(other) => return in_red(format!("THAT KEY IS {} - PICK ANOTHER, OR CLEAR THAT ROW FIRST", other.label(mode))),
-            Notice::Fixed => return in_red("THAT KEY IS FIXED ON THE SCREEN THIS ROW BELONGS TO - PICK ANOTHER".to_string()),
-            Notice::Unnamed => return in_red("THAT KEY CANNOT BE BOUND - PICK ANOTHER".to_string()),
-            Notice::KeyboardOnly => return in_red("THIS ROW IS READ FROM THE KEYBOARD ONLY".to_string()),
-            Notice::LaneKept => return ("A LANE ALWAYS HAS A KEY - IT IS BACK ON THE ONE IT SHIPS WITH".to_string(), theme.warn),
-            Notice::RestoreArmed => {
-                return ("ENTER AGAIN PUTS EVERY KEY AND EVERY CONTROLLER BUTTON BACK AS SHIPPED - ANY OTHER KEY CANCELS".to_string(), theme.warn);
-            }
-            Notice::Restored => return ("EVERY KEY AND EVERY CONTROLLER BUTTON IS BACK AS SHIPPED".to_string(), theme.text_dim),
+            Notice::Taken(other) => return in_red(KeyEditorNoticeText::Taken.fill(language(), &[&other.label(mode)])),
+            Notice::Fixed => return in_red(KeyEditorNoticeText::Fixed.get(language()).to_string()),
+            Notice::Unnamed => return in_red(KeyEditorNoticeText::Unnamed.get(language()).to_string()),
+            Notice::KeyboardOnly => return in_red(KeyEditorNoticeText::KeyboardOnly.get(language()).to_string()),
+            Notice::LaneKept => return (KeyEditorNoticeText::LaneKept.get(language()).to_string(), theme.warn),
+            Notice::RestoreArmed => return (KeyEditorNoticeText::RestoreArmed.get(language()).to_string(), theme.warn),
+            Notice::Restored => return (KeyEditorNoticeText::Restored.get(language()).to_string(), theme.text_dim),
             Notice::None => {}
         }
         let Some(target) = self.focused_target(shared) else {
@@ -344,10 +330,10 @@ impl KeyConfigState {
             Column::Pad => bound.pad_clash(target).map(Clash::With),
         };
         match clash {
-            Some(Clash::With(other)) => in_red(format!("SHARED WITH {} - ONE OF THE TWO WILL NOT WORK", other.label(mode))),
-            Some(Clash::Fixed) => in_red("THIS KEY IS FIXED ON THE SCREEN THE ROW BELONGS TO - THE ROW WILL NOT WORK".to_string()),
+            Some(Clash::With(other)) => in_red(KeyEditorNoticeText::SharedWith.fill(language(), &[&other.label(mode)])),
+            Some(Clash::Fixed) => in_red(KeyEditorNoticeText::FixedOnItsScreen.get(language()).to_string()),
             None => match shared.keyconfig.lane_sharing(mode, target).filter(|_| self.column == Column::Keyboard) {
-                Some(lane) => (format!("ALSO {} - ON THE SONG SELECT BOTH ACT", Bindable::Lane(lane).label(mode)), theme.text_dim),
+                Some(lane) => (KeyEditorNoticeText::AlsoLane.fill(language(), &[&Bindable::Lane(lane).label(mode)]), theme.text_dim),
                 None => (String::new(), theme.text_dim),
             },
         }
@@ -435,19 +421,20 @@ impl StageHandler for KeyConfigState {
         let x0 = (CW as f32 - PANEL_W) * 0.5;
         let keyboard_right = x0 + KEYBOARD_RIGHT;
         let pad_right = x0 + PANEL_W;
-        draw_text(canvas, x0, TITLE_Y, TITLE_SCALE, th.text, TITLE);
+        draw_text(canvas, x0, TITLE_Y, TITLE_SCALE, th.text, KeyEditorText::Title.get(language()));
         draw_text_right(canvas, pad_right, TITLE_Y + HEADING_TEXT_Y, ROW_SCALE, th.accent, mode_short(edit_mode));
         let (hint, hint_col) = match (self.capturing, self.column) {
-            (true, Column::Keyboard) => (CAPTURE_KEY_HINT, th.accent),
-            (true, Column::Pad) => (CAPTURE_PAD_HINT, th.accent),
-            (false, _) => (KEYS_HINT, th.text_muted),
+            (true, Column::Keyboard) => (KeyEditorText::CaptureKeyHint, th.accent),
+            (true, Column::Pad) => (KeyEditorText::CapturePadHint, th.accent),
+            (false, _) => (KeyEditorText::KeysHint, th.text_muted),
         };
+        let hint = hint.get(language());
         draw_text(canvas, x0, HINT_Y, HINT_SCALE, hint_col, &fit_text(hint, HINT_SCALE, PANEL_W));
         let (status, status_col) = self.status(ctx.shared, &bound);
         draw_text(canvas, x0, STATUS_Y, HINT_SCALE, status_col, &fit_text(&status, HINT_SCALE, PANEL_W));
-        draw_text(canvas, x0 + CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, ACTION_COLUMN);
-        draw_text_right(canvas, keyboard_right - CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, KEYBOARD_COLUMN);
-        draw_text_right(canvas, pad_right - CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, PAD_COLUMN);
+        draw_text(canvas, x0 + CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, KeyEditorText::ActionColumn.get(language()));
+        draw_text_right(canvas, keyboard_right - CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, KeyEditorText::KeyboardColumn.get(language()));
+        draw_text_right(canvas, pad_right - CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, KeyEditorText::Controller.get(language()));
 
         let rows = lines(edit_mode);
         let start = self.first_visible(rows.len());
@@ -467,14 +454,19 @@ impl StageHandler for KeyConfigState {
                     draw_text(canvas, x0, y + HEADING_TEXT_Y, HEADING_SCALE, th.accent, title);
                     canvas.fill_rect(Rect::new(x0, y + ROW_H - RULE_THICKNESS, PANEL_W, RULE_THICKNESS), th.divider);
                 }
-                Line::Mode => label_and_value(canvas, MODE_LABEL, &format!("< {} >", mode_short(edit_mode)), keyboard_right),
-                Line::PadDevice => {
-                    label_and_value(canvas, PAD_DEVICE_LABEL, &format!("< {} >", keys.pad.device_name.as_deref().unwrap_or(ANY_DEVICE)), pad_right)
+                Line::Mode => label_and_value(canvas, KeyEditorText::ModeLabel.get(language()), &format!("< {} >", mode_short(edit_mode)), keyboard_right),
+                Line::PadDevice => label_and_value(
+                    canvas,
+                    KeyEditorText::PadDeviceLabel.get(language()),
+                    &format!("< {} >", keys.pad.device_name.as_deref().unwrap_or(KeyEditorText::AnyDevice.get(language()))),
+                    pad_right,
+                ),
+                Line::PadAnalog => {
+                    label_and_value(canvas, KeyEditorText::PadAnalogLabel.get(language()), &format!("< {} >", keys.pad.analog_mode.label()), pad_right)
                 }
-                Line::PadAnalog => label_and_value(canvas, PAD_ANALOG_LABEL, &format!("< {} >", keys.pad.analog_mode.label()), pad_right),
                 Line::RestoreAll => {
-                    let value = if self.notice == Notice::RestoreArmed { RESTORE_ARMED_VALUE } else { RESTORE_VALUE };
-                    label_and_value(canvas, RESTORE_LABEL, value, keyboard_right);
+                    let value = if self.notice == Notice::RestoreArmed { KeyEditorText::RestoreArmedValue.get(language()) } else { RESTORE_VALUE };
+                    label_and_value(canvas, KeyEditorText::RestoreLabel.get(language()), value, keyboard_right);
                 }
                 Line::Bind { target, pad: takes_a_pad } => {
                     canvas.fill_rect(row_rect, if on { th.panel_hi } else { th.panel });
@@ -490,7 +482,7 @@ impl StageHandler for KeyConfigState {
                             canvas.fill_rect(Rect::new(right - COLUMN_W, y, COLUMN_W, ROW_H), if waiting { th.focus } else { th.button });
                         }
                         let (text, color) = if waiting {
-                            (CAPTURING.to_string(), th.bg)
+                            (KeyEditorText::Capturing.get(language()).to_string(), th.bg)
                         } else if clashes {
                             (token, Color::RED)
                         } else if focused {

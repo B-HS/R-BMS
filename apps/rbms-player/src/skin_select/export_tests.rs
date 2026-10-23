@@ -569,7 +569,8 @@ fn a_rows_value_is_put_onto_the_other_screens_that_declare_it() {
     assert_eq!(run.value(DECIDE, THEME), "DARK", "stepping one screen's option moved another's");
     let applied = run.skins.apply_to_peers(&mut run.config, SELECT, THEME).expect("other screens declare the option");
     assert_eq!((applied.applied, applied.skipped), (1, 1));
-    assert_eq!(applied.message(), "THEME: LIGHT applied to 1 other screen (1 skipped: no item of that name)");
+    assert_eq!(applied.message_in(Language::English), "THEME: LIGHT applied to 1 other screen (1 skipped: no item of that name)");
+    assert_eq!(applied.message_in(Language::Korean), "THEME: LIGHT 다른 화면 1개에 적용함 (같은 이름의 항목이 없어 1개 건너뜀)");
     assert_eq!(run.value(DECIDE, THEME), "LIGHT");
     assert_eq!(run.value(RESULT, THEME), "DARK", "a screen with no item of that name was changed");
     let decide = run.skins.document_path(&run.config, DECIDE).expect("the pack draws the decide screen").to_owned();
@@ -584,7 +585,7 @@ fn a_rows_value_is_put_onto_the_other_screens_that_declare_it() {
     assert!(run.skins.set_number_for(&mut run.config, SELECT, JUDGE_X, -4));
     let panel = run.skins.apply_to_peers(&mut run.config, SELECT, PANEL).expect("another screen declares the opacity");
     assert_eq!((panel.applied, panel.skipped), (1, 0));
-    assert_eq!(panel.message(), format!("PANEL OPACITY: {PANEL_PERCENT}% applied to 1 other screen"));
+    assert_eq!(panel.message_in(Language::English), format!("PANEL OPACITY: {PANEL_PERCENT}% applied to 1 other screen"));
     assert_eq!(run.value(DECIDE, SkinRow::Offset(0, OffsetAxis::A)), format!("{PANEL_PERCENT}%"));
     assert!(run.skins.apply_to_peers(&mut run.config, SELECT, JUDGE_X).is_some());
     assert_eq!(run.value(RESULT, SkinRow::Offset(0, OffsetAxis::X)), "-4");

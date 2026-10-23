@@ -41,13 +41,18 @@ use rbms_config::TableSource;
 use rbms_download::{DownloadError, ExtractLimits, LinkKind, Progress, classify_link, extract_zip, safe_folder_name, settle};
 use rbms_library::Library;
 use rbms_library::scan::{DOWNLOAD_WORK_FOLDER, ScanRequest};
+use rbms_model::Language;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_table::TableEntry;
 
 use crate::AppShared;
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_text, notify_with};
 use crate::select_tree::{ListPlace, show_the_list_again};
 use crate::stage::select::missing_chart_title;
 use crate::tablesrc::{MatchedTable, TableStore, read_and_match_all};
+use crate::text::menus::loading::LoadingText;
+use crate::text::notices::NoticeText;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -59,10 +64,10 @@ pub(crate) mod tests;
 const ARCHIVE_FILE: &str = "archive.zip";
 const STAGING_FOLDER: &str = "unpacked";
 
-/// Why a download could not be started.
+/// Why a download could not be started because another is running, in English, which the tests
+/// compare with. The reasons in the language the screens are drawn in are [`NoticeText`].
+#[cfg(test)]
 pub(crate) const ANOTHER_DOWNLOAD_IS_RUNNING: &str = "another download is running";
-const NOT_A_ZIP_LINK: &str = "the chart's link is not a zip archive";
-const NO_DOWNLOAD_FOLDER: &str = "no download folder is chosen";
 
 /// What a worker that stopped without a word is said to have done.
 const JOB_STOPPED: &str = "the download stopped without reporting";
@@ -270,19 +275,24 @@ impl JobStatus {
         matches!(self.phase, Phase::Downloading | Phase::Extracting)
     }
 
-    /// The line the job is described by, which is also what is said when it ends.
+    /// The line the job is described by, in the language the screens are drawn in.
     pub(crate) fn line(&self) -> String {
+        self.line_in(language())
+    }
+
+    /// The line the job is described by in `language`, which is also what is said when it ends.
+    pub(crate) fn line_in(&self, language: Language) -> String {
         match &self.phase {
             Phase::Downloading => match self.expected {
-                Some(expected) => format!("DOWNLOADING {} / {}", size_text(self.received), size_text(expected)),
-                None => format!("DOWNLOADING {}", size_text(self.received)),
+                Some(expected) => NoticeText::DownloadProgress.fill(language, &[&size_text(self.received), &size_text(expected)]),
+                None => NoticeText::DownloadProgressUnknownSize.fill(language, &[&size_text(self.received)]),
             },
-            Phase::Extracting => "EXTRACTING".to_owned(),
-            Phase::Scanning => "SCANNING".to_owned(),
-            Phase::Done { found: true, charts } => format!("downloaded: {} ({charts} chart(s))", self.title),
-            Phase::Done { found: false, charts } => format!("the archive had {charts} chart(s) but not this one"),
-            Phase::Failed(reason) => format!("download failed: {reason}"),
-            Phase::Cancelled => "download cancelled".to_owned(),
+            Phase::Extracting => NoticeText::DownloadExtracting.get(language).to_owned(),
+            Phase::Scanning => LoadingText::Scanning.get(language).to_owned(),
+            Phase::Done { found: true, charts } => NoticeText::DownloadDone.fill(language, &[&self.title, charts]),
+            Phase::Done { found: false, charts } => NoticeText::DownloadArchiveLacksChart.fill(language, &[charts]),
+            Phase::Failed(reason) => NoticeText::DownloadFailed.fill(language, &[reason]),
+            Phase::Cancelled => NoticeText::DownloadCancelled.get(language).to_owned(),
         }
     }
 }
@@ -301,13 +311,13 @@ pub(crate) struct LibraryChange;
 /// download folder is chosen.
 pub(crate) fn start_download(shared: &mut AppShared, entry: &TableEntry) -> Result<(), &'static str> {
     if shared.downloads.is_busy() {
-        return Err(ANOTHER_DOWNLOAD_IS_RUNNING);
+        return Err(NoticeText::DownloadAnotherIsRunning.get(language()));
     }
     if classify_link(&entry.url_diff) != LinkKind::DirectZip {
-        return Err(NOT_A_ZIP_LINK);
+        return Err(NoticeText::DownloadLinkIsNoZip.get(language()));
     }
     let Some(folder) = shared.config.library.download_folder_path().map(PathBuf::from) else {
-        return Err(NO_DOWNLOAD_FOLDER);
+        return Err(NoticeText::DownloadNoFolder.get(language()));
     };
     let chart = Wanted { md5: entry.md5.trim().to_owned(), title: missing_chart_title(entry).to_owned() };
     let name = safe_folder_name(entry.title.trim(), &chart.md5);
@@ -387,7 +397,8 @@ fn end_job(shared: &mut AppShared, chart: Wanted, phase: Phase) {
         _ => Level::Warn,
     };
     let ended = JobStatus { phase, received: 0, expected: None, md5: chart.md5, title: chart.title };
-    notify(level, ended.line());
+    let said = ended.clone();
+    notify_with(level, move |language| said.line_in(language));
     shared.downloads.last = Some(ended);
 }
 
@@ -397,7 +408,7 @@ fn take_finished_refresh(shared: &mut AppShared) -> Option<LibraryChange> {
     let refreshed = match refreshed {
         Some(Refreshed { failure: None, library, tables }) => (library, tables),
         Some(Refreshed { failure: Some(failure), .. }) => {
-            notify(Level::Warn, format!("library scan failed: {failure}"));
+            notify_text(Level::Warn, NoticeText::LibraryScanFailed, &[&failure]);
             if let Some(awaited) = refresh.awaited {
                 end_job(shared, awaited.chart, Phase::Failed(format!("the library scan failed: {failure}")));
             }

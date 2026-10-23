@@ -41,9 +41,10 @@ use rbms_render::text::language;
 use serde::{Deserialize, Serialize};
 
 use crate::format::gauge_name;
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_text};
 use crate::number_row::NumberValue;
 use crate::text::menus::practice::PracticeText;
+use crate::text::notices::NoticeText;
 use crate::write_atomic;
 
 /// Name of the file the per-chart practice properties are kept in, next to `scores.ron`.
@@ -785,7 +786,7 @@ impl PracticeBook {
         match ron::from_str::<PracticeBook>(&text) {
             Ok(book) => book,
             Err(e) => {
-                notify(Level::Warn, format!("practice settings not loaded ({e}); starting with none"));
+                notify_text(Level::Warn, NoticeText::PracticeSettingsNotLoaded, &[&e]);
                 PracticeBook::default()
             }
         }
@@ -796,12 +797,12 @@ impl PracticeBook {
         let text = match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
             Ok(text) => text,
             Err(e) => {
-                notify(Level::Error, format!("practice settings save failed: {e}"));
+                notify_text(Level::Error, NoticeText::PracticeSettingsSaveFailed, &[&e]);
                 return;
             }
         };
         if let Err(e) = write_atomic(path, &text) {
-            notify(Level::Error, format!("practice settings save failed ({}): {e}", path.display()));
+            notify_text(Level::Error, NoticeText::PracticeSettingsSaveFailedAt, &[&path.display(), &e]);
         }
     }
 

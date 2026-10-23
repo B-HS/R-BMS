@@ -168,7 +168,7 @@ impl PracticeState {
                 Transition::Open(Stage::Play(Box::new(play)))
             }
             None => {
-                notify(Level::Warn, PracticeText::ChartNoLongerLoaded.get(language()));
+                notify_text(Level::Warn, PracticeText::ChartNoLongerLoaded, &[]);
                 Transition::Back
             }
         }

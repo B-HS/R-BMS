@@ -22,8 +22,11 @@ use std::sync::mpsc::{self, Receiver};
 
 use rbms_config::{IrProfile, NetworkOptions};
 use rbms_ir::{HttpScoreServer, IrError, NullScoreServer, ScoreServer, ScoreSubmission, SubmitResponse};
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 
 use crate::ir_outcome::short_error;
+use crate::text::menus::ir_outcome::IrOutcomeText;
 
 /// Name given to the profile built from the legacy single `server_url`, so it is distinguishable
 /// from a user-added one in the settings row and on the panel's profile tab.
@@ -39,12 +42,6 @@ const DISPLAY_INDEX_OFFSET: usize = 1;
 /// Reported for a profile whose worker thread unwound. A `ScoreServer` implementation that panics
 /// is a bug, but it must not take the other profiles' results down with it.
 const PROFILE_PANIC_MESSAGE: &str = "profile worker panicked";
-
-/// Summary text when there is nothing to submit to at all.
-const NO_PROFILES_MESSAGE: &str = "no IR profiles";
-
-/// Summary suffix for a profile that answered without taking the score.
-const REJECTED_MESSAGE: &str = "rejected";
 
 /// One profile's answer to a fan-out call: the label it came from, and what that server said.
 pub(crate) type ProfileResult<T> = (String, Result<T, IrError>);
@@ -275,7 +272,7 @@ pub(crate) fn spawn_submit_all(multi: MultiIr, servers: Vec<Arc<dyn ScoreServer>
 /// that did not, so a single failing IR is named instead of silently dropped.
 pub(crate) fn submit_summary(results: &[ProfileResult<SubmitResponse>]) -> String {
     if results.is_empty() {
-        return NO_PROFILES_MESSAGE.to_string();
+        return IrOutcomeText::NoProfiles.get(language()).to_string();
     }
     let accepted = results.iter().filter(|(_, result)| matches!(result, Ok(response) if response.accepted)).count();
     let head = format!("{UNNAMED_PROFILE_PREFIX} {accepted}/{}", results.len());
@@ -291,7 +288,7 @@ fn first_problem(entry: &ProfileResult<SubmitResponse>) -> Option<(&str, String)
     let (label, result) = entry;
     match result {
         Err(error) => Some((label.as_str(), short_error(error))),
-        Ok(response) if !response.accepted => Some((label.as_str(), REJECTED_MESSAGE.to_string())),
+        Ok(response) if !response.accepted => Some((label.as_str(), IrOutcomeText::ProfileRejected.get(language()).to_string())),
         Ok(_) => None,
     }
 }

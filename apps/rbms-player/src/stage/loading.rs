@@ -469,7 +469,7 @@ impl LoadingState {
         crate::user_folders::rematch(shared);
         shared.trace_backfill_after_scan();
         show_the_list_again(shared, &place);
-        notify(Level::Info, LoadingText::Scanned.fill(language(), &[&shared.library.len()]));
+        notify_text(Level::Info, LoadingText::Scanned, &[&shared.library.len()]);
         shared.print_selection();
         Transition::Back
     }
@@ -483,12 +483,12 @@ impl LoadingState {
                     return Transition::Stay;
                 };
                 if let Some(failure) = &report.failure {
-                    notify(Level::Error, format!("library scan failed: {failure}"));
+                    notify_text(Level::Error, NoticeText::LibraryScanFailed, &[failure]);
                 }
                 if report.cancelled {
-                    notify(Level::Info, LoadingText::ScanStoppedEarly.fill(language(), &[&report.upserted]));
+                    notify_text(Level::Info, LoadingText::ScanStoppedEarly, &[&report.upserted]);
                 } else if report.upserted > 0 || report.removed > 0 {
-                    notify(Level::Info, LoadingText::LibraryRead.fill(language(), &[&report.upserted, &report.removed]));
+                    notify_text(Level::Info, LoadingText::LibraryRead, &[&report.upserted, &report.removed]);
                 }
                 *step =
                     ScanStep::Matching { rx: LoadingState::spawn_table_match(report.library, std::mem::take(sources), tables.clone(), Arc::clone(progress)) };

@@ -8,6 +8,7 @@
 use rbms_ir::{AuthRequest, AuthResponse, IrError, ScoreServer};
 
 use crate::ir_outcome::{short_error, truncate};
+use crate::text::notices::{StatusText, installed, installed_with};
 
 /// Player id used when no account is signed in. The server accepts a tokenless submission under
 /// this id alone and rejects every other one with 401, so it is the wire contract, not a label.
@@ -21,30 +22,31 @@ pub(crate) enum AuthAction {
 }
 
 impl AuthAction {
-    /// The ACCOUNT row text while the request is running.
+    /// The ACCOUNT row text while the request is running, in the language the screens are drawn in.
     pub(crate) fn pending_text(self) -> &'static str {
         match self {
-            AuthAction::Login => "logging in...",
-            AuthAction::Register => "registering...",
+            AuthAction::Login => installed(StatusText::LoggingIn),
+            AuthAction::Register => installed(StatusText::Registering),
         }
     }
 
-    /// Prefix of the ACCOUNT row text after the request failed.
-    pub(crate) fn failure_prefix(self) -> &'static str {
+    /// The sentence the ACCOUNT row text is told in after the request failed; why follows in it.
+    fn failure_sentence(self) -> StatusText {
         match self {
-            AuthAction::Login => "login failed",
-            AuthAction::Register => "register failed",
+            AuthAction::Login => StatusText::LoginFailed,
+            AuthAction::Register => StatusText::RegisterFailed,
         }
     }
 }
 
-/// The ACCOUNT row's four states.
+/// The ACCOUNT row's four states. A failure keeps the sentence it is told in and why it happened, so
+/// the row is worded in the language the screens are drawn in whenever it is read.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum AccountState {
     Guest,
     Busy(AuthAction),
     LoggedIn,
-    Failed(String),
+    Failed(StatusText, String),
 }
 
 /// The signed-in identity plus the state of the last credential exchange.
@@ -127,7 +129,7 @@ impl AccountSession {
                 changed
             }
             Err(error) => {
-                self.state = AccountState::Failed(format!("{}: {}", action.failure_prefix(), short_error(&error)));
+                self.state = AccountState::Failed(action.failure_sentence(), short_error(&error));
                 false
             }
         }
@@ -147,7 +149,7 @@ impl AccountSession {
             }
             Err(error @ IrError::Unauthorized(_)) => {
                 self.token = None;
-                self.state = AccountState::Failed(format!("session expired: {}", short_error(&error)));
+                self.state = AccountState::Failed(StatusText::SessionExpired, short_error(&error));
                 true
             }
             Err(_) => false,
@@ -163,16 +165,16 @@ impl AccountSession {
         had_token
     }
 
-    /// The ACCOUNT row value.
+    /// The ACCOUNT row value, in the language the screens are drawn in.
     pub(crate) fn status_text(&self) -> String {
         match &self.state {
             AccountState::Guest => GUEST_PLAYER_ID.to_string(),
             AccountState::Busy(action) => action.pending_text().to_string(),
             AccountState::LoggedIn => match self.login_id() {
-                Some(id) => format!("logged in as {id}"),
-                None => "logged in".to_string(),
+                Some(id) => installed_with(StatusText::LoggedInAs, &[&id]),
+                None => installed(StatusText::LoggedIn).to_string(),
             },
-            AccountState::Failed(message) => truncate(message),
+            AccountState::Failed(sentence, why) => truncate(&installed_with(*sentence, &[why])),
         }
     }
 }
@@ -219,7 +221,9 @@ pub(crate) fn auth_request(action: AuthAction, login_id: &str, password: &str, e
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text::settings::InstalledLanguage;
     use rbms_ir::{ChartId, PlayerId, ScoreRecord, ServerInfo, SubmitResponse};
+    use rbms_model::Language;
 
     /// A [`ScoreServer`] that answers auth calls from a script and nothing else.
     struct AuthDouble {
@@ -274,6 +278,25 @@ mod tests {
 
     fn double(login: fn() -> Result<AuthResponse, IrError>, register: fn() -> Result<AuthResponse, IrError>) -> AuthDouble {
         AuthDouble { login, register }
+    }
+
+    #[test]
+    fn the_account_row_is_worded_in_the_language_it_is_read_in() {
+        let mut session = AccountSession::restored(Some("tok".into()), Some("dj".into()));
+        let failed = double(unauthorized, ok_response);
+        session.begin(AuthAction::Login);
+        let request = auth_request(AuthAction::Login, "dj", "wrong", "");
+        session.finish(AuthAction::Login, run_auth(&failed, AuthAction::Login, &request));
+        let english = session.status_text();
+        let korean = {
+            let _installed = InstalledLanguage::new(Language::Korean);
+            (session.status_text(), AccountSession::restored(Some("tok".into()), Some("dj".into())).status_text(), AuthAction::Register.pending_text())
+        };
+        assert!(english.starts_with("login failed: "), "{english}");
+        assert!(korean.0.starts_with("로그인 실패: ") && korean.0.contains("bad credentials"), "{}", korean.0);
+        assert_eq!(korean.1, "로그인한 계정: dj");
+        assert_eq!(korean.2, "회원가입하는 중...");
+        assert_eq!(session.status_text(), english, "the language went back to English with the test");
     }
 
     #[test]

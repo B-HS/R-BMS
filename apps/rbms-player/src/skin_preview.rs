@@ -97,7 +97,9 @@ pub(crate) mod target;
 mod decide;
 
 use rbms_config::Config;
+use rbms_model::translations::Catalog;
 use rbms_render::Rect;
+use rbms_render::text::language;
 use rbms_skin::dst::{OffsetSource, SkinOffset};
 use rbms_skin::loader::{SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, is_supported_skin_type};
 use rbms_skin::property::generated::OFFSET_ALL;
@@ -108,32 +110,9 @@ use crate::stage::play::skin_preview::{PlaySample, SampleEnding, SampleTempo};
 use crate::stage::result::skin_preview::{CourseSample, ResultSample};
 use crate::stage::select::skin_preview::SelectSample;
 use crate::stage::{Canvas, FrameCtx};
+use crate::text::menus::skin_info::PreviewStatusText;
 use decide::DecideSample;
 pub(crate) use target::{PlayTarget, PreviewTarget};
-
-/// What the preview says while a document is on its way.
-const LOADING_MESSAGE: &str = "LOADING THE SKIN";
-
-/// What the preview says of a screen no document is chosen for.
-const NO_DOCUMENT_MESSAGE: &str = "NO SKIN DOCUMENT FOR THIS SCREEN";
-
-/// What the preview adds about such a screen: what draws it instead.
-const NO_DOCUMENT_DETAIL: &str = "THE BUILT-IN SCREEN DRAWS IT";
-
-/// What the preview says of a screen this build draws no skin for.
-const UNSUPPORTED_MESSAGE: &str = "THIS SCREEN IS NOT DRAWN BY A SKIN";
-
-/// What the preview adds about such a screen.
-const UNSUPPORTED_DETAIL: &str = "ITS DOCUMENT IS LISTED BUT THE BUILT-IN SCREEN DRAWS IT";
-
-/// What the preview says of a screen it has no sample state for.
-const NO_PREVIEW_MESSAGE: &str = "NO PREVIEW FOR THIS SCREEN";
-
-/// What the preview adds about such a screen.
-const NO_PREVIEW_DETAIL: &str = "THE SETTINGS ON THE LEFT STILL APPLY TO IT";
-
-/// What the preview says of a document that could not be read.
-const FAILED_MESSAGE: &str = "THE SKIN DID NOT LOAD";
 
 /// How long a wait for a document that was on show is left dark before it is said, in seconds of
 /// the frames that went by.
@@ -181,15 +160,15 @@ impl PreviewStatus {
     /// What the menu writes in the rectangle in place of a frame: one line that says what happened.
     /// `None` when a frame was drawn.
     pub(crate) fn message(&self) -> Option<&'static str> {
-        match self {
-            PreviewStatus::Drawn => None,
-            PreviewStatus::Loading => Some(LOADING_MESSAGE),
-            PreviewStatus::Absent(PreviewAbsence::NoDocument) => Some(NO_DOCUMENT_MESSAGE),
-            PreviewStatus::Absent(PreviewAbsence::UnsupportedScreen) => Some(UNSUPPORTED_MESSAGE),
-            PreviewStatus::Absent(PreviewAbsence::NoPreview) => Some(NO_PREVIEW_MESSAGE),
-            PreviewStatus::PackTrouble(_) => Some(NO_DOCUMENT_MESSAGE),
-            PreviewStatus::Failed(_) => Some(FAILED_MESSAGE),
-        }
+        let words = match self {
+            PreviewStatus::Drawn => return None,
+            PreviewStatus::Loading => PreviewStatusText::Loading,
+            PreviewStatus::Absent(PreviewAbsence::NoDocument) | PreviewStatus::PackTrouble(_) => PreviewStatusText::NoDocument,
+            PreviewStatus::Absent(PreviewAbsence::UnsupportedScreen) => PreviewStatusText::Unsupported,
+            PreviewStatus::Absent(PreviewAbsence::NoPreview) => PreviewStatusText::NoPreview,
+            PreviewStatus::Failed(_) => PreviewStatusText::Failed,
+        };
+        Some(words.get(language()))
     }
 
     /// What the menu writes under [`PreviewStatus::message`]: what follows from it, or the reason a
@@ -197,9 +176,9 @@ impl PreviewStatus {
     pub(crate) fn detail(&self) -> Option<&str> {
         match self {
             PreviewStatus::Drawn | PreviewStatus::Loading => None,
-            PreviewStatus::Absent(PreviewAbsence::NoDocument) => Some(NO_DOCUMENT_DETAIL),
-            PreviewStatus::Absent(PreviewAbsence::UnsupportedScreen) => Some(UNSUPPORTED_DETAIL),
-            PreviewStatus::Absent(PreviewAbsence::NoPreview) => Some(NO_PREVIEW_DETAIL),
+            PreviewStatus::Absent(PreviewAbsence::NoDocument) => Some(PreviewStatusText::NoDocumentDetail.get(language())),
+            PreviewStatus::Absent(PreviewAbsence::UnsupportedScreen) => Some(PreviewStatusText::UnsupportedDetail.get(language())),
+            PreviewStatus::Absent(PreviewAbsence::NoPreview) => Some(PreviewStatusText::NoPreviewDetail.get(language())),
             PreviewStatus::PackTrouble(reason) | PreviewStatus::Failed(reason) => Some(reason),
         }
     }

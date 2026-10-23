@@ -73,10 +73,10 @@ pub(crate) fn import_pending_runs(db: &mut ScoreDb, dir: &Path) {
                 notify_text(Level::Warn, NoticeText::KeptRunNotRemoved, &[&file.display()]);
             }
             for (file, error) in report.refused {
-                notify(Level::Warn, format!("kept run not read in ({}): {error}; left where it is", file.display()));
+                notify_text(Level::Warn, NoticeText::KeptRunNotReadIn, &[&file.display(), &error]);
             }
         }
-        Err(e) => notify(Level::Error, format!("kept runs not read in ({}): {e}", dir.display())),
+        Err(e) => notify_text(Level::Error, NoticeText::KeptRunsNotReadIn, &[&dir.display(), &e]),
     }
 }
 
@@ -119,7 +119,7 @@ pub(crate) fn open_score_db(db_path: &Path, ron_path: &Path) -> Option<ScoreDb> 
             Some(db)
         }
         Err(e) => {
-            notify(Level::Error, format!("score database not opened ({}): {e}", db_path.display()));
+            notify_text(Level::Error, NoticeText::ScoreDatabaseNotOpened, &[&db_path.display(), &e]);
             None
         }
     }
@@ -238,7 +238,7 @@ pub(crate) fn record_finished_play(db: &mut ScoreDb, log: &PlayLog, updates_best
     match db.record_play_kept(log, updates_best, kept) {
         Ok(id) => Some(id),
         Err(e) => {
-            notify(Level::Error, format!("score not recorded: {e}"));
+            notify_text(Level::Error, NoticeText::ScoreNotRecorded, &[&e]);
             None
         }
     }
@@ -294,7 +294,7 @@ pub(crate) fn book_from_db(db: &ScoreDb) -> ScoreBook {
     match db.all_plays() {
         Ok(plays) => ScoreBook::from_records(plays.iter().map(record_of).collect()),
         Err(e) => {
-            notify(Level::Error, format!("score records not read: {e}"));
+            notify_text(Level::Error, NoticeText::ScoreRecordsNotRead, &[&e]);
             ScoreBook::default()
         }
     }

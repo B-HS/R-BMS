@@ -11,7 +11,7 @@ use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
 use super::*;
 use crate::number_row::{EDIT_HINT_HEX, REFUSAL_SHOWN_FOR};
 use crate::skin_select::color_fixtures::{NOTE_COLOR_ROW, ON_THE_PANEL, PANEL_COLOR, PANEL_COLOR_ROW, TINTED_AUTHORED, write_tinted_play};
-use crate::skin_select::{COLOR_CHANNELS_LABEL, skin_root};
+use crate::skin_select::{color_channels_label, skin_root};
 
 /// How many channel rows the tinted document's two colours come to.
 const CHANNEL_ROWS: usize = 8;
@@ -70,7 +70,7 @@ fn the_colours_of_a_skin_are_listed_with_a_row_that_shows_their_channels() {
     let mut menu = Menu::over(app_with_tinted_play("color-list"));
     let labels = menu.labels();
     let first = labels.iter().position(|label| label == PANEL_COLOR_ROW).expect("the panel's colour is listed");
-    assert_eq!(&labels[first..first + 3], [PANEL_COLOR_ROW, NOTE_COLOR_ROW, COLOR_CHANNELS_LABEL]);
+    assert_eq!(&labels[first..first + 3], [PANEL_COLOR_ROW, NOTE_COLOR_ROW, color_channels_label()]);
     assert_eq!((menu.value_of(menu.listed_as(PANEL_COLOR_ROW)).as_str(), menu.value_of(menu.listed_as(NOTE_COLOR_ROW)).as_str()), ("DEFAULT", "DEFAULT"));
     let fold = SettingRow::Skin(SkinRow::ColorChannels);
     assert_eq!(menu.value_of(fold), format!("HIDDEN ({CHANNEL_ROWS})"));

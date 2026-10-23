@@ -63,7 +63,7 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 use crate::app_play::scratch_auto_color;
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_with};
 use crate::number_row::{EditKey, NumberInput, NumberValue, RowPart};
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_preview::{PlayTarget, SkinPreview};
@@ -76,6 +76,7 @@ use crate::stage::preview_menu::{
 use crate::stage::skin_menu::{APPLY_TO_ALL_KEY, automatic_offset_help, shared_row_note};
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use crate::text::menus::play_menu::PlayMenuText;
+use crate::text::settings::shown_skin_value;
 use crate::{AppShared, Hot};
 
 mod rows;
@@ -555,7 +556,7 @@ impl PlayMenuState {
             return;
         };
         ctx.shared.save_settings();
-        notify(Level::Info, applied.message());
+        notify_with(Level::Info, move |language| applied.message_in(language));
         self.preview.settings_changed(ctx.shared);
     }
 
@@ -602,7 +603,7 @@ impl PlayMenuState {
             Row::Setting(id) => Line { label: shared.setting_line(id).0.to_string(), value: setting_value(shared, readout, id), look },
             Row::Skin(option) => {
                 let (label, value) = shared.skins.line_for(&shared.config, self.target().screen, option);
-                Line { label, value, look }
+                Line { label, value: shown_skin_value(&value), look }
             }
             Row::Fold(fold) => {
                 let held = match fold {

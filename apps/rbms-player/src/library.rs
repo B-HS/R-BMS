@@ -26,7 +26,8 @@ use rbms_library::songdb::{DetailRow, RadarRow, SongDb, SongDbError, SongRow, mo
 use rbms_library::{ChartDetail, Library, SongEntry, compute_chart_detail};
 use rbms_model::Mode;
 
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify, notify_text};
+use crate::text::notices::NoticeText;
 
 /// Name of the song database inside the config directory, next to the settings and the scores.
 pub(crate) const SONGDB_FILE: &str = "songdb.sqlite";
@@ -46,7 +47,7 @@ pub(crate) fn open_song_db(path: &Path) -> Option<SongDb> {
     match open_migrated(path) {
         Ok(db) => Some(db),
         Err(e) => {
-            notify(Level::Error, format!("song database not opened ({}): {e}", path.display()));
+            notify_text(Level::Error, NoticeText::SongDatabaseNotOpened, &[&path.display(), &e]);
             None
         }
     }
@@ -101,7 +102,7 @@ pub(crate) fn stored_library(db: &SongDb) -> Library {
     match db.all_songs() {
         Ok(rows) => library_of(rows),
         Err(e) => {
-            notify(Level::Error, format!("song list not read: {e}"));
+            notify_text(Level::Error, NoticeText::SongListNotRead, &[&e]);
             Library::default()
         }
     }

@@ -1018,7 +1018,7 @@ impl App {
                 Some(r)
             }
             Err(e) => {
-                notify(Level::Error, format!("replay load failed: {e}"));
+                notify_text(Level::Error, NoticeText::ReplayLoadFailed, &[&e]);
                 None
             }
         });
@@ -1671,7 +1671,7 @@ fn exit_code(startup_error: Option<&str>) -> ExitCode {
 /// save in the app goes through here, so the whole document is written as one file.
 fn save_config(config: &Config, path: &Path) {
     if let Err(e) = rbms_config::save(config, path) {
-        notify(Level::Error, format!("settings save failed ({}): {e}", path.display()));
+        notify_text(Level::Error, NoticeText::SettingsSaveFailed, &[&path.display(), &e]);
     }
 }
 
@@ -1721,7 +1721,7 @@ fn run_in(args: impl Iterator<Item = String>, config_dir: &Path) -> ExitCode {
             config
         }
         Err(e) => {
-            notify(Level::Warn, format!("settings not loaded ({e}); running on defaults and leaving the file alone"));
+            notify_text(Level::Warn, NoticeText::SettingsNotLoaded, &[&e]);
             Config::default()
         }
     };
@@ -1754,7 +1754,7 @@ fn run_in(args: impl Iterator<Item = String>, config_dir: &Path) -> ExitCode {
                 }
                 None => notify_text(Level::Warn, NoticeText::FontNotLoadedNoUsableFace, &[&fp]),
             },
-            Err(e) => notify(Level::Warn, format!("font not found: {fp} ({e})")),
+            Err(e) => notify_text(Level::Warn, NoticeText::FontNotFound, &[&fp, &e]),
         }
     }
 

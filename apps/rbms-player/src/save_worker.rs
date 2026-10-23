@@ -24,8 +24,12 @@ use std::thread::JoinHandle;
 use rbms_store::scoredb::{PendingRun, ScoreDb};
 use rbms_store::{Replay, StagedWrite};
 
-use crate::notify::{Level, notify};
+use rbms_model::Language;
+use rbms_model::translations::Catalog;
+
+use crate::notify::{Level, notify, notify_with};
 use crate::play_trace::TraceSource;
+use crate::text::notices::NoticeText;
 use crate::*;
 
 /// What a failed trace write says when the trace made no body.
@@ -337,17 +341,26 @@ fn run_reporting(job: Job, report: &dyn Fn(SaveFailure)) {
 
 /// Say what failed on a write that could not be handed to the thread and has no frame to wait for.
 fn report_now(failure: &SaveFailure) {
-    notify(Level::Error, failure_line(failure));
+    say_failure(failure);
 }
 
-/// What the message bus says of a write that failed.
-fn failure_line(failure: &SaveFailure) -> String {
+/// Put what failed on the message bus, worded in the language the frame thread has installed when
+/// it takes the message. The text of the error follows as it came.
+fn say_failure(failure: &SaveFailure) {
+    let failure = failure.clone();
+    notify_with(Level::Error, move |language| failure_line(&failure, language));
+}
+
+/// What the message bus says of a write that failed, in `language`. The two traces are written for
+/// whoever reads standard error: they are made beside a run, not asked for.
+fn failure_line(failure: &SaveFailure, language: Language) -> String {
+    let error = &failure.error;
     match &failure.what {
-        Saving::Settings => format!("settings save failed: {}", failure.error),
-        Saving::Replay { .. } => format!("replay not saved: {}", failure.error),
-        Saving::PendingRun { .. } => format!("run not kept: {}", failure.error),
-        Saving::Trace { .. } => format!("trace of the run not stored: {}", failure.error),
-        Saving::BackfilledTraces => format!("traces of earlier runs not stored: {}", failure.error),
+        Saving::Settings => NoticeText::SettingsSaveFailedNoPath.fill(language, &[error]),
+        Saving::Replay { .. } => NoticeText::ReplayNotSavedNoPath.fill(language, &[error]),
+        Saving::PendingRun { .. } => NoticeText::RunNotKept.fill(language, &[error]),
+        Saving::Trace { .. } => format!("trace of the run not stored: {error}"),
+        Saving::BackfilledTraces => format!("traces of earlier runs not stored: {error}"),
     }
 }
 
@@ -372,7 +385,7 @@ impl AppShared {
                     notify(Level::Warn, format!("unsaved replay still referenced: {e}"));
                 }
             }
-            notify(Level::Error, failure_line(&failure));
+            say_failure(&failure);
         }
     }
 }

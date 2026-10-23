@@ -8,7 +8,7 @@ use rbms_model::translations::Catalog;
 use rbms_render::Color;
 use rbms_render::text::language;
 
-use crate::text::menus::ir_outcome::IrOutcomeText;
+use crate::text::menus::ir_outcome::{IrOutcomeText, SkipReasonText};
 
 /// Where the IR block sits on the result screen: the left column, below the EX-delta lines the
 /// rank bar draws, one row per status line.
@@ -75,7 +75,7 @@ impl IrStatus {
         match self {
             IrStatus::Off => vec![("IR: OFF".to_string(), IrLineKind::Info)],
             IrStatus::Skipped(reason) => {
-                vec![(IrOutcomeText::Skipped.fill(language(), &[reason]), IrLineKind::Info)]
+                vec![(IrOutcomeText::Skipped.fill(language(), &[&skip_reason_in(reason, language())]), IrLineKind::Info)]
             }
             IrStatus::Sending => vec![(IrOutcomeText::Sending.get(language()).to_string(), IrLineKind::Info)],
             IrStatus::Reported(report) => {
@@ -98,6 +98,12 @@ impl IrStatus {
             }
         }
     }
+}
+
+/// The reason a run was not sent in `language`, when the program gave it in English where it decided
+/// ([`SkipReasonText`]); any other reason is shown as it was given.
+pub(crate) fn skip_reason_in(reason: &str, language: Language) -> String {
+    SkipReasonText::ALL.iter().find(|known| known.get(Language::English) == reason).map_or_else(|| reason.to_string(), |known| known.get(language).to_string())
 }
 
 /// Whether a result line begins with `lead` as any of the languages writes it. A line is told in the
@@ -190,6 +196,22 @@ mod tests {
                 assert_ne!(colors[i], colors[j], "status tones are visually distinct");
             }
         }
+    }
+
+    #[test]
+    fn every_reason_the_program_gives_for_not_sending_a_run_is_written_in_every_language() {
+        let given = [
+            crate::ir_submission_block_reason(true, false, false),
+            crate::ir_submission_block_reason(false, true, false),
+            crate::ir_submission_block_reason(false, false, true),
+            Some(crate::app_ranking::NOT_SIGNED_IN),
+        ];
+        for reason in given.into_iter().flatten() {
+            assert!(SkipReasonText::ALL.iter().any(|known| known.get(Language::English) == reason), "{reason:?} has no words in the catalog");
+            assert_ne!(skip_reason_in(reason, Language::Korean), reason, "{reason:?}");
+            assert_ne!(skip_reason_in(reason, Language::Japanese), reason, "{reason:?}");
+        }
+        assert_eq!(skip_reason_in("a reason of its own", Language::Korean), "a reason of its own", "a reason the catalog does not know stays as it was given");
     }
 
     #[test]
@@ -357,7 +379,7 @@ mod tests {
         rbms_render::text::set_language(Language::English);
         assert_eq!((ranked.score.as_str(), ranked.replay.as_deref()), ("IR: 3위", Some("리플레이 업로드 완료")));
         assert_eq!(rejected.score, "IR: 거부됨 (chart unknown)");
-        assert_eq!(skipped, vec![("IR: スキップ（autoplay）".to_string(), IrLineKind::Info)]);
+        assert_eq!(skipped, vec![("IR: スキップ（AUTOPLAY使用）".to_string(), IrLineKind::Info)]);
     }
 
     #[test]

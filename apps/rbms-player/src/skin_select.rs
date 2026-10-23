@@ -43,6 +43,9 @@ use std::time::SystemTime;
 use rbms_config::{
     ACTION_VALUE, Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NO_UNIT, NONE_VALUE, NumberSpec, SKIN_SCREEN_LABELS, SkinCustomisation, skin_document_label,
 };
+use rbms_model::Language;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 use rbms_skin::dst::{SkinColor, SkinOffset};
 use rbms_skin::loader::{
     LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, automatic_offsets, is_lua_skin, is_supported_skin_type, load_header,
@@ -54,6 +57,8 @@ use rbms_skin::resolve::{CustomFile, RANDOM_SELECTION, plain_path};
 
 use crate::assets::{installed_default_pack, skin_overlay_folder};
 use crate::number_row::NumberValue;
+use crate::text::menus::skin_info::SkinInfoText;
+use crate::text::menus::skin_menu::SkinMenuText;
 
 pub(crate) mod adjustments;
 pub(crate) mod export;
@@ -121,42 +126,39 @@ const OPACITY_STEPS: NumberSpec = NumberSpec::whole(OPACITY_NONE_PERCENT as i64,
 /// Separator between a customisation row's category and its own name.
 const CATEGORY_SEPARATOR: &str = " > ";
 
-/// Shown on the LOADED row while the built-in screen is being drawn.
+/// What the LOADED row says in English while the built-in screen is being drawn, for a document that
+/// has been chosen but not read yet, when the chosen document declares a screen this build does not
+/// draw, and for a Lua skin that is read when the screen it draws next opens. The words in the
+/// language the screens are drawn in are [`SkinInfoText`].
+#[cfg(test)]
 const BUILT_IN_INFO: &str = "BUILT-IN SCREEN";
-
-/// Shown on the LOADED row for a document that has been chosen but not read yet.
+#[cfg(test)]
 const NOT_READ_INFO: &str = "NOT READ YET";
-
-/// Shown on the LOADED row when the chosen document declares a screen this build does not draw.
+#[cfg(test)]
 const UNSUPPORTED_INFO: &str = "SCREEN NOT SUPPORTED - DRAWING THE BUILT-IN ONE";
-
-/// Shown on the LOADED row for a document that decides what to draw with Lua expressions.
-const LUA_INFO: &str = "LUA";
-
-/// Shown on the LOADED row for a Lua skin that is read when the screen it draws next opens.
+#[cfg(test)]
 const WAITING_INFO: &str = "READ WHEN ITS SCREEN OPENS";
 
 /// What a path is cut at, on any platform: a reason may spell a path either way.
 const PATH_SEPARATORS: [char; 2] = ['/', '\\'];
 
-/// What the SKIN row puts before the name of a document the pack chose rather than the player.
-const PACK_DOCUMENT_PREFIX: &str = "PACK: ";
-
-/// What the PACK FOLDER row puts before a folder that is not on the disk. It goes first because a
-/// row that has no room for a whole path gives up part of the path, not what comes before it.
+/// What the PACK FOLDER row puts before a folder that is not on the disk, in English. It goes first
+/// because a row that has no room for a whole path gives up part of the path, not what comes before
+/// it.
+#[cfg(test)]
 const MISSING_PACK_PREFIX: &str = "(MISSING) ";
 
-/// What is said of a pack whose folder is not on the disk, which is why no screen is drawn with it.
+/// What is said of a pack whose folder is not on the disk, in English, which is why no screen is
+/// drawn with it.
+#[cfg(test)]
 const MISSING_PACK_NOTE: &str = "THE PACK FOLDER IS NOT THERE";
 
 /// What is said, between its file's name and why, of a Lua skin of the pack that could not be read
-/// far enough to say which screen it draws. The reason a loader gives begins with the file and the
-/// pass that failed, so with the file's name taken off its front it reads on from here:
+/// far enough to say which screen it draws, in English. The reason a loader gives begins with the
+/// file and the pass that failed, so with the file's name taken off its front it reads on from here:
 /// `decide.luaskin DID NOT READ (header pass): ...`.
+#[cfg(test)]
 const UNREAD_SKIN_NOTE: &str = " DID NOT READ";
-
-/// What the EXPORT row is called.
-const EXPORT_LABEL: &str = "EXPORT";
 
 /// What separates a row's name from its value where the two are said on one line.
 const ROW_VALUE_SEPARATOR: &str = ": ";
@@ -167,8 +169,11 @@ pub(crate) const CHANNEL_STEPS: NumberSpec = NumberSpec::whole(0, u8::MAX as i64
 /// What is written before the digits of a colour.
 pub(crate) const HEX_MARK: &str = "#";
 
-/// What the row that shows or hides the channels of every colour is called.
-pub(crate) const COLOR_CHANNELS_LABEL: &str = "COLOR CHANNELS";
+/// What the row that shows or hides the channels of every colour is called, in the language the
+/// screens are drawn in.
+pub(crate) fn color_channels_label() -> &'static str {
+    SkinInfoText::ColorChannelsRow.get(language())
+}
 
 /// The colours the arrows of a colour row go round, as red, green and blue: white to black in
 /// greys, then round the hues. The alpha the row stands at is kept as it steps.
@@ -275,8 +280,8 @@ impl OffsetAxis {
             OffsetAxis::Y => "Y",
             OffsetAxis::W => "W",
             OffsetAxis::H => "H",
-            OffsetAxis::R => "ANGLE",
-            OffsetAxis::A => "ALPHA",
+            OffsetAxis::R => SkinInfoText::AngleAxis.get(language()),
+            OffsetAxis::A => SkinInfoText::AlphaAxis.get(language()),
         }
     }
 
@@ -423,15 +428,18 @@ pub(crate) struct AppliedToPeers {
 }
 
 impl AppliedToPeers {
-    /// What is said of it, on one line.
-    pub(crate) fn message(&self) -> String {
+    /// What is said of it, on one line, in `language`.
+    pub(crate) fn message_in(&self, language: Language) -> String {
         let (label, value) = &self.line;
-        let screens = |count: usize| if count == 1 { "screen" } else { "screens" };
-        let skipped = match self.skipped {
-            0 => String::new(),
-            skipped => format!(" ({skipped} skipped: no item of that name)"),
+        let row = format!("{label}{ROW_VALUE_SEPARATOR}{value}");
+        let applied = match self.applied {
+            1 => SkinMenuText::AppliedToOneScreen.fill(language, &[&row]),
+            count => SkinMenuText::AppliedToScreens.fill(language, &[&row, &count]),
         };
-        format!("{label}{ROW_VALUE_SEPARATOR}{value} applied to {} other {}{skipped}", self.applied, screens(self.applied))
+        match self.skipped {
+            0 => applied,
+            skipped => format!("{applied} {}", SkinMenuText::AppliedSkipped.fill(language, &[&skipped])),
+        }
     }
 }
 
@@ -769,7 +777,7 @@ impl SkinLibrary {
     /// -- or that there is no pack when the default one is not installed. A named folder that is not
     /// on the disk is marked as missing, ahead of its path for the same reason.
     pub(crate) fn pack_value(&self, config: &Config) -> String {
-        let missing = if self.pack_missing && !self.pack_moved(config) { MISSING_PACK_PREFIX } else { "" };
+        let missing = if self.pack_missing && !self.pack_moved(config) { SkinInfoText::MissingPackPrefix.get(language()) } else { "" };
         match (self.forced_pack.as_deref(), config.skin.pack_folder(), self.default_pack.as_deref()) {
             (Some(forced), _, _) => format!("{missing}{} ({SKIN_PACK_ENV})", forced.display()),
             (None, Some(pack), _) => format!("{missing}{pack}"),
@@ -977,7 +985,7 @@ impl SkinLibrary {
             Some(header) if !header.name.trim().is_empty() => header.name.clone(),
             _ => skin_document_label(path),
         };
-        if by_hand.is_some() { name } else { format!("{PACK_DOCUMENT_PREFIX}{name}") }
+        if by_hand.is_some() { name } else { format!("{}{name}", SkinInfoText::PackDocumentPrefix.get(language())) }
     }
 
     /// What the LOADED row shows: the size, parser and warning count of the document being drawn,
@@ -990,31 +998,32 @@ impl SkinLibrary {
     pub(crate) fn info(&self, config: &Config) -> String {
         let screen = config.skin.screen;
         let Some(path) = self.document_path(config, screen) else {
+            let built_in = SkinInfoText::BuiltInScreen.get(language());
             return match self.pack_trouble(config, screen) {
-                Some(trouble) => format!("{BUILT_IN_INFO} - {trouble}"),
-                None => BUILT_IN_INFO.to_string(),
+                Some(trouble) => format!("{built_in} - {trouble}"),
+                None => built_in.to_string(),
             };
         };
         if let Some(failure) = self.errors.get(&screen).filter(|failure| failure.path == path) {
             return first_line(&failure.reason);
         }
         if !is_supported_skin_type(screen) {
-            return UNSUPPORTED_INFO.to_string();
+            return SkinInfoText::ScreenNotSupported.get(language()).to_string();
         }
         if self.waiting.get(&screen).is_some_and(|waiting| waiting == path) {
-            return WAITING_INFO.to_string();
+            return SkinInfoText::ReadWhenOpens.get(language()).to_string();
         }
         let Some(skin) = self.loaded.get(&screen).filter(|entry| entry.path == path && !self.stale.contains(&screen)).map(|entry| &entry.skin) else {
-            return NOT_READ_INFO.to_string();
+            return SkinInfoText::NotReadYet.get(language()).to_string();
         };
         let parser = match skin.parser {
             ParserKind::Json => "JSON",
             ParserKind::Json5 => "JSON5",
             ParserKind::Lua => "Lua",
         };
-        let lua = if uses_lua(skin) { format!(" - {LUA_INFO}") } else { String::new() };
+        let lua = if uses_lua(skin) { format!(" - {}", SkinInfoText::Lua.get(language())) } else { String::new() };
         let author = if skin.def.author.trim().is_empty() { String::new() } else { format!(" - {}", skin.def.author) };
-        format!("{}X{} - {}{} - {} WARNINGS{}", skin.def.w, skin.def.h, parser, lua, skin.warnings.len(), author)
+        SkinInfoText::Summary.fill(language(), &[&skin.def.w, &skin.def.h, &parser, &lua, &skin.warnings.len(), &author])
     }
 
     /// The customisation rows the skin menu shows, top to bottom, in the order the chosen document
@@ -1227,7 +1236,7 @@ impl SkinLibrary {
                 (Some(def), Some((color, _))) => (format!("{} {}", color_label(def), channel.label()), channel.get(color).to_string()),
                 _ => missing_row(),
             },
-            SkinRow::ColorChannels => (COLOR_CHANNELS_LABEL.to_string(), String::new()),
+            SkinRow::ColorChannels => (color_channels_label().to_string(), String::new()),
         }
     }
 
@@ -1730,7 +1739,7 @@ impl SkinLibrary {
             return None;
         }
         if self.pack_missing {
-            return Some(MISSING_PACK_NOTE.to_string());
+            return Some(SkinInfoText::PackFolderMissing.get(language()).to_string());
         }
         let (file, reason) = self.pack_unread.iter().min_by_key(|(file, _)| file_name_key(file))?;
         let name = file.file_name().map_or_else(|| file.to_string_lossy(), |name| name.to_string_lossy());
@@ -1741,9 +1750,9 @@ impl SkinLibrary {
         };
         let more = match self.pack_unread.len() - 1 {
             0 => String::new(),
-            more => format!(" (AND {more} MORE)"),
+            more => SkinInfoText::AndMore.fill(language(), &[&more]),
         };
-        Some(format!("{name}{UNREAD_SKIN_NOTE}{said}{more}"))
+        Some(format!("{name}{}{said}{more}", SkinInfoText::DidNotRead.get(language())))
     }
 
     /// Why one screen's document could not be read.
@@ -1964,7 +1973,7 @@ pub(crate) fn color_value(set: Option<SkinColor>) -> String {
 
 /// What the EXPORT row shows.
 fn export_row() -> (String, String) {
-    (EXPORT_LABEL.to_string(), ACTION_VALUE.to_string())
+    (SkinInfoText::ExportRow.get(language()).to_string(), ACTION_VALUE.to_string())
 }
 
 /// What a pack's own adjustments and the player's choices come to for one document: every row the

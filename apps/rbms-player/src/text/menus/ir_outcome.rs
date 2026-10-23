@@ -1,9 +1,11 @@
-//! Fixed words of the IR lines of the result screen, by language.
+//! Fixed words of the IR lines of the result screen and of the record modal, by language.
 //!
 //! A line is told in the language the screen is in when the score server answers, and the result screen keeps it as it was told. The leads that
-//! colour a line (`UNRANKED`, `REPLAY ERROR`) are read back from a line told in any of the languages. The reason a run was skipped, the reasons it
-//! was left out of the ranking and the text of an error are the server's or the player's own and stay as they come. `IR: OFF` and `NEW BEST` are
-//! terms every language keeps, and are not here.
+//! colour a line (`UNRANKED`, `REPLAY ERROR`) are read back from a line told in any of the languages. The reason a run was skipped is one of the four
+//! the program gives ([`SkipReasonText`]); the reasons it was left out of the ranking and the text of an error are the server's or the player's own
+//! and stay as they come. `IR: OFF` and `NEW BEST` are
+//! terms every language keeps, and are not here. The record modal's lines say where one stored play stands with the server in the same words the
+//! result screen says it in (`REJECTED`, `SENT`), and are told afresh each time the modal is drawn.
 
 rbms_model::translations! {
     /// Words of the IR lines of the result screen.
@@ -24,6 +26,62 @@ rbms_model::translations! {
         ReplayUploaded => ("REPLAY UPLOADED", "리플레이 업로드 완료", "リプレイ送信済み"),
         /// The lead of the line of a failed replay upload; the text of the error follows the colon.
         ReplayErrorLead => ("REPLAY ERROR", "리플레이 오류", "リプレイエラー"),
+        /// The summary of a fan-out to several score servers when there is none to send to, and what it says of one that answered without taking the score.
+        NoProfiles => ("no IR profiles", "IR 프로필 없음", "IRプロファイルなし"),
+        ProfileRejected => ("rejected", "거부됨", "拒否"),
+    }
+}
+
+rbms_model::translations! {
+    /// Words of the line of the record modal that says where one stored play stands with the score server.
+    pub(crate) enum RecordIrLineText {
+        NotSentYet => ("IR: NOT SENT YET", "IR: 아직 전송하지 않음", "IR: 未送信"),
+        NotSentNotSignedIn => ("IR: NOT SENT (NOT SIGNED IN)", "IR: 전송하지 않음 (로그인하지 않음)", "IR: 未送信（未ログイン）"),
+        /// The play is on the server, under another account than the one signed in now.
+        OnServerAs => ("IR: ON SERVER (AS {0})", "IR: 서버에 있음 (계정 {0})", "IR: サーバーに登録済み（アカウント{0}）"),
+        OnServer => ("IR: ON SERVER", "IR: 서버에 있음", "IR: サーバーに登録済み"),
+        /// The server refused the play; the code, the field and the reason it gave follow.
+        Rejected => ("IR: REJECTED {0}", "IR: 거부됨 {0}", "IR: 拒否 {0}"),
+        NotSentWillRetry => ("IR: NOT SENT YET (WILL RETRY)", "IR: 아직 전송하지 않음 (재시도 예정)", "IR: 未送信（再試行予定）"),
+        NotSentOldRule => ("IR: NOT SENT (OLD SCRATCH AUTO RULE)", "IR: 전송하지 않음 (이전 SCRATCH AUTO 규칙)", "IR: 未送信（旧SCRATCH AUTOルール）"),
+        NotSentChartNotInLibrary => (
+            "IR: NOT SENT (CHART NOT IN LIBRARY)",
+            "IR: 전송하지 않음 (라이브러리에 없는 차트)",
+            "IR: 未送信（ライブラリにない譜面）",
+        ),
+    }
+}
+
+rbms_model::translations! {
+    /// The reasons the program itself gives for not sending a run, which the result screen puts in parentheses after `IR: SKIPPED`. The program
+    /// names them in English where it decides ([`crate::ir_outcome::skip_reason_in`] writes them in a language).
+    pub(crate) enum SkipReasonText {
+        Autoplay => ("autoplay", "AUTOPLAY 사용", "AUTOPLAY使用"),
+        ReplayPlayback => ("replay playback", "리플레이 재생", "リプレイ再生"),
+        Practice => ("practice", "연습", "練習"),
+        NotSignedIn => ("not logged in", "로그인하지 않음", "未ログイン"),
+    }
+}
+
+rbms_model::translations! {
+    /// What the result screen says under the run of what an assist did to it: kept and sent like any other run, but no best score. Each fits a
+    /// line of the built-in screen's column in every language.
+    pub(crate) enum AssistNoteText {
+        ScratchAuto => (
+            "SCRATCH AUTO: TURNTABLE NOT COUNTED, ASSIST LAMP",
+            "SCRATCH AUTO: 턴테이블 제외, 어시스트 램프",
+            "SCRATCH AUTO: ターンテーブル非集計、アシストランプ",
+        ),
+        WidenedJudge => (
+            "WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE",
+            "판정 폭 확대: 전송·보관됨, 최고 스코어 없음",
+            "判定幅拡大: 送信・保管済み、ベストスコアなし",
+        ),
+        OwnTotal => (
+            "OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE",
+            "자체 TOTAL: 전송·보관됨, 최고 스코어 없음",
+            "独自TOTAL: 送信・保管済み、ベストスコアなし",
+        ),
     }
 }
 
@@ -37,6 +95,19 @@ mod tests {
     #[test]
     fn every_entry_is_written_in_every_language() {
         assert_eq!(catalog_problems(IrOutcomeText::ALL), Vec::<String>::new());
+        assert_eq!(catalog_problems(RecordIrLineText::ALL), Vec::<String>::new());
+        assert_eq!(catalog_problems(AssistNoteText::ALL), Vec::<String>::new());
+        assert_eq!(catalog_problems(SkipReasonText::ALL), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_assist_note_fits_a_line_of_the_result_screen_in_every_language() {
+        for note in AssistNoteText::ALL {
+            for language in Language::ALL {
+                let text = note.get(language);
+                assert!(text.chars().count() <= crate::ir_outcome::IR_LINE_MAX_CHARS, "{note:?} {language:?} is too long: {text}");
+            }
+        }
     }
 
     #[test]

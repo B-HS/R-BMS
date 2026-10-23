@@ -12,6 +12,7 @@ use std::fmt;
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_ir::{RandomOption, ReplayData};
+use rbms_model::Language;
 use rbms_model::translations::Catalog;
 use rbms_render::text::language;
 use rbms_store::{Replay, ScoreRecord};
@@ -20,7 +21,7 @@ use crate::AppShared;
 use crate::app_play::OwnPlayOptions;
 use crate::format::fmt_datetime;
 use crate::ghost::GhostSource;
-use crate::notify::{Level, notify_text};
+use crate::notify::{Level, notify_text, notify_with};
 use crate::stage::{LoadingState, Stage, Transition};
 use crate::text::layout_play::LayoutPlayText;
 use crate::text::notices::NoticeText;
@@ -89,21 +90,33 @@ pub(crate) enum LayoutRefusal {
     ArrangementUnknown,
 }
 
-impl fmt::Display for LayoutRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let language = language();
+impl LayoutRefusal {
+    /// The refusal in `language`.
+    pub(crate) fn in_language(&self, language: Language) -> String {
         match self {
             LayoutRefusal::ChartMismatch { replay, chart } if chart.is_empty() => {
-                f.write_str(&NoticeText::LayoutRefusedChartNotInTheLibrary.fill(language, &[&quoted_hash(replay)]))
+                NoticeText::LayoutRefusedChartNotInTheLibrary.fill(language, &[&quoted_hash(replay)])
             }
             LayoutRefusal::ChartMismatch { replay, chart } => {
-                f.write_str(&NoticeText::LayoutRefusedAnotherChart.fill(language, &[&quoted_hash(replay), &quoted_hash(chart)]))
+                NoticeText::LayoutRefusedAnotherChart.fill(language, &[&quoted_hash(replay), &quoted_hash(chart)])
             }
-            LayoutRefusal::UnknownLayout => f.write_str(NoticeText::LayoutRefusedNoSeed.get(language)),
-            LayoutRefusal::UnsupportedOption(label) => f.write_str(&NoticeText::LayoutRefusedUnsupportedOption.fill(language, &[label])),
-            LayoutRefusal::NotFreePlay => f.write_str(NoticeText::LayoutRefusedNotFreePlay.get(language)),
-            LayoutRefusal::ArrangementUnknown => f.write_str(LayoutPlayText::ArrangementUnknown.get(language)),
+            LayoutRefusal::UnknownLayout => NoticeText::LayoutRefusedNoSeed.get(language).to_string(),
+            LayoutRefusal::UnsupportedOption(label) => NoticeText::LayoutRefusedUnsupportedOption.fill(language, &[label]),
+            LayoutRefusal::NotFreePlay => NoticeText::LayoutRefusedNotFreePlay.get(language).to_string(),
+            LayoutRefusal::ArrangementUnknown => LayoutPlayText::ArrangementUnknown.get(language).to_string(),
         }
+    }
+
+    /// Say the refusal over every screen: standard error gets it in English at once, and the screen
+    /// gets it in the language it is drawn in when it takes the message.
+    pub(crate) fn report(self) {
+        notify_with(Level::Warn, move |language| self.in_language(language));
+    }
+}
+
+impl fmt::Display for LayoutRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.in_language(language()))
     }
 }
 
@@ -342,6 +355,22 @@ pub(crate) mod tests {
     use crate::app_play::decode_chart;
     use crate::stage::PlayState;
     use crate::{App, Config, LaunchOptions, Library, SelectItem};
+
+    /// A refusal is said over the screen in the language the screen is drawn in when it takes the
+    /// message, and on standard error in English.
+    #[test]
+    fn a_refusal_is_reported_in_english_at_once_and_worded_for_the_screen_when_it_is_taken() {
+        crate::notify::exclusive(|| {
+            LayoutRefusal::NotFreePlay.report();
+            rbms_render::text::set_language(Language::Korean);
+            let mut taken = Vec::new();
+            crate::notify::drain(&mut taken);
+            rbms_render::text::set_language(Language::English);
+            assert_eq!(taken, [(Level::Warn, LayoutRefusal::NotFreePlay.in_language(Language::Korean))]);
+            assert_eq!(taken[0].1, "배치를 빌리지 않음: 코스나 연습이 아닌 직접 플레이에서만 배치를 빌릴 수 있음");
+            assert_eq!(LayoutRefusal::NotFreePlay.to_string(), LayoutRefusal::NotFreePlay.in_language(Language::English));
+        });
+    }
 
     /// A seven-key chart with a note on every key lane in rows of its own and one on the turntable,
     /// so every arrangement but OFF moves some note.

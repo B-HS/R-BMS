@@ -21,8 +21,11 @@ use crate::ir_replay::{replay_download_is_applicable, to_ir_replay, wire_carries
 use crate::notify::notify_text;
 use crate::record_sync::{RATE_LIMITED_DETAIL, ScoreOutcome, course_outcome, course_sync_row, sync_row};
 use crate::stage::StageId;
+use crate::text::menus::ir_outcome::IrOutcomeText;
 use crate::text::notices::{NoticeText, StatusText, installed, installed_with};
 use crate::*;
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 
 /// The play a submission on its way to the main server was made for, and where to write its answer
 /// down: the server and the account it was sent under, and what is to become of its replay when the
@@ -58,7 +61,7 @@ pub(crate) struct CourseSubmit {
 
 /// Why a run was not sent to the main score server: nobody is signed in to it, and the server takes
 /// a score only from an account (a tokenless submission is refused 401). The run is kept locally.
-const NOT_SIGNED_IN: &str = "not logged in";
+pub(crate) const NOT_SIGNED_IN: &str = "not logged in";
 
 impl AppShared {
     /// Chart id of the focused row, for the IR (only the md5 addresses a chart on the wire).
@@ -336,7 +339,8 @@ impl AppShared {
             }
             Err(TryRecvError::Empty) => self.profile_submit_rx = Some(rx),
             Err(TryRecvError::Disconnected) => {
-                let report = IrReport { score: "IR ERROR: profile submit worker stopped".to_string(), new_best: false, replay: None, failed: true };
+                let score = format!("{}: profile submit worker stopped", IrOutcomeText::ErrorLead.get(language()));
+                let report = IrReport { score, new_best: false, replay: None, failed: true };
                 self.net_status = report.score.clone();
                 if self.submit_rx.is_none() && self.ir_status.accepts_report() {
                     self.ir_status = IrStatus::Reported(report);
@@ -439,7 +443,7 @@ impl AppShared {
             (Some(body), Some(db)) => match db.put_course(&sub.course_hash, sub.played_at, &body, played_as.as_deref()) {
                 Ok(id) => Some(id),
                 Err(e) => {
-                    notify(Level::Error, format!("course not kept: {e}"));
+                    notify_text(Level::Error, NoticeText::CourseNotKept, &[&e]);
                     None
                 }
             },
@@ -473,8 +477,8 @@ impl AppShared {
             let outcome = course_outcome(&result);
             match &outcome {
                 ScoreOutcome::Accepted { .. } => notify_text(Level::Info, NoticeText::CourseSent, &[]),
-                ScoreOutcome::Rejected(rejection) => notify(Level::Warn, format!("course rejected: {}", rejection.detail)),
-                ScoreOutcome::Retry { detail } => notify(Level::Warn, format!("course not sent yet ({detail}): sent again on the next records sync")),
+                ScoreOutcome::Rejected(rejection) => notify_text(Level::Warn, NoticeText::CourseRejected, &[&rejection.detail]),
+                ScoreOutcome::Retry { detail } => notify_text(Level::Warn, NoticeText::CourseNotSentYet, &[detail]),
                 ScoreOutcome::Skipped { .. } => {}
             }
             if let Some((course_id, server, login_id)) = kept {

@@ -76,15 +76,18 @@ use crate::skin_screen::PlayDraw;
 use crate::stage::loading::ChartLoads;
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::target::ResolvedTarget;
+use crate::text::menus::analysis::AnalysisText;
 use crate::*;
 use controls::HeldControls;
 use field::FieldChart;
 use rbms_config::{FixHiSpeed, ScoreTarget};
+use rbms_model::translations::Catalog;
 use rbms_render::playfield::LaneShade;
 use rbms_render::skin_render::frame::{
     BgaExpand, BgaPlayhead, BgaPreloadOrder, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS, GaugeScale, LaneNotes, first_lane_rect, lane_offsets,
 };
 use rbms_render::skin_render::graphs::{NoteDistribution, PlayCursor};
+use rbms_render::text::language;
 use rbms_render::{
     BgaFrame, FrameData, FrameSeries, GaugeFrame, HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, ReferenceImages, SCRATCH_LANE_KIND, TextureId, render_hud,
 };
@@ -785,7 +788,7 @@ impl PlayState {
             Shortcut::ReplayPlayLayout => {
                 let borrowed = shared.borrow_layout_of_watched_replay().unwrap_or(Ok(Transition::Stay));
                 return Some(borrowed.unwrap_or_else(|refusal| {
-                    notify(Level::Warn, refusal.to_string());
+                    refusal.report();
                     Transition::Stay
                 }));
             }
@@ -1295,9 +1298,10 @@ impl PlayState {
         canvas.fill_rect(Rect::new(bx, by, bw, 6.0), colors.divider);
         canvas.fill_rect(Rect::new(bx, by, bw * prog, 6.0), colors.good);
         canvas.fill_rect(Rect::new((bx + bw * prog - 1.5).max(bx), by - 3.0, 3.0, 12.0), Color::WHITE);
-        let state = if play.analysis_paused() { "PAUSED".to_string() } else { format!("{:.2}x", play.analysis_rate()) };
-        draw_text(canvas, bx, CH as f32 - 66.0, 1.4, colors.accent, &format!("ANALYSIS  {state}   {:.1} / {:.1} S", song as f32 / 1e6, total as f32 / 1e6));
-        draw_text_right(canvas, bx + bw, CH as f32 - 66.0, 1.1, colors.text_muted, "SPACE PAUSE  -/+ SPEED  PGUP/PGDN SEEK  ESC EXIT");
+        let state = if play.analysis_paused() { AnalysisText::Paused.get(language()).to_string() } else { format!("{:.2}x", play.analysis_rate()) };
+        let status = AnalysisText::Status.fill(language(), &[&state, &format!("{:.1}", song as f32 / 1e6), &format!("{:.1}", total as f32 / 1e6)]);
+        draw_text(canvas, bx, CH as f32 - 66.0, 1.4, colors.accent, &status);
+        draw_text_right(canvas, bx + bw, CH as f32 - 66.0, 1.1, colors.text_muted, AnalysisText::Keys.get(language()));
         let mut mx = bx;
         for mark in play.recent_marks(ANALYSIS_MARKS_SHOWN) {
             let col = if mark.delta_us > 0 {

@@ -246,7 +246,7 @@ impl TablesState {
     /// still out.
     fn add_source(&mut self, shared: &mut AppShared, source: TableSource) {
         if shared.config.library.tables.iter().any(|t| t.location == source.location) {
-            notify(Level::Warn, TablesText::AlreadyAdded.fill(language(), &[&source.location]));
+            notify_text(Level::Warn, TablesText::AlreadyAdded, &[&source.location]);
             return;
         }
         self.sel = shared.config.library.tables.len();
@@ -380,9 +380,7 @@ impl StageHandler for TablesState {
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.tables.len() => self.remove_table_source(ctx.shared, self.sel),
-            KeyCode::KeyD | KeyCode::Delete if self.sel == TablesState::folders_row(ctx.shared) => {
-                notify(Level::Info, TablesText::FoldersNotRemoved.get(language()))
-            }
+            KeyCode::KeyD | KeyCode::Delete if self.sel == TablesState::folders_row(ctx.shared) => notify_text(Level::Info, TablesText::FoldersNotRemoved, &[]),
             KeyCode::KeyR if self.sel < ctx.shared.config.library.tables.len() => reload_tables(ctx.shared, Some(self.sel)),
             KeyCode::KeyR if self.sel == TablesState::folders_row(ctx.shared) => {
                 crate::user_folders::start_fetch(ctx.shared, true);

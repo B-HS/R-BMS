@@ -10,7 +10,9 @@
 use std::process::{Command, Stdio};
 
 #[cfg(not(test))]
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_text};
+#[cfg(not(test))]
+use crate::text::notices::NoticeText;
 
 /// The program that hands an address to the browser on macOS.
 #[cfg(target_os = "macos")]
@@ -61,8 +63,8 @@ fn launch(program: &'static str, arguments: Vec<String>) {
         let ran = Command::new(program).args(&arguments).stdin(Stdio::null()).spawn().and_then(|mut child| child.wait());
         match ran {
             Ok(status) if status.success() => {}
-            Ok(status) => notify(Level::Warn, format!("could not open the browser: {program} {status}")),
-            Err(error) => notify(Level::Warn, format!("could not open the browser: {error}")),
+            Ok(status) => notify_text(Level::Warn, NoticeText::BrowserNotOpened, &[&format!("{program} {status}")]),
+            Err(error) => notify_text(Level::Warn, NoticeText::BrowserNotOpened, &[&error]),
         }
     });
 }

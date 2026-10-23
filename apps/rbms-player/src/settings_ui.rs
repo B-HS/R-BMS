@@ -31,7 +31,7 @@ use crate::number_row::NumberValue;
 use crate::settings_view::{RowControl, SettingsLine, segments_fit};
 use crate::skin_select::SkinRow;
 use crate::text::settings::screen::AudioStatusText;
-use crate::text::settings::{row_label, shown_choice, shown_value};
+use crate::text::settings::{row_label, shown_choice, shown_skin_value, shown_value};
 use crate::*;
 
 /// The row the skin document's own customisation rows are listed directly above.
@@ -192,7 +192,7 @@ impl AppShared {
         };
         let (shown, choices) = match row {
             SettingRow::Fixed(id) => (shown_value(id, &value), if matches!(control, RowControl::Segments { .. }) { shown_choices(id) } else { Vec::new() }),
-            SettingRow::Skin(_) => (value.clone(), Vec::new()),
+            SettingRow::Skin(_) => (shown_skin_value(&value), Vec::new()),
         };
         SettingsLine { label, value, shown, choices, note: self.settings_note(row), number, control, changed }
     }

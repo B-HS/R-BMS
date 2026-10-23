@@ -59,7 +59,7 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 use crate::dialog::{DialogHandle, DialogState, pick_skin_export_folder, pick_skin_pack_folder};
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_text, notify_with};
 use crate::number_row::{EditKey, NumberInput, RowPart};
 use crate::settings_ui::SettingRow;
 use crate::settings_view::SettingsLine;
@@ -184,7 +184,9 @@ impl SkinMenuState {
         self.lines = self.rows.iter().map(|&row| shared.settings_scene_line(row)).collect();
         let channels = channel_rows(shared).len();
         if let Some(at) = self.rows.iter().position(|row| *row == SettingRow::Skin(SkinRow::ColorChannels)) {
-            self.lines[at].value = fold_value(self.channels_open, channels);
+            let folded = fold_value(self.channels_open, channels);
+            self.lines[at].shown = folded.clone();
+            self.lines[at].value = folded;
         }
         if let Some(fixed @ (SettingRow::Fixed(_) | SettingRow::Skin(SkinRow::Export | SkinRow::ColorChannels))) = focused
             && let Some(at) = self.rows.iter().position(|row| *row == fixed)
@@ -493,7 +495,7 @@ impl SkinMenuState {
         match outcome {
             Ok(exported) => self.say_export(Ok(exported)),
             Err(ExportError::CalledOff) => {
-                notify(Level::Info, SkinMenuText::ExportCancelledNotice.get(language()));
+                notify_text(Level::Info, SkinMenuText::ExportCancelledNotice, &[]);
                 self.said = Some((SkinMenuText::ExportCancelledHeading.get(language()).to_string(), ExportError::CalledOff.to_string().to_ascii_uppercase()));
             }
             Err(error) => self.say_export(Err(error.to_string())),
@@ -509,12 +511,12 @@ impl SkinMenuState {
                     0 => String::new(),
                     links => SkinMenuText::LinksLeftOut.fill(language(), &[&links]),
                 };
-                notify(Level::Info, SkinMenuText::ExportedNotice.fill(language(), &[&exported.files, &folder]));
+                notify_text(Level::Info, SkinMenuText::ExportedNotice, &[&exported.files, &folder]);
                 let heading = SkinMenuText::ExportedHeading.fill(language(), &[&exported.files, &megabytes(exported.bytes), &links]);
                 self.said = Some((heading, folder.into_owned()));
             }
             Err(reason) => {
-                notify(Level::Error, SkinMenuText::ExportFailedNotice.fill(language(), &[&reason]));
+                notify_text(Level::Error, SkinMenuText::ExportFailedNotice, &[&reason]);
                 self.said = Some((SkinMenuText::ExportFailedHeading.get(language()).to_string(), reason));
             }
         }
@@ -533,8 +535,9 @@ impl SkinMenuState {
             return;
         };
         ctx.shared.save_settings();
-        notify(Level::Info, applied.message());
-        self.said = Some((SkinMenuText::AppliedHeading.get(language()).to_string(), applied.message().to_ascii_uppercase()));
+        let said = applied.clone();
+        notify_with(Level::Info, move |language| said.message_in(language));
+        self.said = Some((SkinMenuText::AppliedHeading.get(language()).to_string(), applied.message_in(language()).to_ascii_uppercase()));
         self.settings_moved(ctx);
     }
 
@@ -634,12 +637,12 @@ impl SkinMenuState {
             })
             .collect();
         let entry = |index: usize| {
-            let SettingsLine { label, value, number, .. } = &self.lines[index];
+            let SettingsLine { label, shown, number, .. } = &self.lines[index];
             let row = self.rows.get(index).copied();
             let value = match (row, number) {
-                (Some(SettingRow::Fixed(SettingId::SkinPack)), _) => fit_path(value, VALUE_SCALE, pack_value_room(label)),
+                (Some(SettingRow::Fixed(SettingId::SkinPack)), _) => fit_path(shown, VALUE_SCALE, pack_value_room(label)),
                 (_, Some(number)) => number.spec.text(number.steps),
-                _ => fitted_value(value),
+                _ => fitted_value(shown),
             };
             let number = (*number).zip(row).map(|(number, row)| NumberCell {
                 fraction: number.fraction(),
@@ -662,7 +665,7 @@ impl SkinMenuState {
     fn draw_info(&self, shared: &AppShared, canvas: &mut Canvas<'_>) {
         draw_info_panel(canvas);
         if let Some(loaded) = self.loaded_line() {
-            draw_info_lead(canvas, &loaded.label, &loaded.value);
+            draw_info_lead(canvas, &loaded.label, &loaded.shown);
         }
         if self.pack_picker.is_some() {
             draw_info_note(canvas, SkinMenuText::PickerNote.get(language()));
@@ -681,7 +684,7 @@ impl SkinMenuState {
             return;
         }
         if let (Some(row), Some(line)) = (self.focused(), self.lines.get(self.sel)) {
-            draw_info_row_noted(canvas, INFO_ROW_Y, &line.label, &line.value, row_help(shared, row), peers_note(shared, row).as_deref());
+            draw_info_row_noted(canvas, INFO_ROW_Y, &line.label, &line.shown, row_help(shared, row), peers_note(shared, row).as_deref());
         }
     }
 }

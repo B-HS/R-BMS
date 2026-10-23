@@ -15,8 +15,9 @@
 use winit::event::Ime;
 
 use crate::KeyCode;
-use crate::notify::{Level, notify};
+use crate::notify::{Level, notify_text};
 use crate::stage::KeyInput;
+use crate::text::notices::NoticeText;
 
 /// An editable line of text with a caret in it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -118,7 +119,7 @@ impl TextEdit {
     pub(crate) fn paste(&mut self) {
         match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
             Ok(text) => self.insert(&text),
-            Err(e) => notify(Level::Warn, format!("paste failed: {e}")),
+            Err(e) => notify_text(Level::Warn, NoticeText::PasteFailed, &[&e]),
         }
     }
 

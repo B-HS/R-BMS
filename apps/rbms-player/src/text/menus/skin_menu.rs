@@ -56,6 +56,14 @@ rbms_model::translations! {
             "スキンをエクスポートしました: {0}ファイル、出力先 {1}",
         ),
         ExportFailedNotice => ("skin export failed: {0}", "스킨 내보내기에 실패했습니다: {0}", "スキンのエクスポートに失敗しました: {0}"),
+        /// What is said of putting one row's value on the other screens that declare it; {0} is the row and its value as a menu writes them.
+        AppliedToOneScreen => ("{0} applied to 1 other screen", "{0} 다른 화면 1개에 적용함", "{0}を他の1画面に適用"),
+        AppliedToScreens => ("{0} applied to {1} other screens", "{0} 다른 화면 {1}개에 적용함", "{0}を他の{1}画面に適用"),
+        AppliedSkipped => (
+            "({0} skipped: no item of that name)",
+            "(같은 이름의 항목이 없어 {0}개 건너뜀)",
+            "（同名の項目がなく{0}件スキップ）",
+        ),
 
         AlsoOnOneOtherScreen => (
             "ALSO ON 1 OTHER SCREEN - A APPLIES THIS VALUE TO IT",

@@ -409,7 +409,7 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
                 staged_replay = Some(staged);
                 replay_file = Some(name);
             }
-            Err(e) => notify(Level::Error, format!("replay not saved: {e} ({})", path.display())),
+            Err(e) => notify_text(Level::Error, NoticeText::ReplayNotSaved, &[&e, &path.display()]),
         }
         recorded_replay = Some(rp);
     }
@@ -511,7 +511,7 @@ fn keep_on_the_side(shared: &AppShared, run: PendingRun, name: &str, trace: crat
             true
         }
         Err(e) => {
-            notify(Level::Error, format!("run not kept: {e}"));
+            notify_text(Level::Error, NoticeText::RunNotKept, &[&e]);
             false
         }
     }

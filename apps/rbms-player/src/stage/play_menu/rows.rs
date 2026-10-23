@@ -40,11 +40,12 @@ use crate::AppShared;
 use crate::app_play::{SCRATCH_AUTO_SHIPPED_COLOR, scratch_auto_color};
 use crate::number_row::NumberValue;
 use crate::skin_preview::target::SpeedReadout;
-use crate::skin_select::{CHANNEL_STEPS, COLOR_CHANNELS_LABEL, ColorChannel, SkinRow, SkinRowKind};
+use crate::skin_select::{CHANNEL_STEPS, ColorChannel, SkinRow, SkinRowKind, color_channels_label};
 use crate::stage::preview_menu::{ONE_STEP, RowLook, SHIFT_STEPS};
 use crate::stage::skin_menu::skin_row_help;
 use crate::text::menus::play_menu::PlayMenuText;
 use crate::text::menus::skin_menu::SkinMenuText;
+use crate::text::settings::shown_value;
 
 /// The group the rows that are no setting are listed under.
 pub(super) fn group_preview() -> &'static str {
@@ -118,7 +119,7 @@ impl Fold {
     pub(super) fn label(self) -> &'static str {
         match self {
             Fold::Color => PlayMenuText::FoldColor.get(language()),
-            Fold::ColorChannels => COLOR_CHANNELS_LABEL,
+            Fold::ColorChannels => color_channels_label(),
             Fold::Opacity => PlayMenuText::FoldOpacity.get(language()),
             Fold::Place => PlayMenuText::FoldPlace.get(language()),
             Fold::AutoChannels => PlayMenuText::FoldAutoChannels.get(language()),
@@ -324,7 +325,7 @@ pub(super) fn setting_value(shared: &AppShared, readout: &SpeedReadout, id: Sett
         SettingId::LaneCoverFineStep => {
             format!("{stored} ({WHITE_NUMBER_NAME} {:.*})", FINE_STEP_WHITE_DECIMALS, play.lanecover_step_fine * WHITE_NUMBER_PER_LANE)
         }
-        _ => stored,
+        _ => shown_value(id, &stored),
     }
 }
 

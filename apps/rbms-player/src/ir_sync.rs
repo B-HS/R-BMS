@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use rbms_config::{BUNDLED_SKIN_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION, LegacyV0, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION};
 
 use crate::keyconfig::KeyConfig;
+use crate::text::notices::{StatusText, installed};
 
 /// Blob name the client stores its configuration under (`/players/{id}/settings/{name}`).
 pub(crate) const SETTINGS_BLOB_NAME: &str = "player";
@@ -17,7 +18,9 @@ pub(crate) const SETTINGS_BLOB_NAME: &str = "player";
 /// Free-form format tag stored with the blob; the server keeps it unread.
 pub(crate) const SETTINGS_BLOB_FORMAT: &str = "ron";
 
-/// Shown when the server rejected an upload because its copy moved on since the last download.
+/// What [`sync_error_message`] says in English when the server rejected an upload because its copy
+/// moved on since the last download.
+#[cfg(test)]
 pub(crate) const SYNC_CONFLICT_MESSAGE: &str = "conflict: server newer, download first";
 
 /// Everything the account syncs. Both halves carry a serde default, so a blob written by an older
@@ -251,11 +254,11 @@ pub(crate) fn conflict_server_copy(error: &IrError) -> Option<&SettingsBlob> {
     }
 }
 
-/// Status-line text for a failed sync call. A lost lock gets the fixed instruction; anything else
-/// reports the error itself.
+/// Status-line text for a failed sync call, in the language the screens are drawn in. A lost lock
+/// gets the fixed instruction; anything else reports the error itself.
 pub(crate) fn sync_error_message(error: &IrError) -> String {
     match error {
-        IrError::SettingsConflict(_) => SYNC_CONFLICT_MESSAGE.to_string(),
+        IrError::SettingsConflict(_) => installed(StatusText::SettingsConflict).to_string(),
         other => crate::ir_outcome::short_error(other),
     }
 }
@@ -267,6 +270,7 @@ mod tests {
     use rbms_ir::SettingsConflict;
     use rbms_judge::GaugeKind;
 
+    use crate::text::settings::InstalledLanguage;
     use crate::{SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
 
     /// The folder this machine looks for skin documents in, and a document it found there.
@@ -616,6 +620,15 @@ mod tests {
         let error = IrError::SettingsConflict(Box::<SettingsConflict>::default());
         assert_eq!(sync_error_message(&error), SYNC_CONFLICT_MESSAGE);
         assert!(conflict_server_copy(&error).is_none());
+    }
+
+    #[test]
+    fn the_instruction_after_a_lost_lock_is_written_in_the_language_of_the_screens() {
+        let error = IrError::SettingsConflict(Box::<SettingsConflict>::default());
+        let _korean = InstalledLanguage::new(rbms_model::Language::Korean);
+        assert_eq!(sync_error_message(&error), "충돌: 서버 쪽이 더 최신입니다. 먼저 다운로드해 주세요");
+        let other = IrError::Unauthorized("sign in first".into());
+        assert!(sync_error_message(&other).contains("sign in first"), "the text of another failure is the server's own");
     }
 
     #[test]

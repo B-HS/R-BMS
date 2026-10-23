@@ -14,7 +14,7 @@ pub(crate) mod screen;
 mod values;
 
 pub(crate) use labels::{group_summary, other_heading, row_label, section_heading, tab_label};
-pub(crate) use values::{shown_choice, shown_note, shown_value};
+pub(crate) use values::{shown_choice, shown_note, shown_skin_value, shown_value};
 
 /// Installs a language on the test's thread and puts English back when the test is over, so that a
 /// test which draws a screen in another language leaves the thread as the next test on it expects.

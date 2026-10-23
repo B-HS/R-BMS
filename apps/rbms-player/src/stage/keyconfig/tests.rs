@@ -371,6 +371,40 @@ fn the_status_line_names_a_shared_lane_and_a_clash() {
     assert!(said.contains("HI-SPEED UP") && color == Color::RED, "{said}");
 }
 
+/// The editor names its lines, its groups and what it says of them in the language of the screens,
+/// and a line has the same name wherever the editor quotes it. The names of the keys are not words of
+/// a language and stay as the key config file writes them.
+#[test]
+fn the_editor_names_its_lines_and_says_its_notices_in_the_language_of_the_screens() {
+    use rbms_model::Language;
+
+    use crate::text::settings::InstalledLanguage;
+
+    for (language, lane, scratch, group, control) in [
+        (Language::English, "LANE 6", "SCRATCH 8", "REPLAY ANALYSIS", "HI-SPEED UP"),
+        (Language::Korean, "레인 6", "스크래치 8", "리플레이 분석", "HI-SPEED 올리기"),
+        (Language::Japanese, "レーン6", "スクラッチ8", "リプレイ分析", "HI-SPEEDを上げる"),
+    ] {
+        let _installed = InstalledLanguage::new(language);
+        let mut app = app(&format!("language-{}", language.code()));
+        let mode = app.shared.kc_edit_mode;
+        assert!(mode.is_scratch(7) && !mode.is_scratch(5), "the editor opens on a mode with its turntable in the eighth lane");
+        assert_eq!(Bindable::Lane(5).label(mode), lane, "{language:?}");
+        assert_eq!(Bindable::Lane(7).label(mode), scratch, "{language:?}");
+        assert_eq!(ShortcutGroup::Replay.title(), group, "{language:?}");
+        assert_eq!(Bindable::Control(ControlAction::HiSpeedUp).label(mode), control, "{language:?}");
+        assert!(
+            lines(mode).iter().any(|line| matches!(line, Line::Heading(title) if *title == group)),
+            "{language:?}: the editor does not head the group as it names it"
+        );
+
+        let mut state = on(&app, Bindable::Control(ControlAction::Start));
+        rebind(&mut app, &mut state, KeyCode::ArrowUp);
+        let (said, color) = state.status(&app.shared, &Bindings::read(&app.shared.keyconfig, mode));
+        assert!(said.contains(control) && color == Color::RED, "{language:?}: {said}");
+    }
+}
+
 /// A notice that warns or asks is written in the warning colour, and one that only says how things
 /// stand is not, so the colour that means a caution is not worn by a confirmation.
 #[test]

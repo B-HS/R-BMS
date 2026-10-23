@@ -371,7 +371,7 @@ impl TableStore {
             .map_err(|error| error.to_string())
             .and_then(|json| crate::write_atomic(&self.copy_path(location), &json).map_err(|error| error.to_string()));
         if let Err(reason) = &written {
-            crate::notify::notify(crate::notify::Level::Warn, format!("table copy not saved ({location}): {reason}"));
+            crate::notify::notify_text(crate::notify::Level::Warn, NoticeText::TableCopyNotSaved, &[&location, reason]);
         }
         written.is_ok()
     }
@@ -520,7 +520,7 @@ pub(crate) fn read_and_match(store: &TableStore, src: &TableSource, library: &Md
         }
         Err(e) => {
             let reason = failure_reason(&src.location, &e);
-            crate::notify::notify(crate::notify::Level::Warn, format!("table load failed ({}): {reason}", src.location));
+            crate::notify::notify_text(crate::notify::Level::Warn, NoticeText::TableLoadFailed, &[&src.location, &reason]);
             record_status(&src.location, TableStatus::Failed { reason });
             MatchedTable::unloaded(src)
         }
@@ -563,7 +563,7 @@ pub(crate) fn read_and_match_all(store: &TableStore, sources: &[TableSource], li
 /// The slot of a source whose loader stopped without answering, reported the way a failed load is.
 fn stopped_load(src: &TableSource, done: &AtomicUsize) -> MatchedTable {
     let reason = LOADER_STOPPED.to_string();
-    crate::notify::notify(crate::notify::Level::Warn, format!("table load failed ({}): {reason}", src.location));
+    crate::notify::notify_text(crate::notify::Level::Warn, NoticeText::TableLoadFailed, &[&src.location, &reason]);
     record_status(&src.location, TableStatus::Failed { reason });
     done.fetch_add(1, Ordering::Relaxed);
     MatchedTable::unloaded(src)
@@ -583,14 +583,14 @@ pub(crate) enum FetchWhy {
 }
 
 impl FetchWhy {
-    /// What a fetch that failed is called, ahead of the table's location and the reason, or `None`
-    /// for a fetch whose failure is not told to the player: the table is what it was, and the table
-    /// manager says beside the source that the reload failed.
-    fn failure(self) -> Option<&'static str> {
+    /// The sentence a fetch that failed is told in, which takes the table's location and the reason,
+    /// or `None` for a fetch whose failure is not told to the player: the table is what it was, and
+    /// the table manager says beside the source that the reload failed.
+    fn failure(self) -> Option<NoticeText> {
         match self {
-            FetchWhy::Reload => Some("table reload failed"),
-            FetchWhy::First => Some("table fetch failed"),
-            FetchWhy::Registered => Some("table load failed"),
+            FetchWhy::Reload => Some(NoticeText::TableReloadFailed),
+            FetchWhy::First => Some(NoticeText::TableFetchFailed),
+            FetchWhy::Registered => Some(NoticeText::TableLoadFailed),
             FetchWhy::Stale => None,
         }
     }
@@ -1028,7 +1028,7 @@ pub(crate) fn apply_finished_fetches(shared: &mut AppShared) -> bool {
             }
             FetchOutcome::Kept { reason } => {
                 if let Some(failure) = why.failure() {
-                    crate::notify::notify(crate::notify::Level::Warn, format!("{failure} ({}): {reason}", done.location));
+                    crate::notify::notify_text(crate::notify::Level::Warn, failure, &[&done.location, &reason]);
                 }
                 let kept = match table_status(&done.location) {
                     Some(TableStatus::Loaded { name, entries, levels, owned, origin, .. }) => {

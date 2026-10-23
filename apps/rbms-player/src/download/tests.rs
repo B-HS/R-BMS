@@ -550,3 +550,54 @@ fn a_table_that_arrives_while_the_downloads_are_scanned_is_not_put_back_as_it_wa
         said();
     });
 }
+
+/// What a job says of itself, and what it says when it ends, is written in the language of the screens
+/// when it is read, and the line a notice leaves on standard error is English whichever that is.
+#[test]
+fn the_line_of_a_job_is_written_in_the_language_it_is_read_in() {
+    let status = |phase| JobStatus { phase, received: 3 * 1024 * 1024, expected: Some(6 * 1024 * 1024), md5: String::new(), title: "Song".to_string() };
+    let lines = |language| {
+        [
+            Phase::Downloading,
+            Phase::Extracting,
+            Phase::Scanning,
+            Phase::Done { found: true, charts: 2 },
+            Phase::Done { found: false, charts: 2 },
+            Phase::Failed("timeout".to_string()),
+            Phase::Cancelled,
+        ]
+        .map(|phase| status(phase).line_in(language))
+    };
+    assert_eq!(
+        lines(Language::English),
+        [
+            "DOWNLOADING 3.0 MB / 6.0 MB",
+            "EXTRACTING",
+            "SCANNING",
+            "downloaded: Song (2 chart(s))",
+            "the archive had 2 chart(s) but not this one",
+            "download failed: timeout",
+            "download cancelled",
+        ]
+    );
+    assert_eq!(
+        lines(Language::Korean),
+        [
+            "다운로드 중 3.0 MB / 6.0 MB",
+            "압축 해제 중",
+            "스캔 중",
+            "다운로드했습니다: Song (차트 2개)",
+            "압축 파일에 차트 2개가 있었지만 이 차트는 없었습니다",
+            "다운로드에 실패했습니다: timeout",
+            "다운로드를 취소했습니다",
+        ]
+    );
+    crate::notify::exclusive(|| {
+        let ended = status(Phase::Cancelled);
+        crate::notify::notify_with(Level::Info, move |language| ended.line_in(language));
+        rbms_render::text::set_language(Language::Japanese);
+        let taken = said();
+        rbms_render::text::set_language(Language::English);
+        assert_eq!(taken, [(Level::Info, "ダウンロードをキャンセルしました".to_string())]);
+    });
+}

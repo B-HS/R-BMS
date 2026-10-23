@@ -28,12 +28,13 @@ use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_tex
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use crate::number_row::{COLOR_REFUSAL_NOTE, NumberEdit, RowPart, SliderLook, draw_edit, draw_refusal, draw_refusal_note, draw_slider, hot_rect, row_part};
+use crate::number_row::{NumberEdit, RowPart, SliderLook, draw_edit, draw_refusal, draw_refusal_note, draw_slider, hot_rect, row_part};
 pub(crate) use crate::number_row::{ONE_STEP, SHIFT_STEPS};
 use crate::skin_preview::region::with_region;
 use crate::skin_preview::{PreviewStatus, SkinPreview};
 use crate::stage::{Canvas, FrameCtx, KeyInput};
 use crate::text::menus::preview_menu::PreviewMenuText;
+use crate::text::settings::screen::NumberRowText;
 use crate::{AppShared, CW, Hot};
 
 /// The room kept between the screen's edges and everything on it.
@@ -621,7 +622,7 @@ fn draw_color_row(canvas: &mut Canvas<'_>, rect: Rect, label: &str, value: &str,
         draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, label_color, &fit_text(label, LABEL_SCALE, number_label_room()));
         match cell.edit {
             Some(edit) => draw_edit(canvas, number_edit_rect(rect), rect.y + VALUE_TEXT_Y, VALUE_SCALE, edit),
-            None => draw_refusal_note(canvas, right, rect.y + VALUE_TEXT_Y, VALUE_SCALE, COLOR_REFUSAL_NOTE),
+            None => draw_refusal_note(canvas, right, rect.y + VALUE_TEXT_Y, VALUE_SCALE, NumberRowText::NotAColor.get(language())),
         }
         return;
     }

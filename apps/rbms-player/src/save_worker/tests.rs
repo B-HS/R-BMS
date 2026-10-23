@@ -77,7 +77,9 @@ fn a_write_that_fails_comes_back_to_the_frame_thread() {
     let failures = worker.failures();
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].what, Saving::PendingRun { file: target });
-    assert!(failure_line(&failures[0]).starts_with("run not kept: "), "{}", failure_line(&failures[0]));
+    let said = failure_line(&failures[0], Language::English);
+    assert!(said.starts_with("run not kept: "), "{said}");
+    assert!(failure_line(&failures[0], Language::Korean).starts_with("플레이를 보관하지 못했습니다: "));
     let _ = std::fs::remove_dir_all(&folder);
 }
 

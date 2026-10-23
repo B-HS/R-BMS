@@ -20,6 +20,10 @@ rbms_model::translations! {
         GaugeRule => ("GAUGE RULE", "게이지 규칙", "ゲージルール"),
         FailedAt => ("FAILED AT", "실패 지점", "失敗箇所"),
         Trophy => ("TROPHY", "트로피", "トロフィー"),
+        /// The headings of the built-in course result, and the keys along its foot.
+        ResultCleared => ("COURSE CLEAR", "코스 클리어", "コースクリア"),
+        ResultFailed => ("COURSE FAILED", "코스 실패", "コース失敗"),
+        ResultBack => ("ENTER / ESC  BACK TO SELECT", "ENTER / ESC  선곡으로 돌아가기", "ENTER / ESC  選曲に戻る"),
     }
 }
 

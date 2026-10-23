@@ -55,6 +55,7 @@ use rbms_store::{REFERENCE_RECORD_RULE_VERSION, SCRATCH_AUTO_ASSIST};
 use crate::ir_outcome::{IrLineKind, truncate};
 use crate::ir_replay::{to_ir_replay, wire_carries_judge};
 use crate::notify::{notify_text, notify_with};
+use crate::text::menus::ir_outcome::RecordIrLineText;
 use crate::text::notices::{StatusText, installed, installed_with};
 use crate::*;
 
@@ -1573,25 +1574,24 @@ impl AppShared {
 /// now. A play the server holds under another account is not said to be on the server plainly: it
 /// is not in this account's records.
 pub(crate) fn ir_line_of(row: Option<&IrSyncRow>, signed_in: bool, account: Option<&str>) -> (String, IrLineKind) {
+    let said = |text: RecordIrLineText| text.get(language()).to_string();
     let Some(row) = row else {
         return match signed_in {
-            true => ("IR: NOT SENT YET".to_string(), IrLineKind::Info),
-            false => ("IR: NOT SENT (NOT SIGNED IN)".to_string(), IrLineKind::Info),
+            true => (said(RecordIrLineText::NotSentYet), IrLineKind::Info),
+            false => (said(RecordIrLineText::NotSentNotSignedIn), IrLineKind::Info),
         };
     };
     match row.state {
         SyncState::Accepted => match account {
             Some(account) if !row.login_id.is_empty() && row.login_id != account => {
-                (truncate(&format!("IR: ON SERVER (AS {})", row.login_id)), IrLineKind::Info)
+                (truncate(&RecordIrLineText::OnServerAs.fill(language(), &[&row.login_id])), IrLineKind::Info)
             }
-            _ => ("IR: ON SERVER".to_string(), IrLineKind::Good),
+            _ => (said(RecordIrLineText::OnServer), IrLineKind::Good),
         },
-        SyncState::Rejected => (truncate(&format!("IR: REJECTED {}", rejection_words(row))), IrLineKind::Bad),
-        SyncState::Retry => ("IR: NOT SENT YET (WILL RETRY)".to_string(), IrLineKind::Warn),
-        SyncState::Skipped if row.error_code.as_deref() == Some(SKIPPED_OLD_SCRATCH_AUTO_RULE) => {
-            ("IR: NOT SENT (OLD SCRATCH AUTO RULE)".to_string(), IrLineKind::Info)
-        }
-        SyncState::Skipped => ("IR: NOT SENT (CHART NOT IN LIBRARY)".to_string(), IrLineKind::Warn),
+        SyncState::Rejected => (truncate(&RecordIrLineText::Rejected.fill(language(), &[&rejection_words(row)])), IrLineKind::Bad),
+        SyncState::Retry => (said(RecordIrLineText::NotSentWillRetry), IrLineKind::Warn),
+        SyncState::Skipped if row.error_code.as_deref() == Some(SKIPPED_OLD_SCRATCH_AUTO_RULE) => (said(RecordIrLineText::NotSentOldRule), IrLineKind::Info),
+        SyncState::Skipped => (said(RecordIrLineText::NotSentChartNotInLibrary), IrLineKind::Warn),
     }
 }
 

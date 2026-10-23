@@ -561,9 +561,9 @@ impl AppShared {
                     self.save_settings();
                     println!("font: {} ({family})", path.display());
                 }
-                None => notify(Level::Warn, format!("font load failed (no usable face): {}", path.display())),
+                None => notify_text(Level::Warn, NoticeText::FontNotLoadedNoUsableFace, &[&path.display()]),
             },
-            Err(e) => notify(Level::Error, format!("font read failed ({}): {e}", path.display())),
+            Err(e) => notify_text(Level::Error, NoticeText::FontNotRead, &[&path.display(), &e]),
         }
     }
 

@@ -40,10 +40,12 @@ use std::path::Path;
 use rbms_judge::ClearType;
 use rbms_judge::windows::JudgeWindowSet;
 use rbms_model::Mode;
+use rbms_model::translations::Catalog;
 use rbms_play::{PlayRecord, PlaySession};
 use rbms_render::result::{ResultExtras, TargetView};
 use rbms_render::skin_render::frame::{GAUGE_TYPES, GaugeScale};
 use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, JUDGEMENTS, TIMING_JUDGE_AREAS};
+use rbms_render::text::language;
 use rbms_render::{BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, ReferenceImages, TimingHistogram};
 use rbms_skin::property::generated::{BUTTON_FAVORITTE_CHART, BUTTON_REPLAY, BUTTON_REPLAY2, BUTTON_REPLAY3, BUTTON_REPLAY4, RATE_RANKING_POSITION};
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerState, timer_id};
@@ -61,6 +63,7 @@ use crate::skin_screen::ResultDraw;
 use crate::stage::scene_life::{ScenePhase, SceneTimes, advance, begin_fadeout, takes_input};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::syssound::{SystemSound, result_sound};
+use crate::text::menus::ir_outcome::AssistNoteText;
 use crate::{
     AppShared, CW, Color, DecodedImage, IR_RESULT_LINE_H, IR_RESULT_SCALE, IR_RESULT_X, IR_RESULT_Y, IrStatus, Rect, Renderer, ResultView, SKIN_TYPE_RESULT,
     decode_bga_image, draw_text, draw_text_right, ir_line_color, is_custom_judge, render_result_with_palette, text_width, updates_score,
@@ -827,23 +830,32 @@ struct SceneStage {
 /// say. A widened run sets no best score: its EX, judgements,
 /// combo and bad-poor count are held against no later run (`ScoreData.update(newscore,
 /// updateScore)`), and a skin is told only that the score was not saved.
+///
+/// The notes are written in English here for the tests to compare with; the words in the language
+/// the screens are drawn in are [`AssistNoteText`].
+#[cfg(test)]
 const SCRATCH_AUTO_NOTE: &str = "SCRATCH AUTO: TURNTABLE NOT COUNTED, ASSIST LAMP";
+#[cfg(test)]
 const WIDENED_JUDGE_NOTE: &str = "WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE";
 
 /// What the screen says of a run played on a TOTAL of the player's own, which is eased as a widened
 /// judge is (the player's decision of 2026-10-15): kept and sent, an assist lamp, no best score.
+#[cfg(test)]
 const OWN_TOTAL_NOTE: &str = "OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE";
 
 /// Which of them an assisted run is told, or `None` for a run with no assist on. With more than one
 /// on it is the stronger assist, which is the one the lamp is demoted by (`BMSPlayer.java:866`).
 fn assist_note(custom_judge: bool, own_total: bool, scratch_auto: bool) -> Option<&'static str> {
-    if custom_judge {
-        return Some(WIDENED_JUDGE_NOTE);
-    }
-    if own_total {
-        return Some(OWN_TOTAL_NOTE);
-    }
-    scratch_auto.then_some(SCRATCH_AUTO_NOTE)
+    let note = if custom_judge {
+        AssistNoteText::WidenedJudge
+    } else if own_total {
+        AssistNoteText::OwnTotal
+    } else if scratch_auto {
+        AssistNoteText::ScratchAuto
+    } else {
+        return None;
+    };
+    Some(note.get(language()))
 }
 
 /// How the IR status lines are drawn over a skin: in the top right corner, right-aligned, on a dim

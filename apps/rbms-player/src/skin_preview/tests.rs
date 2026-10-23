@@ -299,6 +299,29 @@ fn every_status_but_a_drawn_frame_has_a_line_to_show() {
     assert_eq!(PreviewStatus::Drawn.detail(), None);
 }
 
+/// What the preview says in place of a frame is written in the language of the screens, in the
+/// words it has always had in English; what follows from the status, or why a document failed, is
+/// the loader's own and is not.
+#[test]
+fn what_the_preview_says_in_place_of_a_frame_is_written_in_the_language_of_the_screens() {
+    use rbms_model::Language;
+
+    use crate::text::settings::InstalledLanguage;
+
+    let absent = PreviewStatus::Absent(PreviewAbsence::NoDocument);
+    assert_eq!((absent.message(), absent.detail()), (Some("NO SKIN DOCUMENT FOR THIS SCREEN"), Some("THE BUILT-IN SCREEN DRAWS IT")));
+    assert_eq!(PreviewStatus::Loading.message(), Some("LOADING THE SKIN"));
+    assert_eq!(PreviewStatus::Failed("why".to_owned()).message(), Some("THE SKIN DID NOT LOAD"));
+    {
+        let _korean = InstalledLanguage::new(Language::Korean);
+        assert_eq!((absent.message(), absent.detail()), (Some("이 화면에 쓸 스킨 문서가 없습니다"), Some("내장 화면이 대신 그립니다")));
+        assert_eq!(PreviewStatus::Failed("why".to_owned()).message(), Some("스킨을 불러오지 못했습니다"));
+        assert_eq!(PreviewStatus::Failed("why".to_owned()).detail(), Some("why"), "the reason a document failed is the loader's own");
+    }
+    let _japanese = InstalledLanguage::new(Language::Japanese);
+    assert_eq!(PreviewStatus::Loading.message(), Some("スキンを読み込み中"));
+}
+
 #[test]
 fn a_released_preview_begins_again_when_it_is_next_brought_up_to_date() {
     let mut bench = Bench::new("released", None);

@@ -478,7 +478,7 @@ impl AppShared {
         let bytes = match std::fs::read(&self.chart_path) {
             Ok(b) => b,
             Err(e) => {
-                notify(Level::Error, format!("chart not found: {} ({e})", self.chart_path));
+                notify_text(Level::Error, NoticeText::ChartNotFound, &[&self.chart_path, &e]);
                 return None;
             }
         };
