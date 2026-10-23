@@ -1,1 +1,18 @@
-return {}
+return {
+    info_chart_data = { en = "CHART DATA", ko = "CHART DATA", ja = "CHART DATA" },
+    info_my_score = { en = "MY SCORE", ko = "MY SCORE", ja = "MY SCORE" },
+    info_score_targets = { en = "SCORE TARGETS", ko = "SCORE TARGETS", ja = "SCORE TARGETS" },
+    info_clear_rate = { en = "CLEAR RATE", ko = "CLEAR RATE", ja = "CLEAR RATE" },
+    info_my_records = { en = "MY RECORDS", ko = "MY RECORDS", ja = "MY RECORDS" },
+    info_ir_ranking = { en = "IR RANKING", ko = "IR RANKING", ja = "IR RANKING" },
+    info_notes_radar = { en = "NOTES RADAR", ko = "NOTES RADAR", ja = "NOTES RADAR" },
+    info_radar_notes = { en = "NOTES", ko = "NOTES", ja = "NOTES" },
+    info_radar_peak = { en = "PEAK", ko = "PEAK", ja = "PEAK" },
+    info_radar_scratch = { en = "SCRATCH", ko = "SCRATCH", ja = "SCRATCH" },
+    info_radar_soflan = { en = "SOF-LAN", ko = "SOF-LAN", ja = "SOF-LAN" },
+    info_radar_charge = { en = "CHARGE", ko = "CHARGE", ja = "CHARGE" },
+    info_radar_chord = { en = "CHORD", ko = "CHORD", ja = "CHORD" },
+    info_records_best = { en = "BEST", ko = "최고 기록", ja = "ベスト" },
+    info_records_ex_score = { en = "EX SCORE", ko = "EX SCORE", ja = "EX SCORE" },
+    info_records_miss = { en = "MISS", ko = "MISS", ja = "MISS" },
+}
