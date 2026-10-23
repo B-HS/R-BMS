@@ -1,6 +1,7 @@
 //! Headless companion to the player: inspect a chart, read the player's configuration, scan a song
 //! folder, query the local score book, dump a skin pack, write the note layout of a library's
-//! charts, or rebuild the course data the player carries. The config, scan, scores and skin-dump
+//! charts, rebuild the course data the player carries, or pack the song folders a difficulty table
+//! lists for a song mirror. The config, scan, scores and skin-dump
 //! subcommands drive `rbms-config`, `rbms-library`, `rbms-store` and `rbms-skin` without a window,
 //! which is how those crates get exercised outside the GUI.
 
@@ -8,6 +9,7 @@
 
 mod chart_pattern;
 mod course_snapshot;
+mod mirror_pack;
 mod skin_dump;
 
 use std::io::ErrorKind;
@@ -29,7 +31,9 @@ const USAGE: &str = "usage:\n  \
     rbms-cli chart-pattern <library folder> --out <folder>   write each chart's note layout as <md5>.json\n      \
     [--table <data.json>] [--mode beat-7k]   with a table, report which of its md5s the library has\n  \
     rbms-cli course-snapshot --zip <2018_course.zip> --normal-header <file> --insane-header <file> --titles <md5-title.json>\n      \
-    --retrieved-on <YYYY-MM-DD> --out <courses.json> [--check]   rebuild (or with --check, compare) the bundled GENOSIDE 2018 course data";
+    --retrieved-on <YYYY-MM-DD> --out <courses.json> [--check]   rebuild (or with --check, compare) the bundled GENOSIDE 2018 course data\n  \
+    rbms-cli mirror-pack <library folder> --out <folder> (--table <data.json>)... [--all] [--dry-run]\n      \
+    pack each song folder a table lists (or, with --all, every song folder) as a zip, with a manifest";
 
 /// Exit code for a usage error, matching the code the bare chart mode has always returned.
 const EXIT_USAGE: u8 = 2;
@@ -75,6 +79,10 @@ fn run(args: impl Iterator<Item = String>) -> ExitCode {
         },
         Some("course-snapshot") => match course_snapshot::parse_args(&args[1..]) {
             Ok(parsed) => course_snapshot::run(&parsed),
+            Err(e) => usage_error(&e),
+        },
+        Some("mirror-pack") => match mirror_pack::parse_args(&args[1..]) {
+            Ok(parsed) => mirror_pack::run(&parsed),
             Err(e) => usage_error(&e),
         },
         Some(chart) => chart_command(chart),
@@ -397,6 +405,17 @@ mod tests {
         assert!(USAGE.contains("rbms-cli course-snapshot"), "the usage line lists it: {USAGE}");
         assert_eq!(run(args(&["rbms-cli", "course-snapshot"]).into_iter()), ExitCode::from(EXIT_USAGE), "the inputs are required");
         assert_eq!(run(args(&["rbms-cli", "course-snapshot", "--nope"]).into_iter()), ExitCode::from(EXIT_USAGE), "an unknown option is a usage error");
+    }
+
+    #[test]
+    fn mirror_pack_is_a_subcommand_and_not_read_as_a_chart_path() {
+        assert!(USAGE.contains("rbms-cli mirror-pack"), "the usage line lists it: {USAGE}");
+        assert_eq!(run(args(&["rbms-cli", "mirror-pack"]).into_iter()), ExitCode::from(EXIT_USAGE), "the library folder is required");
+        assert_eq!(
+            run(args(&["rbms-cli", "mirror-pack", "/library", "--out", "/mirror"]).into_iter()),
+            ExitCode::from(EXIT_USAGE),
+            "a table or --all is required"
+        );
     }
 
     #[test]

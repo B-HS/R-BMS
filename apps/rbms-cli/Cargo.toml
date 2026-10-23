@@ -15,11 +15,13 @@ rbms-parser = { workspace = true }
 rbms-chart = { workspace = true }
 rbms-config = { workspace = true }
 rbms-course = { workspace = true }
+rbms-download = { workspace = true }
 rbms-library = { workspace = true }
 rbms-store = { workspace = true }
 rbms-skin = { workspace = true }
 rbms-table = { workspace = true }
 encoding_rs = { workspace = true }
+md-5 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
