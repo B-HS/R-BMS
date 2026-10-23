@@ -100,8 +100,8 @@ use guide::GUIDE_KEY;
 use images::{SongImages, Wanted};
 use keys::{KeyLayout, SelectKeys};
 use lent::FocusedRecords;
-pub(crate) use list::SelectFilter;
 use list::{ChartFacts, chart_under_cursor, missing_chart_meta};
+pub(crate) use list::{SelectFilter, missing_chart_title};
 use panel::PanelState;
 use preview::PreviewState;
 use scene::BarList;
@@ -515,6 +515,27 @@ impl SelectState {
             return Transition::Stay;
         };
         start_the_course(shared, &entry)
+    }
+
+    /// The library and the tables were replaced while the browser was up, by the scan of a chart
+    /// that was downloaded ([`crate::download::apply_finished`]): what was kept of a chart by its
+    /// place in the library is let go of, so the next frame reads it again for the chart now there,
+    /// and the course list is resolved against the new library.
+    fn library_replaced(&mut self, shared: &AppShared) {
+        self.focused_detail = None;
+        self.focused_detail_si = None;
+        self.focus_settle_si = None;
+        self.cover_image = None;
+        self.cover_si = None;
+        self.cached_scene = None;
+        self.cached_key = None;
+        self.loaded_backbmp = None;
+        self.focused_records = FocusedRecords::default();
+        self.selected_replay = None;
+        self.course_shown = None;
+        self.facts = ChartFacts::default();
+        self.facts_generation = self.facts_generation.wrapping_add(1);
+        self.refresh_courses(shared);
     }
 
     /// Read the course list again from the course folder beside the settings
@@ -1094,6 +1115,10 @@ impl StageHandler for SelectState {
     /// the skin's timers ([`SelectState::run_scene_timers`]), a browser waiting for its skin takes
     /// no input at all, and the built-in browser repeats a held turntable as it always has.
     ///
+    /// A chart downloaded from a table and scanned is taken in here and nowhere else
+    /// ([`crate::download::apply_finished`]), so a library is never replaced under a chart being
+    /// played.
+    ///
     /// The difficulty tables are fetched beside the browser and never ahead of it. The first frame
     /// after the library has been read is where the tables that have no copy yet start being
     /// fetched ([`crate::tablesrc::start_first_fetches`]), and every frame takes what any fetch has
@@ -1108,7 +1133,11 @@ impl StageHandler for SelectState {
         crate::tablesrc::start_first_fetches(ctx.shared);
         crate::tablesrc::apply_finished_fetches(ctx.shared);
         crate::user_folders::apply_finished_fetch(ctx.shared);
+        if crate::download::apply_finished(ctx.shared).is_some() {
+            self.library_replaced(ctx.shared);
+        }
         self.poll_download_folder(ctx.shared);
+        self.follow_the_download(ctx.shared);
         let skin = skin_status(ctx.shared);
         if ctx.shared.skin_text_is_focused() {
             self.confirm_search(ctx.shared);

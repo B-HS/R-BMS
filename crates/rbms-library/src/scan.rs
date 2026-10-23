@@ -97,12 +97,23 @@ pub struct ScanRequest {
     pub cancel: Arc<AtomicBool>,
     /// Filled in as the scan runs.
     pub progress: Arc<ScanProgress>,
+    /// Whether a completed scan records that the library has been read by this parser. Only a scan
+    /// of every folder the library is read from may: a scan of some of them leaves the others as
+    /// they were, a full rescan they still need among it.
+    pub stamps_parser_version: bool,
 }
 
 impl ScanRequest {
-    /// A request over `roots` with its own cancel flag and progress counters.
+    /// A request over every folder of the library, `roots`, with its own cancel flag and progress
+    /// counters.
     pub fn new(roots: Vec<String>, full: bool) -> ScanRequest {
-        ScanRequest { roots, full, cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(ScanProgress::default()) }
+        ScanRequest { roots, full, cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(ScanProgress::default()), stamps_parser_version: true }
+    }
+
+    /// A request over `roots`, some of the folders of the library: what has changed under them is
+    /// read and what is gone from them is dropped, and the parser version is left as it is.
+    pub fn partial(roots: Vec<String>) -> ScanRequest {
+        ScanRequest { stamps_parser_version: false, ..ScanRequest::new(roots, false) }
     }
 }
 
@@ -117,8 +128,9 @@ pub enum ScanOutcomeG {
 
 /// Walk `req.roots`, refresh what changed and drop what is gone.
 ///
-/// The parse generation is stamped only on a completed scan, so an interrupted upgrade rescan is
-/// resumed rather than treated as done.
+/// The parse generation is stamped only on a completed scan of the whole library
+/// ([`ScanRequest::stamps_parser_version`]), so an interrupted upgrade rescan is resumed rather than
+/// treated as done, and so is one that a scan of part of the library ran into.
 pub fn scan_into(db: &mut SongDb, req: &ScanRequest) -> Result<ScanOutcomeG, SongDbError> {
     let roots: Vec<String> = req.roots.iter().map(|root| normalize(Path::new(root))).collect();
     let found = enumerate(&req.roots, &req.progress, &req.cancel);
@@ -145,7 +157,9 @@ pub fn scan_into(db: &mut SongDb, req: &ScanRequest) -> Result<ScanOutcomeG, Son
 
     let removed = db.delete_missing(&alive, &roots)?;
     req.progress.removed.store(removed, Ordering::Relaxed);
-    db.set_parser_version(PARSER_VERSION)?;
+    if req.stamps_parser_version {
+        db.set_parser_version(PARSER_VERSION)?;
+    }
     Ok(ScanOutcomeG::Completed { upserted, removed })
 }
 

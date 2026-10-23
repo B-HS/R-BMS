@@ -441,9 +441,15 @@ impl LoadingState {
     ///
     /// The browser is left looking into the folders it was in, with the cursor on the bar it was on
     /// (`BarManager.updateBar` keeps the folder open), found again in the library as it is now.
+    ///
+    /// The library generation goes up, so a scan of a downloaded chart's folder that began before
+    /// this one is run again rather than taken in ([`crate::download::apply_finished`]), and the
+    /// download folder is taken as read.
     fn apply_scan(shared: &mut AppShared, out: ScanOutcome) -> Transition {
         let place = ListPlace::of(shared);
         shared.library = out.library;
+        shared.library_generation = shared.library_generation.wrapping_add(1);
+        shared.downloads.scanned_with(shared.config.library.download_folder_path());
         shared.set_tables(out.tables);
         shared.table_fetches.first_fetches_are_due();
         crate::user_folders::rematch(shared);

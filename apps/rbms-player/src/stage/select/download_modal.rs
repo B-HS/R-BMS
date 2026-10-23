@@ -9,7 +9,9 @@
 //!
 //! The row is one ordered list ([`DownloadModal::buttons`]), and the drawing, the keys and the mouse
 //! all go by its length and by which of its buttons are on. A button that is off is drawn dimmed
-//! and the cursor steps over it.
+//! and the cursor steps over it. While the chart is being got, getting it gives its place to
+//! cancelling it, and a line under the note says how far the job is ([`crate::download`]); while
+//! another chart is being got, getting this one is off.
 //!
 //! Opening the modal reads nothing from the disk or the network: the table's entry is in memory. A
 //! link is handed to the browser only once [`rbms_download::browsable_url`] has let it through
@@ -28,6 +30,7 @@ use super::list::missing_chart_title;
 use super::skinned::skin_status;
 use super::{BUILT_IN_KEY_LAYOUT, NOT_IN_THE_LIBRARY, SelectState};
 use crate::dialog::{DialogHandle, DialogState};
+use crate::download::{JobStatus, Phase, cancel_download, start_download};
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
 use crate::notify::{Level, notify};
 use crate::select_tree::{level_title, table_name};
@@ -49,8 +52,8 @@ const PICKING_THE_FOLDER: &str = "CHOOSE THE FOLDER THE CHART IS UNPACKED INTO";
 /// The keys the modal is driven by.
 const KEY_HINT: &str = "LEFT RIGHT CHOOSE   ENTER PRESS   ESC CLOSE";
 
-/// What getting a chart says until the job that fetches and unpacks it is part of the build.
-pub(super) const DOWNLOADS_ARE_TO_COME: &str = "getting a chart is not part of this build yet";
+/// What the modal says while a job is getting another chart.
+const ANOTHER_DOWNLOAD_IS_RUNNING: &str = "ANOTHER DOWNLOAD IS RUNNING";
 
 /// How dark the screen under the modal is made.
 const BACKDROP_ALPHA: u8 = 180;
@@ -102,6 +105,8 @@ pub(crate) enum ModalButton {
     OpenChartUrl,
     /// Close the modal.
     Close,
+    /// Stop getting the chart, in the place of [`ModalButton::GetChart`] while it is being got.
+    Cancel,
 }
 
 impl ModalButton {
@@ -112,7 +117,14 @@ impl ModalButton {
             ModalButton::OpenSongUrl => "OPEN SONG URL",
             ModalButton::OpenChartUrl => "OPEN CHART URL",
             ModalButton::Close => "CLOSE",
+            ModalButton::Cancel => "CANCEL",
         }
+    }
+
+    /// Whether the two buttons stand in one place of the row, which getting the chart and
+    /// cancelling it do: the cursor on the one is on the other once it has taken its place.
+    fn shares_place_with(self, other: ModalButton) -> bool {
+        matches!((self, other), (ModalButton::GetChart | ModalButton::Cancel, ModalButton::GetChart | ModalButton::Cancel)) || self == other
     }
 }
 
@@ -130,6 +142,8 @@ pub(crate) struct DownloadModal {
     pub(crate) focus: ModalButton,
     /// The picker of the download folder getting the chart opened, while it is up.
     folder_picker: Option<DialogHandle>,
+    /// How the download job stood when the browser last looked ([`crate::download::status`]).
+    job: Option<JobStatus>,
 }
 
 impl DownloadModal {
@@ -149,27 +163,52 @@ impl DownloadModal {
             entry,
             focus: ModalButton::Close,
             folder_picker: None,
+            job: crate::download::status(shared),
         };
         modal.focus = modal.buttons().into_iter().find(|(_, on)| *on).map_or(ModalButton::Close, |(button, _)| button);
         Some(modal)
     }
 
     /// The row of buttons in order, each with whether it is on. Getting the chart is on only for a
-    /// link to a zip archive, and opening a link only for one the browser may be handed.
+    /// link to a zip archive, while no job is getting a chart and the chart has not just been got;
+    /// while a job is getting this chart, cancelling it stands in its place, on until the archive is
+    /// unpacked. Opening a link is on only for one the browser may be handed.
     pub(crate) fn buttons(&self) -> Vec<(ModalButton, bool)> {
-        vec![
-            (ModalButton::GetChart, self.chart_link == LinkKind::DirectZip),
-            (ModalButton::OpenSongUrl, self.song_url.is_some()),
-            (ModalButton::OpenChartUrl, self.chart_url.is_some()),
-            (ModalButton::Close, true),
-        ]
+        let first = match self.own_job() {
+            Some(job) if job.is_running() => (ModalButton::Cancel, job.can_cancel()),
+            Some(JobStatus { phase: Phase::Done { found: true, .. }, .. }) => (ModalButton::GetChart, false),
+            _ => (ModalButton::GetChart, self.chart_link == LinkKind::DirectZip && !self.job.as_ref().is_some_and(JobStatus::is_running)),
+        };
+        vec![first, (ModalButton::OpenSongUrl, self.song_url.is_some()), (ModalButton::OpenChartUrl, self.chart_url.is_some()), (ModalButton::Close, true)]
+    }
+
+    /// The download job, when it is getting this chart or last got it.
+    fn own_job(&self) -> Option<&JobStatus> {
+        self.job.as_ref().filter(|job| job.md5.eq_ignore_ascii_case(self.entry.md5.trim()))
+    }
+
+    /// The line under the note: the folder picker being up, how far the job getting this chart is
+    /// or how it ended, or another chart being got.
+    fn status_line(&self) -> Option<String> {
+        if self.folder_picker.is_some() {
+            return Some(PICKING_THE_FOLDER.to_owned());
+        }
+        if let Some(job) = self.own_job() {
+            return Some(job.line());
+        }
+        self.job.as_ref().filter(|job| job.is_running()).map(|_| ANOTHER_DOWNLOAD_IS_RUNNING.to_owned())
+    }
+
+    /// The button the cursor is on as the row stands now, when it is on.
+    fn focused_button(&self) -> Option<ModalButton> {
+        self.buttons().into_iter().find(|(button, on)| *on && button.shares_place_with(self.focus)).map(|(button, _)| button)
     }
 
     /// Move the cursor to the next button that is on (`forward`) or the one before, round the ends.
     fn step_focus(&mut self, forward: bool) {
         let buttons = self.buttons();
         let count = buttons.len();
-        let at = buttons.iter().position(|(button, _)| *button == self.focus).unwrap_or_default();
+        let at = buttons.iter().position(|(button, _)| button.shares_place_with(self.focus)).unwrap_or_default();
         let next = (1..count).map(|step| if forward { (at + step) % count } else { (at + count - step) % count }).find(|index| buttons[*index].1);
         if let Some(index) = next {
             self.focus = buttons[index].0;
@@ -202,14 +241,6 @@ impl Default for DownloadHands {
             pick_folder: Box::new(|| panic!("a test reached for the system's folder picker")),
         }
     }
-}
-
-/// Start fetching the chart archive `entry` links to and unpacking it into the download folder, which
-/// has been chosen. Answers why it could not be started.
-///
-/// The job that does it is not part of the build yet, so nothing can be started.
-pub(crate) fn start_download(_shared: &mut AppShared, _entry: &TableEntry) -> Result<(), &'static str> {
-    Err(DOWNLOADS_ARE_TO_COME)
 }
 
 /// Start getting the chart, and say why when it cannot be.
@@ -252,16 +283,17 @@ pub(super) fn render_download_modal<R: Renderer>(r: &mut R, modal: &DownloadModa
     for (line, text) in NOTE_LINES.iter().enumerate() {
         draw_text(r, x, panel.y + NOTE_Y + NOTE_GAP * line as f32, NOTE_SCALE, th.text, &fit_text(text, NOTE_SCALE, room));
     }
-    if modal.folder_picker.is_some() {
-        draw_text(r, x, panel.y + STATUS_Y, STATUS_SCALE, th.accent, PICKING_THE_FOLDER);
+    if let Some(status) = modal.status_line() {
+        draw_text(r, x, panel.y + STATUS_Y, STATUS_SCALE, th.accent, &fit_text(&status, STATUS_SCALE, room));
     }
+    let focus = modal.focused_button();
     let buttons = modal.buttons();
     let count = buttons.len() as f32;
     let width = (room - BUTTON_GAP * (count - 1.0)) / count;
     let top = panel.y + panel.h - BUTTONS_FROM_FOOT;
     for (slot, (button, on)) in buttons.into_iter().enumerate() {
         let rect = Rect::new(x + (width + BUTTON_GAP) * slot as f32, top, width, BUTTON_H);
-        let focused = on && button == modal.focus;
+        let focused = focus == Some(button);
         r.fill_rect(rect, if focused { th.button_active } else { th.button });
         if focused {
             outline(r, rect, FOCUS_OUTLINE, th.focus);
@@ -355,12 +387,16 @@ impl SelectState {
     }
 
     fn press_focused_download_button(&mut self, shared: &mut AppShared) {
-        let Some(modal) = self.download_modal.as_ref() else {
-            return;
-        };
-        let focus = modal.focus;
-        if modal.buttons().contains(&(focus, true)) {
-            self.press_download_button(shared, focus);
+        if let Some(button) = self.download_modal.as_ref().and_then(DownloadModal::focused_button) {
+            self.press_download_button(shared, button);
+        }
+    }
+
+    /// Bring what the modal shows of the download job up to date, once a frame and after anything
+    /// the modal itself did to the job.
+    pub(super) fn follow_the_download(&mut self, shared: &AppShared) {
+        if let Some(modal) = self.download_modal.as_mut() {
+            modal.job = crate::download::status(shared);
         }
     }
 
@@ -388,7 +424,9 @@ impl SelectState {
                 }
             }
             ModalButton::Close => self.download_modal = None,
+            ModalButton::Cancel => cancel_download(shared),
         }
+        self.follow_the_download(shared);
     }
 
     /// Take the answer of the download folder picker the modal opened, once a frame: a folder picked
@@ -409,6 +447,7 @@ impl SelectState {
                 shared.config.library.download_folder = Some(folder.to_string_lossy().into_owned());
                 shared.save_settings();
                 begin_download(shared, &modal.entry);
+                modal.job = crate::download::status(shared);
             }
         }
     }

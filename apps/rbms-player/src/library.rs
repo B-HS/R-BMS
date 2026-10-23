@@ -11,11 +11,15 @@
 //! while the browser keeps reading. The scan thread hands back the finished library, but a caller
 //! that wants to show partial results can read [`stored_library`] through its own connection at any
 //! point while the scan runs.
+//!
+//! Every scan, of the whole library or of the folder a download was unpacked into, goes through
+//! [`scan_now`], which holds [`LIBRARY_WRITE`] while it runs: two scans never write the song
+//! database at once, which would leave one of them failing on a locked database.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use rbms_library::scan::{ScanCounts, ScanOutcomeG, ScanProgress, ScanRequest, normalize, scan_into};
 use rbms_library::songdb::{DetailRow, SongDb, SongDbError, SongRow, mode_from_id};
@@ -26,6 +30,10 @@ use crate::notify::{Level, notify};
 
 /// Name of the song database inside the config directory, next to the settings and the scores.
 pub(crate) const SONGDB_FILE: &str = "songdb.sqlite";
+
+/// Held by the scan that is writing the song database, so the next waits for it to finish. It is
+/// only ever taken on a worker thread: the frame thread never waits for a scan.
+pub(crate) static LIBRARY_WRITE: Mutex<()> = Mutex::new(());
 
 /// The mode a stored row is read as when its id belongs to no mode this build knows, which only
 /// happens to a database written by a build with more modes than this one.
@@ -214,7 +222,10 @@ pub(crate) fn spawn_scan(db_path: PathBuf, roots: Vec<String>, full: bool) -> Li
 /// This is what [`spawn_scan`] does inside the thread it starts. A caller that already owns a
 /// worker thread and a cancel flag of its own — the loading screen does — drives the scan with this
 /// and keeps its own plumbing, passing those into the [`ScanRequest`].
+///
+/// It waits for any other scan to finish first ([`LIBRARY_WRITE`]).
 pub(crate) fn scan_now(db_path: &Path, request: &ScanRequest) -> ScanReport {
+    let _writing = LIBRARY_WRITE.lock().unwrap_or_else(PoisonError::into_inner);
     let mut db = match open_migrated(db_path) {
         Ok(db) => db,
         Err(e) => {

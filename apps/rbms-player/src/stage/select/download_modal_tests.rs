@@ -3,8 +3,9 @@
 //! archive and opening a link only for one the browser may be handed, and while it is up it takes
 //! every key, controller key and press before the list or the skin under it does.
 //!
-//! The browser and the folder picker it reaches for are the tests' own ([`Reached`]): nothing here
-//! opens a program of the machine's or a native panel, and nothing asks the network.
+//! The browser and the folder picker it reaches for are the tests' own ([`Reached`]), and so is the
+//! fetch a download is started with: nothing here opens a program of the machine's or a native
+//! panel, and nothing asks the network.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -17,11 +18,12 @@ use rbms_skin::property::generated::{BUTTON_AUTOPLAY, BUTTON_PLAY, BUTTON_PRACTI
 use rbms_table::{DifficultyTable, Md5Index, TableEntry};
 use winit::keyboard::KeyCode;
 
-use super::download_modal::{DOWNLOADS_ARE_TO_COME, DownloadHands, ModalButton};
+use super::download_modal::{DownloadHands, ModalButton};
 use super::keys::SelectKey;
 use super::skinned_tests::{Browser, KEY_FIVE, KEY_ONE, KEY_THREE, SHORT_STEP, SLOT_BELOW};
 use super::tests::entry;
 use super::*;
+use crate::download::Phase;
 use crate::keyconfig::key_index_of;
 use crate::pointer::PointerInput;
 use crate::tablesrc::MatchedTable;
@@ -46,8 +48,12 @@ const PAGE_MD5: &str = "miss-page";
 const PAGE_CHART_URL: &str = "https://charts.test/difference.html";
 const REFUSED_MD5: &str = "miss-refused";
 
-/// The folder a test picks for the downloads.
-const PICKED_FOLDER: &str = "/home/player/downloads";
+/// The folder a test picks for the downloads: a temporary one of its own, emptied first.
+fn picked_folder(tag: &str) -> PathBuf {
+    let folder = std::env::temp_dir().join(format!("rbms-download-modal-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    folder
+}
 
 /// One entry of the table.
 fn chart(md5: &str, title: &str, artist: &str, url: &str, url_diff: &str) -> TableEntry {
@@ -236,6 +242,9 @@ fn getting_a_chart_asks_for_the_download_folder_first() {
     crate::notify::exclusive(|| {
         let mut browser = built_in_on("download-folder-first", ZIP_MD5);
         let reached = watch(&mut browser);
+        let (fetch, gate) = crate::download::tests::held(ZIP_CHART_URL, crate::download::tests::stored_zip(&[]));
+        crate::download::tests::use_fetch(&mut browser.app.shared, fetch);
+        let picked = picked_folder("folder-first");
         browser.app.shared.config.library.download_folder = None;
         browser.key(KeyCode::Enter);
         browser.key(KeyCode::Enter);
@@ -254,17 +263,29 @@ fn getting_a_chart_asks_for_the_download_folder_first() {
 
         browser.key(KeyCode::Enter);
         let picker = reached.borrow_mut().pickers.remove(0);
-        picker.send(Some(PathBuf::from(PICKED_FOLDER))).expect("the modal still holds the picker");
+        picker.send(Some(picked.clone())).expect("the modal still holds the picker");
         browser.frame();
-        assert_eq!(browser.app.shared.config.library.download_folder.as_deref(), Some(PICKED_FOLDER), "the folder picked is the download folder");
+        assert_eq!(
+            browser.app.shared.config.library.download_folder.as_deref(),
+            Some(picked.to_string_lossy().as_ref()),
+            "the folder picked is the download folder"
+        );
         crate::notify::drain(&mut said);
-        assert_eq!(said, [(crate::notify::Level::Warn, DOWNLOADS_ARE_TO_COME.to_owned())], "the download was not started into the folder picked");
+        assert!(said.is_empty(), "starting the download said {said:?}");
+        let job = crate::download::status(&browser.app.shared).expect("the download was not started into the folder picked");
+        assert_eq!((job.md5.as_str(), job.phase), (ZIP_MD5, Phase::Downloading));
+        let modal = browser.state.download_modal.as_ref().expect("the modal is open");
+        assert_eq!(modal.buttons()[0], (ModalButton::Cancel, true), "getting the chart did not give its place to cancelling it");
 
         browser.key(KeyCode::Enter);
         assert!(reached.borrow().pickers.is_empty(), "a player with a download folder is asked for one again");
-        said.clear();
+        drop(gate);
+        crate::download::tests::wait_for_the_job(&mut browser.app.shared);
+        browser.frame();
         crate::notify::drain(&mut said);
-        assert_eq!(said, [(crate::notify::Level::Warn, DOWNLOADS_ARE_TO_COME.to_owned())]);
+        assert_eq!(said, [(crate::notify::Level::Info, "download cancelled".to_owned())], "the cursor on getting the chart did not cancel it");
+        let modal = browser.state.download_modal.as_ref().expect("the modal is open");
+        assert_eq!(modal.buttons()[0], (ModalButton::GetChart, true), "the chart cannot be got again once the download was cancelled");
         assert!(reached.borrow().opened.is_empty(), "getting the chart opened the browser");
     });
 }

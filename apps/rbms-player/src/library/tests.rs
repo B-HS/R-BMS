@@ -224,6 +224,33 @@ fn a_scan_cancelled_before_it_starts_reports_as_cancelled_and_stores_nothing() {
 }
 
 #[test]
+fn two_scans_never_write_the_song_database_at_once() {
+    let fixture = Fixture::new("one-writer");
+    fixture.write("song.bms", "#TITLE Waits its turn\n#BPM 120\n#00111:0101\n");
+    let db_path = fixture.root.join(SONGDB_FILE);
+    let request = ScanRequest::partial(vec![fixture.root.to_string_lossy().into_owned()]);
+    let progress = Arc::clone(&request.progress);
+    let order = Arc::new(Mutex::new(Vec::new()));
+
+    let writing = LIBRARY_WRITE.lock().unwrap_or_else(PoisonError::into_inner);
+    let scanner = {
+        let order = Arc::clone(&order);
+        std::thread::spawn(move || {
+            let report = scan_now(&db_path, &request);
+            order.lock().unwrap_or_else(PoisonError::into_inner).push("scanned");
+            report
+        })
+    };
+    assert_eq!(progress.counts().found, 0, "the second scan walked its folder while the first held the database");
+    order.lock().unwrap_or_else(PoisonError::into_inner).push("released");
+    drop(writing);
+
+    let report = scanner.join().expect("the scan thread ends");
+    assert_eq!(*order.lock().unwrap_or_else(PoisonError::into_inner), ["released", "scanned"], "the second scan did not wait for the first");
+    assert_eq!((report.upserted, report.failure), (1, None), "the scan that waited did its work");
+}
+
+#[test]
 fn the_song_database_is_named_next_to_the_other_config_files() {
     assert_eq!(SONGDB_FILE, "songdb.sqlite");
 }

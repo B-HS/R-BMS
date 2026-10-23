@@ -258,6 +258,39 @@ fn a_completed_scan_stamps_the_parse_generation_and_a_cancelled_one_does_not() {
 }
 
 #[test]
+fn a_partial_scan_leaves_the_parser_version_alone() {
+    let fixture = Fixture::new("partial-generation");
+    fixture.write("downloads/song.bms", &chart("song"));
+    let mut db = db();
+    assert!(db.needs_full_rescan().expect("read the generation"));
+
+    let partial = ScanRequest::partial(vec![fixture.root.join("downloads").to_string_lossy().into_owned()]);
+    assert_eq!(scan(&mut db, &partial), ScanOutcomeG::Completed { upserted: 1, removed: 0 });
+    assert!(db.needs_full_rescan().expect("read the generation"), "a scan of one folder took the rescan of the others as done");
+
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+    assert!(!db.needs_full_rescan().expect("read the generation"), "a scan of the whole library still stamps the generation");
+}
+
+#[test]
+fn a_partial_scan_removes_only_under_its_folder() {
+    let fixture = Fixture::new("partial-removal");
+    let downloaded = fixture.write("downloads/gone.bms", &chart("downloaded"));
+    let elsewhere = fixture.write("songs/gone.bms", &chart("elsewhere"));
+    fixture.write("downloads/kept.bms", &chart("kept"));
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+    std::fs::remove_file(&downloaded).expect("remove the downloaded chart");
+    std::fs::remove_file(&elsewhere).expect("remove the other chart");
+
+    let partial = ScanRequest::partial(vec![fixture.root.join("downloads").to_string_lossy().into_owned()]);
+    assert_eq!(scan(&mut db, &partial), ScanOutcomeG::Completed { upserted: 0, removed: 1 });
+    let mut titles: Vec<String> = db.all_songs().expect("read the rows").into_iter().map(|row| row.title).collect();
+    titles.sort();
+    assert_eq!(titles, ["elsewhere", "kept"], "a chart gone from outside the folder scanned was dropped, or one gone from inside it kept");
+}
+
+#[test]
 fn charts_in_nested_folders_are_found_and_carry_their_own_folder() {
     let fixture = Fixture::new("nested");
     fixture.write("pack/deep/song.bms", &chart("deep song"));

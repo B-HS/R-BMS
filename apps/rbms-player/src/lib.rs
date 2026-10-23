@@ -61,6 +61,7 @@ mod command_line;
 mod course_ir;
 mod course_ui;
 mod dialog;
+mod download;
 mod favorites;
 mod format;
 mod gamepad;
@@ -740,6 +741,12 @@ struct AppShared {
     /// The difficulty tables being fetched beside the frame loop, which whichever screen is up
     /// takes as they land. A fetch outlives the screen that started it, so it is kept here.
     table_fetches: tablesrc::TableFetches,
+    /// The chart being downloaded from a table and the scan of the folder it was unpacked into,
+    /// which the browser takes in. A download outlives the screen that started it, so it is kept here.
+    downloads: download::Downloads,
+    /// How many times the library has been read again since the run began, by a full scan or by a
+    /// scan of part of it: a scan that began under another count read a database changed since.
+    library_generation: u64,
     /// The signed-in player's own folders of charts and the fetch of them, which like a table's
     /// outlives the screen that started it.
     user_folders: user_folders::UserFolders,
@@ -1068,6 +1075,7 @@ impl App {
             tablesrc::read_and_match_all(&store, &config.library.tables, &library, &std::sync::atomic::AtomicUsize::new(0))
         };
         let (table_names, table_levels, table_extras) = tablesrc::split_matched(matched);
+        let downloads = download::Downloads::new(config.library.download_folder_path());
 
         let session = AccountSession::restored(config.network.ir_token.clone(), config.network.ir_login_id.clone());
         let startup_whoami = session.is_logged_in();
@@ -1108,6 +1116,8 @@ impl App {
                 table_levels,
                 table_extras,
                 table_fetches,
+                downloads,
+                library_generation: 0,
                 user_folders: user_folders::UserFolders::default(),
                 select_path: Vec::new(),
                 select_items: Vec::new(),
