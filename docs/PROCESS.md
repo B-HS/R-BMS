@@ -36,7 +36,7 @@
 - [ ] F7. 곡 미러 준비 — 17 R2 업로드 도구·설계와 조사 기록(실행하지 않음, 마지막 보고)
 - [ ] F8. 통합 리뷰와 수리
 
-  진행 기록: 웨이브 1(wf_53d3eb78-f46) F2 U-A·U-B·U-C, F5 C1, F3 D1, F6 W1 → `9e39262`(커밋 사고: 마이그레이션 전용 커밋에 웨이브 전체가 섞임, [feedback](feedback/2026-10-23-stage-check-before-commit.md)), `db0aa7c`. 운영 0012 적용(사용자 `!` 실행, run 39909099575, 7/7). 웨이브 2(wf_8fbc1c6e-18e) F5 C2 `9f8dfbc`, C5 `f174f2b`, F3 U1 `fc23232`, F6 W2 `db534d1`(게이트 Rust 6,465·웹 1,512 통과, 0 실패). F6 W5 는 W6 과 함께 B2 로 보류(패치 보관). 남은 일: DP 22코스 곡 제목 88개 비어 있음(bms-ir 코스 쪽에서 채움).
+  진행 기록: 웨이브 1(wf_53d3eb78-f46) F2 U-A·U-B·U-C, F5 C1, F3 D1, F6 W1 → `9e39262`(커밋 사고: 마이그레이션 전용 커밋에 웨이브 전체가 섞임, [feedback](feedback/2026-10-23-stage-check-before-commit.md)), `db0aa7c`. 운영 0012 적용(사용자 `!` 실행, run 39909099575, 7/7). 웨이브 2(wf_8fbc1c6e-18e) F5 C2 `9f8dfbc`, C5 `f174f2b`, F3 U1 `fc23232`, F6 W2 `db534d1`(게이트 Rust 6,465·웹 1,512 통과, 0 실패). F6 W5 는 W6 과 함께 B2 로 보류(패치 보관). 웨이브 3(wf_088ab9d0-3ca, 세션 한도로 5단위가 끊겨 wf_a67f8781-768 이 같은 worktree 에서 이어받음) F3 U2 `2787264`, DP 제목 88개 `ea5829d`, U6 `6998d95`, U3 `519d7d6`, F5 C3 `c4fcdfa`, F7 U1 `fbae422`, F6 W3 `c79f53f`(게이트 Rust 6,550·웹 1,590 통과, 0 실패). Windows 해제 수리 `a6dc73c`(ci 3 OS 통과). 사이에 사용자 요청으로 `架空ユリカゴ　 [SABOTHER]` 웹 삭제(`a6e7ffe`, 운영 run 39927201095, [ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)). 웨이브 4(wf_9f61ed7d-64e) 진행 중.
 - [ ] G. ADR·문서, 전체 게이트, 커밋·푸시, CI, 운영 반영(사용자 승인), 실기 점검표(QA) 추가
 - [ ] R. v0.1.7 실기 결과(QA 3.20) 수리 — 결과를 받으면
 
