@@ -112,7 +112,7 @@ mod window_mode;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
 pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, install_default_pack, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
-use course_ir::{CourseAssist, UNRELEASED_COURSE_REASON, build_course_submission};
+use course_ir::{CourseAssist, CourseFacts, UNRELEASED_COURSE_REASON, build_course_submission};
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
 use format::{
@@ -281,6 +281,7 @@ fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
     overrides.apply_to(&mut shared.config.play);
     shared.course_stage_reasons.clear();
     shared.course_assist = CourseAssist::NONE;
+    shared.course_facts = CourseFacts::starting(shared.config.judge.course_gauge);
     let set = shared.config.judge.course_gauge.gauge_set(&Mode::BEAT_7K);
     let start = set.course_gauge_for(shared.config.play.gauge);
     shared.course_overrides = Some(overrides);
@@ -321,6 +322,7 @@ fn end_course(shared: &mut AppShared) -> Transition {
     shared.course_overrides = None;
     shared.course_stage_reasons.clear();
     shared.course_assist = CourseAssist::NONE;
+    shared.course_facts = CourseFacts::default();
     Transition::Back
 }
 
@@ -758,6 +760,10 @@ struct AppShared {
     /// The assists the finished stages were played with, taken over the course so far: what the
     /// course submission states, and whether the course may set a best.
     course_assist: CourseAssist,
+    /// The COURSE GAUGE rule the course is played under, as the settings held it when the course
+    /// started, and how each finished stage was played: what the course submission and the course
+    /// result state of it.
+    course_facts: CourseFacts,
     /// What the run that just ended left for a result screen a skin draws: every gauge's history,
     /// the note timings and the per-second judge tables, to the reference's definitions. One record
     /// for a single chart; one per finished stage, in order, while a course is being played. Kept
@@ -1102,6 +1108,7 @@ impl App {
                 course_overrides: None,
                 course_stage_reasons: Vec::new(),
                 course_assist: CourseAssist::NONE,
+                course_facts: CourseFacts::default(),
                 run_records: Vec::new(),
                 retry_seed: None,
                 course_settings_backup: None,

@@ -113,7 +113,7 @@ impl CourseResultState {
             scene.gauge_type = skin.finished_gauge();
         }
         CourseResultState {
-            rows: crate::course_ui::result_rows(run, shared.config.judge.course_gauge),
+            rows: crate::course_ui::result_rows(run, shared.course_facts.gauge_rule),
             cleared: run.failed_at.is_none(),
             course_name: run.course.name.clone(),
             announced: false,

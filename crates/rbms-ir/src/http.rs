@@ -334,6 +334,9 @@ mod tests {
             trophy: Some("bronzemedal".into()),
             scratch_auto: false,
             assist: vec![],
+            gauge: None,
+            course_gauge: None,
+            stages: Vec::new(),
             extra: Default::default(),
         }
     }

@@ -599,14 +599,15 @@ impl AppShared {
     /// course's own gauge constraint, and on the long-note flavour the course's LN, CN or HCN
     /// constraint forces (`MusicSelector.java:501-503`), which has to be settled here, before the
     /// run's long-note type and the key its record is kept under are read from it. A replay of a
-    /// stage is judged as it was recorded.
+    /// stage is judged as it was recorded. The COURSE GAUGE read is the one the course started under
+    /// ([`crate::course_ir::CourseFacts`]), so every stage is judged by the rule its submission names.
     pub(crate) fn stage_judge_setup(&self, mode: &rbms_model::Mode) -> (rbms_play::JudgeSetup, Option<crate::course_ui::CourseStageGauge>) {
         let mut judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
         let course_stage = self
             .course_run
             .as_ref()
             .filter(|_| self.replay.is_none())
-            .map(|run| crate::course_ui::course_stage_gauge(self.config.judge.course_gauge, self.config.play.gauge, mode, run));
+            .map(|run| crate::course_ui::course_stage_gauge(self.course_facts.gauge_rule, self.config.play.gauge, mode, run));
         if let Some(stage) = &course_stage {
             judge_setup.gauge_set = Some(stage.set);
             if let Some(overrides) = self.course_overrides.as_ref() {

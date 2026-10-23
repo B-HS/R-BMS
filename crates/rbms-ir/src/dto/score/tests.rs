@@ -89,6 +89,9 @@ fn course_submission_round_trips_preserving_chart_order_and_count() {
         trophy: Some("goldmedal".into()),
         scratch_auto: false,
         assist: vec![],
+        gauge: None,
+        course_gauge: None,
+        stages: Vec::new(),
         extra: HashMap::new(),
     };
     let back: CourseSubmission = serde_json::from_str(&serde_json::to_string(&cs).unwrap()).unwrap();
@@ -120,6 +123,9 @@ fn course_submission_empty_charts_round_trips() {
         trophy: None,
         scratch_auto: false,
         assist: vec![],
+        gauge: None,
+        course_gauge: None,
+        stages: Vec::new(),
         extra: HashMap::new(),
     };
     let back: CourseSubmission = serde_json::from_str(&serde_json::to_string(&cs).unwrap()).unwrap();
@@ -135,6 +141,42 @@ fn course_submission_decodes_without_extra() {
     });
     let cs: CourseSubmission = serde_json::from_value(j).unwrap();
     assert!(cs.extra.is_empty());
+}
+
+#[test]
+fn course_gauge_types_have_their_wire_names() {
+    for (rule, wire) in [(CourseGaugeType::Lr2, "\"LR2\""), (CourseGaugeType::Beatoraja, "\"BEATORAJA\""), (CourseGaugeType::Iidx, "\"IIDX\"")] {
+        assert_eq!(serde_json::to_string(&rule).unwrap(), wire, "{rule:?}");
+        assert_eq!(serde_json::from_str::<CourseGaugeType>(wire).unwrap(), rule, "{wire} reads back");
+    }
+}
+
+#[test]
+fn a_course_stage_play_round_trips() {
+    let wire = r#"{"gauge":"ExClass","random":"Mirror","lntype":0}"#;
+    let stage: CourseStagePlay = serde_json::from_str(wire).unwrap();
+    assert_eq!(stage, CourseStagePlay { gauge: GaugeType::ExClass, random: RandomOption::Mirror, lntype: 0 });
+    assert_eq!(serde_json::to_string(&stage).unwrap(), wire);
+}
+
+/// A course body an older build kept, which states neither its gauge, its gauge rule nor its
+/// stages, is read back and sent again as it was kept.
+#[test]
+fn a_course_body_without_the_gauge_fields_reads_back_and_writes_them_out_again_absent() {
+    let kept = json!({
+        "api_version": 1, "course_hash": "h", "player": {"id": "p"},
+        "clear": "Normal", "ex_score": 1, "judge": JudgeBreakdown::default(),
+        "max_combo": 1, "gauge_value": 50.0, "charts": [], "played_at": 0,
+        "lntype": 0, "max_ex_score": 2, "minbp": 0, "trophy": null, "extra": {}
+    });
+    let cs = CourseSubmission::from_json(&kept.to_string()).expect("the kept body reads back");
+    assert_eq!(cs.gauge, None);
+    assert_eq!(cs.course_gauge, None);
+    assert!(cs.stages.is_empty());
+    let sent: serde_json::Value = serde_json::from_str(&cs.to_json().expect("serialises")).unwrap();
+    for key in ["gauge", "course_gauge", "stages"] {
+        assert!(sent.get(key).is_none(), "{key} is left out: {sent}");
+    }
 }
 
 #[test]
@@ -358,6 +400,9 @@ fn course_submission_carries_the_full_server_shape() {
         trophy: Some("bronzemedal".into()),
         scratch_auto: false,
         assist: vec![],
+        gauge: None,
+        course_gauge: None,
+        stages: Vec::new(),
         extra: HashMap::new(),
     };
     let json = serde_json::to_string(&cs).unwrap();
@@ -402,6 +447,9 @@ fn course_for_assist(scratch_auto: bool, assist: Vec<String>) -> CourseSubmissio
         trophy: None,
         scratch_auto,
         assist,
+        gauge: None,
+        course_gauge: None,
+        stages: Vec::new(),
         extra: HashMap::new(),
     }
 }
@@ -537,6 +585,9 @@ fn clamping_a_course_submission_applies_the_same_two_bounds() {
         trophy: None,
         scratch_auto: false,
         assist: vec![],
+        gauge: None,
+        course_gauge: None,
+        stages: Vec::new(),
         extra: HashMap::new(),
     };
     cs.clamp_to_server_bounds();

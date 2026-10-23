@@ -19,7 +19,6 @@ use std::path::PathBuf;
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
-use rbms_judge::gauge::GaugeIndex;
 
 use self::wire::{CaptureServer, Json, MAX_SAFE_INTEGER};
 use super::*;
@@ -232,10 +231,15 @@ fn signed_in_to(server: &CaptureServer, tag: &str) -> AppShared {
 
 /// A run of `model` as `AppShared::load` sets one up on the app's settings: laid out by the
 /// arrangement it has with [`LAYOUT_SEED`], on its gauge and judge, with SCRATCH AUTO taking the
-/// turntable when it is on, and starting on `course` (gauge, combo) when it is a course's stage.
-fn loaded(shared: &AppShared, mut model: rbms_model::Model, course: Option<(f32, u32)>) -> (PlaySession, rbms_model::Model) {
+/// turntable when it is on, and, when it is a course's stage, judged and started as the app judges
+/// and starts one ([`AppShared::stage_judge_setup`]): on the table the COURSE GAUGE setting picks, on
+/// the course gauge the GAUGE setting maps to, carrying every gauge and the combo the stage before
+/// left.
+fn loaded(shared: &AppShared, mut model: rbms_model::Model) -> (PlaySession, rbms_model::Model) {
     rbms_chart::shuffle::apply(&mut model, shared.config.play.random, LAYOUT_SEED);
     let mode = model.mode;
+    let (judge_setup, course_stage) = shared.stage_judge_setup(&mode);
+    let course_combo = course_stage.and(shared.course_run.as_ref()).map(|run| run.totals.combo_carry);
     let auto_lanes = if shared.config.play.scratch_auto { (0..mode.key).map(|lane| mode.is_scratch(lane)).collect() } else { Vec::new() };
     let options = SessionOptions {
         autoplay: shared.run_plays_itself(),
@@ -244,19 +248,20 @@ fn loaded(shared: &AppShared, mut model: rbms_model::Model, course: Option<(f32,
         auto_lanes,
         seed: LAYOUT_SEED,
         auto_calibration: shared.config.judge.auto_offset,
-        initial_gauge: course.map(|(gauge, _)| (GaugeIndex::Class, gauge)),
-        initial_combo: course.map_or(0, |(_, combo)| combo),
+        initial_gauge: course_stage.map(|stage| (stage.start, stage.value)),
+        initial_combo: course_combo.unwrap_or(0),
+        carried_gauges: course_stage.and_then(|stage| stage.carried),
         ..SessionOptions::default()
     };
     let mut session = PlaySession::new(model.clone(), options);
-    session.set_judge_setup(crate::judge_setup::run_judge_setup(&shared.config, None));
+    session.set_judge_setup(judge_setup);
     (session, model)
 }
 
 /// [`loaded`], played by hand to its end: every key note pressed as far from its time as
 /// `offsets_us` says, the turntable on its time unless SCRATCH AUTO plays it.
 fn played(shared: &AppShared, model: rbms_model::Model, offsets_us: &[Option<i64>]) -> PlaySession {
-    let (session, laid_out) = loaded(shared, model, None);
+    let (session, laid_out) = loaded(shared, model);
     replay_inputs(session, &inputs_by_hand(&laid_out, offsets_us, shared.config.play.scratch_auto))
 }
 
@@ -620,7 +625,7 @@ fn a_double_play_run() {
 fn a_run_with_more_empty_poor_than_poor() {
     let server = CaptureServer::spawn();
     let mut shared = signed_in_to(&server, "empty-poor");
-    let (session, laid_out) = loaded(&shared, contract_model(), None);
+    let (session, laid_out) = loaded(&shared, contract_model());
     let mut inputs = inputs_by_hand(&laid_out, &ONE_IN_EIGHT_MISSED_US, false);
     inputs.extend(early_presses_before_every_key_note(&laid_out));
     inputs.sort_unstable();
@@ -677,7 +682,7 @@ fn a_long_note_run(tag: &str, ln_mode: rbms_judge::ln::LnMode, end_kind: u8, fil
     let setup = crate::judge_setup::run_judge_setup(&shared.config, None);
     rbms_chart::resolve_long_note_flavour(&mut model, setup.ln_mode.resolve());
     let long_notes = LongNotes { lntype: crate::judge_setup::run_lntype(0, setup.ln_mode), key: rbms_config::ln_mode_token(setup.ln_mode) };
-    let (session, laid_out) = loaded(&shared, model, None);
+    let (session, laid_out) = loaded(&shared, model);
     let session = replay_inputs(session, &long_note_inputs(&laid_out));
     let summary = session.summary();
     assert!(summary.total_judged == summary.total_notes && summary.counts[4] == 0, "every note is taken: {summary:?}");
@@ -729,7 +734,7 @@ fn a_popn_run_and_its_trace() {
 fn a_max_run_with_empty_poor() {
     let server = CaptureServer::spawn();
     let mut shared = signed_in_to(&server, "max-empty-poor");
-    let (session, laid_out) = loaded(&shared, contract_model(), None);
+    let (session, laid_out) = loaded(&shared, contract_model());
     let mut inputs = inputs_by_hand(&laid_out, &ON_TIME_US, false);
     inputs.extend(early_presses_before_every_key_note(&laid_out));
     inputs.sort_unstable();
@@ -747,7 +752,7 @@ fn a_max_run_with_empty_poor() {
 fn a_run_left_mid_song() {
     let server = CaptureServer::spawn();
     let mut shared = signed_in_to(&server, "left");
-    let (session, laid_out) = loaded(&shared, contract_model(), None);
+    let (session, laid_out) = loaded(&shared, contract_model());
     let inputs = inputs_by_hand(&laid_out, &HAND_OFFSETS_US, false);
     let mut session = session;
     let mut next = 0;
@@ -849,7 +854,7 @@ fn an_autoplay_run() {
     let server = CaptureServer::spawn();
     let mut shared = signed_in_to(&server, "autoplay");
     shared.config.play.autoplay = true;
-    let (session, _) = loaded(&shared, contract_model(), None);
+    let (session, _) = loaded(&shared, contract_model());
     let session = replay_inputs(session, &[]);
     shared.mode = session.model().mode;
     shared.chart_path = RECORDED_CHART_NAME.to_owned();
@@ -892,6 +897,7 @@ fn course_sent(tag: &str, scratch_auto: bool) -> String {
         ..rbms_course::Course::default()
     };
     shared.course_run = Some(rbms_course::CourseRun::new(course, COURSE_OPENING_GAUGE));
+    shared.course_facts = crate::course_ir::CourseFacts::starting(shared.config.judge.course_gauge);
     shared.library = Library::from_songs(vec![rbms_library::SongEntry {
         path: PathBuf::from(SECOND_STAGE_PATH),
         title: second.meta.title.clone(),
@@ -912,8 +918,7 @@ fn course_sent(tag: &str, scratch_auto: bool) -> String {
     }]);
 
     for (model, name) in [(first, RECORDED_CHART_NAME), (second, SECOND_STAGE_PATH)] {
-        let carried = shared.course_run.as_ref().map(|run| (run.carry_gauge, run.totals.combo_carry));
-        let (session, laid_out) = loaded(&shared, model, carried);
+        let (session, laid_out) = loaded(&shared, model);
         let session = replay_inputs(session, &inputs_by_hand(&laid_out, &ON_TIME_US, scratch_auto));
         end_named_run(&mut shared, session, name);
         if let Some(sent) = shared.submit_rx.take() {

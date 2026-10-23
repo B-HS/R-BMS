@@ -1,10 +1,11 @@
 use rbms_course::{Course, CourseChart, CourseConstraint, CourseRun, StageResult};
 use rbms_ir::{
-    ChartId, ChartRankingQuery, ClearLamp, CourseSubmission, IrError, PlayerId, PlayerProfile, ReplayData, ScoreRecord, ScoreServer, ScoreSubmission,
-    ServerInfo, SubmitResponse,
+    ChartId, ChartRankingQuery, ClearLamp, CourseGaugeType, CourseStagePlay, CourseSubmission, GaugeType, IrError, PlayerId, PlayerProfile, RandomOption,
+    ReplayData, ScoreRecord, ScoreServer, ScoreSubmission, ServerInfo, SubmitResponse,
 };
+use rbms_judge::gauge_tables::CourseGaugeMode;
 
-use super::{CourseAssist, UNRELEASED_COURSE_REASON, build_course_submission, course_block_reason, course_updates_score};
+use super::{CourseAssist, CourseFacts, UNRELEASED_COURSE_REASON, build_course_submission, course_block_reason, course_updates_score};
 use crate::record_sync::{SKIPPED_NO_COURSE_ENDPOINT, ScoreOutcome, course_outcome};
 
 const TEST_PLAYER: &str = "gkn";
@@ -80,7 +81,7 @@ impl ScoreServer for CourseOnlyServer {
 #[test]
 fn a_submission_carries_the_course_totals_and_every_chart() {
     let run = two_stage_run(vec![]);
-    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
 
     assert_eq!(sub.api_version, rbms_ir::API_VERSION);
     assert_eq!(sub.course_hash, run.course.hash());
@@ -98,7 +99,7 @@ fn a_submission_carries_the_course_totals_and_every_chart() {
 
 #[test]
 fn the_judgment_breakdown_sums_every_stage() {
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
     assert_eq!(sub.judge.pgreat, 1000);
     assert_eq!(sub.judge.great, 800);
     assert_eq!(sub.judge.good, 140);
@@ -115,10 +116,14 @@ fn the_judgment_breakdown_sums_every_stage() {
 
 #[test]
 fn the_long_note_constraint_decides_the_reported_lntype() {
-    assert_eq!(build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE).lntype, 0, "no constraint reports the default");
-    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Ln]), TEST_PLAYER, CourseAssist::NONE).lntype, 0);
-    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Cn]), TEST_PLAYER, CourseAssist::NONE).lntype, 1);
-    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Hcn]), TEST_PLAYER, CourseAssist::NONE).lntype, 2);
+    assert_eq!(
+        build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default()).lntype,
+        0,
+        "no constraint reports the default"
+    );
+    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Ln]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default()).lntype, 0);
+    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Cn]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default()).lntype, 1);
+    assert_eq!(build_course_submission(&two_stage_run(vec![CourseConstraint::Hcn]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default()).lntype, 2);
 }
 
 #[test]
@@ -128,7 +133,7 @@ fn a_failed_run_submits_the_failed_lamp_and_the_partial_totals() {
     run.advance(&stage(TEST_EX, 40.0, true));
     run.advance(&stage(200, 0.0, false));
 
-    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
     assert_eq!(sub.clear, ClearLamp::Failed);
     assert_eq!(sub.ex_score, TEST_EX + 200);
     assert_eq!(sub.gauge_value, 0.0);
@@ -142,7 +147,7 @@ fn a_non_finite_gauge_is_clamped_before_it_leaves_the_client() {
     only.gauge_value = f32::NAN;
     run.advance(&only);
 
-    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
     assert!(sub.gauge_value.is_finite(), "a NaN gauge would serialise to null and be rejected");
 }
 
@@ -168,7 +173,7 @@ fn a_course_is_submittable_only_when_every_stage_was() {
 #[test]
 fn a_server_without_a_course_endpoint_is_not_a_refusal() {
     let server = CourseOnlyServer { answer: || Err(IrError::Unsupported) };
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
     let outcome = course_outcome(&server.submit_course(&sub));
     assert_eq!(outcome, ScoreOutcome::Skipped { code: SKIPPED_NO_COURSE_ENDPOINT, reason: "server takes no courses" }, "nothing was stored or refused");
 }
@@ -176,7 +181,7 @@ fn a_server_without_a_course_endpoint_is_not_a_refusal() {
 #[test]
 fn a_real_submission_failure_is_sent_again_later() {
     let server = CourseOnlyServer { answer: || Err(IrError::NotConfigured) };
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
     assert!(matches!(course_outcome(&server.submit_course(&sub)), ScoreOutcome::Retry { .. }));
     let refused = CourseOnlyServer { answer: || Err(IrError::Forbidden("{}".into())) };
     assert!(matches!(course_outcome(&refused.submit_course(&sub)), ScoreOutcome::Rejected(_)), "a refusal is the course's own");
@@ -185,26 +190,26 @@ fn a_real_submission_failure_is_sent_again_later() {
 #[test]
 fn an_accepted_submission_is_held_by_the_server() {
     let server = CourseOnlyServer { answer: || Ok(SubmitResponse { accepted: true, rank: Some(3), score_id: Some("cs_1".into()), ..Default::default() }) };
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
     let outcome = course_outcome(&server.submit_course(&sub));
     assert!(matches!(outcome, ScoreOutcome::Accepted { ref score_id, already: false, .. } if score_id.as_deref() == Some("cs_1")), "got {outcome:?}");
 }
 
 #[test]
 fn a_course_without_an_assist_states_none() {
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
     assert!(!sub.scratch_auto && sub.assist.is_empty());
 }
 
 #[test]
 fn an_assisted_course_states_its_assists_as_a_chart_does() {
     let scratch = CourseAssist::NONE.with_stage(false, false).with_stage(true, false);
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, scratch);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, scratch, &CourseFacts::default());
     assert!(sub.scratch_auto, "one SCRATCH AUTO stage makes it a SCRATCH AUTO course");
     assert_eq!(sub.assist, vec![rbms_ir::mapping::AUTO_SCRATCH_FLAG.to_string()]);
 
     let widened = scratch.with_stage(false, true);
-    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, widened);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, widened, &CourseFacts::default());
     assert_eq!(sub.assist, rbms_ir::mapping::assist_flags(true, true), "both tags, once each, in the chart's order");
 }
 
@@ -215,4 +220,55 @@ fn a_course_sets_a_best_by_the_single_charts_rule() {
     assert!(course_updates_score(&sent, CourseAssist::NONE.with_stage(true, false)), "a SCRATCH AUTO stage sets bests like any other");
     assert!(!course_updates_score(&sent, CourseAssist::NONE.with_stage(false, true)), "a stage judged wider sets none");
     assert!(!course_updates_score(&[None, Some("autoplay".to_string())], CourseAssist::NONE), "a stage that is not sent sets none");
+}
+
+/// A stage as its score submission states it, played on `gauge` with no arrangement, in the
+/// long-note flavour `lntype`.
+fn played_on(gauge: GaugeType, lntype: i32) -> CourseStagePlay {
+    CourseStagePlay { gauge, random: RandomOption::Off, lntype }
+}
+
+/// What a course played under `rule` states of `stages`.
+fn facts_of(rule: CourseGaugeMode, stages: &[CourseStagePlay]) -> CourseFacts {
+    let mut facts = CourseFacts::starting(rule);
+    for stage in stages {
+        facts.push_stage(*stage);
+    }
+    facts
+}
+
+#[test]
+fn a_course_submission_states_its_finished_gauge_and_gauge_rule() {
+    let facts = facts_of(CourseGaugeMode::Iidx, &[played_on(GaugeType::Class, 0), played_on(GaugeType::ExClass, 0)]);
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &facts);
+    assert_eq!(sub.gauge, Some(GaugeType::ExClass), "the last stage's gauge");
+    assert_eq!(sub.course_gauge, Some(CourseGaugeType::Iidx));
+}
+
+#[test]
+fn a_course_submission_lists_every_stage_played_in_order() {
+    let course = Course { name: "Grade".to_string(), charts: vec![chart("aa", "11"), chart("bb", "22"), chart("cc", "33")], ..Course::default() };
+    let mut run = CourseRun::new(course, 100.0);
+    run.advance(&stage(TEST_EX, 40.0, true));
+    run.advance(&stage(200, 0.0, false));
+    let played = [played_on(GaugeType::ExClass, 0), played_on(GaugeType::Class, 1)];
+    let sub = build_course_submission(&run, TEST_PLAYER, CourseAssist::NONE, &facts_of(CourseGaugeMode::Lr2, &played));
+    assert_eq!(sub.stages, played.to_vec(), "the two stages played, the third never reached");
+    assert_eq!(sub.gauge, Some(GaugeType::Class));
+}
+
+#[test]
+fn a_course_without_an_ln_constraint_reports_the_lntype_its_first_stage_played() {
+    let facts = facts_of(CourseGaugeMode::Lr2, &[played_on(GaugeType::Class, 1), played_on(GaugeType::Class, 2)]);
+    assert_eq!(build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &facts).lntype, 1);
+    let constrained = build_course_submission(&two_stage_run(vec![CourseConstraint::Hcn]), TEST_PLAYER, CourseAssist::NONE, &facts);
+    assert_eq!(constrained.lntype, 2, "a constraint is what every stage was played under");
+}
+
+#[test]
+fn a_course_without_a_stage_states_no_gauge_and_no_stage() {
+    let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE, &CourseFacts::default());
+    assert_eq!(sub.gauge, None);
+    assert!(sub.stages.is_empty());
+    assert_eq!(sub.course_gauge, Some(CourseGaugeType::Lr2), "the rule is the default one");
 }

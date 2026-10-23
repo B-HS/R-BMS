@@ -120,6 +120,9 @@ mod tests {
             trophy: None,
             scratch_auto: false,
             assist: vec![],
+            gauge: None,
+            course_gauge: None,
+            stages: Vec::new(),
             extra: HashMap::new(),
         }
     }

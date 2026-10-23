@@ -178,6 +178,9 @@ fn kept_course_body(md5: &str, played_at_ms: i64) -> String {
         trophy: None,
         scratch_auto: true,
         assist: Vec::new(),
+        gauge: None,
+        course_gauge: None,
+        stages: Vec::new(),
         extra: Default::default(),
     };
     course.to_json().expect("the course serialises")

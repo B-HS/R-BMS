@@ -12,9 +12,11 @@
         }
     ],
     "clear": "LightAssistEasy",
+    "course_gauge": "LR2",
     "course_hash": "e42cd864171c99e986896ad8b9d71c501a9e5789346c4829cec6c801aa74e661",
     "ex_score": 98,
     "extra": {},
+    "gauge": "Class",
     "gauge_value": 100.0,
     "judge": {
         "avgjudge": 0,
@@ -48,5 +50,9 @@
     "played_at": 1791970074354,
     "player": { "id": "tester" },
     "scratch_auto": true,
+    "stages": [
+        { "gauge": "Class", "lntype": 0, "random": "Off" },
+        { "gauge": "Class", "lntype": 0, "random": "Off" }
+    ],
     "trophy": "goldmedal"
 }

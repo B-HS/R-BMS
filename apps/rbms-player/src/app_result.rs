@@ -152,6 +152,7 @@ fn show_result(state: &mut PlayState, shared: &mut AppShared, end: RunEnd) -> Tr
     };
 
     let block_reason = recorded.block_reason;
+    let as_course_stage = recorded.as_course_stage();
     match block_reason {
         Some(reason) => {
             println!("score not submitted: {reason}");
@@ -188,7 +189,7 @@ fn show_result(state: &mut PlayState, shared: &mut AppShared, end: RunEnd) -> Tr
         shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
         let carried = CarriedOver { standing: standing_combo, longest: standing_max_combo, gauges: state.session.gauge_values() };
         let course_lamp = course_lamp(shared, &state.session);
-        return match fold_course_stage(shared, &summary, carried, block_reason, course_lamp) {
+        return match fold_course_stage(shared, &summary, carried, as_course_stage, course_lamp) {
             Some(rbms_course::CourseStep::Next) => crate::load_course_stage(shared),
             Some(rbms_course::CourseStep::Cleared | rbms_course::CourseStep::Failed) => finish_course(shared),
             None => Transition::Back,
@@ -223,6 +224,22 @@ pub(crate) struct RecordedRun {
     block_reason: Option<&'static str>,
     scratch_auto: bool,
     custom_judge: bool,
+}
+
+impl RecordedRun {
+    /// What the run states of itself to the course it is a stage of ([`fold_course_stage`]).
+    fn as_course_stage(&self) -> CourseStageRecord {
+        CourseStageRecord { block_reason: self.block_reason, played: rbms_ir::CourseStagePlay::of(&self.sub.options) }
+    }
+}
+
+/// What a kept course stage states of itself to its course: why it is not to be sent, if it is not,
+/// and how it was played, as its own score submission says ([`rbms_ir::CourseStagePlay::of`]). It is
+/// taken off the [`RecordedRun`] before the submission goes to the server.
+#[derive(Clone, Copy)]
+struct CourseStageRecord {
+    block_reason: Option<&'static str>,
+    played: rbms_ir::CourseStagePlay,
 }
 
 /// Keep a run that has just ended, as `summary` says it went: build its submission, save its replay,
@@ -578,7 +595,7 @@ pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, sha
     shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
     let carried = CarriedOver { standing: state.session.standing_combo(), longest: state.session.standing_max_combo(), gauges: state.session.gauge_values() };
     let course_lamp = course_lamp(shared, &state.session);
-    match fold_course_stage(shared, &summary, carried, recorded.block_reason, course_lamp) {
+    match fold_course_stage(shared, &summary, carried, recorded.as_course_stage(), course_lamp) {
         Some(rbms_course::CourseStep::Next) => {
             abandon_course(shared, Sending::NextStart);
         }
@@ -767,15 +784,18 @@ fn course_lamp(shared: &AppShared, session: &PlaySession) -> ClearType {
 /// the chart's record keeps the stage's own ([`rbms_play::PlaySummary::max_combo`]). Every gauge's
 /// value as the stage ended is what the next stage starts each gauge on (`GrooveGauge.java:150-155`),
 /// exact rather than the reference's last sample of each. `course_lamp` is the lamp the course stands
-/// at with this stage in ([`course_lamp`]).
+/// at with this stage in ([`course_lamp`]). What the stage's record says of it (`recorded`) goes into
+/// the course verdict and into what the course submission states of its stages
+/// ([`crate::course_ir::CourseFacts`]).
 fn fold_course_stage(
     shared: &mut AppShared,
     summary: &rbms_play::PlaySummary,
     carried: CarriedOver,
-    block_reason: Option<&'static str>,
+    recorded: CourseStageRecord,
     course_lamp: ClearType,
 ) -> Option<rbms_course::CourseStep> {
-    shared.course_stage_reasons.push(block_reason.map(str::to_string));
+    shared.course_stage_reasons.push(recorded.block_reason.map(str::to_string));
+    shared.course_facts.push_stage(recorded.played);
     let stage = rbms_course::StageResult {
         ex_score: summary.ex_score,
         max_ex_score: summary.max_ex_score,
@@ -831,7 +851,7 @@ fn keep_finished_course(shared: &mut AppShared, sending: Sending) {
             println!("course not submitted: {reason}");
             None
         }
-        None => Some(build_course_submission(run, &submission_player_id(&shared.session), shared.course_assist)),
+        None => Some(build_course_submission(run, &submission_player_id(&shared.session), shared.course_assist, &shared.course_facts)),
     };
     match (submission, sending) {
         (Some(sub), Sending::Now) => shared.keep_and_send_course(sub),

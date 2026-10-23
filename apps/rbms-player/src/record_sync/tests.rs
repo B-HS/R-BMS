@@ -69,6 +69,9 @@ struct ScriptedServer {
     health_asked: Mutex<usize>,
     traces_answers: Mutex<VecDeque<Result<String, IrError>>>,
     traced: Mutex<Vec<(ChartId, PlayTrace)>>,
+    /// Every course body sent, as it went on the wire. The server takes no course: it answers each
+    /// as a server without a course endpoint does.
+    courses_sent: Mutex<Vec<String>>,
 }
 
 impl ScriptedServer {
@@ -163,7 +166,8 @@ impl ScoreServer for ScriptedServer {
     fn rivals(&self, _player: &PlayerId) -> Result<Vec<PlayerProfile>, IrError> {
         Err(IrError::Unsupported)
     }
-    fn submit_course(&self, _sub: &CourseSubmission) -> Result<SubmitResponse, IrError> {
+    fn submit_course(&self, sub: &CourseSubmission) -> Result<SubmitResponse, IrError> {
+        self.courses_sent.lock().expect("the course log").push(sub.to_json().expect("the course serialises"));
         Err(IrError::Unsupported)
     }
     fn upload_replay(&self, chart: &ChartId, replay: &ReplayData) -> Result<String, IrError> {
@@ -311,6 +315,35 @@ fn a_stored_body_is_sent_under_the_signed_in_account() {
         [(1, ScoreOutcome::Accepted { score_id: Some("sc_1".into()), already: false, replay: ReplayState::None, trace: ReplayState::None })]
     );
     assert_eq!(finished(&events), None);
+}
+
+/// A course an older build kept states neither the gauge it finished on, the COURSE GAUGE rule nor
+/// its stages, and is sent again as it was kept: the build that sends it has no way to know them.
+#[test]
+fn a_course_kept_by_an_older_build_is_sent_without_the_gauge_fields() {
+    let kept_by_an_older_build = format!(
+        r#"{{"api_version":{},"course_hash":"course","player":{{"id":"guest"}},"clear":"Normal","ex_score":10,"judge":{{"pgreat":5,"great":0,"good":0,"bad":0,"poor":0,"miss":0,"fast":0,"slow":0,"combobreak":0}},"max_combo":10,"gauge_value":80.0,"charts":[{{"md5":"aa","sha256":""}}],"played_at":{},"lntype":0,"max_ex_score":20,"minbp":0,"trophy":null,"extra":{{}}}}"#,
+        rbms_ir::API_VERSION,
+        PLAYED_SECOND * MILLIS_PER_SECOND
+    );
+    let course = KeptCourse {
+        id: 1,
+        course_hash: "course".into(),
+        played_at_ms: PLAYED_SECOND * MILLIS_PER_SECOND,
+        body: kept_by_an_older_build,
+        played_as: None,
+        state: None,
+    };
+    let server = ScriptedServer::answering(Vec::new());
+    run(Arc::clone(&server), SyncJob { courses: vec![course], ..job(Vec::new()) });
+    let sent = server.courses_sent.lock().expect("the course log").clone();
+    assert_eq!(sent.len(), 1, "the kept course went up once");
+    for key in ["gauge", "course_gauge", "stages"] {
+        assert!(!sent[0].contains(&format!("\"{key}\":")), "{key} is not made up for a course that never stated it: {}", sent[0]);
+    }
+    let resent = CourseSubmission::from_json(&sent[0]).expect("the body reads as a course");
+    assert_eq!(resent.player.id, ACCOUNT_ID, "it goes under the account that syncs it");
+    assert_eq!((resent.gauge, resent.course_gauge, resent.stages.len()), (None, None, 0));
 }
 
 #[test]

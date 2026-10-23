@@ -80,6 +80,9 @@ pub(super) fn course_submission() -> CourseSubmission {
         trophy: Some("bronzemedal".into()),
         scratch_auto: false,
         assist: vec![],
+        gauge: None,
+        course_gauge: None,
+        stages: Vec::new(),
         extra: Default::default(),
     }
 }

@@ -1,5 +1,6 @@
-//! Course submissions to the score server: building the submission from a finished run and folding
-//! the per-stage block reasons into one course-level verdict.
+//! Course submissions to the score server: building the submission from a finished run, folding
+//! the per-stage block reasons into one course-level verdict, and gathering what the submission
+//! states of how each stage was played ([`CourseFacts`]).
 //!
 //! A course reaches the IR only when every stage was a real interactive play: one autoplayed or
 //! watched stage keeps the whole course out (`MusicResult.java:82`, applied per stage). A stage
@@ -12,17 +13,18 @@
 //! consumes its public types.
 
 use rbms_course::CourseRun;
-use rbms_ir::mapping::{assist_flags, ir_clear};
-use rbms_ir::{API_VERSION, ChartId, JudgeBreakdown, PlayerId};
+use rbms_ir::mapping::{assist_flags, ir_clear, ir_course_gauge};
+use rbms_ir::{API_VERSION, ChartId, CourseStagePlay, JudgeBreakdown, PlayerId};
 use rbms_judge::clear_type_from_id;
+use rbms_judge::gauge_tables::CourseGaugeMode;
 
 /// Reason a course whose file is not marked for release is never submitted
 /// (`CourseResult.java:96`). The caller adds it to the per-stage reasons it hands
 /// [`course_block_reason`].
 pub(crate) const UNRELEASED_COURSE_REASON: &str = "unreleased course";
 
-/// The `lntype` a course reports when its constraint set does not state one. The caller overwrites
-/// it with the flavour the run actually played under.
+/// The `lntype` a course reports when its constraint set does not state one and no stage was
+/// played to say which flavour the course ran under.
 const DEFAULT_LNTYPE: i32 = 0;
 
 /// The assists the stages of a course were played with, taken over the whole course: it had SCRATCH
@@ -51,6 +53,28 @@ impl CourseAssist {
     }
 }
 
+/// What a course submission states of how the course was played beyond its totals: the COURSE
+/// GAUGE rule it was played under, and every stage played, in order, as that stage's own score
+/// submission states it ([`CourseStagePlay::of`]). A course starts with no stage, on the rule the
+/// settings held when it started ([`CourseFacts::starting`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct CourseFacts {
+    pub(crate) gauge_rule: CourseGaugeMode,
+    pub(crate) stages: Vec<CourseStagePlay>,
+}
+
+impl CourseFacts {
+    /// A course about to be played under `gauge_rule`, with no stage played yet.
+    pub(crate) fn starting(gauge_rule: CourseGaugeMode) -> CourseFacts {
+        CourseFacts { gauge_rule, stages: Vec::new() }
+    }
+
+    /// Add the stage just played, as its own score submission states it.
+    pub(crate) fn push_stage(&mut self, stage: CourseStagePlay) {
+        self.stages.push(stage);
+    }
+}
+
 /// Whether a finished course may set the course best: every stage was one that is sent, and none
 /// was judged wider ([`CourseAssist::sets_best`]).
 pub(crate) fn course_updates_score(stage_reasons: &[Option<String>], assist: CourseAssist) -> bool {
@@ -63,12 +87,15 @@ pub(crate) fn course_updates_score(stage_reasons: &[Option<String>], assist: Cou
 /// poors, the fast/slow tallies and the combo breaks. The early/late split and the mean timing
 /// error are per-chart analysis figures that a course does not sum, and stay at their defaults.
 ///
-/// `lntype` is read off the course's own long-note constraint; a course that states none reports
-/// [`DEFAULT_LNTYPE`] and the caller overwrites it with what the run used.
+/// `lntype` is read off the course's own long-note constraint, which every stage is played under; a
+/// course that states none reports the flavour its first stage was played in ([`course_lntype`]).
 ///
 /// `assist` is what the stages were played with, stated the way a single chart's submission states
 /// it: SCRATCH AUTO, and the assist tags ([`assist_flags`]). A course with none sends neither field.
-pub(crate) fn build_course_submission(run: &CourseRun, player: &str, assist: CourseAssist) -> rbms_ir::dto::CourseSubmission {
+///
+/// `facts` says how the stages were played: the course states the gauge it finished on (its last
+/// stage's), the COURSE GAUGE rule, and every stage played, in order.
+pub(crate) fn build_course_submission(run: &CourseRun, player: &str, assist: CourseAssist, facts: &CourseFacts) -> rbms_ir::dto::CourseSubmission {
     let totals = run.totals;
     let counts = totals.counts;
     let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
@@ -95,12 +122,15 @@ pub(crate) fn build_course_submission(run: &CourseRun, player: &str, assist: Cou
         gauge_value: run.carry_gauge,
         charts: run.course.charts.iter().map(|c| ChartId { md5: c.md5.clone(), sha256: c.sha256.clone() }).collect(),
         played_at,
-        lntype: course_lntype(run),
+        lntype: course_lntype(run, facts),
         max_ex_score: totals.max_ex,
         minbp: totals.min_bp(),
         trophy: run.trophy().map(|t| t.name.clone()),
         scratch_auto: assist.scratch_auto,
         assist: assist_flags(assist.scratch_auto, assist.custom_judge),
+        gauge: facts.stages.last().map(|stage| stage.gauge),
+        course_gauge: Some(ir_course_gauge(facts.gauge_rule)),
+        stages: facts.stages.clone(),
         extra: Default::default(),
     };
     sub.clamp_to_server_bounds();
@@ -116,15 +146,16 @@ pub(crate) fn course_block_reason(stage_reasons: &[Option<String>]) -> Option<St
     stage_reasons.iter().flatten().next().cloned()
 }
 
-/// The long-note flavour the course itself demands (0 LN, 1 CN, 2 HCN), or [`DEFAULT_LNTYPE`] when
-/// it demands none.
-fn course_lntype(run: &CourseRun) -> i32 {
+/// The long-note flavour the course reports (0 LN, 1 CN, 2 HCN): the one its constraint demands,
+/// which every stage is played under, or, when it demands none, the one its first stage was played
+/// in, and [`DEFAULT_LNTYPE`] when no stage was.
+fn course_lntype(run: &CourseRun, facts: &CourseFacts) -> i32 {
     use rbms_course::CourseConstraint;
     match run.course.constraint_in_group(LN_CONSTRAINT_GROUP) {
         Some(CourseConstraint::Ln) => 0,
         Some(CourseConstraint::Cn) => 1,
         Some(CourseConstraint::Hcn) => 2,
-        _ => DEFAULT_LNTYPE,
+        _ => facts.stages.first().map_or(DEFAULT_LNTYPE, |stage| stage.lntype),
     }
 }
 

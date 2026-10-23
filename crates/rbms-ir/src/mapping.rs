@@ -5,6 +5,7 @@
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_judge::gauge::GaugeIndex;
+use rbms_judge::gauge_tables::CourseGaugeMode;
 use rbms_judge::{ClearType, GaugeKind, JudgeProperty};
 use rbms_model::Mode;
 
@@ -71,6 +72,16 @@ pub fn ir_gauge_of_index(g: GaugeIndex) -> crate::GaugeType {
         GaugeIndex::Class => G::Class,
         GaugeIndex::ExClass => G::ExClass,
         GaugeIndex::ExHardClass => G::ExHardClass,
+    }
+}
+
+/// The IR name of the COURSE GAUGE rule a course was played under.
+pub fn ir_course_gauge(mode: CourseGaugeMode) -> crate::CourseGaugeType {
+    use crate::CourseGaugeType as C;
+    match mode {
+        CourseGaugeMode::Lr2 => C::Lr2,
+        CourseGaugeMode::Beatoraja => C::Beatoraja,
+        CourseGaugeMode::Iidx => C::Iidx,
     }
 }
 
@@ -325,6 +336,13 @@ mod tests {
         }
         let course: Vec<G> = [GaugeIndex::Class, GaugeIndex::ExClass, GaugeIndex::ExHardClass].into_iter().map(ir_gauge_of_index).collect();
         assert_eq!(course, [G::Class, G::ExClass, G::ExHardClass]);
+    }
+
+    #[test]
+    fn ir_course_gauge_names_each_rule() {
+        use crate::CourseGaugeType as C;
+        let named: Vec<C> = CourseGaugeMode::ALL.into_iter().map(ir_course_gauge).collect();
+        assert_eq!(named, [C::Lr2, C::Beatoraja, C::Iidx]);
     }
 
     #[test]

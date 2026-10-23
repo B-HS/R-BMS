@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{ChartId, ClearLamp, JudgeBreakdown, PlayOptions, PlayerId};
+use crate::dto::{ChartId, ClearLamp, GaugeType, JudgeBreakdown, PlayOptions, PlayerId, RandomOption};
 
 /// The chart a score is submitted for: its two hashes, and what the chart says it is called and how
 /// hard it is.
@@ -343,6 +343,34 @@ impl SubmitResponse {
     }
 }
 
+/// The gauge table rule a course was played under: the COURSE GAUGE setting, which outranks the
+/// course's own gauge constraint.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum CourseGaugeType {
+    Lr2,
+    Beatoraja,
+    Iidx,
+}
+
+/// What one played stage of a course was played with, as that stage's own score submission states
+/// it ([`PlayOptions`]): the gauge it finished on, its arrangement after the course's constraints
+/// narrowed it, and the long-note flavour it was judged in.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CourseStagePlay {
+    pub gauge: GaugeType,
+    pub random: RandomOption,
+    /// LN handling the stage ran under (0 = LN, 1 = CN, 2 = HCN).
+    pub lntype: i32,
+}
+
+impl CourseStagePlay {
+    /// The stage as the score submission of its run states it.
+    pub fn of(options: &PlayOptions) -> CourseStagePlay {
+        CourseStagePlay { gauge: options.gauge, random: options.random, lntype: options.lntype }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseSubmission {
     pub api_version: u32,
@@ -380,6 +408,19 @@ pub struct CourseSubmission {
     /// [`CourseSubmission::scratch_auto`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assist: Vec<String>,
+    /// The course gauge the course finished on: its last played stage's.
+    ///
+    /// This and the two fields after it are left out of the body when absent: a course kept by a
+    /// build that predates them is sent again as it was kept, and a server that predates them
+    /// ignores them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gauge: Option<GaugeType>,
+    /// The COURSE GAUGE rule the course was played under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub course_gauge: Option<CourseGaugeType>,
+    /// One entry per stage played, in the order they were played.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stages: Vec<CourseStagePlay>,
     #[serde(default)]
     pub extra: HashMap<String, serde_json::Value>,
 }
