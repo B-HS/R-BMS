@@ -1,5 +1,8 @@
+use rbms_model::translations::Catalog;
+
 use crate::ctx::{RenderCtx, with_render_ctx};
 use crate::result::{RANK_BANDS, dj_rank, draw_rank_bar};
+use crate::text::select::SelectText;
 use crate::{Color, Rect, Renderer};
 
 /// Clickable region kinds the song-select screen reports back to the app so it can map them onto its
@@ -9,6 +12,8 @@ pub enum SelectHot {
     Row(usize),
     Record(usize),
     ModalReplay,
+    /// The record modal's button that plays the chart laid out as the shown record's replay was.
+    ModalLayout,
     ModalClose,
     Search,
     Sort,
@@ -651,6 +656,20 @@ const MODAL_IR_LINE_Y: f32 = 340.0;
 const MODAL_IR_LINE_INSET: f32 = 20.0;
 const MODAL_IR_LINE_SCALE: f32 = 1.3;
 
+/// Where the record modal's layout button stands: its left edge beside the replay button's right
+/// edge and how far from it, how wide and tall it is, and how its label is set in it. The modal's
+/// key hint for the button stands on the line of the modal's other keys, at its right edge.
+const MODAL_REPLAY_BUTTON_RIGHT: f32 = 240.0;
+const MODAL_LAYOUT_BUTTON_GAP: f32 = 12.0;
+const MODAL_LAYOUT_BUTTON_W: f32 = 260.0;
+const MODAL_BUTTON_H: f32 = 36.0;
+const MODAL_BUTTON_LABEL_SCALE: f32 = 1.6;
+const MODAL_BUTTON_LABEL_DROP: f32 = 9.0;
+const MODAL_LAYOUT_LABEL_INSET: f32 = 16.0;
+const MODAL_KEYS_LINE_FROM_BOTTOM: f32 = 92.0;
+const MODAL_KEYS_LINE_INSET: f32 = 20.0;
+const MODAL_KEYS_LINE_SCALE: f32 = 1.1;
+
 fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectModal, hot: &mut Vec<(Rect, SelectHot)>) {
     let th = ctx.theme;
     r.fill_rect(Rect::new(0.0, 0.0, 1280.0, 720.0), Color { r: 0, g: 0, b: 0, a: 180 });
@@ -693,10 +712,19 @@ fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectM
         r.fill_rect(rect, th.button);
         ctx.draw_text(r, mx + 36.0, by + 9.0, 1.6, th.text, "PLAY REPLAY");
         hot.push((rect, SelectHot::ModalReplay));
+        let layout = Rect::new(mx + MODAL_REPLAY_BUTTON_RIGHT + MODAL_LAYOUT_BUTTON_GAP, by, MODAL_LAYOUT_BUTTON_W, MODAL_BUTTON_H);
+        r.fill_rect(layout, th.button);
+        let label = ctx.fit_text(SelectText::PlayThisLayout.get(ctx.language), MODAL_BUTTON_LABEL_SCALE, layout.w - MODAL_LAYOUT_LABEL_INSET * 2.0);
+        ctx.draw_text(r, layout.x + MODAL_LAYOUT_LABEL_INSET, by + MODAL_BUTTON_LABEL_DROP, MODAL_BUTTON_LABEL_SCALE, th.text, &label);
+        hot.push((layout, SelectHot::ModalLayout));
     } else {
         ctx.draw_text(r, mx + 24.0, by + 9.0, 1.3, th.text_dim, "NO REPLAY SAVED");
     }
     ctx.draw_text(r, mx + 20.0, my + mh - 92.0, 1.1, th.text_dim, "UP DOWN PREV/NEXT   ENTER REPLAY   ESC CLOSE");
+    if modal.has_replay {
+        let keys = SelectText::ModalLayoutKey.get(ctx.language);
+        ctx.draw_text_right(r, mx + mw - MODAL_KEYS_LINE_INSET, my + mh - MODAL_KEYS_LINE_FROM_BOTTOM, MODAL_KEYS_LINE_SCALE, th.text_dim, keys);
+    }
     let close = Rect::new(mx + mw - 120.0, by, 100.0, 36.0);
     r.fill_rect(close, th.button_active);
     ctx.draw_text(r, mx + mw - 96.0, by + 9.0, 1.6, th.text, "CLOSE");
@@ -734,6 +762,79 @@ mod tests {
             filter: None,
             empty_hint: None,
         }
+    }
+
+    /// The size of the screen the modal is drawn on.
+    const SCREEN_W: u32 = 1280;
+    const SCREEN_H: u32 = 720;
+
+    fn modal(has_replay: bool) -> SelectModal {
+        SelectModal {
+            title: "Chart".to_string(),
+            clear_label: "HARD",
+            clear_color: Color::WHITE,
+            when: "2026-05-31 01:02".to_string(),
+            sub: "7K   RANDOM   GAUGE HARD".to_string(),
+            counts: [10, 4, 3, 2, 1, 0],
+            ex: 24,
+            max_ex: 40,
+            rank: Some("AA"),
+            rank_color: Color::WHITE,
+            max_combo: 12,
+            total_notes: 20,
+            bp: 3,
+            empty_poor: 0,
+            gauge_value: 80,
+            index: 0,
+            total: 1,
+            has_replay,
+            ir_line: None,
+        }
+    }
+
+    fn region_of(hot: &[(Rect, SelectHot)], wanted: SelectHot) -> Option<Rect> {
+        hot.iter().find(|(_, kind)| *kind == wanted).map(|(rect, _)| *rect)
+    }
+
+    #[test]
+    fn the_modal_of_a_record_with_a_replay_has_a_layout_button_between_the_replay_and_close_buttons() {
+        let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+        let hot = render_select_modal(&mut canvas, &modal(true));
+        let (replay, layout, close) = (
+            region_of(&hot, SelectHot::ModalReplay).expect("the replay button"),
+            region_of(&hot, SelectHot::ModalLayout).expect("the layout button"),
+            region_of(&hot, SelectHot::ModalClose).expect("the close button"),
+        );
+        assert!(replay.x + replay.w < layout.x && layout.x + layout.w < close.x, "the buttons are not in a row: {replay:?} {layout:?} {close:?}");
+        assert_eq!((layout.y, layout.h), (replay.y, replay.h), "the layout button is on another line than the replay button");
+    }
+
+    #[test]
+    fn the_modal_of_a_record_with_no_replay_offers_no_layout() {
+        let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+        let hot = render_select_modal(&mut canvas, &modal(false));
+        assert!(region_of(&hot, SelectHot::ModalLayout).is_none() && region_of(&hot, SelectHot::ModalReplay).is_none());
+        assert!(region_of(&hot, SelectHot::ModalClose).is_some());
+    }
+
+    #[test]
+    fn the_layout_button_carries_its_label_and_is_drawn_in_every_language() {
+        crate::font::use_embedded_fonts_only();
+        for language in rbms_model::Language::ALL {
+            crate::text::set_language(language);
+            let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+            let hot = render_select_modal(&mut canvas, &modal(true));
+            let layout = region_of(&hot, SelectHot::ModalLayout).expect("the layout button");
+            let ground = canvas.pixel_at(layout.x as u32 + 1, layout.y as u32 + 1);
+            let lettered = (layout.y as u32..(layout.y + layout.h) as u32)
+                .flat_map(|y| (layout.x as u32..(layout.x + layout.w) as u32).map(move |x| (x, y)))
+                .filter(|(x, y)| canvas.pixel_at(*x, *y) != ground)
+                .count();
+            if language == rbms_model::Language::English {
+                assert!(lettered > 0, "the button has no label on it");
+            }
+        }
+        crate::text::set_language(rbms_model::Language::English);
     }
 
     #[test]

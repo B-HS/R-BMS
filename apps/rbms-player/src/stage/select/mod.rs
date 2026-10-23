@@ -15,7 +15,8 @@
 //! run. The keys the browser has always had keep doing what they did there, and a browser no skin
 //! draws is not touched by any of them. The ranking keys are read on either browser
 //! ([`ranking_mode`]): a blue key held on a chart opens the ranking panel, which the keys of the
-//! list then drive.
+//! list then drive. The record modal and the ranking panel can also start the chart laid out as a
+//! replay of it was ([`layout_play`]).
 //!
 //! What is the application's rather than a skin's is drawn over the skin ([`overlay`]): the hint on
 //! an empty list, the ranking panel, the record modal, the filter panel, the search box, the key
@@ -30,11 +31,11 @@ use std::sync::mpsc::TryRecvError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rbms_render::skin_render::frame::{BarHold, BarScroller, SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS};
-use rbms_render::{BgaFrame, FrameData, ReferenceImages, SongBars};
+use rbms_render::{BgaFrame, FrameData, ReferenceImages, SongBars, select_layout};
 use rbms_skin::property::generated::{BUTTON_KEYCONFIG, BUTTON_SKINSELECT};
 
 use crate::ir_ext::PrimaryProfileDirection;
-use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
+use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line, render_ranking_panel_at};
 use crate::ir_replay::from_ir_replay;
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, ShortcutScreen, key_index_of};
 use crate::select_tree::{BarIdentity, OpenedFolder, SelectFolder};
@@ -61,6 +62,9 @@ mod filter;
 mod guide;
 mod images;
 mod keys;
+mod layout_play;
+#[cfg(test)]
+mod layout_play_tests;
 mod lent;
 #[cfg(test)]
 mod lent_tests;
@@ -186,6 +190,9 @@ pub(crate) struct SelectState {
     ranking_sel: usize,
     /// The keys that open, drive and close the panel as the ranking mode ([`ranking_mode`]).
     ranking_keys: RankingKeys,
+    /// The player whose row's replay is being downloaded to play the chart on its layout
+    /// ([`layout_play`]) rather than to watch it, while that download is on its way.
+    layout_download: Option<String>,
     /// Lazily computed detail (notes/LN/length/BPM range) for the currently focused song, with the
     /// song index it was computed for — recomputed only when the focus moves to a different song.
     focused_detail: Option<ChartDetail>,
@@ -285,6 +292,7 @@ impl Default for SelectState {
             ranking_open: false,
             ranking_sel: 0,
             ranking_keys: RankingKeys::default(),
+            layout_download: None,
             focused_detail: None,
             focused_detail_si: None,
             focus_settle_si: None,
@@ -818,7 +826,12 @@ impl SelectState {
             return false;
         }
         let own = shared.is_shortcut(Shortcut::Ranking, code);
-        let action = if own { Some(PanelAction::Close) } else { panel_action(code).filter(|_| code != RANKING_PANEL_SHIPPED_KEY) };
+        let layout = shared.is_shortcut(Shortcut::ReplayPlayLayout, code) && shared.lane_input_for(code).is_none();
+        let action = if own {
+            Some(PanelAction::Close)
+        } else {
+            panel_action(code).filter(|_| code != RANKING_PANEL_SHIPPED_KEY).or(layout.then_some(PanelAction::PlayLayout))
+        };
         let Some(action) = action else {
             return false;
         };
@@ -836,7 +849,8 @@ impl SelectState {
             PanelAction::Close => self.toggle_ranking_panel(shared),
             PanelAction::Up => self.ranking_sel = self.ranking_sel.saturating_sub(1).max(start),
             PanelAction::Down => self.ranking_sel = (self.ranking_sel + 1).min(lines.len().saturating_sub(1)),
-            PanelAction::PlayReplay => self.play_ranking_replay(shared),
+            PanelAction::PlayReplay => self.play_ranking_replay(shared, false),
+            PanelAction::PlayLayout => self.play_ranking_replay(shared, true),
             PanelAction::PreviousProfile => {
                 if shared.shift_primary_ir(PrimaryProfileDirection::Previous) {
                     self.ranking_sel = self.ranking_selectable_start(shared);
@@ -863,14 +877,15 @@ impl SelectState {
             return;
         }
         if self.ranking_sel == index {
-            self.play_ranking_replay(shared);
+            self.play_ranking_replay(shared, false);
         } else {
             self.ranking_sel = index;
         }
     }
 
-    /// Download the replay behind the focused panel row; the frame loop starts it once it lands.
-    fn play_ranking_replay(&mut self, shared: &mut AppShared) {
+    /// Download the replay behind the focused panel row; the frame loop starts it once it lands, to
+    /// be watched or, when `for_layout` says so, to play the chart on its layout ([`layout_play`]).
+    fn play_ranking_replay(&mut self, shared: &mut AppShared, for_layout: bool) {
         let Some(line) = self.ranking_lines(shared).into_iter().nth(self.ranking_sel) else {
             return;
         };
@@ -888,6 +903,7 @@ impl SelectState {
             return;
         }
         shared.replay_download_target = Some((entry.path.to_string_lossy().to_string(), entry.md5.clone()));
+        self.layout_download = for_layout.then_some(line.label);
         shared.net_status = format!("downloading replay {replay_id}...");
         shared.replay_download_rx = Some(rbms_ir::spawn_query(shared.primary_ir_server(), move |server| server.download_replay(&replay_id)));
     }
@@ -923,7 +939,8 @@ impl SelectState {
         shared.start_ranking_fetch(chart);
     }
 
-    /// Take a downloaded replay and enter playback for it, the same path a local record replay takes.
+    /// Take a downloaded replay and enter playback for it, the same path a local record replay takes,
+    /// or play the chart on its layout when the download was asked for that ([`layout_play`]).
     fn poll_replay_download(&mut self, shared: &mut AppShared) -> Transition {
         let Some(rx) = shared.replay_download_rx.take() else {
             return Transition::Stay;
@@ -933,6 +950,9 @@ impl SelectState {
                 let Some((chart_path, md5)) = shared.replay_download_target.take() else {
                     return Transition::Stay;
                 };
+                if let Some(player) = self.layout_download.take() {
+                    return self.start_downloaded_layout(shared, &data, &chart_path, &md5, player);
+                }
                 let replay = from_ir_replay(&data, &chart_path, &md5);
                 if replay.events.is_empty() {
                     shared.net_status = "downloaded replay has no inputs".to_string();
@@ -951,6 +971,7 @@ impl SelectState {
             }
             Ok(Err(error)) => {
                 shared.replay_download_target = None;
+                self.layout_download = None;
                 shared.net_status = format!("replay download: {}", crate::ir_outcome::short_error(&error));
                 Transition::Stay
             }
@@ -960,6 +981,7 @@ impl SelectState {
             }
             Err(TryRecvError::Disconnected) => {
                 shared.replay_download_target = None;
+                self.layout_download = None;
                 Transition::Stay
             }
         }
@@ -1004,6 +1026,7 @@ impl SelectState {
             KeyCode::ArrowUp => self.record_modal_nav(shared, -1),
             KeyCode::ArrowDown => self.record_modal_nav(shared, 1),
             KeyCode::Enter | KeyCode::NumpadEnter => return self.play_record_replay(shared),
+            code if shared.is_shortcut(Shortcut::ReplayPlayLayout, code) => return self.play_record_layout(shared),
             _ => {}
         }
         Transition::Stay
@@ -1041,11 +1064,21 @@ impl SelectState {
     /// so there is none for a skin's button to run. The option overlay's two keys and the key held
     /// for the detail panel are read where those are, not here.
     ///
+    /// The shortcut that plays a watched replay's layout is none of the browser's, but a controller
+    /// button given it plays the layout of the open ranking panel's selected row, which none of the
+    /// controller's keys do ([`layout_play`]).
+    ///
     /// The reload of the difficulty tables only starts here, and with it a fetch of the player's
     /// own folders when they are signed in: both are fetched beside the browser, which goes on being
     /// used, and what comes back is taken a frame at a time ([`crate::tablesrc::apply_finished_fetches`],
     /// [`crate::user_folders::apply_finished_fetch`]).
     fn run_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> Transition {
+        if shortcut == Shortcut::ReplayPlayLayout {
+            if self.ranking_open {
+                self.run_ranking_action(shared, PanelAction::PlayLayout);
+            }
+            return Transition::Stay;
+        }
         let skinned = skin_status(shared) == SkinStatus::Ready;
         if shortcut.screen() != ShortcutScreen::Browser || (shortcut.group() == ShortcutGroup::SkinBrowser && !skinned) {
             return Transition::Stay;
@@ -1401,6 +1434,7 @@ impl StageHandler for SelectState {
             Some(Hot::RecordRow(ri)) => self.record_modal = Some(ri),
             Some(Hot::RankingRow(i)) => self.ranking_click(ctx.shared, i),
             Some(Hot::ModalReplay) => return self.play_record_replay(ctx.shared),
+            Some(Hot::ModalLayout) => return self.play_record_layout(ctx.shared),
             Some(Hot::ModalClose) => self.record_modal = None,
             Some(Hot::GuideClose) => self.guide_open = false,
             Some(Hot::OverlayPanel) => {}
@@ -1516,6 +1550,7 @@ impl StageHandler for SelectState {
                 SelectHot::Row(i) => Hot::SelectRow(i),
                 SelectHot::Record(i) => Hot::RecordRow(i),
                 SelectHot::ModalReplay => Hot::ModalReplay,
+                SelectHot::ModalLayout => Hot::ModalLayout,
                 SelectHot::ModalClose => Hot::ModalClose,
                 SelectHot::Search => Hot::NavSearch,
                 SelectHot::Sort => Hot::NavSort,
@@ -1527,7 +1562,16 @@ impl StageHandler for SelectState {
             (rect, mapped)
         }));
         if self.ranking_open {
-            let hot = render_ranking_panel(canvas, &ranking_lines, self.ranking_sel, true, ctx.shared.can_switch_primary_ir());
+            let heading = overlay::ranking_heading(ctx.shared);
+            let hot = render_ranking_panel_at(
+                canvas,
+                select_layout().detail_rect,
+                heading.as_deref(),
+                &ranking_lines,
+                self.ranking_sel,
+                true,
+                ctx.shared.can_switch_primary_ir(),
+            );
             ctx.shared.hot.extend(hot.into_iter().map(|(rect, index)| (rect, Hot::RankingRow(index))));
         }
         if self.filter.is_open() {

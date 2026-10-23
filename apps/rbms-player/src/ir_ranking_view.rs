@@ -10,7 +10,9 @@ use winit::keyboard::KeyCode;
 
 use crate::format::fmt_datetime;
 use crate::ir_ranking::{RankingBoard, RankingRow, RankingState};
+use crate::keyconfig::{Shortcut, key_name};
 use crate::target::NOTE_MAX_EX;
+use crate::text::layout_play::LayoutPlayText;
 use crate::text::ranking::RankingText;
 
 /// What a key does while the panel has focus; `None` leaves the key to the select screen.
@@ -20,6 +22,9 @@ pub(crate) enum PanelAction {
     Up,
     Down,
     PlayReplay,
+    /// Play the chart by hand, laid out as the replay behind the selected row was: the shortcut
+    /// that plays a watched replay's layout, read here too ([`Shortcut::ReplayPlayLayout`]).
+    PlayLayout,
     PreviousProfile,
     NextProfile,
     /// Put the selection on the local player's row, fetching the page it is on when the board does
@@ -96,6 +101,10 @@ const ROW_SCALE: f32 = 1.3;
 
 /// The gap between the chart's name and the hint beside it in the panel's head.
 const HEAD_GAP: f32 = 16.0;
+
+/// How far below the title's top the hint on the title's line stands, which sets its smaller
+/// letters level with the middle of the title's.
+const HEAD_HINT_DROP: f32 = 5.0;
 
 /// Panel title.
 pub(crate) const PANEL_TITLE: &str = "IR RANKING";
@@ -283,18 +292,15 @@ pub(crate) fn scroll_start(len: usize, sel: usize) -> usize {
     sel.saturating_sub(visible / 2).min(len - visible)
 }
 
-/// Draw the panel over the detail column and return the clickable region of each drawn line,
-/// tagged with its index into [`panel_lines`].
-pub(crate) fn render_ranking_panel<R: Renderer>(r: &mut R, lines: &[PanelLine], sel: usize, focused: bool, can_switch_profile: bool) -> Vec<(Rect, usize)> {
-    render_ranking_panel_at(r, select_layout().detail_rect, None, lines, sel, focused, can_switch_profile)
-}
-
-/// [`render_ranking_panel`] in `panel` rather than over the detail column, for a screen that has put
-/// its own list there. [`visible_rows`] counts the rows the detail column holds, so a panel meant to
-/// show all of them is as tall as that column is.
+/// Draw the panel in `panel` and return the clickable region of each drawn line, tagged with its
+/// index into [`panel_lines`]. The built-in browser draws it over the detail column
+/// ([`select_layout`]); a screen that has put its own list there draws it elsewhere.
+/// [`visible_rows`] counts the rows the detail column holds, so a panel meant to show all of them
+/// is as tall as that column is.
 ///
 /// `heading` names the chart the board is of; the hint takes its place at the left of the head when
-/// there is none.
+/// there is none. While the panel is focused and the selected line has a replay, the head also
+/// names the key that plays the chart on that replay's layout.
 pub(crate) fn render_ranking_panel_at<R: Renderer>(
     r: &mut R,
     panel: Rect,
@@ -309,9 +315,17 @@ pub(crate) fn render_ranking_panel_at<R: Renderer>(
     r.fill_rect(panel, th.panel);
     r.fill_rect(Rect::new(panel.x, panel.y, panel.w, RULE_H), th.divider);
     draw_text(r, panel.x + RANK_X, panel.y + TITLE_Y, TITLE_SCALE, if focused { th.accent } else { th.text }, PANEL_TITLE);
-    if let Some(own) = lines.iter().rfind(|line| line.role == LineRole::You) {
-        let place = RankingText::YouRank.fill(rbms_render::text::language(), &[&own.rank]);
-        draw_text_right(r, panel.x + panel.w - RANK_X, panel.y + TITLE_Y, TITLE_SCALE, th.accent, &place);
+    let language = rbms_render::text::language();
+    let place = lines.iter().rfind(|line| line.role == LineRole::You).map(|own| RankingText::YouRank.fill(language, &[&own.rank]));
+    let mut head_right = panel.x + panel.w - RANK_X;
+    if let Some(place) = &place {
+        draw_text_right(r, head_right, panel.y + TITLE_Y, TITLE_SCALE, th.accent, place);
+        head_right -= text_width(place, TITLE_SCALE) + HEAD_GAP;
+    }
+    if focused && lines.get(sel).is_some_and(|line| line.replay_id.is_some()) {
+        let layout_hint = LayoutPlayText::PanelHint.fill(language, &[&key_name(Shortcut::ReplayPlayLayout.default_key())]);
+        let room = (head_right - (panel.x + RANK_X + text_width(PANEL_TITLE, TITLE_SCALE) + HEAD_GAP)).max(MIN_NAME_W);
+        draw_text_right(r, head_right, panel.y + TITLE_Y + HEAD_HINT_DROP, HINT_SCALE, th.text_muted, &fit_text(&layout_hint, HINT_SCALE, room));
     }
     let hint = match (focused, can_switch_profile) {
         (true, true) => "UP DOWN MOVE   Q/E PROFILE   ENTER REPLAY   I CLOSE",
@@ -446,6 +460,11 @@ mod tests {
 
     fn labels(lines: &[PanelLine]) -> Vec<&str> {
         lines.iter().map(|line| line.label.as_str()).collect()
+    }
+
+    /// The panel drawn over the detail column, with no chart named in its head.
+    fn render_ranking_panel<R: Renderer>(r: &mut R, lines: &[PanelLine], sel: usize, focused: bool, can_switch_profile: bool) -> Vec<(Rect, usize)> {
+        render_ranking_panel_at(r, select_layout().detail_rect, None, lines, sel, focused, can_switch_profile)
     }
 
     fn a_row(rank: u32, player: &str, ex_score: u32) -> RankingRow {
@@ -695,6 +714,51 @@ mod tests {
         let canvas = drawn(&lines, Some(&"WIDE ".repeat(200)));
         let past_the_panel = (panel.x + panel.w) as u32;
         assert!((0..CANVAS_H).all(|y| (past_the_panel..CANVAS_W).all(|x| canvas.pixel_at(x, y).a == 0)), "the heading ran out of the panel");
+    }
+
+    /// The panel drawn at the detail column with the line `sel` selected, on a fresh canvas.
+    fn drawn_selecting(lines: &[PanelLine], sel: usize, focused: bool) -> CpuCanvas {
+        let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
+        render_ranking_panel_at(&mut canvas, select_layout().detail_rect, None, lines, sel, focused, false);
+        canvas
+    }
+
+    /// The columns of the head, above the first row, in which the two canvases differ.
+    fn head_columns_that_differ(one: &CpuCanvas, other: &CpuCanvas) -> Vec<u32> {
+        let panel = select_layout().detail_rect;
+        (0..CANVAS_W).filter(|x| (panel.y as u32..(panel.y + ROWS_Y) as u32).any(|y| one.pixel_at(*x, y) != other.pixel_at(*x, y))).collect()
+    }
+
+    #[test]
+    fn the_head_names_the_layout_key_while_a_row_with_a_replay_is_selected_and_the_panel_is_focused() {
+        let lines = panel_lines(Some(&ready_state()));
+        assert!(lines[0].replay_id.is_some() && lines[1].replay_id.is_none(), "the fixture's rows are not what the test needs");
+        let no_replays: Vec<PanelLine> = lines.iter().map(|line| PanelLine { replay_id: None, ..line.clone() }).collect();
+        let nothing_to_name = |focused| drawn_selecting(&no_replays, 0, focused);
+        assert!(!head_columns_that_differ(&drawn_selecting(&lines, 0, true), &nothing_to_name(true)).is_empty(), "a row with a replay selected names no key");
+        assert!(head_columns_that_differ(&drawn_selecting(&lines, 1, true), &nothing_to_name(true)).is_empty(), "a row without a replay names a key");
+        assert!(head_columns_that_differ(&drawn_selecting(&lines, 0, false), &nothing_to_name(false)).is_empty(), "a panel that is not focused names a key");
+    }
+
+    #[test]
+    fn the_layout_hint_stands_between_the_title_and_the_place_with_the_key_first_in_every_language() {
+        let lines = panel_lines(Some(&ready_state()));
+        let panel = select_layout().detail_rect;
+        let title_end = panel.x + RANK_X + text_width(PANEL_TITLE, TITLE_SCALE);
+        let place = RankingText::YouRank.fill(rbms_render::text::language(), &[&"#7"]);
+        let place_start = panel.x + panel.w - RANK_X - text_width(&place, TITLE_SCALE);
+        let columns = head_columns_that_differ(&drawn_selecting(&lines, 0, true), &drawn_selecting(&lines, 1, true));
+        assert!(columns.iter().all(|x| (*x as f32) > title_end && (*x as f32) < place_start), "the hint ran into the title or the place: {columns:?}");
+        for language in Language::ALL {
+            let hint = LayoutPlayText::PanelHint.fill(language, &[&key_name(Shortcut::ReplayPlayLayout.default_key())]);
+            assert!(hint.starts_with('J'), "{language:?}: the key does not come first in {hint:?}");
+        }
+    }
+
+    #[test]
+    fn the_layout_key_is_the_shortcut_and_not_one_of_the_panels_own_keys() {
+        let shipped = Shortcut::ReplayPlayLayout.default_key();
+        assert_eq!(panel_action(shipped), None, "{shipped:?} is a key of the panel's own");
     }
 
     #[test]

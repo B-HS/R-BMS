@@ -11,6 +11,7 @@
 use std::fmt;
 
 use rbms_chart::shuffle::NoteOption;
+use rbms_ir::{RandomOption, ReplayData};
 use rbms_model::translations::Catalog;
 use rbms_render::text::language;
 use rbms_store::{Replay, ScoreRecord};
@@ -39,6 +40,25 @@ pub(crate) struct LayoutRequest {
     pub(crate) random_label: String,
     pub(crate) seed: u64,
     pub(crate) source: String,
+}
+
+impl LayoutRequest {
+    /// The request a replay downloaded from the score server makes, for a row of the ranking of the
+    /// chart `row_md5`, whose player is `source`.
+    ///
+    /// The arrangement is named as the wire names it, so a CONVERGE is seen for what it is and not as
+    /// the OFF it is played back as; a replay that names none is the OFF the score server takes a
+    /// run for that names none. The chart is the one the replay states, and the row's own when it
+    /// states none, which is what the row's ranking asked for.
+    pub(crate) fn of_downloaded_replay(data: &ReplayData, row_md5: &str, source: String) -> LayoutRequest {
+        let stated = data.chart.as_ref().map(|chart| chart.md5.as_str()).filter(|md5| !md5.is_empty());
+        LayoutRequest {
+            md5: stated.unwrap_or(row_md5).to_string(),
+            random_label: format!("{:?}", data.random.unwrap_or(RandomOption::Off)),
+            seed: data.seed.unwrap_or_default(),
+            source,
+        }
+    }
 }
 
 /// A layout a run has borrowed: the arrangement and the seed its lanes are laid out with, and the
@@ -209,6 +229,22 @@ impl AppShared {
             borrowing.kept = kept;
         }
         Some(started)
+    }
+
+    /// Borrow the layout of `replay`, the replay `record` of this machine kept, for a run of the
+    /// library's chart `chart_index` played by hand ([`AppShared::borrow_layout`]), as the record
+    /// modal of the browser asks for it.
+    ///
+    /// The runs on the layout are held against the kept run under its name, by its replay note by
+    /// note ([`AppShared::borrowed_kept_run`]), as they are when the replay is borrowed from while it
+    /// is watched. Nothing is borrowed, and no run is held against, when the layout is refused.
+    pub(crate) fn borrow_layout_of_kept_run(&mut self, record: &ScoreRecord, replay: &Replay, chart_index: usize) -> Result<Transition, LayoutRefusal> {
+        let request = LayoutRequest { md5: replay.md5.clone(), random_label: replay.random.clone(), seed: replay.seed, source: fmt_datetime(record.played_at) };
+        let started = self.borrow_layout(request, chart_index)?;
+        if let Some(borrowing) = self.borrowed_layout.as_mut() {
+            borrowing.kept = KeptRun::of(record);
+        }
+        Ok(started)
     }
 
     /// Whether a run started now would be one the player plays by hand on its own: no course stage,
@@ -438,6 +474,115 @@ pub(crate) mod tests {
             judge: Default::default(),
             events: Vec::new(),
         }
+    }
+
+    /// The EX and the day of the run of this machine a test borrows the layout of.
+    const KEPT_EX: u32 = 321;
+    const KEPT_PLAYED_AT: i64 = 1_700_000_000_000;
+
+    /// The record of a run of the chart that kept `replay_file` as its replay.
+    fn kept_record(replay_file: Option<&str>) -> ScoreRecord {
+        ScoreRecord {
+            md5: chart_md5(),
+            title: String::new(),
+            mode: rbms_model::Mode::BEAT_7K.name.to_string(),
+            clear: 5,
+            ex_score: KEPT_EX,
+            max_ex: 1000,
+            counts: [0; 6],
+            empty_poor: 0,
+            max_combo: 0,
+            total_notes: 500,
+            gauge: String::new(),
+            gauge_value: 100.0,
+            random: String::new(),
+            played_at: KEPT_PLAYED_AT,
+            replay_file: replay_file.map(str::to_string),
+            rule_version: rbms_store::SCORE_RULE_VERSION,
+            ln_mode: SCORE_LN_MODE_FROM_CHART.to_string(),
+            assisted: false,
+            assist: 0,
+            log_id: None,
+        }
+    }
+
+    #[test]
+    fn a_kept_run_lends_its_layout_and_the_runs_on_it_are_held_against_that_run() {
+        let mut shared = a_library_of_one_chart("kept-run");
+        let record = kept_record(Some("kept.ron"));
+        let replay = watched_replay(NoteOption::Random);
+        let opened = shared.borrow_layout_of_kept_run(&record, &replay, 0);
+        assert!(matches!(opened, Ok(Transition::Open(_))), "the browser does not open the run over itself");
+        let source = fmt_datetime(KEPT_PLAYED_AT);
+        assert_eq!(shared.borrowed_layout(), Some(&BorrowedLayout { random: NoteOption::Random, seed: REPLAY_SEED, source: source.clone() }));
+        let (layout, kept) = shared.borrowed_kept_run(&chart_md5()).expect("the run on the layout is not held against the kept run");
+        assert_eq!((layout.source.as_str(), kept.ex), (source.as_str(), KEPT_EX));
+        assert_eq!(Some(&kept.ghost), GhostSource::of(&record).as_ref(), "the kept run is not the one its record names");
+        assert_eq!(next_layout(&mut shared), (NoteOption::Random, REPLAY_SEED));
+    }
+
+    #[test]
+    fn a_record_that_kept_no_replay_lends_a_layout_and_no_run() {
+        let mut shared = a_library_of_one_chart("kept-nothing");
+        shared.borrow_layout_of_kept_run(&kept_record(None), &watched_replay(NoteOption::Mirror), 0).expect("the layout is borrowed");
+        assert!(shared.borrowed_layout().is_some());
+        assert!(shared.borrowed_kept_run(&chart_md5()).is_none(), "a run that kept no replay was held against");
+    }
+
+    #[test]
+    fn a_kept_run_whose_layout_is_refused_borrows_nothing_and_holds_nothing() {
+        let record = kept_record(Some("kept.ron"));
+        let refused = |shared: &mut AppShared, replay: &Replay, chart_index: usize| shared.borrow_layout_of_kept_run(&record, replay, chart_index).err();
+        let mut shared = a_library_of_one_chart("kept-refused");
+        let other_chart = Replay { md5: "0123456789abcdef".to_string(), ..watched_replay(NoteOption::Random) };
+        assert!(matches!(refused(&mut shared, &other_chart, 0), Some(LayoutRefusal::ChartMismatch { .. })));
+        let no_seed = Replay { seed: 0, ..watched_replay(NoteOption::Random) };
+        assert_eq!(refused(&mut shared, &no_seed, 0), Some(LayoutRefusal::UnknownLayout));
+        assert!(matches!(refused(&mut shared, &watched_replay(NoteOption::Random), 1), Some(LayoutRefusal::ChartMismatch { .. })), "no chart at that index");
+        shared.course_run = Some(rbms_course::CourseRun::new(rbms_course::Course::default(), COURSE_OPENING_GAUGE));
+        assert_eq!(refused(&mut shared, &watched_replay(NoteOption::Random), 0), Some(LayoutRefusal::NotFreePlay));
+        assert!(shared.borrowed_layout().is_none() && shared.borrowed_kept_run(&chart_md5()).is_none());
+    }
+
+    #[test]
+    fn a_downloaded_replay_is_asked_for_as_the_wire_names_it() {
+        let md5 = chart_md5();
+        let data = |random, seed, stated: &str| ReplayData {
+            random,
+            seed,
+            chart: Some(rbms_ir::ChartId { md5: stated.to_string(), sha256: String::new() }),
+            ..ReplayData::default()
+        };
+        let asked = |data: &ReplayData| LayoutRequest::of_downloaded_replay(data, &md5, "Alice".to_string());
+
+        let spiral = asked(&data(Some(RandomOption::Spiral), Some(REPLAY_SEED), &md5));
+        assert_eq!((spiral.random_label.as_str(), spiral.seed, spiral.source.as_str()), ("Spiral", REPLAY_SEED, "Alice"));
+        assert_eq!(check_layout_request(&spiral, Some(&md5), true).map(|layout| layout.random), Ok(NoteOption::Rotate));
+
+        let converge = asked(&data(Some(RandomOption::Converge), Some(REPLAY_SEED), &md5));
+        assert_eq!(
+            check_layout_request(&converge, Some(&md5), true),
+            Err(LayoutRefusal::UnsupportedOption("Converge".to_string())),
+            "a CONVERGE was taken for OFF"
+        );
+
+        let unstated = asked(&data(None, None, &md5));
+        assert_eq!((unstated.random_label.as_str(), unstated.seed), ("Off", 0), "a replay naming no arrangement is the server's own default");
+        assert!(check_layout_request(&unstated, Some(&md5), true).is_ok());
+
+        let no_seed = asked(&data(Some(RandomOption::Random), None, &md5));
+        assert_eq!(check_layout_request(&no_seed, Some(&md5), true), Err(LayoutRefusal::UnknownLayout));
+
+        let elsewhere = asked(&data(Some(RandomOption::Random), Some(REPLAY_SEED), "0123456789abcdef"));
+        assert!(
+            matches!(check_layout_request(&elsewhere, Some(&md5), true), Err(LayoutRefusal::ChartMismatch { .. })),
+            "a replay of another chart was borrowed from"
+        );
+
+        let silent = asked(&data(Some(RandomOption::Random), Some(REPLAY_SEED), ""));
+        assert_eq!(silent.md5, md5, "a replay stating no chart is the row's own");
+        let no_chart = asked(&ReplayData { chart: None, ..data(Some(RandomOption::Random), Some(REPLAY_SEED), "") });
+        assert_eq!(no_chart.md5, md5);
     }
 
     #[test]

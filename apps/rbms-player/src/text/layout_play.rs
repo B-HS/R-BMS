@@ -18,6 +18,16 @@ rbms_model::translations! {
             "배치를 빌리지 않음: 이 기기에서 기록하지 않은 리플레이의 OFF 표시는 CONVERGE 배치일 수도 있어 배치를 알 수 없음",
             "配置を借りません: この機器で記録していないリプレイのOFF表示はCONVERGEの場合もあるため、配置が分かりません"
         ),
+        /// The key that plays the layout of the selected row's replay, in the head of the ranking
+        /// panel: the key first.
+        PanelHint => ("{0}  PLAY THIS LAYOUT", "{0}  이 배치로 플레이", "{0}  この配置でプレー"),
+        /// The replay a record of this machine kept, which the record modal's button borrows the
+        /// layout of, could not be read.
+        ReplayNotRead => (
+            "layout not borrowed: the replay could not be read ({0})",
+            "배치를 빌리지 않음: 리플레이를 읽을 수 없음 ({0})",
+            "配置を借りません: リプレイを読み込めません（{0}）"
+        ),
     }
 }
 

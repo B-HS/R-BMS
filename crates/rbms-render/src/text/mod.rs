@@ -13,7 +13,7 @@
 
 mod hud;
 mod result;
-mod select;
+pub(crate) mod select;
 
 use std::cell::Cell;
 

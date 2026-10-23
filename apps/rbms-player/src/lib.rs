@@ -129,7 +129,6 @@ use gpu::Gpu;
 use ir_ext::{MultiIr, ProfileResult, spawn_submit_all, submit_summary};
 use ir_outcome::{IR_RESULT_LINE_H, IR_RESULT_SCALE, IR_RESULT_X, IR_RESULT_Y, IrStatus, ir_line_color};
 use ir_ranking::{RANKING_CACHE_CAPACITY, RankingCache, RankingFetch};
-use ir_ranking_view::render_ranking_panel;
 use ir_session::AccountSession;
 use ir_sync::SyncLock;
 use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};
@@ -655,6 +654,8 @@ enum Hot {
     RankingRow(usize),
     ModalClose,
     ModalReplay,
+    /// The record modal's button that plays the chart laid out as the shown record's replay was.
+    ModalLayout,
     NavSearch,
     NavSort,
     NavFolders,

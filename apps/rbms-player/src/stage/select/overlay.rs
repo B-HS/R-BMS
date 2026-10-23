@@ -234,6 +234,7 @@ impl SelectState {
             let regions = rbms_render::render_select_modal(r, modal);
             hot.extend(regions.into_iter().filter_map(|(rect, region)| match region {
                 rbms_render::SelectHot::ModalReplay => Some((rect, Hot::ModalReplay)),
+                rbms_render::SelectHot::ModalLayout => Some((rect, Hot::ModalLayout)),
                 rbms_render::SelectHot::ModalClose => Some((rect, Hot::ModalClose)),
                 _ => None,
             }));
