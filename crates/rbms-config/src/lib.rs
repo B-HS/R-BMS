@@ -74,5 +74,5 @@ pub use speed::{
     GREEN_NUMBER_FINE_STEP, GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, GREEN_NUMBER_STEP, HeldSpeed, HeldTravel, duration_of_green, duration_stepped,
     duration_stepped_by_green, green_of_duration, held_speed, travel_duration_ms,
 };
-pub use tables::{DEFAULT_TABLES, DefaultTable, INSANE_TABLE_ID, table_address_key};
+pub use tables::{DEFAULT_TABLES, DefaultTable, INSANE_TABLE_ID, SATELLITE_TABLE_ID, STELLA_TABLE_ID, table_address_key};
 pub use window::{WINDOW_MODE_COUNT, WINDOW_MODE_LABELS, WINDOW_RESOLUTION_COUNT, WINDOW_RESOLUTION_LABELS, WindowMode, WindowResolution};

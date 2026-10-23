@@ -268,3 +268,25 @@ fn the_sites_copy_of_the_insane_table_is_reached_from_either_address() {
     assert_eq!(as_snapshot.fetch(SITE_PAGE).expect("the header's own relative body").entries.len(), 1_035);
     assert_eq!(as_snapshot.asked, vec![SITE_PAGE, SITE_HEADER, SITE_BODY], "a relative body is read beside the header");
 }
+
+/// A table shaped like the two of stellabms.xyz, with made-up contents: it is registered at its
+/// `table.html`, the page names `header.json`, the header names its body `score.json` and no order
+/// of levels, and carries its courses as a list of lists. The levels are read in numeric order, the
+/// symbol is the header's, and the courses are kept as they were written.
+#[test]
+fn a_stella_shaped_table_is_read_through_its_page() {
+    const STELLA_PAGE: &str = "https://tables.test/st/table.html";
+    const STELLA_HEADER: &str = "https://tables.test/st/header.json";
+    const STELLA_BODY: &str = "https://tables.test/st/score.json";
+    let header = r#"{"name": "Sample", "symbol": "st", "data_url": "score.json", "last_update": "2001.02.03", "course": [[{"name": "Sample st0", "md5": ["0000000000000000000000000000000a", "0000000000000000000000000000000b"], "constraint": ["grade", "gauge_lr2"], "trophy": []}]]}"#;
+    let body = r#"[{"md5": "0000000000000000000000000000000a", "level": "12", "title": "high"}, {"md5": "0000000000000000000000000000000b", "level": "0", "title": "low"}, {"md5": "0000000000000000000000000000000c", "level": "3", "title": "middle"}]"#;
+    let mut site = Site::default().serving(STELLA_PAGE, PAGE).serving(STELLA_HEADER, header).serving(STELLA_BODY, body);
+
+    let table = site.fetch(STELLA_PAGE).expect("a table page is a table");
+    assert_eq!(site.asked, vec![STELLA_PAGE, STELLA_HEADER, STELLA_BODY], "the body is found from the header, beside it");
+    assert_eq!(table.level_order, vec!["0", "3", "12"], "with no order in the header the levels are in numeric order");
+    assert_eq!(table.symbol, "st");
+    assert_eq!(table.named_symbol(), Some("st"));
+    assert_eq!((table.entries.len(), table.skipped), (3, 0));
+    assert_eq!(table.course.as_ref().and_then(|course| course.pointer("/0/0/name")).and_then(|name| name.as_str()), Some("Sample st0"));
+}
