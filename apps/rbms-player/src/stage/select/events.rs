@@ -299,7 +299,8 @@ pub(super) fn replay_in_slot(scores: &ScoreBook, md5: &str, slot: usize) -> Opti
 impl SelectState {
     /// Carries out the events the skin asked for since the last frame, oldest first within the
     /// browser's own and then the settings', until one of them leaves the browser. With the record
-    /// modal up an event closes it instead, as a press on a bar does.
+    /// modal up an event closes it instead, as a press on a bar does, and with the download modal up
+    /// an event is dropped: the modal takes every press.
     ///
     /// The writes of the two clusters are left where they are: the browser's own are carried out
     /// beside this ([`SelectState::carry_out_skin_writes`]) and a volume never waits in the queue.
@@ -307,6 +308,9 @@ impl SelectState {
         let mut events = Vec::new();
         for cluster in [Cluster::Select, Cluster::Options] {
             events.extend(shared.skin_requests().take_if(cluster, |request| matches!(request, ClusterRequest::Event { .. })));
+        }
+        if self.download_modal.is_some() {
+            return Transition::Stay;
         }
         if self.record_modal.is_some() {
             if !events.is_empty() {
@@ -333,9 +337,18 @@ impl SelectState {
 
     /// Run the event `id` with both its arguments (`MainState.executeEvent(e, arg1, arg2)`). The
     /// second is the step of the one event that takes one, and is nothing to every other.
+    ///
+    /// On a chart the library does not hold, every event that would play it -- play, autoplay,
+    /// practice and the replay slots -- asks for it instead (`MusicSelector.render`: a song bar
+    /// with no file opens its download site whatever the play mode).
     pub(super) fn run_event_stepping(&mut self, shared: &mut AppShared, id: i32, arg1: i32, arg2: i32) -> Transition {
         let forward = arg1 >= 0;
         match event_of(id) {
+            Some(SelectEvent::Play | SelectEvent::Autoplay | SelectEvent::Practice | SelectEvent::Replay(_))
+                if self.focused_bar(shared) == FocusedBar::Missing =>
+            {
+                self.open_download_modal_at_cursor(shared);
+            }
             Some(SelectEvent::Setting(SettingEvent::Duration)) => self.run_duration_event(shared, arg1, arg2),
             Some(SelectEvent::Setting(event)) => self.run_setting_event(shared, event, arg1),
             Some(SelectEvent::Mode) => self.mode_event(shared, forward),

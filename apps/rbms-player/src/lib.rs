@@ -84,6 +84,7 @@ mod library;
 mod main_tests;
 mod notify;
 mod number_row;
+mod open_url;
 mod play_sink;
 mod play_trace;
 mod pointer;
@@ -661,6 +662,9 @@ enum Hot {
     /// Everything on screen but the key guide the application draws over a skin: a press there
     /// closes it.
     GuideClose,
+    /// A button of the modal a chart the library does not hold opens, by its place in the modal's
+    /// row of buttons.
+    DownloadButton(usize),
 }
 
 /// The running application: the state that outlives a stage change, the screen that is up, and the

@@ -4,7 +4,8 @@
 //! skin's, and a skin has nothing to say it with: the hint on a list with nothing in it, the IR
 //! ranking panel, the record modal, the filter panel, the search box a word is typed into on a skin
 //! that has no search text of its own (one that has draws the word there instead), the mark of
-//! a search that is on show, the course tab's mark and the key guide ([`super::guide`]). They are
+//! a search that is on show, the course tab's mark, the key guide ([`super::guide`]) and the modal
+//! a chart the library does not hold opens ([`super::download_modal`]). They are
 //! laid out for the fixed screen the application's own screens use and drawn scaled out to the
 //! skin's, on top of it.
 //!
@@ -16,8 +17,8 @@
 //! Every one of them is also something to click on. Each registers where it is among the frame's
 //! clickable regions, in the order it is drawn, so a press that lands on one is the application's and
 //! never reaches the skin's objects beneath it ([`crate::AppShared::skin_pointer`] stands aside for
-//! anything the frame made clickable). The record modal and the guide are over the whole screen:
-//! a press anywhere on them is theirs.
+//! anything the frame made clickable). The record modal, the guide and the download modal are over
+//! the whole screen: a press anywhere on them is theirs.
 //!
 //! None of this is drawn for a browser no skin draws, which has all of it already.
 
@@ -25,6 +26,7 @@ use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_tex
 use rbms_skin::property::generated::STRING_DIRECTORY;
 
 use super::SelectState;
+use super::download_modal::render_download_modal;
 use super::filter::{filter_panel_rect, render_filter_panel};
 use super::guide::render_guide;
 use super::search::skin_search_text;
@@ -184,8 +186,8 @@ impl SelectState {
     /// where each of them takes a press.
     ///
     /// They are drawn from the lowest to the highest -- the hint, the strip of marks, the filter, the
-    /// ranking, the guide, the record modal -- and registered in that order, which is what makes the
-    /// one drawn on top the one a press lands on.
+    /// ranking, the guide, the record modal, the download modal -- and registered in that order,
+    /// which is what makes the one drawn on top the one a press lands on.
     ///
     /// The search box is drawn while a word is typed over a skin that has no search text of its
     /// own: it is what the reference's search popup is. A skin that has one draws the word there,
@@ -227,6 +229,9 @@ impl SelectState {
                 rbms_render::SelectHot::ModalClose => Some((rect, Hot::ModalClose)),
                 _ => None,
             }));
+        }
+        if let Some(modal) = &self.download_modal {
+            render_download_modal(r, modal, &mut hot);
         }
         shared.hot.extend(hot);
     }

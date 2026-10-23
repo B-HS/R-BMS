@@ -3089,6 +3089,7 @@ dependencies = [
  "rbms-chart",
  "rbms-config",
  "rbms-course",
+ "rbms-download",
  "rbms-ir",
  "rbms-judge",
  "rbms-library",

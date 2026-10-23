@@ -140,6 +140,7 @@ impl SelectState {
     /// typed into. A search word being typed is not one of these: the list moves under the box.
     pub(super) fn list_is_covered(&self, ctx: &FrameCtx<'_>) -> bool {
         self.record_modal.is_some()
+            || self.download_modal.is_some()
             || self.filter.is_open()
             || self.guide_open
             || self.ranking_open
@@ -364,8 +365,12 @@ impl SelectState {
 
     /// Carry out the presses on the bars of the skin's wheel, oldest first, until one of them
     /// leaves the browser. With the record modal up a press closes it instead, as a click that
-    /// misses it always has.
+    /// misses it always has, and with the download modal up a press is the modal's and reaches no
+    /// bar.
     fn press_bars(&mut self, shared: &mut AppShared, presses: Vec<SkinAction>) -> Transition {
+        if self.download_modal.is_some() {
+            return Transition::Stay;
+        }
         if self.record_modal.is_some() {
             if !presses.is_empty() {
                 self.record_modal = None;

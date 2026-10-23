@@ -35,6 +35,7 @@ rbms-table = { workspace = true }
 rbms-store = { workspace = true }
 rbms-library = { workspace = true }
 rbms-course = { workspace = true }
+rbms-download = { workspace = true }
 gilrs = { workspace = true }
 winit = "0.30.13"
 pollster = "0.4.0"

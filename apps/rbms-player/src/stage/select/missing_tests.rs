@@ -274,14 +274,15 @@ fn the_cursor_on_a_missing_chart_stays_when_it_becomes_owned() {
 }
 
 #[test]
-fn entering_a_missing_chart_starts_nothing() {
+fn entering_a_missing_chart_opens_the_modal_and_starts_nothing() {
     crate::notify::exclusive(|| {
         let mut browser = browser_in_the_level("missing-enter");
         browser.app.shared.sel = 2;
         assert!(matches!(browser.key(KeyCode::Enter), Transition::Stay), "a missing chart started something");
         let mut said = Vec::new();
         crate::notify::drain(&mut said);
-        assert_eq!(said, [(crate::notify::Level::Info, NOT_IN_THE_LIBRARY.to_owned())]);
+        assert!(said.is_empty(), "the modal speaks for the missing chart, not a notice: {said:?}");
+        assert!(browser.state.download_modal.is_some(), "the download modal did not open");
         assert_eq!(browser.app.shared.sel, 2, "the cursor moved");
     });
 }

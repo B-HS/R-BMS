@@ -16,8 +16,9 @@
 //! draws is not touched by any of them.
 //!
 //! What is the application's rather than a skin's is drawn over the skin ([`overlay`]): the hint on
-//! an empty list, the ranking panel, the record modal, the filter panel, the search box and the key
-//! guide ([`guide`]), each of which takes the keys and the mouse before the skin does.
+//! an empty list, the ranking panel, the record modal, the filter panel, the search box, the key
+//! guide ([`guide`]) and the modal a chart the library does not hold opens ([`download_modal`]),
+//! each of which takes the keys and the mouse before the skin does.
 //!
 //! The search is a state of its own ([`search`]): a word being typed takes the keys that are text
 //! and no others, and the list a word left on show is driven like any other list.
@@ -48,6 +49,9 @@ use crate::*;
 
 #[cfg(test)]
 mod bars_tests;
+mod download_modal;
+#[cfg(test)]
+mod download_modal_tests;
 mod events;
 #[cfg(test)]
 mod events_tests;
@@ -90,6 +94,7 @@ mod tree_tests;
 #[cfg(test)]
 mod user_folder_tests;
 
+use download_modal::{DownloadHands, DownloadModal, render_download_modal};
 use filter::{FilterKey, FilterPanel, render_filter_panel};
 use guide::GUIDE_KEY;
 use images::{SongImages, Wanted};
@@ -133,7 +138,8 @@ const RANKING_PANEL_SHIPPED_KEY: KeyCode = KeyCode::KeyI;
 const SCRATCH_REPEAT_DELAY: Duration = Duration::from_millis(SCROLL_DURATION_LOW_MS as u64);
 const SCRATCH_REPEAT_INTERVAL: Duration = Duration::from_millis(SCROLL_DURATION_HIGH_MS as u64);
 
-/// What the browser says when a chart a table lists that the library does not hold is asked for.
+/// What the browser says when a chart a table lists that the library does not hold is asked for and
+/// the table no longer lists it where the bar said ([`download_modal`]).
 const NOT_IN_THE_LIBRARY: &str = "not in the library";
 
 /// Start a course picked on the course tab or in the folder of the courses a table lists, unless
@@ -162,6 +168,10 @@ pub(crate) struct SelectState {
     /// When the records modal is open, the index into the focused chart's record list (newest
     /// first) currently shown in detail.
     record_modal: Option<usize>,
+    /// The modal over a chart a table lists that the library does not hold, while it is open, and
+    /// what it reaches the browser and the folder picker with.
+    download_modal: Option<DownloadModal>,
+    download_hands: DownloadHands,
     /// When the first Esc at the select root was pressed: a second press within
     /// [`crate::ROOT_ESC_CONFIRM`] quits, anything else cancels.
     esc_quit_at: Option<Instant>,
@@ -261,6 +271,8 @@ impl Default for SelectState {
     fn default() -> SelectState {
         SelectState {
             record_modal: None,
+            download_modal: None,
+            download_hands: DownloadHands::default(),
             esc_quit_at: None,
             ranking_open: false,
             ranking_sel: 0,
@@ -458,8 +470,9 @@ impl SelectState {
                 self.enter_folder(shared, target);
                 Transition::Stay
             }
-            Some(SelectItem::Missing(_)) => {
-                crate::notify::notify(crate::notify::Level::Info, NOT_IN_THE_LIBRARY);
+            Some(SelectItem::Missing(missing)) => {
+                let missing = *missing;
+                self.open_download_modal(shared, &missing);
                 Transition::Stay
             }
             Some(SelectItem::Course(course)) => {
@@ -525,8 +538,12 @@ impl SelectState {
     }
 
     /// Open the practice panel on the focused chart. The panel needs the parsed chart, so the load
-    /// path is the one a run takes and the flag is what makes it land on the panel instead.
+    /// path is the one a run takes and the flag is what makes it land on the panel instead. On a
+    /// chart the library does not hold it asks for the chart instead, as every key that plays does.
     fn start_practice(&mut self, shared: &mut AppShared) -> Transition {
+        if self.open_download_modal_at_cursor(shared) {
+            return Transition::Stay;
+        }
         let Some(index) = shared.focused_song_index() else {
             return Transition::Stay;
         };
@@ -1049,11 +1066,12 @@ impl SelectState {
 
 impl StageHandler for SelectState {
     /// The browser keeps the keys from the option overlay while something on it is being typed into
-    /// or read: the search box, the record modal, the filter panel, the key guide. The option
-    /// overlay opens on a shift key, and a shift key held to type a capital letter belongs to the
-    /// search box rather than to it. A list a search left on show is not one of these: it is a list.
+    /// or read: the search box, the record modal, the download modal, the filter panel, the key
+    /// guide. The option overlay opens on a shift key, and a shift key held to type a capital letter
+    /// belongs to the search box rather than to it. A list a search left on show is not one of
+    /// these: it is a list.
     fn holds_keys(&self, ctx: &FrameCtx<'_>) -> bool {
-        ctx.shared.searching || self.record_modal.is_some() || self.filter.is_open() || self.guide_open
+        ctx.shared.searching || self.record_modal.is_some() || self.download_modal.is_some() || self.filter.is_open() || self.guide_open
     }
 
     /// Arriving back on the browser is when the course list is re-resolved: a scan that has just
@@ -1090,6 +1108,7 @@ impl StageHandler for SelectState {
         crate::tablesrc::start_first_fetches(ctx.shared);
         crate::tablesrc::apply_finished_fetches(ctx.shared);
         crate::user_folders::apply_finished_fetch(ctx.shared);
+        self.poll_download_folder(ctx.shared);
         let skin = skin_status(ctx.shared);
         if ctx.shared.skin_text_is_focused() {
             self.confirm_search(ctx.shared);
@@ -1181,6 +1200,10 @@ impl StageHandler for SelectState {
             self.guide_key(key.code);
             return Transition::Stay;
         }
+        if self.download_modal.is_some() {
+            self.download_modal_key(ctx.shared, key.code);
+            return Transition::Stay;
+        }
         if self.record_modal.is_some() {
             return self.modal_key(ctx.shared, &key);
         }
@@ -1255,6 +1278,10 @@ impl StageHandler for SelectState {
         let Some(index) = key_index_of(ctx.shared.mode, lane, dir) else {
             return Transition::Stay;
         };
+        if self.download_modal.is_some() && skin_status(ctx.shared) != SkinStatus::Reading {
+            self.download_modal_lane(ctx.shared, index);
+            return Transition::Stay;
+        }
         match skin_status(ctx.shared) {
             SkinStatus::Reading => return Transition::Stay,
             SkinStatus::Ready => {
@@ -1283,6 +1310,11 @@ impl StageHandler for SelectState {
     /// keyboard shortcuts, and a click that misses every region closes an open modal.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
         if !is_left_press(button, pressed) {
+            return Transition::Stay;
+        }
+        if self.download_modal.is_some() {
+            let hit = ctx.shared.hit_test(at);
+            self.download_modal_click(ctx.shared, hit);
             return Transition::Stay;
         }
         match ctx.shared.hit_test(at) {
@@ -1428,6 +1460,11 @@ impl StageHandler for SelectState {
         }
         if self.filter.is_open() {
             render_filter_panel(canvas, &self.filter, &ctx.shared.config);
+        }
+        if let Some(modal) = &self.download_modal {
+            let mut hot = Vec::new();
+            render_download_modal(canvas, modal, &mut hot);
+            ctx.shared.hot.extend(hot);
         }
     }
 }
