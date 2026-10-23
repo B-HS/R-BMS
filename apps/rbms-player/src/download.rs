@@ -1,11 +1,12 @@
 //! Getting a chart a difficulty table links to, and bringing it into the library.
 //!
 //! The song list asks for a chart the library does not hold from its download modal. One job runs
-//! at a time, on a worker thread of its own: the folder `.rbms-partial` in the download folder is
-//! emptied, the zip archive the chart's link names is fetched into it
-//! ([`rbms_download::download_to`]), unpacked beside it ([`rbms_download::extract_zip`]) and moved
-//! to a folder of its own in the download folder that takes nothing else's place
-//! ([`rbms_download::settle`]). An archive with no chart in it leaves nothing behind.
+//! at a time, on a worker thread of its own: the folder in the download folder a job works in
+//! ([`DOWNLOAD_WORK_FOLDER`], which no scan of the library walks into) is emptied, the zip archive
+//! the chart's link names is fetched into it ([`rbms_download::download_to`]), unpacked beside it
+//! ([`rbms_download::extract_zip`]) and moved to a folder of its own in the download folder that
+//! takes nothing else's place ([`rbms_download::settle`]). An archive with no chart in it leaves
+//! nothing behind.
 //!
 //! What a finished job unpacked is then scanned on another worker thread, and only that folder
 //! ([`ScanRequest::partial`]): a scan of part of the library does not record the parser version, so
@@ -18,7 +19,9 @@
 //!
 //! Each time a library is taken in, the library generation goes up, and a full scan's does too. A
 //! scan that began under another generation read a database the full scan has changed since, so
-//! what it read is not taken in and the same folders are scanned again.
+//! what it read is not taken in and the same folders are scanned again, the chart waiting for them
+//! with it. A table that arrived while the scan ran raised the table generation, and the copy of it
+//! the scan matched may be older than the one the song list holds: that scan is run again too.
 //!
 //! The same scan of part of the library brings in the download folder itself when the settings
 //! name another one, which the full scans at start-up and after the song folders change would
@@ -37,7 +40,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use rbms_config::TableSource;
 use rbms_download::{DownloadError, ExtractLimits, LinkKind, Progress, classify_link, extract_zip, safe_folder_name, settle};
 use rbms_library::Library;
-use rbms_library::scan::ScanRequest;
+use rbms_library::scan::{DOWNLOAD_WORK_FOLDER, ScanRequest};
 use rbms_table::TableEntry;
 
 use crate::AppShared;
@@ -49,13 +52,10 @@ use crate::tablesrc::{MatchedTable, TableStore, read_and_match_all};
 #[cfg(test)]
 pub(crate) mod tests;
 
-/// The folder in the download folder a job works in. It is emptied when a job starts and removed
-/// when it ends.
-const PARTIAL_FOLDER: &str = ".rbms-partial";
-
-/// The file the archive is fetched into, and the folder it is unpacked into, inside
-/// [`PARTIAL_FOLDER`]. Only one job runs at a time, so the names are fixed rather than taken from
-/// a table's entry.
+/// The file the archive is fetched into, and the folder it is unpacked into, inside the folder in
+/// the download folder a job works in ([`DOWNLOAD_WORK_FOLDER`]), which is emptied when a job
+/// starts, removed when it ends and never read by a scan of the library. Only one job runs at a
+/// time, so the names are fixed rather than taken from a table's entry.
 const ARCHIVE_FILE: &str = "archive.zip";
 const STAGING_FOLDER: &str = "unpacked";
 
@@ -163,12 +163,14 @@ struct Refreshed {
 }
 
 /// A scan of part of the library and the match of the tables after it, with what it was started
-/// under: the folders, the chart it is for, the library generation and the tables.
+/// under: the folders, the chart it is for, the library generation, the tables and the table
+/// generation.
 struct LibraryRefresh {
     roots: Vec<String>,
     awaited: Option<Awaited>,
     generation: u64,
     sources: Vec<TableSource>,
+    table_generation: u64,
     landing: Landing<Refreshed>,
 }
 
@@ -336,8 +338,9 @@ pub(crate) fn status(shared: &AppShared) -> Option<JobStatus> {
 ///
 /// A job that ended has its folder scanned once no other scan is running; a job that failed or was
 /// cancelled is said to have. The download folder is scanned the same way when the settings name
-/// another one. A scan that came back under the library generation it began with is taken in;
-/// one that did not is run again.
+/// another one. A scan that came back under the library generation, the tables and the table
+/// generation it began with is taken in; one that did not is run again, for the chart waiting for
+/// its folder as well.
 pub(crate) fn apply_finished(shared: &mut AppShared) -> Option<LibraryChange> {
     take_finished_job(shared);
     let folder = shared.config.library.download_folder_path().map(str::to_owned);
@@ -407,14 +410,16 @@ fn take_finished_refresh(shared: &mut AppShared) -> Option<LibraryChange> {
             return None;
         }
     };
-    if refresh.generation != shared.library_generation || refresh.sources != shared.config.library.tables {
+    if refresh.generation != shared.library_generation || refresh.sources != shared.config.library.tables || refresh.table_generation != shared.table_generation
+    {
         let mut roots = refresh.roots;
         for queued in std::mem::take(&mut shared.downloads.queued) {
             if !roots.contains(&queued) {
                 roots.push(queued);
             }
         }
-        start_refresh(shared, roots, refresh.awaited);
+        let awaited = refresh.awaited.or_else(|| shared.downloads.awaited.take());
+        start_refresh(shared, roots, awaited);
         return None;
     }
     let (library, tables) = refreshed;
@@ -447,7 +452,8 @@ fn start_refresh(shared: &mut AppShared, roots: Vec<String>, awaited: Option<Awa
     let sources = shared.config.library.tables.clone();
     let (scanned, matched) = (roots.clone(), sources.clone());
     let landing = Landing::spawn(move || refresh_library(&db_path, scanned, &store, &matched));
-    shared.downloads.refresh = Some(LibraryRefresh { roots, awaited, generation: shared.library_generation, sources, landing });
+    shared.downloads.refresh =
+        Some(LibraryRefresh { roots, awaited, generation: shared.library_generation, sources, table_generation: shared.table_generation, landing });
 }
 
 /// The worker of a scan of part of the library: scan `roots` into the song database at `db_path`,
@@ -464,7 +470,7 @@ fn refresh_library(db_path: &Path, roots: Vec<String>, store: &TableStore, sourc
 /// The worker of a job: fetch `url` and unpack it into a new folder called `name` in `folder`.
 /// Whatever happens, nothing is left in the folder the job works in.
 fn fetch_and_unpack(url: &str, folder: &Path, name: &str, fetch: &Fetch, progress: &Progress, cancel: &AtomicBool) -> Result<Settled, DownloadError> {
-    let partial = folder.join(PARTIAL_FOLDER);
+    let partial = folder.join(DOWNLOAD_WORK_FOLDER);
     let result = empty_folder(&partial).map_err(DownloadError::from).and_then(|()| unpack_into(url, &partial, folder, name, fetch, progress, cancel));
     let _ = fs::remove_dir_all(&partial);
     result

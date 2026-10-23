@@ -303,6 +303,27 @@ fn charts_in_nested_folders_are_found_and_carry_their_own_folder() {
     assert!(stored[0].path.ends_with("/pack/deep/song.bms"), "paths are stored with forward separators: {}", stored[0].path);
 }
 
+/// What a download has half fetched or half unpacked is not a chart of the library, at whatever
+/// depth its work folder is, and a chart that was let in from there before is dropped.
+#[test]
+fn the_folder_a_download_works_in_is_never_walked_into() {
+    let fixture = Fixture::new("download-work");
+    fixture.write("pack/song.bms", &chart("kept"));
+    fixture.write(&format!("{DOWNLOAD_WORK_FOLDER}/unpacked/half.bms"), &chart("half unpacked"));
+    fixture.write(&format!("downloads/{DOWNLOAD_WORK_FOLDER}/unpacked/deep/half.bms"), &chart("half unpacked deeper"));
+    fixture.write(&format!("downloads/Settled{DOWNLOAD_WORK_FOLDER}/song.bms"), &chart("named alike"));
+    let mut db = db();
+    let ghost = SongRow { path: normalize(&fixture.root.join(DOWNLOAD_WORK_FOLDER).join("unpacked").join("gone.bms")), ..SongRow::default() };
+    db.upsert_batch(std::slice::from_ref(&ghost)).expect("store a row the walk once let in");
+
+    let request = ScanRequest::new(fixture.roots(), false);
+    scan(&mut db, &request);
+    assert_eq!(request.progress.counts().found, 2, "a chart under the folder a download works in was walked into the scan");
+    let mut titles: Vec<String> = db.all_songs().expect("read the charts").into_iter().map(|song| song.title).collect();
+    titles.sort();
+    assert_eq!(titles, ["kept", "named alike"], "the work folder's charts were stored, or a folder only named like it was skipped");
+}
+
 #[test]
 fn a_scan_stores_the_stamp_it_read_the_file_at() {
     let fixture = Fixture::new("stamp");

@@ -463,3 +463,90 @@ fn a_download_folder_chosen_in_the_settings_is_scanned_on_the_browser() {
     player.frame();
     assert_eq!(player.titles(), ["Stranger"], "the chart in the chosen folder is not in the library");
 }
+
+/// A chart got while a scan of a newly chosen download folder ran is waiting for that scan when a
+/// full scan overtakes it. The scan run again carries the chart with it, so the job ends with the
+/// chart in the library and another can be started: it is not left waiting for a scan that never
+/// comes. Which frame the overtaken scan lands in does not matter.
+#[test]
+fn a_chart_waiting_for_an_overtaken_scan_is_carried_into_the_scan_run_again() {
+    crate::notify::exclusive(|| {
+        let md5 = md5_of(ZIP_CHART);
+        let mut player = Player::new("carried", &[entry(&md5, ZIP_TITLE, ZIP_URL)], serving(ZIP_URL, stored_zip(&[("chart.bms", ZIP_CHART)])));
+        let wanted = player.on_missing(&md5);
+        let chosen = player.root.join("chosen");
+        fs::create_dir_all(&chosen).expect("the chosen folder is writable");
+        fs::write(chosen.join("stranger.bms"), STRANGER_CHART).expect("the chart in the chosen folder is written");
+        player.app.shared.config.library.download_folder = Some(chosen.to_string_lossy().into_owned());
+        player.frame();
+        assert!(player.app.shared.downloads.refresh.as_ref().is_some_and(|refresh| refresh.awaited.is_none()), "the chosen folder is not being scanned");
+
+        start_download(player.shared(), &wanted).expect("a download starts while a folder is scanned");
+        wait_for_the_job(player.shared());
+        player.app.shared.library_generation += 1;
+        player.frame();
+        while player.app.shared.downloads.refresh.is_some() {
+            wait_for_the_scan(player.shared());
+            player.frame();
+        }
+
+        assert_eq!(status(&player.app.shared).map(|job| job.phase), Some(Phase::Done { found: true, charts: 1 }), "the job was left waiting for a scan");
+        assert!(!player.app.shared.downloads.is_busy(), "another download would be refused");
+        assert_eq!(player.under_the_cursor(), (md5, true), "the chart got is not a bar of the library");
+        assert_eq!(said(), [(Level::Info, format!("downloaded: {ZIP_TITLE} (1 chart(s))"))]);
+    });
+}
+
+/// The address of the table in the test where it arrives while a scan of the downloads runs, and
+/// what the table calls itself before and after.
+const RACING_TABLE: &str = "https://tables.test/download-race/";
+const BEFORE: &str = "BEFORE";
+const AFTER: &str = "AFTER";
+
+/// A table that arrives while a scan of the downloads runs is matched against the copy the scan
+/// read before it arrived. Its fetch is held until the scan has read that copy, then let land
+/// before the scan is taken, the order one frame of the browser takes the two in. The scan does not
+/// put the copy it read back in place of the table that arrived: it is run again, and reads the
+/// copy the fetch kept.
+#[test]
+fn a_table_that_arrives_while_the_downloads_are_scanned_is_not_put_back_as_it_was() {
+    crate::notify::exclusive(|| {
+        let tables = crate::tablesrc::test_outside::FakeTables::default();
+        let _installed = tables.install();
+        let mut player = Player::new("table-race", &[], serving(ZIP_URL, Vec::new()));
+        let body = format!("[{}]", entry(&md5_of(STRANGER_CHART), "Stranger", ""));
+        let source = TableSource { name: String::new(), location: RACING_TABLE.to_owned(), group: String::new() };
+        let shared = player.shared();
+        TableStore::beside(&shared.settings_path).keep_for_tests(RACING_TABLE, BEFORE, body.as_bytes(), Some(crate::tablesrc::unix_now()));
+        tables.serve(RACING_TABLE, AFTER, body.as_bytes());
+        shared.config.library.tables = vec![source.clone()];
+        let matched = read_and_match_all(&TableStore::beside(&shared.settings_path), &shared.config.library.tables, &shared.library, &AtomicUsize::new(0));
+        shared.set_tables(matched);
+        assert_eq!(shared.table_names, [BEFORE]);
+
+        let open = tables.hold();
+        let store = TableStore::beside(&shared.settings_path);
+        assert_eq!(shared.table_fetches.start(store, vec![source], crate::tablesrc::FetchWhy::Stale), 1);
+        let chosen = player.root.join("chosen");
+        fs::create_dir_all(&chosen).expect("the chosen folder is writable");
+        fs::write(chosen.join("stranger.bms"), STRANGER_CHART).expect("the chart in the chosen folder is written");
+        player.app.shared.config.library.download_folder = Some(chosen.to_string_lossy().into_owned());
+        player.frame();
+        wait_for_the_scan(player.shared());
+        drop(open);
+        while !crate::tablesrc::apply_finished_fetches(player.shared()) {
+            std::thread::yield_now();
+        }
+        assert_eq!(player.app.shared.table_names, [AFTER], "the table that arrived is not in the list");
+
+        player.frame();
+        assert_eq!(player.app.shared.table_names, [AFTER], "the scan put back the copy it read before the table arrived");
+        assert!(player.app.shared.downloads.refresh.is_some(), "the scan that read an older copy was not run again");
+        wait_for_the_scan(player.shared());
+        player.frame();
+        assert_eq!(player.app.shared.table_names, [AFTER], "the scan run again did not read the copy the fetch kept");
+        assert_eq!(player.titles(), ["Stranger"], "the scan run again was not taken in");
+        crate::tablesrc::forget_table_status(RACING_TABLE);
+        said();
+    });
+}

@@ -52,6 +52,11 @@ const CONTROL_FLOW_COMMANDS: [&[u8]; 4] = [b"#RANDOM", b"#SETRANDOM", b"#SWITCH"
 /// Extension of the text file whose presence next to a chart sets `CONTENT_TEXT`.
 const TEXT_EXTENSION: &str = "txt";
 
+/// The name of the folder a download of a chart works in, inside the folder it downloads to. What
+/// is in it is half fetched or half unpacked, and is moved out of it or removed, so a scan never
+/// walks into a folder of that name: what it would find there is not a chart of the library.
+pub const DOWNLOAD_WORK_FOLDER: &str = ".rbms-partial";
+
 /// How far a scan has got. The screen driving it reads these while the scan runs.
 #[derive(Debug, Default)]
 pub struct ScanProgress {
@@ -175,7 +180,8 @@ struct Found {
 }
 
 /// Walk every root depth-first, collecting chart files and their stamps. Symbolic links are not
-/// followed, so a link pointing back up its own tree cannot make the walk run forever.
+/// followed, so a link pointing back up its own tree cannot make the walk run forever, and the
+/// folder a download works in ([`DOWNLOAD_WORK_FOLDER`]) is not walked into.
 fn enumerate(roots: &[String], progress: &ScanProgress, cancel: &AtomicBool) -> Vec<Found> {
     let mut out = Vec::new();
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
@@ -198,7 +204,9 @@ fn enumerate(roots: &[String], progress: &ScanProgress, cancel: &AtomicBool) -> 
             }
             let path = entry.path();
             if kind.is_dir() {
-                stack.push(path);
+                if entry.file_name() != DOWNLOAD_WORK_FOLDER {
+                    stack.push(path);
+                }
                 continue;
             }
             if is_text(&path) {

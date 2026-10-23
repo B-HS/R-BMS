@@ -1075,6 +1075,7 @@ fn set_table_slot(shared: &mut AppShared, at: usize, table: MatchedTable) {
     shared.table_names[at] = table.name;
     shared.table_levels[at] = table.levels;
     shared.table_extras[at] = table.extras;
+    shared.table_generation = shared.table_generation.wrapping_add(1);
 }
 
 impl AppShared {
@@ -1110,12 +1111,14 @@ impl AppShared {
         if at < self.table_extras.len() {
             self.table_extras.remove(at);
         }
+        self.table_generation = self.table_generation.wrapping_add(1);
     }
 
     /// Put `tables`, one for each source in the order of the sources, in place of the ones the list
     /// was showing.
     pub(crate) fn set_tables(&mut self, tables: Vec<MatchedTable>) {
         (self.table_names, self.table_levels, self.table_extras) = split_matched(tables);
+        self.table_generation = self.table_generation.wrapping_add(1);
     }
 }
 

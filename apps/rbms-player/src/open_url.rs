@@ -6,8 +6,10 @@
 //! on Windows that is why it is `rundll32` and not `cmd /C start`, which reads `&`, `|`, `^` and `%`
 //! in an address the way a table's links are full of.
 
+#[cfg(not(test))]
 use std::process::{Command, Stdio};
 
+#[cfg(not(test))]
 use crate::notify::{Level, notify};
 
 /// The program that hands an address to the browser on macOS.
@@ -53,6 +55,7 @@ fn hand_to(raw: &str, launch: impl FnOnce(&'static str, Vec<String>)) -> bool {
 
 /// Run the opener on a thread of its own and wait for it there, so the frame loop never waits on it
 /// and it leaves no process behind. An opener that cannot be run, or that says it failed, is told.
+#[cfg(not(test))]
 fn launch(program: &'static str, arguments: Vec<String>) {
     std::thread::spawn(move || {
         let ran = Command::new(program).args(&arguments).stdin(Stdio::null()).spawn().and_then(|mut child| child.wait());
@@ -62,6 +65,12 @@ fn launch(program: &'static str, arguments: Vec<String>) {
             Err(error) => notify(Level::Warn, format!("could not open the browser: {error}")),
         }
     });
+}
+
+/// A test is never handed the system's opener: one that reaches for it fails there and then.
+#[cfg(test)]
+fn launch(program: &'static str, arguments: Vec<String>) {
+    panic!("a test reached for the system's opener: {program} {arguments:?}");
 }
 
 /// Hand `raw` to the browser on a thread of its own, which waits for the opener so it leaves no
@@ -98,9 +107,10 @@ mod tests {
         assert_eq!(handed, Some(opener_command(SONG_PAGE)), "the address checked is the address handed on");
     }
 
-    /// Opening an address the check refuses runs nothing, so it is safe to ask for from anywhere.
+    /// Opening an address the check refuses runs nothing, so it is safe to ask for from anywhere. In
+    /// a test the opener fails the moment it is reached, so an address let through fails this.
     #[test]
-    fn opening_a_refused_address_does_nothing() {
+    fn opening_a_refused_address_runs_nothing() {
         for raw in ["javascript:alert(1)", "file:///etc/passwd", "-a Calculator"] {
             open_in_browser(raw);
         }

@@ -11,6 +11,10 @@ static FIXTURE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 /// How long a test waits for a background scan before calling it hung.
 const SCAN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long a scan that should be waiting for the song database is given to get on regardless: far
+/// longer than one that does not wait takes to open the database and walk a folder of one chart.
+const WAITING_SCAN_GRACE: Duration = Duration::from_millis(300);
+
 struct Fixture {
     root: PathBuf,
 }
@@ -223,6 +227,10 @@ fn a_scan_cancelled_before_it_starts_reports_as_cancelled_and_stores_nothing() {
     assert!(report.library.is_empty());
 }
 
+/// A scan that starts while another holds the song database waits for it before it so much as
+/// opens the file. The scanner says when it is about to scan, and the test, still holding the
+/// database, gives it a while to get on before looking: a scan that waits has done nothing however
+/// long it is given, so the look can only fail when the scan did not wait.
 #[test]
 fn two_scans_never_write_the_song_database_at_once() {
     let fixture = Fixture::new("one-writer");
@@ -230,23 +238,23 @@ fn two_scans_never_write_the_song_database_at_once() {
     let db_path = fixture.root.join(SONGDB_FILE);
     let request = ScanRequest::partial(vec![fixture.root.to_string_lossy().into_owned()]);
     let progress = Arc::clone(&request.progress);
-    let order = Arc::new(Mutex::new(Vec::new()));
 
     let writing = LIBRARY_WRITE.lock().unwrap_or_else(PoisonError::into_inner);
+    let (starting, started) = std::sync::mpsc::channel();
     let scanner = {
-        let order = Arc::clone(&order);
+        let db_path = db_path.clone();
         std::thread::spawn(move || {
-            let report = scan_now(&db_path, &request);
-            order.lock().unwrap_or_else(PoisonError::into_inner).push("scanned");
-            report
+            let _ = starting.send(());
+            scan_now(&db_path, &request)
         })
     };
+    started.recv_timeout(SCAN_TIMEOUT).expect("the scanner is about to scan");
+    std::thread::sleep(WAITING_SCAN_GRACE);
     assert_eq!(progress.counts().found, 0, "the second scan walked its folder while the first held the database");
-    order.lock().unwrap_or_else(PoisonError::into_inner).push("released");
+    assert!(!db_path.exists(), "the second scan opened the song database while the first held it");
     drop(writing);
 
     let report = scanner.join().expect("the scan thread ends");
-    assert_eq!(*order.lock().unwrap_or_else(PoisonError::into_inner), ["released", "scanned"], "the second scan did not wait for the first");
     assert_eq!((report.upserted, report.failure), (1, None), "the scan that waited did its work");
 }
 

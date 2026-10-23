@@ -747,6 +747,10 @@ struct AppShared {
     /// How many times the library has been read again since the run began, by a full scan or by a
     /// scan of part of it: a scan that began under another count read a database changed since.
     library_generation: u64,
+    /// How many times a table's slot has been put in place, taken out or replaced since the run
+    /// began: a scan of part of the library that began under another count matched copies of the
+    /// tables older than the ones the song list holds now.
+    table_generation: u64,
     /// The signed-in player's own folders of charts and the fetch of them, which like a table's
     /// outlives the screen that started it.
     user_folders: user_folders::UserFolders,
@@ -1118,6 +1122,7 @@ impl App {
                 table_fetches,
                 downloads,
                 library_generation: 0,
+                table_generation: 0,
                 user_folders: user_folders::UserFolders::default(),
                 select_path: Vec::new(),
                 select_items: Vec::new(),
