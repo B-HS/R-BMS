@@ -184,6 +184,24 @@ fn copy_up_to(from: &mut impl Read, to: &mut File, allowed: u64, cancel: &Atomic
     }
 }
 
+/// Whether writing `relative` under `into` would meet something already there: the name itself, or a file where one of its
+/// folders should be. Asking the file system up front gives the same answer everywhere, where the error a refused create
+/// returns differs (Windows reports a folder in the way as access denied, not as an existing name).
+fn is_taken(into: &Path, relative: &Path) -> bool {
+    let mut at = into.to_path_buf();
+    let mut parts = relative.components().peekable();
+    while let Some(part) = parts.next() {
+        at.push(part);
+        let Ok(found) = fs::symlink_metadata(&at) else {
+            return false;
+        };
+        if parts.peek().is_none() || !found.is_dir() {
+            return true;
+        }
+    }
+    false
+}
+
 fn unpack(archive: &mut ZipArchive<impl Read + Seek>, into: &Path, limits: &ExtractLimits, cancel: &AtomicBool) -> Result<ExtractReport, DownloadError> {
     let mut report = ExtractReport::default();
     let mut unpacked_bytes = 0u64;
@@ -205,6 +223,10 @@ fn unpack(archive: &mut ZipArchive<impl Read + Seek>, into: &Path, limits: &Extr
             }
             Plan::Write { relative, is_chart } => (relative, is_chart),
         };
+        if is_taken(into, &relative) {
+            report.skipped += 1;
+            continue;
+        }
         let target = into.join(&relative);
         let mut entry = archive.by_index(index).map_err(DownloadError::Archive)?;
         let created = fs::create_dir_all(target.parent().unwrap_or(into)).and_then(|()| OpenOptions::new().write(true).create_new(true).open(&target));
