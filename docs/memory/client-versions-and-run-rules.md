@@ -1,6 +1,6 @@
 # 클라이언트의 버전 상수와 실행 규칙
 
-최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+최종 갱신 2026-10-24 · 대응 커밋 ec48d8d
 
 다음 세션이 다시 찾지 않도록 모아 둔 사실이다. 값은 코드가 정본이고, 바뀌면 이 문서를 같이 고친다.
 
@@ -13,6 +13,9 @@
 | 설정 스키마 `CURRENT_SCHEMA_VERSION` | 6 | `crates/rbms-config/src/schema.rs` | 올라가면 첫 실행이 `settings.ron.v<이전>.bak` 을 남긴다 |
 | KEY DEBOUNCE | 기본 16 ms, 0~100 | 설정 키 `play.key_debounce_ms` (`crates/rbms-config/src/schema.rs`) | 키보드의 LR2 형 디바운스 |
 | PAD DEBOUNCE | 기본 16 ms, 0~100 | 키 설정 파일 `keyconfig.ron` 의 `pad.debounce_ms` | 컨트롤러의 LR2 형 디바운스. 설정 화면의 INPUT 탭에서 바꾸지만 값은 `settings.ron` 이 아니라 `keyconfig.ron` 에 있다 |
+| 설정 행 수 `SETTING_COUNT` | 97 | `crates/rbms-config/src/settings.rs` | 2026-10-23 에 COURSE GAUGE, MISSING CHARTS, DOWNLOAD FOLDER, DISCORD STATUS 가 더해졌다. 길이 고정 배열(예 `apps/rbms-player/src/settings_ui.rs` 시험 고정표)이 함께 바뀐다 |
+| 2026-10-23 설정 필드 | 스키마 6 그대로(`#[serde(default)]`, `skip_serializing_if` 없음) | `crates/rbms-config/src/schema.rs` | `play.scratch_auto_color`, `judge.course_gauge`(LR2 기본), `library.download_folder`(기기 고유, 업로드에서 뺌), `library.show_missing_charts`(켬), `network.discord_status`(켬), `library.tables[].group`(빈 값도 기록). 하나라도 바뀌면 `contract/client-requests/settings-blob.json` 을 `RBMS_UPDATE_CONTRACT=1 cargo test --locked -p rbms-player --lib a_settings_upload` 로 다시 만든다 |
+| Discord Application ID | `1563156237539999865` | `apps/rbms-player/src/discord_presence.rs` 의 `DISCORD_APPLICATION_ID` | 비밀이 아니다. Art Asset 키 `rbms`(Developer Portal) |
 
 ## 실행 규칙
 
