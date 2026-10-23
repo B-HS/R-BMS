@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import math
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
-from sprites import OPAQUE, WHITE, Rgb, Sprite, block, font_at, glyph_rows, palette, themes, tinted, word
+from sprites import OPAQUE, ROOT, WHITE, Rgb, Sprite, block, font_at, glyph_rows, palette, themes, tinted, word
 
 BAR_SIZE = (728, 64)
 BAR_FILL_ALPHA = 26
 BAR_FAINT_ALPHA = 13
 BAR_TAG_SIZE = 18
-BAR_TAG_LEFT = 20
+BAR_TAG_LEFT = 72
 BARS = (
     ('bar_song', '', BAR_FILL_ALPHA),
     ('bar_folder', 'FOLDER', BAR_FILL_ALPHA),
@@ -41,6 +41,12 @@ LAMP_FRAMES: dict[str, tuple[str | None, ...]] = {
 }
 
 METER_SIZE = (512, 4)
+
+RANK_BADGE_SIZE = (48, 28)
+RANK_TEXT_SIZE = 18
+RANK_FONT_FILE = ROOT / 'font' / 'Inter-Bold.ttf'
+RANK_FACE = palette('rank')
+RANK_INK = palette('rank_ink')
 
 SUPERSAMPLE = 4
 ICON_SIDE = 32
@@ -94,6 +100,16 @@ def lamp_frames(name: str, frames: tuple[str | None, ...]) -> Sprite:
         if lamp is not None:
             image.paste((*LAMP[lamp], OPAQUE), (column * LAMP_CELL, 0, (column + 1) * LAMP_CELL, LAMP_CELL))
     return Sprite(name, image, len(frames), 1)
+
+
+def rank_badge(key: str) -> Sprite:
+    image = Image.new('RGBA', RANK_BADGE_SIZE, (*RANK_FACE[key], OPAQUE))
+    font = ImageFont.truetype(str(RANK_FONT_FILE), RANK_TEXT_SIZE)
+    text = key.upper()
+    _, top, _, bottom = font.getbbox(text, anchor='ls')
+    baseline = (RANK_BADGE_SIZE[1] - (bottom - top)) / 2 - top
+    ImageDraw.Draw(image).text((RANK_BADGE_SIZE[0] / 2, baseline), text, font=font, fill=(*RANK_INK[key], OPAQUE), anchor='ms')
+    return Sprite(f'rank_{key}', image)
 
 
 def smooth(side: int, paint) -> Image.Image:
@@ -157,6 +173,7 @@ def build() -> list[Sprite]:
     sprites += [lamp_strip(f'lamp_strip{suffix}', surface) for suffix, surface in themes().items()]
     sprites += [lamp_frames(f'lamp_{name}', frames) for name, frames in LAMP_FRAMES.items()]
     sprites.append(block('meter', *METER_SIZE))
+    sprites += [rank_badge(key) for key in RANK_FACE]
     sprites.append(Sprite('icon_settings', smooth(ICON_SIDE, paint_gear)))
     sprites.append(Sprite('icon_volume', smooth(ICON_SIDE, paint_speaker)))
     sprites.append(Sprite('star_on', smooth(STAR_SIDE, paint_star)))

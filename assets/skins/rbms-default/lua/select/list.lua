@@ -1,24 +1,32 @@
 local theme = require("lua.theme")
 local props = require("lua.props")
 local motion = require("lua.motion")
+local ui = require("lua.ui")
 local kit = require("lua.select.kit")
 
 local list = {}
 
+local LAYOUT = theme.select_layout.bar
+local SELECTED = LAYOUT.selected
+
 local WHEEL = { x = 1128, width = 728, bar_height = 64, pitch = 72, slots = 15, center = 7, center_top = 520, first_clickable = 3, last_clickable = 11 }
 local WHOLE = { first = 2, last = 12 }
-local FRAME = { x = 1096, width = 760, band = 8, pulse = 2000, pulse_low = 160 }
 local FRAME_KINDS = { props.option.FOLDERBAR, props.option.SONGBAR, props.option.GRADEBAR }
+local FRAME_PULSE = { period = 2000, low = 160 }
+local POP = WHEEL.x - SELECTED.left - SELECTED.band
 local BAR_SET = "set.bar"
 local BAR_SPRITES = { "bar_song", "bar_folder", "bar_table", "bar_course", "bar_missing", "bar_command", "bar_search" }
 
-local LAMP = { x = 0, width = 8, sprite = "lamp_" }
+local LAMP = { x = LAYOUT.lamp.x, width = LAYOUT.lamp.width, sprite = "lamp_" }
 
-local LEVEL = { x = 16, digits = 3, sprite = "num24", id = "num.bar.level", kinds = 7 }
-local TROPHY = { x = 104, side = 16 }
-local TROPHY_COLORS = { { 176, 112, 72 }, { 192, 198, 208 }, { 242, 201, 76 } }
+local LEVEL = { x = LAYOUT.level.x, width = LAYOUT.level.width, digits = 3, sprite = "num32", id = "num.bar.level", kinds = 7 }
+local TROPHY = { side = 16 }
+local TROPHY_COLORS = { theme.medal.bronze, theme.medal.silver, theme.medal.gold }
 
-local TITLE = { size = 28, chart_x = 80, plain_x = 136, plain_right = 712, label_gap = 18 }
+local RANK_SPRITE = "rank_"
+local THUMB = { id = "img.bar.thumb", x = LAYOUT.thumb.x, side = LAYOUT.thumb.side }
+
+local TITLE = { size = 28, chart_x = LAYOUT.title_x, plain_x = 176, plain_right = 712, label_gap = 16 }
 local TITLE_KINDS = {
     { id = "txt.bar.normal", color = theme.color.text },
     { id = "txt.bar.new", color = theme.color.text },
@@ -33,7 +41,7 @@ local TITLE_KINDS = {
     { id = "txt.bar.search", color = theme.color.sub },
 }
 
-local LABEL = { right = 714, pitch = 20 }
+local LABEL = { right = LAYOUT.label_right, pitch = 20 }
 local LABELS = {
     { sprite = "label_ln", color = theme.color.accent, row = 0 },
     { sprite = "label_random", color = theme.color.sub, row = 1 },
@@ -42,9 +50,11 @@ local LABELS = {
     { sprite = "label_hcn", color = theme.color.accent, row = 0 },
 }
 
-local GRAPH = { id = "graph.bar.lamps", x = 136, top = 54, width = 576, height = 4, by_lamp = -1 }
+local GRAPH = { id = "graph.bar.lamps", x = TITLE.plain_x, top = 54, width = TITLE.plain_right - TITLE.plain_x, height = 4, by_lamp = -1 }
 
-local SCROLL = { x = 1872, top = 136, width = 12, height = 832, thumb = 32 }
+local SCROLL = { x = 1872, top = 136, height = 832, lamps_width = 8, gap = 4, thumb_width = 4, thumb = 32, track = 2 }
+
+local PATH = { top = 120, trailing = "%s*>%s*$" }
 
 local function slot_top(slot)
     return WHEEL.center_top + (slot - WHEEL.center) * WHEEL.pitch
@@ -59,12 +69,22 @@ local function centered(height)
 end
 
 local function frame(s)
-    local top = slot_top(WHEEL.center)
-    local box = { x = FRAME.x, top = top, w = FRAME.width, h = WHEEL.bar_height }
-    local band = { x = FRAME.x, top = top, w = FRAME.band, h = WHEEL.bar_height }
+    local top = slot_top(WHEEL.center) - SELECTED.grow
+    local height = WHEEL.bar_height + SELECTED.grow * 2
+    local box = { x = SELECTED.left, top = top, w = WHEEL.x + WHEEL.width - SELECTED.left, h = height }
+    local band = { x = SELECTED.left, top = top, w = SELECTED.band, h = height }
+    local edge = theme.grid.rule
+    local edges = {
+        { x = box.x, top = box.top, w = box.w, h = edge },
+        { x = box.x, top = box.top + box.h - edge, w = box.w, h = edge },
+        { x = box.x + box.w - edge, top = box.top, w = edge, h = box.h },
+    }
     for _, kind in ipairs(FRAME_KINDS) do
         s:rect(box, theme.color.raised, { op = { kind } })
-        s:rect(band, theme.color.accent, motion.pulse(FRAME.pulse, FRAME.pulse_low, { op = { kind } }))
+        for _, line in ipairs(edges) do
+            s:rect(line, theme.color.muted, { op = { kind } })
+        end
+        s:rect(band, theme.color.accent, motion.pulse(FRAME_PULSE.period, FRAME_PULSE.low, { op = { kind } }))
     end
 end
 
@@ -76,10 +96,13 @@ local function bar_set(s)
     s:object("imageset", { id = BAR_SET, images = images })
 end
 
-local function bars(s)
+local function bars(s, popped)
     local slots = {}
     for slot = 0, WHEEL.slots - 1 do
         local box = { x = WHEEL.x, top = slot_top(slot), w = WHEEL.width, h = WHEEL.bar_height }
+        if popped and slot == WHEEL.center then
+            box = { x = WHEEL.x - POP, top = box.top, w = WHEEL.width + POP, h = box.h }
+        end
         slots[slot + 1] = s:dst(BAR_SET, box, { filter = props.filter.LINEAR })
     end
     return slots
@@ -111,7 +134,8 @@ local function levels(s)
     local parent = bar_box()
     local sprite = s:sprite(LEVEL.sprite)
     s:define_number({ id = LEVEL.id, sprite = LEVEL.sprite, ref = props.number.PLAYLEVEL, align = "center" }, LEVEL.digits)
-    local box = { x = LEVEL.x, top = centered(sprite.cell_h), w = sprite.cell_w, h = sprite.cell_h }
+    local x = LEVEL.x + (LEVEL.width - sprite.cell_w * LEVEL.digits) / 2
+    local box = { x = x, top = centered(sprite.cell_h), w = sprite.cell_w, h = sprite.cell_h }
     local placed = {}
     for index = 1, LEVEL.kinds do
         local color = theme.difficulty[index - 1] or theme.difficulty[0]
@@ -140,12 +164,30 @@ end
 local function trophies(s)
     local parent = bar_box()
     local block = s:define_image("block")
-    local box = { x = TROPHY.x, top = centered(TROPHY.side), w = TROPHY.side, h = TROPHY.side }
+    local x = LAYOUT.badge.x + (LAYOUT.badge.width - TROPHY.side) / 2
+    local box = { x = x, top = centered(TROPHY.side), w = TROPHY.side, h = TROPHY.side }
     local placed = {}
     for index, color in ipairs(TROPHY_COLORS) do
         placed[index] = s:dst(block, box, { color = color }, parent)
     end
     return placed
+end
+
+local function ranks(s)
+    local parent = bar_box()
+    local placed = {}
+    for index = 0, theme.rank_last do
+        local name = RANK_SPRITE .. theme.rank_key[index]
+        local sprite = s:sprite(name)
+        local box = { x = LAYOUT.badge.x + (LAYOUT.badge.width - sprite.w) / 2, top = centered(sprite.h), w = sprite.w, h = sprite.h }
+        placed[index + 1] = s:dst(s:define_image(name), box, { filter = props.filter.LINEAR }, parent)
+    end
+    return placed
+end
+
+local function thumb(s)
+    local box = { x = THUMB.x, top = centered(THUMB.side), w = THUMB.side, h = THUMB.side }
+    return s:dst(THUMB.id, box, { filter = props.filter.LINEAR }, bar_box())
 end
 
 local function labels(s)
@@ -174,39 +216,75 @@ local function wheel(s)
     s:single("songlist", {
         center = WHEEL.center,
         clickable = clickable,
-        listoff = bars(s),
-        liston = bars(s),
+        listoff = bars(s, false),
+        liston = bars(s, true),
         text = titles(s),
         level = levels(s),
         lamp = lamps(s),
         trophy = trophies(s),
         label = labels(s),
         graph = graph(s),
+        rank = ranks(s),
+        thumb = thumb(s),
     })
 end
 
-local function scrollbar(s)
-    s:rect({ x = SCROLL.x, top = SCROLL.top, w = SCROLL.width, h = SCROLL.height }, theme.color.panel)
-    local thumb = kit.slider(s, props.rate.MUSICSELECT_POSITION, props.slider_angle.DOWN, SCROLL.height - SCROLL.thumb)
-    s:object("slider", thumb, { x = SCROLL.x, top = SCROLL.top, w = SCROLL.width, h = SCROLL.thumb }, { color = theme.color.muted })
+local function lamp_share_from(main_state, first)
+    return function()
+        local total = main_state.number(props.extension_number.FOLDER_CHART_COUNT)
+        if not ui.has_value(total) or total <= 0 then
+            return 0
+        end
+        local share = 0
+        for lamp = first, theme.clear_last do
+            share = share + main_state.float_number(props.extension_rate.FOLDER_LAMP_FIRST + lamp)
+        end
+        return math.max(0, math.min(1, share))
+    end
+end
+
+local function scrollbar(s, main_state)
+    local track = { x = SCROLL.x, top = SCROLL.top, w = SCROLL.lamps_width, h = SCROLL.height }
+    s:rect(track, theme.color.panel)
+    local source = s:sprite_source("block")
+    for lamp = 0, theme.clear_last do
+        local stack = ui.merge(source, { angle = props.graph_angle.UP, value = lamp_share_from(main_state, lamp) })
+        s:object("graph", stack, track, { color = theme.clear[lamp].color, filter = props.filter.NEAREST })
+    end
+    local thumb_x = SCROLL.x + SCROLL.lamps_width + SCROLL.gap
+    s:rect({ x = thumb_x + (SCROLL.thumb_width - SCROLL.track) / 2, top = SCROLL.top, w = SCROLL.track, h = SCROLL.height }, theme.color.line)
+    local position = kit.slider(s, props.rate.MUSICSELECT_POSITION, props.slider_angle.DOWN, SCROLL.height - SCROLL.thumb)
+    s:object("slider", position, { x = thumb_x, top = SCROLL.top, w = SCROLL.thumb_width, h = SCROLL.thumb }, { color = theme.color.text })
 end
 
 local function trim(s)
     local gap = WHEEL.pitch - WHEEL.bar_height
     local upper = slot_top(WHOLE.first) - gap
     local lower = slot_top(WHOLE.last) + WHEEL.pitch
-    local x = FRAME.x
-    local width = SCROLL.x - FRAME.x
+    local x = SELECTED.left
+    local width = SCROLL.x - x
     local grid = theme.grid
     s:rect({ x = x, top = grid.header_rule, w = width, h = upper - grid.header_rule }, theme.color.bg)
     s:rect({ x = x, top = lower, w = width, h = grid.footer_rule - lower }, theme.color.bg)
 end
 
-function list.build(s)
+local function path(s, main_state)
+    local spec = {
+        size = theme.type.caption,
+        overflow = props.text_overflow.SHRINK,
+        value = function()
+            return (main_state.text(props.text.DIRECTORY):gsub(PATH.trailing, ""))
+        end,
+    }
+    s:text(spec, { x = WHEEL.x, top = PATH.top, w = WHEEL.width }, { color = theme.color.muted })
+end
+
+function list.build(s, main_state)
     frame(s)
     wheel(s)
     trim(s)
-    scrollbar(s)
+    scrollbar(s, main_state)
+    path(s, main_state)
 end
 
 return list
