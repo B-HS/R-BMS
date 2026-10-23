@@ -6,7 +6,7 @@
 //! neither are the terms every language keeps as they are (judgements, gauges, lamps, options).
 //! The terms and their translations are fixed in `docs/reference/2026-10-24-i18n-glossary.md`.
 
-mod layout_play;
+pub(crate) mod layout_play;
 mod menus;
 mod notices;
 pub(crate) mod ranking;

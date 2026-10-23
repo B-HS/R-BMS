@@ -826,4 +826,73 @@ mod tests {
         apply(&mut m, NoteOption::SRandom, 909);
         assert_eq!(note_count(&m), note_count(&base), "S-RANDOM preserves count on 14K DP");
     }
+
+    /// The seed the golden layouts below are laid out from: a seed as a run of this player draws
+    /// one, inside the 53 bits a score server keeps whole.
+    const GOLDEN_SEED: u64 = 0x001E_D5A7_C3B9_1F42;
+
+    /// A chart for each mode the golden layouts are of: first every lane alone on a row of its own,
+    /// in lane order, which shows where each lane went; then chords; then rows played across a long
+    /// note, which a note-by-note arrangement has to keep in its lane.
+    const GOLDEN_CHARTS: [(Mode, &[u8]); 3] = [
+        (Mode::BEAT_7K, b"#BPM 150\n#WAV01 a.wav\n#00111:0100000000000000\n#00112:0001000000000000\n#00113:0000010000000000\n#00114:0000000100000000\n#00115:0000000001000000\n#00118:0000000000010000\n#00119:0000000000000100\n#00116:0000000000000001\n#00211:01000100\n#00212:00010001\n#00213:01010000\n#00215:00000101\n#00218:01000001\n#00216:01000100\n#00351:0100000000000001\n#00312:0101010100000000\n#00314:0000000001010101\n#00319:0100000001000000\n"),
+        (Mode::BEAT_14K, b"#PLAYER 3\n#BPM 150\n#WAV01 a.wav\n#00111:01000000000000000000000000000000\n#00112:00010000000000000000000000000000\n#00113:00000100000000000000000000000000\n#00114:00000001000000000000000000000000\n#00115:00000000010000000000000000000000\n#00118:00000000000100000000000000000000\n#00119:00000000000001000000000000000000\n#00116:00000000000000010000000000000000\n#00121:00000000000000000100000000000000\n#00122:00000000000000000001000000000000\n#00123:00000000000000000000010000000000\n#00124:00000000000000000000000100000000\n#00125:00000000000000000000000001000000\n#00128:00000000000000000000000000010000\n#00129:00000000000000000000000000000100\n#00126:00000000000000000000000000000001\n#00211:01000100\n#00212:00010001\n#00213:01010000\n#00215:00000101\n#00218:01000001\n#00216:01000100\n#00351:0100000000000001\n#00312:0101010100000000\n#00314:0000000001010101\n#00319:0100000001000000\n#00221:00010100\n#00223:01000001\n#00224:00010001\n#00229:01010000\n#00226:00000001\n#00361:0000000100000001\n#00322:0101000001010000\n#00325:0000010100000101\n"),
+        (Mode::POPN_9K, b"#BPM 150\n#WAV01 a.wav\n#00111:010000000000000000\n#00112:000100000000000000\n#00113:000001000000000000\n#00114:000000010000000000\n#00115:000000000100000000\n#00122:000000000001000000\n#00123:000000000000010000\n#00124:000000000000000100\n#00125:000000000000000001\n#00211:01000100\n#00212:00010001\n#00213:01010000\n#00215:00000101\n#00223:01000001\n#00225:01000100\n#00314:0101010100000000\n#00322:0000000001010101\n#00351:0100000000000001\n"),
+    ];
+
+    /// Where the notes of a chart are once laid out: each row that holds a note, as the lanes it
+    /// holds one in, one hexadecimal digit a lane, rows apart by a space.
+    fn laid_out(m: &Model) -> String {
+        let row = |notes: &[Option<rbms_model::Note>]| {
+            notes.iter().enumerate().filter(|(_, note)| note.is_some()).map(|(lane, _)| format!("{lane:x}")).collect::<String>()
+        };
+        m.timelines.iter().map(|tl| row(&tl.notes)).filter(|lanes| !lanes.is_empty()).collect::<Vec<_>>().join(" ")
+    }
+
+    /// Every arrangement on every golden chart, as it lays the chart out from [`GOLDEN_SEED`]: the
+    /// mode's name, the arrangement and the notes where they land ([`laid_out`]). A replay states only
+    /// its arrangement and its seed, so these are what a replay recorded by any earlier build is
+    /// played back on and what a run borrowing its layout is played on.
+    const GOLDEN_LAYOUTS: [(&str, NoteOption, &str); 24] = [
+        ("BEAT_7K", NoteOption::Off, "0 1 2 3 4 5 6 7 0257 12 047 145 016 1 1 1 36 3 3 03"),
+        ("BEAT_7K", NoteOption::Mirror, "6 5 4 3 2 1 0 7 1467 45 267 125 056 5 5 5 03 3 3 36"),
+        ("BEAT_7K", NoteOption::Random, "5 4 1 2 0 6 3 7 1567 14 057 046 345 4 4 4 23 2 2 25"),
+        ("BEAT_7K", NoteOption::SRandom, "2 1 0 4 2 1 3 7 0167 23 367 235 036 0 5 0 23 2 0 36"),
+        ("BEAT_7K", NoteOption::RRandom, "1 2 3 4 5 6 0 7 1367 23 157 256 012 2 2 2 04 4 4 14"),
+        ("BEAT_7K", NoteOption::Rotate, "1 2 3 4 5 6 0 7 1367 23 157 256 012 2 2 2 04 4 4 14"),
+        ("BEAT_7K", NoteOption::HRandom, "2 2 2 4 3 3 3 7 0127 26 257 026 015 6 1 6 02 5 6 03"),
+        ("BEAT_7K", NoteOption::AllScratch, "7 7 7 7 7 7 7 7 2347 57 017 067 057 7 7 7 27 7 7 17"),
+        ("BEAT_14K", NoteOption::Off, "0 1 2 3 4 5 6 7 8 9 a b c d e f 0257ae 128be 0478 145abf 0169 19 1c 18c 369 39 3c 038c"),
+        ("BEAT_14K", NoteOption::Mirror, "6 5 4 3 2 1 0 7 e d c b a 9 8 f 14678c 458be 267e 125bcf 056d 5d 5a 5ae 03d 3d 3a 36ae"),
+        ("BEAT_14K", NoteOption::Random, "5 4 1 2 0 6 3 7 9 d e b c a 8 f 15678e 1489b 0579 046bef 345d 4d 4c 49c 23d 2d 2c 259c"),
+        ("BEAT_14K", NoteOption::SRandom, "2 5 2 6 1 2 3 7 a c d 8 b b e f 23479a 129ce 457d 2568ef 145e 5e 3e 29b 128 2a 6d 04bc"),
+        ("BEAT_14K", NoteOption::RRandom, "1 2 3 4 5 6 0 7 c d e 8 9 a b f 1367be 238bc 157c 2568ef 012d 2d 29 29c 04d 4d 49 149c"),
+        ("BEAT_14K", NoteOption::Rotate, "1 2 3 4 5 6 0 7 9 a b c d e 8 f 13678b 2389c 1579 256bcf 012a 2a 2d 29d 04a 4a 4d 149d"),
+        ("BEAT_14K", NoteOption::HRandom, "2 0 2 4 3 6 3 7 a e d e 8 e 9 f 02379d 16abc 2579 345bcf 124c 48 08 08b 45d 2b 59 459b"),
+        ("BEAT_14K", NoteOption::AllScratch, "7 7 7 7 7 7 7 7 f f f f f f f f 2367df 3789f 137f 0578cf 147f 7f 7f 7bf 67f 7f 7f 27df"),
+        ("POPN_9K", NoteOption::Off, "0 1 2 3 4 5 6 7 8 0268 12 048 146 03 3 3 3 5 5 5 05"),
+        ("POPN_9K", NoteOption::Mirror, "8 7 6 5 4 3 2 1 0 0268 67 048 247 58 5 5 5 3 3 3 38"),
+        ("POPN_9K", NoteOption::Random, "8 7 5 0 6 4 2 1 3 2358 57 368 267 08 0 0 0 4 4 4 48"),
+        ("POPN_9K", NoteOption::SRandom, "6 3 0 5 1 6 5 2 1 0345 25 047 478 12 1 1 7 6 4 7 12"),
+        ("POPN_9K", NoteOption::RRandom, "3 4 5 6 7 8 0 1 2 0235 45 237 047 36 6 6 6 8 8 8 38"),
+        ("POPN_9K", NoteOption::Rotate, "1 2 3 4 5 6 7 8 0 0137 23 015 257 14 4 4 4 6 6 6 16"),
+        ("POPN_9K", NoteOption::HRandom, "2 6 4 6 4 7 4 1 8 0367 46 257 267 24 2 6 1 7 2 1 28"),
+        ("POPN_9K", NoteOption::AllScratch, "2 6 4 6 4 7 4 1 8 0367 46 257 267 24 2 6 1 7 2 1 28"),
+    ];
+
+    /// The arrangements lay the golden charts out as they always have, for every option and for the
+    /// seven-key, fourteen-key and nine-key modes alike. A change here changes the layout of every
+    /// replay already recorded, and of every run that borrows one.
+    #[test]
+    fn every_arrangement_lays_the_golden_charts_out_as_it_always_has() {
+        for (mode, chart) in GOLDEN_CHARTS {
+            for option in NoteOption::ALL {
+                let mut m = to_model(&parse(chart), mode);
+                apply(&mut m, option, GOLDEN_SEED);
+                let golden =
+                    GOLDEN_LAYOUTS.iter().find(|(name, golden_option, _)| *name == mode.name && *golden_option == option).map(|(_, _, layout)| *layout);
+                assert_eq!(Some(laid_out(&m).as_str()), golden, "{} {option:?}", mode.name);
+            }
+        }
+    }
 }

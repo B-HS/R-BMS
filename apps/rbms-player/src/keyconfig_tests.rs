@@ -990,6 +990,31 @@ fn a_key_config_written_before_the_table_reload_reads_as_it_did() {
     assert_eq!(back.shortcut_key(Shortcut::Tables), Some(KeyCode::F7));
 }
 
+/// The key that plays the chart of a replay being watched on the replay's layout is a key of the
+/// replay under analysis. It ships on a key no shipped layout plays a lane on and no control is read
+/// from, and a key config written before it existed reads as it did: the key is the new one's unless
+/// the player had put another key of the replay there, which keeps it.
+#[test]
+fn the_layout_play_key_ships_on_a_free_key_and_an_earlier_file_reads_as_it_did() {
+    let shipped = Shortcut::ReplayPlayLayout.default_key();
+    assert_eq!((shipped, Shortcut::ReplayPlayLayout.config_key()), (KeyCode::KeyJ, "replay_play_layout"));
+    assert_eq!((Shortcut::ReplayPlayLayout.group(), Shortcut::ReplayPlayLayout.screen()), (crate::keyconfig::ShortcutGroup::Replay, ShortcutScreen::Replay));
+    let fresh = KeyConfig::default();
+    for &mode in Mode::ALL {
+        let lanes = default_keys_for_mode(mode).into_iter().chain(default_reverse_keys_for_mode(mode));
+        assert!(lanes.into_iter().all(|(lane_key, _)| lane_key != shipped), "{} plays a lane on it", mode.name);
+        assert!(collisions(&fresh, mode).is_empty(), "{}", mode.name);
+    }
+    assert!(ControlAction::ALL.into_iter().all(|action| fresh.control_key(action) != Some(shipped)), "a control is read from it");
+    assert_eq!(fresh.shortcut_on(ShortcutScreen::Replay, shipped), Some(Shortcut::ReplayPlayLayout));
+
+    let earlier: KeyConfig = ron::from_str(&format!(r#"(shortcuts: {{"replay_pause": "{}"}})"#, key_name(KeyCode::Enter))).expect("the file parses");
+    assert_eq!(earlier.shortcut_key(Shortcut::ReplayPlayLayout), Some(shipped), "a file with no word for it leaves it on the key it ships on");
+    let taken: KeyConfig = ron::from_str(&format!(r#"(shortcuts: {{"replay_back": "{}"}})"#, key_name(shipped))).expect("the file parses");
+    assert_eq!(taken.shortcut_key(Shortcut::ReplayPlayLayout), None, "it took a key the player had given another key of the replay");
+    assert_eq!(taken.shortcut_on(ShortcutScreen::Replay, shipped), Some(Shortcut::ReplayBack));
+}
+
 /// The shortcuts and the controls are stored under names that do not change with what the rows are
 /// called on screen, each name is used once, and the ten controls an older pad block names keep the
 /// names it knows them by.

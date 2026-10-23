@@ -58,6 +58,7 @@ mod app_play;
 mod app_ranking;
 mod app_result;
 mod assets;
+mod borrowed_layout;
 mod command_line;
 mod course_ir;
 mod course_ui;
@@ -811,6 +812,9 @@ struct AppShared {
     /// settings hold the ones it was recorded with: written to the settings file in their place and
     /// put back when the replay ends ([`AppShared::end_replay`]).
     own_play_options: Option<app_play::OwnPlayOptions>,
+    /// The layout borrowed from a replay that the runs of its chart are laid out with, while it is
+    /// held ([`AppShared::borrow_layout`]).
+    borrowed_layout: Option<borrowed_layout::Borrowing>,
     gpu: Option<Gpu>,
     /// The one output stream for the whole app lifetime. Opened lazily on the first frame (or the
     /// first chart/preview load) and kept across Play, Result and Select; stage changes clear the
@@ -1152,6 +1156,7 @@ impl App {
                 retry_seed: None,
                 course_settings_backup: None,
                 own_play_options: None,
+                borrowed_layout: None,
                 kc_edit_mode: MODE,
                 gpu: None,
                 audio: None,

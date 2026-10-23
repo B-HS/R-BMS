@@ -73,6 +73,31 @@ impl AppShared {
         Some((recorded.random, seed))
     }
 
+    /// The arrangement and the seed the chart of `md5` being loaded lays its lanes out with, the
+    /// settings made to hold the arrangement the run plays on. A replay in hand is laid out as it was
+    /// recorded ([`AppShared::play_as_recorded`]), and lets go of any layout borrowed from one; a run
+    /// a layout was borrowed for is laid out with it ([`AppShared::lay_out_as_borrowed`]); any other
+    /// run is laid out on the player's own arrangement, from `carried_seed` when a run started again
+    /// as it was laid out hands one on, and from a fresh seed otherwise.
+    pub(crate) fn layout_to_load(&mut self, md5: &str, carried_seed: Option<u64>) -> (NoteOption, u64) {
+        let borrowed = match self.replay {
+            Some(_) => {
+                self.let_go_of_borrowed_layout();
+                None
+            }
+            None => self.lay_out_as_borrowed(md5),
+        };
+        match (borrowed, self.play_as_recorded()) {
+            (Some(borrowed), _) => borrowed,
+            (None, Some(recorded)) => recorded,
+            (None, None) => {
+                self.put_back_own_play_options();
+                let fresh = || fresh_layout_seed(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(1));
+                (self.config.play.random, carried_seed.unwrap_or_else(fresh))
+            }
+        }
+    }
+
     /// Put the player's own SCRATCH AUTO, gauge and arrangement back where a watched replay put its
     /// own, if one did.
     pub(crate) fn put_back_own_play_options(&mut self) {
@@ -81,9 +106,11 @@ impl AppShared {
         }
     }
 
-    /// Forget the replay in hand, and put back the options it was watched with.
+    /// Forget the replay in hand and any layout borrowed from one, and put back the options it was
+    /// watched or played with.
     pub(crate) fn end_replay(&mut self) {
         self.replay = None;
+        self.borrowed_layout = None;
         self.put_back_own_play_options();
     }
 
@@ -467,17 +494,7 @@ impl AppShared {
         {
             notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, decoded.md5));
         }
-        let (random, seed) = match self.play_as_recorded() {
-            Some(recorded) => recorded,
-            None => {
-                self.put_back_own_play_options();
-                (
-                    self.config.play.random,
-                    fresh_layout_seed(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(1)),
-                )
-            }
-        };
-        let seed = carried_seed.filter(|_| self.replay.is_none()).unwrap_or(seed);
+        let (random, seed) = self.layout_to_load(&decoded.md5, carried_seed);
         let (judge_setup, course_stage) = self.stage_judge_setup(&mode);
         let course_combo = course_stage.and(self.course_run.as_ref()).map(|run| run.totals.combo_carry);
         let mut model = decoded.model;
@@ -487,6 +504,7 @@ impl AppShared {
             true => ln_mode_token(judge_setup.ln_mode).to_string(),
             false => SCORE_LN_MODE_FROM_CHART.to_string(),
         };
+        self.warn_of_a_borrowed_layout_the_ln_mode_decides(ln_mode_decides_flavour, ln_mode_token(judge_setup.ln_mode));
         let ghost_sources = (!self.practice_requested).then(|| crate::ghost::ghost_sources(self, &decoded.md5, &ln_mode_key)).filter(GhostSources::any);
         let ghost_model = ghost_sources.as_ref().map(|_| model.clone());
         rbms_chart::resolve_long_note_flavour(&mut model, judge_setup.ln_mode.resolve());

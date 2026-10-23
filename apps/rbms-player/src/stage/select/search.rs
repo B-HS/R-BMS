@@ -117,7 +117,8 @@ impl WhileTyping {
             | Shortcut::ReplayFaster
             | Shortcut::ReplaySlower
             | Shortcut::ReplayForward
-            | Shortcut::ReplayBack => WhileTyping::Nothing,
+            | Shortcut::ReplayBack
+            | Shortcut::ReplayPlayLayout => WhileTyping::Nothing,
         }
     }
 }

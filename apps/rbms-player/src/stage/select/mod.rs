@@ -1088,7 +1088,8 @@ impl SelectState {
             | Shortcut::ReplayFaster
             | Shortcut::ReplaySlower
             | Shortcut::ReplayForward
-            | Shortcut::ReplayBack => {}
+            | Shortcut::ReplayBack
+            | Shortcut::ReplayPlayLayout => {}
         }
         Transition::Stay
     }

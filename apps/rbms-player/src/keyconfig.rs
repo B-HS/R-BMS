@@ -2,11 +2,13 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use rbms_model::Mode;
+use rbms_model::translations::Catalog;
 use rbms_play::ScratchDir;
 use serde::{Deserialize, Serialize};
 use winit::keyboard::KeyCode;
 
 use crate::gamepad::PadConfig;
+use crate::text::layout_play::LayoutPlayText;
 
 /// Parse a key token (the vocabulary used in the keyconfig file and `--keys`) into a `KeyCode`.
 pub fn key_from_name(s: &str) -> Option<KeyCode> {
@@ -752,11 +754,13 @@ pub enum Shortcut {
     ReplaySlower,
     ReplayForward,
     ReplayBack,
+    /// Play the chart of the replay being watched by hand, laid out as the replay was.
+    ReplayPlayLayout,
 }
 
 impl Shortcut {
     /// Every shortcut, group by group, in the order the key editor and the key guide list them.
-    pub const ALL: [Shortcut; 31] = [
+    pub const ALL: [Shortcut; 32] = [
         Shortcut::Search,
         Shortcut::Filter,
         Shortcut::Sort,
@@ -788,6 +792,7 @@ impl Shortcut {
         Shortcut::ReplaySlower,
         Shortcut::ReplayForward,
         Shortcut::ReplayBack,
+        Shortcut::ReplayPlayLayout,
     ];
 
     pub fn group(self) -> ShortcutGroup {
@@ -812,7 +817,12 @@ impl Shortcut {
             | Shortcut::RefSearch
             | Shortcut::RefFavourite => ShortcutGroup::SkinBrowser,
             Shortcut::Retry | Shortcut::NextSong => ShortcutGroup::Result,
-            Shortcut::ReplayPause | Shortcut::ReplayFaster | Shortcut::ReplaySlower | Shortcut::ReplayForward | Shortcut::ReplayBack => ShortcutGroup::Replay,
+            Shortcut::ReplayPause
+            | Shortcut::ReplayFaster
+            | Shortcut::ReplaySlower
+            | Shortcut::ReplayForward
+            | Shortcut::ReplayBack
+            | Shortcut::ReplayPlayLayout => ShortcutGroup::Replay,
         }
     }
 
@@ -859,6 +869,7 @@ impl Shortcut {
             Shortcut::ReplaySlower => "PLAYBACK RATE DOWN",
             Shortcut::ReplayForward => "SEEK FORWARD",
             Shortcut::ReplayBack => "SEEK BACK",
+            Shortcut::ReplayPlayLayout => LayoutPlayText::ShortcutLabel.get(rbms_render::text::language()),
         }
     }
 
@@ -896,13 +907,16 @@ impl Shortcut {
             Shortcut::ReplaySlower => "replay_slower",
             Shortcut::ReplayForward => "replay_forward",
             Shortcut::ReplayBack => "replay_back",
+            Shortcut::ReplayPlayLayout => "replay_play_layout",
         }
     }
 
     /// The key the shortcut ships on. Every one of them but the keys to the key editor and to the
     /// play menu, and the key that reloads the tables, is the key the application read for it before
     /// any of them could be changed. The reload ships on a function key the browser read nothing
-    /// from, next to the one the key editor is on.
+    /// from, next to the one the key editor is on. The key that plays a watched replay's layout
+    /// ships on one no shipped layout plays a lane on and no control or other key of a replay under
+    /// analysis is read from.
     pub fn default_key(self) -> KeyCode {
         match self {
             Shortcut::Search => KeyCode::Slash,
@@ -936,6 +950,7 @@ impl Shortcut {
             Shortcut::ReplaySlower => KeyCode::Minus,
             Shortcut::ReplayForward => KeyCode::PageUp,
             Shortcut::ReplayBack => KeyCode::PageDown,
+            Shortcut::ReplayPlayLayout => KeyCode::KeyJ,
         }
     }
 

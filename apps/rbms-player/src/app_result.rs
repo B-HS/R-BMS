@@ -692,8 +692,17 @@ pub(crate) fn tempo_points(timelines: &[TimeLine]) -> Vec<(f32, f64)> {
 ///
 /// The play HUD and the result screen ask the same question — the one while the run is going, the
 /// other once it has ended — so both settle it here rather than each building its own context.
+///
+/// A run on a layout borrowed from a run of this machine is held against that run instead, named
+/// after when it was played, and the TARGET row is left as it is ([`AppShared::borrowed_kept_run`]).
 pub(crate) fn run_target(shared: &AppShared, md5: &str, total_notes: u32, local_best_ex: Option<u32>) -> target::ResolvedTarget {
-    target::resolve(shared.config.judge.target, shared.config.judge.target_fallback, &target_context(shared, md5, total_notes, local_best_ex))
+    let asked = shared.config.judge.target;
+    if let Some((layout, kept)) = shared.borrowed_kept_run(md5) {
+        let name =
+            rbms_model::translations::Catalog::fill(crate::text::layout_play::LayoutPlayText::TargetName, rbms_render::text::language(), &[&layout.source]);
+        return target::ResolvedTarget { name, ex: kept.ex, asked, used: asked, of_borrowed_replay: true };
+    }
+    target::resolve(asked, shared.config.judge.target_fallback, &target_context(shared, md5, total_notes, local_best_ex))
 }
 
 /// What a target of the chart `md5` can be worked out from right now: the note count and the local
@@ -874,10 +883,13 @@ fn start_song(shared: &mut AppShared, index: usize) -> Transition {
 ///
 /// Nothing about the run is carried over — the chart is loaded again from the library — so the
 /// options it starts on are whatever [`AppShared::config`] holds, which is what the player last set.
+/// A layout the run borrowed from a replay goes on to the new run when it is started laid out as it
+/// was ([`AppShared::hand_borrowed_layout_on`]).
 pub(crate) fn retry(shared: &mut AppShared) -> Transition {
     let Some(index) = played_song_index(shared) else {
         return Transition::Stay;
     };
+    shared.hand_borrowed_layout_on();
     start_song(shared, index)
 }
 
@@ -887,6 +899,7 @@ pub(crate) fn next_song(shared: &mut AppShared) -> Transition {
     let Some((at, index)) = following_song(shared) else {
         return Transition::Stay;
     };
+    shared.let_go_of_borrowed_layout();
     shared.sel = at;
     start_song(shared, index)
 }
@@ -1183,5 +1196,32 @@ mod tests {
         let settled = target::resolve(shared.config.judge.target, shared.config.judge.target_fallback, &context);
         assert_eq!(settled.ex, target::band_target_ex(812, 24));
         assert_eq!(settled.name, rbms_config::ScoreTarget::RateAaa.label());
+    }
+
+    /// A run played on a layout borrowed from a replay is kept and sent as any run the player plays,
+    /// stating the borrowed arrangement and seed everywhere it states them: the score database's row,
+    /// the submission and the replay it records.
+    #[test]
+    fn a_run_on_a_borrowed_layout_is_recorded_with_the_layout_it_was_played_on() {
+        use crate::borrowed_layout::tests::{REPLAY_SEED, a_library_of_one_chart, next_run, play_through, request};
+        let mut shared = a_library_of_one_chart("recorded");
+        shared.config.play.random = rbms_chart::shuffle::NoteOption::Mirror;
+        shared.borrow_layout(request("R-RANDOM", REPLAY_SEED), 0).expect("the layout is borrowed");
+        let mut state = next_run(&mut shared);
+        play_through(&mut state);
+        let summary = state.session.summary();
+        assert!(summary.ex_score > 0, "the fixture run scores: {summary:?}");
+        let recorded = record_run(&state, &mut shared, &summary, &state.session.record());
+
+        assert_eq!(recorded.block_reason, None, "a run on a borrowed layout is held back");
+        assert_eq!(recorded.sub.options.random, ir_random(rbms_chart::shuffle::NoteOption::RRandom));
+        assert_eq!(recorded.sub.seed, REPLAY_SEED);
+        let replay = recorded.recorded_replay.expect("the run's replay is kept");
+        assert_eq!((replay.random.as_str(), replay.seed), (rbms_chart::shuffle::NoteOption::RRandom.label(), REPLAY_SEED));
+        let db = shared.scoredb.as_ref().expect("the score database opened in the test's folder");
+        let [log] = db.all_plays().expect("the history reads").try_into().expect("one run was played and one row stored");
+        assert_eq!(log.random, rbms_store::scoredb::random_id(rbms_chart::shuffle::NoteOption::RRandom.label()));
+        assert_eq!(log.seed, i64::try_from(REPLAY_SEED).expect("the seed is an exact integer"));
+        assert_eq!(shared.settings_to_save().play.random, rbms_chart::shuffle::NoteOption::Mirror, "the settings file would keep the borrowed arrangement");
     }
 }

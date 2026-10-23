@@ -122,12 +122,19 @@ pub struct TargetContext {
 /// The two differ when the score the asked target names was not there: [`ResolvedTarget::used`] is
 /// then the one that stood in for it, and [`ResolvedTarget::name`] is its name, so a screen that
 /// prints the name never claims a target it could not work out.
+///
+/// A run on a layout borrowed from a replay this machine recorded is held against the run of that
+/// replay instead, whatever the TARGET row asks for, and for that run alone:
+/// [`ResolvedTarget::of_borrowed_replay`] says so, and `used` is then the target that was asked for,
+/// which nothing stood in for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
     pub name: String,
     pub ex: u32,
     pub asked: ScoreTarget,
     pub used: ScoreTarget,
+    /// Whether the EX is the one of the run whose replay this run borrowed its layout from.
+    pub of_borrowed_replay: bool,
 }
 
 impl ResolvedTarget {
@@ -193,7 +200,7 @@ fn candidates(asked: ScoreTarget, fallback: ScoreTarget) -> impl Iterator<Item =
 /// target actually used, so the screen never claims to be showing one it could not resolve.
 pub fn resolve(asked: ScoreTarget, fallback: ScoreTarget, ctx: &TargetContext) -> ResolvedTarget {
     let (used, ex) = settle(asked, fallback, ctx);
-    ResolvedTarget { name: target_name(used, ctx), ex, asked, used }
+    ResolvedTarget { name: target_name(used, ctx), ex, asked, used, of_borrowed_replay: false }
 }
 
 /// The target a run is paced against, and the EX it asks for: [`resolve`] without the name, for a

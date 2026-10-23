@@ -238,3 +238,152 @@ fn practice_is_never_paced_against_a_ghost() {
 /// How long the practice panel above is told the chart is, and its TOTAL.
 const PRACTICE_CHART_MS: i32 = 8_000;
 const PRACTICE_TOTAL: f64 = 300.0;
+
+/// The app's library as the one recorded chart, under the name the runs above were played from.
+fn library_of_the_recorded_chart(app: &mut App) {
+    let model = recorded_model();
+    let entry = rbms_library::SongEntry {
+        path: std::path::PathBuf::from(&app.shared.chart_path),
+        title: model.meta.title.clone(),
+        subtitle: String::new(),
+        artist: String::new(),
+        genre: String::new(),
+        maker: String::new(),
+        level: String::new(),
+        difficulty: 0,
+        init_bpm: model.init_bpm,
+        rank: 0,
+        total: model.meta.total,
+        mode: model.mode,
+        md5: model.md5,
+        stagefile: String::new(),
+        banner: String::new(),
+        preview: String::new(),
+    };
+    app.shared.library = crate::Library::from_songs(vec![entry]);
+}
+
+/// A replay of the recorded chart being watched under analysis, as the play screen holds it.
+fn watching(app: &mut App, replay: rbms_store::Replay) -> PlayState {
+    app.shared.replay = Some(replay.clone());
+    PlayState::new(
+        PlaySession::new(recorded_model(), SessionOptions { analysis: true, replay: Some(replay), ..SessionOptions::default() }),
+        std::collections::HashMap::new(),
+        0,
+        SCORE_LN_MODE_FROM_CHART.to_string(),
+    )
+}
+
+/// Press PLAY THIS LAYOUT on the replay being watched.
+fn press_play_this_layout(state: &mut PlayState, app: &mut App) -> Transition {
+    let code = app.shared.keyconfig.shortcut_key(Shortcut::ReplayPlayLayout).expect("the key ships bound");
+    let key = KeyInput { code, pressed: true, released: false, text: None };
+    state.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, key)
+}
+
+/// The seed a replay from elsewhere was laid out from.
+const ELSEWHERE_SEED: u64 = 0x5EED;
+
+/// A replay of the recorded chart that no run of this machine kept, laid out on `random`.
+fn replay_from_elsewhere(random: rbms_chart::shuffle::NoteOption) -> rbms_store::Replay {
+    rbms_store::Replay {
+        chart_path: String::new(),
+        md5: recorded_model().md5,
+        mode: recorded_model().mode.name.to_string(),
+        random: random.label().to_string(),
+        seed: ELSEWHERE_SEED,
+        offset_ms: 0,
+        scratch_auto: false,
+        gauge: String::new(),
+        judge: rbms_store::ReplayJudge::default(),
+        events: Vec::new(),
+    }
+}
+
+/// A run of the recorded chart played by hand and kept, on the TARGET row RATE AAA, with the chart
+/// in the library: its record, the replay it kept as the record modal reads it, and its pace.
+fn a_kept_run_in_the_library(app: &mut App) -> (rbms_store::ScoreRecord, rbms_store::Replay, crate::ghost::GhostPace) {
+    app.shared.config.judge.target = ScoreTarget::RateAaa;
+    let kept_run = played_by_hand(&HAND_OFFSETS_US, false);
+    let ghost = crate::ghost::GhostPace::of_judges(kept_run.judge().vanished(), kept_run.judge().total_notes());
+    end_run(&mut app.shared, kept_run);
+    if let Some(saved) = app.shared.saves.settled() {
+        saved.recv().expect("the save thread answers");
+    }
+    library_of_the_recorded_chart(app);
+    let record = app.shared.scores.for_md5(&recorded_model().md5).first().map(|record| (*record).clone()).expect("the run is kept");
+    let file = record.replay_file.clone().expect("the run kept its replay");
+    let replay = rbms_store::Replay::load(&app.shared.replay_dir.join(file)).expect("the kept replay reads");
+    (record, replay, ghost)
+}
+
+/// A kept run whose replay cannot be judged again note for note -- one judged on the frame-by-frame
+/// clock of an old replay -- still lends its layout and its score, which the run on it is then held
+/// against earned evenly.
+#[test]
+fn a_kept_run_that_cannot_be_judged_again_is_paced_evenly() {
+    let mut app = app("borrowed-framed");
+    let (record, mut replay, _) = a_kept_run_in_the_library(&mut app);
+    replay.judge.clock = rbms_store::REPLAY_LEGACY_CLOCK.to_string();
+    let file = app.shared.replay_dir.join(record.replay_file.as_deref().expect("the run kept its replay"));
+    std::fs::write(file, replay.to_ron().expect("the replay writes")).expect("the replay folder is writable");
+    let md5 = recorded_model().md5;
+    let mut watched = watching(&mut app, replay);
+    assert!(matches!(press_play_this_layout(&mut watched, &mut app), Transition::To(Stage::Loading(_))));
+    app.shared.layout_to_load(&md5, None);
+
+    let (mut state, paced) = run_paced_by_its_record_runs(&app);
+    assert_eq!((paced.ex, paced.of_borrowed_replay), (record.ex_score, true));
+    assert!(state.target_ghost.is_none(), "a replay on the frame clock was taken for a ghost");
+    let judged = let_part_of_it_go_by(&mut state);
+    assert_eq!(state.target_ex_now(&paced), pace_ex_at(paced.ex, judged, state.session.judge().total_notes()));
+}
+
+/// PLAY THIS LAYOUT over a replay a run of this machine kept starts a run of the chart in the
+/// replay's place, and that run, and the result screen after it, are held against the kept run under
+/// its name, by its replay note by note, whatever the TARGET row asks for, which stays as it is.
+#[test]
+fn a_run_on_the_layout_of_a_kept_run_is_held_against_that_run_note_by_note() {
+    let mut app = app("borrowed-kept");
+    let (record, replay, ghost) = a_kept_run_in_the_library(&mut app);
+    let md5 = recorded_model().md5;
+    let mut watched = watching(&mut app, replay);
+    assert!(matches!(press_play_this_layout(&mut watched, &mut app), Transition::To(Stage::Loading(_))), "the run does not take the replay's place");
+    assert!(app.shared.replay.is_none(), "the replay is still being watched");
+    app.shared.layout_to_load(&md5, None);
+
+    let (mut state, paced) = run_paced_by_its_record_runs(&app);
+    let name = format!("REPLAY {}", crate::format::fmt_datetime(record.played_at));
+    assert_eq!((paced.name.as_str(), paced.ex, paced.of_borrowed_replay), (name.as_str(), record.ex_score, true));
+    assert_eq!(paced.ex, ghost.final_ex());
+    assert!(!paced.stood_in_for(), "the kept run was read as standing in for the TARGET row");
+    assert_eq!(app.shared.config.judge.target, ScoreTarget::RateAaa, "the TARGET row moved");
+    let judged = let_part_of_it_go_by(&mut state);
+    let total = state.session.judge().total_notes();
+    assert_ne!(i64::from(ghost.ex_after(judged)), pace_ex_at(paced.ex, judged, total), "the fixture must tell the two paces apart");
+    assert_eq!(state.target_ex_now(&paced), i64::from(ghost.ex_after(judged)), "the HUD's score difference");
+    assert_eq!(state.standing(&app.shared).paced_now.rival, Some(ghost.ex_after(judged)));
+    assert_eq!(run_target(&app.shared, &md5, total, Some(record.ex_score)), paced, "the result screen holds the run against another target");
+}
+
+/// A replay no run of this machine kept may have come from the score server: its layout is borrowed
+/// as it shows it, but the run on it is held against the TARGET row, and one that shows OFF, which
+/// the score server's CONVERGE is shown as too, is refused and the replay plays on.
+#[test]
+fn a_replay_from_elsewhere_lends_its_layout_but_no_run_and_never_an_off_it_cannot_vouch_for() {
+    let mut app = app("borrowed-elsewhere");
+    app.shared.config.judge.target = ScoreTarget::RateAaa;
+    library_of_the_recorded_chart(&mut app);
+    let md5 = recorded_model().md5;
+
+    let mut watched = watching(&mut app, replay_from_elsewhere(rbms_chart::shuffle::NoteOption::Off));
+    assert!(matches!(press_play_this_layout(&mut watched, &mut app), Transition::Stay));
+    assert!(app.shared.replay.is_some() && app.shared.borrowed_layout().is_none(), "an OFF from elsewhere was borrowed");
+
+    let mut watched = watching(&mut app, replay_from_elsewhere(rbms_chart::shuffle::NoteOption::Random));
+    assert!(matches!(press_play_this_layout(&mut watched, &mut app), Transition::To(Stage::Loading(_))));
+    assert_eq!(app.shared.layout_to_load(&md5, None), (rbms_chart::shuffle::NoteOption::Random, ELSEWHERE_SEED));
+    assert!(app.shared.borrowed_kept_run(&md5).is_none(), "a replay from elsewhere was taken for a run of this machine");
+    let (_, paced) = run_paced_by_its_record_runs(&app);
+    assert_eq!((paced.used, paced.of_borrowed_replay), (ScoreTarget::RateAaa, false));
+}

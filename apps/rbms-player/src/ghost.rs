@@ -107,25 +107,27 @@ pub(crate) struct GhostSource {
 
 impl GhostSource {
     /// The run `record` is of, when it kept a replay.
-    fn of(record: &ScoreRecord) -> Option<GhostSource> {
+    pub(crate) fn of(record: &ScoreRecord) -> Option<GhostSource> {
         let file = record.replay_file.clone()?;
         Some(GhostSource { file, total_notes: record.total_notes, pgreat: record.counts[PGREAT_TIER], great: record.counts[GREAT_TIER] })
     }
 }
 
 /// The stored runs a run of one chart may be held against note by note: the player's best here,
-/// which the skin's BEST figures pace against whatever the target is, and the run the score server
-/// holds as this account's best, when the TARGET row asks for that and the run was played here.
+/// which the skin's BEST figures pace against whatever the target is, the run the score server
+/// holds as this account's best, when the TARGET row asks for that and the run was played here,
+/// and the run of this machine whose replay the run borrowed its layout from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct GhostSources {
     best: Option<GhostSource>,
     account: Option<GhostSource>,
+    borrowed: Option<GhostSource>,
 }
 
 impl GhostSources {
     /// Whether there is any run to judge again.
     pub(crate) fn any(&self) -> bool {
-        self.best.is_some() || self.account.is_some()
+        self.best.is_some() || self.account.is_some() || self.borrowed.is_some()
     }
 }
 
@@ -136,10 +138,15 @@ impl GhostSources {
 /// the ranking cache holds for this account and scored the same EX: a run the score server got from
 /// another machine has no replay here, and one from the server itself is not judged again
 /// ([`crate::ir_replay`] carries no judge algorithm, long-note mode or clock), so it is paced evenly.
+///
+/// The run a borrowed layout came from is there only when it is a run of this machine
+/// ([`AppShared::borrowed_kept_run`]): a replay from the score server is not judged again, for the
+/// same reason, and a run on its layout is held against the TARGET row as any other.
 pub(crate) fn ghost_sources(shared: &AppShared, md5: &str, ln_mode: &str) -> GhostSources {
     let best = shared.scores.best_record_with_replay_in_ln_mode(md5, ln_mode).and_then(GhostSource::of);
     let account = (shared.config.judge.target == ScoreTarget::IrBest).then(|| account_best_played_here(shared, md5, ln_mode)).flatten();
-    GhostSources { best, account }
+    let borrowed = shared.borrowed_kept_run(md5).map(|(_, kept)| kept.ghost.clone());
+    GhostSources { best, account, borrowed }
 }
 
 /// The run of this machine that is this account's best on the score server, as the ranking cache
@@ -164,6 +171,7 @@ fn account_best_played_here(shared: &AppShared, md5: &str, ln_mode: &str) -> Opt
 pub(crate) struct RunGhosts {
     pub(crate) best: Option<Arc<GhostPace>>,
     pub(crate) account: Option<Arc<GhostPace>>,
+    pub(crate) borrowed: Option<Arc<GhostPace>>,
 }
 
 /// Stored runs being judged again on their own thread, and the cancel that stops it.
@@ -204,7 +212,7 @@ impl GhostJob {
         GhostLoad { rx, cancel }
     }
 
-    /// Judge every run again, the same file once.
+    /// Judge every run again, the best's file once.
     fn judge_all(self, cancel: &AtomicBool) -> RunGhosts {
         if let Some(settled) = &self.settled {
             let _ = settled.recv();
@@ -222,11 +230,13 @@ impl GhostJob {
             }
         };
         let best = self.sources.best.as_ref().and_then(judge_again);
-        let account = match (&self.sources.account, &self.sources.best) {
-            (Some(account), Some(best_run)) if account.file == best_run.file => best.clone(),
-            (account, _) => account.as_ref().and_then(judge_again),
+        let judged_as_best = |source: &Option<GhostSource>| match (source, &self.sources.best) {
+            (Some(run), Some(best_run)) if run.file == best_run.file => best.clone(),
+            (run, _) => run.as_ref().and_then(judge_again),
         };
-        RunGhosts { best, account }
+        let account = judged_as_best(&self.sources.account);
+        let borrowed = judged_as_best(&self.sources.borrowed);
+        RunGhosts { best, account, borrowed }
     }
 }
 

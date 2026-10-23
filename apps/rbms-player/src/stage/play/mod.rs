@@ -483,8 +483,9 @@ impl PlayState {
     /// then (`ScoreDataProperty.java:171-172`), and finished on the very score it stands for, so a
     /// best or a ranking that moved after the chart was read is paced evenly rather than by another
     /// run. A LOCAL BEST target is the best's own run; an IR BEST target the account's run, which is
-    /// the best's own when IR BEST stood in for it. A practice slice is paced evenly, as the
-    /// reference gives practice no ghost (`BMSPlayer.java:441-442`).
+    /// the best's own when IR BEST stood in for it; the run a borrowed layout came from is its own
+    /// run. A practice slice is paced evenly, as the reference gives practice no ghost
+    /// (`BMSPlayer.java:441-442`).
     fn attach_ghosts(&mut self) {
         let Some(target) = self.pace_target.as_ref() else {
             return;
@@ -500,6 +501,7 @@ impl PlayState {
             |ghost: &Option<Arc<GhostPace>>, ex: u32| ghost.as_ref().filter(|ghost| ghost.total_notes() == total_notes && ghost.final_ex() == ex).cloned();
         self.best_ghost = run_of(&ghosts.best, self.best_score);
         self.target_ghost = match target.used {
+            _ if target.of_borrowed_replay => run_of(&ghosts.borrowed, target.ex),
             ScoreTarget::LocalBest => run_of(&ghosts.best, target.ex),
             ScoreTarget::IrBest => run_of(&ghosts.account, target.ex),
             _ => None,
@@ -748,24 +750,30 @@ impl PlayState {
     }
 
     /// Handle an analysis-mode playback key (only while a replay analysis is active): pause/resume,
-    /// playback rate, and one seek step either way, each on the key the key configuration gives it.
-    /// Returns whether the key was an analysis control.
-    fn analysis_key(&mut self, shared: &mut AppShared, code: KeyCode) -> bool {
+    /// playback rate, one seek step either way and playing the chart on the replay's layout, each on
+    /// the key the key configuration gives it. Returns where the screen goes when the key was an
+    /// analysis control, and `None` when it was not.
+    fn analysis_key(&mut self, shared: &mut AppShared, code: KeyCode) -> Option<Transition> {
         match shared.shortcut_for(ShortcutScreen::Replay, code) {
             Some(shortcut) => self.analysis_shortcut(shared, shortcut),
             None => {
                 self.sync_judge_settings(shared);
-                false
+                None
             }
         }
     }
 
     /// Carry out one control of a replay under analysis, from a key or from a controller. Returns
-    /// whether a replay is under analysis for it to act on; a seek is also told to the skin.
-    fn analysis_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> bool {
+    /// where the screen goes when a replay is under analysis for it to act on, and `None` when none
+    /// is; a seek is also told to the skin.
+    ///
+    /// PLAY THIS LAYOUT starts a run of the chart played by hand on the replay's layout in the
+    /// replay's place ([`AppShared::borrow_layout_of_watched_replay`]); a layout that cannot be
+    /// borrowed leaves the replay playing and says why.
+    fn analysis_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> Option<Transition> {
         self.sync_judge_settings(shared);
         if !self.session.analysis_enabled() {
-            return false;
+            return None;
         }
         let play = &mut self.session;
         match shortcut {
@@ -774,12 +782,19 @@ impl PlayState {
             Shortcut::ReplaySlower => play.adjust_analysis_rate(-1),
             Shortcut::ReplayForward => play.seek(play.analysis_position_us() + ANALYSIS_SEEK_STEP_US),
             Shortcut::ReplayBack => play.seek(play.analysis_position_us() - ANALYSIS_SEEK_STEP_US),
-            _ => return false,
+            Shortcut::ReplayPlayLayout => {
+                let borrowed = shared.borrow_layout_of_watched_replay().unwrap_or(Ok(Transition::Stay));
+                return Some(borrowed.unwrap_or_else(|refusal| {
+                    notify(Level::Warn, refusal.to_string());
+                    Transition::Stay
+                }));
+            }
+            _ => return None,
         }
         if matches!(shortcut, Shortcut::ReplayForward | Shortcut::ReplayBack) {
             self.skin_seeked(shared);
         }
-        true
+        Some(Transition::Stay)
     }
 
     /// A jump of a replay under analysis, as a skin sees it: the scene clock goes where the chart
@@ -1571,9 +1586,7 @@ impl StageHandler for PlayState {
         match event {
             crate::gamepad::PadEvent::Lane { lane, dir, press } => self.lane_input(ctx.shared, lane, dir, press, ctx.now),
             crate::gamepad::PadEvent::Control(action) => self.in_play_control(ctx.shared, action),
-            crate::gamepad::PadEvent::Shortcut(shortcut) => {
-                self.analysis_shortcut(ctx.shared, shortcut);
-            }
+            crate::gamepad::PadEvent::Shortcut(shortcut) => return self.analysis_shortcut(ctx.shared, shortcut).unwrap_or(Transition::Stay),
         }
         Transition::Stay
     }
@@ -1601,8 +1614,10 @@ impl StageHandler for PlayState {
             }
             return self.escape_key(ctx, &key);
         }
-        if key.pressed && self.analysis_key(ctx.shared, key.code) {
-            return Transition::Stay;
+        if key.pressed
+            && let Some(next) = self.analysis_key(ctx.shared, key.code)
+        {
+            return next;
         }
         if key.pressed
             && let Some(action) = ctx.shared.control_for(key.code)
