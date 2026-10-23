@@ -8,10 +8,12 @@ import {
     countColumnSchema,
     extraSchema,
     floatColumnSchema,
+    gaugeTypeSchema,
     intColumnSchema,
     jsonTextSchema,
     judgeBreakdownSchema,
     playerIdSchema,
+    randomOptionSchema,
 } from '@server/dto/common'
 
 export const COURSE_HASH_MAX_LENGTH = 128
@@ -20,6 +22,19 @@ export const COURSE_ASSIST_TAG_MAX_LENGTH = 32
 export const COURSE_ASSIST_TAGS_MAX = 16
 export const COURSE_CHARTS_MAX = 64
 export const COURSE_SUBMISSION_MAX_BYTES = 256 * 1024
+
+export const COURSE_GAUGE_RULES = ['LR2', 'BEATORAJA', 'IIDX'] as const
+
+export type CourseGaugeRule = (typeof COURSE_GAUGE_RULES)[number]
+
+export const courseGaugeRuleSchema = z.enum(COURSE_GAUGE_RULES)
+
+/** What one played stage of a course was played with, as the client states it. `lntype` is not narrowed: a value outside 0 to 2 must not discard the whole run. */
+export const courseStagePlaySchema = z.object({
+    gauge: gaugeTypeSchema,
+    random: randomOptionSchema,
+    lntype: z.number().int(),
+})
 
 export const courseTrophySchema = z.object({
     name: jsonTextSchema,
@@ -60,9 +75,14 @@ export const courseSubmissionSchema = z.object({
     assist: z.array(jsonTextSchema.max(COURSE_ASSIST_TAG_MAX_LENGTH)).max(COURSE_ASSIST_TAGS_MAX).default([]),
     client_build_sha256: buildHashSchema,
     client_platform: columnTextSchema(CLIENT_PLATFORM_LENGTH).nullish().default(null),
+    gauge: gaugeTypeSchema.nullish().default(null),
+    course_gauge: courseGaugeRuleSchema.nullish().default(null),
+    stages: z.array(courseStagePlaySchema).max(COURSE_CHARTS_MAX).default([]),
     extra: extraSchema,
 })
 
 export type CourseMetaInput = z.infer<typeof courseMetaSchema>
 export type CourseMetaUpsertInput = z.infer<typeof courseMetaUpsertSchema>
 export type CourseSubmissionInput = z.infer<typeof courseSubmissionSchema>
+export type CourseStagePlayInput = z.infer<typeof courseStagePlaySchema>
+export type StoredCourseStage = CourseStagePlayInput & { md5: string; sha256: string }

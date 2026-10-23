@@ -327,6 +327,51 @@ describe.each(filesOf('course'))('%s — 코스 제출 라우트와 서비스', 
             maxExScore: input.max_ex_score,
         })
     })
+
+    test('서비스가 코스 게이지 모드와 스테이지의 게이지·RANDOM·LN 종류를 그대로 저장한다', async () => {
+        const { inserted, service } = createCourseStub(input.charts)
+        await service.submit({
+            input,
+            user: { id: CONTRACT_USER_ID, loginId: input.player.id },
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+        })
+        expect(inserted[0].courseGauge).toBe(input.course_gauge)
+        expect(inserted[0].stages?.map(({ gauge, random, lntype }) => ({ gauge, random, lntype })) ?? []).toEqual(input.stages)
+    })
+})
+
+describe('코스 제출의 게이지·코스 게이지·스테이지 (결정 6)', () => {
+    const body = readContract('course-normal.json')
+    const bodyRecord = isRecord(body) ? body : {}
+    const { charts } = courseSubmissionSchema.parse(body)
+    const GAUGE_FIELDS = ['gauge', 'course_gauge', 'stages']
+    const stage = { gauge: 'Class', random: 'Off', lntype: 0 } as const
+    const withGaugeFields = { ...bodyRecord, gauge: 'Class', course_gauge: 'LR2', stages: charts.map(() => stage) }
+
+    test('세 필드가 없는 옛 코스 본문도 받고 gauge 와 course_gauge 는 null, stages 는 비어 있다', () => {
+        const legacy = Object.fromEntries(Object.entries(bodyRecord).filter(([key]) => !GAUGE_FIELDS.includes(key)))
+        const parsed = courseSubmissionSchema.parse(legacy)
+        expect([parsed.gauge, parsed.course_gauge, parsed.stages]).toEqual([null, null, []])
+    })
+
+    test('세 필드를 실은 코스 본문은 서버가 버리거나 바꾸는 값 없이 받는다', () => {
+        const result = courseSubmissionSchema.safeParse(withGaugeFields)
+        expect(result.success).toBe(true)
+        expect(result.success ? changedPaths(withGaugeFields, result.data, DROPPED_FIELDS.course) : []).toEqual([])
+    })
+
+    test('세 필드를 실은 코스 본문의 스테이지는 같은 자리 차트와 짝지어 저장된다', async () => {
+        const input = courseSubmissionSchema.parse(withGaugeFields)
+        const { inserted, service } = createCourseStub(input.charts)
+        await service.submit({
+            input,
+            user: { id: CONTRACT_USER_ID, loginId: input.player.id },
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+        })
+        expect(inserted[0].stages).toEqual(charts.map((chart) => ({ ...stage, md5: chart.md5, sha256: chart.sha256 })))
+    })
 })
 
 describe.each(filesOf('replay'))('%s — 리플레이 업로드 라우트와 서비스', (file) => {

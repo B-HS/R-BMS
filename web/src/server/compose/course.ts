@@ -2,10 +2,10 @@ import { and, asc, count, eq, inArray } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chart, course, courseBest, courseChart, courseScore, rival } from '@server/db/schema'
-import { NO_ASSIST_GRADE, type AssistGrade } from '@server/dto/common'
+import type { AssistGrade } from '@server/dto/common'
 import { newId } from '@server/lib/token'
 import { withLockRetry } from '@server/lib/with-lock-retry'
-import { createCourseService } from '@server/service/domain/course/course.service'
+import { courseAssistGrade, createCourseService } from '@server/service/domain/course/course.service'
 import { effectiveJudgeCounts } from '@server/service/domain/score/best-policy'
 import type { ScoreRankedRow, ScoreRankingRow } from '@server/service/domain/score/score.service'
 import { courseBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
@@ -175,11 +175,17 @@ export const composeCourse = (db: Database) => {
                         maxCombo: courseScore.maxCombo,
                         ranked: courseScore.ranked,
                         scratchAuto: courseScore.scratchAuto,
+                        gauge: courseScore.gauge,
+                        courseGauge: courseScore.courseGauge,
+                        gaugeValue: courseScore.gaugeValue,
+                        stages: courseScore.stages,
+                        playedAt: courseScore.playedAt,
+                        extra: courseScore.extra,
                     })
                     .from(courseScore)
                     .where(and(eq(courseScore.userId, userId), eq(courseScore.courseHash, courseHash), eq(courseScore.playedAt, playedAt)))
                     .limit(1)
-                return row ? { ...row, assistGrade: NO_ASSIST_GRADE } : null
+                return row ? { ...row, assistGrade: courseAssistGrade(row) } : null
             },
             insertCourseScore: withLockRetry(async (row) => {
                 await db.insert(courseScore).values(row)

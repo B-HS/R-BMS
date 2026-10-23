@@ -20,6 +20,7 @@ const BASE_PLAYED_AT = 1_796_000_000_000
 const PLAY_SPACING_MS = 1_000
 const NOTES = 1000
 const COURSE_HASH = 'assist-grade-course'
+const GAUGE_COURSE_HASH = 'assist-grade-course-gauge'
 const TABLE_ID = 'insane1'
 const PLAYERS = ['alice', 'bob', 'carol', 'dave', 'erin', 'frank'] as const
 const BACKFILL_SEED = 0xa5510000
@@ -226,7 +227,7 @@ describe.skipIf(!hasDatabase)('어시스트 등급 (임시 MySQL)', () => {
         expect(records?.records[entry.md5]).toMatchObject({ clear: 'LightAssistEasy', assist_grade: 3, ex_score: 600, scratch_auto: true })
     })
 
-    test('코스 본문에는 게이지가 없어 코스 최고 기록의 등급은 0 이다', async () => {
+    test('게이지가 없는 옛 코스 본문은 코스 최고 기록의 등급이 0 이다', async () => {
         const run = await compose().courseService.submit({
             input: courseSubmissionSchema.parse({
                 course_hash: COURSE_HASH,
@@ -251,6 +252,34 @@ describe.skipIf(!hasDatabase)('어시스트 등급 (임시 MySQL)', () => {
         expect(stored).toMatchObject({ clear: 3, assistGrade: 0, exScore: 5000 })
         const [first] = await compose().courseService.getRanking({ courseHash: COURSE_HASH, limit: 10, page: 1, includeScratchAuto: true })
         expect([first?.clear, first?.assist_grade]).toEqual(['LightAssistEasy', 0])
+    })
+
+    test('게이지를 실은 코스 본문은 그 게이지 등급으로 순위에 오른다', async () => {
+        const run = await compose().courseService.submit({
+            input: courseSubmissionSchema.parse({
+                course_hash: GAUGE_COURSE_HASH,
+                player: { id: userId('bob') },
+                clear: 'LightAssistEasy',
+                ex_score: 5000,
+                minbp: 5,
+                judge,
+                played_at: BASE_PLAYED_AT + 52 * PLAY_SPACING_MS,
+                scratch_auto: true,
+                assist: ['AUTO_SCRATCH'],
+                gauge: 'Class',
+            }),
+            user: { id: userId('bob'), loginId: userId('bob') },
+            buildTrust: 'trusted',
+            requireTrustedBuild: false,
+        })
+        expect(run.response.is_new_best).toBe(true)
+        const [stored] = await getDb()
+            .select()
+            .from(courseBest)
+            .where(and(eq(courseBest.userId, userId('bob')), eq(courseBest.courseHash, GAUGE_COURSE_HASH)))
+        expect(stored).toMatchObject({ clear: 3, assistGrade: 2, exScore: 5000 })
+        const [first] = await compose().courseService.getRanking({ courseHash: GAUGE_COURSE_HASH, limit: 10, page: 1, includeScratchAuto: true })
+        expect([first?.clear, first?.assist_grade]).toEqual(['LightAssistEasy', 2])
     })
 
     test('0011 의 백필은 chart_best 행을 그 행이 가리키는 score 의 게이지 등급으로 채우고 옛 코드가 남긴 낡은 등급은 0 으로 되돌린다', async () => {

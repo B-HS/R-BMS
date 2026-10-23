@@ -1,6 +1,7 @@
-import { clearLampToId, NO_ASSIST_GRADE, type AssistGrade } from '@server/dto/common'
-import type { CourseMetaInput, CourseSubmissionInput } from '@server/dto/course'
+import { clearLampToId, gaugeTypeToId, NO_ASSIST_GRADE, type AssistGrade } from '@server/dto/common'
+import type { CourseGaugeRule, CourseMetaInput, CourseSubmissionInput, StoredCourseStage } from '@server/dto/course'
 import type { SubmitResponseOutput } from '@server/dto/score'
+import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import { deriveExScore, deriveMinbp, effectiveJudgeCounts, EX_PER_PGREAT, isBetterBest } from '@server/service/domain/score/best-policy'
 import {
     assistFlags,
@@ -8,6 +9,7 @@ import {
     isBuildBlockingRank,
     isScratchAutoPlay,
     rankBlockingFlags,
+    SCORE_FLAG,
     submissionMessage,
     type BuildTrust,
     type ScoreFlag,
@@ -78,8 +80,19 @@ export type CourseScoreInsertRow = {
     scratchAuto: boolean
     ranked: boolean
     playedAt: number
+    gauge: number | null
+    courseGauge: CourseGaugeRule | null
+    stages: StoredCourseStage[] | null
     extra: Record<string, unknown>
 }
+
+export type StoredCourseRun = StoredRunForBest &
+    Pick<CourseScoreInsertRow, 'gauge' | 'courseGauge' | 'gaugeValue' | 'stages' | 'playedAt'> & { extra: unknown }
+
+export type SubmittedCourseRun = Pick<
+    CourseScoreInsertRow,
+    'id' | 'userId' | 'courseHash' | 'clear' | 'ranked' | 'scratchAuto' | 'gauge' | 'courseGauge' | 'gaugeValue' | 'stages' | 'playedAt'
+> & { flags: ScoreFlag[] }
 
 export type CourseServiceDb = {
     findCourse: (courseHash: string) => Promise<CourseRow | null>
@@ -93,7 +106,7 @@ export type CourseServiceDb = {
         extra: Record<string, unknown>
     }) => Promise<void>
     replaceCourseCharts: (courseHash: string, charts: { position: number; chartSha256: string }[]) => Promise<void>
-    findCourseScoreByIdempotency: (params: { userId: string; courseHash: string; playedAt: number }) => Promise<StoredRunForBest | null>
+    findCourseScoreByIdempotency: (params: { userId: string; courseHash: string; playedAt: number }) => Promise<StoredCourseRun | null>
     insertCourseScore: (row: CourseScoreInsertRow) => Promise<void>
     getCourseBest: (params: {
         courseHash: string
@@ -140,11 +153,23 @@ export const toCourseMeta = (row: CourseRow, charts: CourseChartRow[]): CourseMe
  */
 const COURSE_BAD_TAKES_NOTE = false
 
-/**
- * A course body names no gauge and the course keeps none, so a course run has no assist grade: its SCRATCH AUTO clear is one LIGHT
- * ASSIST whatever gauge the course ran on.
- */
-const COURSE_ASSIST_GRADE = NO_ASSIST_GRADE
+/** The assist grade of a course run: none when the body names no gauge (a client from before 2026-10-23). */
+export const courseAssistGrade = (run: { clear: number; gauge: number | null }): AssistGrade =>
+    run.gauge === null ? NO_ASSIST_GRADE : deriveAssistGrade({ clear: run.clear, gauge: run.gauge })
+
+/** The stages a body played, each with the chart the course lists at that place. */
+export const toStoredStages = (input: Pick<CourseSubmissionInput, 'stages' | 'charts'>): StoredCourseStage[] | null =>
+    input.stages.length === 0
+        ? null
+        : input.stages.map((stage, index) => ({ ...stage, md5: input.charts[index]?.md5 ?? '', sha256: input.charts[index]?.sha256 ?? '' }))
+
+const SCORE_FLAGS: readonly unknown[] = Object.values(SCORE_FLAG)
+
+const isScoreFlag = (value: unknown): value is ScoreFlag => SCORE_FLAGS.includes(value)
+
+/** The flags a run was stored with: `extra.flags` of its row, without any value that is not a flag. */
+export const storedFlagsOf = (extra: unknown): ScoreFlag[] =>
+    typeof extra === 'object' && extra !== null && 'flags' in extra && Array.isArray(extra.flags) ? extra.flags.filter(isScoreFlag) : []
 
 /**
  * The first reason a course body can not be what a real run sends, or null. Only the body is read: the judgements that
@@ -210,6 +235,9 @@ export const buildCourseScoreRow = (params: {
         scratchAuto: params.scratchAuto,
         ranked: params.ranked,
         playedAt: input.played_at,
+        gauge: input.gauge === null ? null : gaugeTypeToId(input.gauge),
+        courseGauge: input.course_gauge,
+        stages: toStoredStages(input),
         extra:
             params.flags.length > 0 ? { ...input.extra, flags: params.flags, scratch_auto: input.scratch_auto, assist: input.assist } : input.extra,
     }
@@ -252,7 +280,6 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
         const exScore = input.ex_score > 0 ? input.ex_score : deriveExScore(input.judge)
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
-        const assistGrade = COURSE_ASSIST_GRADE
         const flags = [...assistFlags(input), ...buildTrustFlags(params.buildTrust)]
         const ranked = rankBlockingFlags(flags).length === 0 && !isBuildBlockingRank(params.buildTrust, params.requireTrustedBuild)
         const scratchAuto = isScratchAutoPlay(input)
@@ -296,14 +323,28 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                 is_new_best: false,
                 score_id: stored.id,
             }
-            return { courseScoreId: stored.id, duplicated: true, ranked, flags, response }
+            const scoreRow: SubmittedCourseRun = {
+                id: stored.id,
+                userId: user.id,
+                courseHash: input.course_hash,
+                clear: stored.clear,
+                ranked: stored.ranked,
+                scratchAuto: stored.scratchAuto,
+                flags: storedFlagsOf(stored.extra),
+                gauge: stored.gauge,
+                courseGauge: stored.courseGauge,
+                gaugeValue: stored.gaugeValue,
+                stages: stored.stages,
+                playedAt: stored.playedAt,
+            }
+            return { courseScoreId: stored.id, duplicated: true, ranked, flags, response, scoreRow }
         }
 
         const courseScoreId = deps.newId('cs_')
+        const row = buildCourseScoreRow({ id: courseScoreId, userId: user.id, input, exScore, minbp, ranked, scratchAuto, flags })
+        const assistGrade = courseAssistGrade({ clear, gauge: row.gauge })
         const previous = await deps.db.getCourseBest({ courseHash: input.course_hash, userId: user.id, scratchAuto })
-        await deps.db.insertCourseScore(
-            buildCourseScoreRow({ id: courseScoreId, userId: user.id, input, exScore, minbp, ranked, scratchAuto, flags }),
-        )
+        await deps.db.insertCourseScore(row)
 
         const isNewBest =
             ranked &&
@@ -333,7 +374,22 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             score_id: courseScoreId,
         }
 
-        return { courseScoreId, duplicated: false, ranked, flags, response }
+        const scoreRow: SubmittedCourseRun = {
+            id: row.id,
+            userId: row.userId,
+            courseHash: row.courseHash,
+            clear: row.clear,
+            ranked: row.ranked,
+            scratchAuto: row.scratchAuto,
+            flags,
+            gauge: row.gauge,
+            courseGauge: row.courseGauge,
+            gaugeValue: row.gaugeValue,
+            stages: row.stages,
+            playedAt: row.playedAt,
+        }
+
+        return { courseScoreId, duplicated: false, ranked, flags, response, scoreRow }
     },
 
     getRanking: async (params: BestScope & { courseHash: string; limit: number; page: number; rivalOf?: string }) => {

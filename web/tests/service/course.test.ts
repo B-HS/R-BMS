@@ -1,14 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { clearLampToId } from '@server/dto/common'
+import { clearLampToId, gaugeTypeToId, type AssistGrade } from '@server/dto/common'
 import { COURSE_ASSIST_TAG_MAX_LENGTH, COURSE_ASSIST_TAGS_MAX, COURSE_CHARTS_MAX, courseSubmissionSchema } from '@server/dto/course'
 import {
+    courseAssistGrade,
     createCourseService,
     findCourseIntegrityFailure,
+    storedFlagsOf,
     toCourseMeta,
+    toStoredStages,
     type CourseScoreInsertRow,
+    type StoredCourseRun,
 } from '@server/service/domain/course/course.service'
-import type { StoredRunForBest } from '@server/service/domain/score/score.service'
-import { BUILD_TRUST } from '@server/service/domain/score/ranked-policy'
+import { BUILD_TRUST, SCORE_FLAG } from '@server/service/domain/score/ranked-policy'
 
 const COURSE_HASH = 'course-hash-1'
 const PLAYED_AT = 1_700_000_000_000
@@ -31,7 +34,7 @@ const submission = (overrides: Record<string, unknown> = {}) =>
 
 const LOCK_DEADLOCK = Object.assign(new Error('Deadlock found when trying to get lock'), { code: 'ER_LOCK_DEADLOCK' })
 
-const storedRun = (overrides: Partial<StoredRunForBest> & { id: string }): StoredRunForBest => ({
+const storedRun = (overrides: Partial<StoredCourseRun> & { id: string }): StoredCourseRun => ({
     clear: clearLampToId('Normal'),
     assistGrade: 0,
     exScore: 5000,
@@ -39,12 +42,30 @@ const storedRun = (overrides: Partial<StoredRunForBest> & { id: string }): Store
     maxCombo: 3000,
     ranked: true,
     scratchAuto: false,
+    gauge: null,
+    courseGauge: null,
+    gaugeValue: 42,
+    stages: null,
+    playedAt: PLAYED_AT,
+    extra: {},
     ...overrides,
 })
 
+const CHARTS = [
+    { md5: 'a'.repeat(32), sha256: 'b'.repeat(64) },
+    { md5: 'c'.repeat(32), sha256: 'd'.repeat(64) },
+    { md5: 'e'.repeat(32), sha256: 'f'.repeat(64) },
+]
+const CLASS_STAGE = { gauge: 'Class', random: 'Off', lntype: 0 } as const
+const LIGHT_ASSIST = clearLampToId('LightAssistEasy')
+const CLASS_ASSIST_GRADE = 2
+const EX_CLASS_ASSIST_GRADE = 3
+const EX_HARD_CLASS_ASSIST_GRADE = 4
+const EX_HARD_CLASS_ID = gaugeTypeToId('ExHardClass')
+
 const createService = (
     options: {
-        existing?: StoredRunForBest
+        existing?: StoredCourseRun
         best?: { clear: number; assistGrade: 0; exScore: number; minbp: number }
         winsBest?: boolean
         remembersInserted?: boolean
@@ -55,6 +76,8 @@ const createService = (
     const bests: { courseScoreId: string; clear: number; exScore: number; scratchAuto: boolean }[] = []
     const bestLookups: boolean[] = []
     const rankScopes: boolean[] = []
+    const bestGrades: AssistGrade[] = []
+    const rankGrades: AssistGrade[] = []
     const calls: string[] = []
     let counter = 0
     const service = createCourseService({
@@ -66,8 +89,8 @@ const createService = (
             replaceCourseCharts: async () => undefined,
             findCourseScoreByIdempotency: async () => {
                 const [row] = inserted
-                if (options.remembersInserted && row) return { ...row, assistGrade: 0 }
-                return options.existing ?? null
+                if (options.remembersInserted && row) return { ...row, assistGrade: courseAssistGrade(row) }
+                return options.existing ? { ...options.existing, assistGrade: courseAssistGrade(options.existing) } : null
             },
             insertCourseScore: async (row) => {
                 inserted.push(row)
@@ -78,13 +101,15 @@ const createService = (
             },
             upsertCourseBestIfBetter: async (row) => {
                 calls.push('best')
+                bestGrades.push(row.assistGrade)
                 if (calls.filter((call) => call === 'best').length <= (options.bestFailures ?? 0)) throw LOCK_DEADLOCK
                 bests.push({ courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore, scratchAuto: row.scratchAuto })
                 return options.winsBest ?? true
             },
-            countBetterCourseBests: async ({ includeScratchAuto }) => {
+            countBetterCourseBests: async ({ includeScratchAuto, assistGrade }) => {
                 calls.push('rank')
                 rankScopes.push(includeScratchAuto)
+                rankGrades.push(assistGrade)
                 return 2
             },
             getCourseRanking: async () => [],
@@ -92,7 +117,7 @@ const createService = (
             getRivalUserIds: async () => [],
         },
     })
-    return { service, inserted, bests, bestLookups, rankScopes, calls }
+    return { service, inserted, bests, bestLookups, rankScopes, bestGrades, rankGrades, calls }
 }
 
 describe('courseService.submit', () => {
@@ -259,6 +284,154 @@ describe('courseService.submit', () => {
             ...TRUSTED,
         })
         expect(inserted[0].exScore).toBe(24)
+    })
+})
+
+describe('코스 게이지와 어시스트 등급 (결정 6)', () => {
+    const scratchAutoClear = { clear: 'LightAssistEasy', scratch_auto: true, assist: ['AUTO_SCRATCH'] }
+
+    test('게이지가 있는 SCRATCH AUTO 코스 클리어는 그 게이지 등급으로 최고 기록과 순위에 들어간다', async () => {
+        const { service, inserted, bestGrades, rankGrades } = createService()
+        await service.submit({ input: submission({ ...scratchAutoClear, gauge: 'ExClass' }), user: USER, ...TRUSTED })
+        expect(inserted[0].gauge).toBe(gaugeTypeToId('ExClass'))
+        expect(bestGrades).toEqual([EX_CLASS_ASSIST_GRADE])
+        expect(rankGrades).toEqual([EX_CLASS_ASSIST_GRADE])
+    })
+
+    test('게이지가 없는 옛 코스 본문은 등급 0 이고 게이지와 스테이지는 비어 있다', async () => {
+        const input = submission(scratchAutoClear)
+        expect(input.gauge).toBeNull()
+        expect(input.course_gauge).toBeNull()
+        expect(input.stages).toEqual([])
+        const { service, inserted, bestGrades } = createService()
+        await service.submit({ input, user: USER, ...TRUSTED })
+        expect(bestGrades).toEqual([0])
+        expect([inserted[0].gauge, inserted[0].courseGauge, inserted[0].stages]).toEqual([null, null, null])
+    })
+
+    test('LIGHT ASSIST 램프가 아니면 게이지가 있어도 등급은 0 이다', async () => {
+        const { service, bestGrades } = createService()
+        await service.submit({ input: submission({ clear: 'Hard', gauge: 'ExHardClass' }), user: USER, ...TRUSTED })
+        expect(bestGrades).toEqual([0])
+    })
+
+    test('스테이지는 같은 자리 차트와 짝지어 저장된다', async () => {
+        const { service, inserted } = createService()
+        const stages = [CLASS_STAGE, { ...CLASS_STAGE, random: 'Mirror', lntype: 1 }]
+        await service.submit({ input: submission({ charts: CHARTS, stages }), user: USER, ...TRUSTED })
+        expect(inserted[0].stages).toHaveLength(2)
+        expect(inserted[0].stages?.[1]).toEqual({ gauge: 'Class', random: 'Mirror', lntype: 1, md5: CHARTS[1].md5, sha256: CHARTS[1].sha256 })
+    })
+
+    test('차트보다 많은 스테이지는 차트가 없는 자리를 빈 해시로 저장한다', () => {
+        expect(toStoredStages({ charts: [CHARTS[0]], stages: [CLASS_STAGE, CLASS_STAGE] })).toEqual([
+            { ...CLASS_STAGE, md5: CHARTS[0].md5, sha256: CHARTS[0].sha256 },
+            { ...CLASS_STAGE, md5: '', sha256: '' },
+        ])
+    })
+
+    test('코스 게이지 모드는 그대로 저장된다', async () => {
+        const { service, inserted } = createService()
+        await service.submit({ input: submission({ course_gauge: 'IIDX' }), user: USER, ...TRUSTED })
+        expect(inserted[0].courseGauge).toBe('IIDX')
+    })
+
+    test('같은 판을 다시 보내면 처음 판에 저장된 게이지로 등급을 다시 만든다', async () => {
+        const existing = storedRun({ id: 'cs_existing', clear: LIGHT_ASSIST, gauge: EX_HARD_CLASS_ID, scratchAuto: true })
+        const { service, bestGrades, rankGrades } = createService({ existing })
+        await service.submit({ input: submission(scratchAutoClear), user: USER, ...TRUSTED })
+        expect(bestGrades).toEqual([EX_HARD_CLASS_ASSIST_GRADE])
+        expect(rankGrades).toEqual([EX_HARD_CLASS_ASSIST_GRADE])
+    })
+
+    test('게이지를 모르는 옛 행을 다시 보내면 다시 보낸 본문에 게이지가 있어도 등급은 0 이다', async () => {
+        const { service, bestGrades } = createService({ existing: storedRun({ id: 'cs_old', clear: LIGHT_ASSIST, scratchAuto: true }) })
+        await service.submit({ input: submission({ ...scratchAutoClear, gauge: 'ExHardClass' }), user: USER, ...TRUSTED })
+        expect(bestGrades).toEqual([0])
+    })
+
+    test('범위 밖 lntype 도 판을 거절하지 않는다', () => {
+        expect(submission({ stages: [{ ...CLASS_STAGE, lntype: 7 }] }).stages[0].lntype).toBe(7)
+    })
+
+    test('알 수 없는 코스 게이지 이름이나 차트 한도를 넘는 스테이지 수는 스키마가 거절한다', () => {
+        expect(() => submission({ course_gauge: 'LR1' })).toThrow()
+        expect(() => submission({ stages: Array.from({ length: COURSE_CHARTS_MAX + 1 }, () => CLASS_STAGE) })).toThrow()
+        expect(() => submission({ stages: Array.from({ length: COURSE_CHARTS_MAX }, () => CLASS_STAGE) })).not.toThrow()
+    })
+
+    test('새 판의 scoreRow 는 저장한 행의 값과 이번 제출의 표지를 싣는다', async () => {
+        const { service, inserted } = createService()
+        const result = await service.submit({
+            input: submission({ ...scratchAutoClear, charts: CHARTS, gauge: 'Class', course_gauge: 'LR2', stages: [CLASS_STAGE] }),
+            user: USER,
+            ...TRUSTED,
+        })
+        expect(result.scoreRow).toEqual({
+            id: result.courseScoreId,
+            userId: USER.id,
+            courseHash: COURSE_HASH,
+            clear: LIGHT_ASSIST,
+            ranked: true,
+            scratchAuto: true,
+            flags: [SCORE_FLAG.SCRATCH_AUTO],
+            gauge: gaugeTypeToId('Class'),
+            courseGauge: 'LR2',
+            gaugeValue: 42,
+            stages: [{ ...CLASS_STAGE, md5: CHARTS[0].md5, sha256: CHARTS[0].sha256 }],
+            playedAt: PLAYED_AT,
+        })
+        expect(result.scoreRow.stages).toBe(inserted[0].stages)
+    })
+
+    test('다시 보낸 판의 scoreRow 는 다시 보낸 본문이 아니라 저장된 행에서 온다', async () => {
+        const stored = storedRun({
+            id: 'cs_existing',
+            clear: LIGHT_ASSIST,
+            scratchAuto: true,
+            gauge: gaugeTypeToId('ExClass'),
+            courseGauge: 'BEATORAJA',
+            gaugeValue: 17,
+            stages: [{ ...CLASS_STAGE, md5: CHARTS[0].md5, sha256: CHARTS[0].sha256 }],
+            playedAt: PLAYED_AT + 1,
+            extra: { flags: [SCORE_FLAG.SCRATCH_AUTO] },
+        })
+        const { service, inserted } = createService({ existing: stored })
+        const result = await service.submit({ input: submission({ gauge: 'Easy' }), user: USER, ...TRUSTED })
+        expect(inserted).toHaveLength(0)
+        expect(result.scoreRow).toEqual({
+            id: 'cs_existing',
+            userId: USER.id,
+            courseHash: COURSE_HASH,
+            clear: LIGHT_ASSIST,
+            ranked: true,
+            scratchAuto: true,
+            flags: [SCORE_FLAG.SCRATCH_AUTO],
+            gauge: gaugeTypeToId('ExClass'),
+            courseGauge: 'BEATORAJA',
+            gaugeValue: 17,
+            stages: stored.stages,
+            playedAt: PLAYED_AT + 1,
+        })
+    })
+})
+
+describe('courseAssistGrade', () => {
+    test('LIGHT ASSIST 램프만 게이지 등급을 받고 게이지를 모르면 0 이다', () => {
+        expect(courseAssistGrade({ clear: LIGHT_ASSIST, gauge: gaugeTypeToId('Class') })).toBe(CLASS_ASSIST_GRADE)
+        expect(courseAssistGrade({ clear: LIGHT_ASSIST, gauge: gaugeTypeToId('ExClass') })).toBe(EX_CLASS_ASSIST_GRADE)
+        expect(courseAssistGrade({ clear: LIGHT_ASSIST, gauge: EX_HARD_CLASS_ID })).toBe(EX_HARD_CLASS_ASSIST_GRADE)
+        expect(courseAssistGrade({ clear: LIGHT_ASSIST, gauge: null })).toBe(0)
+        expect(courseAssistGrade({ clear: clearLampToId('Normal'), gauge: EX_HARD_CLASS_ID })).toBe(0)
+    })
+})
+
+describe('storedFlagsOf', () => {
+    test('저장된 extra.flags 에서 알려진 표지만 남긴다', () => {
+        expect(storedFlagsOf({ flags: [SCORE_FLAG.ASSIST, 'NOT_A_FLAG', 3], scratch_auto: false })).toEqual([SCORE_FLAG.ASSIST])
+        expect(storedFlagsOf({ flags: 'ASSIST' })).toEqual([])
+        expect(storedFlagsOf({})).toEqual([])
+        expect(storedFlagsOf(null)).toEqual([])
     })
 })
 

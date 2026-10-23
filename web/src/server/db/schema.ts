@@ -18,6 +18,7 @@ import {
 } from 'drizzle-orm/mysql-core'
 import { user } from '@server/db/auth-schema'
 import type { AssistGrade } from '@server/dto/common'
+import type { CourseGaugeRule, StoredCourseStage } from '@server/dto/course'
 
 export const chart = mysqlTable(
     'chart',
@@ -298,8 +299,8 @@ export const courseScore = mysqlTable(
         createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
         extra: json('extra'),
         gauge: tinyint('gauge'),
-        courseGauge: varchar('course_gauge', { length: 16 }),
-        stages: json('stages'),
+        courseGauge: varchar('course_gauge', { length: 16 }).$type<CourseGaugeRule>(),
+        stages: json('stages').$type<StoredCourseStage[]>(),
     },
     (table) => [
         uniqueIndex('course_score_idempotent_uniq').on(table.userId, table.courseHash, table.playedAt),
