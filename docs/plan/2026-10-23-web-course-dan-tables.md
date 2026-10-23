@@ -374,6 +374,8 @@ bun scripts/seed-courses.ts apply   # 계획 → 적용 → 다시 계획(바뀔
 
 ### 3.5 단위 자동 판정(결정 19·20, W4)
 
+> 구현과 다름: 체계와 규칙은 `dan-rules.ts` 가 아니라 `web/src/server/service/domain/course-catalog/dan-of-course.ts` 에 있다([ADR](../acknowledge/2026-10-23-adr-dan-auto-award.md)).
+
 **체계와 규칙(`web/src/server/service/domain/dan/dan-rules.ts`)**
 
 ```ts
@@ -525,6 +527,8 @@ export type DanDisplayInput = z.infer<typeof danDisplayInputSchema>
 `web/src/server/route/dan.ts`(`createMyDansRoute`, `createMyDanDisplayRoute`), `web/src/server/route/course-catalog.ts`(`createCourseCatalogListRoute`, `createCourseCatalogEntryRoute`). 앱 파일 `web/src/app/api/fe/me/dans/route.ts`, `web/src/app/api/fe/me/dans/display/route.ts`, `web/src/app/api/fe/courses/route.ts`, `web/src/app/api/fe/courses/[courseHash]/catalog/route.ts`.
 
 ### 3.6 표 매일 갱신(결정 13, W5)
+
+> 구현과 다름: 검증 상수는 비율이 아니라 정수 퍼센트다(`TABLE_MIN_KEPT_PERCENT` 90, `TABLE_MAX_CHANGE_PERCENT` 25. 값은 같다). 사유 코드에 `course_sync_failed`·`unexpected_error` 가 더해졌다([ADR](../acknowledge/2026-10-23-adr-table-daily-refresh.md)).
 
 **표 정의(`web/src/server/service/domain/table-refresh/table-sources.ts`)**
 

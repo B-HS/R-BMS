@@ -1,7 +1,7 @@
 # ADR: SCRATCH AUTO 클리어의 어시스트 등급 (ASSIST EASY / CLEAR / HARD / EXHARD)
 
-> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
-> 상태: 유효(사용자 확인 2026-10-23: "1-11 추천대로") · 결정일 2026-10-22 · 결정자 메인(사용자 지시 "끝까지 다 구현해놔"에 따라 추천안 채택, 사용자 미확인. 운영 DB 마이그레이션 적용만 사용자가 승인) · 커밋 4d57c2a(클라이언트 코어), 8d85b32(웹 마이그레이션 0011), 64c6120(웹 등급), 242397f(코스 스테이지), 47a7f9c(웹 AI 정렬·백필 액션)
+> 최종 갱신 2026-10-23 · 대응 커밋 47a7f9c
+> 상태: 일부 대체됨(6절의 `course_best.assist_grade` 항목만 [코스 제출 게이지](2026-10-23-adr-course-submission-gauge.md)가 대체함. 나머지는 유효, 사용자 확인 2026-10-23: "1-11 추천대로") · 결정일 2026-10-22 · 결정자 메인(사용자 지시 "끝까지 다 구현해놔"에 따라 추천안 채택, 사용자 미확인. 운영 DB 마이그레이션 적용만 사용자가 승인) · 커밋 4d57c2a(클라이언트 코어), 8d85b32(웹 마이그레이션 0011), 64c6120(웹 등급), 242397f(코스 스테이지), 47a7f9c(웹 AI 정렬·백필 액션)
 > 관계: [2026-10-14-adr-scratch-auto-rule.md](2026-10-14-adr-scratch-auto-rule.md) 결정 4(SCRATCH AUTO 클리어의 램프는 LIGHT ASSIST)를 대체하지 않고 확장한다. 램프 id 3 과 그 강등 규칙은 그대로이고, 그 안을 등급으로 나눈다.
 
 ## 배경
@@ -62,7 +62,7 @@
 - 순위·최고 기록 키는 `(clear, assist_grade, EX, BP)` 다. `web/src/server/compose/best-scope.ts` 의 `BEST_ORDER` 표 하나로 `outranks`·`isBeatenBy`·`isRankedAheadOf`·`rankInList`·`listOrder` 와 `best-policy.ts` 의 `isBetterBest` 를 만든다. SCRATCH AUTO 칸의 기존 순위가 이 키로 다시 매겨진다.
 - 응답에 `assist_grade`(0~4, 최상위 정수)를 더했다: 차트·코스 순위 행, 플레이어 점수 목록, 활동 항목, 플레이어 통계 `lamps[]`, 표 기록, AI 응답. 제출 본문과 `SubmitResponse` 는 바뀌지 않는다. Rust 쪽 `ScoreRecord` 는 `#[serde(default)] assist_grade: u8` 이고 `deny_unknown_fields` 가 없어 구 클라이언트는 무시한다.
 - AI: 추천·목표·연습·주간·기록 질문의 프롬프트 버전 5개를 1 에서 2 로 올렸다(캐시된 결과는 한 번 다시 생성된다). 기록 질문의 lamp 정렬은 `(clear, assist_grade)` 순이고(점수 source 는 `score.gauge` 에서 파생하는 SQL CASE), 비교 합계(`judgeTotalsSchema`)도 등급을 싣는다.
-- `course_best.assist_grade` 는 항상 0 이다. 코스 제출 본문과 코스 DB 에 게이지가 없어 파생할 수 없다. 공유 비교 코드가 균일해지는 이점으로 열은 추가했지만 지금은 쓰이지 않는 열이다.
+- `course_best.assist_grade` 는 항상 0 이다. 코스 제출 본문과 코스 DB 에 게이지가 없어 파생할 수 없다. 공유 비교 코드가 균일해지는 이점으로 열은 추가했지만 지금은 쓰이지 않는 열이다. (대체됨: [2026-10-23-adr-course-submission-gauge.md](2026-10-23-adr-course-submission-gauge.md). 코스 제출에 게이지를 싣고 이 열을 채운다.)
 
 ### 7) 운영 적용
 
@@ -106,7 +106,7 @@
 - 사용자 확인이 필요한 것(미확인):
   - 웹 순위 키가 `(clear, 등급, EX, BP)` 로 바뀌어 SCRATCH AUTO 칸의 기존 순위가 달라진다. 조사 문서 8절 D5 는 이 변경에 사용자 확인이 필요하다고 적었다.
   - ASSIST EASY 게이지를 등급 0 에 두는 것(EASY 등급에 합치는 안과 다르다), HAZARD 를 EXHARD 로 접는 것, 이름 통일.
-  - `course_best.assist_grade` 를 쓰지 않는 열로 두는 것. 코스 최고 기록의 등급 정책은 따로 정해야 한다.
+  - `course_best.assist_grade` 를 쓰지 않는 열로 두는 것. 코스 최고 기록의 등급 정책은 따로 정해야 한다. (대체됨: [2026-10-23-adr-course-submission-gauge.md](2026-10-23-adr-course-submission-gauge.md))
 - 남은 위험:
   - 서버 백필은 `chart_best` 가 가리키는 `score` 의 값만 채운다. 같은 차트에서 게이지가 다른 SCRATCH AUTO 판이 둘 이상이면 `(clear, 등급, EX, BP)` 가 더 높은 다른 판이 있을 수 있고, 그 사용자의 best 는 더 높은 판을 제출할 때 바뀐다. 최고 기록 재선정은 하지 않았다.
   - 이미 서버에 올라간 코스 스테이지 판은 설정 게이지로 남아 서버 쪽 등급이 높게 매겨질 수 있다. 서버 보정이나 재전송은 하지 않았다.

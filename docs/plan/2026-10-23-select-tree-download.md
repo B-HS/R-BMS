@@ -96,6 +96,8 @@
 
 ### 3.1 폴더 스택과 커서 복원(U1, 결정 10·11)
 
+> 구현과 다름: `TableSource.group` 은 빈 값도 `group:""` 로 쓴다(`skip_serializing_if` 없음). 코스 막대의 정체는 코스 이름이 아니라 코스 해시(`Course::hash`)다. 표의 덧붙임 정보 `TableExtras` 에 symbol 말고 없는 곡 목록(`missing`)과 코스(`courses`)도 든다([ADR](../acknowledge/2026-10-23-adr-select-folder-stack.md)).
+
 #### 3.1.1 새 타입(새 파일 `apps/rbms-player/src/select_tree.rs`, lib.rs 에 `mod select_tree;`)
 
 ```rust
@@ -265,6 +267,8 @@ pub fn courses_of_table(course: &serde_json::Value) -> Vec<rbms_course::Course>;
 
 ### 3.3 Stella·Satellite 기본 표(U2, 결정 12)
 
+> 구현과 다름: `TableSource.group` 은 빈 값도 `group:""` 로 쓴다([ADR](../acknowledge/2026-10-23-adr-stella-default-tables.md)).
+
 1. 설정 스키마: `TableSource` 에 묶음을 더한다(crates/rbms-config/src/schema.rs:436-440). 이 필드는 U1 이 더한다(목록이 읽음).
 
 ```rust
@@ -338,6 +342,8 @@ pub fn missing_levels_in(&self, library: &Md5Index) -> Vec<Vec<usize>>;
 
 ### 3.6 다운로드 폴더 설정(U6, 결정 16)
 
+> 구현과 다름: `download_folder` 와 `show_missing_charts` 는 설정 파일에 늘 적힌다(`None` 미기록 아님)([ADR](../acknowledge/2026-10-23-adr-missing-charts-and-download.md)).
+
 1. 스키마(`LibraryOptions`, schema.rs:850-876):
 
 ```rust
@@ -385,6 +391,8 @@ impl DownloadModal {
 5. 모달을 열 때 디스크·네트워크를 읽지 않는다(표 항목은 메모리에 있음).
 
 ### 3.8 받기·풀기 크레이트(D1, 결정 15)
+
+> 구현과 다름: `zip` 은 9.0.0, `typed-path` 는 0.12.3 이다(`Cargo.lock` 도 같다). 작업 폴더는 `.rbms-partial/{md5}/` 가 아니라 `.rbms-partial` 아래 고정 이름 `archive.zip`·`unpacked` 다(작업이 하나뿐이라서). 스캔은 `.rbms-partial` 이라는 이름의 폴더를 걸어 들어가지 않는다(`DOWNLOAD_WORK_FOLDER`, 45d09fd).
 
 새 작업 공간 크레이트 `crates/rbms-download`(외부 의존 아님. 워크스페이스 members 와 `[workspace.dependencies]` 에 경로로 등록). 의존: `reqwest`(workspace), `encoding_rs`(workspace), `thiserror`(workspace), 그리고 승인된 새 외부 의존 하나:
 
@@ -451,6 +459,8 @@ pub(crate) fn open_in_browser(raw: &str);
 4. 시험용: `opener_command` 는 순수 함수라 플랫폼별 인자를 시험한다. 실제 실행은 시험하지 않는다(9절 부채).
 
 ### 3.10 받기 일과 부분 재스캔(D3, 결정 15·16)
+
+> 구현과 다름: 설정에서 다운로드 폴더를 바꾸면 선곡이 그 폴더를 부분 스캔하는 경로가 더해졌다. 45d09fd 로 다시 띄운 부분 스캔도 받은 차트를 기다리는 상태를 이어받고, 스캔이 도는 사이 표 사본이 바뀌었으면(표 세대) 그 스캔을 다시 돌린다.
 
 1. 새 파일 `apps/rbms-player/src/download.rs`:
 
@@ -742,7 +752,7 @@ D3(download/tests.rs, 네트워크 없는 fetcher 주입):
 
 1. 차분만 받은 곡은 음원이 없어 키음 없이 재생될 수 있다. 막대는 살아나지만 플레이 품질은 사용자가 곡 URL 에서 받은 파일을 같은 폴더에 넣어야 맞다. 모달 문구로만 막는다. 후속 후보: 같은 제목의 라이브러리 곡 폴더에 풀기(원본 `open_with_explorer` 가 비슷한 탐색을 함, EventFactory.java:419-446).
 2. 부분 스캔 중 프레임 스레드의 곡 DB 읽기(`ChartFacts`, 즐겨찾기)가 SQLITE_BUSY 를 받을 수 있다(`busy_timeout` 없음, 2.6-4). 읽기 실패는 기존처럼 기본값으로 떨어지지만 사실 정보가 한 번 비어 보일 수 있다. 부채: 재현 조건 "큰 압축 풀기 직후 스캔 중 커서 이동", 필요 시 `busy_timeout`(워커 연결만) 검토.
-3. `.rbms-partial` 은 다운로드 폴더 안이라, 풀기 중에 사용자가 곡 폴더 화면을 나가 전체 스캔이 돌면 반쯤 푼 차트가 잠시 DB 에 들어갈 수 있다. 다음 스캔에서 지워진다. 부채로 기록.
+3. `.rbms-partial` 은 다운로드 폴더 안이라, 풀기 중에 사용자가 곡 폴더 화면을 나가 전체 스캔이 돌면 반쯤 푼 차트가 잠시 DB 에 들어갈 수 있다. 다음 스캔에서 지워진다. 부채로 기록. 구현과 다름: 45d09fd 로 해소됐다. 스캔이 `.rbms-partial` 을 걸어 들어가지 않고(`scan.rs` 의 `DOWNLOAD_WORK_FOLDER`), 이름만 같은 다른 폴더는 건너뛰지 않는다는 시험이 있다.
 4. `zip` 9.0.5 는 게시 6일, `typed-path` 0.12.4 는 3일 된 판이다(2026-10-23 기준). 컨벤션의 "최신" 을 따르되 Cargo.lock 으로 고정한다. 보안 공지가 나오면 갱신.
 5. `cargo tree` 를 설계 단계에서 돌리지 못했다(실행 권한 거부). D1 첫 단계에서 확인한다.
 6. Windows `rundll32` 와 Linux `xdg-open` 실제 동작은 CI 에서 확인할 수 없다(브라우저 없음). 실기 점검표로 한다.

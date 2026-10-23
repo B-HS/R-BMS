@@ -382,3 +382,28 @@
 | 외부 스킨 위에서 재배정한 패널 키 | ModernChic 같은 스킨이 죽은 칸 라벨(JUDGE AREA, MARK NOTE, BPM GUIDE, NO MINE)로 그리는 키가 저장되는 설정을 바꾼다: SCRATCH AUTO, KEEP GREEN NUMBER, LANE COVER, LIFT, HIDDEN+, GAUGE 이전, HI-SPEED FIX 이전, JUDGE ALGORITHM. 화면은 변하지 않고 OptionChange 소리만 난다 | 그 칸이 원본 설정을 뒤집는다: 패널 2 는 `showjudgearea`·`markprocessednote`·`bpmguide`·`mineMode`, 패널 1 건반 4·6 은 `optiondp`(54)·`option2p`(43). R-BMS 는 패널 2 의 네 설정을 갖지 않아 전에는 그 칸이 아무 일도 하지 않았다. 패널 1 건반 4 는 값만 저장하고 플레이가 읽지 않았으며 건반 6 은 건반 2 와 같은 RANDOM 이었다 | 스킨이 확장 id 를 안다는 신호 통로가 없어 막지 못했다. **사용자 결정 대기.** 방법 셋(헤더 플래그, 번들 팩 경로, 실행 중 읽기 기록)은 [패널 배치 ADR](2026-10-22-adr-option-panel-layout.md) 7절 |
 | 원본이 어시스트로 세는 옵션 | SCRATCH AUTO 와 넓힌 판정·TOTAL 만 센다 | H-RANDOM, S-RANDOM-EX, SPIRAL, ALL-SCRATCH, BPM 가이드, 지뢰 제거 등도 어시스트(`score = false`)(`BMSPlayer.java:200-256`) | 이번 램프 등급 작업의 범위 밖이다. 세면 기존 기록과 서버 ranked 정책이 함께 바뀐다 |
 | 코스 최고 기록의 어시스트 등급 | 서버 `course_best.assist_grade` 열은 항상 0 이다 | 해당 없음(R-BMS 확장) | 코스 제출 본문과 코스 DB 에 게이지가 없어 파생할 수 없다. **사용자 결정 대기:** 코스 최고 기록에 등급 정책을 둘지 |
+
+## 코스·선곡 트리·다운로드 (2026-10-23)
+
+> 사용자 결정 1~21(2026-10-23, "1-11 추천대로" 등)과 메인 판단의 결과다. 결정과 근거: [Esc 결과 화면](2026-10-23-adr-escape-shows-the-result.md), [코스 시작 슬롯과 LN 제약](2026-10-23-adr-course-stage-start-and-ln.md), [코스 게이지](2026-10-23-adr-course-gauge-modes.md), [폴더 스택](2026-10-23-adr-select-folder-stack.md), [없는 곡과 다운로드](2026-10-23-adr-missing-charts-and-download.md), [GENOSIDE 2018 코스](2026-10-23-adr-genoside-2018-course-data.md). 이 절의 원본 줄 번호는 각 ADR 이 적은 것을 옮겼고 이번 정리에서 원본 소스를 다시 열지 않았다.
+
+| 항목 | 전 | 원본 | 지금 |
+|---|---|---|---|
+| 노트를 친 판의 Esc | 결과 화면 없이 선곡, 알림 한 줄 | `stopPlay` 가 남은 노트가 있으면 FAILED 로 닫고 점수 데이터가 있으면 RESULT 로 간다(`BMSPlayer.java:693-742`) | 노트를 하나라도 친 판은 로그인과 상관없이 결과 화면. 남은 노트는 늦은 POOR 로 세고 게이지 그래프는 나간 자리부터 0 으로 채운다(원본 `:722-727`). 코스 도중이면 그 스테이지를 FAILED 로 접어 불합격 코스 결과까지 간다 |
+| 코스 스테이지의 시작 게이지 슬롯 | 사용자 GAUGE 와 무관하게 늘 CLASS | 사용자 게이지로 정한다(`GrooveGauge.java:164`) | ASSIST EASY·EASY·NORMAL → CLASS, HARD → EXCLASS, EXHARD·HAZARD → EXHARDCLASS(IIDX 표는 EXCLASS 까지) |
+| 코스 곡 사이의 게이지 이월 | 선택 게이지의 끝 값 하나 | 직전 곡 게이지 기록의 마지막 값으로 9슬롯 모두를 세팅한다(`GrooveGauge.java:150-155`) | 9슬롯 모두를 이월한다. 값은 기록 표본이 아니라 판 끝의 정확한 값이다(표본 간격 안의 차이) |
+| 코스의 ln·cn·hcn 제약 | 플레이에 적용하지 않음 | 설정의 LN 종류를 강제한다(`MusicSelector.java:501`) | 모든 스테이지가 그 LN 종류로 판정한다. 설정 파일은 바꾸지 않고 복사본에만 적용한다(원본은 `config.setLnmode` 로 설정 자체를 바꾼다) |
+| 표 레벨 폴더 제목 | `LV 12` | 표 헤더 symbol + 레벨(`TableDataAccessor.java:185`) | 발광 `★12`, Stella `st3`, Satellite `sl5`. symbol 이 없거나 `*` 이면 `LV 12`. 발광 표의 화면 글자가 바뀐다 |
+| 폴더에서 나올 때의 커서 | 목록의 첫 줄 | `BarManager` 가 진입 직전의 막대를 쌓아 두고 나올 때 새 목록에서 찾는다(`BarManager.java:73, 273, 298-302, 375-377, 424-447`) | 폴더 스택으로 같다. 재스캔·표 도착·표 관리 Esc 뒤에도 열린 경로와 커서 막대를 다시 찾는다 |
+
+**아직 원본과 다른 점:**
+
+| 항목 | rbms | 원본 | 이유 |
+|---|---|---|---|
+| 코스가 쓰는 게이지 표 | 설정 COURSE GAUGE(LR2 기본·BEATORAJA·IIDX)가 정한다. 코스의 게이지 제약은 막대 배지에만 남는다. 코스를 시작할 때 한 번 읽어 모든 스테이지에 쓴다 | 코스 제약이 표를 정한다(`GrooveGauge.java:128-147`) | 사용자 결정 21. 제약이 표를 정하면 발광·Stella 코스(제약 `gauge_lr2`)는 모드와 무관하게 늘 LR2 라서 BEATORAJA·IIDX 모드가 의미가 없다 |
+| IIDX 게이지 표 | 있다(Class 시작 100·0% 실패·30% 이하에서 감소량 절반 등). EXHARD 이상은 EX-DAN | 없다 | R-BMS 확장. 수치 출처는 iidx.org 한 곳이고 실제 IIDX 의 내부 단위·반올림은 알 수 없다. 5·9·24키에도 같은 수치다 |
+| 노트 하나 못 친 판, 오토플레이·리플레이 보기·연습의 Esc | 결과 화면 없이 선곡(코스 스테이지 사이·앱 종료도 지금대로). 닫힘 연출 없이 곧장 결과 화면 | 오토플레이·리플레이도 결과 화면으로 간다. FAILED 로 닫는 연출을 거친다 | 기록이 없는 판이거나 변경 최소(메인 판단, 사용자 미확인) |
+| 곡 받기 | 직접 zip 링크는 앱이 받아 다운로드 폴더에 풀고 그 폴더만 다시 스캔한다. 나머지는 브라우저로 넘긴다. 차분만 받으므로 소리는 곡 URL 에서 따로 받아야 한다 | 두 링크를 곧장 브라우저에 넘긴다(`EventFactory.open_download_site`) | 사용자 결정 15·16 |
+| 없는 곡 막대의 검색 | 검색에는 나오지 않는다(검색은 라이브러리만 본다). 필터가 켜지면 빠진다 | 이 작업에서 대조하지 않았다 | 확인하지 못함 |
+| DP 코스의 MIRROR | FLIP 이 없다(R-BMS 가 `LaneOption` 을 플레이에 적용하지 않는다) | 이 작업에서 대조하지 않았다 | 범위 밖. 테스트 부채 |
+| 코스 제약 NO GOOD·NO GREAT | 적용하지 않고 배지만 남긴다(대상 코스 0개) | 이 작업에서 대조하지 않았다 | 범위 밖. 테스트 부채 |

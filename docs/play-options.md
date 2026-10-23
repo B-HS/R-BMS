@@ -1,6 +1,6 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c. 반영한 변경: 2026-10-22 선곡 옵션 패널 1~3 의 새 배치와 켬·끔 토글, F1 오버레이 홀드 키(새 12절, 2절 표의 "바꾸는 곳" 칸), 램프 등급과 코스 스테이지의 게이지(새 10.13절, 10.1·10.2·10.6·10.12절의 해당 칸), PLAY 메뉴의 색 행 접이(7.2·7.3·7.4절), 2026-10-20 과거 판 trace 소급(웹 AI 기능 W6, 10.12절의 소급·소급 실행·설정·테스트·남은 것 행, 10.1절의 `play_trace` 행), 2026-10-20 판별 trace(웹 AI 기능 W4 클라이언트, 10.1절의 `play_trace`·`ir_sync`·`pending-runs` 행, 10.9절의 trace 행, 새 10.12절), 2026-10-19 기록 목표의 진행 중 값이 그 기록 판의 노트별 판정을 따름(11.7절, 8절의 점수 차 행), 2026-10-19 노트를 하나도 치지 않은 판은 Esc·앱 종료로 남기지 않음(10.2절의 도중 포기·앱 종료 행), 2026-10-15 S19 의 입력 시각과 KEY·PAD DEBOUNCE(3.4절), 기록 정의(규칙 세대 4: avgjudge·BP·코스 스테이지 콤보·풀콤·TOTAL 어시스트, Esc 판은 모두 저장과 코스 도중 Esc: 10.2절의 FAILED·TOTAL·Esc 행, 새 10.11절), 0.1.4 의 기록 동기화와 Esc 포기 판 저장(10.1·10.2·10.4·10.8절과 새 10.9절, 커밋 `5f4a9a2`), 저장 스레드와 리플레이 보존(10.10절), 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
+> 최종 갱신 2026-10-23 · 대응 커밋 76e026a. 반영한 변경: 2026-10-23 노트를 친 판의 Esc 는 결과 화면(코스 도중은 FAILED 코스 결과까지. 10.2절의 도중 포기 행, 10.6절 5번), SCRATCH AUTO COLOR 행과 색 접이(2절, 7.2절, 10.5절 끝), COURSE GAUGE 설정과 코스 시작 게이지·9칸 이월·ln/cn/hcn 제약·제출 게이지(새 10.14절, 10.13절 4번), 선곡 패널 키의 스킨 opt-in(12.2절, 12.7절), 없는 곡 보이기·다운로드 폴더·다운로드 모달(새 13절), 연습 패널의 GAUGE CATEGORY 에 IIDX(9.1절), 2026-10-22 선곡 옵션 패널 1~3 의 새 배치와 켬·끔 토글, F1 오버레이 홀드 키(새 12절, 2절 표의 "바꾸는 곳" 칸), 램프 등급과 코스 스테이지의 게이지(새 10.13절, 10.1·10.2·10.6·10.12절의 해당 칸), PLAY 메뉴의 색 행 접이(7.2·7.3·7.4절), 2026-10-20 과거 판 trace 소급(웹 AI 기능 W6, 10.12절의 소급·소급 실행·설정·테스트·남은 것 행, 10.1절의 `play_trace` 행), 2026-10-20 판별 trace(웹 AI 기능 W4 클라이언트, 10.1절의 `play_trace`·`ir_sync`·`pending-runs` 행, 10.9절의 trace 행, 새 10.12절), 2026-10-19 기록 목표의 진행 중 값이 그 기록 판의 노트별 판정을 따름(11.7절, 8절의 점수 차 행), 2026-10-19 노트를 하나도 치지 않은 판은 Esc·앱 종료로 남기지 않음(10.2절의 도중 포기·앱 종료 행), 2026-10-15 S19 의 입력 시각과 KEY·PAD DEBOUNCE(3.4절), 기록 정의(규칙 세대 4: avgjudge·BP·코스 스테이지 콤보·풀콤·TOTAL 어시스트, Esc 판은 모두 저장과 코스 도중 Esc: 10.2절의 FAILED·TOTAL·Esc 행, 새 10.11절), 0.1.4 의 기록 동기화와 Esc 포기 판 저장(10.1·10.2·10.4·10.8절과 새 10.9절, 커밋 `5f4a9a2`), 저장 스레드와 리플레이 보존(10.10절), 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
 > 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절), 선곡의 옵션 패널 1~3(12절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
@@ -27,6 +27,7 @@
 | HIDDEN+ | 판정선에서 위로 올라오는 가림막 | 비율 0~1 | 0, 끔 | PLAY 메뉴 > LANE, 플레이 중 올림·내림·켬·끔 키(출하 시 미지정), 선곡 패널 2 의 턴테이블(켬·끔. 12.2절) | `PlayConfig.hidden`, IIDX 의 HIDDEN+ | 없음 |
 | JUDGE OFFSET | 판정 오프셋 | -200~+200 ms, PLAY 메뉴의 행은 1 ms 씩(Shift 10 ms) | 0 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 5·7번 키(±1 ms), 플레이 중 `9`(-1 ms)/`0`(+1 ms. 누르고 있으면 반복, 5.3절) | `PlayerConfig.judgetiming`(`LaneRenderer.java:300-301`) | 뜻과 부호는 같다. 범위만 좁다(원본 -500~+500 ms). 원본은 플레이 중에 바꾸는 키가 없다 |
 | AUTO ADJUST | 칠 때마다 JUDGE OFFSET 을 조금씩 움직인다 | 켬 / 끔 | 끔 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 3번 키, 플레이 중 AUTO ADJUST ON/OFF 키(출하 시 미지정) | `PlayerConfig.notesDisplayTimingAutoAdjust`(`JudgeManager.java:697-703`) | 없음(식과 부호가 같다) |
+| SCRATCH AUTO COLOR | SCRATCH AUTO 가 대신 치는 턴테이블 노트를 칠하는 색. 알파가 불투명도다 | RGBA(`#RRGGBBAA`), 채널 R·G·B·A 각 0~255 | 저장값 없음(출하 `#30E050FF`, 불투명 초록) | PLAY 메뉴 > CHART(7.2절) | 없음(R-BMS 확장. 원본은 상수 색) | 어느 스킨에서나(외부 스킨 포함)·스킨 없는 내장 필드에서도 같은 값이 이긴다. 스킨의 색 행(Scratch Note·Scratch LN)은 이 노트에 닿지 않는다. 롱노트 몸통은 사용자 알파 x 0xA0/255 라 머리와 구분된다. 저장값이 없으면 화소가 전과 같다 |
 
 ## 3. 판정 오프셋과 자동 보정(JUDGE OFFSET, AUTO ADJUST)
 
@@ -262,6 +263,8 @@ START + 턴테이블의 세부
 | CHART | RANDOM, GAUGE, TARGET, TARGET FALLBACK, ESCAPE | 항목 이름. TARGET 은 점수를 이름으로 삼는 목표(LOCAL BEST·IR BEST·RIVAL)일 때 `LOCAL BEST > AAA` 처럼 점수가 없을 때 쓰는 것을 뒤에 붙인다(11절) | 한 항목 |
 | CHART | TARGET RATE | `85%` | 1% / 10%. 범위 1~100%. RATE CUSTOM 목표가 요구하는 몫(11절) |
 | CHART | LEGACY NOTE, AUTOPLAY, SCRATCH AUTO, AUTO REPLAY | `ON` / `OFF` | 뒤집기 |
+| CHART | SCRATCH AUTO COLOR | 색 견본 사각형과 값. 저장한 색이 있으면 `#RRGGBBAA`, 없으면 `DEFAULT`(출하 `#30E050FF`). SCRATCH AUTO 가 꺼져 있어도 늘 보인다 | 색 행(SKIN 묶음)과 같다: ← → 로 프리셋 16색(알파 유지), Enter 로 16진 `RRGGBB`·`RRGGBBAA`, 0 키로 저장값 지움 |
+| CHART | 접이 `SCRATCH AUTO CHANNELS` | `HIDDEN` / `SHOWN`: 접힘 여부(든 행 4) | 접이 `COLOR CHANNELS` 와 같이 편다. 펴면 R, G, B, A 네 행(각 0~255, 한 칸 1, Shift 10)이 나오고 0 키는 그 채널만 출하 초록의 값으로 되돌린다. 닫힌 채로 열린다 |
 | SKIN | 접이 `COLOR` | `HIDDEN (17)` / `SHOWN (17)`: 접힘 여부와 든 행 수(기본 스킨 7키) | Enter·← →·클릭으로 펴고 접는다. 그 문서가 `color` 로 선언한 색 행이 한 행씩 바로 아래에 나온다(기본 스킨 5·7·10·14키 17행, 9키 22행. 목록은 3.4.4절). 선언한 색이 없는 문서에는 접이가 없다. 닫힌 채로 열린다 |
 | SKIN | 색 행(접이 `COLOR` 를 폈을 때. 기본 스킨: `LANE > WHITE KEY`, `NOTE > BLACK KEY`, `EFFECT > BOMB` 등) | 그 색의 견본 사각형(16px)과 값. 저장한 색이 있으면 `#RRGGBBAA`, 없으면 `DEFAULT` | ← → 로 프리셋 16색을 돈다(알파는 그대로. 프리셋 밖의 색에서는 → 가 첫 색, ← 가 끝 색). Enter 로 16진 `RRGGBB`·`RRGGBBAA` 를 쳐서 넣는다(`#` 는 받는다. 색이 아니면 행에 1.5초 동안 `NOT A COLOR`). 0 키는 `DEFAULT`(스킨이 정한 색으로 돌려놓고 저장값을 지운다). 저장값이 없다가 생기거나 있다가 없어지면 문서를 한 번 다시 읽고, 이미 저장된 색을 바꾸는 것은 다시 읽지 않고 다음 프레임에 반영한다. 저장값이 없는 행의 시작은 스킨이 지금 그 부위를 그리는 색이다(3.4.4절) |
 | SKIN | 접이 `COLOR CHANNELS` | `HIDDEN (68)` / `SHOWN (68)`(기본 스킨 7키: 17색 x 4) | 접이 `COLOR` 와 같이 펴고 접는다. 펴면 색 행마다 `<행 이름> R`, `G`, `B`, `A` 네 행이 나온다. 각 행은 0~255 숫자 행(한 칸 1, Shift 10, 슬라이더·직접 입력은 7.3절 그대로)이고 0 키는 그 색이 출하된 값(헤더의 `def`, 팩이 조절값 파일로 색을 주었으면 그 색)의 그 채널로 되돌린다. 알파는 그 부위의 불투명도에 곱해진다. 접이 `COLOR` 와 같이 닫힌 채로 열린다 |
@@ -343,7 +346,7 @@ START + 턴테이블의 세부
 | TARGET, TARGET FALLBACK, TARGET RATE | 점수 그래프의 타깃 막대와 `TARGET +n`, 그 막대의 이름표. 기록·IR·라이벌 없이 예시 차트의 노트 수만으로 정한 타깃이다. 그래서 LOCAL BEST·IR BEST·RIVAL 은 TARGET FALLBACK 으로 물러난 값이고, 이름표도 물러난 목표의 이름이다(웨이브 16 전에는 MAX 로 물러났다) |
 | AUTOPLAY | 스킨의 AUTOPLAY 표지. 예시 손(적어 둔 입력)은 그대로다 |
 | LEGACY NOTE | 롱노트가 일반 노트로 그려진다 |
-| RANDOM, HI-SPEED FIX, HI-SPEED STEP, COVER FINE STEP, SCRATCH AUTO, AUTO REPLAY, ESCAPE | 보이지 않는다. 예시 차트의 배치와 손은 바꾸지 않고(RANDOM), 예시 차트가 한 템포라 기준 BPM 이 어느 것이든 같으며(HI-SPEED FIX), 나머지는 화면에 그릴 것이 없는 값이다 |
+| RANDOM, HI-SPEED FIX, HI-SPEED STEP, COVER FINE STEP, SCRATCH AUTO, SCRATCH AUTO COLOR, AUTO REPLAY, ESCAPE | 보이지 않는다(SCRATCH AUTO COLOR 는 행의 색 견본 사각형으로 확인한다). 예시 차트의 배치와 손은 바꾸지 않고(RANDOM), 예시 차트가 한 템포라 기준 BPM 이 어느 것이든 같으며(HI-SPEED FIX), 나머지는 화면에 그릴 것이 없는 값이다 |
 
 ### 7.5 SETTINGS 에 남은 것과 옮긴 것
 
@@ -356,9 +359,12 @@ START + 턴테이블의 세부
 | GAUGE | SETTINGS > GAUGE | PLAY 메뉴 > CHART |
 | TARGET | SETTINGS > JUDGE | PLAY 메뉴 > CHART |
 | SCRATCH AUTO | SETTINGS > INPUT | PLAY 메뉴 > CHART |
+| SCRATCH AUTO COLOR, SCRATCH AUTO CHANNELS(접이) | 없음(2026-10-23 새 행) | PLAY 메뉴 > CHART(SCRATCH AUTO 바로 아래) |
+| COURSE GAUGE | 없음(2026-10-23 새 행) | SETTINGS > JUDGE(GAUGE 구역의 GAUGE SET 바로 뒤. 10.14절) |
+| MISSING CHARTS, DOWNLOAD FOLDER | 없음(2026-10-23 새 행) | SETTINGS > SELECT(MISSING CHARTS 는 SONG LIST 구역, DOWNLOAD FOLDER 는 DOWNLOADS 구역. 13절) |
 | 5KEYS LAYOUT | SETTINGS > PLAY | SETTINGS > DISPLAY(내장 필드만 읽는 행. WHITE NUMBER, JUDGE TEXT Y 아래) |
 | TOTAL | SETTINGS > GAUGE | SETTINGS > JUDGE(게이지 규칙 행들 아래) |
-| JUDGE ALGORITHM, JUDGE WIDTH 6행, LN MARGIN, LN MODE, GAUGE SET, GAUGE AUTO SHIFT, BOTTOM SHIFTABLE | SETTINGS > JUDGE | 그대로 |
+| JUDGE ALGORITHM, JUDGE WIDTH 6행, LN MARGIN, LN MODE, GAUGE SET, GAUGE AUTO SHIFT, BOTTOM SHIFTABLE | SETTINGS > JUDGE | 그대로. GAUGE SET(AUTO·LR2)은 단일 곡 전용이 되었고 코스는 COURSE GAUGE 가 표를 정한다 |
 | SCRATCH SIDE, KEY CONFIG | SETTINGS > INPUT | 그대로. SETTINGS 의 SCRATCH SIDE 는 내장 필드의 값이고(스킨이 그리는 동안 행 옆에 `SKIN OPTION COMES FIRST` 표지가 붙는다), 스킨이 그리는 화면의 스크래치 쪽은 PLAY 메뉴 LANE 묶음의 스킨 옵션 SCRATCH SIDE 다. 이름이 같은 두 행은 다른 값이다 |
 | DISPLAY 의 나머지, NETWORK, AUDIO, SELECT | — | 그대로 |
 
@@ -395,7 +401,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | START TIME | 숫자(시각) | 0:00.0 ~ 마지막 타임라인 2초 전(0.1초로 내림. **차트마다 다름**) | 0.1초 | 1초 | 0.1초 / 2.5초 | 0:00.0 |
 | END TIME | 숫자(시각) | START TIME + 1초(0.1초로 내림. **START TIME 에 따라 다름**) ~ 마지막 타임라인 1초 뒤(**차트마다 다름**) | 0.1초 | 1초 | 0.1초 / 2.5초 | 차트 끝(상한) |
 | GAUGE TYPE | 고르기(9종, 돌아감) | ASSIST EASY ~ EXHARD GRADE | 한 칸 | 한 칸 | 그대로 | 움직이지 않음 |
-| GAUGE CATEGORY | 고르기(5종, 돌아감) | 5KEYS 7KEYS PMS KEYBOARD LR2 | 한 칸 | 한 칸 | 그대로 | 움직이지 않음 |
+| GAUGE CATEGORY | 고르기(6종, 돌아감) | 5KEYS 7KEYS PMS KEYBOARD LR2 IIDX | 한 칸 | 한 칸 | 그대로 | 움직이지 않음 |
 | GAUGE VALUE | 숫자 | 1 ~ 고른 게이지의 상한(**GAUGE TYPE 과 GAUGE CATEGORY 에 따라 다름**. 예: 7KEYS NORMAL 100, PMS NORMAL 120) | 1 | 10 | 1 / 10 | 20 |
 | JUDGERANK | 숫자 | 1 ~ 400(판정 폭 %) | 1 | 10 | 1 / 25 | 100 |
 | TOTAL | 숫자 | 10 ~ 5000. **슬라이더와 ← → 는 10 ~ 1000, 그 위는 직접 입력** | 1 | 10 | 5 / 25 | 차트의 TOTAL |
@@ -467,18 +473,18 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | --- | --- | --- | --- | --- | --- | --- |
 | 손으로 친 판(로그인 여부와 무관) | 남는다 | 더 좋은 값이면 갱신 | 더 높은 램프면 갱신, 횟수 +1 | 저장 | 전송 | 없음 |
 | FAILED 로 끝난 판 | 남는다. BP(`minbp`)는 게이지가 비어 도달하지 못한 노트까지 센다(`BMSPlayer.java:909`, 10.11) | EX 가 더 높으면 갱신(램프와 무관, `ScoreData.java:549`) | FAILED, 횟수 +1(클리어 횟수는 그대로) | 저장 | 전송 | 원본은 PG~BD 가 하나도 없는 판을 저장하지 않는다(`BMSPlayer.java:858-861`). 여기서는 FAILED 로 남는다 |
-| 실패 화면에서 START·SELECT 로 곧장 다시 한 판 | 남는다. 다시 시작하기 전에 결과 화면이 남겼을 그대로(장면이 센 집계, FAILED) 남긴다(`app_result::record_retried_run`). 메시지 `failed run kept before starting again` | FAILED 판과 같다 | FAILED, 횟수 +1 | 저장 | 로그인했으면 그 판 하나만 기록 동기화로 곧장 보낸다(Esc 포기 판과 같다), 게스트면 다음 로그인 때 | 원본은 이 판을 저장하지 않는다(`BMSPlayer.java:696-710`). "사람이 친 판은 모두 저장·전송"(사용자 결정 2026-10-14)으로 남긴다. START 를 누른 채 실패하면 곧장 다시 시작하는 것은 원본대로다 |
+| 실패 화면에서 START·SELECT 로 곧장 다시 한 판 | 남는다. 다시 시작하기 전에 결과 화면이 남겼을 그대로(장면이 센 집계, FAILED) 남긴다(`app_result::record_retried_run`). 메시지 `failed run kept before starting again` | FAILED 판과 같다 | FAILED, 횟수 +1 | 저장 | 로그인했으면 그 판 하나만 기록 동기화로 곧장 보낸다, 게스트면 다음 로그인 때 | 원본은 이 판을 저장하지 않는다(`BMSPlayer.java:696-710`). "사람이 친 판은 모두 저장·전송"(사용자 결정 2026-10-14)으로 남긴다. START 를 누른 채 실패하면 곧장 다시 시작하는 것은 원본대로다 |
 | SCRATCH AUTO 를 켠 판(어시스트 1). 그 판의 턴테이블 레인에 노트가 하나라도 있을 때만 | 남는다. 턴테이블 노트를 뺀 집계 그대로(10.5) | 더 좋은 값이면 갱신. 손으로 친 판과 한 행을 같이 쓴다 | LIGHT ASSIST 램프(클리어한 게이지에 따라 ASSIST EASY ~ ASSIST EXHARD 등급이 붙는다. 10.13절), 횟수 +1 | 저장(`scratch_auto: true`) | 전송. `options.scratch_auto = true`, `options.assist = ["AUTO_SCRATCH"]` 를 싣는다. 서버(웨이브 20)는 이 판을 ranked 로 저장하고 일반 판과 따로 센 최고 기록에 넣는다. 웹 순위 목록은 기본으로 일반 판만 보이고 "SCRATCH AUTO 포함" 을 켜면 A-SCR 표지와 함께 보인다. 응답은 `flags: ["SCRATCH_AUTO"]` 이고 순위는 그 포함 목록 기준이라, 결과 화면은 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다(`ir_outcome::SCRATCH_AUTO_RANK_MARK`. `ScoreFlag::ScratchAuto` 는 랭킹을 막는 사유가 아니다). AUTO UPLOAD REPLAY 의 리플레이도 올라간다. 곡 선택의 IR RANKING 패널은 기본 목록을 쓴다 | 원본은 턴테이블 노트를 배경음으로 옮기고(같다) 그 판을 최고 기록·리플레이·IR 에서 뺀다(`score = false`). 사용자의 결정으로 다른 판과 똑같이 남기고 보낸다. 램프를 낮추는 것은 원본대로 유지했다(사용자가 램프는 말하지 않았다) |
 | SCRATCH AUTO 를 켰지만 턴테이블 노트가 없는 차트, 턴테이블이 없는 모드(9키) | 손으로 친 판과 같다 | 손으로 친 판과 같다 | 손으로 친 판과 같다(램프를 낮추지 않는다) | 저장 | 전송 | 없음. 원본은 자동으로 친 레인에서 노트를 옮겼을 때만 어시스트를 올린다(`AutoplayModifier.modify`) |
 | JUDGE WIDTH 나 LN MARGIN 을 100% 넘게 넓힌 판(어시스트 2) | 남는다 | 바뀌지 않는다 | ASSIST 램프(등급 없음. 10.13절), 횟수 +1 | 저장 | 전송. `options.assist = ["CUSTOM_JUDGE"]`. AUTO UPLOAD REPLAY 로 리플레이를 올리는 것은 여섯 판정 폭이 한 값이고 LN MARGIN 이 기본일 때뿐이다: 올리는 형식이 폭 하나만 싣고 LN MARGIN 을 싣지 않아, 다른 판은 내려받으면 다른 판정으로 재생되기 때문이다(`ir_replay::wire_carries_judge`). 로컬 리플레이는 전부 싣는다 | 원본은 리플레이를 남기지 않고 보내지도 않는다(`BMSPlayer.java:208-214`). "서버로 저장되지 않는 기록은 없다"는 결정으로 남기고 보낸다. 최고 기록을 바꾸지 않는 것은 원본대로 유지했다: 넓힌 판정의 EX 는 같은 차트를 정상 판정으로 친 EX 와 같은 잣대가 아니고, 사용자는 이것을 말하지 않았다 |
 | TOTAL 을 직접 정한 판(JUDGE 탭의 TOTAL > 0, 어시스트 2) | 남는다 | 바뀌지 않는다 | ASSIST 램프(등급 없음. 10.13절), 횟수 +1. 결과 화면 `OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE` | 저장. 그 TOTAL 을 리플레이(`judge.total_override`)에 적고, 재생은 설정이 아니라 적힌 값으로 한다. 올리는 형식에 TOTAL 자리가 없어 AUTO UPLOAD REPLAY 로는 올리지 않는다 | 전송. `options.total_override` 와 `options.assist = ["CUSTOM_JUDGE"]`. 서버는 `TOTAL_OVERRIDE`·`ASSIST` 로 unranked. 이 스테이지가 낀 코스는 넓힌 판정 스테이지가 낀 코스와 같다 | 원본에는 이 설정이 없다(rbms 확장). 넓힌 판정과 같이 다룬다(사용자 결정 2026-10-15) |
 | 게이지 종류, GAUGE AUTO SHIFT | 위와 같다. 게이지는 램프와, SCRATCH AUTO 판이면 램프 안의 등급(10.13절)을 정한다. 자동 전환된 판은 끝난 게이지로 적힌다 | - | - | - | - | 원본은 전환된 판의 게이지를 -1 로 적는다(`BMSPlayer.java:884`) |
-| 코스의 각 스테이지 | 그 차트의 판으로 위 규칙대로 남는다(`enter_result` 가 다음 스테이지로 넘어가기 전에 적는다). 게이지는 설정의 게이지가 아니라 그 스테이지가 실제로 돈 코스 게이지(CLASS·EXCLASS·EXHARDCLASS)로 적히고 점수 본문의 `options.gauge` 도 그 이름을 싣는다(10.13절). 램프와 등급은 그 게이지로 정해진다 | 위와 같다 | 위와 같다 | 위와 같다 | 스테이지 점수는 위와 같다. 코스 점수도 어시스트 스테이지가 있든 없든 보낸다(사용자 결정 2026-10-14). 코스 전체로 접은 어시스트(`course_ir::CourseAssist`)를 단일 곡과 같은 어휘로 싣는다: SCRATCH AUTO 스테이지가 하나라도 있으면 `scratch_auto = true`, 태그는 `assist = ["AUTO_SCRATCH", "CUSTOM_JUDGE"]` 중 해당하는 것(각각 한 번). 어시스트가 없는 코스는 두 필드를 싣지 않아 전과 같은 본문이고, 두 필드를 모르는 옛 서버도 거절하지 않는다. 코스 최고 기록(코스 결과 화면의 "점수 저장" 여부, `course_ir::course_updates_score`)은 단일 곡 규칙과 같다: SCRATCH AUTO 스테이지만 낀 코스는 갱신하고, 넓힌 판정 스테이지가 낀 코스는 갱신하지 않는다. 서버(웨이브 20)는 SCRATCH AUTO 스테이지만 낀 코스를 단일 곡처럼 ranked 로 저장하고 SCRATCH AUTO 칸의 코스 베스트에 넣으며(웹 코스 순위는 토글을 켜야 보인다), 넓힌 판정 스테이지가 낀 코스는 unranked 로 저장하고 코스 순위와 코스 베스트에 넣지 않는다. 보낼 수 있는 코스(모든 스테이지가 사람이 친 판이고 공개 코스)는 끝날 때 점수 DB 의 `course_submission` 에 본문째 남기고, 로그인했으면 곧장 보내 답을 `course_sync` 에 적는다(메시지 `course sent` / `course rejected: …` / `course not sent yet (…): sent again on the next records sync`). 로그인하지 않았거나 서버가 답하지 않은 코스는 기록 동기화가 같은 본문(같은 `played_at`)으로 다시 보낸다. 서버는 (사용자, 코스 해시, `played_at`) 가 같으면 같은 코스로 본다 | 스테이지 램프를 원본과 대조하는 일은 하지 않았다(원본은 코스 중 스테이지 램프를 게이지로 정하지 않는다, `BMSPlayer.java:864-880`) |
+| 코스의 각 스테이지 | 그 차트의 판으로 위 규칙대로 남는다(`enter_result` 가 다음 스테이지로 넘어가기 전에 적는다). 게이지는 설정의 게이지가 아니라 그 스테이지가 실제로 돈 코스 게이지(CLASS·EXCLASS·EXHARDCLASS. 시작 슬롯은 GAUGE 설정을 따른다. 10.14절)로 적히고 점수 본문의 `options.gauge` 도 그 이름을 싣는다(10.13절). 램프와 등급은 그 게이지로 정해진다 | 위와 같다 | 위와 같다 | 위와 같다 | 스테이지 점수는 위와 같다. 코스 점수도 어시스트 스테이지가 있든 없든 보낸다(사용자 결정 2026-10-14). 코스 전체로 접은 어시스트(`course_ir::CourseAssist`)를 단일 곡과 같은 어휘로 싣는다: SCRATCH AUTO 스테이지가 하나라도 있으면 `scratch_auto = true`, 태그는 `assist = ["AUTO_SCRATCH", "CUSTOM_JUDGE"]` 중 해당하는 것(각각 한 번). 어시스트가 없는 코스는 두 필드를 싣지 않아 전과 같은 본문이고, 두 필드를 모르는 옛 서버도 거절하지 않는다. 코스 최고 기록(코스 결과 화면의 "점수 저장" 여부, `course_ir::course_updates_score`)은 단일 곡 규칙과 같다: SCRATCH AUTO 스테이지만 낀 코스는 갱신하고, 넓힌 판정 스테이지가 낀 코스는 갱신하지 않는다. 서버(웨이브 20)는 SCRATCH AUTO 스테이지만 낀 코스를 단일 곡처럼 ranked 로 저장하고 SCRATCH AUTO 칸의 코스 베스트에 넣으며(웹 코스 순위는 토글을 켜야 보인다), 넓힌 판정 스테이지가 낀 코스는 unranked 로 저장하고 코스 순위와 코스 베스트에 넣지 않는다. 보낼 수 있는 코스(모든 스테이지가 사람이 친 판이고 공개 코스)는 끝날 때 점수 DB 의 `course_submission` 에 본문째 남기고, 로그인했으면 곧장 보내 답을 `course_sync` 에 적는다(메시지 `course sent` / `course rejected: …` / `course not sent yet (…): sent again on the next records sync`). 로그인하지 않았거나 서버가 답하지 않은 코스는 기록 동기화가 같은 본문(같은 `played_at`)으로 다시 보낸다. 서버는 (사용자, 코스 해시, `played_at`) 가 같으면 같은 코스로 본다 | 스테이지 램프를 원본과 대조하는 일은 하지 않았다(원본은 코스 중 스테이지 램프를 게이지로 정하지 않는다, `BMSPlayer.java:864-880`) |
 | AUTOPLAY | 남지 않는다 | - | - | - | 보내지 않는다 | 없음(`MusicResult.updateScoreDatabase` 가 PLAY 모드만 적는다). 사람이 친 판이 아니다 |
 | 리플레이 재생 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 재생하는 동안 SCRATCH AUTO·GAUGE·RANDOM 은 리플레이에 적힌 값으로 돌고 끝나면 플레이어의 값으로 돌아온다(웨이브 16) |
 | 연습 구간 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 사람이 쳤지만 구간만 잘라 친 판이라 한 판의 기록이 아니다 |
-| 도중 포기(Esc) | 사람이 친 판이면 판정한 노트 수와 상관없이 남는다(사용자 결정 2026-10-15). 단 노트를 하나도 치지 않은 판, 곧 PG·GR·GD·BD 가 모두 0 이고 쥔 롱노트가 없는 판은 지나간 노트의 POOR 나 빈 POOR 가 있어도 아무것도 남기지 않고 곧장 선곡으로 간다(사용자 결정 2026-10-19, `PlayState::has_judged_nothing`). 일반 LN 머리를 쥔 채 나간 판은 친 판이라 남는다. 결과 화면을 거치지 않고 곧장 선곡으로 간다(Esc 는 지금도 바로 나가는 키다). 남은 노트(아직 판정하지 않은 노트와 롱노트의 끝)는 모두 늦은 POOR(見逃し)로 세고 램프는 FAILED 다(`PlaySummary::left_unfinished`). 그래서 PG~POOR 합이 차트의 노트 수와 같다. 노트를 다 처리한 뒤의 Esc(판정할 노트가 처음부터 없는 차트도 여기다. 10.5절), 그리고 이미 실패·끝으로 닫히는 중인 판의 Esc(ESCAPE 가 길게 누르기일 때 누르는 도중 게이지가 바닥나 길게 누르기가 닫히는 중에 끝나는 경우도 같다)는 결과 화면으로 가고 위 규칙대로 남는다: 닫히는 판은 장면이 센 대로 남고 남은 노트를 見逃し POOR 로 더하지 않는다. 코스 도중의 Esc 는 그 스테이지에 남은 노트가 없으면 위처럼 결과로 가고 코스가 이어진다. 남은 노트가 있으면 그 스테이지를 위 규칙대로 FAILED 곡 기록으로 남기고, 코스를 끝낸 스테이지와 함께 FAILED 코스 기록으로 남겨 보낸 뒤(`app_result::leave_course`, 메시지 `course left part-way kept as FAILED`) 선곡으로 나간다. 그 스테이지에서 노트를 하나도 치지 않았으면 그 스테이지는 더하지 않고 코스가 그 자리에서 끝난다: 친 스테이지가 있으면 그 스테이지들로 FAILED 코스 기록을 남겨 보내고(`app_result::abandon_course`), 첫 스테이지였으면 코스 기록도 없다 | EX 가 더 높으면 갱신(FAILED 판과 같다) | FAILED, 횟수 +1 | 나간 시점까지의 입력으로 저장 | 로그인했으면 그 판 하나만 기록 동기화로 곧장 보낸다(결과 화면이 없어 결과 화면의 전송은 쓰지 않는다). 게스트면 다음 로그인 때 동기화가 보낸다. IR 프로필로의 전송은 다른 판과 같다. 메시지 `run left mid-song kept as FAILED` 가 뜬다 | 원본(`BMSPlayer.stopPlay`)은 FAILED 로 바꿔 결과 화면을 거쳐 저장하고, 남은 노트는 판정 수에 넣지 않고 BP 에만 더한다(`BMSPlayer.java:909`). 여기서는 결과 화면을 거치지 않고(위) 남은 노트를 見逃し POOR 로 센다(사용자 결정 2026-10-14). 리플레이를 재생하면 남은 노트가 지나가 見逃し POOR 가 되므로 판정 수는 기록과 같지만, 재생은 곡 끝까지 가고 게이지는 기록과 다르게 끝날 수 있다(쉬운 게이지면 클리어로 끝날 수도 있다). 알려진 한계다 |
-| 플레이 중 앱 종료(창 닫기·Cmd+Q·메뉴 Quit·Dock 종료) | Esc 와 같다(사용자 결정 2026-10-15 "서버로 저장되지 않는 기록은 없다", S19 2차 REC2-2): 사람이 친 판은 남은 노트가 있으면 남은 노트를 見逃し POOR 로 센 FAILED 판, 끝났거나 닫히는 판은 결과 화면이 남겼을 그대로 남는다. 남은 노트가 있어도 노트를 하나도 치지 않은 판은 Esc 처럼 남기지 않는다(사용자 결정 2026-10-19, `keep_run_cut_short_by_quitting`). 코스 도중이면 그 스테이지를 접고 코스를 남긴다(마지막 스테이지였거나 실패한 스테이지면 그대로, 아니면 FAILED 코스. 노트를 하나도 치지 않은 스테이지는 접지 않고 그 앞 스테이지까지의 FAILED 코스만 남긴다). 코스의 스테이지 사이(LOADING·결정 화면)에서 끄면 친 스테이지까지의 FAILED 코스가 남는다. 이벤트 루프의 `exiting` 에서 저장 스레드를 기다리기 전에 남기므로(`App::keep_what_quitting_cuts_short`, `app_result::keep_run_cut_short_by_quitting`) 리플레이까지 디스크에 놓인다. 플레이 화면에서 끄면 Esc 처럼 판을 남기기 전에 설정도 저장한다(남기지 않는 오토플레이·연습도 같다): 그 판에서 키로 바꾼 하이스피드·커버·리프트·히든과 AUTO ADJUST 가 옮긴 판정 오프셋이 다음 실행에 남는다(S19 3차 R3-REC-1). 플레이 화면이 아닌 곳에서 끌 때는 설정을 쓰지 않는다. 이 빌드가 읽지 못한 설정 파일(더 새 빌드가 쓴 파일 등)을 기본값으로 덮지 않기 위해서다(`run` 의 "leaving the file alone"). 메시지 `run cut short by quitting kept; it is sent on the next start` | Esc 판과 같다 | Esc 판과 같다 | 저장 | 끄는 중에는 보내지 않는다(기록 동기화도 코스 전송도 시작하지 않는다). 다음 실행의 기록 동기화가 판과 코스를 보낸다. IR 프로필로는 보내지 않는다(테스트 부채 3.66) | 원본은 창을 닫으면 설정만 저장하고 진행 중인 판을 저장하지 않는다(`MainController.dispose`, `MainController.java:590-612`). 강제 종료(kill -9·정전·크래시)는 여전히 남지 않는다 |
+| 도중 포기(Esc) | 사람이 친 판이면 판정한 노트 수와 상관없이 남는다(사용자 결정 2026-10-15). 단 노트를 하나도 치지 않은 판, 곧 PG·GR·GD·BD 가 모두 0 이고 쥔 롱노트가 없는 판은 지나간 노트의 POOR 나 빈 POOR 가 있어도 아무것도 남기지 않고 곧장 선곡으로 간다(사용자 결정 2026-10-19, `PlayState::has_judged_nothing`). 일반 LN 머리를 쥔 채 나간 판은 친 판이라 남는다. **노트를 하나라도 친 판의 Esc 는 로그인과 상관없이 결과 화면으로 간다**(사용자 결정 2026-10-23, [ADR](./acknowledge/2026-10-23-adr-escape-shows-the-result.md)). 닫힘 연출 없이 곧장 가고, PlayStop 소리는 Esc 를 누른 자리에서 울리며 곡 소리는 끊는다(`app_result::enter_result_of_a_left_run`). 남은 노트(아직 판정하지 않은 노트와 롱노트의 끝)는 모두 늦은 POOR(見逃し)로 세고 램프는 FAILED 다(`PlaySummary::left_unfinished`). 그래서 PG~POOR 합이 차트의 노트 수와 같고, 결과 화면의 판정 수·기록 목록 행·전송 본문·스킨 결과 화면이 읽는 기록(`run_records.last()`)이 모두 이 한 값을 쓴다. 결과 화면 그래프의 게이지 이력은 나간 자리부터 끝까지 0 으로 채운다(`PlaySession::left_record`. 게이지 사망으로 끝난 판은 사망 시각부터). 결과 화면의 판정 분포 그래프와 스킨의 초별 판정 표는 "판정된 입력" 기준이라 남은 노트의 POOR 를 넣지 않는다(끝까지 친 판에서도 같은 기존 의미). 노트를 다 처리한 뒤의 Esc(판정할 노트가 처음부터 없는 차트도 여기다. 10.5절), 그리고 이미 실패·끝으로 닫히는 중인 판의 Esc(ESCAPE 가 길게 누르기일 때 누르는 도중 게이지가 바닥나 길게 누르기가 닫히는 중에 끝나는 경우도 같다)는 원래부터 결과 화면으로 가고 위 규칙대로 남는다: 닫히는 판은 장면이 센 대로 남고 남은 노트를 見逃し POOR 로 더하지 않는다. 코스 도중의 Esc 는 그 스테이지에 남은 노트가 없으면 위처럼 결과로 가고 코스가 이어진다. 남은 노트가 있고 그 스테이지에서 노트를 하나라도 쳤으면 그 스테이지를 FAILED 로 접어 FAILED 코스 결과 화면까지 간다(스테이지 기록은 결과 화면의 전송이, 코스 기록은 `finish_course` 가 한 번만 남기고 보낸다). 그 스테이지에서 노트를 하나도 치지 않았으면 그 스테이지는 더하지 않고 코스가 그 자리에서 끝난다: 친 스테이지가 있으면 그 스테이지들로 FAILED 코스 기록을 남겨 보내고(`app_result::abandon_course`) 코스 결과 화면 없이 선곡으로 가며, 첫 스테이지였으면 코스 기록도 없다. 오토플레이·리플레이 보기·연습의 Esc 는 결과 화면 없이 선곡으로 간다 | EX 가 더 높으면 갱신(FAILED 판과 같다) | FAILED, 횟수 +1 | 나간 시점까지의 입력으로 저장 | 결과 화면의 전송 경로 하나로 보낸다(별도의 "화면 없는 전송"은 이 갈래에서 없앴다). 로그인했으면 보내고, 서버가 없거나 로그인하지 않았으면 결과 화면의 전송이 건너뜀(`IrStatus::Off`)이 되며 DB 에는 늘 남아 다음 로그인 때 기록 동기화가 보낸다. IR 프로필로의 전송은 다른 판과 같다. 알림 `run left mid-song kept as FAILED`·`course left part-way kept as FAILED` 는 없어졌다(결과 화면이 판이 남았음을 보인다) | 원본(`BMSPlayer.stopPlay`)도 남은 노트가 있으면 FAILED 로 바꿔 점수 데이터가 있을 때 결과 화면으로 간다(`BMSPlayer.java:693-742`)는 점은 같다. 다른 점: 원본은 닫힘 연출을 거치고 남은 노트를 판정 수에 넣지 않고 BP 에만 더한다(`BMSPlayer.java:909`). 여기서는 연출 없이 곧장 가고 남은 노트를 見逃し POOR 로 센다(사용자 결정 2026-10-14). 결과 화면의 다시 하기(R, N, 파란 건반 + START)를 허용한다(원본 결과 화면도 받는다). 리플레이를 재생하면 남은 노트가 지나가 見逃し POOR 가 되므로 판정 수는 기록과 같지만, 재생은 곡 끝까지 가고 게이지는 기록과 다르게 끝날 수 있다(쉬운 게이지면 클리어로 끝날 수도 있다). 알려진 한계다. Esc 직후 곡 소리가 실제로 멈추는지와 PlayStop 이 한 번만 나는지는 오디오 장치가 없는 헤드리스 테스트가 보지 못해 실기 점검 항목이다 |
+| 플레이 중 앱 종료(창 닫기·Cmd+Q·메뉴 Quit·Dock 종료) | Esc 의 저장 규칙과 같고 결과 화면은 거치지 않는다(사용자 결정 2026-10-15 "서버로 저장되지 않는 기록은 없다", S19 2차 REC2-2): 사람이 친 판은 남은 노트가 있으면 남은 노트를 見逃し POOR 로 센 FAILED 판, 끝났거나 닫히는 판은 결과 화면이 남겼을 그대로 남는다. 남은 노트가 있어도 노트를 하나도 치지 않은 판은 Esc 처럼 남기지 않는다(사용자 결정 2026-10-19, `keep_run_cut_short_by_quitting`). 코스 도중이면 그 스테이지를 접고 코스를 남긴다(마지막 스테이지였거나 실패한 스테이지면 그대로, 아니면 FAILED 코스. 노트를 하나도 치지 않은 스테이지는 접지 않고 그 앞 스테이지까지의 FAILED 코스만 남긴다). 코스의 스테이지 사이(LOADING·결정 화면)에서 끄면 친 스테이지까지의 FAILED 코스가 남는다. 이벤트 루프의 `exiting` 에서 저장 스레드를 기다리기 전에 남기므로(`App::keep_what_quitting_cuts_short`, `app_result::keep_run_cut_short_by_quitting`) 리플레이까지 디스크에 놓인다. 플레이 화면에서 끄면 Esc 와 같이 판을 남기기 전에 설정도 저장한다(남기지 않는 오토플레이·연습도 같다): 그 판에서 키로 바꾼 하이스피드·커버·리프트·히든과 AUTO ADJUST 가 옮긴 판정 오프셋이 다음 실행에 남는다(S19 3차 R3-REC-1). 플레이 화면이 아닌 곳에서 끌 때는 설정을 쓰지 않는다. 이 빌드가 읽지 못한 설정 파일(더 새 빌드가 쓴 파일 등)을 기본값으로 덮지 않기 위해서다(`run` 의 "leaving the file alone"). 메시지 `run cut short by quitting kept; it is sent on the next start` | Esc 판과 같다 | Esc 판과 같다 | 저장 | 끄는 중에는 보내지 않는다(기록 동기화도 코스 전송도 시작하지 않는다). 다음 실행의 기록 동기화가 판과 코스를 보낸다. IR 프로필로는 보내지 않는다(테스트 부채 3.66) | 원본은 창을 닫으면 설정만 저장하고 진행 중인 판을 저장하지 않는다(`MainController.dispose`, `MainController.java:590-612`). 강제 종료(kill -9·정전·크래시)는 여전히 남지 않는다 |
 | 코스 스테이지 사이에서 나감(다음 스테이지의 LOADING 에서 Esc, 결정 화면에서 나감, 스테이지 차트를 못 읽음, 라이브러리에 없음) | 코스가 그 자리에서 끝난다(S19 2차 REC2-1). 친 스테이지가 있으면 그 스테이지들로 FAILED 코스 기록을 남겨 보내고(`app_result::abandon_course`, 메시지 `course ended before its last stage kept as FAILED`), 서 있던 스테이지는 치지 않았으므로 아무것도 더하지 않는다. 친 스테이지가 없으면(1스테이지의 결정 화면) 남기지 않는다. 코스 제약으로 바뀐 설정은 플레이어의 값으로 돌아간다. 전에는 코스가 끝나지 않아 다음에 고른 단일 곡이 그 코스의 다음 스테이지로 접히고 엉뚱한 곡이 든 코스 기록이 보내졌다 | - | - | - | 코스는 곧장 보낸다(코스 결과 화면의 전송과 같다) | 없음(코스 도중 포기를 FAILED 코스로 남기는 것은 결정 9 다) |
 
 ### 10.3 최고 기록 한 행과 노트 수
@@ -502,7 +508,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | 항목 | 동작 | 원본과 다른 점 |
 | --- | --- | --- |
 | 판정에 들어가는 차트 | 배치(RANDOM 등)를 적용한 뒤 턴테이블 레인의 노트를 모두 뺀 차트. 판정·콤보·게이지·EX·판정 수·FAST/SLOW·BP·노트 수(만점의 기준)·진행률·스코어 그래프·스킨이 읽는 노트 수와 남은 노트 수가 모두 이 차트로 센다. RATE·랭크·최대 콤보도 같다(`rbms_play::Player::with_auto_lanes`) | 같다(`AutoplayModifier.modify` 가 `moveToBackground` 로 차트에서 뺀다) |
-| 그리기 | 뺀 노트는 필드에만 남아(`PlaySession::field_timelines`) 초록으로 그려진다. 일반 노트와 롱노트의 시작·끝은 `AUTO_LANE_NOTE`(#30E050), 롱노트 몸통은 `AUTO_LANE_LONG_BODY`(같은 초록, 불투명도 0xA0). 스킨이 고른 노트 그림의 자리(크기·위치)에 엔진이 그리므로 기본 팩과 남의 Lua 스킨(ModernChic 캡처)이 같다. 판정선에 닿으면 사라지고, PAST NOTES·처리된 노트 표시·팝픈의 떨어지는 노트에 해당하지 않는다. 내장 필드(스킨 없음)도 같은 색이다 | 원본은 그리지 않는다(배경음이 된다). 스킨 그림에 색을 곱하는 대신 단색으로 그린 이유: 그림 색에 곱하는 방식은 빨간 턴테이블 노트(기본 팩과 대부분의 스킨)를 검게 만들고, 그림의 알파로 색을 바꾸는 그리기는 지금 렌더러(GPU 셰이더)에 없다 |
+| 그리기 | 뺀 노트는 필드에만 남아(`PlaySession::field_timelines`) 단색으로 그려진다. 색은 SCRATCH AUTO COLOR 다(저장값이 없으면 출하 초록 `#30E050`, 알파 255. 2절). 일반 노트와 롱노트의 시작·끝은 그 색(출하값은 `AUTO_LANE_NOTE`), 롱노트 몸통은 사용자 알파 x 0xA0/255(출하값은 `AUTO_LANE_LONG_BODY`와 비트까지 같다). 스킨이 정한 불투명도(노트 알파와 Note Opacity 행)는 사용자 알파에 곱해진다. 스킨이 고른 노트 그림의 자리(크기·위치)에 엔진이 그리므로 기본 팩과 남의 Lua 스킨(ModernChic 캡처)이 같다. 판정선에 닿으면 사라지고, PAST NOTES·처리된 노트 표시·팝픈의 떨어지는 노트에 해당하지 않는다. 내장 필드(스킨 없음)도 같은 색이다. 스킨의 색 행(Scratch Note·Scratch LN)은 이 노트에 닿지 않는다 | 원본은 그리지 않는다(배경음이 된다). 스킨 그림에 색을 곱하는 대신 단색으로 그린 이유: 그림 색에 곱하는 방식은 빨간 턴테이블 노트(기본 팩과 대부분의 스킨)를 검게 만들고, 그림의 알파로 색을 바꾸는 그리기는 지금 렌더러(GPU 셰이더)에 없다 |
 | 지뢰 | 턴테이블 레인의 지뢰는 판정에서도 그리기에서도 뺀다 | 같다(`moveToBackground` 는 지뢰를 배경음으로도 옮기지 않는다) |
 | 키음 | 각 노트 머리(롱노트는 시작)의 키음이 제 시각에 키 버스로 울린다. 롱노트 끝과 지뢰는 울리지 않는다(오토플레이와 같다) | 원본은 배경음(BGM 버스)으로 울린다. 키 음량을 따르게 키 버스에 두었다 |
 | 턴테이블 입력 | SCRATCH AUTO 가 켜져 있으면(그 차트에 턴테이블 노트가 없어도) 턴테이블 키의 누름·뗌을 판정에 넘기지 않는다. 공 POOR 도, 빔도, 키음도 없다. 리플레이에는 입력으로 적히지만 재생할 때도 같은 이유로 무시된다 | - |
@@ -516,6 +522,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 2. 결과 화면은 오른쪽 위에 `SCRATCH AUTO: TURNTABLE NOT COUNTED, ASSIST LAMP`(2026-10-22 전에는 `…, LIGHT ASSIST LAMP`. 넓힌 판정은 `WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE`)를 노란 글자로 쓴다. 스킨의 숫자만으로는 턴테이블이 빠진 것과 램프가 낮아진 것을 알 수 없기 때문이다. AUTOPLAY·리플레이 재생에는 쓰지 않는다(캡처 `result-recorded-scratch-auto.png`).
 3. LOCAL BEST 목표와 스코어 그래프의 BEST, 결과 화면의 이전 점수(스킨과 내장 화면의 이전 EX·이전 최고 EX)는 SCRATCH AUTO 판도 센다. 넓힌 판정의 판과 세대 2 의 SCRATCH AUTO 판은 세지 않는다.
 4. PLAY 메뉴의 SCRATCH AUTO 행 설명은 `Let the game play the scratch lane, drawn green; its notes are not counted`, 정보 패널의 덧말은 `WHILE ON: TURNTABLE NOT COUNTED, ASSIST LAMP BY GAUGE (E.G. ASSIST HARD)`(`stage/play_menu.rs`). 설정 화면의 JUDGE WIDTH·LN MARGIN 행 설명과 정보 패널은 넓힌 판정이 최고 기록만 바꾸지 않고 리플레이와 함께 남고 보내진다고 말한다.
+5. 노트를 하나라도 치고 Esc 로 나간 판의 결과 화면은 끝까지 친 판과 같은 화면이다(10.2절의 도중 포기 행). 판정 수는 남은 노트를 見逃し POOR 로 센 값이고 게이지 그래프는 나간 자리부터 0 이다. 코스 도중이면 그 스테이지가 FAILED 로 접히고 코스 결과 화면(불합격)이 이어서 뜬다. 서버가 없거나 로그인하지 않았으면 전송 줄이 건너뜀이다.
 
 ### 10.7 같은 배치로 다시 하기(파란 건반 + START)
 
@@ -540,7 +547,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | --- | --- |
 | 판이 끝날 때의 저장·전송·리플레이 | `apps/rbms-player/src/app_result.rs`(`enter_result`, 저장은 `record_run`, 포기한 판은 `record_left_run`, 실패 화면에서 다시 한 판은 `record_retried_run`, DB 를 쓸 수 없을 때 `keep_on_the_side`), 행으로 바꾸기는 `apps/rbms-player/src/scoredb_store.rs`(`play_log`, `record_finished_play`, `record_of`, `import_pending_runs`), 파일 쓰기는 `apps/rbms-player/src/save_worker.rs`(10.10) |
 | 저장의 실패 경로 | 테스트 `app_result/record_tests.rs`(`a_replay_that_cannot_be_written_leaves_no_replay_on_the_row`, `a_replay_the_save_thread_could_not_write_is_let_go`, `a_run_played_while_the_score_database_is_unavailable_is_kept_and_read_in_later`, `retrying_a_failed_run_keeps_the_failed_run`), `stage/play/screen_tests.rs`(`a_failed_run_started_again_is_kept_first`), `crates/rbms-store/src/scoredb/sync_tests.rs`(`a_play_and_its_submission_body_are_written_together`), `scoredb/tests.rs`(`plays_kept_on_the_side_are_read_in_and_their_files_removed`) |
-| Esc 포기 | `apps/rbms-player/src/stage/play/mod.rs`(`leave_run`, `keeps_a_left_run`, `has_judged_nothing`), `crates/rbms-play/src/session.rs`(`PlaySummary::left_unfinished`), 테스트 `app_result/record_tests.rs`(`leaving_mid_song_keeps_a_failed_run_with_the_rest_as_poor`, `leaving_mid_song_signed_in_sends_the_run`, `leaving_before_any_note_is_judged_keeps_nothing`, `leaving_after_only_an_empty_poor_keeps_nothing`, `leaving_after_a_note_went_by_unhit_keeps_nothing`, `leaving_while_holding_the_first_long_note_keeps_a_failed_run`, `leaving_a_chart_with_no_note_to_judge_ends_it_on_its_result`, `leaving_while_holding_a_long_note_counts_it_once`, `leaving_a_watched_replay_or_autoplay_keeps_nothing`, `leaving_mid_course_keeps_the_stage_and_a_failed_course`, `leaving_a_course_stage_with_no_note_left_ends_it_as_played`, `left_behind.rs` 의 `escape_on_a_course_stage_that_judged_nothing_ends_the_course_without_the_stage`·`escape_on_the_first_course_stage_that_judged_nothing_keeps_nothing`·`quitting_before_any_note_is_judged_keeps_nothing`·`quitting_in_a_course_stage_that_judged_nothing_keeps_the_course_without_the_stage`), 닫히는 판 `stage/play/tests.rs`(`escape_held_through_a_closing_run_reaches_the_result_screen_with_the_notes_it_judged`), `session.rs` 의 `a_run_left_unfinished_*` |
+| Esc 포기 | `apps/rbms-player/src/stage/play/mod.rs`(`leave_run`, `keeps_a_left_run`, `has_judged_nothing`), `apps/rbms-player/src/app_result.rs`(`RunEnd`, `show_result`, `enter_result_of_a_left_run`. `record_left_run`·`leave_course` 와 두 알림 상수는 지웠다), `crates/rbms-play/src/{session,record}.rs`(`PlaySummary::left_unfinished`, `PlaySession::left_record`, `GaugeLogRecorder::closed_left`), 테스트 `app_result/record_tests.rs`(`leaving_mid_song_shows_a_failed_result_with_the_counts_it_keeps`, `leaving_mid_song_signed_in_sends_the_run_once_from_its_result`, `leaving_mid_song_signed_out_still_shows_its_result`, `leaving_before_any_note_is_judged_keeps_nothing`, `leaving_after_only_an_empty_poor_keeps_nothing`, `leaving_after_a_note_went_by_unhit_keeps_nothing`, `leaving_while_holding_the_first_long_note_keeps_a_failed_run`, `leaving_a_chart_with_no_note_to_judge_ends_it_on_its_result`, `leaving_while_holding_a_long_note_counts_it_once`, `leaving_a_watched_replay_or_autoplay_keeps_nothing`, `leaving_mid_course_ends_on_a_failed_course_result`, `leaving_a_course_stage_with_no_note_left_ends_it_as_played`, `left_behind.rs` 의 `escape_on_a_course_stage_that_judged_nothing_ends_the_course_without_the_stage`·`escape_on_the_first_course_stage_that_judged_nothing_keeps_nothing`·`quitting_before_any_note_is_judged_keeps_nothing`·`quitting_in_a_course_stage_that_judged_nothing_keeps_the_course_without_the_stage`), `stage/play/screen_tests/run_tests.rs`(`escape_with_notes_left_on_a_skinned_run_goes_straight_to_its_result`), 닫히는 판 `stage/play/tests.rs`(`escape_held_through_a_closing_run_reaches_the_result_screen_with_the_notes_it_judged`), `crates/rbms-play/src/record/tests.rs`(`a_history_closed_as_left_falls_to_zero_from_where_it_stopped`, `a_record_left_part_way_counts_the_rest_as_poor`), `session.rs` 의 `a_run_left_unfinished_*` |
 | 기록 동기화 | 10.9절의 마지막 표 |
 | 최고 기록에 합치는 규칙 | `crates/rbms-store/src/scoredb.rs`(`ScoreDb::record_play`, `merge_best`), 행이 최고 기록이 될 수 있는지 `crates/rbms-store/src/score.rs`(`sets_best`, `SCORE_RULE_VERSION`) |
 | 최고 기록을 갱신해도 되는 판, 보낼 판 | `apps/rbms-player/src/lib.rs`(`updates_score`, `ir_submission_block_reason`, `assisted_lamp`), 실제로 보내는지 `apps/rbms-player/src/app_ranking.rs`(`sends_to_primary_ir_server`), 코스의 어시스트와 코스 최고 기록 `apps/rbms-player/src/course_ir.rs`(`CourseAssist`, `course_updates_score`, `build_course_submission`) |
@@ -561,7 +568,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | 대상 | 기본 서버(`SERVER URL`)에서 `accepted` 가 아닌 판 전부(거절·일시 실패·건너뜀·미확인). 단 저절로 시작한 동기화(시작·로그인·포기한 판)는 서버가 지금과 같은 두 빌드(이 클라이언트의 버전과 실행 파일 해시, 서버가 `/version` 으로 알려 주는 commit. commit 이 없으면 서버 이름과 API 세대, 답이 없으면 빈 값) 아래에서 거절한 판을 다시 보내지 않는다: 같은 클라이언트가 같은 서버에 같은 본문을 보내면 같은 거절이 돌아오기 때문이다(`record_sync::refusal_key`, `SyncWalk::refused_under`). 클라이언트나 서버의 빌드가 바뀌면 다시 보내고, SYNC RECORDS NOW 는 거절된 판을 모두 다시 보낸다(사용자 결정 7 의 "거절된 판도 다음 동기화에서 다시 보낸다"를 "빌드가 바뀌었거나 손으로 누르면"으로 좁혔다. S19, REC-5). 다른 계정으로 친 판(`play_submission.played_as` 가 다른 판)은 뺀다. 게스트로 친 판과 0.1.4 이전의 판(`played_as` NULL)은 처음 동기화하는 계정으로 간다. 세대 2 이하의 SCRATCH AUTO 판(옮겨 온 어시스트 판 포함)은 보내지 않는다(10.4). IR 프로필(`ir_profiles`)로는 동기화하지 않는다. 서버는 SERVER URL 의 앞뒤 공백과 끝의 `/` 를 뗀 문자열로 구별하므로, 서버를 바꾸면 상태가 따로 쌓인다 |
 | 순서 | 오래된 판부터(`date`, `id` 순). 단 서버가 답하지 못한(`retry`) 판은 아직 묻지 않은 판 뒤로, 실패한 횟수가 적은 판부터 보낸다. 서버 쪽에서 늘 실패하는 옛 판 셋이 맨 앞을 차지해도 "세 번 연속 실패면 멈춤"에 걸려 뒤 판이 영영 못 나가는 일이 없다(S19, IR-12). 점수 다음에 코스를, 그 다음에 trace 를, 그 다음에 리플레이를 올린다 |
 | 고르는 비용 | 보낼 판을 고르는 일은 일꾼 스레드가 읽기 전용 DB 연결을 따로 열어 한다(`ScoreDb::open_read_only`, WAL 이라 프레임 스레드의 쓰기와 함께 돈다). 프레임 스레드는 가장 새 판·코스 id 두 개만 읽고(`newest_play_id`, `newest_course_id`, 수 µs) 일꾼을 띄운다. 일꾼은 그 id 까지만 보내므로(`SyncWalk::up_to`) 동기화가 도는 사이 끝난 판은 그 판을 남긴 쪽(결과 화면의 전송, 포기한 판의 동기화)이 보낸다. 곡 라이브러리 대조는 일꾼이 고른 차트의 md5 만 프레임 스레드에 물어(`SyncEvent::Picked`) 라이브러리 색인으로 찾는다. 세대 2 이하 SCRATCH AUTO 판의 "보내지 않음" 표시는 DB 에 쓰지 않고 상태를 읽을 때 만든다(`ScoreDb::sync_states`) |
-| 언제 | 시작할 때 로그인 상태면 세션이 확인된 뒤(`whoami` 성공. 오프라인이면 하지 않는다), 로그인·가입에 성공했을 때, 설정 NETWORK 의 SCORES 묶음 첫 줄 `SYNC RECORDS NOW` 를 눌렀을 때, Esc 로 포기한 판이 남았을 때(그 판 하나). 게스트면 하지 않고, 수동 버튼은 `log in first`(서버가 없으면 `set SERVER URL first`)를 띄운다. 보내는 계정은 서버가 토큰의 주인으로 알려 준 login id(`whoami`·로그인 응답)뿐이다. 설정에 적은 PLAYER ID 는 대신 쓰지 않고(다르면 모든 판이 403 으로 거절된다), 토큰은 있는데 주인을 아직 모르면 수동 버튼은 `account not confirmed yet` 을 띄우고 자동 동기화는 하지 않는다. 이미 돌고 있으면 수동 버튼은 `records sync already running`, 포기한 판은 지금 동기화가 끝난 뒤 이어서 보낸다 |
+| 언제 | 시작할 때 로그인 상태면 세션이 확인된 뒤(`whoami` 성공. 오프라인이면 하지 않는다), 로그인·가입에 성공했을 때, 설정 NETWORK 의 SCORES 묶음 첫 줄 `SYNC RECORDS NOW` 를 눌렀을 때, 앱 종료로 끊긴 판이 다음 시작에 남아 있을 때. 게스트면 하지 않고, 수동 버튼은 `log in first`(서버가 없으면 `set SERVER URL first`)를 띄운다. 보내는 계정은 서버가 토큰의 주인으로 알려 준 login id(`whoami`·로그인 응답)뿐이다. 설정에 적은 PLAYER ID 는 대신 쓰지 않고(다르면 모든 판이 403 으로 거절된다), 토큰은 있는데 주인을 아직 모르면 수동 버튼은 `account not confirmed yet` 을 띄우고 자동 동기화는 하지 않는다. 이미 돌고 있으면 수동 버튼은 `records sync already running`, 결과 화면이 보낸 판은 지금 동기화가 끝난 뒤 이어서 보낸다 |
 | 본문 | 판이 끝날 때 적어 둔 제출 본문(`play_submission.body`)을 그대로 보내고 `player.id` 만 동기화하는 계정으로 바꾼다. 본문이 없는 판(0.1.3 까지)은 기록 행으로 다시 만든다(아래 "재구성") |
 | 속도 | 백그라운드 스레드에서 보내 화면 프레임을 막지 않는다. 점수는 1.5초에 하나(분당 40, 서버 한도 60), 리플레이는 7.5초에 하나(분당 8, 서버 한도 10), trace 는 2.5초에 하나(분당 24, 서버 한도는 기획 제안 30). 남는 몫은 동기화 중에 친 판의 몫이다(`record_sync.rs` 의 `SCORE_SEND_INTERVAL`, `REPLAY_SEND_INTERVAL`, `TRACE_SEND_INTERVAL`) |
 | 답의 분류(`rbms_ir::submit_verdict`) | 2xx 수락은 `accepted`(중복 응답이면 "이미 있음"으로 센다). 4xx(400·403·404·409·413 등)는 `rejected` 로 오류 코드·필드·이유·HTTP 상태와 거절받은 두 빌드를 적고, 빌드가 바뀐 뒤의 동기화나 SYNC RECORDS NOW 에서 다시 보낸다(위 "대상"). 429 는 60초 기다렸다 같은 판을 다시 보내고, 두 번 기다려도 429 면 그 판을 `retry` 로 적고 동기화를 멈춘다. 네트워크 오류·응답 해석 실패·5xx 는 `retry` 이고 세 번 연속이면 서버가 닿지 않는 것으로 보고 멈춘다. 401·서버 없음은 그 판을 `retry` 로 적고 멈춘다 |
@@ -662,13 +669,45 @@ SCRATCH AUTO 로 클리어한 판의 램프는 클리어한 게이지에 따라 
 1. 등급은 램프 id 3 에만 있다. 값은 끝난 게이지(GAUGE AUTO SHIFT 가 옮겼으면 옮겨진 게이지)로 정한다: `rbms_judge::assist_grade(램프, 끝난 게이지)`, 열거형 `AssistGrade`(None·Easy·Clear·Hard·ExHard, id 0~4). 점수 기록 크레이트는 판정 크레이트에 기대지 않으므로 같은 표를 정수로 따로 가진다(`rbms_store::assist_grade_of`, `RecordLamp { clear, assist_grade }`). 서버도 표를 따로 가진다(`web/src/server/service/domain/score/assist-grade.ts`). 클라이언트 테스트 `format::tests::the_score_store_grades_every_stored_run_as_the_engine_does` 가 램프 11종 x 게이지 9종에서 엔진과 기록 쪽이 같은 답을 내는지 본다.
 2. 비교는 (램프 id, 등급) 순서다. 같은 id 3 안에서 ASSIST HARD 는 ASSIST CLEAR 를 이기고 둘 다 EASY CLEAR(id 4) 아래다. 최고 기록 행(`score`)은 `assist_grade` 열(0~4, 기본 0)을 갖고, 램프 쌍이 오르면 `merge_best` 가 `clear`·`assist_grade`·`option`·`seed`·`gauge`·`assist` 를 그 판의 값으로 바꾼다(id 가 같고 등급만 올라도). `ScoreDb::best` 의 순서는 `clear DESC, assist_grade DESC, EX DESC, minbp ASC` 다. 선곡의 정렬 Clear 은 (램프, 등급) 순이고, CLEARED·NOT CLEARED 필터는 전과 같이 램프 id 2 이상이 기준이다.
 3. 소급: DB 를 열 때마다 `refold_assist_grades` 가 각 `score` 행의 등급을 같은 램프의 `scorelog` 행 가운데 가장 높은 등급(동률이면 가장 먼저 친 판)으로 맞춘다. 등급이 0 보다 크면 그 판의 게이지·어시스트도 쓴다. 램프 id 3 이 아닌 행은 등급 0 으로 정리한다. 이미 맞는 행은 쓰지 않아 두 번째 열기는 아무것도 쓰지 않고, 훑는 범위는 램프 id 3 의 행뿐이다. 이전 빌드가 같은 DB 의 `score` 행을 다시 써서 등급이 0 이 돼도 다음 열기에서 복구된다. 새 열 `assist_grade` 는 기존 `ADDED_COLUMNS` 방식으로 더했고 스키마 세대는 1 그대로다.
-4. 코스 스테이지: 코스의 스테이지는 언제나 코스 게이지(CLASS, 코스 제약에 따라 EXCLASS·EXHARDCLASS)로 돈다. 2026-10-22 의 수리(`242397f`) 전에는 결과 화면의 등급은 코스 게이지로 정하면서 저장·전송하는 게이지는 설정의 게이지였다. 그래서 설정이 EXHARD 인 채 SCRATCH AUTO 로 친 코스 스테이지가 결과 화면에는 ASSIST CLEAR, 기록과 서버에는 ASSIST EXHARD 로 남았다(설정이 ASSIST EASY 면 등급이 아예 없었다).
+4. 코스 스테이지: 코스의 스테이지는 언제나 코스 게이지(CLASS·EXCLASS·EXHARDCLASS)로 돈다. 2026-10-23 부터 시작 슬롯은 GAUGE 설정을 따른다(ASSIST EASY·EASY·NORMAL 은 CLASS, HARD 는 EXCLASS, EXHARD·HAZARD 는 EXHARDCLASS. 10.14절). 전에는 늘 CLASS 로 시작했다. 2026-10-22 의 수리(`242397f`) 전에는 결과 화면의 등급은 코스 게이지로 정하면서 저장·전송하는 게이지는 설정의 게이지였다. 그래서 설정이 EXHARD 인 채 SCRATCH AUTO 로 친 코스 스테이지가 결과 화면에는 ASSIST CLEAR, 기록과 서버에는 ASSIST EXHARD 로 남았다(설정이 ASSIST EASY 면 등급이 아예 없었다).
    - 지금은 `record_run` 이 `PlayRecord::finished_gauge` 를 그대로 저장한다(`FinishedPlay.gauge` 와 `PlayLog.gauge` 가 게이지 번호이고 코스 게이지는 6~8). 점수 본문의 `options.gauge` 는 `rbms_ir::mapping::ir_gauge_of_index` 로 `class`·`exclass`·`exhardclass` 를 싣고, 서버의 `deriveAssistGrade` 는 이 이름들을 2·3·4 로 읽는다. 기록 동기화의 다시 보내기도 저장된 게이지 번호로 같은 이름을 보낸다(`record_sync.rs`).
    - 이미 저장된 행은 DB 를 열 때 `put_course_stages_on_class` 가 옮긴다. 남아 있는 코스(`course_submission`)의 스테이지 행(`trace_backfill::course_stages`) 가운데 게이지 번호가 6 미만인 행을 CLASS 로 바꾸고 등급을 다시 접는다. 두 번째 열기는 쓰지 않는다. 남지 않은 코스의 스테이지는 알아낼 길이 없어 그대로다. 옮기면 알림 `N course stages stored on the gauge the settings chose are on the course gauge they ran on now` 가 한 번 뜬다.
-   - 코스의 스테이지는 코스 기록과 별도로 곡 단위로도 최고 기록 규칙을 지난다(위 10.2절의 코스 행). 코스 기록 쪽의 등급은 없다: 서버의 `course_best.assist_grade` 는 항상 0 이다(코스 제출 본문에도 코스 DB 에도 게이지가 없다. 테스트 부채 3.93).
+   - 코스의 스테이지는 코스 기록과 별도로 곡 단위로도 최고 기록 규칙을 지난다(위 10.2절의 코스 행). 코스 기록의 등급: 2026-10-23 부터 코스 제출 본문이 끝난 게이지를 싣고(10.14절) 서버가 `course_best.assist_grade` 를 채운다([ADR](./acknowledge/2026-10-23-adr-course-submission-gauge.md)). 전에는 본문에 게이지가 없어 항상 0 이었다(테스트 부채 3.93).
 5. 서버: `chart_best.assist_grade`·`course_best.assist_grade` 열과 인덱스 `chart_best_rank_grade_idx`(마이그레이션 `web/drizzle/0011_assist_grade.sql`), 순위 키 (clear, assist_grade, EX, BP). 순위·활동·목록 응답에 `assist_grade` 0~4 정수가 추가로 실린다(없으면 0이고 이전 클라이언트는 무시한다). 2026-10-22 에 0011 을 운영에 적용했고(web-db 실행 39693988962) 낡은 등급 행이 0 임을 확인했다(실행 39733088817. 등급이 매겨진 `chart_best` 398행). 낡은 행을 세고 고치는 액션은 `web-db.yml` 의 `assist-grade-backfill-count`, `assist-grade-backfill` 이다.
 6. 표시: 앱의 결과 화면, 선곡 상세의 최고 기록 라벨, 기록 모달, 기록 목록 행, 내장 선곡 막대의 LED, IR 순위 패널(서버가 준 `assist_grade`. `skin_host/ir.rs` 의 램프 분포는 라벨 글자가 아니라 램프 id 로 센다). 기본 스킨은 선곡 정보창과 결과 화면이 확장 옵션 21110~21134 로 등급을 읽어 그린다([skin.md](./skin.md) 3.4.5절). 스킨이 읽는 램프 id(이미지 인덱스 370·371)와 선곡의 폴더 분포 11칸은 그대로 0~10 이다. 등급 라벨 색은 `3ad19f`(ASSIST EASY), `c4a796`(ASSIST CLEAR), `afb8ef`(ASSIST HARD), `ca76a9`(ASSIST EXHARD)이고 웹과 같다(`format.rs`, 테스트가 웹의 hex 와 맞춘다).
 7. 남은 것: (a) 리플레이 파일 헤더(`replay.gauge`)와 AUTO UPLOAD REPLAY 로 올리는 리플레이는 설정의 게이지, 곧 재생이 시작하는 게이지를 적는다. 코스 스테이지의 리플레이는 코스 게이지와 이월한 게이지 값·콤보를 담지 않아 충실한 재생이 아니다(전과 같다. 테스트 부채 3.94). (b) 이미 서버에 올라간 코스 스테이지 행은 설정 게이지로 낸 등급을 서버가 그대로 갖고 있다. 다시 보내지 않으면 고쳐지지 않는다(테스트 부채 3.94). (c) 설정 화면의 JUDGE WIDTH·LN MARGIN 행 설명(`stage/settings/catalog.rs` 147·169줄)은 `the ASSIST lamp at best` 로 고쳤다.
+
+### 10.14 코스 게이지(COURSE GAUGE, 시작 슬롯, 9칸 이월, ln·cn·hcn 제약. 2026-10-23)
+
+결정은 [코스 게이지 ADR](./acknowledge/2026-10-23-adr-course-gauge-modes.md), [시작 슬롯과 LN 제약 ADR](./acknowledge/2026-10-23-adr-course-stage-start-and-ln.md), [제출 게이지 ADR](./acknowledge/2026-10-23-adr-course-submission-gauge.md). 사용자가 정한 것은 모드 셋(LR2 기준, 설정에서 변경)과 IIDX 구현이고, 아래 수치의 세부와 시작 슬롯·이월·LN 강제는 메인 판단이라 사용자가 직접 확인하지 않았다.
+
+1. 설정: SETTINGS > JUDGE 의 GAUGE 구역에서 GAUGE SET 바로 뒤 행 `COURSE GAUGE`(`judge.course_gauge`). 값은 `LR2`(기본) / `BEATORAJA` / `IIDX` 이고, 저장 파일에 없거나 모르는 값이면 LR2 다. 설정 스키마 세대는 6 그대로이고 계정 설정 묶음(`settings-blob.json`)에 `course_gauge` 한 줄이 더해졌다.
+2. 코스는 이 설정의 표로만 돈다.
+
+| COURSE GAUGE | 코스 스테이지가 쓰는 게이지 표 |
+| --- | --- |
+| LR2 | LR2 세트(차트 모드와 무관) |
+| BEATORAJA | 차트 모드의 표: 5키·10키 FIVEKEYS, 9키 PMS, 24키 KEYBOARD, 그 밖 SEVENKEYS |
+| IIDX | IIDX 세트(차트 모드와 무관, 5·9·24키에도 같은 수치) |
+
+3. 코스가 선언한 게이지 제약(`gauge_lr2` 등)은 막대 배지에만 남고 표를 정하지 않는다. 설정이 제약보다 우선하며, 제약이 없는 사용자 코스 파일도 기본은 LR2 표다. 설정 GAUGE SET(AUTO·LR2)은 단일 곡 전용이 되었다. 원본은 제약이 표를 정한다(`GrooveGauge.java:128-147`). 그래서 BEATORAJA 에서는 발광·Stella 코스(모두 `gauge_lr2` 제약)가 LR2 가 아니라 7키 CLASS 로 돈다. 코스 결과 화면에는 GAUGE 행 바로 뒤에 `GAUGE RULE` 행이 있다.
+4. 규칙은 코스를 시작할 때 한 번 읽어 고정한다(`CourseFacts.gauge_rule`, `lib.rs` 의 `start_course`). 코스 도중 설정을 바꿔도 이어지는 스테이지는 시작 때의 규칙으로 판정된다(`app_play.rs` 의 `stage_judge_setup`). 제출 본문이 규칙을 한 값(`course_gauge`)으로 말하므로 모든 스테이지가 그 규칙으로 판정돼야 본문과 판정이 맞기 때문이다.
+5. IIDX 표(출처는 iidx.org 한 곳, 다른 공식 자료는 열리지 않았다): 시작 100, 0% 에서 실패(클리어는 0 초과. iidx.org 의 gauge compendium 은 0%, beginner 는 2% 미만으로 서로 다르며 사용자가 0% 를 골랐다).
+
+| 슬롯 | 값 |
+| --- | --- |
+| Class (DAN) | PG +0.16, GR +0.16, GD +0.04, BD -1.5, POOR -2.5, 빈 POOR -1.5. 게이지가 30% 이하이면 BAD·POOR·빈 POOR 감소량을 절반(-0.75, -1.25, -0.75). TOTAL 보정 없음 |
+| ExClass (EX-DAN) | 같은 증가량, BD -3.0, POOR -5.0, 빈 POOR -3.0. 30% 보정 없음 |
+| ExHardClass | EX-DAN 값의 복사(코스 상한이 ExClass 라 코스에서는 닿지 않는다) |
+| AssistEasy ~ Hazard | 7키 세트의 복사(코스에서 선택되지 않는 자리) |
+
+   "30% 이하"는 새 열거형 `GutsEdge::AtOrBelow` 로만 표현한다. 기존 모든 행은 원본대로 엄격 미만(`Below`)이라 기존 LR2·beatoraja 판정은 수치·화소 모두 그대로다. 연습 패널의 GAUGE CATEGORY 순환에도 IIDX 가 들어갔다(9.1절).
+6. 시작 슬롯은 사용자 GAUGE 설정을 따른다: ASSIST EASY·EASY·NORMAL 은 CLASS(DAN), HARD 는 EXCLASS, EXHARD·HAZARD 는 EXHARDCLASS. 고른 표의 상한(`GaugeSetId::course_ceiling`)으로 자르므로 IIDX 표는 EXCLASS 까지다. BEST CLEAR·SELECT TO UNDER 의 자동 이동도 이 상한을 넘지 않는다. 코스를 시작할 때의 첫 값은 그 슬롯의 `init`(모든 표의 코스 슬롯이 100)이다. 전에는 항상 CLASS 로 시작해서 GAUGE 설정이 코스에서 의미가 없었다. SCRATCH AUTO 로 HARD 설정의 코스를 치면 EXCLASS 로 달려 어시스트 등급 3 이 된다.
+7. 곡 사이에 9칸을 모두 이월한다. 스테이지가 끝나면 아홉 게이지의 판 끝 값(`PlaySession::gauge_values`)을 `CourseRun.carry_gauges` 에 담고(`fold_course_stage`), 다음 스테이지는 `SessionOptions.carried_gauges` 로 아홉 슬롯 전부를 그 값으로 시작한다(시작 값은 `carried[시작 슬롯]`, 분석 seek 뒤에도 유지, 0 이 된 슬롯은 0). 전에는 선택 게이지의 끝 값 하나만 CLASS 로 이월했다. `carry_gauge`(한 값)는 코스 결과의 GAUGE 행과 제출 `gauge_value` 용으로 남는다.
+8. 코스 제약 `ln`·`cn`·`hcn` 은 그 코스의 모든 스테이지 판정에 LN MODE 를 LN·CN·HCN 으로 강제한다(`CourseOverrides::ln_mode_for`). 설정 파일의 LN MODE 는 바꾸지 않고(RANDOM·속도 제약처럼 복사본에만 적용) 코스가 끝나면 플레이어의 값 그대로다. CN·HCN 설정의 사용자가 발광·Stella·GENOSIDE 코스(모두 `ln` 제약)를 치면 이제 LN 으로 친다. 코스 제출 최상위 `lntype` 은 LN 제약이 있으면 그 값(0 LN, 1 CN, 2 HCN), 없으면 첫 스테이지가 실제로 친 값이다. NO GOOD·NO GREAT 는 대상 코스가 없어 배지만 있고, DP MIRROR 코스의 FLIP 은 플레이가 `LaneOption` 을 적용하지 않아 지키지 못한다(테스트 부채).
+9. 코스 제출 본문에 생략 가능한 세 필드가 더해졌다: `course_gauge`(`LR2`·`BEATORAJA`·`IIDX`), `gauge`(끝난 게이지의 `GaugeType` 이름. `Class`·`ExClass`·`ExHardClass` 등), `stages`(친 순서대로 스테이지마다 `gauge`·`random`(코스 제약이 좁힌 뒤의 실제 값)·`lntype`). 값은 각 스테이지 자신의 점수 본문 `options` 에서 복사하고, 결과 진입·앱 종료로 끊김·코스 도중 Esc 세 경로가 같다. 서버는 이것으로 `course_best.assist_grade` 를 채우고 단위 인정(미러·LN 제약 준수)을 판정한다.
+10. 구현: `crates/rbms-judge/src/{gauge_tables,gauge,data}.rs`·`data/gauge.ron`("IIDX" 키), `crates/rbms-config/src/{judge,schema,settings}.rs`, `apps/rbms-player/src/{course_ui,app_play,app_result,lib,practice,course_ir}.rs`, `apps/rbms-player/src/stage/{settings/catalog,course_result}.rs`, `crates/rbms-play/src/{lib,session}.rs`, `crates/rbms-course/src/run.rs`. 시험: `gauge_tables::tests::{the_iidx_dan_gauges_pin_their_published_values, only_the_iidx_dan_gauge_softens_at_or_below_its_band, the_iidx_set_tops_out_at_exclass}`, `course_ui::tests::{the_course_gauge_setting_outranks_a_gauge_constraint, a_hard_player_starts_a_course_on_exclass, a_later_stage_starts_on_every_gauge_the_stage_before_left, the_long_note_constraints_each_force_their_flavour}`, `record_tests::course_gauge::{an_ln_course_plays_long_notes_whatever_the_ln_mode_setting, the_next_stage_starts_on_every_gauge_the_last_one_left}`.
+11. 확인하지 못한 것: IIDX 의 내부 단위·반올림(실제 IIDX 와 다를 수 있다), LR2 본체의 시작값·실패선, 차트 자체의 `#LNMODE` 가 LN 종류를 고정한 곡이 LN 제약 코스에 있을 때 서버가 단위를 인정하는지(GENOSIDE·Stella 곡의 `#LNMODE` 사용 여부).
 
 ## 11. 목표 점수(TARGET, TARGET FALLBACK, TARGET RATE)
 
@@ -788,7 +827,7 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 
 ## 12. 선곡의 옵션 패널 1~3
 
-스킨이 그리는 선곡에서 키를 누르고 있는 동안 올라오는 세 패널이다. 내장 선곡(스킨 없음)에는 패널이 없고, 같은 값을 옵션 오버레이(F1, 12.5절)와 PLAY 메뉴(7절)·SETTINGS 가 고친다. 패널은 설정 필드를 새로 만들지 않고 기존 값을 고친다. 2026-10-22 에 두 가지를 바꿨다. 원본(beatoraja)에서 이 플레이어에 대응하는 설정이 없어 아무것도 하지 않던 칸에 SCRATCH AUTO·KEEP GREEN NUMBER·LANE COVER·LIFT·HIDDEN+·JUDGE ALGORITHM 을 배정했고, 기본 스킨의 패널을 IIDX 옵션 화면 식으로 다시 그렸다([skin.md](./skin.md) 3.4.5절). 조사는 [reference/option-panels.md](./reference/option-panels.md), 결정은 [옵션 패널 ADR](./acknowledge/2026-10-22-adr-option-panel-layout.md)와 [확장 id ADR](./acknowledge/2026-10-22-adr-rbms-extension-ids.md).
+스킨이 그리는 선곡에서 키를 누르고 있는 동안 올라오는 세 패널이다. 내장 선곡(스킨 없음)에는 패널이 없고, 같은 값을 옵션 오버레이(F1, 12.5절)와 PLAY 메뉴(7절)·SETTINGS 가 고친다. 패널은 설정 필드를 새로 만들지 않고 기존 값을 고친다. 2026-10-22 에 두 가지를 바꿨다. 원본(beatoraja)에서 이 플레이어에 대응하는 설정이 없어 아무것도 하지 않던 칸에 SCRATCH AUTO·KEEP GREEN NUMBER·LANE COVER·LIFT·HIDDEN+·JUDGE ALGORITHM 을 배정했고, 기본 스킨의 패널을 IIDX 옵션 화면 식으로 다시 그렸다([skin.md](./skin.md) 3.4.5절). 2026-10-23 부터 이 재배정은 **스킨이 선곡 문서 헤더에 `rbms_extensions`(정수 1 이상)를 선언했을 때만** 적용된다. 선언이 없는 외부 스킨은 원본 키 표를 쓴다(12.2절, 12.7절, [패널 키 opt-in ADR](./acknowledge/2026-10-23-adr-panel-keys-opt-in.md)). 조사는 [reference/option-panels.md](./reference/option-panels.md), 결정은 [옵션 패널 ADR](./acknowledge/2026-10-22-adr-option-panel-layout.md)와 [확장 id ADR](./acknowledge/2026-10-22-adr-rbms-extension-ids.md).
 
 ### 12.1 여는 길
 
@@ -802,7 +841,7 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 
 ### 12.2 키 배치
 
-건반 번호는 왼쪽부터 1~7이다(키 인덱스 0~6). 턴테이블은 스크래치 레인의 두 키이고(7키 기본: 정방향 `LSHIFT`, 역방향 `LCTRL`. 5.4절) 키 인덱스 7(정방향)·8(역방향)이다. 9키(pop'n)에는 턴테이블이 없어 8·9번 버튼이 그 자리다. 표의 값은 설정의 같은 값을 고친다. 아래 "바꾼 칸"의 것을 빼고는 beatoraja 의 `MusicSelectKeyProperty` 와 같다.
+아래 첫 표와 "원본과 바꾼 칸" 표는 **`rbms_extensions` 를 선언한 스킨(기본 스킨)** 의 배치다. 선언이 없는 스킨의 배치는 이 절 끝의 "선언 없는 스킨" 표를 본다. 건반 번호는 왼쪽부터 1~7이다(키 인덱스 0~6). 턴테이블은 스크래치 레인의 두 키이고(7키 기본: 정방향 `LSHIFT`, 역방향 `LCTRL`. 5.4절) 키 인덱스 7(정방향)·8(역방향)이다. 9키(pop'n)에는 턴테이블이 없어 8·9번 버튼이 그 자리다. 표의 값은 설정의 같은 값을 고친다. 아래 "바꾼 칸"의 것을 빼고는 beatoraja 의 `MusicSelectKeyProperty` 와 같다.
 
 | 키 | 패널 1 (START) | 패널 2 (SELECT) | 패널 3 (START + SELECT) |
 | --- | --- | --- | --- |
@@ -816,11 +855,11 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 | 턴테이블 정방향 | TARGET 이동(방향키와 휠도 같다) | HIDDEN+ 켬·끔 | JUDGE ALGORITHM 이전 |
 | 턴테이블 역방향 | TARGET 이동 | HIDDEN+ 켬·끔 | JUDGE ALGORITHM 다음 |
 
-원본과 바꾼 칸(`stage/select/keys.rs` 의 테스트 `CHANGED_SLOTS` 가 이 목록 밖의 칸이 원본과 같음을 고정한다)
+원본과 바꾼 칸(`stage/select/keys.rs` 의 테스트 `CHANGED_SLOTS` 가 이 목록 밖의 칸이 원본과 같음을 고정한다. 확장을 선언한 스킨의 표다)
 
 | 칸 | 원본 | 지금 | 까닭 |
 | --- | --- | --- | --- |
-| 패널 1, 4번 | DP OPTION 이전 | GAUGE 이전 | 이 플레이어에는 DP OPTION 을 적용하는 곳이 없다. 값(`play.lane_option`)과 설정 행, 스킨 이벤트 54 와 인덱스 54 의 응답은 그대로다 |
+| 패널 1, 4번 | DP OPTION 다음 | GAUGE 이전 | 이 플레이어에는 DP OPTION 을 적용하는 곳이 없다. 값(`play.lane_option`)과 설정 행, 스킨 이벤트 54 와 인덱스 54 의 응답은 그대로다 |
 | 패널 1, 6번 | 2P RANDOM 이전 | HI-SPEED FIX 이전 | 1P·2P 가 RANDOM 값 하나를 같이 쓰므로 2번 키와 같은 일이었다 |
 | 패널 1, 7번 | 2P RANDOM 다음 | 그대로(RANDOM 다음) | HI-SPEED FIX 이전이 6번에 생겨 비울 까닭이 없다. 동작하고, 원본·ModernChic 의 7번 라벨과 어긋나지 않는다 |
 | 패널 2, 3번 | JUDGE AREA | SCRATCH AUTO | 대응하는 설정이 없다 |
@@ -829,6 +868,20 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 | 패널 2, 7번 | NO MINE | LIFT 켬·끔 | 같다 |
 | 패널 2, 턴테이블 | 없음 | HIDDEN+ 켬·끔 | 어느 방향이든 한 번 뒤집는다 |
 | 패널 3, 턴테이블 | 없음 | JUDGE ALGORITHM 이전(정방향)·다음(역방향) | 패널 1 의 TARGET 과 같은 방향 관례 |
+
+원본 표를 쓰는 선언 없는 스킨(`REFERENCE_BEAT_TABLE`·`REFERENCE_POPN_TABLE`. 원본 `MusicSelectKeyProperty` 에서 `NEXT_REPLAY` 만 뺀 것)은 위 표에서 아래 칸만 다르다. 나머지 칸은 같다.
+
+| 칸 | 선언 없는 스킨(원본 역할) |
+| --- | --- |
+| 패널 1, 4번 | DP OPTION 다음. 값(`play.lane_option`)은 저장되지만 플레이에 적용되지 않는 기존 차이는 그대로다 |
+| 패널 1, 6번 | RANDOM 이전(원본의 2P RANDOM 이전. 1P·2P 가 한 값을 쓴다) |
+| 패널 1, 7번 | RANDOM 다음 |
+| 패널 2, 3·5·6·7번 | JUDGE AREA·MARK NOTE·BPM GUIDE·NO MINE. 대응하는 설정이 없어 **죽은 칸**이다: 패널이 누름을 가져가고 아무 일도, 소리도 없다 |
+| 패널 2·3 의 턴테이블 | 역할 없음(패널 1 의 턴테이블은 TARGET) |
+
+- 선언 없는 스킨에서는 SCRATCH AUTO·KEEP GREEN NUMBER·LANE COVER·LIFT·HIDDEN+·JUDGE ALGORITHM 을 이 키로 바꾸지 않으므로, 화면에 변화가 없는데 OptionChange 소리와 함께 저장 설정이 바뀌는 일(다음 판이 SCRATCH AUTO 로 시작해 어시스트 램프가 되는 일)이 없다. 키 안내(`H`)의 패널 줄 중 `SELECT + TURNTABLE = HIDDEN+ ON/OFF`·`START+SELECT + TURNTABLE = JUDGE ALGORITHM` 두 줄은 재배정 표일 때만 보인다.
+- 어느 표를 쓰는지는 선곡을 그리는 문서의 선언으로 정한다(`KeyLayout::of_browser`: 모드의 턴테이블 유무 x 선언). 선곡 문서를 아직 읽는 중이면 원본 표이고(그동안 스킨 선곡의 입력이 돌지 않는다), 스킨 없는 내장 선곡의 목록 역할은 두 표가 같다. 기본 스킨은 `lua/props.lua` 의 `props.rbms_extensions = 1` 을 `lua/select/main.lua` 의 `screen.header()` 에 실어 보낸다([skin.md](./skin.md) 1.4절).
+- 확장 id 자체(켬끔 값, 어시스트 등급, 닿지 않는 키. 이벤트 21000~21099, 불린 21100~21199)는 선언과 상관없이 모든 스킨에 답한다. 선언은 키 재배정만 가른다.
 
 - 키 표에서 `NEXT_REPLAY` 는 뺐다. 원본은 6번 키에 두지만 여기서는 6번 키가 즐겨찾기만 하고, 리플레이 슬롯은 숫자 `4` 로만 넘긴다.
 - BGA 는 켬·끔 둘뿐이라(`display.bga`) 인덱스 72 는 0(ON) 또는 2(OFF)만 답하고, 원본의 AUTOPLAY ONLY(1)는 저장될 수 없어 나오지 않는다.
@@ -860,7 +913,7 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 
 ### 12.7 외부 스킨과 알려진 한계
 
-- 키 재배정은 어느 스킨에서나 적용된다. beatoraja 용 스킨(ModernChic 등)은 패널 2 의 JUDGE AREA·MARK NOTE·BPM GUIDE·NO MINE 칸을 `NOT AVAILABLE` 로 그리거나 그리지 않는데, 그 칸의 키가 이제 SCRATCH AUTO·KEEP GREEN NUMBER·LANE COVER·LIFT 를 바꾸고 화면에는 아무 표시가 없다(OptionChange 소리뿐이다). 패널 1 의 4번 키는 더는 DP OPTION 이미지(54)를 바꾸지 않고 GAUGE 이전이며, 6번 키는 HI-SPEED FIX 이전이다. 스킨이 R-BMS 의 확장 id 를 안다고 알릴 길(헤더 플래그 등)이 없어 막지 않았다. **미확인**: 외부 스킨에서 이 재배정을 막을지(기본 스킨에만 적용, 스킨이 선언해야 적용, 지금처럼 모두 적용)를 사용자가 정하지 않았다. 지금은 모두 적용이다(테스트 부채 3.90).
+- 키 재배정은 `rbms_extensions` 를 선언한 스킨에만 적용된다(2026-10-23. 사용자 결정 5). beatoraja 용 외부 스킨(ModernChic 등)은 선언이 없어 원본 표를 쓰므로 패널 1 의 4번 키는 DP OPTION, 6번 키는 RANDOM 이전이고 패널 2 의 JUDGE AREA·MARK NOTE·BPM GUIDE·NO MINE 칸은 아무것도 바꾸지 않는다(12.2절의 표). 이전(2026-10-22)에는 이 칸이 설정을 바꿨으나 외부 스킨에는 표시가 없어 이를 막을 통로가 없었다. 남은 위험: (a) 사용자가 고쳐 둔 기본 팩의 `lua/select/main.lua` 사본(설치 관리자가 덮지 않는 파일)에는 선언이 없어 원본 표가 되고, 기본 스킨의 패널 그림(확장 칸을 그린다)과 키가 어긋난다. (b) JSON 스킨이 `rbms_extensions` 에 정수가 아닌 값을 쓰면 문서가 거절될 수 있다(시험하지 않았다). (c) 외부 팩으로 키를 누르는 확인은 `RBMS_SKIN_PACK` 이 있을 때만 돌아 CI 에서 하지 않았고 실제 창에서도 보지 않았다.
 - 폴더 위에서 패널 1 의 HI-SPEED FIX 칸은 값 없음(`-`)으로 읽히지만 5·6번 키는 그 값을 바꾼다(차트가 다 없는 코스에서만 막힌다). 12.3절의 NOTE DISPLAY TIME 과 같은 불일치가 이 칸에 남아 있다(테스트 부채 3.91).
 - 같은 프레임에 옵션 둘이 바뀌면(예: 1·3번 키를 한꺼번에) 기본 스킨의 INFORMATION 줄은 감시 순서상 마지막 것만 보인다.
 
@@ -868,10 +921,62 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 
 | 내용 | 위치 |
 | --- | --- |
-| 키 표(`BEAT_TABLE`, `POPN_TABLE`), 패널을 부르는 키(`Panel::held`), 누름과 눌러둠을 가르는 읽기 | `apps/rbms-player/src/stage/select/keys.rs` |
+| 키 표(`BEAT_TABLE`, `POPN_TABLE`, 선언 없는 스킨의 `REFERENCE_BEAT_TABLE`·`REFERENCE_POPN_TABLE`), 어느 표인지 정하는 `KeyLayout::of_browser`, 패널을 부르는 키(`Panel::held`), 누름과 눌러둠을 가르는 읽기 | `apps/rbms-player/src/stage/select/keys.rs` |
 | 패널의 열고 닫음, 키가 하는 일(`press_act`, `run_panel_act`), 턴테이블 버림(`forget_turntable_changes`를 부르는 `show_panel`) | `stage/select/panel.rs` |
 | 설정 이벤트(`run_setting_event`, `run_duration_event`, `step_setting`, `step_duration`) | `stage/select/events.rs` |
 | 오버레이의 홀드 키 | `apps/rbms-player/src/app_options.rs`(`open_key`) |
 | H 키 안내(`{START} + TURNTABLE = TARGET`, `{SELECT} + TURNTABLE = HIDDEN+ ON/OFF`, `{START}+{SELECT} + TURNTABLE = JUDGE ALGORITHM`) | `stage/select/guide.rs` |
 | 스킨이 켬·끔을 일으키고 읽는 확장 id | `apps/rbms-player/src/skin_host/extension.rs` |
+| 선언(`rbms_extensions`)을 읽는 곳 | `crates/rbms-skin/src/model.rs`(`SkinDef::knows_rbms_extensions`), `crates/rbms-skin/src/loader/lua_skin.rs`(헤더 값 복사) |
 | 테스트 | `stage/select/keys.rs`(원본과 같은 칸·바뀐 칸), `panel_tests.rs`(턴테이블 버림, NOTE DISPLAY TIME), `events_tests.rs`, `app_options.rs`(홀드 키와 핀 키), `skin_host/select/tests.rs`(5키·10키 옵션) |
+
+
+## 13. 없는 곡 보이기와 다운로드(2026-10-23)
+
+결정은 [없는 곡과 다운로드 ADR](./acknowledge/2026-10-23-adr-missing-charts-and-download.md). 표에는 있는데 라이브러리에 없는 곡을 흐린 막대로 보이고, 그 곡을 플레이하려 하면 안내 모달을 띄워 차분(차트 파일)을 받게 한다.
+
+### 13.1 설정
+
+| 행 | 위치 | 값 | 비고 |
+| --- | --- | --- | --- |
+| MISSING CHARTS | SETTINGS > SELECT 의 SONG LIST 구역 | 켬(기본) / 끔 (`library.show_missing_charts`) | 켜짐이 기본인 것은 요구가 직접 요청했기 때문이다. 기호라 계정 설정 묶음과 같이 동기화된다 |
+| DOWNLOAD FOLDER | 같은 탭의 DOWNLOADS 구역 | 폴더 고르기, 0 키로 없음 (`library.download_folder`, 기본 없음) | 곡 폴더 목록에 자동으로 들어가 곡 폴더와 같이 스캔된다(`LibraryOptions::scan_roots`, 곡 폴더와 같은 경로면 한 번). 기기 고유라 설정 묶음 올리기에서 빼고 내려받을 때도 이 기기의 값을 둔다. 첫 받기에서 폴더를 고른다(고르기 창 제목 `Select download folder`) |
+
+곡 폴더 화면에는 곡 폴더들 뒤, `+ ADD FOLDER` 앞에 `DOWNLOADS  <경로>` 행이 보이고 거기서는 지울 수 없다(안내 `the download folder is changed in SETTINGS > SELECT`).
+
+### 13.2 없는 곡 막대
+
+1. 표 레벨 폴더 안에 라이브러리에 없는 곡이 가진 곡과 함께 흐린 막대로 보인다. 대상은 표의 md5 가 라이브러리에 없는 항목이고, 한 레벨 안에서 같은 md5 는 한 번만 나온다. sha256 만 있는 항목은 보이지 않는다(기존 한계).
+2. 기본 화면은 글자를 흐리게 그리고 램프 띠와 레벨 칸을 비우며, 세부 패널에 제목·아티스트·`NOT IN THE LIBRARY - ENTER FOR THE DOWNLOAD` 를 보인다. 스킨에는 `exists: false` 인 곡 막대로 전달된다([skin.md](./skin.md) 1.4절).
+3. 검색에는 나오지 않는다(검색은 라이브러리만 본다). 즐겨찾기 필터와 모드·레벨 범위 필터가 켜지면 빠지고, 클리어 필터는 기록이 없는 차트가 통과하는 값일 때만 남는다. 정렬은 제목 순이면 가진 곡 사이에 섞이고, 정렬 없음이면 가진 곡 뒤에 표 순서로, 그 밖이면 가진 곡 뒤에 제목 순으로 온다. 레벨 막대의 `(n)` 과 루트·묶음 합계, 폴더 램프 분포는 가진 곡만 센다.
+4. 정체는 가진 곡과 같은 md5 라서 받은 뒤 그 줄이 가진 곡이 되어도 커서가 머문다.
+
+### 13.3 안내 모달
+
+- 없는 곡 막대에서 재생·오토·연습·리플레이 이벤트나 Enter 가 모달을 연다(원본은 모드와 상관없이 다운로드 사이트를 연다). 모달은 키(컨트롤러 키 포함)와 마우스를 먼저 받고, 열 때 디스크와 네트워크를 읽지 않는다. 모달 문구는 영어다(앱 UI 전체가 영어).
+- 제목 `NOT IN THE LIBRARY`, 안내 두 줄: 표의 DL 은 차트 파일만(차분)이고 소리·그림은 곡 URL 에서 따로 받아 같은 폴더에 두어야 한다. 곡 제목·아티스트·`표 이름 레벨 제목`도 보인다. 키 안내 `LEFT RIGHT CHOOSE   ENTER PRESS   ESC CLOSE`.
+- 버튼 줄: `GET CHART`(링크가 직접 zip 이고 다른 받기가 없을 때만 켜짐. 받는 중에는 `CANCEL`), `OPEN SONG URL`, `OPEN CHART URL`(각각 브라우저에 넘겨도 되는 주소일 때만 켜짐), `CLOSE`. 꺼진 버튼은 흐리게 그리고 커서가 건너뛴다. 받는 중 줄은 `DOWNLOADING 1.2 MB / 3.4 MB`(크기를 모르면 받은 양만), `EXTRACTING`, `SCANNING`, 끝나면 결과 문구, 다른 곡을 받는 중이면 `ANOTHER DOWNLOAD IS RUNNING`. 예·아니오 확인창이 아니라 이 버튼 줄이 "받겠느냐"는 물음이다.
+
+### 13.4 어떤 링크를 앱이 받나
+
+- 경로(쿼리 제외)만 본다(`classify_link`): http·https 가 아니면 쓸 수 없음, 호스트 `stellabms.xyz` 의 `/upload/...` 이거나 경로가 대소문자 무시 `.zip` 으로 끝나면 직접 zip, 그 밖은 브라우저. `page.html?file=a.zip` 은 페이지다.
+- rar·7z·lzh, 단일 `.bms` 같은 차트 파일 링크, HTML·클라우드 페이지는 앱이 받지 않고 브라우저로 넘긴다(이때 `GET CHART` 가 꺼진다). 사용자 결정은 "직접 zip 링크만 앱이 받아 풀고 나머지는 브라우저"다.
+- 브라우저에는 `browsable_url` 을 통과한 주소만 넘긴다(http·https, 호스트 있음, 공백·제어 문자 없음, 2,048자 이하). 셸을 거치지 않고 열기 프로그램을 따로 실행한다: macOS `open`, Windows `rundll32 url.dll,FileProtocolHandler`(`cmd /C start` 는 `&`·`|`·`^`·`%` 를 해석한다), 그 밖은 `xdg-open`. 실패는 `could not open the browser: 이유` 로 알린다.
+
+### 13.5 받기·풀기와 안전 장치(크레이트 `rbms-download`)
+
+| 구분 | 값 |
+| --- | --- |
+| 받기 상한 | 512 MiB, 무응답 30초, 전체 15분(조각마다 남은 시간과 취소를 확인), 리다이렉트 10회, 최종 주소도 http·https |
+| 받은 파일 검사 | 처음 4바이트가 zip 머리(`PK\x03\x04`, 빈 보관 `PK\x05\x06`)가 아니면 거절(HTML 응답 포함). 알린 크기가 상한을 넘으면 읽기 전에 거절하고 받은 바이트로도 센다. 실패하면 파일을 남기지 않는다 |
+| 풀기 상한 | 항목 10,000개, 항목 하나 1 GiB, 전체 2 GiB. 쓴 바이트로 센다(머리에 적힌 크기를 믿지 않는다) |
+| 이름·경로 | 항목 이름은 UTF-8 이거나 아니면 Shift_JIS 로 읽는다. 빈 이름·`.`·`..`·제어 문자·Windows 금지 문자·끝의 공백·점·Windows 장치 이름인 항목은 건너뛰고, 심볼릭 링크 항목도 건너뛴다 |
+| 쓰는 파일 | 차트(`bms bme bml pms bmson`), 소리, 그림, 영상, `txt` 확장자만. 실행 파일·스크립트는 쓰지 않는다 |
+| 덮어쓰기 | 없다(이미 있는 이름은 건너뛴다). 풀린 폴더는 다운로드 폴더 안에 `제목 [md5 앞 8자]` 로 옮기고, 있으면 ` (2)`, ` (3)`... |
+| 차트가 없는 압축 | 풀린 폴더를 지운다. 압축에 차트는 있지만 이 md5 가 없으면 폴더는 두고 알린다 |
+
+- 작업은 한 번에 하나다. 다운로드 폴더 안의 `.rbms-partial` 에서 받고 풀어 최종 폴더로 옮기며, 끝나면 `.rbms-partial` 은 지워진다.
+- 끝난 일은 그 폴더만 부분 스캔하고(`ScanRequest::partial`, 곡 DB 의 파서 버전을 기록하지 않아 전체 재스캔이 끝난 것으로 취급되지 않는다) 표를 다시 맞춘다. 선곡이 열린 폴더와 커서를 지킨 채 목록을 받아들이고, 플레이 중에 끝난 일은 선곡으로 돌아왔을 때 받아들인다.
+- 결과 알림: `downloaded: 제목 (n chart(s))`, `the archive had n chart(s) but not this one`, `download failed: 이유`, `download cancelled`. 시작할 수 없는 이유는 `another download is running`, `the chart's link is not a zip archive`, `no download folder is chosen`.
+- 새 의존성은 `zip` 9.0.0 과 `typed-path` 0.12.3 이다(crates.io 게시 14일이 지난 판만 쓴다는 작업 지시를 따랐고, 이 규칙의 출처는 저장소 규칙 문서에서 찾지 못했다). 곡 미러(음원 파일 제공)는 이 기능에 없다.
+- 확인하지 못한 것: 실제 Stella·BMS 사이트에서 받아 본 결과(직접 zip 링크의 실제 응답), Windows 에서 폴더가 막은 이름의 동작(`a6dc73c` 가 접근 거부를 건너뛰게 고쳤다).

@@ -204,6 +204,8 @@ pub fn left_record(&self) -> PlayRecord
 
 #### 3.2.2 app_result: 결과 화면 한 길
 
+> 구현과 다름: `record_run`(이력 행·전송 본문)은 `left_record` 가 아니라 `play.record()` 로 샘플된 그대로의 게이지 이력을 쓴다. 0 으로 채운 이력은 결과 화면용 `keep_run_record` 에만 쓴다. 판정 trace 도 샘플된 그대로다([ADR](../acknowledge/2026-10-23-adr-escape-shows-the-result.md)).
+
 `apps/rbms-player/src/app_result.rs`:
 
 ```rust

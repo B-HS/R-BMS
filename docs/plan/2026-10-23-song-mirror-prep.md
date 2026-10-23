@@ -346,6 +346,8 @@ pub struct MirrorPackReport {
 
 ### 5.5 U1 의존성
 
+> 구현과 다름: 워크스페이스의 `zip` 은 9.0.5 가 아니라 9.0.0 이다([ADR](../acknowledge/2026-10-23-adr-missing-charts-and-download.md)).
+
 - `zip`: 결정 15 로 승인된 크레이트를 **F4 가 워크스페이스에 넣은 줄 그대로** `zip = { workspace = true }` 로 쓴다(새 크레이트를 늘리지 않음. 다만 승인 문구가 "해제용" 이라 묶음 쓰기에도 쓰는 것은 11절 D-1 로 메인 확인).
   - crates.io 확인(2026-10-23): 최신 안정 **9.0.5**(2026-10-17, 미철회), MIT, 저장소 https://github.com/zip-rs/zip2 , MSRV 1.88(워크스페이스 1.95 충족), 9.0.0(2026-10-09) 이후 6일 사이 패치 5번.
   - 기본 기능(aes-crypto, bzip2, deflate64, deflate, lzma, ppmd, time, zstd, xz)은 크다. 추천 줄: `zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }`. 이 경우 일반 의존은 crc32fast·indexmap·memchr·typed-path(+ macOS 등 nix)와 flate2/zlib-rs 이고, **Cargo.lock 에 없는 새 크레이트는 `zip`·`typed-path` 둘뿐**이다(crc32fast 1.5.2, indexmap 2.14.2, memchr 2.8.3, nix 0.31.3, flate2 1.1.10, zlib-rs 0.6.8 은 이미 잠금 파일에 있음. typed-path 의 하위 의존은 확인 못함 → 구현 때 `cargo tree -p rbms-cli -e normal -i typed-path` 로 확인).
@@ -396,6 +398,8 @@ song_mirror_chart(
 - 새 에러 코드 `MIRROR_NOT_FOUND`(404) — `error-code`·`error-message`·상태 표 세 곳.
 
 ### 5.8 U2·M3 클라이언트 모달 자리
+
+> 구현과 다름: `DownloadChoice` 목록·`MAX_DOWNLOAD_CHOICES` 상수와, 내려받기 작업이 기대 바이트·SHA-256 을 입력으로 받는 계약(C3)은 만들지 않았다. 모달은 `ModalButton`(GetChart·OpenSongUrl·OpenChartUrl·Close·Cancel)과 `buttons()` 가 만드는 순서 있는 목록이고, 다운로드 작업은 URL 만 받는다. 미러 버튼은 M3 에서 이 목록 맨 앞에 변종 하나로 더한다([ADR](../acknowledge/2026-10-23-adr-song-mirror-prep.md)).
 
 F4 가 모달을 만든다. U2 는 F4 구현이 지켜야 할 계약이고, M3 가 미러 버튼을 실제로 넣는다.
 

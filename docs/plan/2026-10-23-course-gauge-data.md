@@ -193,6 +193,8 @@ impl CourseGaugeMode {
 
 ### 3.3 코스 진행 통합
 
+> 구현과 다름: (2)의 스테이지마다 설정값을 읽는 방식 대신, 코스를 시작할 때 `config.judge.course_gauge` 를 한 번 읽어 `CourseFacts.gauge_rule` 에 담고 이어지는 스테이지는 그 값으로 표를 고른다(`stage_judge_setup`). 코스 도중 설정을 바꿔도 시작 때의 규칙이다([ADR](../acknowledge/2026-10-23-adr-course-gauge-modes.md)).
+
 **(1) 스테이지 게이지 결정 함수(apps/rbms-player/src/course_ui.rs)**
 
 ```rust
@@ -296,6 +298,8 @@ pub stages: Vec<CourseStagePlay>,
 7. trace 소급(`trace_backfill::course_stages`)은 `charts` 만 읽어 영향 없음. 점수 DB 의 `course_submission` 스키마는 바뀌지 않는다(본문 JSON 그대로).
 
 ### 3.5 코스 원천 (a): GENOSIDE 2018 데이터 파일과 생성기(결정 18)
+
+> 구현과 다름: `zip` 은 9.0.5 가 아니라 9.0.0 이다(워크스페이스 줄과 `Cargo.lock`)([ADR](../acknowledge/2026-10-23-adr-genoside-2018-course-data.md)).
 
 **데이터 파일**: `web/data/courses/genoside-2018/courses.json`(새 파일). 클라이언트가 `include_str!` 로, 웹(F6)이 정적 import 로 같은 파일을 읽는다(선례: 클라이언트가 `web/data/tables/insane1` 을 `include_bytes!` 로 내장, `apps/rbms-player/src/tablesrc/seed.rs:31`).
 

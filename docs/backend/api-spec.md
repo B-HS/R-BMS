@@ -1,8 +1,8 @@
 # rbms 백엔드 — HTTP API 규격 (IR 슈퍼셋)
 
-> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (2026-10-22 에 응답의 `assist_grade` 와 순위 키만 고쳤다. 나머지는 2026-10-15 기준)
+> 최종 갱신 2026-10-23 · 대응 커밋 5a0eacf (2026-10-23 에 코스 제출의 세 필드(§6), 코스 카탈로그·내 단위 경로와 프로필 `extra.dans`(§12), 표 사본의 `source`(§7.1), Cron 경로(§1)를 더했다. 2026-10-22 에는 응답의 `assist_grade` 와 순위 키만 고쳤다. 나머지는 2026-10-15 기준)
 
-> **현재 구현 기준:** 이 문서는 `web/src/app/api`와 `web/src/server`를 따라 읽습니다. 코드와 다르면 코드(`web/src/server/dto/*.ts` 의 zod 스키마)가 맞습니다. 초기 설계에 남은 `/api/settings/*`, `?envelope=1`, 외부 CORS, LR2IR 어댑터 설명은 아래의 구현 상태 표기를 우선합니다. 운영 배포(https://bms.hyuns.uk, Vercel `rbms-web`)는 2026-10-14 에 끝났고, 운영 DB 에는 마이그레이션 0000~0011 이 모두 적용돼 있습니다(0003·0004 는 2026-10-15, 0011 어시스트 등급 열은 2026-10-22). 2026-10-15 관찰 시 운영 웹은 `51f3a1e`(`/api/version`)이며 그 뒤 커밋은 `web/` 을 바꾸지 않았습니다. 현재 배포 상태는 [../web/architecture.md](../web/architecture.md) 6-2 절이 정본입니다.
+> **현재 구현 기준:** 이 문서는 `web/src/app/api`와 `web/src/server`를 따라 읽습니다. 코드와 다르면 코드(`web/src/server/dto/*.ts` 의 zod 스키마)가 맞습니다. 초기 설계에 남은 `/api/settings/*`, `?envelope=1`, 외부 CORS, LR2IR 어댑터 설명은 아래의 구현 상태 표기를 우선합니다. 운영 배포(https://bms.hyuns.uk, Vercel `rbms-web`)는 2026-10-14 에 끝났고, 운영 DB 에는 마이그레이션 0000~0012 가 모두 적용돼 있습니다(0003·0004 는 2026-10-15, 0011 어시스트 등급 열은 2026-10-22, 0012 코스 출처·단위·표 사본은 2026-10-23). 2026-10-15 관찰 시 운영 웹은 `51f3a1e`(`/api/version`)이며 그 뒤 커밋은 `web/` 을 바꾸지 않았습니다. 현재 배포 상태는 [../web/architecture.md](../web/architecture.md) 6-2 절이 정본입니다.
 
 > REST + JSON. 모든 시각은 **unix epoch ms**(레퍼런스 구현 IR은 초 단위 — [compatibility.md](./compatibility.md) 변환표). 차트 키는 **md5(32hex) 또는 sha256(64hex)** 둘 다 허용(`{hash}` 길이로 판별).
 > 인증: `Authorization: Bearer <token>`(선택). 미인증 제출은 서버 설정상 `guest` 허용 가능.
@@ -88,6 +88,12 @@
 ### `GET /api/version` → `{ "api_version": 1, "server": "0.1.0", "commit": "abc1234" }`
 `commit` 은 `SERVER_COMMIT` 또는 Vercel 의 `VERCEL_GIT_COMMIT_SHA` 앞 7자이고, 둘 다 없으면 `null` 이다(Git 연동 배포가 아니라는 신호). 운영 배포가 어느 커밋인지 보려면 `curl https://bms.hyuns.uk/api/version`.
 
+### `GET /api/cron/tables` (Vercel Cron 전용, 2026-10-23)
+매일 UTC 15:00(`web/vercel.json` 의 `crons`)에 Vercel 이 `Authorization: Bearer <CRON_SECRET>` 로 부른다. 사람이나 게임 클라이언트가 쓰는 경로가 아니다.
+- `CRON_SECRET`(16자 이상, Vercel 환경 변수)이 설정돼 있지 않으면 503 `SERVICE_NOT_CONFIGURED`(`details.reason = "cron_secret_missing"`), 헤더가 맞지 않으면 401 `UNAUTHORIZED`. 값은 상수 시간으로 비교하고 응답·로그에 싣지 않는다.
+- 하는 일: Stella·Satellite 표(`stella-st`, `stella-sl`)를 원본에서 받아 검증하고 바뀌었을 때만 `table_snapshot` 에 저장, 표 헤더의 코스 등록, 새로 단위 코스가 된 코스의 소급 단위 판정([../web/architecture.md](../web/architecture.md) §15-4).
+- 200 응답 `{ success:true, data:{ tables:[{ tableId, outcome: "saved"|"unchanged"|"rejected"|"failed", reason, entries, added, removed, releveled, courses, awarded }] } }`, 헤더 `Cache-Control: private, no-store`. `reason` 은 고정 코드(`shrank`, `changed_too_much`, `http_status` …)이고 원본에서 받은 글자는 싣지 않는다. 한 표의 실패나 거절은 상태코드를 바꾸지 않는다(그 표의 `outcome` 이 말한다).
+
 ---
 
 ## 2. auth — 계정 (레퍼런스 구현 IRAccount 슈퍼셋)
@@ -131,7 +137,7 @@
 
 ## 3. players — 프로필 / 라이벌 (IRPlayerData)
 
-### `GET /api/players/{id}` → `PlayerProfile` (`playerProfileSchema`: `id`·`name`·`total_plays`·`rank_points`·`extra`. `id` 는 로그인 id 다. `total_plays` 는 그 사용자의 `score` 행 수를 센 값이고, `rank_points` 는 `user.rank_points` 열을 그대로 읽는데 이 열에 쓰는 코드가 없어 항상 0 이다. 웹 순위는 이 값을 쓰지 않는다)
+### `GET /api/players/{id}` → `PlayerProfile` (`playerProfileSchema`: `id`·`name`·`total_plays`·`rank_points`·`extra`. `id` 는 로그인 id 다. `total_plays` 는 그 사용자의 `score` 행 수를 센 값이고, `rank_points` 는 `user.rank_points` 열을 그대로 읽는데 이 열에 쓰는 코드가 없어 항상 0 이다. 웹 순위는 이 값을 쓰지 않는다). `extra` 는 `{ rank: "", dans: [{ system, name, label }] }` 이다: 2026-10-23 부터 `dans` 는 플레이어가 남에게 보이기로 한 단위(체계마다 하나, 자동이면 가장 높은 것, 숨김이면 빠진다. 없으면 빈 배열)다. 클라이언트는 `extra` 를 맵으로 읽어 모르는 키를 무시한다
 ```jsonc
 { "id":"alice", "name":"Alice", "total_plays":1234, "rank_points":56.7, "extra":{ "rank":"" } }
 // 404 IR_PLAYER_NOT_FOUND
@@ -278,7 +284,7 @@
   "trophy":[ {"name":"bronze","scorerate":0.7,"smissrate":0.05}, … ], // IRTrophyData
   "extra":{} }
 ```
-> `course_hash` = 코스 차트들의 sha256(또는 md5) 결합 해시(레퍼런스 구현/LR2 관행). [compatibility.md] 참조.
+> `course_hash` = 코스 차트들의 sha256(또는 md5) 결합 해시(레퍼런스 구현/LR2 관행). [compatibility.md] 참조. R-BMS 클라이언트가 만드는 값은 SHA-256(이름 + `\n` + 차트마다 (sha256 이 있으면 sha256, 없으면 md5) + `\n`)이다. 2026-10-23 부터 md5 만 있는 차트(GENOSIDE 2018 공식 코스 파일, Stella 표의 코스)도 코스에 든다: 그 차트는 `charts[]` 에서 `sha256` 이 빈 문자열이고 서버는 `course_chart.md5` 열에 md5 를 저장한다(`chart_sha256` 은 `''`).
 
 ### `POST /api/courses` (Bearer) — 코스 결과 제출(네이티브 클라이언트 계약)
 ### `POST /api/courses/meta` (admin) — 코스 메타 업서트
@@ -294,6 +300,9 @@
   "client_build_sha256":"<64hex>", "client_platform":"macos-universal",   // 선택. 점수 제출과 같은 빌드 신뢰 판정(아래)
   "scratch_auto":false,                     // 선택. 어느 스테이지든 SCRATCH AUTO 로 쳤으면 true (없으면 false)
   "assist":[],                              // 선택. 스테이지들의 어시스트 태그 합(AUTO_SCRATCH·CUSTOM_JUDGE, 각각 한 번, 최대 16개·각 32자). 없으면 []
+  "gauge":"Class",                          // 선택(2026-10-23). 코스가 끝난 게이지: 마지막 스테이지의 "Class"·"ExClass"·"ExHardClass"
+  "course_gauge":"LR2",                     // 선택. 코스를 친 COURSE GAUGE 규칙: "LR2"·"BEATORAJA"·"IIDX"
+  "stages":[ {"gauge":"Class","random":"Off","lntype":0}, … ],  // 선택. 친 스테이지마다, 친 순서대로(최대 64)
   "extra":{} }
 // 201 SubmitResponse
 // SCRATCH AUTO 코스 예: { "accepted":true, "ranked":true, "rank":2, "is_new_best":true,
@@ -307,6 +316,8 @@
 - 멱등: 동일 `(player, course_hash, played_at)` 재전송은 기존 id 를 돌려주고, `ranked`·`flags` 는 이번 본문으로 다시 판정해 돌려준다.
 - **단일 곡과 같은 검사**(S19): 점수 제출과 같은 사용자당 60/min 한도(버킷은 따로, 초과 시 429), 본문 256KB(초과 413), `charts` 최대 64개, `client_build_sha256`·`client_platform`(둘 다 선택)으로 빌드 신뢰를 판정한다. `REQUIRE_BUILD_HASH=true` 인데 해시가 없으면 400(`field: "client_build_sha256"`)이다. 알 수 없는 빌드는 `UNKNOWN_BUILD` flag 를 달고, 명시적 untrusted 빌드이거나 `REQUIRE_BUILD_HASH=true` 인 알 수 없는 빌드는 unranked 로 저장된다(§11.1). 본문 무결성은 단일 곡처럼 본문만 본다(S19 2차 수리): `ex_score` 가 판정에서 유도한 값과 같아야 하고(`field: "ex_score"`), 노트를 소비한 판정(PG·GR·GD·POOR. 코스 본문은 모드가 없어 pop'n BAD 를 위해 BAD 는 세지 않는다)의 2배가 `max_ex_score` 를 넘을 수 없으며(`field: "judge"`. 클라이언트는 스테이지 노트 수 × 2 의 합을 보낸다. 0 이면 판정도 0 이어야 한다), `minbp` 는 0 이거나 BAD+POOR+空POOR 이상이며(`field: "minbp"`), 서버가 저장할 BP 가 INT 열 안이어야 한다(`field: "judge"`. `minbp` 0 이면 BAD+POOR+空POOR 로 유도하므로). 열 범위는 단일 곡과 같다. `charts` 의 차트 행 노트 수는 쓰지 않는다(첫 제출자가 정한 값이라 다른 사람의 코스 제출을 막을 수 있었다). 램프는 보지 않는다: 0.1.0 은 코스 램프로 마지막 스테이지의 램프를 보내 코스 판정 합과 맞지 않을 수 있다(테스트 부채 3.36). 본문 검증 거절과 수락 모두 `submission_audit` 에 남는다.
 - **판정 저장**(S19 2차 수리, R2-ACC-3, 마이그레이션 `0004_course_score_judge_totals`): 클라이언트는 코스 판정을 합계(`pgreat`~`miss`)와 `fast`·`slow`·`combobreak`·`empty_poor` 로 보내고 early/late 분리는 0 이다. `course_score` 는 합계·FAST/SLOW·콤보 끊김·空POOR·`max_ex_score` 를 그대로 저장하고, 순위·best 응답의 `judge` 는 분리 합이 0 이 아니면 그것, 아니면 합계를 돌려준다. 0004 이전에 저장된 코스 행은 합계를 잃어 판정이 0 이다(복구 불가).
+- **게이지·규칙·스테이지**(2026-10-23, 결정 6·20): 셋 다 선택이고 없으면(`gauge`·`course_gauge` 는 `null`, `stages` 는 `[]`) 옛 클라이언트의 판으로 받는다. `stages[i].random` 은 코스 제약이 좁힌 뒤의 실제 값이고 `lntype` 은 그 스테이지가 판정된 롱노트 종류(0 LN, 1 CN, 2 HCN, 범위를 좁히지 않는다)다. 저장: `course_score.gauge`(게이지 번호 0~8, 없으면 NULL), `course_gauge`, `stages`(서버가 `stages[i]` 에 `charts[i]` 의 `md5`·`sha256` 을 붙인 json). `course_best.assist_grade` 는 이제 마지막 스테이지 게이지의 등급(`deriveAssistGrade`: Class 2, ExClass 3, ExHardClass 4)으로 채워진다(램프가 LIGHT ASSIST 일 때만, 단일 곡과 같다. 게이지가 없는 본문은 0). 그래서 SCRATCH AUTO 코스 클리어끼리의 순위 순서가 게이지 등급을 따른다. 같은 판을 다시 보내면 처음 판의 저장된 게이지로 등급을 다시 만들어 돌려준다. 옛 서버가 이 세 키를 받으면 조용히 버리고 400 은 없다(Zod `z.object`).
+- **단위**(2026-10-23, 결정 19·20): 제출이 저장된 뒤 같은 요청 안에서 단위 판정이 따로 돈다(코스 정의가 단위 코스일 때만. 판정이 던져도 201 은 그대로고 서버 로그에만 남는다). 응답 본문은 바뀌지 않는다. 조건과 표시는 [../web/architecture.md](../web/architecture.md) §15-3.
 - **코스 best 갱신과 순위**는 단일 곡과 같다: 조건부 문장 하나로 갱신하고, 목록·제출·`best` 의 `rank` 는 같은 공동 순위 정의다(§4).
 ### `GET /api/courses/{course_hash}/ranking?limit=&page=&rival_of=&include_scratch_auto=false` → `ScoreRecord[]`
 ### `GET /api/courses/{course_hash}/best?player={id}&include_scratch_auto=false` → `ScoreRecord | null` (레퍼런스 구현 getCoursePlayData 본인분)
@@ -329,7 +340,7 @@
 
 ### 7.1 서버가 번들한 표와 표준 BMS 표 형식 (웨이브 17B-1)
 
-DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)을 정적으로 싣는 표가 있다. 지금은 `insane1`(発狂BMS難易度表, 1,035곡, 레벨 26개) 하나이고 모든 곡이 `md5` 만 가진다. 응답·화면에는 다른 사이트의 흔적(원본·보관본 주소, 출처 문구, 원본 표의 메모)을 싣지 않는다(사용자 지시 2026-10-14~15, 커밋 4a0872d·ea34002·dd5518e). 스냅샷을 받은 주소와 HTTP 기록은 저장소의 `web/data/tables/insane1/source.json` 에만 있고(재현용, 서빙하지 않음. `ETag` 의 해시만 이 파일에서 읽는다), 스냅샷은 `web/scripts/snapshot-table.ts` 가 정규화한다: header 의 `original_url` 을 버리고, 곡의 `comment` 를 비우고, 내려받기 주소(`url`·`url_diff`·`name_diff`) 밖의 글자 필드(`title`·`artist` 등)에서 웹 주소를 지운다. 곡 내려받기 주소는 남긴다(사용자 정정 "그건 지우면안되는데").
+DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)을 정적으로 싣는 표가 있다. 번들은 `insane1`(発狂BMS難易度表, 1,034곡 — 사이트 주인의 요청으로 한 곡을 뺐다, 레벨 26개) 하나이고 모든 곡이 `md5` 만 가진다. 2026-10-23 부터는 Stella(`stella-st`, 2,350곡)·Satellite(`stella-sl`, 2,497곡)의 사본이 더해진다: 저장소가 아니라 DB(`table_snapshot`)에서, 하루 한 번 원본에서 받은 바이트를 그대로 읽고(§1 `GET /api/cron/tables`), 한 번도 받지 못했으면 목록에 없다. (곡 수는 2026-10-23 첫 확인 값. 표 요약·상세의 곡 항목은 `md5` 로만 곡을 가리키고, 표준 `data.json` 에는 원본의 `sha256` 도 그대로 있다.) 응답·화면에는 다른 사이트의 흔적(원본·보관본 주소, 출처 문구, 원본 표의 메모)을 싣지 않는다(사용자 지시 2026-10-14~15, 커밋 4a0872d·ea34002·dd5518e). 스냅샷을 받은 주소와 HTTP 기록은 저장소의 `web/data/tables/insane1/source.json` 에만 있고(재현용, 서빙하지 않음. `ETag` 의 해시만 이 파일에서 읽는다), 스냅샷은 `web/scripts/snapshot-table.ts` 가 정규화한다: header 의 `original_url` 을 버리고, 곡의 `comment` 를 비우고, 내려받기 주소(`url`·`url_diff`·`name_diff`) 밖의 글자 필드(`title`·`artist` 등)에서 웹 주소를 지운다. 곡 내려받기 주소는 남긴다(사용자 정정 "그건 지우면안되는데").
 
 | 경로 | 응답 | 인증 |
 |---|---|---|
@@ -339,6 +350,11 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 | `GET /api/fe/tables/{id}` | `{ table, levels:[{ level, entries:[{ md5, level, title, artist, url, url_diff, name_diff }] }] }`(`tableEntryOutputSchema`, `comment` 없음, 약 307KB, 공개 캐시 `s-maxage=3600`) | 없음 |
 | `GET /api/fe/tables/{id}/entries?q=&level=&page=&limit=` | 제목·아티스트·md5 앞 6자 이상으로 검색. `limit` 최대 100. 쪽 나누기 포함 | 없음 |
 | `GET /api/fe/tables/{id}/records` | `{ table_id, records:{ "<md5>": { clear, assist_grade, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } } }` — 내 곡별 최고 기록(기록 있는 곡만, `chart.md5` 로 맞춤). 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고 `scratch_auto` 가 어느 쪽인지 알린다. `no-store` | 세션 |
+
+원격 사본(`stella-st`, `stella-sl`)의 차이(2026-10-23):
+- `GET /tables/{id}/header.json` 은 받은 헤더에서 `{ name, symbol, data_url, level_order, last_update }` 를 만들고(`level_order` 가 헤더에 없으면 곡의 레벨을 수 오름차순으로, `last_update` 는 받은 날) 헤더에 `course` 가 있으면 그대로 싣는다. insane1 의 응답은 바이트까지 그대로다. `GET /tables/{id}/data.json` 은 원본에서 받은 바이트를 그대로(`ETag` = 데이터 SHA-256 앞 32자, 304 지원) 돌려준다.
+- `GET /api/fe/tables`·`GET /api/fe/tables/{id}` 의 표 요약에 `source: { name, maker, page_url, fetched_at, checked_at, data_sha256 } | null` 이 붙는다(원격 사본은 값이 있고, insane1 은 다른 사이트의 흔적을 뺀 그대로라 `null`). 곡 항목에는 원본의 `url`·`url_diff`·`name_diff` 가 그대로 있다.
+- `GET /api/fe/tables/{id}/records`·검색·"내 폴더로 가져오기"(`POST /api/fe/me/folders/{id}/import` 의 `table_id`)는 원격 표에도 같은 규칙으로 동작한다. 차트 제목 대체·차트 검색·AI·곡별 패턴 대조는 번들 insane1 만 본다(설계 T3).
 
 `/tables/{id}` 의 사람이 보는 페이지(`<meta name="bmstable" content="/tables/{id}/header.json">`)는 화면 웨이브가 만든다. 클라이언트(`rbms-table`)는 header 의 `data_url` 을 header 의 최종 주소 기준으로 풀고, 이 header 는 절대 주소를 내므로 끝 슬래시(운영은 `/x/` 를 308 로 `/x` 로 뗀다)에 영향받지 않는다. 정본 등록 주소는 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음).
 
@@ -471,8 +487,14 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 > 네이티브 IR 위에 구현된 FE 조회 경로입니다. 모두 `/api/fe/*`이고 envelope를 고정으로 사용합니다.
 
 - `GET /api/fe/charts/search`, `/api/fe/charts/[hash]/leaderboard`, `/api/fe/activity/recent`, `/api/fe/leaderboards/players`, `/api/fe/players/[playerId]/{recent,stats}`, `/api/fe/stats/summary`.
-- 어시스트 등급(2026-10-22): `ScoreRecord`, 활동 항목(`/api/fe/activity/recent`, `/api/fe/players/[playerId]/recent`)에 `assist_grade` 가 있고, `/api/fe/players/[playerId]/stats` 의 `lamps[]` 는 `{ clear, assist_grade, count }`, `/api/fe/tables/{id}/records` 의 곡마다도 `assist_grade` 가 있다(`fe.service.ts`, `table-snapshot.service.ts`). 코스 순위는 항상 0.
+- 어시스트 등급(2026-10-22): `ScoreRecord`, 활동 항목(`/api/fe/activity/recent`, `/api/fe/players/[playerId]/recent`)에 `assist_grade` 가 있고, `/api/fe/players/[playerId]/stats` 의 `lamps[]` 는 `{ clear, assist_grade, count }`, `/api/fe/tables/{id}/records` 의 곡마다도 `assist_grade` 가 있다(`fe.service.ts`, `table-snapshot.service.ts`). 코스의 `assist_grade` 는 2026-10-23 전에는 항상 0 이었고, 그 뒤 제출은 게이지 등급을 담는다(§6).
 - SCRATCH AUTO 다루기(웨이브 20): `/api/fe/charts/[hash]/leaderboard?include_scratch_auto=true` 는 §4 차트 순위와 같은 포함 목록을 쓴다(기본 제외). `/api/fe/leaderboards/players?include_scratch_auto=true` 는 `cleared_charts`·`played_charts` 를 곡마다 두 칸 가운데 하나라도 있으면 세고 `total_plays` 에 SCRATCH AUTO 판을 더한다(기본은 일반 판만). `/api/fe/activity/recent` 는 SCRATCH AUTO 판을 늘 뺀다. `/api/fe/players/[playerId]/recent` 는 모든 판을 `scratch_auto` 와 함께 돌려준다. `/api/fe/players/[playerId]/stats` 의 `lamps`·`cleared` 는 곡마다 더 높은 쪽으로 세고 그중 SCRATCH AUTO 판인 곡 수를 `scratch_auto_charts` 로 준다.
+- 코스 카탈로그와 단위(2026-10-23, 마이그레이션 0012):
+  - `GET /api/fe/courses`(무인증, `withRateLimit('fe-read')`) → `{ groups:[{ id, name, keys, source:{ id, kind:"bundled"|"table", name, maker, page_url, file_url, retrieved_at, file_sha256, detail }, courses:[{ course_hash, name, stage_count, active, dan:{ system, system_name, label, rank }|null }] }] }`. 묶음은 `genoside-2018-sp`, `genoside-2018-dp`, `stella-st`, `stella-sl`. `active:false` 는 표에서 빠진 코스다. `detail` 은 출처마다 다르다(GENOSIDE 는 코스 파일 이름·SHA-256·해시 접두사·제약 출처, 표는 `data_url`·`data_sha256`).
+  - `GET /api/fe/courses/{courseHash}/catalog`(무인증) → `{ course_hash, name, active, group:{ id, name, keys }, source, dan, charts:[{ position, md5, sha256, title }] }`. 카탈로그에 없는 코스(플레이어가 가져온 코스)는 404 `IR_COURSE_NOT_FOUND`.
+  - `GET /api/fe/me/dans`(세션, `private, no-store`) → `{ systems:[{ system, name, display:{ mode:"auto"|"hidden"|"label", label }, shown, acquired:[{ label, rank, course_hash, course_name, course_gauge, acquired_at }] }] }`. 체계는 `genoside2018_sp`, `genoside2018_dp`, `stella`, `satellite` 넷이 늘 있다. `shown` 은 남에게 실제로 보이는 label(숨김이면 `null`).
+  - `PUT /api/fe/me/dans/display`(세션, 본문 1 KiB 이하) `{ system, mode:"auto" }` \| `{ system, mode:"hidden" }` \| `{ system, mode:"label", label }` → 같은 `data`(위의 내 단위). `label` 은 그 사용자가 이미 획득한 label 이어야 하고 아니면 400 `VALIDATION_ERROR`(`field: "label"`).
+  - 순위 행: `GET /api/fe/leaderboards/players` 의 항목마다 `dans:[{ system, name, label }]`(남에게 보이기로 한 단위, 한 번의 묶음 조회).
 - `GET /api/fe/me/settings`, `GET|POST /api/fe/tokens`, `DELETE /api/fe/tokens/[tokenId]`은 세션 사용자 전용입니다.
 - `POST /api/fe/auth/login` `{ id, password }` 는 웹 로그인입니다. `/api/auth/login` 과 같은 자격 확인을 하고 세션 쿠키만 세팅합니다(API 토큰을 만들지 않음). 응답 `{ success:true, data:{ user:{ id, login_id, name, role } } }`, 실패 401 `UNAUTHORIZED`, 5/min/IP(`/api/auth/login` 과 같은 버킷).
 - `POST /api/fe/auth/register` `{ id, email, password, name? }` 는 웹 가입입니다. `/api/auth/register` 와 같은 검사(아이디 형식·예약어, 중복은 409 `IR_ACCOUNT_EXISTS`)를 하고 세션 쿠키만 세팅합니다. 응답은 로그인과 같은 꼴이고 201 입니다.

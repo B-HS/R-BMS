@@ -29,16 +29,17 @@
 - [x] F0. 결정 기록 — 2026-10-22 ADR 5건 상태를 사용자 확인으로, 미확인 목록 정리, 요구 원문·조사 보고 저장 (`e2da295`, `1169efb`)
 - [x] F1. 설계 — 묶음별 상세 설계(`docs/plan/2026-10-23-*.md`), 파일 소유권, 마이그레이션 계획 (workflow wf_98aa6bb9-ae7, `3c0cd22`: 설계서 5개 `docs/plan/2026-10-23-{client-small,select-tree-download,course-gauge-data,web-course-dan-tables,song-mirror-prep}.md`, 교차 검토와 메인 결정 `design-review.md` 10절, 실행은 그 3.2절 웨이브 1~7)
 - [x] F2. 클라이언트 작은 묶음 — 8 SCRATCH AUTO 색, 9 Esc 결과 화면, 5 패널 키 스킨 opt-in (웨이브 1 `9e39262`, 통합 게이트 Rust 6,382 통과·0 실패)
-- [ ] F3. 선곡 폴더 스택과 표 — 10·11 폴더 스택·커서 복원, 12 Stella·Satellite 기본 표, 13 클라이언트 자동 다시 받기, 표 코스 폴더
-- [ ] F4. 없는 곡과 다운로드 — 16 흐린 없는 곡 막대·다운로드 폴더, 15 모달·zip 받기·브라우저 열기
-- [ ] F5. 코스 게이지와 코스 원천 — 21 코스 게이지 LR2/BEATORAJA/IIDX, 6 제출 게이지 종류, 18 GENOSIDE 2018 SP·DP 44 + 표 코스 가져오기
-- [ ] F6. 웹 — 6 `course_best.assist_grade`, 18 코스 등록·출처(14), 19·20 단위 자동 판정·마이페이지, 13 표 매일 갱신(Vercel Cron + DB), 12 Stella·Satellite 표 페이지. 마이그레이션 파일 먼저 커밋 → 사용자 승인으로 운영 적용 → 코드 푸시
-- [ ] F7. 곡 미러 준비 — 17 R2 업로드 도구·설계와 조사 기록(실행하지 않음, 마지막 보고)
+- [x] F3. 선곡 폴더 스택과 표 — 10·11 폴더 스택·커서 복원, 12 Stella·Satellite 기본 표, 13 클라이언트 자동 다시 받기, 표 코스 폴더
+- [x] F4. 없는 곡과 다운로드 — 16 흐린 없는 곡 막대·다운로드 폴더, 15 모달·zip 받기·브라우저 열기
+- [x] F5. 코스 게이지와 코스 원천 — 21 코스 게이지 LR2/BEATORAJA/IIDX, 6 제출 게이지 종류, 18 GENOSIDE 2018 SP·DP 44 + 표 코스 가져오기
+- [x] F6. 웹 — 6 `course_best.assist_grade`, 18 코스 등록·출처(14), 19·20 단위 자동 판정·마이페이지, 13 표 매일 갱신(Vercel Cron + DB), 12 Stella·Satellite 표 페이지. 마이그레이션 파일 먼저 커밋 → 사용자 승인으로 운영 적용 → 코드 푸시
+- [x] F7. 곡 미러 준비 — 17 R2 업로드 도구·설계와 조사 기록(실행하지 않음, 마지막 보고)
 - [ ] F8. 통합 리뷰와 수리
 
-  진행 기록: 웨이브 1(wf_53d3eb78-f46) F2 U-A·U-B·U-C, F5 C1, F3 D1, F6 W1 → `9e39262`(커밋 사고: 마이그레이션 전용 커밋에 웨이브 전체가 섞임, [feedback](feedback/2026-10-23-stage-check-before-commit.md)), `db0aa7c`. 운영 0012 적용(사용자 `!` 실행, run 39909099575, 7/7). 웨이브 2(wf_8fbc1c6e-18e) F5 C2 `9f8dfbc`, C5 `f174f2b`, F3 U1 `fc23232`, F6 W2 `db534d1`(게이트 Rust 6,465·웹 1,512 통과, 0 실패). F6 W5 는 W6 과 함께 B2 로 보류(패치 보관). 웨이브 3(wf_088ab9d0-3ca, 세션 한도로 5단위가 끊겨 wf_a67f8781-768 이 같은 worktree 에서 이어받음) F3 U2 `2787264`, DP 제목 88개 `ea5829d`, U6 `6998d95`, U3 `519d7d6`, F5 C3 `c4fcdfa`, F7 U1 `fbae422`, F6 W3 `c79f53f`(게이트 Rust 6,550·웹 1,590 통과, 0 실패). Windows 해제 수리 `a6dc73c`(ci 3 OS 통과). 사이에 사용자 요청으로 `架空ユリカゴ　 [SABOTHER]` 웹 삭제(`a6e7ffe`, 운영 run 39927201095, [ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)). 웨이브 4(wf_9f61ed7d-64e) 진행 중.
+  진행 기록: 웨이브 1(wf_53d3eb78-f46) F2 U-A·U-B·U-C, F5 C1, F3 D1, F6 W1 → `9e39262`(커밋 사고: 마이그레이션 전용 커밋에 웨이브 전체가 섞임, [feedback](feedback/2026-10-23-stage-check-before-commit.md)), `db0aa7c`. 운영 0012 적용(사용자 `!` 실행, run 39909099575, 7/7). 웨이브 2(wf_8fbc1c6e-18e) F5 C2 `9f8dfbc`, C5 `f174f2b`, F3 U1 `fc23232`, F6 W2 `db534d1`(게이트 Rust 6,465·웹 1,512 통과, 0 실패). F6 W5 는 W6 과 함께 B2 로 보류(패치 보관). 웨이브 3(wf_088ab9d0-3ca, 세션 한도로 5단위가 끊겨 wf_a67f8781-768 이 같은 worktree 에서 이어받음) F3 U2 `2787264`, DP 제목 88개 `ea5829d`, U6 `6998d95`, U3 `519d7d6`, F5 C3 `c4fcdfa`, F7 U1 `fbae422`, F6 W3 `c79f53f`(게이트 Rust 6,550·웹 1,590 통과, 0 실패). Windows 해제 수리 `a6dc73c`(ci 3 OS 통과). 사이에 사용자 요청으로 `架空ユリカゴ　 [SABOTHER]` 웹 삭제(`a6e7ffe`, 운영 run 39927201095, [ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)). 웨이브 4(wf_9f61ed7d-64e) C6 `a52d9a3`, U4 `0ff2077`, C4 `47e8f70`(코스 시작 때의 COURSE GAUGE 로 스테이지 판정, 메인 수정 포함), W4 `d57c6c2`. 웨이브 5(wf_ceae3e00-e38) U5 `0247561`, W6(보류한 W5 포함) `942ed71`. 웨이브 6(wf_6dc77b43-fac) D2 `8d0a62a`, W7 `f2d8ce5`, W8 `608eae7`, W9 `df52b3c`. 웨이브 7(wf_1b82225e-f89) D3 `5a0eacf`(게이트 Rust 6,611 통과·0 실패, 스킨 덤프 통과, 웹 마지막 1,808 통과). 운영: courses-seed-count(run 39938376095: SP 22·DP 22 inserted), tables-refresh-count(run 39938388900: st 2,350·sl 2,497 저장 가능) 끝, courses-seed·tables-refresh-force 는 사용자 `!` 실행 대기, CRON_SECRET 등록은 사용자. F8 통합 리뷰(wf_10322c71-7d7) 진행 중.
 - [ ] G. ADR·문서, 전체 게이트, 커밋·푸시, CI, 운영 반영(사용자 승인), 실기 점검표(QA) 추가
 - [ ] R. v0.1.7 실기 결과(QA 3.20) 수리 — 결과를 받으면
+- [ ] D. Discord 상태 표시(2026-10-23 사용자 요청 "discord에 게임으로 인식되게하는 기능", 답 "좋아 1번대로 하도록하고 Application 만들어서 아이디는 1563156237539999865 / 아이콘이나 기타 꼼꼼하게"). 결정: workflow 사용, v0.1.8 draft 전에 넣음, Rich Presence(로컬 IPC, 새 의존성 없음)로 곡 제목·난이도·모드·코스·경과 시간, 설정 DISCORD STATUS 기본 켬(2~4 는 답이 없어 메인이 추천안으로 정함, 사용자 미확인). Application ID 1563156237539999865(비밀 아님). 아이콘 업로드는 Developer Portal 에서 사용자가 함
 
 ## 체크리스트 — 클라이언트 기능 고도화: 옵션 패널·램프·색상·글꼴 (2026-10-22)
 
