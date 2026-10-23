@@ -5,7 +5,10 @@ use rbms_model::{LnKind, Micros, Mode, Model, ModelMeta, Note, NoteKind, TimeLin
 pub use rbms_model::{VOLWAV_DEFAULT_PERCENT, chart_gain, count_playable_notes, default_total, default_total_for_mode, default_total_keyboard};
 use rbms_parser::BmsSource;
 
+pub use radar::{RADAR_AXIS_COUNT, RADAR_DISPLAY_MAX, RADAR_VERSION, RadarAxis, RadarRaw, radar_display, radar_raw};
+
 mod long_note;
+pub mod radar;
 pub mod scroll;
 pub mod shuffle;
 
