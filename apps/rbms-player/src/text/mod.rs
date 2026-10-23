@@ -9,6 +9,6 @@
 mod layout_play;
 mod menus;
 mod notices;
-mod ranking;
+pub(crate) mod ranking;
 mod select;
 mod settings;

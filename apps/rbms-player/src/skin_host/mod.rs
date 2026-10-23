@@ -931,7 +931,7 @@ impl<'a> ScreenHost<'a> {
     pub fn show_select(&mut self, shown: &'a select::SelectShown) {
         self.select = select::SelectState::of(shown);
         self.options = options::OptionsState::of_settings(shown.settings);
-        self.ir.browser = Some(shown.ir);
+        self.ir.browser = Some(&shown.ir);
     }
 
     /// Puts the play screen's frame on this host: the run so far for cluster B, the judgement on

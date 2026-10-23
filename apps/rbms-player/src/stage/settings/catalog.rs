@@ -14,6 +14,8 @@
 //! described before anything here is written for it.
 
 use rbms_config::{SettingId, SettingTab, descriptor};
+use rbms_model::translations::Catalog;
+use rbms_render::text::language;
 
 use crate::settings_ui::SettingRow;
 
@@ -89,7 +91,7 @@ const AUDIO_SECTIONS: &[Section] = &[
 ];
 
 const SELECT_SECTIONS: &[Section] = &[
-    Section { heading: "SONG LIST", rows: &[SettingId::Sort, SettingId::FavoriteOnly, SettingId::ShowMissingCharts] },
+    Section { heading: "SONG LIST", rows: &[SettingId::Sort, SettingId::FavoriteOnly, SettingId::ShowMissingCharts, SettingId::RankingKeys] },
     Section { heading: "PREVIEW", rows: &[SettingId::PreviewVolume, SettingId::PreviewFade] },
     Section { heading: "DOWNLOADS", rows: &[SettingId::DownloadFolder] },
 ];
@@ -153,6 +155,20 @@ macro_rules! judge_width_description {
             "Narrowing is free; over 100% makes a run a custom judge: no best score, the ASSIST lamp at best; the run is still kept, with its replay, and sent."
         )
     };
+}
+
+rbms_model::translations! {
+    /// The sentences of the rows added since the screen's words are written in every language.
+    pub(crate) enum RowDescriptionText {
+        RankingKeys => (
+            "Holding a blue key on the chart under the cursor opens the IR RANKING of that chart. A short press does what the key always did, \
+             once it is let go. On the keyboard keys 2 and 4 open it, and 9KEYS uses buttons 2 and 8. With OFF the keys work as they always have.",
+            "커서가 있는 차트에서 파란 건반을 누르고 있으면 그 차트의 IR RANKING 화면이 열립니다. 짧게 누르면 건반을 뗄 때 원래 동작을 합니다. \
+             키보드에서는 2번·4번 키로 열고, 9KEYS 모드에서는 2번·8번 버튼을 씁니다. OFF 상태에서는 건반이 원래대로 동작합니다.",
+            "カーソルの譜面で青い鍵盤を押し続けると、その譜面のIR RANKING画面が開きます。短く押すと、離したときに元の動作をします。\
+             キーボードでは2番・4番キーで開き、9KEYSモードではボタン2・8を使います。OFFでは鍵盤は元のとおりに動作します。"
+        ),
+    }
 }
 
 /// What one row of the settings screen is for, written on the panel beside the list: what the row
@@ -281,6 +297,7 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         SettingId::Sort => "The order of the song list. The sort key of the song select steps the same value.",
         SettingId::FavoriteOnly => "Lists only the charts marked as favourites.",
         SettingId::ShowMissingCharts => "Lists the charts a difficulty table names that the library does not have, dimmed. Choosing one offers its download.",
+        SettingId::RankingKeys => RowDescriptionText::RankingKeys.get(language()),
         SettingId::DownloadFolder => {
             "The folder the song list unpacks a chart it downloads into. It is scanned with the song folders. With none chosen, the first download asks for one."
         }

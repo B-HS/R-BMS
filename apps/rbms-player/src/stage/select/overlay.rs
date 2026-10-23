@@ -102,6 +102,13 @@ pub(super) fn ranking_panel_rect() -> Rect {
     Rect::new(layout.list_rect.x, layout.detail_rect.y, layout.detail_rect.w, layout.detail_rect.h)
 }
 
+/// The name of the chart the ranking panel is of, written in its head: the title, and the subtitle
+/// after it when the chart has one. A cursor that is not on a chart names none.
+pub(super) fn ranking_heading(shared: &AppShared) -> Option<String> {
+    let entry = shared.library.songs().get(shared.focused_song_index()?)?;
+    Some(if entry.subtitle.is_empty() { entry.title.clone() } else { format!("{} {}", entry.title, entry.subtitle) })
+}
+
 /// The card a list with nothing in it puts its hint on.
 fn draw_empty_hint<R: Renderer>(r: &mut R, title: &str, body: &str) {
     let th = theme();
@@ -215,7 +222,8 @@ impl SelectState {
         if self.ranking_open {
             let panel = ranking_panel_rect();
             hot.push((panel, Hot::OverlayPanel));
-            let rows = render_ranking_panel_at(r, panel, ranking, self.ranking_sel, true, shared.can_switch_primary_ir());
+            let heading = ranking_heading(shared);
+            let rows = render_ranking_panel_at(r, panel, heading.as_deref(), ranking, self.ranking_sel, true, shared.can_switch_primary_ir());
             hot.extend(rows.into_iter().map(|(rect, index)| (rect, Hot::RankingRow(index))));
         }
         if self.guide_open {

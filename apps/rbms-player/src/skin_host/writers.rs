@@ -16,7 +16,7 @@
 //! | --- | --- | --- |
 //! | rate 1, `musicselect_position` | moves the browser's cursor to that share of the list | the browser: [`BrowserWrite::Position`] |
 //! | rate 7, `skinselect_position` | scrolls the skin settings screen | nothing: the skin menu is built in, and scrolls its own list |
-//! | rate 8, `ranking_position` | scrolls the ranking list of the browser or the result screen | the result screen, which holds the offset; the browser has no ranking list a skin draws yet |
+//! | rate 8, `ranking_position` | scrolls the ranking list of the browser or the result screen | the result screen, which holds the offset; the browser reads the offset ([`super::ir::IrBrowser`]) but holds none it could move yet, so it draws its list from the top |
 //! | rates 17, 18, 19 | the system, key and background volume | [`carry_out`], at once |
 //! | rate 20, `practice_position` | scrolls the practice items of the play screen | nothing: practice is a screen of its own here |
 //! | string 30, `searchword` | `MusicSelector.search` | the browser: [`BrowserWrite::Search`] |

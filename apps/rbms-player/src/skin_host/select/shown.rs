@@ -157,6 +157,9 @@ pub struct SelectShown {
     /// bound is on it ([`unreachable_keys_of`]). [`SelectShown::of`] leaves every key reachable, and
     /// the browser says which are not.
     pub unreachable_keys: [bool; KEY_INDEX_COUNT],
+    /// Whether the ranking mode is open over the browser (this player's own option 21105).
+    /// [`SelectShown::of`] leaves it closed, and the browser says when it is open.
+    pub ranking_mode: bool,
 }
 
 /// For each key index of the browser's key table (`crate::keyconfig::key_index_of`), whether no lane
@@ -235,6 +238,7 @@ impl SelectShown {
             settings: if has_chart_settings { settings } else { settings.without_chart() },
             ir: IrBrowser { board: inputs.ir.board.filter(|_| has_ranking), ..inputs.ir },
             unreachable_keys: [false; KEY_INDEX_COUNT],
+            ranking_mode: false,
         }
     }
 

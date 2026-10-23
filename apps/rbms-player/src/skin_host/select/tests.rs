@@ -654,12 +654,18 @@ fn the_settings_and_the_ranking_are_read_against_the_bar_under_the_cursor() {
     let config = Config::default();
     let board = IrBrowser {
         online: true,
-        board: Some(crate::skin_host::ir::IrBoard { access: crate::skin_host::ir::IrAccess::Finished, rank: 3, total: 9, lamps: [0; 11] }),
+        board: Some(crate::skin_host::ir::IrBoard {
+            access: crate::skin_host::ir::IrAccess::Finished,
+            rank: 3,
+            total: 9,
+            lamps: [0; 11],
+            slots: Default::default(),
+        }),
         offset: 0,
     };
     let on = |kind: BarKind| {
         let bars = [SongBar::new(kind, "")];
-        SelectShown::of(SelectInputs { ir: board, ..inputs(&bars, &config) })
+        SelectShown::of(SelectInputs { ir: board.clone(), ..inputs(&bars, &config) })
     };
 
     let chart = on(BarKind::Song { exists: true });
@@ -730,7 +736,7 @@ fn every_id_the_browser_skin_reads_that_the_browser_owns_has_a_cluster_that_answ
     let shown = SelectShown::of(SelectInputs {
         chart: Some(chart_with(Some(&record))),
         panel: Some(1),
-        ir: IrBrowser::of_ranking(true, Some(&ranking)),
+        ir: IrBrowser::of_ranking(true, Some(&ranking), 0),
         ..inputs(&bars, &config)
     });
     let timers = TimerState::new();

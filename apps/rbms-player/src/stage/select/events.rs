@@ -31,7 +31,8 @@
 //!
 //! Two events are this player's own and have no number in the reference: SCRATCH AUTO and KEEP GREEN
 //! NUMBER switched on or off ([`crate::skin_host::extension`]). They are run as every other is, by a
-//! skin's button or script and by the second panel's keys.
+//! skin's button or script and by the second panel's keys. A third, the ranking mode opened or
+//! closed (21002), is a skin's button for what the ranking shortcut does ([`super::ranking_mode`]).
 //!
 //! The buttons that leave the browser go where this player keeps the same thing: the key
 //! configuration (13) is its own screen, the skin configuration (14) is the skin menu, practice
@@ -46,7 +47,7 @@ use rbms_store::ScoreBook;
 
 use super::SelectState;
 use super::skinned::FocusedBar;
-use crate::skin_host::extension::{RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_SCRATCH_AUTO};
+use crate::skin_host::extension::{RBMS_EVENT_KEEP_GREEN_NUMBER, RBMS_EVENT_RANKING_MODE, RBMS_EVENT_SCRATCH_AUTO};
 use crate::skin_host::options::{JUDGE_ALGORITHMS_NUMBERED, OPTION_GENERAL, random_option_index};
 use crate::skin_host::{Cluster, ClusterRequest};
 use crate::stage::{KeyConfigState, SkinMenuState, Stage, Transition};
@@ -243,6 +244,8 @@ pub(super) enum SelectEvent {
     Replay(usize),
     /// `favorite_chart`: star or unstar the chart under the cursor.
     FavoriteChart,
+    /// This player's own: open the ranking mode, or close it when it is open.
+    RankingMode,
 }
 
 /// The reference's event table as this browser carries it out, by id, and this player's own events
@@ -284,6 +287,7 @@ const EVENTS: &[(i32, SelectEvent)] = &[
     (BUTTON_LONGNOTEMODE, SelectEvent::Setting(SettingEvent::LongNoteMode)),
     (RBMS_EVENT_SCRATCH_AUTO, SelectEvent::Setting(SettingEvent::ScratchAuto)),
     (RBMS_EVENT_KEEP_GREEN_NUMBER, SelectEvent::Setting(SettingEvent::KeepGreenNumber)),
+    (RBMS_EVENT_RANKING_MODE, SelectEvent::RankingMode),
 ];
 
 /// What the event `id` does here, or `None` for an id that does nothing.
@@ -361,6 +365,7 @@ impl SelectState {
             Some(SelectEvent::Practice) => return self.practise_focused(shared),
             Some(SelectEvent::Replay(slot)) => return self.play_replay_slot(shared, slot),
             Some(SelectEvent::FavoriteChart) => self.favorite_event(shared),
+            Some(SelectEvent::RankingMode) => self.toggle_ranking_panel(shared),
             None => {}
         }
         Transition::Stay

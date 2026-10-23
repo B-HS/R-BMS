@@ -1870,6 +1870,7 @@ const OVERLAY_AT_MS: i64 = 3000;
 const OVERLAY_GUIDE: &str = "overlay-guide";
 const OVERLAY_FILTER: &str = "overlay-filter";
 const OVERLAY_RANKING: &str = "overlay-ranking";
+const OVERLAY_RANKING_BOARD: &str = "overlay-ranking-board";
 const OVERLAY_MODAL: &str = "overlay-modal";
 const OVERLAY_SEARCH: &str = "overlay-search";
 const OVERLAY_OPTIONS: &str = "overlay-options";
@@ -1933,6 +1934,87 @@ fn overlay_with(
     browser_frame_at(app, OVERLAY_AT_MS, pixels, deadline)
 }
 
+/// One player of the board the ranking overlay is captured with: who they are, what they scored and
+/// cleared with, the dans they show as a system and a label, and whether a replay is kept of the score.
+struct OverlayPlayer {
+    id: &'static str,
+    name: &'static str,
+    ex: u32,
+    clear: rbms_ir::ClearLamp,
+    dans: &'static [(&'static str, &'static str)],
+    has_replay: bool,
+}
+
+/// The players of that board, best first. `me` is the local player and `friend` a rival.
+const OVERLAY_BOARD_PLAYERS: [OverlayPlayer; 9] = [
+    OverlayPlayer {
+        id: "alice",
+        name: "Alice",
+        ex: 990,
+        clear: rbms_ir::ClearLamp::Perfect,
+        dans: &[("genoside2018_sp", "二段"), ("stella", "SL 8")],
+        has_replay: true,
+    },
+    OverlayPlayer { id: "me", name: "Hyunseok", ex: 940, clear: rbms_ir::ClearLamp::FullCombo, dans: &[("stella", "SL 6")], has_replay: true },
+    OverlayPlayer { id: "friend", name: "Friend", ex: 905, clear: rbms_ir::ClearLamp::ExHard, dans: &[], has_replay: false },
+    OverlayPlayer { id: "cy", name: "Cy", ex: 861, clear: rbms_ir::ClearLamp::Hard, dans: &[("satellite", "ST 3")], has_replay: true },
+    OverlayPlayer {
+        id: "di",
+        name: "A Player With A Very Long Name Indeed",
+        ex: 780,
+        clear: rbms_ir::ClearLamp::Normal,
+        dans: &[("stella", "SL 2")],
+        has_replay: false,
+    },
+    OverlayPlayer { id: "ed", name: "Ed", ex: 640, clear: rbms_ir::ClearLamp::Easy, dans: &[], has_replay: false },
+    OverlayPlayer { id: "fay", name: "Fay", ex: 520, clear: rbms_ir::ClearLamp::LightAssistEasy, dans: &[], has_replay: true },
+    OverlayPlayer { id: "gus", name: "Gus", ex: 410, clear: rbms_ir::ClearLamp::Failed, dans: &[], has_replay: false },
+    OverlayPlayer { id: "hal", name: "Hal", ex: 120, clear: rbms_ir::ClearLamp::Failed, dans: &[], has_replay: false },
+];
+
+/// A day, which the scores of the overlay's board are spread over.
+const OVERLAY_BOARD_DAY_MS: i64 = 86_400_000;
+
+/// The board [`OVERLAY_BOARD_PLAYERS`] makes, as the server shows it when it has more players than
+/// one page holds.
+fn overlay_board() -> crate::ir_ranking::RankingBoard {
+    let rows: Vec<_> = OVERLAY_BOARD_PLAYERS
+        .iter()
+        .zip(1..)
+        .map(|(player, rank)| {
+            let mut score = crate::ir_ranking::tests::record(player.id, player.name, player.ex, Some(rank));
+            score.clear = player.clear;
+            score.played_at += i64::from(rank) * OVERLAY_BOARD_DAY_MS;
+            let listed = player.dans.iter().map(|(system, label)| serde_json::json!({"system": system, "name": system, "label": label}));
+            score.extra.insert("dans".to_owned(), serde_json::Value::Array(listed.collect()));
+            if player.has_replay {
+                score.extra.insert("replay_id".to_owned(), serde_json::json!(format!("replay-{}", player.id)));
+            }
+            score
+        })
+        .collect();
+    let you = rows.iter().find(|score| score.player.id == "me").cloned();
+    let rival = rows.iter().find(|score| score.player.id == "friend").cloned();
+    let mut board = crate::ir_ranking::build_board(&rows, you.as_ref(), &[("friend".to_owned(), rival)]);
+    board.more = true;
+    board
+}
+
+/// The ranking overlay over the chart the cursor is on, with a board in the cache for it and a score
+/// server set, so it shows the rows and not the message of a player with no server. The cache and the
+/// server are put back as they were.
+fn overlay_ranking_board(app: &mut App, pixels: &mut HeadlessCanvas, size: (u32, u32), deadline: Instant) -> Result<(), String> {
+    let md5 = app.shared.focused_md5().ok_or("the cursor is not on a chart")?;
+    let mut network = app.shared.config.network.clone();
+    network.server_url = Some("http://capture.invalid".to_owned());
+    let without_server = std::mem::replace(&mut app.shared.multi_ir, crate::ir_ext::MultiIr::from_network(&network));
+    app.shared.ranking_cache.insert(md5, crate::ir_ranking::RankingState::Ready(Box::new(overlay_board())));
+    let shot = overlay_with(app, pixels, size, OVERLAY_RANKING_BOARD, &[key_down(KeyCode::KeyI)], KeyCode::KeyI, deadline);
+    app.shared.multi_ir = without_server;
+    app.shared.ranking_cache.clear();
+    shot
+}
+
 /// A key typing `text`, to be put to the browser's search box.
 fn typed_key(code: KeyCode, text: &'static str) -> KeyInput<'static> {
     KeyInput { code, pressed: true, released: false, text: Some(text) }
@@ -1967,12 +2049,13 @@ fn capture_browser_overlays(pack: &Path) -> Result<Vec<String>, String> {
     overlay_with(&mut app, &mut pixels, size, OVERLAY_GUIDE, &[key_down(KeyCode::KeyH)], KeyCode::KeyH, deadline)?;
     overlay_with(&mut app, &mut pixels, size, OVERLAY_FILTER, &[key_down(KeyCode::F2)], KeyCode::F2, deadline)?;
     overlay_with(&mut app, &mut pixels, size, OVERLAY_RANKING, &[key_down(KeyCode::KeyI)], KeyCode::KeyI, deadline)?;
+    overlay_ranking_board(&mut app, &mut pixels, size, deadline)?;
     overlay_with(&mut app, &mut pixels, size, OVERLAY_MODAL, &[key_down(KeyCode::KeyR)], KeyCode::Escape, deadline)?;
     let mut search = vec![key_down(KeyCode::Slash)];
     search.extend(OVERLAY_QUERY.map(|(code, text)| typed_key(code, text)));
     overlay_with(&mut app, &mut pixels, size, OVERLAY_SEARCH, &search, KeyCode::Escape, deadline)?;
     overlay_with(&mut app, &mut pixels, size, OVERLAY_OPTIONS, &[key_down(KeyCode::F1)], KeyCode::Escape, deadline)?;
-    saved.extend([OVERLAY_GUIDE, OVERLAY_FILTER, OVERLAY_RANKING, OVERLAY_MODAL, OVERLAY_SEARCH, OVERLAY_OPTIONS].map(str::to_owned));
+    saved.extend([OVERLAY_GUIDE, OVERLAY_FILTER, OVERLAY_RANKING, OVERLAY_RANKING_BOARD, OVERLAY_MODAL, OVERLAY_SEARCH, OVERLAY_OPTIONS].map(str::to_owned));
 
     app.shared.config.display.debug = true;
     app.shared.config.network.server_url = Some("http://capture.invalid".to_owned());

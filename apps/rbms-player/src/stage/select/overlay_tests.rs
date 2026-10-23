@@ -11,10 +11,12 @@ use winit::keyboard::KeyCode;
 
 use super::SelectState;
 use super::guide::{FIXED_KEYS, GUIDE_KEY, columns, key_rows, panel_rows, shortcut_label};
-use super::overlay::{HINT_H, HINT_Y, SEARCH_H, STRIP_BOTTOM, STRIP_X, TAB_MARK_H};
+use super::overlay::{HINT_H, HINT_Y, SEARCH_H, STRIP_BOTTOM, STRIP_X, TAB_MARK_H, ranking_heading};
 use super::skinned_tests::{Browser, SLOT_ABOVE, SLOT_BELOW, slot_middle, starts_a_chart, wheel_document, wheel_document_naming};
-use super::tests::{app, entry, press, record};
+use super::tests::{add_ir_profile, app, entry, press, record};
 use crate::app_options::{TOGGLE_KEY, options_key};
+use crate::ir_ranking::tests::record as ranked_record;
+use crate::ir_ranking::{RankingState, build_board};
 use crate::ir_ranking_view::panel_action;
 use crate::keyconfig::{Bindable, ControlAction, KeyConfig, Shortcut, ShortcutGroup, ShortcutScreen, default_keys_for_mode};
 use crate::pointer::PointerInput;
@@ -208,6 +210,38 @@ fn the_ranking_panel_takes_the_presses_on_it_and_leaves_the_rest_to_the_skin() {
 
     let beside = (panel.x + panel.w + PAST_THE_PANEL, slot_middle(SLOT_BELOW).1);
     assert!(starts_a_chart(&click_at(&mut browser, beside)), "a press beside the panel was not the skin's");
+}
+
+/// The ranking panel over a skin names the chart the cursor is on in its head, and lists the board
+/// the cache holds for it with one clickable line each.
+#[test]
+fn the_ranking_panel_names_the_chart_and_lists_the_board_the_cache_holds() {
+    let mut browser = Browser::three_songs("overlay-ranking-board");
+    add_ir_profile(&mut browser.app, "SERVER", true);
+    browser.app.shared.rebuild_server();
+    let rows = [ranked_record("a", "Alice", 900, None), ranked_record("b", "Bob", 800, None)];
+    browser.app.shared.ranking_cache.insert(FIRST_CHART_MD5.to_owned(), RankingState::Ready(Box::new(build_board(&rows, None, &[]))));
+    browser.key(KeyCode::KeyI);
+    browser.frame_after(super::skinned_tests::SHORT_STEP);
+
+    assert_eq!(ranking_heading(&browser.app.shared).as_deref(), Some("alpha"));
+    for line in 0..rows.len() + 1 {
+        assert!(has_region(&browser, Hot::RankingRow(line)), "the panel registered no region for line {line}");
+    }
+    assert!(!has_region(&browser, Hot::RankingRow(rows.len() + 2)), "the panel registered a region for a line it does not have");
+}
+
+/// A chart's subtitle follows its title in the head, and a cursor that is not on a chart names none.
+#[test]
+fn the_ranking_panel_names_a_chart_by_its_title_and_subtitle_and_a_folder_by_nothing() {
+    let mut browser = Browser::three_songs("overlay-ranking-heading");
+    browser.app.shared.library =
+        rbms_library::Library::from_songs(vec![rbms_library::SongEntry { subtitle: "[ANOTHER]".to_owned(), ..entry("alpha", "a", "5") }]);
+    browser.app.shared.rebuild_select_items();
+    assert_eq!(ranking_heading(&browser.app.shared).as_deref(), Some("alpha [ANOTHER]"));
+
+    let at_the_root = Browser::at_the_root("overlay-ranking-root");
+    assert_eq!(ranking_heading(&at_the_root.app.shared), None, "the cursor is on a folder");
 }
 
 /// The filter panel takes a press on it, and a press below it is the skin's.

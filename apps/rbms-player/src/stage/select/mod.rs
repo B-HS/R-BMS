@@ -13,7 +13,9 @@
 //! [`skinned`] is the frame of input and the timers that go with it, [`panel`] is the three option
 //! panels the held keys call up, and [`events`] is what the skin's buttons and those panels' keys
 //! run. The keys the browser has always had keep doing what they did there, and a browser no skin
-//! draws is not touched by any of them.
+//! draws is not touched by any of them. The ranking keys are read on either browser
+//! ([`ranking_mode`]): a blue key held on a chart opens the ranking panel, which the keys of the
+//! list then drive.
 //!
 //! What is the application's rather than a skin's is drawn over the skin ([`overlay`]): the hint on
 //! an empty list, the ranking panel, the record modal, the filter panel, the search box, the key
@@ -72,6 +74,9 @@ mod panel;
 #[cfg(test)]
 mod panel_tests;
 mod preview;
+mod ranking_mode;
+#[cfg(test)]
+mod ranking_mode_tests;
 #[cfg(test)]
 pub(crate) mod recorded_tests;
 mod scene;
@@ -104,6 +109,7 @@ use list::{ChartFacts, chart_under_cursor, missing_chart_meta};
 pub(crate) use list::{SelectFilter, missing_chart_title};
 use panel::PanelState;
 use preview::PreviewState;
+use ranking_mode::{RANKING_AUTO_FETCH_AFTER, RankingFrame, RankingKeys};
 use scene::BarList;
 use skinned::{BarMark, WallClock, skin_status};
 
@@ -178,6 +184,8 @@ pub(crate) struct SelectState {
     /// IR ranking panel: whether it is open (which also gives it the arrow keys) and the focused row.
     ranking_open: bool,
     ranking_sel: usize,
+    /// The keys that open, drive and close the panel as the ranking mode ([`ranking_mode`]).
+    ranking_keys: RankingKeys,
     /// Lazily computed detail (notes/LN/length/BPM range) for the currently focused song, with the
     /// song index it was computed for — recomputed only when the focus moves to a different song.
     focused_detail: Option<ChartDetail>,
@@ -276,6 +284,7 @@ impl Default for SelectState {
             esc_quit_at: None,
             ranking_open: false,
             ranking_sel: 0,
+            ranking_keys: RankingKeys::default(),
             focused_detail: None,
             focused_detail_si: None,
             focus_settle_si: None,
@@ -763,10 +772,12 @@ impl SelectState {
     }
 
     /// Show or hide the ranking panel. While it is open it also takes the arrow keys, so one key
-    /// both opens it and gives it focus.
+    /// both opens it and gives it focus. Opening it asks for the ranking of the chart under the
+    /// cursor again, which the cache answers unless what it holds has run out.
     fn toggle_ranking_panel(&mut self, shared: &mut AppShared) {
         self.ranking_open = !self.ranking_open;
         self.ranking_sel = self.ranking_selectable_start(shared);
+        self.ranking_keys.leave_the_mode();
         if self.ranking_open {
             shared.ranking_requested = None;
         }
@@ -811,6 +822,13 @@ impl SelectState {
         let Some(action) = action else {
             return false;
         };
+        self.run_ranking_action(shared, action);
+        true
+    }
+
+    /// Carry out one action of the open ranking panel, whichever key, controller element or turn of
+    /// the wheel asked for it.
+    fn run_ranking_action(&mut self, shared: &mut AppShared, action: PanelAction) {
         let lines = self.ranking_lines(shared);
         self.clamp_ranking_selection(shared, &lines);
         let start = self.ranking_selectable_start(shared).min(lines.len().saturating_sub(1));
@@ -829,8 +847,9 @@ impl SelectState {
                     self.ranking_sel = self.ranking_selectable_start(shared);
                 }
             }
+            PanelAction::YourRow => self.ranking_your_row(shared),
+            PanelAction::NextPage => self.ranking_next_page(shared),
         }
-        true
     }
 
     /// Click on a panel row: focus it, or start its replay when it is already focused.
@@ -874,25 +893,33 @@ impl SelectState {
     }
 
     /// Start a ranking fetch when the focus has settled on a new chart and the panel has no cached
-    /// answer for it. Called once per frame while the select screen is up.
+    /// answer for it. Called once per frame while the select screen is up, `now` being the frame's
+    /// time.
+    ///
+    /// With the panel open the focus settles as fast as the detail of the chart does. With it closed
+    /// the ranking of a chart of the song list is fetched once the cursor has rested on it for
+    /// [`RANKING_AUTO_FETCH_AFTER`], so a skin that draws the ranking itself has it to draw.
     ///
     /// Only one fetch is ever in flight: a second one would drop the first receiver, stranding that
     /// chart's `Loading` placeholder in the cache and leaving the panel on LOADING forever. While a
     /// fetch runs the request for the newly focused chart is simply retried next frame.
-    fn update_ranking(&mut self, shared: &mut AppShared) {
-        if !self.ranking_open || !shared.has_primary_ir_server() || shared.ranking_rx.is_some() {
+    fn update_ranking(&mut self, shared: &mut AppShared, now: Instant) {
+        if !shared.has_primary_ir_server() || shared.ranking_rx.is_some() || (!self.ranking_open && self.tab != SelectTab::Songs) {
             return;
         }
         let Some(chart) = shared.focused_chart_id() else {
             return;
         };
-        if self.focus_settle_at.elapsed() < FOCUS_DETAIL_DEBOUNCE {
+        let settle = if self.ranking_open { FOCUS_DETAIL_DEBOUNCE } else { RANKING_AUTO_FETCH_AFTER };
+        if now.saturating_duration_since(self.focus_settle_at) < settle {
             return;
         }
         if shared.ranking_requested.as_deref() == Some(chart.md5.as_str()) {
             return;
         }
-        self.ranking_sel = self.ranking_selectable_start(shared);
+        if self.ranking_open {
+            self.ranking_sel = self.ranking_selectable_start(shared);
+        }
         shared.start_ranking_fetch(chart);
     }
 
@@ -1162,7 +1189,11 @@ impl StageHandler for SelectState {
                 self.guide_open = false;
                 self.panel = PanelState::default();
                 self.repeat_scratch(ctx);
-                Transition::Stay
+                let free = self.ranking_keys_are_free(ctx.shared);
+                match self.ranking_frame(ctx.shared, BUILT_IN_KEY_LAYOUT, false, free, ctx.now) {
+                    RankingFrame::Let(index) if BUILT_IN_KEY_LAYOUT.carries(index, keys::SelectKey::FolderClose) => self.close_folder(ctx.shared),
+                    RankingFrame::Unchanged | RankingFrame::Toggled | RankingFrame::Let(_) => Transition::Stay,
+                }
             }
         };
         self.settle_option_changes(ctx.shared);
@@ -1181,7 +1212,7 @@ impl StageHandler for SelectState {
         }
         self.refresh_song_images(ctx.shared);
         self.update_preview(ctx.shared, ctx.now);
-        self.update_ranking(ctx.shared);
+        self.update_ranking(ctx.shared, ctx.now);
         Transition::Stay
     }
 
@@ -1287,6 +1318,9 @@ impl StageHandler for SelectState {
     ///
     /// Only a lane going down counts. The key is named by its index in the mode that is up
     /// ([`key_index_of`]), so the second side of a double-play layout does the same as the first.
+    /// A black key that is a ranking key goes up a folder when it is let go rather than when it goes
+    /// down while the cursor is on a chart, since held it opens the ranking mode ([`ranking_mode`]),
+    /// which is read once a frame.
     ///
     /// That is the built-in browser. A browser a skin draws reads the whole table off the keys'
     /// state once a frame, so there a key going down is only noted for the frame that follows, and
@@ -1307,6 +1341,7 @@ impl StageHandler for SelectState {
         let Some(index) = key_index_of(ctx.shared.mode, lane, dir) else {
             return Transition::Stay;
         };
+        self.note_ranking_press(ctx.shared.mode, index, false);
         if self.download_modal.is_some() && skin_status(ctx.shared) != SkinStatus::Reading {
             self.download_modal_lane(ctx.shared, index);
             return Transition::Stay;
@@ -1329,6 +1364,7 @@ impl StageHandler for SelectState {
                 self.scratch_hold = Some(ScratchHold { index, next_step_at: ctx.now + SCRATCH_REPEAT_DELAY });
             }
             _ if BUILT_IN_KEY_LAYOUT.carries(index, keys::SelectKey::FolderOpen) => return self.select_enter(ctx.shared),
+            _ if self.ranking_key_waits(ctx.shared, BUILT_IN_KEY_LAYOUT, index) => {}
             _ if BUILT_IN_KEY_LAYOUT.carries(index, keys::SelectKey::FolderClose) => return self.close_folder(ctx.shared),
             _ => {}
         }
@@ -1387,8 +1423,13 @@ impl StageHandler for SelectState {
 
     /// The wheel of the mouse turns a skin's list, and waits for the frame that follows like the
     /// keys do (`BarRenderer.input`). The built-in browser has no use for it. A search word being
-    /// typed does not take the wheel: it turns the list under the box.
+    /// typed does not take the wheel: it turns the list under the box. Over the open ranking mode
+    /// the wheel moves its selection instead, on either browser.
     fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
+        if self.ranking_open && !self.over_the_ranking(ctx.shared) {
+            self.ranking_wheel(ctx.shared, lines);
+            return Transition::Stay;
+        }
         if skin_status(ctx.shared) == SkinStatus::Ready && !self.list_is_covered(ctx) {
             self.wheel_lines += lines;
         }
@@ -1448,6 +1489,7 @@ impl StageHandler for SelectState {
             selected_replay: self.selected_replay,
             best: self.focused_records.best(),
             replays_stored: self.focused_records.replays_stored(),
+            ranking_mode: self.ranking_open,
         };
         let focused = if self.tab == SelectTab::Songs { ctx.shared.focused_song_index() } else { None };
         let measured = self.focused_detail.as_ref().filter(|_| self.focused_detail_si == focused);

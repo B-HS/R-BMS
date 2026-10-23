@@ -7,9 +7,9 @@
 //!
 //! What this cluster answers:
 //!
-//! - this player's own options 21110-21114, the assist grade of the best lamp on the bar, and
-//!   21140-21148, which key indices of the browser's table no key of the bound mode is on
-//!   ([`super::extension`]);
+//! - this player's own options 21105, whether the ranking mode is open, 21110-21114, the assist
+//!   grade of the best lamp on the bar, and 21140-21148, which key indices of the browser's table no
+//!   key of the bound mode is on ([`super::extension`]);
 //! - options 1-3 and 5 (which kind of bar is under the cursor), 21-23 (the open panel), 100-105 and
 //!   1100-1104 (the lamp on it), 196-198, 1196-1204 and 1205-1208 (its replays and the slot
 //!   selected), 624-625 (whether a rival is compared), 1002-1007 and 1010-1017 (what a course
@@ -51,7 +51,7 @@ use rbms_render::skin_render::frame::{BarKind, LAMP_KINDS};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 
-use super::extension::{RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_asked, unreachable_key_asked};
+use super::extension::{RBMS_OPTION_RANKING_MODE_ON, RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_asked, unreachable_key_asked};
 use super::score::standing::{CUMULATIVE_RANK_STEPS, RANK_COUNT};
 use super::score::{BAD, GREAT, JUDGE_KINDS, MISS, POOR, SIDES_PER_JUDGEMENT, whole};
 use super::{ClusterState, INDEX_CLEAR, INDEX_DIFFICULTY_FILTER, INDEX_TARGET_CLEAR, STRING_DIFFICULTY_FILTER, STRING_MODE_FILTER, STRING_SORT};
@@ -293,6 +293,9 @@ impl ClusterState for SelectState<'_> {
         }
         if let Some(index) = unreachable_key_asked(id) {
             return shown.unreachable_keys.get(index).copied();
+        }
+        if id == RBMS_OPTION_RANKING_MODE_ON {
+            return Some(shown.ranking_mode);
         }
         if let Some((_, constraint)) = CONSTRAINT_OPTIONS.iter().find(|(option, _)| *option == id) {
             return Some(constraints.is_some_and(|constraints| constraints.contains(constraint)));

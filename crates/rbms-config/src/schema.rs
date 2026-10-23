@@ -902,6 +902,9 @@ pub struct LibraryOptions {
     /// List the charts a difficulty table names that the library does not have, dimmed, among the
     /// ones it has (`Config.showNoSongExistingBar` of the reference).
     pub show_missing_charts: bool,
+    /// Open the IR ranking of the chart under the cursor while a blue key is held on it, a short press
+    /// of the key doing what it always did once it is let go. A file from before the row reads as on.
+    pub ranking_keys: bool,
 }
 
 impl Default for LibraryOptions {
@@ -918,6 +921,7 @@ impl Default for LibraryOptions {
             seeded_default_tables: Vec::new(),
             download_folder: None,
             show_missing_charts: true,
+            ranking_keys: true,
         }
     }
 }

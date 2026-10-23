@@ -269,12 +269,13 @@ pub enum SettingId {
     KeepGreenNumber,
     GreenNumber,
     ShowMissingCharts,
+    RankingKeys,
     DownloadFolder,
     DiscordStatus,
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 98;
+pub const SETTING_COUNT: usize = 99;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -375,6 +376,7 @@ impl SettingId {
         SettingId::KeepGreenNumber,
         SettingId::GreenNumber,
         SettingId::ShowMissingCharts,
+        SettingId::RankingKeys,
         SettingId::DownloadFolder,
         SettingId::DiscordStatus,
     ];
@@ -903,6 +905,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingKind::Toggle,
         "List the charts a difficulty table names that the library does not have, dimmed",
     ),
+    row(SettingId::RankingKeys, SettingTab::Select, "RANKING KEYS", SettingKind::Toggle, "Hold a blue key on a chart to open its IR ranking"),
     row(
         SettingId::PreviewVolume,
         SettingTab::Select,
@@ -1148,6 +1151,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::Sort => config.library.sort.label().to_string(),
         SettingId::FavoriteOnly => on_off(config.library.favorite_only),
         SettingId::ShowMissingCharts => on_off(config.library.show_missing_charts),
+        SettingId::RankingKeys => on_off(config.library.ranking_keys),
         SettingId::DownloadFolder => optional_text(config.library.download_folder.as_deref()),
         SettingId::PreviewVolume => shade_value(config.library.preview_volume, id),
         SettingId::PreviewFade => format!("{}{}", config.library.preview_fade_ms, unit_of(id)),
@@ -1355,6 +1359,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         }
         SettingId::FavoriteOnly => toggle(&mut config.library.favorite_only),
         SettingId::ShowMissingCharts => toggle(&mut config.library.show_missing_charts),
+        SettingId::RankingKeys => toggle(&mut config.library.ranking_keys),
         SettingId::Hidden => {
             let next = stepped_share(config.play.hidden, delta, LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
             store(&mut config.play.hidden, next)
@@ -2162,6 +2167,20 @@ mod tests {
         assert_eq!(cycle_values(SettingId::WindowMode), WINDOW_MODE_LABELS);
     }
 
+    /// RANKING KEYS ships on, is on for a file written before the row, and is switched like any
+    /// other switch of the SELECT group.
+    #[test]
+    fn the_ranking_keys_row_is_on_as_shipped_and_for_a_file_from_before_it() {
+        let mut config = Config::default();
+        assert_eq!(display_value(&config, SettingId::RankingKeys), "ON");
+        assert_eq!(adjust(&mut config, SettingId::RankingKeys, 1), AdjustOutcome::Changed);
+        assert!(!config.library.ranking_keys);
+        assert_eq!(display_value(&config, SettingId::RankingKeys), "OFF");
+        let before: crate::schema::LibraryOptions = ron::from_str("(show_missing_charts: false)").expect("a file from before the row reads");
+        assert!(before.ranking_keys, "a file that never switched the keys off keeps them on");
+        assert_eq!(descriptor(SettingId::RankingKeys).tab, SettingTab::Select);
+    }
+
     #[test]
     fn the_language_row_names_each_language_in_itself_and_steps_through_every_one() {
         let mut config = Config::default();
@@ -2355,6 +2374,7 @@ mod tests {
                 SettingId::Sort,
                 SettingId::FavoriteOnly,
                 SettingId::ShowMissingCharts,
+                SettingId::RankingKeys,
                 SettingId::PreviewVolume,
                 SettingId::PreviewFade,
                 SettingId::DownloadFolder

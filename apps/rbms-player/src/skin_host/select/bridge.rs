@@ -27,6 +27,10 @@ use crate::target;
 const SEARCH_TITLE_OPENS: &str = "Search : '";
 const SEARCH_TITLE_CLOSES: &str = "'";
 
+/// The score the ranking list a skin draws starts from. The browser keeps no scroll of that list, so
+/// it shows the ranking from its top.
+const RANKING_LIST_TOP: usize = 0;
+
 /// What the browser lends one frame of its skin beside the list itself.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct BrowserLent<'a> {
@@ -44,6 +48,8 @@ pub(crate) struct BrowserLent<'a> {
     /// saved of it. Both are nothing for a bar that is no chart.
     pub(crate) best: Option<&'a BestScore>,
     pub(crate) replays_stored: usize,
+    /// Whether the ranking mode is open over the browser.
+    pub(crate) ranking_mode: bool,
 }
 
 impl AppShared {
@@ -87,8 +93,9 @@ impl AppShared {
             panel: Some(lent.panel),
             selected_replay: lent.selected_replay,
             config: &self.config,
-            ir: IrBrowser::of_ranking(self.has_primary_ir_server(), entry.and_then(|entry| self.ranking_cache.peek(&entry.md5))),
+            ir: IrBrowser::of_ranking(self.has_primary_ir_server(), entry.and_then(|entry| self.ranking_cache.peek(&entry.md5)), RANKING_LIST_TOP),
         });
+        let shown = SelectShown { ranking_mode: lent.ranking_mode, ..shown };
         SelectShown { settings: shown.settings.with_target_stand_in(stand_in), unreachable_keys: unreachable_keys_of(self.mode), ..shown }
     }
 

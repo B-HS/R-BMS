@@ -26,26 +26,30 @@
 //!
 //! On the song browser the cluster answers from the ranking of the chart under the cursor instead
 //! ([`IrBrowser`], what `MusicSelector.getCurrentRankingData` holds): whether it is being fetched,
-//! was fetched or failed, the player's place on it, how many scores came back, and how many of those
-//! sit on each lamp. The reference counts the scores the service returned; this player asks the
-//! service for the top of the board, so the count is of the scores it got. The ranking's own list
-//! -- who is on it, with what -- and the rivals are not read from the board here, and a skin that
-//! asks for one reads the absent value of its kind. The connection timers of the browser are not
-//! the result screen's: the begin timer is on only while the fetch is under way
-//! ([`IrBrowser::timers`]).
+//! was fetched or failed, the player's place on it, how many scores came back, how many of those sit
+//! on each lamp, and the ten scores of the list a skin draws from the place the list is scrolled to
+//! (`MusicSelector.getRankingOffset`): the EX score, the place, whose it is (the player's, a rival's
+//! or neither), the lamp and the name of each. The reference counts every score the service holds;
+//! the service pages its ranking and does not say how many it holds, so the count here is of the
+//! scores the pages received so far hold, the player's own page among them. The rivals' scores are
+//! not read from the board here, and a skin that asks for one reads the absent value of its kind. The
+//! connection timers of the browser are not the result screen's: the begin timer is on only while
+//! the fetch is under way ([`IrBrowser::timers`]). The result screen's own ranking list is not the
+//! browser's: its slots read the absent value of their kind.
 //!
 //! A cluster that has neither a link nor a browser answers nothing, so the ids fall through to
 //! whatever else can.
 
 use std::borrow::Cow;
 
+use rbms_ir::DEFAULT_PAGE;
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 use rbms_skin::timer::{TimerId, timer_id};
 
 use super::{ClusterState, ResultScene, STRING_TARGET_NAME};
 use crate::ir_outcome::IrStatus;
-use crate::ir_ranking::RankingState;
+use crate::ir_ranking::{RANKING_PAGE_LIMIT, RankingBoard, RankingState};
 
 /// How the submission of the run stands (`AbstractResult.STATE_*`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -131,6 +135,15 @@ impl IrLink {
 /// How many clear lamps a ranking is spread over, no play to max (`RankingData.lamps`).
 pub const CLEAR_LAMPS: usize = 11;
 
+/// How many scores of the ranking a skin draws at once: the slots of the ids 380-399 and 120-129
+/// (`ranking_exscore1` to `ranking_exscore10`).
+pub const RANKING_SLOTS: usize = (NUMBER_RANKING10_EXSCORE - NUMBER_RANKING1_EXSCORE + 1) as usize;
+
+/// Whose a score on the ranking is (`RankingData.PLAYER_NONE`, `PLAYER_YOU` and `PLAYER_RIVAL`).
+const PLAYER_NONE: i32 = 0;
+const PLAYER_YOU: i32 = 1;
+const PLAYER_RIVAL: i32 = 2;
+
 /// How the fetch of a ranking stands (`RankingData.ACCESS`, `FINISH` and `FAIL`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IrAccess {
@@ -142,8 +155,24 @@ pub enum IrAccess {
     Failed,
 }
 
+/// One score of the ranking as a slot of the list a skin draws holds it (`IRScoreData`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrScore {
+    /// The EX score (`ranking_exscore`).
+    pub ex_score: i32,
+    /// The place the score holds on the ranking (`RankingData.getScoreRanking`, `ranking_index`).
+    pub place: i32,
+    /// Whose it is: nobody in particular, the player's or a rival's (`RankingData.getPlayerType`).
+    pub player_type: i32,
+    /// The lamp the score was made on, no play to max (`cleartype_ranking`).
+    pub clear: i32,
+    /// The name of the player, or the id the service knows them by when they gave none
+    /// (`rankingname`).
+    pub player: String,
+}
+
 /// The ranking of one chart as the browser holds it (`RankingData`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IrBoard {
     pub access: IrAccess,
     /// The place the player holds, or zero when the player is not on it (`getRank`).
@@ -152,10 +181,67 @@ pub struct IrBoard {
     pub total: i32,
     /// How many of those sit on each lamp, from no play to max (`getClearCount`).
     pub lamps: [i32; CLEAR_LAMPS],
+    /// The scores on show in the list a skin draws, [`RANKING_SLOTS`] of them from the place the list
+    /// is scrolled to, and `None` where the list runs out.
+    pub slots: [Option<IrScore>; RANKING_SLOTS],
+}
+
+impl IrBoard {
+    /// A ranking in `access` with nobody on it yet.
+    fn empty(access: IrAccess) -> IrBoard {
+        IrBoard { access, rank: 0, total: 0, lamps: [0; CLEAR_LAMPS], slots: Default::default() }
+    }
+
+    /// A ranking the service has answered, as far as the pages received go, with the list scrolled
+    /// down to `offset`.
+    fn of_pages(board: &RankingBoard, offset: usize) -> IrBoard {
+        let received = || board.rows.iter().chain(board.your_page.iter().flat_map(|page| page.rows.iter()));
+        let mut lamps = [0; CLEAR_LAMPS];
+        for row in received() {
+            if let Some(count) = lamps.get_mut(usize::from(row.record_lamp.clear)) {
+                *count += 1;
+            }
+        }
+        IrBoard {
+            access: IrAccess::Finished,
+            rank: board.you.as_ref().and_then(|you| you.rank).map_or(0, |rank| i32::try_from(rank).unwrap_or(i32::MAX)),
+            total: i32::try_from(received().count()).unwrap_or(i32::MAX),
+            lamps,
+            slots: std::array::from_fn(|slot| score_at(board, offset.saturating_add(slot))),
+        }
+    }
+}
+
+/// The score at `index` of the ranking from the top (`RankingData.getScore`): from the pages the
+/// board holds from the top, or else from the page the player's own score was found on.
+fn score_at(board: &RankingBoard, index: usize) -> Option<IrScore> {
+    let row = match board.rows.get(index) {
+        Some(row) => row,
+        None => {
+            let page = board.your_page.as_ref()?;
+            let first = usize::try_from(page.page.checked_sub(DEFAULT_PAGE)?.checked_mul(RANKING_PAGE_LIMIT)?).ok()?;
+            page.rows.get(index.checked_sub(first)?)?
+        }
+    };
+    let player_type = if row.is_you {
+        PLAYER_YOU
+    } else if row.is_rival {
+        PLAYER_RIVAL
+    } else {
+        PLAYER_NONE
+    };
+    let place = row.rank.unwrap_or_else(|| u32::try_from(index.saturating_add(1)).unwrap_or(u32::MAX));
+    Some(IrScore {
+        ex_score: i32::try_from(row.ex_score).unwrap_or(i32::MAX),
+        place: i32::try_from(place).unwrap_or(i32::MAX),
+        player_type,
+        clear: i32::from(row.record_lamp.clear),
+        player: row.player.clone(),
+    })
 }
 
 /// The ranking of the chart under the browser's cursor, and whether there is a service at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IrBrowser {
     /// Whether a service is set up (`main.getIRStatus().length > 0`).
     pub online: bool,
@@ -167,40 +253,34 @@ pub struct IrBrowser {
 }
 
 impl IrBrowser {
-    /// The browser's view of a ranking the panel holds for the chart under the cursor. A browser
-    /// with no service holds no ranking, whatever the cache has.
-    pub(crate) fn of_ranking(online: bool, ranking: Option<&RankingState>) -> IrBrowser {
+    /// The browser's view of a ranking the panel holds for the chart under the cursor, with the list
+    /// a skin draws scrolled down `offset` scores. A browser with no service holds no ranking,
+    /// whatever the cache has.
+    pub(crate) fn of_ranking(online: bool, ranking: Option<&RankingState>, offset: usize) -> IrBrowser {
         let board = ranking.filter(|_| online).map(|state| match state {
-            RankingState::Loading => IrBoard { access: IrAccess::Accessing, rank: 0, total: 0, lamps: [0; CLEAR_LAMPS] },
-            RankingState::Failed(_) => IrBoard { access: IrAccess::Failed, rank: 0, total: 0, lamps: [0; CLEAR_LAMPS] },
-            RankingState::Ready(board) => {
-                let mut lamps = [0; CLEAR_LAMPS];
-                for row in &board.rows {
-                    if let Some(count) = lamps.get_mut(usize::from(row.record_lamp.clear)) {
-                        *count += 1;
-                    }
-                }
-                IrBoard {
-                    access: IrAccess::Finished,
-                    rank: board.you.as_ref().and_then(|you| you.rank).map_or(0, |rank| i32::try_from(rank).unwrap_or(i32::MAX)),
-                    total: i32::try_from(board.rows.len()).unwrap_or(i32::MAX),
-                    lamps,
-                }
-            }
+            RankingState::Loading => IrBoard::empty(IrAccess::Accessing),
+            RankingState::Failed(_) => IrBoard::empty(IrAccess::Failed),
+            RankingState::Ready(board) => IrBoard::of_pages(board, offset),
         });
-        IrBrowser { online, board, offset: 0 }
+        IrBrowser { online, board, offset: i32::try_from(offset).unwrap_or(i32::MAX) }
     }
 
     /// The connection timers of the browser (`MusicSelector.render`): each is on exactly while the
     /// ranking is in the state it is named for, and none is on while there is no ranking.
     pub fn timers(&self) -> IrTimers {
-        let access = self.board.map(|board| board.access);
+        let access = self.board.as_ref().map(|board| board.access);
         IrTimers { begin: access == Some(IrAccess::Accessing), success: access == Some(IrAccess::Finished), fail: access == Some(IrAccess::Failed) }
     }
 
     /// The ranking, once it has been fetched.
-    fn finished(&self) -> Option<IrBoard> {
-        self.board.filter(|board| board.access == IrAccess::Finished)
+    fn finished(&self) -> Option<&IrBoard> {
+        self.board.as_ref().filter(|board| board.access == IrAccess::Finished)
+    }
+
+    /// The score in the slot that the id `id` names, `first` being the id of the first slot, once the
+    /// ranking has been fetched and while the list has a score there.
+    fn slot(&self, first: i32, id: i32) -> Option<&IrScore> {
+        self.finished()?.slots.get(usize::try_from(id.checked_sub(first)?).ok()?)?.as_ref()
     }
 
     /// How many of the scores sit on the lamps `of` names, once fetched.
@@ -213,7 +293,7 @@ impl IrBrowser {
             OPTION_OFFLINE => !self.online,
             OPTION_ONLINE => self.online,
             OPTION_IR_NOPLAYER => self.finished().is_some_and(|board| board.total == 0),
-            OPTION_IR_FAILED | OPTION_IR_BUSY => self.board.is_some_and(|board| board.access == IrAccess::Failed),
+            OPTION_IR_FAILED | OPTION_IR_BUSY => self.board.as_ref().is_some_and(|board| board.access == IrAccess::Failed),
             OPTION_IR_WAITING => self.board.is_none(),
             _ => return None,
         })
@@ -246,7 +326,17 @@ impl IrBrowser {
             NUMBER_IR_PLAYER_TOTAL_FULLCOMBO => self.count(FULL_COMBO_UP).unwrap_or(INTEGER_ABSENT),
             NUMBER_IR_PLAYER_TOTAL_FULLCOMBO_RATE => share(self.count(FULL_COMBO_UP), PERCENT).unwrap_or(INTEGER_ABSENT),
             NUMBER_IR_PLAYER_TOTAL_FULLCOMBO_RATE_AFTERDOT => tenths(self.count(FULL_COMBO_UP)).unwrap_or(INTEGER_ABSENT),
-            NUMBER_RIVAL_PERFECT..=NUMBER_RIVAL_POOR_RATE | NUMBER_RANKING1_EXSCORE..=NUMBER_RANKING10_CLEAR => INTEGER_ABSENT,
+            NUMBER_RANKING1_EXSCORE..=NUMBER_RANKING10_EXSCORE => self.slot(NUMBER_RANKING1_EXSCORE, id).map_or(INTEGER_ABSENT, |score| score.ex_score),
+            NUMBER_RANKING1_CLEAR..=NUMBER_RANKING10_CLEAR => self.slot(NUMBER_RANKING1_CLEAR, id).map_or(INTEGER_ABSENT, |score| score.place),
+            NUMBER_RIVAL_PERFECT..=NUMBER_RIVAL_POOR_RATE => INTEGER_ABSENT,
+            _ => return None,
+        })
+    }
+
+    fn image_index(&self, id: i32) -> Option<i32> {
+        Some(match id {
+            NUMBER_RANKING1_EXSCORE..=NUMBER_RANKING10_EXSCORE => self.slot(NUMBER_RANKING1_EXSCORE, id).map_or(IMAGE_INDEX_ABSENT, |score| score.player_type),
+            NUMBER_RANKING1_CLEAR..=NUMBER_RANKING10_CLEAR => self.slot(NUMBER_RANKING1_CLEAR, id).map_or(IMAGE_INDEX_ABSENT, |score| score.clear),
             _ => return None,
         })
     }
@@ -269,7 +359,7 @@ impl IrBrowser {
     }
 
     fn rate(&self, id: i32) -> Option<f32> {
-        (id == RATE_RANKING_POSITION).then(|| self.offset as f32 / self.board.map_or(1, |board| board.total.max(1)) as f32)
+        (id == RATE_RANKING_POSITION).then(|| self.offset as f32 / self.board.as_ref().map_or(1, |board| board.total.max(1)) as f32)
     }
 }
 
@@ -346,7 +436,7 @@ const TENTHS_MODULUS: i32 = 10;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IrState<'a> {
     /// The ranking under the browser's cursor, on the song browser.
-    pub browser: Option<IrBrowser>,
+    pub browser: Option<&'a IrBrowser>,
     /// How the run stands with the service, when there is a run to stand.
     pub link: Option<IrLink>,
     /// What the result screen holds itself: how many players the ranking has and how far it is
@@ -426,9 +516,10 @@ impl ClusterState for IrState<'_> {
     }
 
     fn image_index(&self, id: i32) -> Option<i32> {
-        if self.browser.is_none() {
-            self.link?;
+        if let Some(browser) = self.browser {
+            return browser.image_index(id);
         }
+        self.link?;
         (NUMBER_RANKING1_EXSCORE..=NUMBER_RANKING10_CLEAR).contains(&id).then_some(IMAGE_INDEX_ABSENT)
     }
 
@@ -448,7 +539,9 @@ impl ClusterState for IrState<'_> {
         match id {
             STRING_RIVAL if self.browser.is_some() => Some(Cow::Borrowed("")),
             STRING_RIVAL | STRING_TARGET_NAME => Some(Cow::Borrowed(self.target_name)),
-            STRING_RANKING1_NAME..=STRING_RANKING10_NAME => Some(Cow::Borrowed("")),
+            STRING_RANKING1_NAME..=STRING_RANKING10_NAME => {
+                Some(Cow::Borrowed(self.browser.and_then(|browser| browser.slot(STRING_RANKING1_NAME, id)).map_or("", |score| score.player.as_str())))
+            }
             STRING_IR_NAME => Some(Cow::Borrowed(self.service_name)),
             STRING_IR_USER_NAME => Some(Cow::Borrowed(self.user_name)),
             _ => None,

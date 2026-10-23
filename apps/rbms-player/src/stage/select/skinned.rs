@@ -26,6 +26,7 @@ use rbms_skin::timer::{TimerId, timer_id};
 
 use super::SelectState;
 use super::keys::{KeyLayout, Panel, SelectKey, SelectKeys};
+use super::ranking_mode::RankingFrame;
 use crate::ir_ranking::RankingState;
 use crate::keyconfig::{Shortcut, key_index_of};
 use crate::skin_host::Cluster;
@@ -182,6 +183,7 @@ impl SelectState {
         let lane = ctx.shared.lane_input_for(code).and_then(|(lane, dir)| key_index_of(ctx.shared.mode, lane, dir));
         if let Some(index) = lane {
             self.note_key_index(ctx, index);
+            self.note_ranking_press(ctx.shared.mode, index, true);
         }
         match code {
             KeyCode::ArrowDown | KeyCode::ArrowUp if !self.panel_is_called_up(ctx.shared) => {
@@ -253,8 +255,14 @@ impl SelectState {
     /// While a search word is typed the keys of the key table are letters of it: they are only kept
     /// track of, call no panel up and start nothing, and the wheel and the two arrows go on moving
     /// the list under the box.
+    ///
+    /// The ranking keys are read with the key table ([`super::ranking_mode`]). A frame on which they
+    /// open or close the ranking mode reads nothing else, and while the mode is open they drive it
+    /// in place of the list. A ranking key let go before the mode opened goes up a folder now, as it
+    /// would have when it went down.
     pub(super) fn skin_input_frame(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
-        let now_ms = self.clock.millis_at(ctx.now);
+        let now = ctx.now;
+        let now_ms = self.clock.millis_at(now);
         let tapped = std::mem::take(&mut self.arrow_tap);
         let presses = ctx.shared.take_skin_bar_presses(SKIN_TYPE_MUSIC_SELECT);
         let covered = self.list_is_covered(ctx);
@@ -263,17 +271,25 @@ impl SelectState {
         let held = Panel::held(shared.start_pressed(), shared.select_pressed(), shared.shortcut_held(Shortcut::RefDetail));
         let panel = if covered || typing { Panel::Closed } else { held };
         self.show_panel(shared, panel);
-        if !std::mem::replace(&mut self.listening, true) || covered {
-            self.keys = SelectKeys::settled(shared);
-            self.wheel_lines = 0.0;
-            self.scroller.reset_input(now_ms);
-            return self.press_bars(shared, presses);
-        }
         let layout = KeyLayout::of_browser(shared);
+        let first = !std::mem::replace(&mut self.listening, true);
+        let free = !first && self.ranking_keys_are_free(shared);
+        if first || covered {
+            self.ranking_frame(shared, layout, true, free, now);
+            return self.settle_list_keys(shared, now_ms, presses);
+        }
         if typing {
             self.keys = SelectKeys::settled(shared);
         } else {
             self.keys.read(shared);
+        }
+        match self.ranking_frame(shared, layout, true, free, now) {
+            RankingFrame::Toggled => return self.settle_list_keys(shared, now_ms, presses),
+            RankingFrame::Let(index) if layout.carries(index, SelectKey::FolderClose) => {
+                self.keys.forget_change(FOLDER_CLOSE_FORGOTTEN_KEY);
+                self.close_bar(shared);
+            }
+            RankingFrame::Unchanged | RankingFrame::Let(_) => {}
         }
         if panel != Panel::Closed {
             self.scroller.reset_input(now_ms);
@@ -291,6 +307,15 @@ impl SelectState {
             Transition::Stay => self.press_bars(shared, presses),
             asked => asked,
         }
+    }
+
+    /// A frame on which the list reads no key: what is held is taken as held and not as pressed, and
+    /// only the presses on the bars of the wheel are carried out.
+    fn settle_list_keys(&mut self, shared: &mut AppShared, now_ms: i64, presses: Vec<SkinAction>) -> Transition {
+        self.keys = SelectKeys::settled(shared);
+        self.wheel_lines = 0.0;
+        self.scroller.reset_input(now_ms);
+        self.press_bars(shared, presses)
     }
 
     /// The keys of the list (`MusicSelectInputProcessor.input`, the branch with no panel up).

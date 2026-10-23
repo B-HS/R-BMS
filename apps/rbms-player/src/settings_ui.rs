@@ -497,6 +497,7 @@ mod tests {
         (SettingId::KeepGreenNumber, "KEEP GREEN NUMBER", "OFF"),
         (SettingId::GreenNumber, "GREEN NUMBER", "300"),
         (SettingId::ShowMissingCharts, "MISSING CHARTS", "ON"),
+        (SettingId::RankingKeys, "RANKING KEYS", "ON"),
         (SettingId::DownloadFolder, "DOWNLOAD FOLDER", "(none)"),
         (SettingId::DiscordStatus, "DISCORD STATUS", "ON"),
     ];
