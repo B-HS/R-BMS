@@ -3,12 +3,14 @@
 //!
 //! This is the reference's own table (`MusicSelectKeyProperty`) and its own way of reading it
 //! (`MusicSelectKeyProperty.isPressed`, `BMSPlayerInputProcessor.resetKeyChangedTime`), used when a
-//! skin draws the browser, except that the keys carry no `NEXT_REPLAY` and that the option panels'
-//! keys the reference gives to nothing this player has are given to options it does have
-//! ([`BEAT_TABLE`]). A key is known by its index ([`crate::keyconfig::key_index_of`]): keys one to
-//! seven are 0 to 6 and the two turntable directions are 7 and 8, on the keyboard and on a
-//! controller alike. Each index carries one role for the list and one for each option panel, and
-//! which of them a key press means is decided by whether START and SELECT are held
+//! skin draws the browser, except that the keys carry no `NEXT_REPLAY`. A skin that says it knows
+//! this player's own ids ([`rbms_skin::model::SkinDef::knows_rbms_extensions`]) is also given the
+//! option panels' keys the reference gives to nothing this player has as keys of options it does
+//! have ([`BEAT_TABLE`]); to any other skin those keys are the reference's ([`REFERENCE_BEAT_TABLE`]),
+//! as that skin was drawn for them. A key is known by its index ([`crate::keyconfig::key_index_of`]):
+//! keys one to seven are 0 to 6 and the two turntable directions are 7 and 8, on the keyboard and
+//! on a controller alike. Each index carries one role for the list and one for each option panel,
+//! and which of them a key press means is decided by whether START and SELECT are held
 //! ([`Panel::held`]).
 //!
 //! A five-key or ten-key mode has no lane on key indices 5 and 6, so in those modes the roles of
@@ -23,8 +25,8 @@
 use rbms_model::Mode;
 use rbms_render::skin_render::frame::BarHold;
 
-use crate::AppShared;
 use crate::keyconfig::{KEY_INDEX_COUNT, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX};
+use crate::{AppShared, SKIN_TYPE_MUSIC_SELECT};
 
 /// What a key can stand for on the browser (`MusicSelectKeyProperty.MusicSelectKey`). Only the
 /// roles a table assigns or the browser asks about are here.
@@ -42,14 +44,30 @@ pub(super) enum SelectKey {
     Option1Down,
     GaugeUp,
     GaugeDown,
+    /// The reference's double option, before and after, on the first panel. Its table
+    /// ([`REFERENCE_BEAT_TABLE`]) has the one after on a key and the one before on none, though its
+    /// input processor asks about both.
+    OptionDpUp,
+    OptionDpDown,
     HsFixUp,
     HsFixDown,
+    /// The reference's random option of the second side, before and after, on the first panel.
+    /// This player deals both sides by one random option.
+    Option2Up,
     Option2Down,
     TargetUp,
     TargetDown,
     LegacyNote,
     Constant,
     JudgeWindowUp,
+    /// The reference's assists this player has no setting for -- the judge area shown, processed
+    /// notes marked, the BPM guide and no mines -- on the second panel, where only the reference's
+    /// table ([`REFERENCE_BEAT_TABLE`]) has them on a key. The panel takes their presses and nothing
+    /// follows.
+    JudgeArea,
+    MarkNote,
+    BpmGuide,
+    NoMine,
     /// This player's own: SCRATCH AUTO, KEEP GREEN NUMBER and the lane cover, the lift and the
     /// HIDDEN+ cover, each switched on or off, on the second panel's keys the reference gives to
     /// assists this player has no setting for.
@@ -78,8 +96,9 @@ type KeyTable = [&'static [SelectKey]; KEY_INDEX_COUNT];
 /// (`BEAT_14K`) is this one twice, which is what folding both sides onto the same nine indices
 /// comes to.
 ///
-/// It is the reference's with these intended differences, each on a key whose role in the reference
-/// does nothing that reaches a run here:
+/// It is the table of a skin that says it knows this player's own ids. It is the reference's
+/// ([`REFERENCE_BEAT_TABLE`]) with these intended differences, each on a key whose role in the
+/// reference does nothing that reaches a run here:
 ///
 /// - `NEXT_REPLAY` is not on key six. The replay slot moves on only with the number key `4`, so key
 ///   six only stars the chart. A click on one of a skin's replay buttons plays the replay in that
@@ -122,20 +141,67 @@ const POPN_TABLE: KeyTable = [
     &[SelectKey::Replay, SelectKey::TargetDown, SelectKey::Hidden, SelectKey::JudgeAlgorithmDown],
 ];
 
-/// The roles the first panel takes a press of, in the order the reference asks about them
-/// (`MusicSelectInputProcessor.input`, the START branch), without the double option's two, which
-/// no key carries here.
-const PLAY_PANEL_PRESSES: [SelectKey; 7] =
-    [SelectKey::Option1Down, SelectKey::Option1Up, SelectKey::GaugeDown, SelectKey::GaugeUp, SelectKey::Option2Down, SelectKey::HsFixDown, SelectKey::HsFixUp];
+/// The reference's table of a layout with a turntable (`BEAT_7K`) without `NEXT_REPLAY`, which is
+/// what a skin that does not say it knows this player's own ids is read by: the keys of the option
+/// panels are the roles it was drawn for, among them the ones this player has no setting for. The
+/// panel takes a press of those and nothing follows. The turntable carries no role on the second and
+/// third panels, and on the first it scrolls the target.
+const REFERENCE_BEAT_TABLE: KeyTable = [
+    &[SelectKey::Play, SelectKey::FolderOpen, SelectKey::Option1Down, SelectKey::JudgeWindowUp, SelectKey::BgaDown],
+    &[SelectKey::FolderClose, SelectKey::Option1Up, SelectKey::Constant, SelectKey::GaugeAutoShiftDown],
+    &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::GaugeDown, SelectKey::JudgeArea, SelectKey::NotesDisplayTimingAutoAdjust],
+    &[SelectKey::FolderClose, SelectKey::OptionDpDown, SelectKey::LegacyNote, SelectKey::DurationDown],
+    &[SelectKey::FolderOpen, SelectKey::Auto, SelectKey::HsFixDown, SelectKey::MarkNote, SelectKey::NotesDisplayTimingDown],
+    &[SelectKey::Option2Up, SelectKey::BpmGuide, SelectKey::DurationUp],
+    &[SelectKey::FolderOpen, SelectKey::Replay, SelectKey::Option2Down, SelectKey::NoMine, SelectKey::NotesDisplayTimingUp],
+    &[SelectKey::Up, SelectKey::TargetUp],
+    &[SelectKey::Down, SelectKey::TargetDown],
+];
 
-/// The roles the second panel takes a press of (the SELECT branch), the turntable's last.
-const ASSIST_PANEL_PRESSES: [SelectKey; 8] = [
+/// The reference's table of a layout of nine buttons (`POPN_9K`) without `NEXT_REPLAY`, as
+/// [`REFERENCE_BEAT_TABLE`] is for a layout with a turntable.
+const REFERENCE_POPN_TABLE: KeyTable = [
+    &[SelectKey::Auto, SelectKey::Option1Down, SelectKey::JudgeWindowUp, SelectKey::BgaDown],
+    &[SelectKey::Option1Up, SelectKey::Constant, SelectKey::GaugeAutoShiftDown],
+    &[SelectKey::FolderClose, SelectKey::GaugeDown, SelectKey::JudgeArea, SelectKey::NotesDisplayTimingAutoAdjust],
+    &[SelectKey::Down, SelectKey::OptionDpDown, SelectKey::LegacyNote, SelectKey::DurationDown],
+    &[SelectKey::Play, SelectKey::FolderOpen, SelectKey::HsFixDown, SelectKey::MarkNote, SelectKey::NotesDisplayTimingDown],
+    &[SelectKey::Up, SelectKey::Option2Up, SelectKey::BpmGuide, SelectKey::DurationUp],
+    &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::Option2Down, SelectKey::NoMine, SelectKey::NotesDisplayTimingUp],
+    &[SelectKey::TargetUp],
+    &[SelectKey::Replay, SelectKey::TargetDown],
+];
+
+/// The roles the first panel takes a press of, in the order the reference asks about them
+/// (`MusicSelectInputProcessor.input`, the START branch). The roles of both families of tables are
+/// here; a role the table in force has on no key is never down.
+const PLAY_PANEL_PRESSES: [SelectKey; 10] = [
+    SelectKey::Option1Down,
+    SelectKey::Option1Up,
+    SelectKey::GaugeDown,
+    SelectKey::GaugeUp,
+    SelectKey::OptionDpDown,
+    SelectKey::OptionDpUp,
+    SelectKey::Option2Down,
+    SelectKey::Option2Up,
+    SelectKey::HsFixDown,
+    SelectKey::HsFixUp,
+];
+
+/// The roles the second panel takes a press of (the SELECT branch), the turntable's last. The roles
+/// of both families of tables are here, in the reference's order with this player's own in the places
+/// they take.
+const ASSIST_PANEL_PRESSES: [SelectKey; 12] = [
     SelectKey::JudgeWindowUp,
     SelectKey::Constant,
+    SelectKey::JudgeArea,
     SelectKey::ScratchAuto,
     SelectKey::LegacyNote,
+    SelectKey::MarkNote,
     SelectKey::KeepGreenNumber,
+    SelectKey::BpmGuide,
     SelectKey::LaneCover,
+    SelectKey::NoMine,
     SelectKey::Lift,
     SelectKey::Hidden,
 ];
@@ -154,27 +220,52 @@ const DETAIL_PANEL_PRESSES: [SelectKey; 7] = [
     SelectKey::JudgeAlgorithmDown,
 ];
 
-/// Which of the reference's key tables is in force.
+/// Which of the key tables is in force.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum KeyLayout {
-    /// Seven keys and a turntable, on one side or two.
+    /// Seven keys and a turntable, on one side or two, with the keys of the option panels
+    /// reassigned ([`BEAT_TABLE`]).
     Beat,
-    /// Nine buttons.
+    /// Nine buttons, with the keys of the option panels reassigned ([`POPN_TABLE`]).
     Popn,
+    /// Seven keys and a turntable, as the reference has them ([`REFERENCE_BEAT_TABLE`]).
+    ReferenceBeat,
+    /// Nine buttons, as the reference has them ([`REFERENCE_POPN_TABLE`]).
+    ReferencePopn,
 }
 
 impl KeyLayout {
-    /// The table the keys of `mode` are read by. The reference has a setting for this
-    /// (`musicselectinput`); here it follows the mode whose keys are bound, which is the only one
-    /// whose indices mean anything.
-    pub(super) fn of(mode: Mode) -> KeyLayout {
-        if mode.scratch.is_empty() { KeyLayout::Popn } else { KeyLayout::Beat }
+    /// The table the keys of `mode` are read by, the reassigned one when `knows_extensions` and the
+    /// reference's otherwise. The reference has a setting for the layout (`musicselectinput`); here
+    /// it follows the mode whose keys are bound, which is the only one whose indices mean anything.
+    pub(super) fn of(mode: Mode, knows_extensions: bool) -> KeyLayout {
+        match (mode.scratch.is_empty(), knows_extensions) {
+            (true, true) => KeyLayout::Popn,
+            (true, false) => KeyLayout::ReferencePopn,
+            (false, true) => KeyLayout::Beat,
+            (false, false) => KeyLayout::ReferenceBeat,
+        }
+    }
+
+    /// The table the browser reads its keys by now: the one for the bound mode, reassigned when the
+    /// document that draws the browser says it knows this player's own ids. With no document yet --
+    /// it is being read, and the keys of the browser are not asked meanwhile -- it is the reference's.
+    pub(super) fn of_browser(shared: &AppShared) -> KeyLayout {
+        let knows_extensions = shared.skins.document(SKIN_TYPE_MUSIC_SELECT).is_some_and(|skin| skin.def.knows_rbms_extensions());
+        KeyLayout::of(shared.mode, knows_extensions)
+    }
+
+    /// Whether the keys of the option panels are the reassigned ones.
+    pub(super) fn is_extended(self) -> bool {
+        matches!(self, KeyLayout::Beat | KeyLayout::Popn)
     }
 
     fn table(self) -> &'static KeyTable {
         match self {
             KeyLayout::Beat => &BEAT_TABLE,
             KeyLayout::Popn => &POPN_TABLE,
+            KeyLayout::ReferenceBeat => &REFERENCE_BEAT_TABLE,
+            KeyLayout::ReferencePopn => &REFERENCE_POPN_TABLE,
         }
     }
 
@@ -386,6 +477,17 @@ mod tests {
         ("NOTESDISPLAYTIMING_AUTOADJUST", SelectKey::NotesDisplayTimingAutoAdjust),
     ];
 
+    /// The role under each of the reference's names the reassigned tables give up, which the
+    /// reference's own tables ([`REFERENCE_BEAT_TABLE`]) carry.
+    const REFERENCE_ONLY_ROLES: [(&str, SelectKey); 6] = [
+        ("JUDGEAREA", SelectKey::JudgeArea),
+        ("OPTIONDP_DOWN", SelectKey::OptionDpDown),
+        ("MARKNOTE", SelectKey::MarkNote),
+        ("OPTION2_UP", SelectKey::Option2Up),
+        ("BPMGUIDE", SelectKey::BpmGuide),
+        ("NOMINE", SelectKey::NoMine),
+    ];
+
     /// Every place the seven-key table differs from the reference's: the key index, the reference's
     /// role there (empty for a role this player adds past the reference's list) and this player's.
     const CHANGED_SLOTS: [(usize, &str, SelectKey); 10] = [
@@ -428,45 +530,94 @@ mod tests {
         }
     }
 
-    /// The panel roles of the nine-button table are the seven-key table's on the same indices, and
-    /// its list roles are the reference's (`POPN_9K`) without `NEXT_REPLAY`.
+    /// The seven-key table of a skin that does not know this player's ids is the reference's
+    /// without `NEXT_REPLAY` and with nothing else changed: each role by the reference's own name,
+    /// in the reference's order, and none of this player's own among them.
     #[test]
-    fn the_nine_button_table_has_the_seven_key_panels_and_the_references_list_roles() {
+    fn the_reference_tables_are_the_references_without_next_replay() {
+        let named = |name: &str| KEPT_ROLES.iter().chain(REFERENCE_ONLY_ROLES.iter()).find(|(kept, _)| *kept == name).map(|(_, role)| *role);
+        for (index, reference) in REFERENCE_BEAT.iter().enumerate() {
+            let expected: Vec<SelectKey> = reference.iter().map(|name| named(name).unwrap_or_else(|| panic!("{name} has no role"))).collect();
+            assert_eq!(KeyLayout::ReferenceBeat.table()[index], expected.as_slice(), "key index {index}");
+        }
+    }
+
+    /// The reference's nine-button table has the seven-key table's panel roles on the same indices
+    /// and the reference's list roles (`POPN_9K`) without `NEXT_REPLAY`, as the reassigned one does.
+    #[test]
+    fn the_nine_button_tables_have_the_seven_key_panels_and_the_references_list_roles() {
         use SelectKey::*;
         let list_roles = [Play, Auto, Replay, Up, Down, FolderOpen, FolderClose, Practice];
         let popn_list_roles: [&[SelectKey]; KEY_INDEX_COUNT] =
             [&[Auto], &[], &[FolderClose], &[Down], &[Play, FolderOpen], &[Up], &[Practice, FolderOpen], &[], &[Replay]];
         let panel_roles = |table: &KeyTable, index: usize| table[index].iter().copied().filter(|role| !list_roles.contains(role)).collect::<Vec<_>>();
-        for (index, expected) in popn_list_roles.iter().enumerate() {
-            let listed: Vec<SelectKey> = KeyLayout::Popn.table()[index].iter().copied().filter(|role| list_roles.contains(role)).collect();
-            assert_eq!(listed.as_slice(), *expected, "the list roles of button {index}");
-            assert_eq!(panel_roles(KeyLayout::Popn.table(), index), panel_roles(KeyLayout::Beat.table(), index), "the panel roles of button {index}");
+        for (popn, beat) in [(KeyLayout::Popn, KeyLayout::Beat), (KeyLayout::ReferencePopn, KeyLayout::ReferenceBeat)] {
+            for (index, expected) in popn_list_roles.iter().enumerate() {
+                let listed: Vec<SelectKey> = popn.table()[index].iter().copied().filter(|role| list_roles.contains(role)).collect();
+                assert_eq!(listed.as_slice(), *expected, "the list roles of button {index} of {popn:?}");
+                assert_eq!(panel_roles(popn.table(), index), panel_roles(beat.table(), index), "the panel roles of button {index} of {popn:?}");
+            }
         }
     }
 
-    /// Every role a panel takes a press of is on a key of both tables, and every role on a key is
-    /// one the list or a panel reads.
+    /// The roles the browser asks about and no table gives a key: the reference's double option
+    /// before, which its input processor asks of the first panel and its table never assigns.
+    const ASKED_AND_UNASSIGNED: [SelectKey; 1] = [SelectKey::OptionDpUp];
+
+    /// Every role a panel takes a press of is on a key of one of the tables or is asked about and
+    /// assigned to none, and every role on a key is one the list or a panel reads.
     #[test]
     fn every_panel_role_is_on_a_key_and_every_role_on_a_key_is_read() {
         use SelectKey::*;
         let read_as_held = [TargetUp, TargetDown, DurationUp, DurationDown];
         let list_roles = [Play, Auto, Replay, Up, Down, FolderOpen, FolderClose, Practice];
+        let layouts = [KeyLayout::Beat, KeyLayout::Popn, KeyLayout::ReferenceBeat, KeyLayout::ReferencePopn];
         let pressed: Vec<SelectKey> = [Panel::Play, Panel::Assist, Panel::Detail].into_iter().flat_map(|panel| panel.presses().iter().copied()).collect();
-        for layout in [KeyLayout::Beat, KeyLayout::Popn] {
-            for role in &pressed {
-                assert!(!layout.indices_of(*role).is_empty(), "{role:?} is on no key of {layout:?}");
-            }
+        for role in &pressed {
+            let on_a_key = layouts.iter().any(|layout| !layout.indices_of(*role).is_empty());
+            assert!(on_a_key || ASKED_AND_UNASSIGNED.contains(role), "{role:?} is asked about and on no key of any table");
+        }
+        for layout in layouts {
             for role in layout.table().iter().flat_map(|roles| roles.iter()) {
                 assert!(pressed.contains(role) || read_as_held.contains(role) || list_roles.contains(role), "{role:?} on {layout:?} is read by nothing");
             }
         }
+        for (beat, popn) in [(KeyLayout::Beat, KeyLayout::Popn), (KeyLayout::ReferenceBeat, KeyLayout::ReferencePopn)] {
+            for role in &pressed {
+                assert_eq!(beat.indices_of(*role).is_empty(), popn.indices_of(*role).is_empty(), "{role:?} is on a key of one of {beat:?} and {popn:?} only");
+            }
+        }
     }
 
+    /// A layout without a turntable reads a nine-button table and one with it a seven-key table, and
+    /// only a skin that names this player's ids is read by the table with the panels' keys
+    /// reassigned.
     #[test]
-    fn a_layout_without_a_turntable_reads_the_nine_button_table() {
-        assert_eq!(KeyLayout::of(Mode::POPN_9K), KeyLayout::Popn);
+    fn only_a_skin_that_names_the_extensions_reads_the_reassigned_table() {
+        assert_eq!(KeyLayout::of(Mode::POPN_9K, true), KeyLayout::Popn);
+        assert_eq!(KeyLayout::of(Mode::POPN_9K, false), KeyLayout::ReferencePopn);
         for mode in [Mode::BEAT_5K, Mode::BEAT_7K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::KEYBOARD_24K] {
-            assert_eq!(KeyLayout::of(mode), KeyLayout::Beat, "{}", mode.name);
+            assert_eq!(KeyLayout::of(mode, true), KeyLayout::Beat, "{}", mode.name);
+            assert_eq!(KeyLayout::of(mode, false), KeyLayout::ReferenceBeat, "{}", mode.name);
+        }
+        let extended = [KeyLayout::Beat, KeyLayout::Popn, KeyLayout::ReferenceBeat, KeyLayout::ReferencePopn].map(KeyLayout::is_extended);
+        assert_eq!(extended, [true, true, false, false]);
+    }
+
+    /// The panel keys the reference has and the reassigned table gives up are on the reference's
+    /// tables alone, and the ones this player added are on the reassigned tables alone.
+    #[test]
+    fn each_family_of_tables_carries_only_its_own_panel_roles() {
+        use SelectKey::*;
+        let reference_only = [JudgeArea, OptionDpDown, MarkNote, Option2Up, BpmGuide, NoMine];
+        let reassigned_only = [ScratchAuto, KeepGreenNumber, LaneCover, Lift, Hidden, JudgeAlgorithmUp, JudgeAlgorithmDown, GaugeUp, HsFixUp];
+        for (extended, reference) in [(KeyLayout::Beat, KeyLayout::ReferenceBeat), (KeyLayout::Popn, KeyLayout::ReferencePopn)] {
+            for role in reference_only {
+                assert!(extended.indices_of(role).is_empty() && !reference.indices_of(role).is_empty(), "{role:?}");
+            }
+            for role in reassigned_only {
+                assert!(!extended.indices_of(role).is_empty() && reference.indices_of(role).is_empty(), "{role:?}");
+            }
         }
     }
 

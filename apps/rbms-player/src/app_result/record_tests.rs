@@ -929,18 +929,19 @@ fn leave_by_escape(shared: &mut AppShared, session: PlaySession) -> Transition {
     playing.handle_key(&mut crate::stage::FrameCtx { shared, now: std::time::Instant::now(), dt: 0.0 }, key)
 }
 
-/// A run left part-way is kept as a FAILED run: what it judged stands, every note it never reached
-/// is a POOR let pass, and so the judgements that took a note add up to the chart's. No result
-/// screen is shown, and its replay and the body it is to be sent with are kept.
+/// A run left part-way ends on its result screen as a FAILED run (the player's decision of
+/// 2026-10-23): what it judged stands, every note it never reached is a POOR let pass, and so the
+/// judgements that took a note add up to the chart's. The screen a skin draws reads the same counts
+/// the history row holds, and its replay and the body it is to be sent with are kept.
 #[test]
-fn leaving_mid_song_keeps_a_failed_run_with_the_rest_as_poor() {
+fn leaving_mid_song_shows_a_failed_result_with_the_counts_it_keeps() {
     let mut shared = signed_out("left-mid-song");
     let model = recorded_model();
     let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_AT_US);
     let summary = session.summary();
     assert!(summary.total_judged > 0 && summary.total_judged < summary.total_notes, "the fixture run is left part-way: {summary:?}");
     let left = leave_by_escape(&mut shared, session);
-    assert!(!matches!(left, Transition::To(Stage::Result(_)) | Transition::Stay), "Escape still leaves at once");
+    assert!(matches!(left, Transition::To(Stage::Result(_))), "Escape ends the run on its result screen");
 
     let (logs, best) = stored(&shared);
     let [log] = logs.as_slice() else {
@@ -957,12 +958,20 @@ fn leaving_mid_song_keeps_a_failed_run_with_the_rest_as_poor() {
     let body = candidates[0].body.as_deref().and_then(ScoreSubmission::from_json).expect("the body the run is to be sent with is kept");
     assert_eq!((body.clear, body.judge.poor, body.passnotes), (rbms_ir::ClearLamp::Failed, summary.counts[4] + unreached, summary.total_notes));
     assert_eq!(shared.scores.for_md5(&model.md5)[0].log_id, Some(log.id), "the book knows the row");
+
+    let shown = shared.run_records.last().expect("the result screen has the run's record");
+    let shown_tiers = shown.summary.counts[..=rbms_store::scoredb::JUDGE_POOR].to_vec();
+    let kept_tiers: Vec<u32> = (0..=rbms_store::scoredb::JUDGE_POOR).map(|tier| log.judge.tier(tier)).collect();
+    assert_eq!(shown_tiers, kept_tiers, "the result screen shows the counts the history keeps");
+    assert_eq!(shown.summary.counts[4], summary.counts[4] + unreached);
+    assert!(shown.summary.failed && shown.failed_at_ms.is_none(), "the run is FAILED with no empty gauge to have ended it");
+    assert_eq!(shown.gauge_log.last(shown.finished_gauge), Some(0.0), "the gauge graph falls to zero where the run was left");
 }
 
-/// A run left signed in is sent straight away by a records sync of that run alone, and its answer
-/// is written down against it.
+/// A run left signed in is sent once, by its result screen's submission: no records sync of it is
+/// started besides, and the server's answer is written down against it.
 #[test]
-fn leaving_mid_song_signed_in_sends_the_run() {
+fn leaving_mid_song_signed_in_sends_the_run_once_from_its_result() {
     let server = Arc::new(AcceptingServer::default());
     let mut shared = signed_in("left-signed-in", server.clone());
     shared.record_sync_pacing = crate::record_sync::SyncPacing {
@@ -974,17 +983,35 @@ fn leaving_mid_song_signed_in_sends_the_run() {
     };
     let model = recorded_model();
     let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_AT_US);
-    leave_by_escape(&mut shared, session);
-    assert!(shared.submit_rx.is_none(), "no result screen's submission was made");
+    let left = leave_by_escape(&mut shared, session);
+    assert!(matches!(left, Transition::To(Stage::Result(_))), "Escape ends the run on its result screen");
+    assert!(shared.submit_rx.is_some(), "the result screen sends the run");
+    assert!(shared.record_sync.is_none(), "a records sync of the run was started besides");
     let deadline = std::time::Instant::now() + COURSE_SUBMIT_WAIT;
-    while shared.record_sync.is_some() {
+    while shared.submit_rx.is_some() || shared.record_sync.is_some() {
         assert!(std::time::Instant::now() < deadline, "the run was not sent");
-        shared.poll_ir_jobs(crate::stage::StageId::Select);
+        shared.poll_ir_jobs(crate::stage::StageId::Result);
         std::thread::sleep(Duration::from_millis(1));
     }
-    assert_eq!(server.sent_for.lock().expect("the submission log").as_slice(), [ACCOUNT_ID.to_owned()]);
+    assert_eq!(server.sent_for.lock().expect("the submission log").as_slice(), [ACCOUNT_ID.to_owned()], "the run was sent once");
     let (logs, _) = stored(&shared);
-    assert_eq!(shared.record_sync_states[&logs[0].id].state, rbms_store::scoredb::SyncState::Accepted);
+    let server_key = crate::record_sync::server_key("http://score-server.invalid");
+    let states = shared.scoredb.as_ref().expect("the database").sync_states(&server_key).expect("reads");
+    assert_eq!(states[&logs[0].id].state, SyncState::Accepted);
+}
+
+/// A player who never signed in sees the result of a run they left too: it is kept, and nothing is
+/// sent or set to be sent but by a later records sync.
+#[test]
+fn leaving_mid_song_signed_out_still_shows_its_result() {
+    let mut shared = signed_out("left-signed-out");
+    let model = recorded_model();
+    let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_AT_US);
+    let left = leave_by_escape(&mut shared, session);
+    assert!(matches!(left, Transition::To(Stage::Result(_))), "Escape ends the run on its result screen");
+    assert_eq!(stored(&shared).0.len(), 1, "the run is kept");
+    assert!(shared.submit_rx.is_none(), "a run was sent with no server to send it to");
+    assert!(shared.record_sync.is_none(), "a records sync was started");
 }
 
 /// A run left before any note was judged was never played, and nothing is kept of it (the player's
@@ -1154,7 +1181,8 @@ fn leaving_a_watched_replay_or_autoplay_keeps_nothing() {
     shared.config.play.autoplay = true;
     let session = run_until(recorded_model(), SessionOptions { autoplay: true, ..SessionOptions::default() }, &[], LEFT_AT_US);
     assert!(session.summary().total_judged > 0);
-    leave_by_escape(&mut shared, session);
+    let left = leave_by_escape(&mut shared, session);
+    assert!(!matches!(left, Transition::To(Stage::Result(_)) | Transition::Stay), "an autoplay run left part-way has no result screen");
     assert_eq!(stored(&shared), (Vec::new(), None), "an autoplay run was kept");
 
     let mut shared = signed_out("left-replay");
@@ -1172,16 +1200,17 @@ fn leaving_a_watched_replay_or_autoplay_keeps_nothing() {
         judge: Default::default(),
         events: Vec::new(),
     });
-    leave_by_escape(&mut shared, session);
+    let left = leave_by_escape(&mut shared, session);
+    assert!(!matches!(left, Transition::To(Stage::Result(_)) | Transition::Stay), "a replay left part-way has no result screen");
     assert_eq!(stored(&shared), (Vec::new(), None), "a replay being watched was kept");
 }
 
 /// A course left part-way with notes still to come keeps everything that was played (the player's
-/// decision of 2026-10-15): the stage it was left on is kept as a FAILED chart, and the course is
-/// kept and sent as a FAILED course with the stage finished before it and the one left folded in,
-/// the course being over.
+/// decision of 2026-10-15) and ends on the course's result (the player's decision of 2026-10-23): the
+/// stage it was left on is kept and sent as a FAILED chart, and the course fails with it, kept and
+/// sent as a FAILED course with the stage finished before it and the one left folded in.
 #[test]
-fn leaving_mid_course_keeps_the_stage_and_a_failed_course() {
+fn leaving_mid_course_ends_on_a_failed_course_result() {
     let server = Arc::new(AcceptingServer::default());
     let (courses, sent) = channel();
     *server.courses.lock().expect("the course log") = Some(courses);
@@ -1208,8 +1237,9 @@ fn leaving_mid_course_keeps_the_stage_and_a_failed_course() {
     let left = session.summary();
     assert!(left.total_judged < left.total_notes, "the second stage is left part-way: {left:?}");
     let leaving = leave_by_escape(&mut shared, session);
-    assert!(!matches!(leaving, Transition::To(Stage::Result(_) | Stage::CourseResult(_)) | Transition::Stay), "Escape still leaves at once");
-    assert!(shared.course_run.is_none(), "the course is over");
+    assert!(matches!(leaving, Transition::To(Stage::CourseResult(_))), "Escape ends the course on its result");
+    assert!(shared.course_run.as_ref().is_some_and(|run| run.failed_at.is_some()), "the course result holds the failed course");
+    assert!(shared.record_sync.is_none(), "a records sync of the stage was started besides its submission");
 
     let (logs, _) = stored(&shared);
     let [log] = logs.as_slice() else {
@@ -1224,6 +1254,14 @@ fn leaving_mid_course_keeps_the_stage_and_a_failed_course() {
     assert_eq!(course.judge.pgreat, first.counts[0] + left.counts[0], "both stages are folded into the course");
     assert_eq!(course.judge.poor, first.counts[4] + left.counts[4] + unreached, "the notes left are POORs of the course too");
     assert!(shared.scoredb.as_ref().expect("the database").newest_course_id().expect("reads").is_some(), "the course is kept");
+    let deadline = std::time::Instant::now() + COURSE_SUBMIT_WAIT;
+    while shared.submit_rx.is_some() {
+        assert!(std::time::Instant::now() < deadline, "the stage was not sent");
+        shared.poll_ir_jobs(crate::stage::StageId::CourseResult);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(server.sent_for.lock().expect("the submission log").as_slice(), [ACCOUNT_ID.to_owned()], "the stage was sent once");
+    assert!(sent.try_recv().is_err(), "the course was sent twice");
 }
 
 /// A course stage left with nothing more to hit is not abandoned: it ends as a stage played to its

@@ -64,7 +64,7 @@ mod timing_tests;
 mod trace;
 
 use crate::app_input::{ControlContext, ControlEffect, FixedSpeed, green_for_hispeed};
-use crate::app_play::schedule_position_us;
+use crate::app_play::{schedule_position_us, scratch_auto_color};
 use crate::app_result::{enter_result, run_target};
 use crate::ghost::{GhostPace, RunGhosts};
 use crate::keyconfig::{Shortcut, ShortcutScreen, mode_config_key};
@@ -686,26 +686,29 @@ impl PlayState {
         self.esc_down_at.is_some_and(|since| now.duration_since(since) >= ESC_HOLD)
     }
 
-    /// Abandon the run: keep whatever the in-play controls changed, and go back to the browser.
+    /// Leave the run: keep whatever the in-play controls changed, and end it.
     ///
-    /// A chart with nothing left to hit goes to its result screen instead, and so does a run that is
+    /// A chart with nothing left to hit goes to its result screen, and so does a run that is
     /// already closing, failed or finished: it ends as every closing run does, with the notes it did
     /// not reach counted as the closing counted them, whichever key or hold took it out. That holds
     /// for a course stage too, which then goes on to the next stage or the course's result as a stage
     /// played to its end does.
     ///
+    /// Nothing is kept of a run the engine played or a replay being watched: a single chart goes back
+    /// to the browser and a course simply ends. Practice goes back to its own screen.
+    ///
     /// A run that has judged nothing at all was never played, and nothing is kept of it
     /// ([`Self::has_judged_nothing`], the player's decision of 2026-10-19): a single chart goes back
     /// to the browser, and a course ends where it stands, with the stages played before it kept and
-    /// sent as a FAILED course ([`crate::app_result::leave_course`]).
+    /// sent as a FAILED course ([`crate::app_result::abandon_course`]).
     ///
-    /// Otherwise a run the player was playing by hand is kept and sent as a FAILED run whose notes
-    /// not reached were let pass ([`crate::app_result::record_left_run`]), straight on the way out:
-    /// Escape is still the key that leaves at once. That is so however few notes the run judged
-    /// (the player's decision of 2026-10-15): one note let pass unhit, or one empty POOR, is a
-    /// judgment. A course left part-way keeps the stage it was left on that way and is kept and sent
-    /// as a FAILED course with every stage it played. Nothing is kept of a run the engine played, a
-    /// replay being watched or practice.
+    /// Any other run left with notes still to come goes straight to its result screen, signed in or
+    /// not (the player's decision of 2026-10-23): its sounds stop, and it is shown, kept and sent as
+    /// a FAILED run whose notes not reached were let pass
+    /// ([`crate::app_result::enter_result_of_a_left_run`]), with no closing played first. That is so
+    /// however few notes the run judged (the player's decision of 2026-10-15): one note let pass
+    /// unhit, or one empty POOR, is a judgment. A course stage left so fails the course, which ends on
+    /// the course's result.
     fn leave_run(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.esc_down_at = None;
         self.esc_pressed_at = None;
@@ -717,13 +720,15 @@ impl PlayState {
         if self.has_ended() {
             return enter_result(self, ctx.shared);
         }
-        if ctx.shared.course_run.is_some() {
-            return crate::app_result::leave_course(self, ctx.shared);
+        let in_a_course = ctx.shared.course_run.is_some();
+        if !keeps_a_left_run(ctx.shared) {
+            return if in_a_course { crate::end_course(ctx.shared) } else { ctx.shared.leave_play() };
         }
-        if keeps_a_left_run(ctx.shared) && !self.has_judged_nothing() {
-            crate::app_result::record_left_run(self, ctx.shared);
+        if self.has_judged_nothing() {
+            return if in_a_course { crate::app_result::abandon_course(ctx.shared, crate::app_result::Sending::Now) } else { ctx.shared.leave_play() };
         }
-        ctx.shared.leave_play()
+        ctx.shared.stop_chart_sounds(self.session.model());
+        crate::app_result::enter_result_of_a_left_run(self, ctx.shared)
     }
 
     /// Whether the run has nothing left to play: every note has gone by, or it is closing, failed
@@ -1192,6 +1197,7 @@ impl PlayState {
             states: feed.trace(),
             longs: feed.longs(),
             auto_lanes: self.session.auto_lanes(),
+            auto_note: Color::from(scratch_auto_color(play)),
             ..LaneNotes::new(shown_chart, self.drawn_chart_us(shared), opening_bpm)
         };
         let overview = feed.overview();
@@ -1704,6 +1710,7 @@ impl StageHandler for PlayState {
             constant,
             legacy_note: ctx.shared.config.play.legacy_note,
             auto_lanes: self.session.auto_lanes(),
+            auto_note: Color::from(scratch_auto_color(&ctx.shared.config.play)),
         };
         let shade = LaneShade { cover, hidden: ctx.shared.effective_hidden() };
         render_playfield_view(canvas, &ctx.shared.skin, &playfield);

@@ -265,7 +265,7 @@ impl SelectState {
             self.scroller.reset_input(now_ms);
             return self.press_bars(shared, presses);
         }
-        let layout = KeyLayout::of(shared.mode);
+        let layout = KeyLayout::of_browser(shared);
         if typing {
             self.keys = SelectKeys::settled(shared);
         } else {

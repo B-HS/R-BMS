@@ -12,7 +12,7 @@ use winit::keyboard::KeyCode;
 use super::SelectState;
 use super::guide::{FIXED_KEYS, GUIDE_KEY, columns, key_rows, panel_rows, shortcut_label};
 use super::overlay::{HINT_H, HINT_Y, SEARCH_H, STRIP_BOTTOM, STRIP_X, TAB_MARK_H};
-use super::skinned_tests::{Browser, SLOT_ABOVE, SLOT_BELOW, slot_middle, starts_a_chart, wheel_document};
+use super::skinned_tests::{Browser, SLOT_ABOVE, SLOT_BELOW, slot_middle, starts_a_chart, wheel_document, wheel_document_naming};
 use super::tests::{app, entry, press, record};
 use crate::app_options::{TOGGLE_KEY, options_key};
 use crate::ir_ranking_view::panel_action;
@@ -650,6 +650,23 @@ fn the_guide_names_the_keys_as_they_are_bound() {
     assert_eq!(keys_of(&nine, "PLAY IT BY ITSELF").as_deref(), Some("Z"));
     assert_eq!(keys_of(&nine, "NEXT BAR").as_deref(), Some("F"));
     assert_eq!(keys_of(&nine, "PREVIOUS BAR").as_deref(), Some("D"));
+}
+
+/// The turntable does something on the second and third panels only for a skin that names this
+/// player's own ids, so the guide lists those two lines for such a skin alone and the turntable's
+/// work on the first panel, the target, for every skin.
+#[test]
+fn the_guide_names_the_panels_turntables_only_on_a_skin_that_names_the_extensions() {
+    let named = Browser::three_songs("overlay-guide-turntables-named");
+    let named_rows = panel_rows(&named.app.shared);
+    assert_eq!(named_rows.len(), 6, "{named_rows:?}");
+
+    let songs = ["alpha", "beta", "gamma"].map(|title| entry(title, "a", "5")).to_vec();
+    let silent = Browser::skinned_by("overlay-guide-turntables-silent", songs, wheel_document_naming(None));
+    let silent_rows = panel_rows(&silent.app.shared);
+    assert_eq!(silent_rows.len(), 4, "{silent_rows:?}");
+    assert_eq!(silent_rows[..], named_rows[..4], "the lines that name the keys held are not the extensions'");
+    assert_eq!(silent_rows[3].does, "TARGET");
 }
 
 /// Every line of the guide has the keys and what they do.

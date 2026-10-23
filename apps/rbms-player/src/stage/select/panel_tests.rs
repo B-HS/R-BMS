@@ -10,6 +10,7 @@ use std::time::Duration;
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::{Config, FixHiSpeed, LaneOption, ScoreTarget};
 use rbms_judge::gauge::{GaugeAutoShift, GaugeKind};
+use rbms_skin::model::RBMS_EXTENSIONS_PANEL_KEYS;
 use rbms_skin::timer::{TimerId, timer_id};
 
 use super::skinned_tests::{
@@ -51,15 +52,18 @@ const TIMER_STEP: Duration = Duration::from_millis(100);
 /// Longer than a held target key waits before it first repeats.
 const PAST_THE_FIRST_REPEAT: Duration = Duration::from_millis(400);
 
-fn panel_document() -> String {
+/// The fixture document of the three squares, saying it knows this player's own ids when
+/// `extensions` has the value to say so with.
+fn panel_document_naming(extensions: Option<i32>) -> String {
     let squares = SQUARE_LEFTS
         .iter()
         .zip(PANEL_OPTIONS)
         .map(|(x, option)| format!(r#"{{"id":"lamp","op":[{option}],"dst":[{{"x":{x},"y":{SQUARE_BOTTOM},"w":{SQUARE_SIDE},"h":{SQUARE_SIDE}}}]}}"#))
         .collect::<Vec<_>>();
+    let extensions = extensions.map_or_else(String::new, |value| format!(r#""rbms_extensions": {value},"#));
     format!(
         r#"{{
-            "type": {SKIN_TYPE_MUSIC_SELECT}, "name": "panels", "w": {}, "h": {},
+            "type": {SKIN_TYPE_MUSIC_SELECT}, "name": "panels", "w": {}, "h": {}, {extensions}
             "input": {NO_WAIT_MS}, "scene": {SCENE_MS}, "fadeout": {NO_WAIT_MS},
             "source": [{{ "id": "sheet", "path": "sheet.png" }}],
             "image": [{{ "id": "lamp", "src": "sheet", "x": 0, "y": 0, "w": {CELL}, "h": {CELL} }}],
@@ -71,9 +75,20 @@ fn panel_document() -> String {
     )
 }
 
-/// A browser over three charts that the fixture of the three squares draws.
+/// A browser over three charts that the fixture of the three squares draws, which says it knows
+/// this player's own ids.
 fn browser(tag: &str) -> Browser {
-    Browser::skinned_by(tag, ["alpha", "beta", "gamma"].map(|title| entry(title, "a", "5")).to_vec(), panel_document())
+    browser_drawn_by(tag, panel_document_naming(Some(RBMS_EXTENSIONS_PANEL_KEYS)))
+}
+
+/// A browser over three charts that the fixture of the three squares draws, which says nothing of
+/// this player's own ids, as a document written for the reference does.
+fn reference_browser(tag: &str) -> Browser {
+    browser_drawn_by(tag, panel_document_naming(None))
+}
+
+fn browser_drawn_by(tag: &str, document: String) -> Browser {
+    Browser::skinned_by(tag, ["alpha", "beta", "gamma"].map(|title| entry(title, "a", "5")).to_vec(), document)
 }
 
 /// Which of the three squares the last frame drew.
@@ -100,7 +115,11 @@ fn has_gone(browser: &Browser, panel: usize) -> bool {
 
 /// A browser with `keys` held for one frame.
 fn holding(tag: &str, keys: &[KeyCode]) -> Browser {
-    let mut browser = browser(tag);
+    holding_in(browser(tag), keys)
+}
+
+/// `browser` with `keys` held for one frame.
+fn holding_in(mut browser: Browser, keys: &[KeyCode]) -> Browser {
     for key in keys {
         browser.hold(*key);
     }
@@ -233,7 +252,12 @@ fn the_option_overlay_starts_no_panel_of_the_skin() {
 
 /// One tap of `key` with `panel_keys` held, and the settings it left.
 fn tapped(tag: &str, panel_keys: &[KeyCode], key: KeyCode) -> Config {
-    let mut browser = holding(tag, panel_keys);
+    tapped_in(browser(tag), tag, panel_keys, key)
+}
+
+/// One tap of `key` on `browser` with `panel_keys` held, and the settings it left.
+fn tapped_in(browser: Browser, tag: &str, panel_keys: &[KeyCode], key: KeyCode) -> Config {
+    let mut browser = holding_in(browser, panel_keys);
     assert!(matches!(browser.tap(key), Transition::Stay), "{tag}: a key of a panel left the browser");
     assert_eq!(browser.sel(), 0, "{tag}: a key of a panel moved the list");
     browser.app.shared.config.clone()
@@ -242,7 +266,13 @@ fn tapped(tag: &str, panel_keys: &[KeyCode], key: KeyCode) -> Config {
 /// Whether `key`, held with `panel_keys` for longer than any repeat waits, leaves every setting as
 /// it was.
 fn changes_nothing(tag: &str, panel_keys: &[KeyCode], key: KeyCode) -> bool {
-    let mut browser = holding(tag, panel_keys);
+    changes_nothing_in(browser(tag), panel_keys, key)
+}
+
+/// Whether `key`, held on `browser` with `panel_keys` for longer than any repeat waits, leaves every
+/// setting as it was.
+fn changes_nothing_in(browser: Browser, panel_keys: &[KeyCode], key: KeyCode) -> bool {
+    let mut browser = holding_in(browser, panel_keys);
     let before = browser.app.shared.config.clone();
     browser.hold(key);
     browser.frame_after(SHORT_STEP);
@@ -402,6 +432,47 @@ fn the_keys_of_the_third_panel_step_the_detail_options() {
         assert!(changes_nothing(&format!("panel3-{name}"), both, key), "key {name} of the third panel changed a setting");
     }
     assert_eq!(tapped("panel3-detail-key", &[DETAIL_KEY], KEY_FIVE).judge.offset_ms, -1, "the detail key's panel is the same panel");
+}
+
+/// To a skin that names none of this player's ids the keys of the panels are the reference's. On the
+/// first panel key four steps the double option and key six the second side's random option back,
+/// where they are the gauge and the fixed tempo before for a skin that knows the ids. On the second
+/// panel keys three, five, six and seven are the judge area, the processed note mark, the BPM guide
+/// and no mines, which this player has no setting for and which the panel takes and does nothing
+/// with, and the turntable has no role on the second panel or on the third.
+#[test]
+fn on_a_skin_that_names_no_extensions_the_panels_keys_are_the_references() {
+    let reference = |name: &str| reference_browser(&format!("panel-reference-{name}"));
+    let tapped_on_reference = |name: &str, panel_keys: &[KeyCode], key: KeyCode| tapped_in(reference(name), name, panel_keys, key);
+
+    let shipped = Config::default();
+    let four = tapped_on_reference("start-four", &[START], KEY_FOUR);
+    assert_eq!(four.play.lane_option, LaneOption::Flip, "OPTIONDP_DOWN is the next double option");
+    assert_eq!(four.play.gauge, shipped.play.gauge, "key four stepped the gauge");
+    let six = tapped_on_reference("start-six", &[START], KEY_SIX);
+    assert_eq!(six.play.random, NoteOption::AllScratch, "OPTION2_UP is the random option before, round the end");
+    assert_eq!(six.play.fix_hispeed, shipped.play.fix_hispeed, "key six stepped the fixed tempo");
+    assert_eq!(tapped_on_reference("start-seven", &[START], KEY_SEVEN).play.random, NoteOption::Mirror, "OPTION2_DOWN");
+    assert_eq!(tapped_on_reference("start-three", &[START], KEY_THREE).play.gauge, GaugeKind::Hard, "GAUGE_DOWN is where it always was");
+
+    assert!(tapped_on_reference("select-two", &[SELECT], KEY_TWO).play.constant_speed, "CONSTANT is where it always was");
+    assert!(tapped_on_reference("select-four", &[SELECT], KEY_FOUR).play.legacy_note, "LEGACYNOTE is where it always was");
+    for (key, name) in [(KEY_ONE, "one"), (KEY_THREE, "three"), (KEY_FIVE, "five"), (KEY_SIX, "six"), (KEY_SEVEN, "seven")] {
+        assert!(changes_nothing_in(reference(&format!("select-{name}")), &[SELECT], key), "key {name} of the second panel changed a setting");
+    }
+    for (key, name) in [(TURNTABLE_FORWARD, "forward"), (TURNTABLE_BACKWARD, "backward")] {
+        assert!(
+            changes_nothing_in(reference(&format!("select-turntable-{name}")), &[SELECT], key),
+            "the turntable {name} on the second panel changed a setting"
+        );
+        assert!(
+            changes_nothing_in(reference(&format!("both-turntable-{name}")), &[START, SELECT], key),
+            "the turntable {name} on the third panel changed a setting"
+        );
+    }
+
+    let both: &[KeyCode] = &[START, SELECT];
+    assert_eq!(tapped_on_reference("both-five", both, KEY_FIVE).judge.offset_ms, -1, "NOTESDISPLAYTIMING_DOWN is where it always was");
 }
 
 /// With a green number held, keys four and six of the third panel move the travel time it is held

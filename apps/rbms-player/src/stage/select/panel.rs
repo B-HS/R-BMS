@@ -14,14 +14,19 @@
 //! to 23 answer ([`PanelState::number`]).
 //!
 //! The keys of a panel are the reference's table ([`super::keys`]) and do what its three branches
-//! do ([`press_act`]): the first panel steps the random option, the gauge and the fixed tempo by
-//! their events and scrolls the target with the turntable and the mouse wheel; the second flips the
-//! assists; the third steps the background animation, the gauge auto shift and the judge timing, and
-//! moves the note display time while its two keys are held. Of the reference's seven assists only
-//! the constant speed and the legacy notes are settings here, and the custom judge window is taken
-//! and does nothing. The keys the reference gives to what this player has not got step what it has
-//! instead: on the second panel SCRATCH AUTO, KEEP GREEN NUMBER and the three covers switched on or
-//! off, and on the third the judge algorithm with the turntable, each by its event.
+//! do ([`press_act`]): the first panel steps the random options, the gauge, the double option and
+//! the fixed tempo by their events and scrolls the target with the turntable and the mouse wheel;
+//! the second flips the assists; the third steps the background animation, the gauge auto shift and
+//! the judge timing, and moves the note display time while its two keys are held. Of the
+//! reference's seven assists only the constant speed and the legacy notes are settings here, and
+//! the custom judge window, the judge area, the processed note mark, the BPM guide and no mines are
+//! taken and do nothing. The double option is stepped, though no run applies it.
+//!
+//! That is the table of a skin that does not say it knows this player's own ids. To one that does,
+//! the keys the reference gives to what this player has not got step what it has instead: on the
+//! first panel the gauge before and the fixed tempo before, on the second SCRATCH AUTO, KEEP GREEN
+//! NUMBER and the three covers switched on or off, and on the third the judge algorithm with the
+//! turntable, each by its event.
 //!
 //! The note display time is the travel time a held green number is held at
 //! ([`super::events::step_duration`]). Its keys repeat as the reference's do: a step when a key
@@ -103,14 +108,18 @@ pub(super) enum PanelAct {
 }
 
 /// What a press of the key carrying `role` asks of the panel it belongs to, or `None` for a role no
-/// panel takes a press of (`MusicSelectInputProcessor.input`, the three panel branches).
+/// panel takes a press of (`MusicSelectInputProcessor.input`, the three panel branches) and for the
+/// reference's assists this player has no setting for: a key carrying one of those is the panel's
+/// and asks for nothing.
 pub(super) fn press_act(role: SelectKey) -> Option<PanelAct> {
     let setting = |event: SettingEvent, arg1: i32| Some(PanelAct::Setting { event, arg1 });
     match role {
         SelectKey::Option1Down | SelectKey::Option2Down => setting(SettingEvent::Random, NEXT),
-        SelectKey::Option1Up => setting(SettingEvent::Random, PREVIOUS),
+        SelectKey::Option1Up | SelectKey::Option2Up => setting(SettingEvent::Random, PREVIOUS),
         SelectKey::GaugeDown => setting(SettingEvent::Gauge, NEXT),
         SelectKey::GaugeUp => setting(SettingEvent::Gauge, PREVIOUS),
+        SelectKey::OptionDpDown => setting(SettingEvent::DoubleOption, NEXT),
+        SelectKey::OptionDpUp => setting(SettingEvent::DoubleOption, PREVIOUS),
         SelectKey::HsFixDown => setting(SettingEvent::FixHiSpeed, NEXT),
         SelectKey::HsFixUp => setting(SettingEvent::FixHiSpeed, PREVIOUS),
         SelectKey::JudgeWindowUp => Some(PanelAct::Assist(AssistSwitch::CustomJudge)),
@@ -385,6 +394,30 @@ mod tests {
         ];
         for (role, event, arg1) in rows {
             assert_eq!(press_act(role), Some(PanelAct::Setting { event, arg1 }), "{role:?}");
+        }
+    }
+
+    /// The first panel's roles only the reference's table puts on keys: the double option after and
+    /// before, and the second side's random option back, which this player deals by the one option.
+    #[test]
+    fn the_reference_roles_of_the_first_panel_step_the_double_option_and_the_random_back() {
+        let rows = [
+            (SelectKey::OptionDpDown, SettingEvent::DoubleOption, NEXT),
+            (SelectKey::OptionDpUp, SettingEvent::DoubleOption, PREVIOUS),
+            (SelectKey::Option2Up, SettingEvent::Random, PREVIOUS),
+        ];
+        for (role, event, arg1) in rows {
+            assert_eq!(press_act(role), Some(PanelAct::Setting { event, arg1 }), "{role:?}");
+        }
+    }
+
+    /// The reference's assists this player has no setting for are taken by the panel and ask for
+    /// nothing, as the judge area, the processed note mark, the BPM guide and no mines did before
+    /// their keys were given to options this player has.
+    #[test]
+    fn the_reference_assists_this_player_has_not_got_ask_for_nothing() {
+        for role in [SelectKey::JudgeArea, SelectKey::MarkNote, SelectKey::BpmGuide, SelectKey::NoMine] {
+            assert_eq!(press_act(role), None, "{role:?}");
         }
     }
 

@@ -162,7 +162,7 @@ const EXPORT_LABEL: &str = "EXPORT";
 const ROW_VALUE_SEPARATOR: &str = ": ";
 
 /// How a channel row of a colour is counted: one of the 256 values a channel holds.
-const CHANNEL_STEPS: NumberSpec = NumberSpec::whole(0, u8::MAX as i64, NO_UNIT);
+pub(crate) const CHANNEL_STEPS: NumberSpec = NumberSpec::whole(0, u8::MAX as i64, NO_UNIT);
 
 /// What is written before the digits of a colour.
 pub(crate) const HEX_MARK: &str = "#";
@@ -205,7 +205,7 @@ impl ColorChannel {
     pub(crate) const ALL: [ColorChannel; 4] = [ColorChannel::R, ColorChannel::G, ColorChannel::B, ColorChannel::A];
 
     /// What the row calls this channel.
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             ColorChannel::R => "R",
             ColorChannel::G => "G",
@@ -215,7 +215,7 @@ impl ColorChannel {
     }
 
     /// The value of this channel of `color`.
-    fn get(self, color: SkinColor) -> u8 {
+    pub(crate) fn get(self, color: SkinColor) -> u8 {
         match self {
             ColorChannel::R => color.r,
             ColorChannel::G => color.g,
@@ -225,7 +225,7 @@ impl ColorChannel {
     }
 
     /// `color` with this channel at `value`.
-    fn set(self, color: SkinColor, value: u8) -> SkinColor {
+    pub(crate) fn set(self, color: SkinColor, value: u8) -> SkinColor {
         match self {
             ColorChannel::R => SkinColor { r: value, ..color },
             ColorChannel::G => SkinColor { g: value, ..color },
@@ -233,6 +233,19 @@ impl ColorChannel {
             ColorChannel::A => SkinColor { a: value, ..color },
         }
     }
+}
+
+/// The preset one step round the list from `current`, with the alpha `current` has. A colour that is
+/// on no preset goes to the first on the way forward and to the last on the way back.
+pub(crate) fn preset_after(current: SkinColor, delta: i32) -> Option<SkinColor> {
+    let found = COLOR_PRESETS.iter().position(|(r, g, b)| (current.r, current.g, current.b) == (*r, *g, *b));
+    let next = match found {
+        Some(found) => stepped(Some(found), COLOR_PRESETS.len(), delta),
+        None if delta < 0 => COLOR_PRESETS.len().checked_sub(1),
+        None => Some(0),
+    };
+    let (r, g, b) = next.and_then(|next| COLOR_PRESETS.get(next).copied())?;
+    Some(SkinColor::rgba(r, g, b, current.a))
 }
 
 /// A colour as a colour row writes it: `#RRGGBBAA`, which a typed figure is read back from.
@@ -1275,16 +1288,10 @@ impl SkinLibrary {
                 let Some((current, _)) = self.color_for(config, screen, at) else {
                     return false;
                 };
-                let found = COLOR_PRESETS.iter().position(|(r, g, b)| (current.r, current.g, current.b) == (*r, *g, *b));
-                let next = match found {
-                    Some(found) => stepped(Some(found), COLOR_PRESETS.len(), delta),
-                    None if delta < 0 => COLOR_PRESETS.len().checked_sub(1),
-                    None => Some(0),
-                };
-                let Some((r, g, b)) = next.and_then(|next| COLOR_PRESETS.get(next).copied()) else {
+                let Some(next) = preset_after(current, delta) else {
                     return false;
                 };
-                self.put_color(config, screen, at, Some(SkinColor::rgba(r, g, b, current.a)))
+                self.put_color(config, screen, at, Some(next))
             }
             SkinRow::Export | SkinRow::ColorChannels => false,
         }
@@ -1951,7 +1958,7 @@ fn color_label(def: &ColorDef) -> String {
 }
 
 /// What a colour row reads: the colour that is set for it, or that the skin's own is in force.
-fn color_value(set: Option<SkinColor>) -> String {
+pub(crate) fn color_value(set: Option<SkinColor>) -> String {
     set.map_or_else(|| DEFAULT_VALUE.to_string(), hex_color)
 }
 

@@ -334,13 +334,19 @@ fn middle(rect: Rect) -> (f32, f32) {
 }
 
 /// The list the menu shows with no option of a skin in it: the tempo of the sample chart, then the
-/// four groups of the settings table, each under its name.
+/// four groups of the settings table, each under its name, with the colour SCRATCH AUTO draws in --
+/// its row and its closed fold of channels -- under the row of SCRATCH AUTO.
 fn rows_without_skin_options() -> Vec<Row> {
     let groups: [(&str, &[SettingId]); 4] = [("SPEED", &SPEED_ROWS), ("LANE", &LANE_ROWS), ("JUDGE", &JUDGE_ROWS), ("CHART", &CHART_ROWS)];
     let mut rows = vec![Row::Group(GROUP_PREVIEW), Row::PreviewBpm];
     for (name, ids) in groups {
         rows.push(Row::Group(name));
-        rows.extend(ids.iter().copied().map(Row::Setting));
+        for id in ids {
+            rows.push(Row::Setting(*id));
+            if *id == SettingId::ScratchAuto {
+                rows.extend([Row::AutoColor, Row::Fold(Fold::AutoChannels)]);
+            }
+        }
     }
     rows
 }
@@ -387,7 +393,21 @@ fn the_list_is_the_tempo_row_and_the_four_groups_under_their_names() {
     assert_eq!(&labels[17..20], ["JUDGE", "JUDGE OFFSET", "AUTO ADJUST"]);
     assert_eq!(
         &labels[20..],
-        ["CHART", "RANDOM", "GAUGE", "LEGACY NOTE", "TARGET", "TARGET FALLBACK", "TARGET RATE", "AUTOPLAY", "SCRATCH AUTO", "AUTO REPLAY", "ESCAPE"]
+        [
+            "CHART",
+            "RANDOM",
+            "GAUGE",
+            "LEGACY NOTE",
+            "TARGET",
+            "TARGET FALLBACK",
+            "TARGET RATE",
+            "AUTOPLAY",
+            "SCRATCH AUTO",
+            "SCRATCH AUTO COLOR",
+            "SCRATCH AUTO CHANNELS",
+            "AUTO REPLAY",
+            "ESCAPE"
+        ]
     );
     for row in &menu.state.rows {
         assert_eq!(menu.line(*row).look == RowLook::Heading, row.is_heading(), "{row:?}");
@@ -1372,6 +1392,7 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
 
 mod colors;
 mod numbers;
+mod scratch_auto_color;
 mod shared;
 mod skin_offsets;
 mod target;

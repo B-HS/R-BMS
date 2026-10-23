@@ -578,6 +578,9 @@ pub struct PlayOptions {
     pub lanecover_step_fine: f32,
     pub scratch_left: bool,
     pub scratch_auto: bool,
+    /// The colour the notes SCRATCH AUTO plays are drawn in, on every skin and on the built-in field,
+    /// its alpha being how opaque they are. `None` is the shipped green.
+    pub scratch_auto_color: Option<SkinColor>,
     /// KEY DEBOUNCE: how long, in milliseconds, a lane key of the keyboard is held down after a press
     /// of it was played, as LR2's `inputinterval` holds a key. A press is played the instant it
     /// comes; a release inside the window is played the instant the window ends, if the key still
@@ -613,6 +616,7 @@ impl Default for PlayOptions {
             lanecover_step_fine: DEFAULT_LANE_SHADE_FINE_STEP,
             scratch_left: false,
             scratch_auto: false,
+            scratch_auto_color: None,
             key_debounce_ms: DEFAULT_KEY_DEBOUNCE_MS,
             total_override: TOTAL_FROM_CHART,
             auto_replay: true,

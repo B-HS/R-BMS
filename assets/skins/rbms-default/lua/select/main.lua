@@ -17,6 +17,7 @@ function screen.header()
         type = props.skin_type.MUSIC_SELECT,
         name = theme.name .. " (Select)",
         author = theme.author,
+        rbms_extensions = props.rbms_extensions,
         w = theme.width,
         h = theme.height,
         input = TIME.input,

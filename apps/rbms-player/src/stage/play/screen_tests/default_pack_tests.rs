@@ -398,6 +398,17 @@ fn is_auto_lane_green(rgba: &[u8]) -> bool {
     rgba[..3] == [green.r, green.g, green.b]
 }
 
+/// The packs the SCRATCH AUTO runs are drawn on: the default pack, and the pack [`SKIN_PACK_ENV`]
+/// names when it names one.
+fn scratch_auto_packs() -> Vec<std::path::PathBuf> {
+    let mut packs = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER)];
+    packs.extend(std::env::var_os(SKIN_PACK_ENV).map(std::path::PathBuf::from));
+    packs
+}
+
+/// The colour a player picks for the turntable SCRATCH AUTO plays.
+const PICKED_SCRATCH_AUTO: rbms_skin::dst::SkinColor = rbms_skin::dst::SkinColor::rgba(0xff, 0x40, 0xc0, u8::MAX);
+
 /// The turntable SCRATCH AUTO plays is drawn in green on the default pack, and on the pack
 /// [`SKIN_PACK_ENV`] names when it names one, while the run counts the key notes alone. Saved as
 /// `scratch-auto-play-<pack folder>.png`.
@@ -405,10 +416,7 @@ fn is_auto_lane_green(rgba: &[u8]) -> bool {
 fn the_turntable_scratch_auto_plays_is_drawn_green_and_counts_for_nothing() {
     let mut config = holding_a_green_number();
     config.play.scratch_auto = true;
-    let default_pack = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER);
-    let mut packs = vec![default_pack];
-    packs.extend(std::env::var_os(SKIN_PACK_ENV).map(std::path::PathBuf::from));
-    for folder in packs {
+    for folder in scratch_auto_packs() {
         let name = folder.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         let mut app = app_on_the_pack(&format!("scratch-auto-{name}"), config.clone(), &folder);
         let size = frame_size(&app);
@@ -422,5 +430,26 @@ fn the_turntable_scratch_auto_plays_is_drawn_green_and_counts_for_nothing() {
         let green = pixels.rgba().chunks_exact(4).filter(|pixel| is_auto_lane_green(pixel)).count();
         assert!(green > 0, "{name}: no turntable note was drawn green");
         save(&format!("scratch-auto-play-{name}"), &pixels, size);
+    }
+}
+
+/// The turntable SCRATCH AUTO plays is drawn in the colour the settings hold, on the default pack
+/// and on the pack [`SKIN_PACK_ENV`] names when it names one, and the shipped green is nowhere.
+#[test]
+fn the_turntable_scratch_auto_plays_is_drawn_in_the_colour_the_settings_hold() {
+    let mut config = holding_a_green_number();
+    config.play.scratch_auto = true;
+    config.play.scratch_auto_color = Some(PICKED_SCRATCH_AUTO);
+    for folder in scratch_auto_packs() {
+        let name = folder.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let mut app = app_on_the_pack(&format!("scratch-auto-color-{name}"), config.clone(), &folder);
+        let size = frame_size(&app);
+        let mut pixels = HeadlessCanvas::new(size.0, size.1);
+        play_into(&mut app, &mut pixels, scratch_auto_run(SLOW_BPM));
+        assert!(play(&app).session.has_auto_played_notes(), "{name}: the turntable was not left to the chart");
+        let picked = pixels.rgba().chunks_exact(4).filter(|pixel| pixel[..3] == [PICKED_SCRATCH_AUTO.r, PICKED_SCRATCH_AUTO.g, PICKED_SCRATCH_AUTO.b]).count();
+        let green = pixels.rgba().chunks_exact(4).filter(|pixel| is_auto_lane_green(pixel)).count();
+        assert!(picked > 0, "{name}: no turntable note was drawn in the picked colour");
+        assert_eq!(green, 0, "{name}: the shipped green was drawn beside the picked colour");
     }
 }

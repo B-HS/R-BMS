@@ -23,15 +23,21 @@
 //! while none is held the green number is what the stored speed comes to, and it is the one that
 //! cannot. What either comes to is read from the one place the preview's own scroll is
 //! ([`SpeedReadout`]).
+//!
+//! The colour the notes SCRATCH AUTO plays are drawn in is two more kinds of row, listed under the
+//! row that turns SCRATCH AUTO on: one row read as the colour, and a fold of its red, green, blue
+//! and alpha ([`Fold::AutoChannels`]). The colour is the player's alone, stored in the play
+//! options and drawn on every skin, so unlike a colour of a skin it is not that document's.
 
 use rbms_config::{
     AdjustOutcome, Config, HISPEED_DECIMALS, MILLISECOND_UNIT, PlayOptions, SettingId, SettingTab, adjust, descriptor, move_number_steps, number_spec, tab_rows,
 };
 
 use crate::AppShared;
+use crate::app_play::{SCRATCH_AUTO_SHIPPED_COLOR, scratch_auto_color};
 use crate::number_row::NumberValue;
 use crate::skin_preview::target::SpeedReadout;
-use crate::skin_select::{COLOR_CHANNELS_LABEL, SkinRow, SkinRowKind};
+use crate::skin_select::{CHANNEL_STEPS, COLOR_CHANNELS_LABEL, ColorChannel, SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{ONE_STEP, RowLook, SHIFT_STEPS};
 use crate::stage::skin_menu::{CHANNEL_FOLD_HELP, skin_row_help};
 
@@ -50,6 +56,18 @@ pub(super) const GROUP_SKIN: &str = "SKIN";
 const COLOR_FOLD_HELP: &str = "The colors of the play skin of this mode, one row each. ENTER shows or hides the rows";
 const OPACITY_FOLD_HELP: &str = "How opaque each part of the play skin of this mode is drawn. ENTER shows or hides the rows";
 const PLACE_FOLD_HELP: &str = "The offsets the game adds to every play skin: its screen, notes and judgement. ENTER shows or hides the rows";
+
+/// The group the rows of the SCRATCH AUTO colour are listed in, under the row of SCRATCH AUTO itself.
+const SCRATCH_AUTO_COLOR_GROUP: SettingTab = SettingTab::PlayChart;
+
+/// What the row of the SCRATCH AUTO colour is called, and what its channel rows begin with.
+pub(super) const SCRATCH_AUTO_COLOR_LABEL: &str = "SCRATCH AUTO COLOR";
+
+/// What is said of the rows of the SCRATCH AUTO colour.
+const SCRATCH_AUTO_COLOR_HELP: &str =
+    "The color SCRATCH AUTO's notes are drawn in, on every skin. Its alpha is how opaque they are. ENTER types a hex color, 0 gives back the green";
+const SCRATCH_AUTO_CHANNELS_HELP: &str = "The red, green, blue and alpha of SCRATCH AUTO's color. ENTER shows or hides the rows";
+const SCRATCH_AUTO_CHANNEL_HELP: &str = "One channel of SCRATCH AUTO's color, 0 to 255";
 
 /// The row of the tempo of the sample chart.
 pub(super) const PREVIEW_BPM_LABEL: &str = "PREVIEW BPM";
@@ -97,10 +115,14 @@ pub(super) enum Fold {
     /// The offsets the game adds to every play skin, which move or resize the whole screen, the
     /// notes and the judgement.
     Place,
+    /// The channels of the colour SCRATCH AUTO's notes are drawn in, each one row read as a number
+    /// from 0 to 255. It holds no row of a skin, and is listed under SCRATCH AUTO rather than in
+    /// the skin's group.
+    AutoChannels,
 }
 
 impl Fold {
-    /// Every fold, in the order they are listed.
+    /// Every fold of the play skin, in the order they are listed.
     pub(super) const ALL: [Fold; 4] = [Fold::Color, Fold::ColorChannels, Fold::Opacity, Fold::Place];
 
     /// What the fold's row is called.
@@ -110,6 +132,7 @@ impl Fold {
             Fold::ColorChannels => COLOR_CHANNELS_LABEL,
             Fold::Opacity => "OPACITY",
             Fold::Place => "POSITION AND SIZE",
+            Fold::AutoChannels => "SCRATCH AUTO CHANNELS",
         }
     }
 
@@ -133,6 +156,7 @@ impl Fold {
             Fold::ColorChannels => CHANNEL_FOLD_HELP,
             Fold::Opacity => OPACITY_FOLD_HELP,
             Fold::Place => PLACE_FOLD_HELP,
+            Fold::AutoChannels => SCRATCH_AUTO_CHANNELS_HELP,
         }
     }
 }
@@ -145,6 +169,7 @@ pub(super) struct Folds {
     channels: bool,
     opacity: bool,
     place: bool,
+    auto_channels: bool,
 }
 
 impl Folds {
@@ -155,6 +180,7 @@ impl Folds {
             Fold::ColorChannels => self.channels,
             Fold::Opacity => self.opacity,
             Fold::Place => self.place,
+            Fold::AutoChannels => self.auto_channels,
         }
     }
 
@@ -165,6 +191,7 @@ impl Folds {
             Fold::ColorChannels => &mut self.channels,
             Fold::Opacity => &mut self.opacity,
             Fold::Place => &mut self.place,
+            Fold::AutoChannels => &mut self.auto_channels,
         };
         *open = !*open;
     }
@@ -183,6 +210,10 @@ pub(super) enum Row {
     Skin(SkinRow),
     /// The row that shows or hides the offsets of one fold.
     Fold(Fold),
+    /// The colour the notes SCRATCH AUTO plays are drawn in, read as a colour.
+    AutoColor,
+    /// One channel of that colour, read as a number from 0 to 255.
+    AutoChannel(ColorChannel),
 }
 
 impl Row {
@@ -212,7 +243,13 @@ pub(super) fn listed(shared: &AppShared, screen: i32, open: Folds) -> Vec<Row> {
     let mut rows = vec![Row::Group(GROUP_PREVIEW), Row::PreviewBpm];
     for tab in SettingTab::PLAY_MENU {
         rows.push(Row::Group(tab.label()));
-        rows.extend(tab_rows(tab, &shared.config).into_iter().map(Row::Setting));
+        let mut settings: Vec<Row> = tab_rows(tab, &shared.config).into_iter().map(Row::Setting).collect();
+        if tab == SCRATCH_AUTO_COLOR_GROUP {
+            let after_scratch_auto = settings.iter().position(|row| *row == Row::Setting(SettingId::ScratchAuto)).map_or(settings.len(), |at| at + 1);
+            let channels = open.is_open(Fold::AutoChannels).then(|| ColorChannel::ALL.map(Row::AutoChannel)).into_iter().flatten();
+            settings.splice(after_scratch_auto..after_scratch_auto, [Row::AutoColor, Row::Fold(Fold::AutoChannels)].into_iter().chain(channels));
+        }
+        rows.extend(settings);
         if tab == SKIN_OPTIONS_GROUP {
             rows.extend(declared(shared, screen).into_iter().map(Row::Skin));
         }
@@ -315,6 +352,8 @@ pub(super) fn help(play: &PlayOptions, row: Row, kind: Option<SkinRowKind>) -> &
             Some(SkinRowKind::Property | SkinRowKind::File) | None => SKIN_OPTION_HELP,
         },
         Row::Fold(fold) => fold.help(),
+        Row::AutoColor => SCRATCH_AUTO_COLOR_HELP,
+        Row::AutoChannel(_) => SCRATCH_AUTO_CHANNEL_HELP,
     }
 }
 
@@ -345,7 +384,11 @@ pub(super) fn number_of(shared: &AppShared, readout: &SpeedReadout, screen: i32,
             Some(NumberValue { steps, locked: true, ..stored })
         }
         Row::Skin(skin_row) => shared.skins.number_for(&shared.config, screen, skin_row),
-        Row::Group(_) | Row::PreviewBpm | Row::Fold(_) => None,
+        Row::AutoChannel(channel) => {
+            let held = scratch_auto_color(&shared.config.play);
+            Some(NumberValue::of(CHANNEL_STEPS, i64::from(channel.get(held)), i64::from(channel.get(SCRATCH_AUTO_SHIPPED_COLOR))))
+        }
+        Row::Group(_) | Row::PreviewBpm | Row::Fold(_) | Row::AutoColor => None,
     }
 }
 

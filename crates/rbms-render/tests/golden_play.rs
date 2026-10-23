@@ -8,6 +8,7 @@ use rbms_chart::to_model;
 use rbms_model::Mode;
 use rbms_parser::parse;
 use rbms_render::playfield::LaneShade;
+use rbms_render::skin_render::frame::AUTO_LANE_NOTE;
 use rbms_render::{Color, CpuCanvas, HudView, PlayfieldView, Renderer, Skin, SkinConfig, render_hud, render_lane_cover, render_playfield_view};
 
 const GOLDEN_HUD: u64 = 0xbda7_83f3_c745_bd55;
@@ -71,6 +72,7 @@ fn draw_field(canvas: &mut CpuCanvas, mode: Mode, five_key_layout: bool) {
         constant: false,
         legacy_note: false,
         auto_lanes: &[],
+        auto_note: AUTO_LANE_NOTE,
     };
     render_playfield_view(canvas, &skin, &view);
 }

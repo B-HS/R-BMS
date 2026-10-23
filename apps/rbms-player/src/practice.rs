@@ -166,8 +166,14 @@ fn value_of_steps(steps: i64) -> i32 {
 }
 
 /// The gauge tables, as tokens stable enough to write to a file.
-const GAUGE_SET_TOKENS: [(GaugeSetId, &str); GaugeSetId::COUNT] =
-    [(GaugeSetId::FiveKeys, "5KEYS"), (GaugeSetId::SevenKeys, "7KEYS"), (GaugeSetId::Pms, "PMS"), (GaugeSetId::Keyboard, "KEYBOARD"), (GaugeSetId::Lr2, "LR2")];
+const GAUGE_SET_TOKENS: [(GaugeSetId, &str); GaugeSetId::COUNT] = [
+    (GaugeSetId::FiveKeys, "5KEYS"),
+    (GaugeSetId::SevenKeys, "7KEYS"),
+    (GaugeSetId::Pms, "PMS"),
+    (GaugeSetId::Keyboard, "KEYBOARD"),
+    (GaugeSetId::Lr2, "LR2"),
+    (GaugeSetId::Iidx, "IIDX"),
+];
 
 /// Token this gauge table is written under.
 pub(crate) fn gauge_set_token(set: GaugeSetId) -> &'static str {

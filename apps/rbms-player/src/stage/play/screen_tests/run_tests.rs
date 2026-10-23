@@ -171,6 +171,25 @@ fn a_key_that_comes_up_while_the_run_is_closing_is_not_handed_to_the_run() {
     assert!(!app.shared.skin_timers.is_on(timer_id::KEYON_1P_KEY1), "the beam of a key that came up is still lit");
 }
 
+/// Escape on a run played by hand with notes still to come ends it on its result in the frame it is
+/// pressed (the player's decision of 2026-10-23): the run is not closed as a failure first.
+#[test]
+fn escape_with_notes_left_on_a_skinned_run_goes_straight_to_its_result() {
+    let mut app = app_with_play_skin("left-to-result");
+    let mut pixels = canvas();
+    let lane_key = app.shared.active_keys.iter().find(|(_, lane)| *lane == 0).map(|(code, _)| *code).expect("the first lane has a key");
+    started(&mut app, &mut pixels, run(SessionOptions::default()));
+    stay_after(&mut app, &mut pixels, FIRST_NOTE_MS);
+    key(&mut app, press(lane_key));
+    key(&mut app, release(lane_key));
+    assert!(!play(&app).has_judged_nothing(), "the first note was not hit");
+    assert!(!play(&app).session.all_notes_resolved(), "the fixture run has notes still to come");
+
+    let left = key(&mut app, press(KeyCode::Escape));
+    assert!(matches!(left, Transition::To(Stage::Result(_))), "Escape did not end the run on its result");
+    assert_eq!(phase(&app), Some(PlayPhase::Play), "the run was closed as a failure before its result");
+}
+
 /// A lane the chart plays by itself (SCRATCH AUTO) is nobody's: its long note is not in the chart
 /// the run judges, so nothing holds it and no beam lights for it, though the field still draws it.
 #[test]

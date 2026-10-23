@@ -176,6 +176,8 @@ props.extension = {
     UNREACHABLE_KEY_FIRST = 21140,
 }
 
+props.rbms_extensions = 1
+
 props.number = {
     HISPEED = 310,
     HISPEED_AFTERDOT = 311,

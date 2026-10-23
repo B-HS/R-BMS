@@ -251,6 +251,8 @@ export const courseChart = mysqlTable(
         courseHash: varchar('course_hash', { length: 128 }).notNull(),
         position: int('position').notNull(),
         chartSha256: char('chart_sha256', { length: 64 }).notNull(),
+        md5: char('md5', { length: 32 }).default('').notNull(),
+        title: varchar('title', { length: 255 }).default('').notNull(),
     },
     (table) => [primaryKey({ columns: [table.courseHash, table.position] })],
 )
@@ -295,6 +297,9 @@ export const courseScore = mysqlTable(
         playedAt: bigint('played_at', { mode: 'number' }).notNull(),
         createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
         extra: json('extra'),
+        gauge: tinyint('gauge'),
+        courseGauge: varchar('course_gauge', { length: 16 }),
+        stages: json('stages'),
     },
     (table) => [
         uniqueIndex('course_score_idempotent_uniq').on(table.userId, table.courseHash, table.playedAt),
@@ -320,6 +325,87 @@ export const courseBest = mysqlTable(
             .notNull(),
     },
     (table) => [primaryKey({ columns: [table.courseHash, table.userId, table.scratchAuto] })],
+)
+
+export const courseSource = mysqlTable('course_source', {
+    id: varchar('id', { length: 64 }).primaryKey(),
+    kind: varchar('kind', { length: 16 }).notNull(),
+    name: varchar('name', { length: 255 }).default('').notNull(),
+    maker: varchar('maker', { length: 255 }).default('').notNull(),
+    pageUrl: varchar('page_url', { length: 512 }).default('').notNull(),
+    fileUrl: varchar('file_url', { length: 512 }).default('').notNull(),
+    retrievedAt: bigint('retrieved_at', { mode: 'number' }).default(0).notNull(),
+    fileSha256: char('file_sha256', { length: 64 }).default('').notNull(),
+    detail: json('detail'),
+    updatedAt: timestamp('updated_at', { fsp: 3 })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
+})
+
+export const courseGroup = mysqlTable('course_group', {
+    id: varchar('id', { length: 64 }).primaryKey(),
+    sourceId: varchar('source_id', { length: 64 }).notNull(),
+    name: varchar('name', { length: 255 }).default('').notNull(),
+    keys: int('keys').default(0).notNull(),
+    position: int('position').default(0).notNull(),
+})
+
+export const courseGroupMember = mysqlTable(
+    'course_group_member',
+    {
+        groupId: varchar('group_id', { length: 64 }).notNull(),
+        courseHash: varchar('course_hash', { length: 128 }).notNull(),
+        position: int('position').notNull(),
+        active: boolean('active').default(true).notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.groupId, table.courseHash] }), index('course_group_member_course_idx').on(table.courseHash)],
+)
+
+export const danCourse = mysqlTable(
+    'dan_course',
+    {
+        courseHash: varchar('course_hash', { length: 128 }).primaryKey(),
+        system: varchar('system', { length: 32 }).notNull(),
+        label: varchar('label', { length: 64 }).notNull(),
+        rank: int('rank').notNull(),
+    },
+    (table) => [index('dan_course_system_idx').on(table.system, table.rank)],
+)
+
+export const userDan = mysqlTable(
+    'user_dan',
+    {
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        system: varchar('system', { length: 32 }).notNull(),
+        label: varchar('label', { length: 64 }).notNull(),
+        rank: int('rank').notNull(),
+        courseHash: varchar('course_hash', { length: 128 }).notNull(),
+        courseScoreId: varchar('course_score_id', { length: 36 }).notNull(),
+        courseGauge: varchar('course_gauge', { length: 16 }).notNull(),
+        gauge: tinyint('gauge').notNull(),
+        acquiredAt: bigint('acquired_at', { mode: 'number' }).notNull(),
+        createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.system, table.label] })],
+)
+
+export const userDanDisplay = mysqlTable(
+    'user_dan_display',
+    {
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        system: varchar('system', { length: 32 }).notNull(),
+        label: varchar('label', { length: 64 }),
+        updatedAt: timestamp('updated_at', { fsp: 3 })
+            .defaultNow()
+            .$onUpdate(() => new Date())
+            .notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.system] })],
 )
 
 export const difficultyTable = mysqlTable('difficulty_table', {
@@ -547,6 +633,21 @@ export const chartPattern = mysqlTable(
     },
     (table) => [index('chart_pattern_sha256_idx').on(table.sha256)],
 )
+
+export const tableSnapshot = mysqlTable('table_snapshot', {
+    tableId: varchar('table_id', { length: 64 }).primaryKey(),
+    headerUrl: varchar('header_url', { length: 512 }).notNull(),
+    dataUrl: varchar('data_url', { length: 512 }).notNull(),
+    headerSha256: char('header_sha256', { length: 64 }).notNull(),
+    dataSha256: char('data_sha256', { length: 64 }).notNull(),
+    headerGz: mediumBlob('header_gz').notNull(),
+    dataGz: mediumBlob('data_gz').notNull(),
+    entryCount: int('entry_count').notNull(),
+    levelCount: int('level_count').notNull(),
+    fetchedAt: bigint('fetched_at', { mode: 'number' }).notNull(),
+    checkedAt: bigint('checked_at', { mode: 'number' }).notNull(),
+    lastOutcome: varchar('last_outcome', { length: 64 }).default('').notNull(),
+})
 
 export const aiGoal = mysqlTable(
     'ai_goal',

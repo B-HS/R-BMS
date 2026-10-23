@@ -175,6 +175,21 @@ fn the_gauge_table_cycles_and_resets_the_starting_amount_to_the_new_tables_own()
 }
 
 #[test]
+fn the_gauge_set_cycle_reaches_iidx_and_comes_back() {
+    let mut p = property(LONG_CHART_MS);
+    let first = p.gauge_set();
+    let mut seen = Vec::new();
+    for _ in 0..GaugeSetId::COUNT {
+        cycle_gauge_set(&mut p, true);
+        seen.push(p.gauge_set());
+    }
+    assert!(seen.contains(&GaugeSetId::Iidx), "the IIDX table is one of the practice tables: {seen:?}");
+    assert_eq!(p.gauge_set(), first, "a whole turn lands on the table it started from");
+    assert_eq!(gauge_set_token(GaugeSetId::Iidx), "IIDX");
+    assert_eq!(gauge_set_from_token("IIDX"), Some(GaugeSetId::Iidx));
+}
+
+#[test]
 fn a_mode_without_a_scratch_lane_cannot_practise_all_scratch() {
     let mut p = property(LONG_CHART_MS);
     let mut seen = Vec::new();

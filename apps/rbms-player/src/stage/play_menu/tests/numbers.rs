@@ -413,11 +413,18 @@ fn a_key_or_a_press_that_moves_on_stores_what_was_typed_first() {
 }
 
 /// A row that holds no number is what it was: Enter and a press step it, and nothing opens it to be
-/// typed into or takes hold of it.
+/// typed into or takes hold of it. The colour row is the exception that is a colour: Enter opens it
+/// to have a colour typed in hex, which its own tests look at.
 #[test]
 fn a_row_that_holds_no_number_is_stepped_by_enter_and_a_press_as_it_always_was() {
     let mut menu = Menu::over(bare_app("number-others"));
-    let others: Vec<Row> = menu.state.rows.iter().copied().filter(|row| !row.is_heading() && menu.state.number_of(&menu.app.shared, *row).is_none()).collect();
+    let others: Vec<Row> = menu
+        .state
+        .rows
+        .iter()
+        .copied()
+        .filter(|row| !row.is_heading() && *row != Row::AutoColor && menu.state.number_of(&menu.app.shared, *row).is_none())
+        .collect();
     assert!(
         others.contains(&Row::PreviewBpm) && others.contains(&Row::Setting(SettingId::KeepGreenNumber)) && others.contains(&Row::Setting(SettingId::Gauge))
     );

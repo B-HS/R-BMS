@@ -195,6 +195,69 @@ fn a_failed_run_stops_logging_and_is_padded_with_zeroes_to_the_end_of_the_chart(
     assert_eq!(log.last(GaugeIndex::Normal), Some(0.0), "the result reads the padded tail as the final value");
 }
 
+/// How many zeroes a history padded from `from_ms` gains on a chart of `play_time_ms` that is shorter
+/// than a day: one for every interval up to half a second past the play time.
+fn zeroes_from(from_ms: i64, play_time_ms: i64) -> usize {
+    let mut zeroes = 0;
+    let mut at_ms = from_ms;
+    while at_ms < play_time_ms + GAUGE_LOG_INTERVAL_MS {
+        zeroes += 1;
+        at_ms += GAUGE_LOG_INTERVAL_MS;
+    }
+    zeroes
+}
+
+/// The song time the left runs are left at: past the second of [`four_notes`] and before the third.
+const LEFT_AT_US: i64 = FIRST_NOTE_US + QUARTER_US + QUARTER_US / 2;
+
+#[test]
+fn a_history_closed_as_left_falls_to_zero_from_where_it_stopped() {
+    let mut session = autoplay(eight_notes());
+    let play_time_ms = session.play_time_ms();
+    run(&mut session, &[], LEFT_AT_US);
+    let sampled = session.record().gauge_log;
+    let live = samples_by(LEFT_AT_US / 1_000);
+    assert_eq!(sampled.len(), live, "a run no gauge ended closes as it was sampled");
+
+    let left = session.left_record().gauge_log;
+    let zeroes = zeroes_from(live as i64 * GAUGE_LOG_INTERVAL_MS, play_time_ms);
+    assert!(zeroes > 1, "the fixture is left with most of the chart still ahead");
+    assert_eq!(left.len(), live + zeroes, "the zeroes take up every interval after the last sample to where a failed run's stop");
+    assert_eq!(left.len(), samples_by(play_time_ms), "so every interval to the end of the chart holds one value");
+    for index in GaugeIndex::ALL {
+        assert_eq!(left.of(index)[..live], *sampled.of(index), "{index:?} keeps what was sampled");
+        assert!(left.of(index)[live..].iter().all(|value| *value == 0.0), "{index:?} is zero-filled after it");
+    }
+
+    let mut failed = PlaySession::new(dense_notes(), SessionOptions { gauge: GaugeKind::Hard, ..Default::default() });
+    let mut frame_us = 0;
+    while !failed.is_failed() {
+        failed.tick(SessionClock::at(frame_us), &mut NullSink);
+        frame_us += FRAME_US;
+    }
+    assert_eq!(failed.left_record().gauge_log, failed.record().gauge_log, "a run the gauge ended is closed from where it failed");
+}
+
+#[test]
+fn a_record_left_part_way_counts_the_rest_as_poor() {
+    let mut session = PlaySession::new(four_notes(), SessionOptions::default());
+    let play_time_ms = session.play_time_ms();
+    run(&mut session, &mixed_inputs(), LEFT_AT_US);
+    let summary = session.summary();
+    assert!(summary.total_judged > 0 && summary.total_judged < summary.total_notes, "the fixture is left part-way: {summary:?}");
+
+    let record = session.record();
+    let left = session.left_record();
+    assert_eq!(left.summary, summary.left_unfinished(), "the rest of the chart is counted as POORs let pass");
+    assert!(left.summary.failed);
+    assert_eq!(left.failed_at_ms, None, "no empty gauge ended the run");
+    assert_eq!(left.gauge_log.len(), samples_by(play_time_ms), "the gauge history falls to zero where the run was left");
+    let mut rest = left.clone();
+    rest.summary = record.summary;
+    rest.gauge_log = record.gauge_log.clone();
+    assert_eq!(rest, record, "everything else is the record of the run as it stood");
+}
+
 /// A chart whose tempo drops to one beat a minute after two bars of notes, with its last note 997
 /// bars on: more than two days long.
 fn days_long_notes() -> Model {

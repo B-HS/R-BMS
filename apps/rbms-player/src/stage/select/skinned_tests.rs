@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use rbms_library::{Library, SongEntry};
 use rbms_render::skin_render::frame::{SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS};
+use rbms_skin::model::RBMS_EXTENSIONS_PANEL_KEYS;
 use rbms_skin::property::generated::RATE_MUSICSELECT_POSITION;
 use rbms_skin::timer::{TimerId, timer_id};
 
@@ -96,14 +97,22 @@ fn began_since(browser: &Browser, since: Instant) -> bool {
 const NEVER_SWITCHED: [TimerId; 5] =
     [timer_id::SONGBAR_MOVE, timer_id::SONGBAR_MOVE_UP, timer_id::SONGBAR_MOVE_DOWN, timer_id::SONGBAR_STOP, timer_id::FADEOUT];
 
+/// The fixture document, which says it knows this player's own ids.
 pub(super) fn wheel_document() -> String {
+    wheel_document_naming(Some(RBMS_EXTENSIONS_PANEL_KEYS))
+}
+
+/// The fixture document, saying it knows this player's own ids when `extensions` has the value to
+/// say so with.
+pub(super) fn wheel_document_naming(extensions: Option<i32>) -> String {
+    let extensions = extensions.map_or_else(String::new, |value| format!(r#""rbms_extensions": {value},"#));
     let slots = SLOT_BOTTOMS.map(|y| format!(r#"{{"id":"bars","dst":[{{"x":{SLOT_X},"y":{y},"w":{SLOT_W},"h":{SLOT_H}}}]}}"#)).join(",");
     let images =
         (0..BAR_IMAGES).map(|index| format!(r#"{{"id":"bar-{index}","src":"sheet","x":{},"y":0,"w":{CELL},"h":{CELL}}}"#, index * CELL)).collect::<Vec<_>>();
     let set = (0..BAR_IMAGES).map(|index| format!(r#""bar-{index}""#)).collect::<Vec<_>>();
     format!(
         r#"{{
-            "type": {SKIN_TYPE_MUSIC_SELECT}, "name": "keys", "w": {}, "h": {},
+            "type": {SKIN_TYPE_MUSIC_SELECT}, "name": "keys", "w": {}, "h": {}, {extensions}
             "input": {INPUT_MS}, "scene": {SCENE_MS}, "fadeout": {FADEOUT_MS},
             "source": [{{ "id": "sheet", "path": "sheet.png" }}],
             "image": [{}],

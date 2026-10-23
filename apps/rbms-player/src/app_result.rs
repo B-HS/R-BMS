@@ -52,8 +52,32 @@ struct ChartRun {
     seed: u64,
 }
 
-/// Turn the finished run into the result screen: the on-screen summary, the local score record,
-/// the saved replay and the IR submission. The judge offset a run adjusted is already in the settings
+/// How the run whose result is being shown came to its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RunEnd {
+    /// It has nothing left to play: it was played to its end, an empty gauge ended it, or it was
+    /// closing when it was left. Its notes are counted as the run counted them.
+    Reached,
+    /// The player left it with notes still to come. Every note it never reached counts as a late
+    /// POOR let pass, and it is FAILED ([`rbms_play::PlaySummary::left_unfinished`]).
+    LeftPartWay,
+}
+
+/// Turn the run that has nothing left to play into its result screen ([`show_result`]).
+pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Transition {
+    show_result(state, shared, RunEnd::Reached)
+}
+
+/// Turn a run the player left with notes still to come into its result screen ([`show_result`]),
+/// as a FAILED run whose notes not reached were let pass, which is what Escape does to a run played
+/// by hand (the player's decision of 2026-10-23). A course stage left so fails the course, which
+/// ends on its result.
+pub(crate) fn enter_result_of_a_left_run(state: &mut PlayState, shared: &mut AppShared) -> Transition {
+    show_result(state, shared, RunEnd::LeftPartWay)
+}
+
+/// Turn the run that ended as `end` says into the result screen: the on-screen summary, the local
+/// score record, the saved replay and the IR submission. The judge offset a run adjusted is already in the settings
 /// by now: it is kept as each input moves it ([`PlayState::keep_adjusted_offset`]).
 ///
 /// The deltas on the summary compare against the records that existed *before* this play — this
@@ -67,9 +91,20 @@ struct ChartRun {
 /// history is no best, so it is no LOCAL BEST here either, and the target a run was paced against is
 /// the one it is scored against. The best a skin's result screen compares the run with is read at
 /// the same point, before the run joins the book ([`PreviousScore::of_book`]).
-pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Transition {
+///
+/// The screen, the history row, the submission and the record a skin's result screen reads all hold
+/// the same judgement counts: a run left part-way is counted with its notes not reached as POORs in
+/// each of them. Its record for the screen has its gauge history fall to zero where it was left
+/// ([`rbms_play::PlaySession::left_record`]); the trace kept with the run is laid out from the history
+/// as it was sampled, as it always was, since the trace says by its missing failure instant and its
+/// unreached notes that the run was left. This is the one way such a run is sent: there is no
+/// records sync of it besides.
+fn show_result(state: &mut PlayState, shared: &mut AppShared, end: RunEnd) -> Transition {
     let play = &state.session;
-    let summary = play.summary();
+    let (summary, record_shown) = match end {
+        RunEnd::Reached => (play.summary(), None),
+        RunEnd::LeftPartWay => (play.summary().left_unfinished(), Some(play.left_record())),
+    };
     let standing_combo = play.standing_combo();
     let standing_max_combo = play.standing_max_combo();
     let md5 = play.model().md5.clone();
@@ -148,7 +183,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     if practice {
         return Transition::Back;
     }
-    keep_run_record(shared, record);
+    keep_run_record(shared, record_shown.unwrap_or(record));
     if shared.course_run.is_some() {
         shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
         let carried = CarriedCombo { standing: standing_combo, longest: standing_max_combo };
@@ -473,27 +508,6 @@ fn wire_avgjudge(avg_duration_us: i64) -> i64 {
     if avg_duration_us == rbms_play::AVG_DURATION_ABSENT_US { 0 } else { avg_duration_us }
 }
 
-/// What the message bus says of a run that was left before its end and kept.
-pub(crate) const LEFT_RUN_KEPT: &str = "run left mid-song kept as FAILED";
-
-/// Keep a run the player left before its end, as a FAILED run whose every note not reached was let
-/// pass ([`rbms_play::PlaySummary::left_unfinished`]), and send it, and say so. Returns what was
-/// kept.
-///
-/// No result screen is shown: Escape stays the key that leaves at once, and the run is in the
-/// history and on the server like any other. It is sent by a records sync of this one run rather
-/// than by the result screen's submission, which has no screen to report on here. Every run the
-/// player played by hand is kept however few notes it judged (the player's decision of 2026-10-15);
-/// the caller leaves out a run that judged nothing at all (the player's decision of 2026-10-19), a
-/// run the engine played, a replay being watched and practice.
-pub(crate) fn record_left_run(state: &PlayState, shared: &mut AppShared) -> RecordedRun {
-    let summary = state.session.summary().left_unfinished();
-    let recorded = record_run(state, shared, &summary, &state.session.record());
-    send_without_a_screen(shared, &recorded);
-    notify(Level::Info, LEFT_RUN_KEPT);
-    recorded
-}
-
 /// When what is kept with no screen to report on is sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Sending {
@@ -512,7 +526,7 @@ pub(crate) const ABANDONED_COURSE_KEPT: &str = "course ended before its last sta
 /// The course stands on a stage not yet played: the LOADING or decide screen of it was left with
 /// Escape, its chart could not be read or is not in the library, or the app is quitting. A course
 /// with a stage played by hand behind it is kept and sent as a FAILED course of the stages it
-/// played, as a course left part-way with Escape is ([`leave_course`]); the stage it stood on is not
+/// played, as a course left part-way with Escape ends on its result; the stage it stood on is not
 /// played and adds nothing. A course with nothing played yet, one the engine plays or one watched as
 /// a replay keeps nothing, and a course already over has been kept already. Either way the course
 /// ends here, so the next chart played is played as a chart of its own.
@@ -576,41 +590,6 @@ pub(crate) fn keep_run_cut_short_by_quitting(state: &PlayState, ended: bool, sha
     }
 }
 
-/// What the message bus says of a course left part-way, once its stages and the course are kept.
-pub(crate) const LEFT_COURSE_KEPT: &str = "course left part-way kept as FAILED";
-
-/// Leave a course part-way through a stage with notes still to come, which is what Escape does to
-/// one (the player's decision of 2026-10-15): the stage is kept and sent as a FAILED chart, as a
-/// single chart left part-way is ([`record_left_run`]), and the course is kept and sent as a FAILED
-/// course, the stages it finished and the one it was left on folded in. The stages it never reached
-/// are not played.
-///
-/// A stage that has judged nothing at all was never played (the player's decision of 2026-10-19):
-/// it adds nothing, and the course ends where it stands as one left between two stages does
-/// ([`abandon_course`]), kept as a FAILED course of the stages before it, or not at all when it
-/// stood on its first.
-///
-/// A course the engine played or one watched as a replay keeps nothing and simply ends, as before.
-/// No course result screen is shown: Escape still leaves at once.
-pub(crate) fn leave_course(state: &PlayState, shared: &mut AppShared) -> Transition {
-    if shared.run_plays_itself() || shared.replay.is_some() || state.practice.is_some() {
-        return crate::end_course(shared);
-    }
-    if state.has_judged_nothing() {
-        return abandon_course(shared, Sending::Now);
-    }
-    let summary = state.session.summary().left_unfinished();
-    let recorded = record_left_run(state, shared);
-    shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
-    let carried = CarriedCombo { standing: state.session.standing_combo(), longest: state.session.standing_max_combo() };
-    let course_lamp = course_lamp(shared, &state.session);
-    if fold_course_stage(shared, &summary, carried, recorded.block_reason, course_lamp).is_some() {
-        keep_finished_course(shared, Sending::Now);
-        notify(Level::Info, LEFT_COURSE_KEPT);
-    }
-    crate::end_course(shared)
-}
-
 /// What the message bus says of a failed run that START or SELECT started again, once it is kept.
 pub(crate) const RETRIED_RUN_KEPT: &str = "failed run kept before starting again";
 
@@ -618,7 +597,7 @@ pub(crate) const RETRIED_RUN_KEPT: &str = "failed run kept before starting again
 /// (`BMSPlayer.java:696-710`), as the result screen would have kept it, and send it.
 ///
 /// The run never reaches its result screen, so it is kept here on the way out, judged as it stood
-/// when it failed, and sent by a records sync of this one run as a run left mid-song is. Every run
+/// when it failed, and sent by a records sync of this one run, there being no screen to send it. Every run
 /// the player played by hand is kept and sent (the player's decision of 2026-10-14); a run the
 /// engine played, a replay being watched and practice keep nothing.
 pub(crate) fn record_retried_run(state: &PlayState, shared: &mut AppShared) {

@@ -52,7 +52,7 @@ use rbms_model::{Mode, Model, NoteKind};
 use rbms_play::{NullSink, PlaySession, SessionClock, SessionOptions};
 use rbms_render::skin_render::frame::{BgaExpand, GaugeScale, LaneNotes, first_lane_rect, lane_offsets};
 use rbms_render::skin_render::graphs::{NoteDistribution, PlayCursor};
-use rbms_render::{BgaFrame, FrameData, FrameSeries, GaugeFrame};
+use rbms_render::{BgaFrame, Color, FrameData, FrameSeries, GaugeFrame};
 use rbms_skin::loader::skin_type_mode;
 use rbms_skin::timer::{TimerId, TimerState, timer_id};
 use rbms_store::{Replay, ReplayEvent, ReplayJudge};
@@ -62,6 +62,7 @@ use super::scene::{PlayScene, PlayTimes, RunEnd, SceneFacts, SceneStep, TIME_MAR
 use super::skin::{SkinFeed, Standing};
 use super::{BpmStats, LOADED, MICROS_PER_MILLI, whole_ms};
 use crate::AppShared;
+use crate::app_play::scratch_auto_color;
 use crate::skin_host::options::SettingsView;
 use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
 use crate::skin_host::play_timers::{FieldOffsets, PlayingFrame, SceneEvent};
@@ -783,6 +784,7 @@ impl PlaySample {
             states: self.feed.trace(),
             longs: self.feed.longs(),
             auto_lanes: self.session.auto_lanes(),
+            auto_note: Color::from(scratch_auto_color(play)),
             ..LaneNotes::new(shown_chart, chart_us, opening_bpm)
         };
         let overview = self.feed.overview();

@@ -1,5 +1,5 @@
 use crate::Judge;
-use crate::data::{GaugeModifier, GaugeParams};
+use crate::data::{GaugeModifier, GaugeParams, GutsEdge};
 use crate::gauge_tables::{GaugeSetId, element_of, modify_damage};
 
 /// A gauge a player can select. These are the reference implementation's gauge slots 0..5, the
@@ -50,7 +50,7 @@ impl GaugeIndex {
     ];
 
     /// This slot's reference index (`GrooveGauge.java:20-28`).
-    pub fn index(self) -> usize {
+    pub const fn index(self) -> usize {
         match self {
             GaugeIndex::AssistEasy => 0,
             GaugeIndex::Easy => 1,
@@ -271,6 +271,7 @@ pub struct Gauge {
     border: f32,
     deltas: [f32; 6],
     guts: Vec<(f32, f32)>,
+    guts_edge: GutsEdge,
 }
 
 /// Upper bound on the LIMIT_INCREMENT PGREAT gain and the divisor its scaling is expressed
@@ -320,7 +321,16 @@ impl Gauge {
             }
             GaugeModifier::None => {}
         }
-        Gauge { index, value: params.init, min: params.min, max: params.max, border: params.border, deltas, guts: params.guts.clone() }
+        Gauge {
+            index,
+            value: params.init,
+            min: params.min,
+            max: params.max,
+            border: params.border,
+            deltas,
+            guts: params.guts.clone(),
+            guts_edge: params.guts_edge,
+        }
     }
 
     pub fn update(&mut self, judge: Judge) {
@@ -329,16 +339,17 @@ impl Gauge {
 
     /// Apply a judgment scaled by `rate` (reference implementation `GrooveGauge.Gauge.update`,
     /// `GrooveGauge.java:229-240`). A hell-charge tick feeds a fractional rate; a normal judgment
-    /// feeds 1.0. Guts softening is decided from the value before the change, as in the reference.
+    /// feeds 1.0. Guts softening is decided from the value before the change, as in the reference,
+    /// and a band starts where the gauge's [`GutsEdge`] puts it.
     pub fn update_with_rate(&mut self, judge: Judge, rate: f32) {
         if self.value <= 0.0 {
             return;
         }
         let mut inc = self.deltas[judge as usize] * rate;
         if inc < 0.0 {
-            for g in &self.guts {
-                if self.value < g.0 {
-                    inc *= g.1;
+            for &(threshold, multiplier) in &self.guts {
+                if self.guts_edge.softens(self.value, threshold) {
+                    inc *= multiplier;
                     break;
                 }
             }
@@ -592,14 +603,16 @@ impl GrooveGauge {
     }
 
     /// The per-frame re-pick of `BMSPlayer.java:639-650`: scan from the floor up to the ceiling the
-    /// mode allows and keep the highest gauge that is still clearing.
+    /// mode allows and keep the highest gauge that is still clearing. On a course the ceiling is
+    /// also held to the table's own top course gauge ([`GaugeSetId::course_ceiling`]).
     fn shift_to_best(&mut self, mode: GaugeAutoShift, configured: GaugeKind, bottom: GaugeKind) {
         let course = self.is_course_gauge();
+        let course_top = self.set.course_ceiling().index();
         let configured = GaugeIndex::from_kind(configured).index();
         let len = match mode {
             GaugeAutoShift::BestClear => {
                 if course {
-                    GaugeIndex::ExHardClass.index() + 1
+                    course_top + 1
                 } else {
                     GaugeIndex::Hazard.index() + 1
                 }
@@ -607,7 +620,7 @@ impl GrooveGauge {
             _ => {
                 if course {
                     let course_offset = GaugeIndex::Class.index() - GaugeIndex::Normal.index();
-                    (configured.max(GaugeIndex::Normal.index()) + course_offset).min(GaugeIndex::ExHardClass.index()) + 1
+                    (configured.max(GaugeIndex::Normal.index()) + course_offset).min(course_top) + 1
                 } else {
                     configured + 1
                 }
@@ -1452,6 +1465,52 @@ mod groove_gauge_tests {
         }
         assert_eq!(20.0 - half.value_at(GaugeIndex::Normal), 1.5, "half of the NORMAL BAD damage of 3.0");
     }
+
+    fn course_gauge_at(set: GaugeSetId, index: GaugeIndex, value: f32) -> GrooveGauge {
+        let mut g = GrooveGauge::at_index(set, index, 200.0, 100);
+        g.set_value_at(index, value);
+        g
+    }
+
+    fn after(set: GaugeSetId, index: GaugeIndex, value: f32, judge: Judge) -> f32 {
+        let mut g = course_gauge_at(set, index, value);
+        g.update(judge);
+        g.value_at(index)
+    }
+
+    #[test]
+    fn an_iidx_dan_gauge_halves_damage_at_thirty_exactly() {
+        assert_eq!(after(GaugeSetId::Iidx, GaugeIndex::Class, 30.0, Judge::Bad), 29.25);
+        assert_eq!(after(GaugeSetId::Iidx, GaugeIndex::Class, 30.0, Judge::Poor), 28.75);
+        assert_eq!(after(GaugeSetId::Iidx, GaugeIndex::Class, 30.0, Judge::Miss), 29.25, "an empty POOR is halved too");
+    }
+
+    #[test]
+    fn an_iidx_dan_gauge_takes_full_damage_just_above_thirty() {
+        assert_eq!(after(GaugeSetId::Iidx, GaugeIndex::Class, 30.5, Judge::Bad), 29.0);
+    }
+
+    #[test]
+    fn an_lr2_class_gauge_still_softens_only_below_thirty() {
+        assert_eq!(after(GaugeSetId::Lr2, GaugeIndex::Class, 30.0, Judge::Bad), 28.0, "the reference band starts below its threshold");
+        let softened = after(GaugeSetId::Lr2, GaugeIndex::Class, 29.0, Judge::Bad);
+        assert!((softened - 27.8).abs() < 1e-4, "below 30 the LR2 CLASS BAD of -2.0 is taken at 0.6, got {softened}");
+    }
+
+    #[test]
+    fn an_iidx_ex_dan_gauge_never_softens() {
+        assert_eq!(after(GaugeSetId::Iidx, GaugeIndex::ExClass, 10.0, Judge::Poor), 5.0);
+    }
+
+    #[test]
+    fn an_iidx_dan_gauge_empties_at_zero_and_stays() {
+        let mut g = course_gauge_at(GaugeSetId::Iidx, GaugeIndex::Class, 1.0);
+        g.update(Judge::Poor);
+        assert_eq!(g.value(), 0.0);
+        g.update(Judge::PerfectGreat);
+        assert_eq!(g.value(), 0.0, "an emptied dan gauge does not refill");
+        assert!(!g.is_cleared());
+    }
 }
 
 #[cfg(test)]
@@ -1581,5 +1640,30 @@ mod auto_shift_tests {
         assert!(g.value() > 0.0, "the selected gauge is alive");
         g.auto_shift(GaugeAutoShift::BestClear, GaugeKind::AssistEasy, GaugeKind::AssistEasy);
         assert_ne!(g.selected_index(), GaugeIndex::AssistEasy, "BESTCLEAR shifts while the gauge is still alive");
+    }
+
+    const FRAMES: usize = 200;
+
+    #[test]
+    fn best_clear_on_an_iidx_course_never_picks_exhardclass() {
+        let mut reference = GrooveGauge::at_index(GaugeSetId::SevenKeys, GaugeIndex::Class, 200.0, 100);
+        reference.auto_shift(GaugeAutoShift::BestClear, GaugeKind::Normal, GaugeKind::AssistEasy);
+        assert_eq!(reference.selected_index(), GaugeIndex::ExHardClass, "a reference table offers all three course gauges");
+
+        let mut g = GrooveGauge::at_index(GaugeSetId::Iidx, GaugeIndex::Class, 200.0, 100);
+        g.auto_shift(GaugeAutoShift::BestClear, GaugeKind::Normal, GaugeKind::AssistEasy);
+        assert_eq!(g.selected_index(), GaugeIndex::ExClass, "EX-DAN is the strongest IIDX course gauge");
+        for _ in 0..FRAMES {
+            g.update(Judge::Bad);
+            g.auto_shift(GaugeAutoShift::BestClear, GaugeKind::Normal, GaugeKind::AssistEasy);
+            assert!(matches!(g.selected_index(), GaugeIndex::Class | GaugeIndex::ExClass), "{:?}", g.selected_index());
+        }
+    }
+
+    #[test]
+    fn select_to_under_on_an_iidx_course_stops_at_exclass() {
+        let mut g = GrooveGauge::at_index(GaugeSetId::Iidx, GaugeIndex::Class, 200.0, 100);
+        g.auto_shift(GaugeAutoShift::SelectToUnder, GaugeKind::ExHard, GaugeKind::AssistEasy);
+        assert_eq!(g.selected_index(), GaugeIndex::ExClass);
     }
 }

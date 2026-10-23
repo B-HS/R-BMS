@@ -82,9 +82,35 @@ pub enum GaugeModifier {
     None,
 }
 
+/// Where a softening band starts: below its threshold, as the reference's `value < gut[0]` has it
+/// (`GrooveGauge.java:233`), or at it, as IIDX's "at or below 30%" low-life adjustment of the DAN
+/// gauge has it.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
+pub enum GutsEdge {
+    #[default]
+    Below,
+    AtOrBelow,
+}
+
+impl GutsEdge {
+    /// Whether this is the reference's edge, which a data file leaves unwritten.
+    pub fn is_below(&self) -> bool {
+        *self == GutsEdge::Below
+    }
+
+    /// Whether a gauge standing at `value` is inside a band that starts at `threshold`.
+    pub fn softens(self, value: f32, threshold: f32) -> bool {
+        match self {
+            GutsEdge::Below => value < threshold,
+            GutsEdge::AtOrBelow => value <= threshold,
+        }
+    }
+}
+
 /// One row of the reference implementation's `GaugeProperty.GaugeElementProperty`: the gauge's
-/// bounds, its per-judge deltas in judge order (PG, GR, GD, BD, PR, MS) and its "guts" softening
-/// bands as ascending `(threshold, damage_multiplier)` pairs.
+/// bounds, its per-judge deltas in judge order (PG, GR, GD, BD, PR, MS), its "guts" softening
+/// bands as ascending `(threshold, damage_multiplier)` pairs and where those bands start. A row
+/// that does not state `guts_edge` starts them below the threshold, as every reference row does.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub struct GaugeParams {
     pub modifier: GaugeModifier,
@@ -94,11 +120,13 @@ pub struct GaugeParams {
     pub border: f32,
     pub deltas: [f32; 6],
     pub guts: Vec<(f32, f32)>,
+    #[serde(default, skip_serializing_if = "GutsEdge::is_below")]
+    pub guts_edge: GutsEdge,
 }
 
 /// The nine gauges one mode offers, in the reference implementation's index order. The last three
-/// are the course gauges; this engine builds and updates them for parity but never selects one,
-/// having no course mode. `GaugeSet::at` reaches all nine by [`crate::gauge::GaugeIndex`].
+/// are the course gauges, which a course stage starts on and a single song never selects.
+/// `GaugeSet::at` reaches all nine by [`crate::gauge::GaugeIndex`].
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub struct GaugeSet {
     pub assist_easy: GaugeParams,
@@ -371,6 +399,22 @@ mod data_tests {
         let gauge = builtin_gauge_tables();
         let text = ron::ser::to_string_pretty(gauge, ron::ser::PrettyConfig::default()).unwrap();
         assert_eq!(&ron::from_str::<GaugeTables>(&text).unwrap(), gauge);
+    }
+
+    #[test]
+    fn a_gauge_file_without_guts_edge_reads_below() {
+        let row = "(modifier: None, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: (0.1, 0.1, 0.05, -2.0, -3.0, -2.0), guts: [(30.0, 0.6)])";
+        let params: GaugeParams = ron::from_str(row).expect("a row of the original shape parses");
+        assert_eq!(params.guts_edge, GutsEdge::Below);
+        let written = ron::ser::to_string(&params).unwrap();
+        assert!(!written.contains("guts_edge"), "the reference edge is written in the original shape: {written}");
+    }
+
+    #[test]
+    fn the_bundled_file_states_guts_edge_only_on_the_iidx_dan_row() {
+        assert_eq!(BUILTIN_GAUGE_RON.matches("guts_edge").count(), 1);
+        let dan = builtin_gauge_tables().get(crate::gauge_tables::IIDX_GAUGE_KEY).expect("IIDX row present");
+        assert_eq!(dan.class.guts_edge, GutsEdge::AtOrBelow);
     }
 
     #[test]

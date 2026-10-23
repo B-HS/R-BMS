@@ -132,7 +132,8 @@ const PLACEHOLDER_PROCESSED: Color = Color { r: 0, g: 255, b: 255, a: 255 };
 /// leaves an image exactly as it is.
 const BATCH_WHITE: Color = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
 
-/// The green a note of a lane the chart plays by itself (SCRATCH AUTO) is drawn in, head and end.
+/// The green a note of a lane the chart plays by itself (SCRATCH AUTO) is drawn in, head and end,
+/// until the player picks another colour ([`LaneNotes::auto_note`]).
 ///
 /// It is a flat colour over the rectangle the skin's own note fills rather than the skin's image
 /// with a green tint: a tint multiplies an image channel by channel, so the red turntable note
@@ -140,21 +141,28 @@ const BATCH_WHITE: Color = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MA
 /// to recolour an image through its alpha.
 pub const AUTO_LANE_NOTE: Color = Color { r: 0x30, g: 0xe0, b: 0x50, a: u8::MAX };
 
-/// The same green for the body of such a long note, let through a little so the body reads as one.
-pub const AUTO_LANE_LONG_BODY: Color = Color { r: 0x30, g: 0xe0, b: 0x50, a: 0xa0 };
+/// How much of a note's own alpha the body of such a long note keeps, so the body reads as one.
+const AUTO_LONG_BODY_ALPHA: u8 = 0xa0;
 
-/// What a note of such a lane is drawn from.
-const AUTO_NOTE_IMAGE: NoteImage = NoteImage::Solid(AUTO_LANE_NOTE);
+/// The colour for the body of such a long note drawn with the head colour `note`: the same colour
+/// let through by the share [`AUTO_LONG_BODY_ALPHA`] of the alpha it is given.
+pub const fn auto_long_body(note: Color) -> Color {
+    Color { a: ((note.a as u16 * AUTO_LONG_BODY_ALPHA as u16) / u8::MAX as u16) as u8, ..note }
+}
 
-/// What each part of a long note of such a lane is drawn from: its ends as a note, every body alike.
-const AUTO_LONG_IMAGES: [NoteImage; LONG_IMAGES] = {
-    let mut images = [NoteImage::Solid(AUTO_LANE_LONG_BODY); LONG_IMAGES];
-    images[LONG_END] = AUTO_NOTE_IMAGE;
-    images[LONG_START] = AUTO_NOTE_IMAGE;
-    images[HELL_END] = AUTO_NOTE_IMAGE;
-    images[HELL_START] = AUTO_NOTE_IMAGE;
+/// The shipped green for the body of such a long note.
+pub const AUTO_LANE_LONG_BODY: Color = auto_long_body(AUTO_LANE_NOTE);
+
+/// What each part of a long note of such a lane is drawn from when its notes are `note`: its ends as
+/// a note, every body alike.
+const fn auto_long_images(note: Color) -> [NoteImage; LONG_IMAGES] {
+    let mut images = [NoteImage::Solid(auto_long_body(note)); LONG_IMAGES];
+    images[LONG_END] = NoteImage::Solid(note);
+    images[LONG_START] = NoteImage::Solid(note);
+    images[HELL_END] = NoteImage::Solid(note);
+    images[HELL_START] = NoteImage::Solid(note);
     images
-};
+}
 
 /// The legacy text scale that comes to the eighteen pixels the reference sets its line labels in.
 const LABEL_SCALE: f32 = 2.1;
@@ -302,10 +310,14 @@ pub struct LaneNotes<'a> {
     pub longs: &'a [LaneLong],
     pub show: NoteDisplay<'a>,
     /// The lanes the chart plays by itself (SCRATCH AUTO), in lane order; a lane past the end is
-    /// the player's. Their notes are drawn in [`AUTO_LANE_NOTE`] whatever the skin draws notes
+    /// the player's. Their notes are drawn in [`LaneNotes::auto_note`] whatever the skin draws notes
     /// with, leave the field at the line whatever they were judged (nothing judges them), and are
     /// never kept on the line, drawn as processed or dropped as missed.
     pub auto_lanes: &'a [bool],
+    /// The colour the notes of those lanes are drawn in, its alpha being how opaque they are; the
+    /// body of a long note takes the share [`auto_long_body`] gives of it. [`AUTO_LANE_NOTE`] is the
+    /// shipped green.
+    pub auto_note: Color,
     /// Milliseconds since the last quarter note, on the scene clock
     /// (`now - getNowQuarterNoteTime()`). Only a document with an expansion rate reads it.
     pub quarter_note_ms: i64,
@@ -332,6 +344,7 @@ impl<'a> LaneNotes<'a> {
             longs: &[],
             show: NoteDisplay::default(),
             auto_lanes: &[],
+            auto_note: AUTO_LANE_NOTE,
             quarter_note_ms: i64::MAX,
             late_window_us: 0,
         }
@@ -1027,7 +1040,7 @@ impl Field<'_> {
                     match note.kind {
                         NoteKind::Normal if notes.plays_itself(lane_index) => {
                             if ahead {
-                                drawn |= self.put(r, &AUTO_NOTE_IMAGE, at, alpha, None);
+                                drawn |= self.put(r, &NoteImage::Solid(notes.auto_note), at, alpha, None);
                             }
                         }
                         NoteKind::Normal => {
@@ -1096,7 +1109,8 @@ impl Field<'_> {
         let foot = lane.region.y - grown;
         let height = (if y < foot { f64::from(y - foot) } else { span }) as f32;
         let end_y = (f64::from(y) + span) as f32;
-        let (images, tint) = if self.notes.plays_itself(lane_index) { (&AUTO_LONG_IMAGES, None) } else { (&lane.images.long, lane.long_tint) };
+        let auto_images = auto_long_images(self.notes.auto_note);
+        let (images, tint) = if self.notes.plays_itself(lane_index) { (&auto_images, None) } else { (&lane.images.long, lane.long_tint) };
         let held = lane.long.processing == Some(head_us);
         let body_at = (x, end_y - height + scale, w, height - scale);
         let end_at = (x, end_y, w, scale);

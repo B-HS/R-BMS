@@ -873,6 +873,13 @@ impl PlaySession {
         PlayRecord::of(self.player.model(), self.player.judge(), self.summary(), &self.gauge_log)
     }
 
+    /// The record of a run left before its end: the summary [`PlaySummary::left_unfinished`] gives,
+    /// and the gauge history padded with zeroes from where it stopped, as the reference pads a run it
+    /// failed (`BMSPlayer.java:722-727`). No empty gauge ended it, so it has no failure instant.
+    pub fn left_record(&self) -> PlayRecord {
+        PlayRecord { summary: self.summary().left_unfinished(), gauge_log: self.gauge_log.closed_left(), ..self.record() }
+    }
+
     /// The score against the notes that have gone by so far, which is how the reference rates a run
     /// that is still going (`BMSPlayer.java:1031`).
     pub fn score_progress(&self) -> ScoreProgress {

@@ -1,6 +1,8 @@
 //! `AppShared` methods behind the play path: loading a chart, the shared output stream, the song
 //! clock and the timing instrumentation. The PLAY screen itself lives in `stage::play`.
 #![allow(clippy::wildcard_imports)]
+use rbms_render::skin_render::frame::AUTO_LANE_NOTE;
+
 use crate::assets::{bga_jobs, spawn_bga_decode};
 use crate::ghost::{GhostJob, GhostLoad, GhostSources};
 use crate::skin_host::overview::ChartOverview;
@@ -155,6 +157,17 @@ pub(crate) fn scratch_auto_lanes(mode: rbms_model::Mode, scratch_auto: bool) -> 
         true => (0..mode.key).map(|lane| mode.is_scratch(lane)).collect(),
         false => Vec::new(),
     }
+}
+
+/// The colour the notes SCRATCH AUTO plays are drawn in until the player picks another: the green the
+/// renderer ships.
+pub(crate) const SCRATCH_AUTO_SHIPPED_COLOR: rbms_skin::dst::SkinColor =
+    rbms_skin::dst::SkinColor::rgba(AUTO_LANE_NOTE.r, AUTO_LANE_NOTE.g, AUTO_LANE_NOTE.b, AUTO_LANE_NOTE.a);
+
+/// The colour the notes SCRATCH AUTO plays are drawn in under `play`, its alpha being how opaque
+/// they are.
+pub(crate) fn scratch_auto_color(play: &rbms_config::PlayOptions) -> rbms_skin::dst::SkinColor {
+    play.scratch_auto_color.unwrap_or(SCRATCH_AUTO_SHIPPED_COLOR)
 }
 
 /// What the load path needs from a chart file, whatever format it is written in.
@@ -1180,6 +1193,16 @@ mod tests {
         assert_ne!(seed, 0);
         assert_ne!(fresh_layout_seed(now), fresh_layout_seed(now + 1), "two clocks one nanosecond apart gave the same seed");
         assert_eq!(fresh_layout_seed(1 << 53), 1, "a clock whose kept bits are all zero still gives a seed");
+    }
+
+    #[test]
+    fn scratch_auto_colour_is_the_shipped_green_until_one_is_set() {
+        let mut play = rbms_config::PlayOptions::default();
+        assert_eq!(scratch_auto_color(&play), SCRATCH_AUTO_SHIPPED_COLOR);
+        assert_eq!(SCRATCH_AUTO_SHIPPED_COLOR, rbms_skin::dst::SkinColor::rgba(0x30, 0xe0, 0x50, u8::MAX));
+        let picked = rbms_skin::dst::SkinColor::rgba(0xff, 0x40, 0xc0, 0x80);
+        play.scratch_auto_color = Some(picked);
+        assert_eq!(scratch_auto_color(&play), picked);
     }
 
     const BUFFER_US_512_AT_48K: i64 = 10_687;

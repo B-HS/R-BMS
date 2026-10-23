@@ -2,6 +2,7 @@ use std::io::Write;
 
 use rbms_chart::{detect_mode, to_model};
 use rbms_model::NoteKind;
+use rbms_render::skin_render::frame::AUTO_LANE_NOTE;
 use rbms_render::{CpuCanvas, HudView, PlayfieldView, Skin, SkinConfig, render_hud, render_key_bomb, render_playfield_view};
 
 fn main() {
@@ -41,6 +42,7 @@ fn main() {
         constant: false,
         legacy_note: false,
         auto_lanes: &[],
+        auto_note: AUTO_LANE_NOTE,
     };
     render_playfield_view(&mut canvas, &skin, &field);
     let mut bomb = vec![(i64::MIN, 0u8); mode.key];

@@ -448,6 +448,78 @@ fn a_long_note_the_chart_plays_itself_is_green_end_to_end() {
     }
 }
 
+/// The colour a player picks for the notes SCRATCH AUTO plays.
+const PICKED_AUTO: Color = Color { r: 0xff, g: 0x40, b: 0xc0, a: u8::MAX };
+
+/// The green shipped as the default is the one the lanes were drawn in before it could be chosen,
+/// and the body of a long note keeps the share of it that was always let through.
+#[test]
+fn the_shipped_scratch_auto_colours_are_the_ones_drawn_before() {
+    assert_eq!(super::AUTO_LANE_NOTE, Color { r: 0x30, g: 0xe0, b: 0x50, a: u8::MAX });
+    assert_eq!(super::AUTO_LANE_LONG_BODY, Color { r: 0x30, g: 0xe0, b: 0x50, a: 0xa0 });
+    assert_eq!(super::auto_long_body(super::AUTO_LANE_NOTE), super::AUTO_LANE_LONG_BODY);
+    assert_eq!(LaneNotes::new(&[], 0, BPM).auto_note, super::AUTO_LANE_NOTE, "a field nobody coloured is drawn in the shipped green");
+}
+
+/// The body of a long note takes its share of whatever alpha the head colour has, and nothing else
+/// of the colour changes.
+#[test]
+fn a_long_body_keeps_its_share_of_the_alpha_it_is_given() {
+    const HALF: u8 = 0x80;
+    const HALF_BODY: u8 = 0x50;
+    let half = super::auto_long_body(Color { a: HALF, ..PICKED_AUTO });
+    assert_eq!(half, Color { a: HALF_BODY, ..PICKED_AUTO });
+    assert_eq!(super::auto_long_body(Color { a: 0, ..PICKED_AUTO }).a, 0, "a colour that is not there has no body");
+}
+
+/// A note of a lane the chart plays itself is drawn in the colour the field is given, and the green
+/// is nowhere on the canvas then.
+#[test]
+fn a_note_the_chart_plays_itself_is_drawn_in_the_colour_it_is_given() {
+    let timelines = chart(vec![note_at(1_000, 0.5, 0), note_at(1_000, 0.5, 1)]);
+    let auto = [true, false];
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    assert!(draw(&mut canvas, &object, &LaneNotes { auto_lanes: &auto, auto_note: PICKED_AUTO, ..playing(&timelines, 500) }));
+    assert_eq!(span(&canvas, middle(0), PICKED_AUTO), Some((200, 210)), "the picked note sits where the skin's note would");
+    assert_eq!(span(&canvas, middle(0), super::AUTO_LANE_NOTE), None, "and the shipped green is not drawn");
+    assert_eq!(span(&canvas, middle(1), shade(NOTE_RED)), Some((200, 210)), "a lane of the player's is drawn as the skin draws it");
+}
+
+/// The alpha of the picked colour is how opaque the notes are, on top of whatever the skin fades.
+#[test]
+fn a_note_the_chart_plays_itself_is_as_opaque_as_the_colour_it_is_given() {
+    let timelines = chart(vec![note_at(1_000, 0.5, 0)]);
+    let auto = [true];
+    let size = (CANVAS.0 as f32, CANVAS.1 as f32);
+    let faint = Color { a: HALF_ALPHA, ..PICKED_AUTO };
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    let notes = LaneNotes { auto_lanes: &auto, auto_note: faint, ..playing(&timelines, 500) };
+
+    assert!(draw_with(&mut canvas, &object, &notes, &fading(0.0), size));
+    assert_eq!(pixel(&canvas, middle(0), 205), over_black(PICKED_AUTO, HALF_ALPHA), "the colour's own alpha lets the field through");
+
+    assert!(draw_with(&mut canvas, &object, &notes, &fading(HALF_SHIFT), size));
+    assert!(pixel(&canvas, middle(0), 205).r < over_black(PICKED_AUTO, HALF_ALPHA).r, "the skin's own fade comes on top of it");
+}
+
+/// A long note of such a lane takes the colour end to end: the ends are the colour itself and the
+/// body is the same colour let through by the share of it a body keeps.
+#[test]
+fn a_long_note_the_chart_plays_itself_takes_the_colour_end_to_end() {
+    let timelines = long_chart(LnKind::Cn, 2_000, 1.0);
+    let auto = [true];
+    let notes = LaneNotes { ln_mode: LnKind::Cn, auto_lanes: &auto, auto_note: PICKED_AUTO, ..playing(&timelines, 500) };
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    draw(&mut canvas, &object, &notes);
+    assert_eq!(pixel(&canvas, middle(0), 205), PICKED_AUTO, "the start");
+    assert_eq!(pixel(&canvas, middle(0), 405), PICKED_AUTO, "the end");
+    assert_eq!(pixel(&canvas, middle(0), 300), over_black(PICKED_AUTO, super::auto_long_body(PICKED_AUTO).a), "the body lets the field through");
+    assert_eq!(span(&canvas, middle(0), super::AUTO_LANE_NOTE), None, "no shipped green is left on a lane that was given a colour");
+}
+
 /// A hidden note is drawn from the outlined placeholder on the lane's own rectangle, untouched by
 /// the note object's offsets, and only when the player asked for hidden notes.
 #[test]

@@ -35,7 +35,7 @@ pub use super::gauge::{GAUGE_TYPES, GaugeFrame, GaugeScale};
 use super::graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
 pub use super::notes::{
     AUTO_LANE_LONG_BODY, AUTO_LANE_NOTE, ConstantScroll, JUDGE_AREA_WINDOWS, JudgeArea, LaneLong, LaneNotes, LaneOffsets, NOTE_UNJUDGED, NoteDisplay,
-    NoteStates, Unplayed, current_duration_ms, first_lane_rect, fixed_hispeed, lane_offsets,
+    NoteStates, Unplayed, auto_long_body, current_duration_ms, first_lane_rect, fixed_hispeed, lane_offsets,
 };
 use super::object::SkinObject;
 use super::refs::ReferenceImages;

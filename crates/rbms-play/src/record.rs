@@ -214,16 +214,36 @@ impl GaugeLogRecorder {
     /// for every interval from the failure to half a second past the play time
     /// (`BMSPlayer.java:723-729`), or to [`GAUGE_LOG_PADDING_END_MS`] when the chart runs longer.
     pub(crate) fn closed(&self) -> GaugeLog {
+        match self.failed_at_ms {
+            Some(failed_at_ms) => self.padded_from(failed_at_ms),
+            None => self.log.clone(),
+        }
+    }
+
+    /// The history of a run left before its end, as the result screen receives it: what was
+    /// sampled, and a zero for every interval after it to the same end a failed run is padded to.
+    /// The reference closes such a run as a failed one and pads it the same way
+    /// (`BMSPlayer.java:722-727`), from the instant it was left; the recorder is not told that
+    /// instant, so the zeroes start at the first interval it has no sample for, which gives every
+    /// interval one value. A run an empty gauge already ended is closed as [`Self::closed`] closes it.
+    pub(crate) fn closed_left(&self) -> GaugeLog {
+        match self.failed_at_ms {
+            Some(_) => self.closed(),
+            None => self.padded_from(self.log.len() as i64 * GAUGE_LOG_INTERVAL_MS),
+        }
+    }
+
+    /// What was sampled, then a zero for every interval from `from_ms` to half a second past the
+    /// play time, or to [`GAUGE_LOG_PADDING_END_MS`] when the chart runs longer.
+    fn padded_from(&self, from_ms: i64) -> GaugeLog {
         let mut log = self.log.clone();
-        if let Some(failed_at_ms) = self.failed_at_ms {
-            let padding_end_ms = self.play_time_ms.saturating_add(GAUGE_LOG_INTERVAL_MS).min(GAUGE_LOG_PADDING_END_MS);
-            let mut at_ms = failed_at_ms;
-            while at_ms < padding_end_ms {
-                for samples in log.samples.iter_mut() {
-                    samples.push(0.0);
-                }
-                at_ms += GAUGE_LOG_INTERVAL_MS;
+        let padding_end_ms = self.play_time_ms.saturating_add(GAUGE_LOG_INTERVAL_MS).min(GAUGE_LOG_PADDING_END_MS);
+        let mut at_ms = from_ms;
+        while at_ms < padding_end_ms {
+            for samples in log.samples.iter_mut() {
+                samples.push(0.0);
             }
+            at_ms += GAUGE_LOG_INTERVAL_MS;
         }
         log
     }

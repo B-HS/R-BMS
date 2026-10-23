@@ -19,7 +19,7 @@ use rbms_skin::loader::{
     is_supported_skin_type, load_header, load_skin, load_skin_with_host, mode_skin_type, parse_document, read_document, selected_option, skin_type_mode,
     stretch_rect,
 };
-use rbms_skin::model::{Destination, NO_TINT, PropertyDef, PropertyItem, PropertyRef};
+use rbms_skin::model::{Destination, NO_RBMS_EXTENSIONS, NO_TINT, PropertyDef, PropertyItem, PropertyRef, RBMS_EXTENSIONS_PANEL_KEYS};
 use rbms_skin::property::generated::{OPTION_7KEYSONG, OPTION_AUTOPLAYON, OPTION_BGAOFF, OPTION_BGAON};
 use rbms_skin::property::{MapHost, StaticScreen};
 use rbms_skin::timer::{TimerId, TimerState};
@@ -210,6 +210,30 @@ fn a_document_without_colour_rows_declares_none_and_loads_as_it_always_did() {
     let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
     assert!(skin.def.color.is_empty() && skin.warnings.is_empty());
     assert_eq!(track(&skin, "plain").tint, None);
+}
+
+#[test]
+fn a_document_that_names_the_rbms_extensions_is_read_as_knowing_them() {
+    let scratch = Scratch::new("rbms-extensions");
+    let user = SkinUserConfig::default();
+    let load = |name: &str, extensions: &str| {
+        let text = format!(r#"{{ "type": 5{extensions}, "destination": [{{ "id": "plain", "dst": [{{ "time": 0 }}] }}] }}"#);
+        let path = scratch.write(name, &text);
+        load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load").def
+    };
+
+    let named = load("named.json", r#", "rbms_extensions": 1"#);
+    assert_eq!(named.rbms_extensions, RBMS_EXTENSIONS_PANEL_KEYS);
+    assert!(named.knows_rbms_extensions());
+
+    let silent = load("silent.json", "");
+    assert_eq!(silent.rbms_extensions, NO_RBMS_EXTENSIONS);
+    assert!(!silent.knows_rbms_extensions());
+
+    let zero = load("zero.json", r#", "rbms_extensions": 0"#);
+    assert!(!zero.knows_rbms_extensions());
+
+    assert!(load("later.json", r#", "rbms_extensions": 2"#).knows_rbms_extensions(), "a later value still names the ids it was written for");
 }
 
 #[test]

@@ -192,6 +192,7 @@ pub fn load_lua_skin(path: &Path, options: &LuaSkinOptions<'_>, host: &dyn SkinH
     def.skin_type = header.skin_type;
     def.name = header.name;
     def.author = header.author;
+    def.rbms_extensions = header.rbms_extensions;
     def.category = header.category;
     def.property = header.property;
     def.filepath = header.filepath;

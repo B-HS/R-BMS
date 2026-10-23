@@ -269,6 +269,7 @@ fn ron_round_trip_preserves_every_field() {
     c.play.scratch_left = true;
     c.play.key_debounce_ms = 5;
     c.play.scratch_auto = true;
+    c.play.scratch_auto_color = Some(SkinColor::rgba(255, 64, 192, 128));
     c.play.autoplay = false;
     c.play.random = NoteOption::Mirror;
     c.play.constant_speed = true;
@@ -348,6 +349,15 @@ fn ron_round_trip_preserves_every_field() {
 
     let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
     assert_eq!(back, c, "every field survives the round trip");
+}
+
+/// A settings file from before the SCRATCH AUTO colour holds none, which reads as the shipped green.
+#[test]
+fn a_settings_file_without_a_scratch_auto_colour_holds_the_shipped_one() {
+    let before: Config = ron::from_str("(play: (scratch_auto: true))").expect("a file from before the colour loads");
+    assert!(before.play.scratch_auto);
+    assert_eq!(before.play.scratch_auto_color, None);
+    assert_eq!(Config::default().play.scratch_auto_color, None);
 }
 
 /// The renderer reads what the player nudged through the offset ids the document declared, and

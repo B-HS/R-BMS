@@ -40,6 +40,12 @@
 //! is stored by every frame; one that comes to be set, or stops being set, has the document read
 //! again once ([`crate::skin_select::SkinLibrary::set_color_for`]).
 //!
+//! The colour the notes SCRATCH AUTO plays are drawn in is set the same way, from the two rows under
+//! SCRATCH AUTO: one read as the colour and a fold of its four channels. It is the player's own and
+//! is drawn on every skin, so it is stored in the play options and not with any document, and
+//! nothing is read again when it moves. The preview does not play SCRATCH AUTO, so the square of the
+//! colour on its row is where it is seen.
+//!
 //! A row of the play skin that other screens' skins declare under the same name -- the five play
 //! modes share most of theirs -- says so under the preview, and the key the skin menu has for it
 //! ([`APPLY_TO_ALL_KEY`]) puts the row's value onto those screens here too.
@@ -54,11 +60,12 @@ use rbms_skin::loader::{SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PL
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
+use crate::app_play::scratch_auto_color;
 use crate::notify::{Level, notify};
 use crate::number_row::{EditKey, NumberInput, NumberValue, RowPart};
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_preview::{PlayTarget, SkinPreview};
-use crate::skin_select::{SkinRow, SkinRowKind, hex_color};
+use crate::skin_select::{CHANNEL_STEPS, ColorChannel, SkinRow, SkinRowKind, color_value, hex_color, preset_after};
 use crate::stage::preview_menu::{
     ColorCell, INFO_ROW_UNDER_FIGURES_Y, InfoFigure, LIST_RECT, ListEntry, ListWindow, NEXT_TAB, NumberCell, PREVIOUS_TAB, ROW_STEP_BACK, ROW_STEP_FORWARD,
     RowLook, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_noted, draw_list, draw_preview,
@@ -71,8 +78,8 @@ use crate::{AppShared, Hot};
 mod rows;
 
 use rows::{
-    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, bpm_value, folded, help, hispeed_figure, is_read_only, listed, number_figure, number_of,
-    reset_setting, setting_value, step_setting,
+    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, SCRATCH_AUTO_COLOR_LABEL, bpm_value, folded, help, hispeed_figure, is_read_only, listed,
+    number_figure, number_of, reset_setting, setting_value, step_setting,
 };
 
 /// The screen's title.
@@ -210,13 +217,13 @@ impl PlayMenuState {
 
     /// Read the list again, keeping the cursor on the row it was on.
     ///
-    /// The tempo row, a row of the settings table and a fold are followed to wherever they now are,
+    /// The tempo row, a row of the settings table, a fold and a row of the SCRATCH AUTO colour are followed to wherever they now are,
     /// since the rows of the play skin come and go above them; a row of a skin is held by its
     /// place, because the row at that place of another document is the nearest thing to it.
     fn refresh(&mut self, shared: &AppShared) {
         let focused = self.focused();
         self.rows = listed(shared, self.target().screen, self.folds);
-        if let Some(row @ (Row::PreviewBpm | Row::Setting(_) | Row::Fold(_))) = focused
+        if let Some(row @ (Row::PreviewBpm | Row::Setting(_) | Row::Fold(_) | Row::AutoColor | Row::AutoChannel(_))) = focused
             && let Some(at) = self.rows.iter().position(|entry| *entry == row)
         {
             self.sel = at;
@@ -266,7 +273,7 @@ impl PlayMenuState {
         let Some(at) = self.rows.iter().position(|row| *row == Row::Fold(fold)) else {
             return;
         };
-        let held = self.rows[at + 1..].iter().take_while(|row| matches!(row, Row::Skin(_))).count();
+        let held = self.rows[at + 1..].iter().take_while(|row| matches!(row, Row::Skin(_) | Row::AutoChannel(_))).count();
         self.top = revealed_top(at + held, self.top, self.rows.len());
         self.top = revealed_top(at, self.top, self.rows.len());
     }
@@ -306,7 +313,16 @@ impl PlayMenuState {
                 }
                 moved
             }
-            Row::Group(_) | Row::PreviewBpm | Row::Fold(_) => false,
+            Row::AutoChannel(channel) => {
+                let held = scratch_auto_color(&ctx.shared.config.play);
+                if let Ok(value) = u8::try_from(CHANNEL_STEPS.clamp(steps))
+                    && value != channel.get(held)
+                {
+                    self.put_scratch_auto_color(ctx, Some(channel.set(held, value)));
+                }
+                false
+            }
+            Row::Group(_) | Row::PreviewBpm | Row::Fold(_) | Row::AutoColor => false,
         };
         if moved {
             self.preview.settings_changed(ctx.shared);
@@ -329,6 +345,16 @@ impl PlayMenuState {
         }
     }
 
+    /// Set the colour SCRATCH AUTO's notes are drawn in to `color`, or give back the green they ship
+    /// in with `None`, and tell the preview when that moved it. It is an engine value read by every
+    /// frame, so no document is read again.
+    fn put_scratch_auto_color(&mut self, ctx: &mut FrameCtx<'_>, color: Option<SkinColor>) {
+        if ctx.shared.config.play.scratch_auto_color != color {
+            ctx.shared.config.play.scratch_auto_color = color;
+            self.preview.settings_changed(ctx.shared);
+        }
+    }
+
     /// Store what was typed into the row being typed into, and close its editor. What is not a
     /// number -- or, typed into a colour row, not a colour -- is not stored, and the row says so for
     /// a while.
@@ -339,6 +365,12 @@ impl PlayMenuState {
         if let Row::Skin(SkinRow::Color(at)) = row {
             if let Some(color) = self.numbers.typed_color(row, &typed, ctx.now) {
                 self.put_color(ctx, at, Some(color));
+            }
+            return;
+        }
+        if row == Row::AutoColor {
+            if let Some(color) = self.numbers.typed_color(row, &typed, ctx.now) {
+                self.put_scratch_auto_color(ctx, Some(color));
             }
             return;
         }
@@ -399,6 +431,10 @@ impl PlayMenuState {
             }
             return;
         }
+        if row == Row::AutoColor {
+            self.numbers.begin_hex_edit(row, &hex_color(scratch_auto_color(&ctx.shared.config.play)));
+            return;
+        }
         match self.number_of(ctx.shared, row) {
             Some(value) => self.numbers.begin_edit(row, &value),
             None => self.step(ctx, row, ROW_STEP_FORWARD, false),
@@ -431,6 +467,18 @@ impl PlayMenuState {
                 self.reveal_cursor();
                 if self.folds.is_open(fold) {
                     self.reveal_fold(fold);
+                }
+                false
+            }
+            Row::AutoColor => {
+                if let Some(next) = preset_after(scratch_auto_color(&ctx.shared.config.play), delta) {
+                    self.put_scratch_auto_color(ctx, Some(next));
+                }
+                false
+            }
+            Row::AutoChannel(_) => {
+                if let Some(value) = self.number_of(ctx.shared, row) {
+                    self.set_number(ctx, row, value.stepped(delta, wide));
                 }
                 false
             }
@@ -497,6 +545,16 @@ impl PlayMenuState {
             }
             Row::Skin(SkinRow::Color(at)) => {
                 self.put_color(ctx, at, None);
+                false
+            }
+            Row::AutoColor => {
+                self.put_scratch_auto_color(ctx, None);
+                false
+            }
+            Row::AutoChannel(_) => {
+                if let Some(value) = self.number_of(ctx.shared, row) {
+                    self.set_number(ctx, row, value.shipped);
+                }
                 false
             }
             Row::Group(_) | Row::Skin(SkinRow::File(_) | SkinRow::Export | SkinRow::ColorChannels) | Row::Fold(_) => false,
@@ -569,9 +627,18 @@ impl PlayMenuState {
                 Line { label, value, look }
             }
             Row::Fold(fold) => {
-                let held = folded(shared, self.target().screen, fold).len();
+                let held = match fold {
+                    Fold::AutoChannels => ColorChannel::ALL.len(),
+                    _ => folded(shared, self.target().screen, fold).len(),
+                };
                 Line { label: fold.label().to_string(), value: fold_value(self.folds.is_open(fold), held), look }
             }
+            Row::AutoColor => Line { label: SCRATCH_AUTO_COLOR_LABEL.to_string(), value: color_value(shared.config.play.scratch_auto_color), look },
+            Row::AutoChannel(channel) => Line {
+                label: format!("{SCRATCH_AUTO_COLOR_LABEL} {}", channel.label()),
+                value: number_of(shared, readout, self.target().screen, row).map_or_else(String::new, |value| number_figure(row, &value)),
+                look,
+            },
         }
     }
 
@@ -628,6 +695,7 @@ impl PlayMenuState {
         let screen = self.target().screen;
         let color_of = |row: &Row| match row {
             Row::Skin(SkinRow::Color(at)) => shared.skins.color_for(&shared.config, screen, *at).map(|(color, _)| Color::from(color)),
+            Row::AutoColor => Some(Color::from(scratch_auto_color(&shared.config.play))),
             _ => None,
         };
         let lines: Vec<(Line, Option<NumberValue>, Option<Color>)> =

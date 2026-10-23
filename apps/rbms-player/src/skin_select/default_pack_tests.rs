@@ -231,6 +231,23 @@ fn a_choice_made_in_a_default_pack_document_is_saved_and_restored() {
     assert!(next_run.document(SKIN_TYPE_DECIDE).is_some(), "the installed document was not read with the stored choice");
 }
 
+/// The default pack's browser says it knows this player's own ids, which is what the option panels'
+/// reassigned keys are read by. No other document of the pack says it: only the browser reads the
+/// mark.
+#[test]
+fn the_default_select_skin_names_the_rbms_extensions() {
+    let settings = installed("extensions");
+    let config = Config::default();
+    let mut skins = SkinLibrary::new(&settings, &config);
+    skins.rescan(&settings, &config);
+    for (screen, names_them) in [(SKIN_TYPE_MUSIC_SELECT, true), (SKIN_TYPE_PLAY_7KEYS, false), (SKIN_TYPE_DECIDE, false)] {
+        skins.reload_for(&config, screen, SkinRead { host: &DefaultState, seed: Some(READ_SEED) });
+        assert_eq!(skins.failure(screen), None, "screen {screen}");
+        let skin = skins.document(screen).unwrap_or_else(|| panic!("screen {screen} was not read"));
+        assert_eq!(skin.def.knows_rbms_extensions(), names_them, "screen {screen}");
+    }
+}
+
 /// The options of the seven-key play document that pick colours, each with the item it is put on:
 /// the slate theme, the sky accent and the white and yellow notes.
 const COLOUR_OPTIONS: [(&str, i32); 3] = [("Theme", 921), ("Accent", 923), ("Note Colors", 932)];

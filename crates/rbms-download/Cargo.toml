@@ -1,0 +1,15 @@
+[package]
+name = "rbms-download"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+encoding_rs = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+zip = { workspace = true }
+
+[lints]
+workspace = true

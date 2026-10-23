@@ -741,8 +741,8 @@ fn a_max_run_with_empty_poor() {
     check_contract("score-max-with-empty-poor", &score.body);
 }
 
-/// A run left by Escape part-way, which no result screen sends: a records sync of that run alone
-/// sends the body kept when it was left.
+/// A run left by Escape part-way, which its result screen sends as it sends a finished run, and its
+/// trace, which a records sync of the run sends once the server has taken the score.
 #[test]
 fn a_run_left_mid_song() {
     let server = CaptureServer::spawn();
@@ -765,8 +765,14 @@ fn a_run_left_mid_song() {
     }
     let summary = session.summary();
     assert!(summary.total_judged > 0 && summary.total_judged < summary.total_notes, "the fixture run is left part-way: {summary:?}");
-    leave_by_escape(&mut shared, session);
-    assert!(shared.submit_rx.is_none(), "a result screen sent the run");
+    let left = leave_by_escape(&mut shared, session);
+    assert!(matches!(left, Transition::To(Stage::Result(_))), "the run did not reach the result screen");
+    let deadline = std::time::Instant::now() + WORK_WAIT;
+    while shared.submit_rx.is_some() {
+        assert!(std::time::Instant::now() < deadline, "the submission did not come back");
+        shared.poll_ir_jobs(crate::stage::StageId::Result);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     sync_finished(&mut shared);
     let score = server.next("POST", "/scores");
     check_contract("score-abandoned", &score.body);

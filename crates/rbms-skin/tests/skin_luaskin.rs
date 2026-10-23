@@ -21,7 +21,7 @@ use rbms_skin::loader::{
     SkinLoadOptions, SkinUserConfig, automatic_offsets, is_known_skin_type, is_lua_skin, load_header, load_skin, load_skin_with_host, skin_resolution,
 };
 use rbms_skin::lua::{LoadBudget, LuaBudget};
-use rbms_skin::model::{Destination, NO_TINT, NoteSet, PropertyRef, SkinDef};
+use rbms_skin::model::{Destination, NO_RBMS_EXTENSIONS, NO_TINT, NoteSet, PropertyRef, RBMS_EXTENSIONS_PANEL_KEYS, SkinDef};
 use rbms_skin::property::generated::{
     OPTION_1P_80_89, OPTION_1P_AA, OPTION_7KEYSONG, OPTION_AA, OPTION_BANNER, OPTION_BEST_AA_1P, OPTION_BGA, OPTION_BGAOFF, OPTION_BGAON, OPTION_CLEAR_GROOVE,
     OPTION_CLEAR_NORMAL, OPTION_GOOD_EXIST, OPTION_GREAT_EXIST, OPTION_JUDGE_NORMAL, OPTION_NO_BACKBMP, OPTION_NO_BPMCHANGE, OPTION_NO_LN,
@@ -927,6 +927,30 @@ fn the_header_pass_decides_the_rows_and_the_body_pass_everything_drawn() {
     assert_eq!(skin.selected_options, vec![("Row".to_owned(), 900)]);
     assert_eq!((skin.def.w, skin.def.h, skin.def.input), (1920, 1080, 500), "the size and the scene timings are the body pass's");
     assert_eq!(object_ids(&skin), vec!["-110"]);
+}
+
+#[test]
+fn a_lua_header_that_names_the_rbms_extensions_is_read_as_knowing_them() {
+    let scratch = Scratch::new("rbms-extensions");
+    let named = r#"
+        if skin_config then
+            return { type = 5, destination = { { id = "-110", dst = { { x = 0 } } } } }
+        end
+        return { type = 5, rbms_extensions = 1 }
+    "#;
+    let skin = load_scratch(&scratch, named).expect("the skin should load");
+    assert_eq!(skin.def.rbms_extensions, RBMS_EXTENSIONS_PANEL_KEYS, "the header pass's value is the document's");
+    assert!(skin.def.knows_rbms_extensions());
+
+    let silent = r#"
+        if skin_config then
+            return { type = 5, destination = { { id = "-110", dst = { { x = 0 } } } } }
+        end
+        return { type = 5 }
+    "#;
+    let skin = load_scratch(&scratch, silent).expect("the skin should load");
+    assert_eq!(skin.def.rbms_extensions, NO_RBMS_EXTENSIONS);
+    assert!(!skin.def.knows_rbms_extensions());
 }
 
 #[test]

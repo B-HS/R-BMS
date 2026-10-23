@@ -221,25 +221,32 @@ pub(super) fn number_rows(shared: &AppShared) -> Vec<GuideRow> {
 }
 
 /// The lines of the three option panels: the keys held for each, as they are bound now, then what
-/// the turntable does on each. What keys one to seven do on a panel is the skin's to show.
+/// the turntable does on each. What keys one to seven do on a panel is the skin's to show. The
+/// turntable of the second and third panels does something only on a skin that names this player's
+/// own ids; to any other it is the reference's, which gives it nothing there.
 pub(super) fn panel_rows(shared: &AppShared) -> Vec<GuideRow> {
     let start = control_label(shared, ControlAction::Start);
     let select = control_label(shared, ControlAction::Select);
     let detail = bound_label(shared.shortcut_key(Shortcut::RefDetail));
-    vec![
+    let mut rows = vec![
         GuideRow::new(start, "HOLD FOR THE PLAY OPTIONS"),
         GuideRow::new(select, "HOLD FOR THE ASSIST OPTIONS"),
         GuideRow::new(format!("{start} + {select} / {detail}"), "HOLD FOR THE DETAIL OPTIONS"),
         GuideRow::new(format!("{start} + TURNTABLE"), "TARGET"),
-        GuideRow::new(format!("{select} + TURNTABLE"), "HIDDEN+ ON/OFF"),
-        GuideRow::new(format!("{start}+{select} + TURNTABLE"), "JUDGE ALGORITHM"),
-    ]
+    ];
+    if KeyLayout::of_browser(shared).is_extended() {
+        rows.extend([
+            GuideRow::new(format!("{select} + TURNTABLE"), "HIDDEN+ ON/OFF"),
+            GuideRow::new(format!("{start}+{select} + TURNTABLE"), "JUDGE ALGORITHM"),
+        ]);
+    }
+    rows
 }
 
-/// The lines of the keys of the reference's table: for each role, the keyboard keys that are on the
+/// The lines of the keys of the browser's table: for each role, the keyboard keys that are on the
 /// indices that carry it in the mode that is up.
 pub(super) fn key_rows(shared: &AppShared) -> Vec<GuideRow> {
-    let layout = KeyLayout::of(shared.mode);
+    let layout = KeyLayout::of_browser(shared);
     KEY_ROLES
         .iter()
         .map(|(role, does)| {

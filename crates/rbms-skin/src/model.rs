@@ -42,6 +42,15 @@ pub const SKIN_TYPE_UNSET: i32 = -1;
 /// A single undivided cell: one column, one row.
 const SINGLE_DIVISION: i32 = 1;
 
+/// The `rbms_extensions` value of a document that says nothing of this player's own ids, which is
+/// every document written for the reference.
+pub const NO_RBMS_EXTENSIONS: i32 = 0;
+
+/// The `rbms_extensions` value of a document that knows this player's own ids (the events 21000 to
+/// 21099 and the options 21100 to 21199) and the keys of the song browser's option panels that go
+/// with them.
+pub const RBMS_EXTENSIONS_PANEL_KEYS: i32 = 1;
+
 /// The `stretch` value of a destination that names none.
 pub const STRETCH_UNSET: i32 = -1;
 
@@ -605,6 +614,7 @@ pub struct SkinDef {
     pub filepath: Vec<Filepath>,
     pub offset: Vec<OffsetDef>,
     pub color: Vec<ColorDef>,
+    pub rbms_extensions: i32,
     pub source: Vec<Source>,
     pub font: Vec<FontDef>,
     pub image: Vec<ImageDef>,
@@ -662,6 +672,7 @@ impl Default for SkinDef {
             filepath: Vec::new(),
             offset: Vec::new(),
             color: Vec::new(),
+            rbms_extensions: NO_RBMS_EXTENSIONS,
             source: Vec::new(),
             font: Vec::new(),
             image: Vec::new(),
@@ -692,5 +703,13 @@ impl Default for SkinDef {
             custom_timers: Vec::new(),
             destination: Vec::new(),
         }
+    }
+}
+
+impl SkinDef {
+    /// Whether the document says it knows this player's own ids, which is what the song browser's
+    /// option panels read their reassigned keys by.
+    pub fn knows_rbms_extensions(&self) -> bool {
+        self.rbms_extensions >= RBMS_EXTENSIONS_PANEL_KEYS
     }
 }
