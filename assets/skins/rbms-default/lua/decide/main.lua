@@ -3,6 +3,7 @@ local props = require("lua.props")
 local ui = require("lua.ui")
 local motion = require("lua.motion")
 local parts = require("lua.parts")
+local i18n = require("lua.i18n")
 
 local decide = {}
 
@@ -96,7 +97,7 @@ end
 
 local function level_fact(s, main_state)
     local fact = FACTS.level
-    local x, width, start = fact_label(s, fact, "LEVEL", 0)
+    local x, width, start = fact_label(s, fact, i18n.t("common_level"), 0)
     local spec = { sprite = fact.sprite, ref = props.number.PLAYLEVEL, known = main_state.number(props.number.PLAYLEVEL), fit = width * fact.number_share }
     local box = { x = x, baseline = FACTS.baseline }
     parts.by_difficulty(function(_, op, color)
@@ -131,7 +132,7 @@ end
 
 local function notes_fact(s, main_state)
     local fact = FACTS.notes
-    local x, width, start = fact_label(s, fact, "NOTES", 2)
+    local x, width, start = fact_label(s, fact, i18n.t("common_notes"), 2)
     local spec = { sprite = fact.sprite, ref = props.number.TOTALNOTES, known = main_state.number(props.number.TOTALNOTES), fit = width }
     s:number(spec, { x = x, baseline = FACTS.baseline }, motion.fade_in(start, nil, { color = theme.color.text }))
 end
@@ -148,8 +149,8 @@ local function facts(s, main_state)
     level_fact(s, main_state)
     bpm_fact(s, main_state)
     notes_fact(s, main_state)
-    word_fact(s, FACTS.judge, "JUDGE", 3, parts.judge_rank_text)
-    word_fact(s, FACTS.keys, "KEYS", 4, parts.key_mode_text)
+    word_fact(s, FACTS.judge, i18n.t("common_judge"), 3, parts.judge_rank_text)
+    word_fact(s, FACTS.keys, i18n.t("common_keys"), 4, parts.key_mode_text)
 end
 
 local function graph(s)
@@ -157,7 +158,7 @@ local function graph(s)
     local width = theme.content_width()
     local shown = { op = { OPTION.GRAPH_SHOW } }
     local appear = motion.fade_in(GRAPH.at, nil, shown)
-    parts.caption(s, "NOTE DISTRIBUTION", { x = grid.margin, top = GRAPH.caption_top, w = width }, appear)
+    parts.caption(s, i18n.t("decide_note_distribution"), { x = grid.margin, top = GRAPH.caption_top, w = width }, appear)
     local box = { x = grid.margin, top = GRAPH.top, w = width, h = GRAPH.height }
     parts.panel(s, box, appear)
     s:object("judgegraph", { type = props.judge_graph.NOTES, backTexOff = props.back_texture.OFF }, box, appear)
@@ -170,7 +171,7 @@ local function footer(s)
     local progress = { x = grid.margin, top = grid.footer_rule, w = width, h = grid.rule }
     s:rect(progress, theme.color.accent, motion.progress_right(TIME.scene))
     local hint = motion.fade_in(0, FOOTER.hint_fade, { timer = props.timer.STARTINPUT, color = theme.color.muted })
-    s:text({ text = "ENTER  SKIP        ESC  BACK", size = theme.type.caption }, { x = grid.margin, top = FOOTER.hint_top, w = width }, hint)
+    s:text({ text = i18n.t("decide_hint"), size = theme.type.caption }, { x = grid.margin, top = FOOTER.hint_top, w = width }, hint)
 end
 
 local function closing(s)
@@ -191,7 +192,7 @@ function decide.build()
     s:atlas("common")
     s:atlas("decide")
     parts.backdrop(s)
-    parts.frame(s, "CHART SELECTED")
+    parts.frame(s, i18n.t("decide_title"))
     hero(s, main_state)
     stage(s)
     facts(s, main_state)

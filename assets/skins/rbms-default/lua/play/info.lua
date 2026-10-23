@@ -3,17 +3,26 @@ local props = require("lua.props")
 local ui = require("lua.ui")
 local parts = require("lua.parts")
 local layout = require("lua.play.layout")
+local i18n = require("lua.i18n")
 
 local info = {}
 
 local EX_PER_NOTE = 2
 local SIGN_PLACES = 1
+local STAGE_NUMBER = i18n.template("common_stage_number")
+
+local function stage_label(number)
+    return function()
+        return STAGE_NUMBER(number)
+    end
+end
+
 local STAGE_LABELS = {
-    { op = props.option.COURSE_STAGE1, label = "STAGE 1" },
-    { op = props.option.COURSE_STAGE1 + 1, label = "STAGE 2" },
-    { op = props.option.COURSE_STAGE1 + 2, label = "STAGE 3" },
-    { op = props.option.COURSE_STAGE1 + 3, label = "STAGE 4" },
-    { op = props.option.COURSE_STAGE_FINAL, label = "FINAL STAGE" },
+    { op = props.option.COURSE_STAGE1, label = stage_label(1) },
+    { op = props.option.COURSE_STAGE1 + 1, label = stage_label(2) },
+    { op = props.option.COURSE_STAGE1 + 2, label = stage_label(3) },
+    { op = props.option.COURSE_STAGE1 + 3, label = stage_label(4) },
+    { op = props.option.COURSE_STAGE_FINAL, label = i18n.t("play_final_stage") },
 }
 
 local HEAD = {
@@ -113,8 +122,8 @@ local PACE = {
     sprite = "snum24",
     bars = {
         { type = props.rate.SCORE_RATE, color = theme.color.accent },
-        { type = props.rate.BESTSCORE_RATE_NOW, color = theme.color.sub, label = "BEST", diff = props.number.DIFF_HIGHSCORE },
-        { type = props.rate.TARGETSCORE_RATE_NOW, color = theme.tone.yellow, label = "TARGET", name = props.text.TARGET_NAME, diff = props.number.DIFF_EXSCORE },
+        { type = props.rate.BESTSCORE_RATE_NOW, color = theme.color.sub, label = i18n.t("common_best"), diff = props.number.DIFF_HIGHSCORE },
+        { type = props.rate.TARGETSCORE_RATE_NOW, color = theme.tone.yellow, label = i18n.t("common_target"), name = props.text.TARGET_NAME, diff = props.number.DIFF_EXSCORE },
     },
 }
 
@@ -170,7 +179,7 @@ local function bga(s, view)
     local inner = ui.inset(box, BGA.inset)
     local size = theme.type.caption
     local label = { x = box.x, top = theme.centered_top(box, size), w = box.w }
-    local absent = { { ops = { props.option.NO_BGA }, label = "NO BGA" }, { ops = { props.option.BGA, props.option.BGA_OFF }, label = "BGA OFF" } }
+    local absent = { { ops = { props.option.NO_BGA }, label = i18n.t("play_no_bga") }, { ops = { props.option.BGA, props.option.BGA_OFF }, label = "BGA OFF" } }
     for _, case in ipairs(absent) do
         local pictured = { props.option.STAGEFILE, table.unpack(case.ops) }
         s:reference(props.image.STAGEFILE, inner, { op = pictured, stretch = props.stretch.FIT_INNER })
@@ -212,7 +221,7 @@ local function score(s, view, main_state)
         end,
         function(x, baseline)
             score_rate(s, main_state, x, width, baseline)
-            return "RATE"
+            return i18n.t("common_rate")
         end,
         function(x, baseline)
             local spec = { sprite = SCORE.plain, ref = props.number.MAXCOMBO_NOW, digit = SCORE.combo_digits, saturate = true, align = "right" }
@@ -224,7 +233,7 @@ local function score(s, view, main_state)
         table.insert(rows, function(x, baseline)
             local spec = { sprite = SCORE.signed, ref = props.number.DIFF_EXSCORE, digit = ex_digits + SIGN_PLACES, align = "right", fit = width - SCORE.label_width }
             s:number(spec, { x = x, baseline = baseline, w = width }, { color = theme.color.sub })
-            return "TARGET"
+            return i18n.t("common_target")
         end)
     end
     local per_column = wide and math.ceil(#rows / 2) or #rows
@@ -247,7 +256,7 @@ local function counts(s, view, main_state)
     local slow_end = box.x + box.w
     local size = theme.type.caption
     local split_width = slow_end - fast_end - theme.grid.unit * 2
-    parts.caption(s, "JUDGE", { x = box.x, top = box.top, w = box.w })
+    parts.caption(s, i18n.t("common_judge"), { x = box.x, top = box.top, w = box.w })
     s:text({ text = "FAST", size = size, align = "right" }, { x = box.x, top = box.top, w = fast_end - box.x }, { color = theme.color.muted })
     s:text({ text = "SLOW", size = size, align = "right" }, { x = box.x, top = box.top, w = slow_end - box.x }, { color = theme.color.muted })
     for index, row in ipairs(parts.judges) do
@@ -294,11 +303,15 @@ local function timing(s, view, main_state)
     local bpm = { sprite = TIMING.sprite, ref = props.number.NOWBPM, digit = ui.digit_count(ui.has_value(fastest) and fastest or 0), fit = column - TIMING.column_room }
     s:number(bpm, { x = at(0), baseline = baseline }, { color = theme.color.text })
 
-    parts.caption(s, "TIME LEFT", { x = at(1), top = box.top, w = column })
+    parts.caption(s, i18n.t("play_time_left"), { x = at(1), top = box.top, w = column })
     time_left(s, main_state, at(1), baseline)
 
+    local timing_auto, timing_plain = i18n.t("play_timing_auto"), i18n.t("common_timing")
     local adjusting = function()
-        return main_state.event_index(props.index.TIMING_AUTO_ADJUST) == TIMING.auto_on and "TIMING AUTO" or "TIMING"
+        if main_state.event_index(props.index.TIMING_AUTO_ADJUST) == TIMING.auto_on then
+            return timing_auto()
+        end
+        return timing_plain()
     end
     local heading = { value = adjusting, size = theme.type.caption, overflow = props.text_overflow.SHRINK }
     s:text(heading, { x = at(2), top = box.top, w = column - TIMING.caption_room }, { color = theme.color.muted })
@@ -376,7 +389,7 @@ end
 
 local function foot_state(s, box, status_top)
     local changing = { op = { props.option.LANECOVER1_CHANGING } }
-    local shades = { { label = "COVER", ref = props.number.LANECOVER1 }, { label = "LIFT", ref = props.number.LIFT1 } }
+    local shades = { { label = i18n.t("play_cover"), ref = props.number.LANECOVER1 }, { label = "LIFT", ref = props.number.LIFT1 } }
     for index, shade in ipairs(shades) do
         local column = foot_column(box, FOOT.shade_column + index - 1)
         parts.caption(s, shade.label, column, changing)
@@ -386,7 +399,7 @@ local function foot_state(s, box, status_top)
 
     local status = { x = box.x, top = box.top + status_top, w = box.w }
     parts.caption(s, "AUTOPLAY", status, { op = { props.option.AUTOPLAY_ON }, color = theme.color.accent })
-    parts.caption(s, "REPLAY", status, { op = { props.option.REPLAY_PLAYING }, color = theme.color.accent })
+    parts.caption(s, i18n.t("common_replay"), status, { op = { props.option.REPLAY_PLAYING }, color = theme.color.accent })
 end
 
 local function foot(s, view, main_state)
@@ -411,7 +424,7 @@ local function pace(s, view, main_state)
     end
     local total = main_state.number(props.number.TOTALNOTES)
     local digits = ui.digit_count(ui.has_value(total) and total * EX_PER_NOTE or 0) + SIGN_PLACES
-    parts.caption(s, "SCORE GRAPH", { x = box.x, top = box.top, w = box.w })
+    parts.caption(s, i18n.t("play_score_graph"), { x = box.x, top = box.top, w = box.w })
     local bars_top = box.top + PACE.head
     local bars_height = box.h - PACE.head - PACE.legend
     local legend_top = bars_top + bars_height

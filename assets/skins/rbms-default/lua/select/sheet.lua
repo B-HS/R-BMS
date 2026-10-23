@@ -4,8 +4,11 @@ local ui = require("lua.ui")
 local panel = require("lua.select.panel")
 local words = require("lua.select.words")
 local inform = require("lua.select.inform")
+local i18n = require("lua.i18n")
 
 local sheet = {}
+
+local t = i18n.t
 
 local TOP = 120
 local LEFT = { x = 64, w = 408 }
@@ -129,25 +132,24 @@ local function switch(main_state, spec, read)
     return option(spec)
 end
 
-local function out_of_reach(main_state, ...)
-    local ids = {}
-    for _, index in ipairs({ ... }) do
-        table.insert(ids, props.extension.UNREACHABLE_KEY_FIRST + index - 1)
-    end
+local function out_of_reach(index)
+    return { props.extension.UNREACHABLE_KEY_FIRST + index - 1 }
+end
+
+local function joined(lines)
     return function()
-        for _, id in ipairs(ids) do
-            if not main_state.option(id) then
-                return false
-            end
+        local texts = {}
+        for index, line in ipairs(lines) do
+            texts[index] = line()
         end
-        return true
+        return i18n.join(texts)
     end
 end
 
-local function keyboard(page, main_state, labels)
+local function keyboard(page, labels)
     for index = 1, KEYS.count do
         local label = labels[index]
-        page:key(key_box(index), label.text, label.color, is_black(index), out_of_reach(main_state, index))
+        page:key(key_box(index), label.text, label.color, is_black(index), out_of_reach(index))
     end
 end
 
@@ -157,13 +159,13 @@ local function turntable(page, action, color)
     local size = theme.type.caption
     local first = box.top + (box.h - theme.cap_height(size) - TURNTABLE.pitch) / 2
     local spec = { size = size, weight = "bold", align = "center", overflow = props.text_overflow.SHRINK }
-    page:write(ui.merge(spec, { text = "TURNTABLE" }), { x = box.x, top = first, w = box.w }, theme.color.sub)
+    page:write(ui.merge(spec, { text = t("sheet_turntable") }), { x = box.x, top = first, w = box.w }, theme.color.sub)
     page:write(ui.merge(spec, { text = action }), { x = box.x, top = first + TURNTABLE.pitch, w = box.w }, color)
 end
 
 local function information(page, main_state, def)
     local tag = { x = MAIN.x, top = TOP, w = INFO.tag_w, h = INFO.tag_h }
-    page:tag(tag, "INFORMATION", theme.panel.pick, theme.panel.pick_ink)
+    page:tag(tag, t("sheet_information"), theme.panel.pick, theme.panel.pick_ink)
     local caption = theme.type.caption
     local hold = { text = def.hold, size = caption, align = "right", overflow = props.text_overflow.SHRINK }
     local right = { x = tag.x + tag.w + INFO.inset, top = theme.centered_top(tag, caption), w = MAIN.w - tag.w - INFO.inset }
@@ -200,7 +202,7 @@ local function target(page, color)
     local height = panel.HEADER.height + panel.ROWS.first + rows * TARGET_ROWS.pitch + panel.ROWS.foot
     local frame = { x = LEFT.x, top = TOP, w = LEFT.w, h = height }
     page:body(frame, color)
-    page:heading(frame, { "TARGET" }, color)
+    page:heading(frame, { t("common_target") }, color)
     local size = theme.type.label
     local refs = {}
     for step = 1, props.target_reach do
@@ -229,7 +231,7 @@ local function gauge_help(page, main_state, top, color)
     local height = HELP.tag_h + HELP.gap * 3 + HELP.name_size + HELP.line_pitch * #words.gauge[0]
     local box = { x = LEFT.x, top = top, w = LEFT.w, h = height }
     local read = indexed(main_state, props.index.GAUGE_1P)
-    local first = help_tag(page, box, "GROOVE GAUGE", color)
+    local first = help_tag(page, box, t("sheet_groove_gauge"), color)
     local inner = { x = box.x + panel.ROWS.inset * 2, w = box.w - panel.ROWS.inset * 4 }
     local name = { size = HELP.name_size, weight = "bold", overflow = props.text_overflow.SHRINK }
     name.value = function()
@@ -239,8 +241,8 @@ local function gauge_help(page, main_state, top, color)
     for line = 1, #words.gauge[0] do
         local spec = { size = theme.type.caption, overflow = props.text_overflow.SHRINK }
         spec.value = function()
-            local notes = words.gauge[read()]
-            return notes and notes[line] or ""
+            local note = (words.gauge[read()] or {})[line]
+            return note and note() or ""
         end
         page:write(spec, { x = inner.x, top = first + HELP.name_size + HELP.gap + (line - 1) * HELP.line_pitch, w = inner.w }, theme.color.sub)
     end
@@ -250,28 +252,28 @@ local function play_page(page, main_state)
     local random = option({
         title = "RANDOM",
         name = { "RANDOM" },
-        label = "STYLE",
+        label = t("sheet_label_style"),
         color = COLUMN.orange,
         read = indexed(main_state, props.index.RANDOM_1P),
         values = numbered(theme.random_name, 0, #theme.random_name),
         notes = words.random,
     })
     local gauge = option({
-        title = "GAUGE",
-        name = { "GAUGE" },
-        label = "GAUGE",
+        title = t("common_gauge"),
+        name = { t("common_gauge") },
+        label = t("common_gauge"),
         color = COLUMN.green,
         read = indexed(main_state, props.index.GAUGE_1P),
         values = numbered(theme.gauge_name, 0, 5),
         notes = {},
     })
     for value, lines in pairs(words.gauge) do
-        gauge.notes[value] = table.concat(lines, " ")
+        gauge.notes[value] = joined(lines)
     end
     local fix = option({
         title = "HI-SPEED FIX",
         name = { "HI-SPEED FIX" },
-        label = "SPEED",
+        label = t("sheet_label_speed"),
         color = COLUMN.violet,
         read = indexed(main_state, props.index.HSFIX),
         values = numbered(words.fix, 0, #words.fix),
@@ -283,7 +285,7 @@ local function play_page(page, main_state)
             return main_state.text(props.text.TARGET_NAME)
         end,
         tell = function(now)
-            return "TARGET", now, words.target
+            return t("common_target"), now, words.target
         end,
     }
 
@@ -291,16 +293,17 @@ local function play_page(page, main_state)
     def.watch = { random.watch, gauge.watch, fix.watch, target_watch }
     information(page, main_state, def)
 
-    keyboard(page, main_state, {
-        { text = "DOWN", color = random.color },
-        { text = "UP", color = random.color },
-        { text = "DOWN", color = gauge.color },
-        { text = "UP", color = gauge.color },
-        { text = "DOWN", color = fix.color },
-        { text = "UP", color = fix.color },
-        { text = "DOWN", color = random.color },
+    local down, up = t("sheet_key_down"), t("sheet_key_up")
+    keyboard(page, {
+        { text = down, color = random.color },
+        { text = up, color = random.color },
+        { text = down, color = gauge.color },
+        { text = up, color = gauge.color },
+        { text = down, color = fix.color },
+        { text = up, color = fix.color },
+        { text = down, color = random.color },
     })
-    turntable(page, "TARGET", target_color)
+    turntable(page, t("common_target"), target_color)
 
     local columns = { random, gauge, fix }
     local width, gap = PLAY_BOX.width, PLAY_BOX.gap
@@ -354,52 +357,52 @@ local function assist_page(page, main_state)
     local ex_judge = switch(main_state, {
         title = "EX JUDGE",
         name = { "EX JUDGE" },
-        label = "JUDGE",
+        label = t("common_judge"),
         color = COLUMN.locked,
         notes = words.ex_judge,
-        lines = { "READ ONLY:", "SET IN SETTINGS" },
+        lines = { t("sheet_read_only_1"), t("sheet_read_only_2") },
     }, indexed(main_state, props.index.ASSIST_EXJUDGE))
     local constant = switch(main_state, {
         title = "CONSTANT",
         name = { "CONSTANT" },
-        label = "SPEED",
+        label = t("sheet_label_speed"),
         color = COLUMN.orange,
         notes = words.constant,
     }, indexed(main_state, props.index.ASSIST_CONSTANT))
     local scratch = switch(main_state, {
         title = "SCRATCH AUTO",
         name = { "SCRATCH", "AUTO" },
-        label = "ASSIST",
+        label = t("sheet_label_assist"),
         color = COLUMN.green,
         notes = words.scratch_auto,
-        lines = { "ON: THE LAMP IS AN", "ASSIST GRADE" },
+        lines = { t("sheet_scratch_auto_1"), t("sheet_scratch_auto_2") },
         line_color = COLUMN.green,
     }, flagged(main_state, ext.SCRATCH_AUTO_ON))
     local legacy = switch(main_state, {
         title = "LEGACY NOTE",
         name = { "LEGACY", "NOTE" },
-        label = "ASSIST",
+        label = t("sheet_label_assist"),
         color = COLUMN.violet,
         notes = words.legacy,
     }, indexed(main_state, props.index.ASSIST_LEGACY))
     local keep = switch(main_state, {
         title = "KEEP GREEN NUMBER",
         name = { "KEEP GREEN", "NUMBER" },
-        label = "SPEED",
+        label = t("sheet_label_speed"),
         color = COLUMN.sky,
         notes = words.keep_green,
     }, flagged(main_state, ext.KEEP_GREEN_NUMBER_ON))
     local cover = switch(main_state, {
-        title = "LANE COVER",
-        name = { "LANE", "COVER" },
-        label = "RANGE",
+        title = t("sheet_lane_cover"),
+        name = { t("sheet_lane_cover_1"), t("sheet_lane_cover_2") },
+        label = t("sheet_label_range"),
         color = COLUMN.orange,
         notes = words.lane_cover,
     }, flagged(main_state, ext.LANE_COVER_ON))
     local lift = switch(main_state, {
         title = "LIFT",
         name = { "LIFT" },
-        label = "RANGE",
+        label = t("sheet_label_range"),
         color = COLUMN.green,
         notes = words.lift,
     }, flagged(main_state, ext.LIFT_ON))
@@ -408,7 +411,7 @@ local function assist_page(page, main_state)
         name = { "HIDDEN+" },
         color = COLUMN.violet,
         notes = words.hidden,
-        lines = { "TURN THE TURNTABLE", "EITHER WAY TO SWITCH" },
+        lines = { t("sheet_hidden_1"), t("sheet_hidden_2") },
     }, flagged(main_state, ext.HIDDEN_ON))
 
     local columns = { ex_judge, constant, scratch, legacy, keep, cover, lift }
@@ -424,8 +427,8 @@ local function assist_page(page, main_state)
     for index, spec in ipairs(columns) do
         labels[index] = { text = "ON/OFF", color = spec.color }
     end
-    labels[1].text = "LOCKED"
-    keyboard(page, main_state, labels)
+    labels[1].text = t("sheet_key_locked")
+    keyboard(page, labels)
     turntable(page, "ON/OFF", hidden.color)
 
     local pitch = (MAIN.w - LEFT_GAP / 2) / #columns
@@ -440,7 +443,7 @@ local function assist_page(page, main_state)
         else
             page:wire(down(index, lanes[#lanes + 1 - reach], x), spec.color)
         end
-        page:dim(boxed_list(page, centered(x, width), spec), out_of_reach(main_state, index))
+        page:dim(boxed_list(page, centered(x, width), spec), out_of_reach(index))
     end
 
     page:wire(from_turntable(), hidden.color)
@@ -459,7 +462,7 @@ local function shift_help(page, main_state, top, color)
         entry_top = entry_top + HELP.name_size + HELP.gap + #words.shift_notes[value] * CAPTION_PITCH
     end
     box.h = entry_top - top
-    help_tag(page, box, "GAUGE AUTO SHIFT", color)
+    help_tag(page, box, t("sheet_gauge_auto_shift"), color)
     for value = 0, #words.shift do
         local name = { text = words.shift[value], size = HELP.name_size, weight = "bold", overflow = props.text_overflow.SHRINK }
         local line = { x = inner.x, top = tops[value], w = inner.w }
@@ -556,9 +559,13 @@ local function judge_timing(main_state)
                 return said.name, value, said.zero
             end
             if now > 0 then
-                return said.name, value, string.format(said.earlier, now)
+                return said.name, value, function()
+                    return said.earlier(now)
+                end
             end
-            return said.name, value, string.format(said.later, -now)
+            return said.name, value, function()
+                return said.later(-now)
+            end
         end,
     }
 end
@@ -567,34 +574,34 @@ local function detail_page(page, main_state)
     local bga = option({
         title = "BGA",
         name = { "BGA" },
-        label = "DISPLAY",
+        label = t("sheet_label_display"),
         color = COLUMN.orange,
         read = indexed(main_state, props.index.BGA),
         values = listed(words.bga, { 0, 2 }),
         notes = words.bga_notes,
     })
     local shift = option({
-        title = "GAUGE AUTO SHIFT",
-        name = { "GAUGE", "AUTO SHIFT" },
-        label = "GAUGE",
+        title = t("sheet_gauge_auto_shift"),
+        name = { t("sheet_gauge_auto_shift_1"), t("sheet_gauge_auto_shift_2") },
+        label = t("common_gauge"),
         color = COLUMN.green,
         read = indexed(main_state, props.index.GAUGEAUTOSHIFT),
         values = numbered(words.shift, 0, #words.shift),
         notes = {},
     })
     for value, lines in pairs(words.shift_notes) do
-        shift.notes[value] = table.concat(lines, " ")
+        shift.notes[value] = joined(lines)
     end
     local adjust = switch(main_state, {
-        title = "AUTO ADJUST",
-        name = { "AUTO", "ADJUST" },
-        label = "TIMING",
+        title = t("sheet_auto_adjust"),
+        name = { t("sheet_auto_adjust_1"), t("sheet_auto_adjust_2") },
+        label = t("common_timing"),
         color = COLUMN.violet,
         notes = words.auto_adjust,
     }, indexed(main_state, props.index.TIMING_AUTO_ADJUST))
     local algorithm = option({
-        title = "JUDGE ALGORITHM",
-        name = { "JUDGE ALGORITHM" },
+        title = t("sheet_judge_algorithm"),
+        name = { t("sheet_judge_algorithm") },
         color = COLUMN.violet,
         read = indexed(main_state, props.index.JUDGEALGORITHM),
         values = numbered(words.algorithm, 0, #words.algorithm),
@@ -609,16 +616,17 @@ local function detail_page(page, main_state)
     def.watch = { bga.watch, shift.watch, adjust.watch, duration, timing, algorithm.watch }
     information(page, main_state, def)
 
-    keyboard(page, main_state, {
+    local left, right = t("sheet_key_left"), t("sheet_key_right")
+    keyboard(page, {
         { text = "ON/OFF", color = bga.color },
-        { text = "DOWN", color = shift.color },
+        { text = t("sheet_key_down"), color = shift.color },
         { text = "ON/OFF", color = adjust.color },
-        { text = "LEFT", color = duration_color },
-        { text = "LEFT", color = timing_color },
-        { text = "RIGHT", color = duration_color },
-        { text = "RIGHT", color = timing_color },
+        { text = left, color = duration_color },
+        { text = left, color = timing_color },
+        { text = right, color = duration_color },
+        { text = right, color = timing_color },
     })
-    turntable(page, "UP/DOWN", algorithm.color)
+    turntable(page, t("sheet_key_up_down"), algorithm.color)
 
     local narrow, wide, field = DETAIL_BOX.narrow, DETAIL_BOX.wide, DETAIL_BOX.field
     local gap = (MAIN.w - narrow * 2 - wide - field * 2) / 4
@@ -643,10 +651,10 @@ local function detail_page(page, main_state)
 
     page:wire({ { key_x(5), key_bottom(5) }, { key_x(5), LANE.high }, { key_x(7), LANE.high }, { key_x(7), key_bottom(7) } }, timing_color)
     page:wire({ { middle(timing_box), LANE.high }, { middle(timing_box), BOX_TOP } }, timing_color)
-    local timing_spec = { name = { "JUDGE TIMING" }, color = timing_color, first = timing.first }
+    local timing_spec = { name = { t("sheet_judge_timing") }, color = timing_color, first = timing.first }
     timing_spec.lines = words.judge_timing.advice
     timing_spec.line_color = theme.panel.caution
-    page:column_label(page:field(timing_box, timing_spec), "TIMING", timing_color)
+    page:column_label(page:field(timing_box, timing_spec), t("common_timing"), timing_color)
 
     local over = { { key_x(4), key_box(4).top }, { key_x(4), LANE.over }, { LANE.beside, LANE.over } }
     table.insert(over, { LANE.beside, LANE.low })
@@ -654,27 +662,27 @@ local function detail_page(page, main_state)
     table.insert(over, { middle(duration_box), BOX_TOP })
     page:wire(over, duration_color)
     page:wire({ { key_x(6), key_box(6).top }, { key_x(6), LANE.over } }, duration_color)
-    local duration_spec = { name = { "NOTE DISPLAY TIME" }, color = duration_color, first = duration.first, second = duration.second }
+    local duration_spec = { name = { t("sheet_note_display_time") }, color = duration_color, first = duration.first, second = duration.second }
     duration_spec.reserve = #words.display_time.off_lines
     local duration_frame, duration_lines = page:field(duration_box, duration_spec)
     page:caption_lines(duration_lines, words.display_time.off_lines, theme.panel.caution, { draw = duration.off })
     page:caption_lines(duration_lines, words.display_time.away_lines, theme.color.muted, { draw = duration.away })
     page:caption_lines(duration_lines, words.display_time.held_lines, theme.color.muted, { draw = duration.held })
-    page:column_label(duration_frame, "SPEED", duration_color)
+    page:column_label(duration_frame, t("sheet_label_speed"), duration_color)
 
     page:wire(from_turntable(), algorithm.color)
     algorithm.reserve = 1
     local box, lines = page:list({ x = LEFT.x, top = TOP, w = LEFT.w }, algorithm)
-    page:caption_lines(lines, { "SCORE: SET IN SETTINGS > JUDGE" }, theme.panel.caution, { draw = algorithm.is(SCORE_ALGORITHM) })
-    page:caption_lines(lines, { "TURN THE TURNTABLE TO STEP" }, theme.color.muted, { draw = algorithm.is_not(SCORE_ALGORITHM) })
+    page:caption_lines(lines, { t("sheet_algorithm_score") }, theme.panel.caution, { draw = algorithm.is(SCORE_ALGORITHM) })
+    page:caption_lines(lines, { t("sheet_algorithm_step") }, theme.color.muted, { draw = algorithm.is_not(SCORE_ALGORITHM) })
     shift_help(page, main_state, box.top + box.h + LEFT_GAP, shift.color)
 end
 
 local PAGES = {
-    { hold = "HOLD START", option = props.option.PANEL1, on = props.timer.PANEL1_ON, off = props.timer.PANEL1_OFF, build = play_page },
-    { hold = "HOLD SELECT", option = props.option.PANEL2, on = props.timer.PANEL2_ON, off = props.timer.PANEL2_OFF, build = assist_page },
+    { hold = t("sheet_hold_start"), option = props.option.PANEL1, on = props.timer.PANEL1_ON, off = props.timer.PANEL1_OFF, build = play_page },
+    { hold = t("sheet_hold_select"), option = props.option.PANEL2, on = props.timer.PANEL2_ON, off = props.timer.PANEL2_OFF, build = assist_page },
     {
-        hold = "HOLD START + SELECT, OR THE DETAIL OPTIONS KEY (5 AS SHIPPED)",
+        hold = t("sheet_hold_detail"),
         option = props.option.PANEL3,
         on = props.timer.PANEL3_ON,
         off = props.timer.PANEL3_OFF,

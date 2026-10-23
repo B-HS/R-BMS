@@ -3,6 +3,7 @@ local props = require("lua.props")
 local ui = require("lua.ui")
 local layout = require("lua.play.layout")
 local colors = require("lua.play.colors")
+local i18n = require("lua.i18n")
 
 local field = {}
 
@@ -336,7 +337,7 @@ local function notices(s, view)
     for _, side in ipairs(view.fields) do
         local row = { x = side.x, top = NOTICE.top, w = side.w }
         local loading = { op = { props.option.NOW_LOADING } }
-        s:text({ text = "LOADING", size = NOTICE.loading.size, align = "center" }, row, ui.merge(loading, { color = theme.color.sub }))
+        s:text({ text = i18n.t("play_loading"), size = NOTICE.loading.size, align = "center" }, row, ui.merge(loading, { color = theme.color.sub }))
         local inset = NOTICE.loading.bar_inset
         local track = { x = side.x + inset, top = NOTICE.loading.bar_top, w = side.w - inset * 2, h = NOTICE.loading.bar_height }
         s:rect(track, theme.color.raised, loading)
@@ -345,7 +346,7 @@ local function notices(s, view)
         local ready = NOTICE.ready
         local steps = { { time = 0, a = TRANSPARENT }, { time = ready.fade }, { time = ready.hold }, { time = ready.gone, a = TRANSPARENT } }
         local readying = { timer = props.timer.READY, keys = steps, loop = props.loop.ONCE, color = theme.color.text }
-        s:text({ text = "READY", size = ready.size, align = "center" }, row, readying)
+        s:text({ text = i18n.t("play_ready"), size = ready.size, align = "center" }, row, readying)
 
         local combo = NOTICE.combo
         local timer = props.timer.FULLCOMBO_1P

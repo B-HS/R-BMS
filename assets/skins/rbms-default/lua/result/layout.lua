@@ -3,6 +3,7 @@ local props = require("lua.props")
 local ui = require("lua.ui")
 local motion = require("lua.motion")
 local parts = require("lua.parts")
+local i18n = require("lua.i18n")
 
 local layout = {}
 
@@ -14,7 +15,7 @@ local LABEL_GAP = 10
 local HEAD = { top = 136, height = 168 }
 local ROWS = { gap = 26, sizes = { 64, 32, 44, 32 } }
 local DIVIDER = { above = 15, below = 16 }
-local MARK = { text = "NEW RECORD", at = 400 }
+local MARK = { text = i18n.t("result_new_record"), at = 400 }
 local STAGE_TITLE_LIMIT = 10
 
 layout.order = { head = 0, rank = 1, score = 2, judges = 3, graphs = 4 }

@@ -15,4 +15,7 @@ return {
     info_records_best = { en = "BEST", ko = "최고 기록", ja = "ベスト" },
     info_records_ex_score = { en = "EX SCORE", ko = "EX SCORE", ja = "EX SCORE" },
     info_records_miss = { en = "MISS", ko = "MISS", ja = "MISS" },
+    info_play_count = { en = "PLAY COUNT", ko = "플레이 횟수", ja = "プレー回数" },
+    info_clear_count = { en = "CLEAR COUNT", ko = "클리어 횟수", ja = "クリア回数" },
+    info_constraints = { en = "CONSTRAINTS", ko = "제약", ja = "制約" },
 }

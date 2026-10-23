@@ -2,6 +2,7 @@ local theme = require("lua.theme")
 local props = require("lua.props")
 local ui = require("lua.ui")
 local motion = require("lua.motion")
+local i18n = require("lua.i18n")
 
 local parts = {}
 
@@ -64,7 +65,7 @@ parts.stage_image = {
     name = "Stage Image",
     show = props.option.CUSTOM_FIRST,
     hide = props.option.CUSTOM_FIRST + 1,
-    missing = "NO STAGE IMAGE",
+    missing = i18n.t("common_no_stage_image"),
 }
 
 local function with_op(opts, op)
@@ -173,30 +174,22 @@ end
 
 function parts.choice(main_state, id, names, missing)
     return function()
-        return names[main_state.event_index(id)] or missing
+        local name = names[main_state.event_index(id)] or missing
+        if type(name) == "function" then
+            return name()
+        end
+        return name
     end
 end
 
-function parts.assist_grade_drawn(main_state, first, grade)
-    if grade > 0 then
-        return function()
-            return main_state.option(first + grade)
-        end
+function parts.lamp_names(first, place)
+    local unstated = {}
+    for grade = 1, theme.assist_grade_last do
+        table.insert(unstated, -(first + grade))
     end
-    return function()
-        for other = 1, theme.assist_grade_last do
-            if main_state.option(first + other) then
-                return false
-            end
-        end
-        return true
-    end
-end
-
-function parts.lamp_names(main_state, first, place)
     for grade = 0, theme.assist_grade_last do
         local entry = theme.assist_grade[grade]
-        place(entry.name, entry.color, parts.assist_grade_drawn(main_state, first, grade))
+        place(entry.name, entry.color, grade > 0 and { first + grade } or unstated)
     end
 end
 

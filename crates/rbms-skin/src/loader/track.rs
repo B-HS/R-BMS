@@ -9,7 +9,7 @@
 use crate::SkinError;
 use crate::dst::{Acc, DestinationTrack, DrawCondition, Keyframe, MouseRect, OpLists, SkinColor, SkinRect, TimerRef, draw_conditions_from_ops};
 use crate::model::{Animation, Destination, PropertyRef};
-use crate::property::{NameSpace, reference_implements};
+use crate::property::{NameSpace, extension};
 
 /// The alpha and colour channels a first keyframe starts at when a document names none.
 const DEFAULT_CHANNEL: i32 = 255;
@@ -147,14 +147,16 @@ pub(crate) struct BuiltTrack {
     pub options: Vec<i32>,
 }
 
-/// Whether the reference has a built-in boolean property under `id`, whichever sign the skin wrote
-/// it with (`BooleanPropertyFactory.getBooleanProperty(int)`).
+/// Whether a built-in boolean property stands under `id`, whichever sign the skin wrote it with:
+/// one the reference has (`BooleanPropertyFactory.getBooleanProperty(int)`), or one of this
+/// player's own option band ([`extension::implements`]).
 ///
-/// This is the reference's own list and not a question for the host: an id that is on it is a
-/// condition the running game answers, and an id that is not can only be one of the skin's own
-/// options.
+/// This is the reference's list, widened by the band the player answers beyond it, and not a
+/// question for the host: an id that is on it is a condition the running game answers, and an id
+/// that is not can only be one of the skin's own options. The band is let through so that a skin
+/// can gate an object on an extension option in `op`, as it does on any other.
 fn is_builtin_option(id: i32) -> bool {
-    reference_implements(NameSpace::Boolean, id)
+    extension::implements(NameSpace::Boolean, id)
 }
 
 /// The keyframes of one destination, filled in and sorted, with the one acceleration the object
@@ -277,6 +279,7 @@ mod tests {
     use super::{BuiltTrack, TrackContext, build_track};
     use crate::dst::{DrawCondition, LuaFnId, TimerRef};
     use crate::model::{Animation, Destination, DestinationOption, PropertyRef};
+    use crate::property::extension::{EXTENSION_OPTION_FIRST, EXTENSION_OPTION_LAST};
     use crate::property::generated::{OPTION_AUTOPLAYON, OPTION_BGAOFF};
     use crate::timer::TimerId;
 
@@ -341,6 +344,35 @@ mod tests {
         assert_eq!(built.track.draw_conditions, vec![DrawCondition::Option(OPTION_BGAOFF)], "only the built-in id is left for a frame to ask");
         assert_eq!(built.options, vec![SKIN_OPTION, -SKIN_OPTION], "the other is kept under each sign it was written with, once, and the zero is dropped");
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn an_option_of_the_players_own_band_gates_a_frame_under_either_sign_and_is_never_one_of_the_skins_own() {
+        let inside = [EXTENSION_OPTION_FIRST, EXTENSION_OPTION_LAST];
+        let op = ids(&[inside[0], -inside[1], SKIN_OPTION, OPTION_BGAOFF]);
+        let (built, warnings) = built(&Destination { op, ..destination() });
+        assert_eq!(
+            built.track.draw_conditions,
+            vec![DrawCondition::Option(inside[0]), DrawCondition::Option(-inside[1]), DrawCondition::Option(OPTION_BGAOFF)],
+            "the band is asked every frame like the reference's own ids, in the order the document wrote them"
+        );
+        assert_eq!(built.options, vec![SKIN_OPTION], "and only the id nobody answers is left for the skin's own options");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn an_id_just_outside_the_players_band_is_still_one_of_the_skins_own_options() {
+        let outside = [EXTENSION_OPTION_FIRST - 1, EXTENSION_OPTION_LAST + 1];
+        let (built, _) = built(&Destination { op: ids(&[outside[0], -outside[1]]), ..destination() });
+        assert!(built.track.draw_conditions.is_empty(), "nothing answers {outside:?}");
+        assert_eq!(built.options, vec![outside[0], -outside[1]]);
+    }
+
+    #[test]
+    fn a_property_spelled_as_an_id_of_the_players_band_is_a_condition_and_not_dropped() {
+        let (built, _) = built(&Destination { draw: Some(PropertyRef::Id(-EXTENSION_OPTION_FIRST)), ..destination() });
+        assert_eq!(built.track.draw_conditions, vec![DrawCondition::Option(-EXTENSION_OPTION_FIRST)]);
+        assert!(built.options.is_empty());
     }
 
     #[test]

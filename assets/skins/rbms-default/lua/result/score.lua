@@ -4,6 +4,7 @@ local ui = require("lua.ui")
 local motion = require("lua.motion")
 local parts = require("lua.parts")
 local layout = require("lua.result.layout")
+local i18n = require("lua.i18n")
 
 local score = {}
 
@@ -20,7 +21,7 @@ local ROW = { score = 1, best = 2, combo = 3, option = 4 }
 local FIRST = { column = 3, span = 2 }
 local SECOND = { column = 5, span = 2 }
 local DIFF_GAP = 16
-local TARGET = { label = "TARGET", name_offset = 82 }
+local TARGET = { label = i18n.t("common_target"), name_offset = 82 }
 
 local RATE = { whole = "num64", fraction = "num44", fraction_digits = 2, dot = 6, dot_gap = 4, unit_gap = 8, unit_size = theme.type.body }
 
@@ -29,9 +30,9 @@ local LOWER = -1
 local FAILED_CLEAR = 1
 
 local REPLAY_STATES = {
-    { op = props.option.REPLAYDATA_SAVED, name = "SAVED", color = theme.color.accent },
-    { op = props.option.REPLAYDATA, name = "STORED", color = theme.color.sub },
-    { op = props.option.NO_REPLAYDATA, name = "NOT SAVED", color = theme.color.muted },
+    { op = props.option.REPLAYDATA_SAVED, name = i18n.t("result_replay_saved"), color = theme.color.accent },
+    { op = props.option.REPLAYDATA, name = i18n.t("result_replay_stored"), color = theme.color.sub },
+    { op = props.option.NO_REPLAYDATA, name = i18n.t("result_replay_missing"), color = theme.color.muted },
 }
 
 local function half(x, width, index)
@@ -55,18 +56,18 @@ local function lamp(s, main_state, x, width, course)
     local top, baseline = layout.row(ROW.combo)
     local now = main_state.event_index(props.index.CLEAR)
     local entry = theme.clear[now]
-    layout.caption(s, "CLEAR", { x = x, top = top, w = width }, order)
+    layout.caption(s, i18n.t("common_clear"), { x = x, top = top, w = width }, order)
     if entry == nil then
         return
     end
     local size = theme.type.heading
     local box = { x = x, top = theme.text_top(baseline, size), w = width }
-    local function place(text, color, draw)
+    local function place(text, color, op)
         local name = { text = text, size = size, overflow = props.text_overflow.SHRINK }
-        s:text(name, box, layout.appear(order, { color = color, draw = draw }))
+        s:text(name, box, layout.appear(order, { color = color, op = op }))
     end
     if now == theme.graded_clear then
-        parts.lamp_names(main_state, props.extension.RESULT_ASSIST_GRADE_FIRST, place)
+        parts.lamp_names(props.extension.RESULT_ASSIST_GRADE_FIRST, place)
     else
         place(entry.name, theme.clear_text(entry))
     end
@@ -82,8 +83,8 @@ local function next_rank(s, main_state, box)
     local order = layout.order.rank
     local top, baseline = layout.row(ROW.option)
     local top_rank = props.option.RESULT_RANK_AAA
-    layout.caption(s, "TO NEXT RANK", { x = box.x, top = top, w = box.w }, order, { op = { -top_rank } })
-    layout.caption(s, "TO MAX", { x = box.x, top = top, w = box.w }, order, { op = { top_rank } })
+    layout.caption(s, i18n.t("result_to_next_rank"), { x = box.x, top = top, w = box.w }, order, { op = { -top_rank } })
+    layout.caption(s, i18n.t("result_to_max"), { x = box.x, top = top, w = box.w }, order, { op = { top_rank } })
     local short = main_state.number(props.number.DIFF_NEXTRANK)
     if not ui.has_value(short) then
         return
@@ -97,18 +98,18 @@ local function previous_lamp(s, main_state, box)
     local top, baseline = layout.row(ROW.option)
     local previous = main_state.event_index(props.index.TARGET_CLEAR)
     local entry = theme.clear[previous]
-    layout.caption(s, "PREVIOUS CLEAR", { x = box.x, top = top, w = box.w }, order)
+    layout.caption(s, i18n.t("result_previous_clear"), { x = box.x, top = top, w = box.w }, order)
     if entry == nil then
         return
     end
     local size = theme.type.label
     local line = { x = box.x, top = theme.text_top(baseline, size), w = box.w }
-    local function place(text, color, draw)
+    local function place(text, color, op)
         local name = { text = text, size = size, overflow = props.text_overflow.SHRINK }
-        s:text(name, line, layout.appear(order, { color = color, draw = draw }))
+        s:text(name, line, layout.appear(order, { color = color, op = op }))
     end
     if previous == theme.graded_clear then
-        parts.lamp_names(main_state, props.extension.RESULT_PREVIOUS_ASSIST_GRADE_FIRST, place)
+        parts.lamp_names(props.extension.RESULT_PREVIOUS_ASSIST_GRADE_FIRST, place)
     else
         place(entry.name, theme.clear_text(entry))
     end
@@ -116,7 +117,7 @@ end
 
 local function rank(s, main_state, course)
     local x, width = theme.column(RANK.column, RANK.span)
-    layout.caption(s, "RANK", { x = x, top = layout.row(ROW.score), w = width }, layout.order.rank)
+    layout.caption(s, i18n.t("common_rank"), { x = x, top = layout.row(ROW.score), w = width }, layout.order.rank)
     rank_letters(s, x, width)
     lamp(s, main_state, x, width, course)
     next_rank(s, main_state, half(x, width, 0))
@@ -173,7 +174,7 @@ local function rate(s, main_state, column, row)
     local order = layout.order.score
     local x, width = theme.column(column.column, column.span)
     local top, baseline = layout.row(row)
-    layout.caption(s, "RATE", { x = x, top = top, w = width }, order)
+    layout.caption(s, i18n.t("common_rate"), { x = x, top = top, w = width }, order)
     local whole = main_state.number(props.number.SCORE_RATE)
     if not ui.has_value(whole) then
         return
@@ -208,7 +209,7 @@ local function random_option(s, main_state, column, row)
 end
 
 local function replay(s)
-    word(s, SECOND, ROW.option, "REPLAY", function(spec, box, order)
+    word(s, SECOND, ROW.option, i18n.t("common_replay"), function(spec, box, order)
         for _, state in ipairs(REPLAY_STATES) do
             s:text(ui.merge(spec, { text = state.name }), box, layout.appear(order, { op = { state.op }, color = state.color }))
         end
@@ -232,7 +233,7 @@ end
 
 local function best(s, main_state)
     figure(s, main_state, FIRST, ROW.best, {
-        label = "BEST",
+        label = i18n.t("common_best"),
         sprite = "num32",
         ref = props.number.HIGHSCORE_BEFORE,
         color = theme.color.sub,
@@ -245,7 +246,7 @@ local function figures(s, main_state, course)
     figure(s, main_state, FIRST, ROW.score, { label = "EX SCORE", sprite = "num64", ref = props.number.SCORE_AFTER })
     rate(s, main_state, SECOND, ROW.score)
     if course then
-        figure(s, main_state, FIRST, ROW.best, { label = "TOTAL NOTES", sprite = "num32", ref = props.number.TOTALNOTES, color = theme.color.sub })
+        figure(s, main_state, FIRST, ROW.best, { label = i18n.t("common_total_notes"), sprite = "num32", ref = props.number.TOTALNOTES, color = theme.color.sub })
         random_option(s, main_state, SECOND, ROW.best)
     else
         best(s, main_state)

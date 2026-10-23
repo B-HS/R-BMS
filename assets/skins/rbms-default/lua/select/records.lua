@@ -7,6 +7,9 @@ local kit = require("lua.select.kit")
 local records = {}
 
 local ON_CHART = props.option.SONGBAR
+local RANKING_ON = props.extension.RANKING_MODE_ON
+local LISTING_OPS = { ON_CHART, -RANKING_ON }
+local RANKING_OPS = { ON_CHART, RANKING_ON }
 local NOTHING = "-"
 local BEST_ROW = 0
 local DATE_LENGTH = 10
@@ -48,18 +51,6 @@ local function cell(row, column, inset)
     return { x = box.x + column.x, top = box.top + trim, w = column.width, h = box.h - trim * 2 }
 end
 
-local function ranking_on(main_state)
-    return function()
-        return main_state.option(props.extension.RANKING_MODE_ON)
-    end
-end
-
-local function records_on(main_state)
-    return function()
-        return not main_state.option(props.extension.RANKING_MODE_ON)
-    end
-end
-
 local function lamp_set(s, id, selector)
     local strip = s:sprite(theme.sprite("lamp_strip"))
     local images = {}
@@ -82,24 +73,24 @@ local function centered_text(s, spec, box, opts)
     s:text(spec, placed, opts)
 end
 
-local function level_is(main_state, row, level, shown)
+local function level_is(main_state, row, level)
     local ref = props.extension_number.MY_RECORD_DJ_LEVEL_FIRST + row
     return function()
-        return shown() and main_state.number(ref) == level
+        return main_state.number(ref) == level
     end
 end
 
-local function holds_row(main_state, row, shown)
+local function holds_row(main_state, row)
     local ref = props.extension_number.MY_RECORD_EX_FIRST + row
     return function()
-        return shown() and ui.has_value(main_state.number(ref))
+        return ui.has_value(main_state.number(ref))
     end
 end
 
-local function holds_no_best(main_state, shown)
+local function holds_no_best(main_state)
     local ref = props.extension_number.MY_RECORD_EX_FIRST + BEST_ROW
     return function()
-        return shown() and not ui.has_value(main_state.number(ref))
+        return not ui.has_value(main_state.number(ref))
     end
 end
 
@@ -110,8 +101,8 @@ local function date_of(main_state, row)
     end
 end
 
-local function record_row(s, main_state, row, shown)
-    local on = { op = { ON_CHART }, draw = shown }
+local function record_row(s, main_state, row)
+    local on = { op = LISTING_OPS }
     local set = lamp_set(s, "set.record.lamp" .. row, { value = props.extension_number.MY_RECORD_LAMP_FIRST + row })
     s:place(set, cell(row, LAYOUT.lamp, LAYOUT.lamp.inset), kit.arriving(on))
 
@@ -119,9 +110,9 @@ local function record_row(s, main_state, row, shown)
     local label_size = theme.type.caption
     if row == BEST_ROW then
         local best = { value = i18n.t("info_records_best"), size = label_size, overflow = props.text_overflow.SHRINK }
-        centered_text(s, best, label_box, kit.arriving({ color = theme.color.text, op = { ON_CHART }, draw = holds_row(main_state, row, shown) }))
+        centered_text(s, best, label_box, kit.arriving({ color = theme.color.text, op = LISTING_OPS, draw = holds_row(main_state, row) }))
         local dash = { text = NOTHING, size = label_size }
-        centered_text(s, dash, label_box, { color = theme.color.muted, op = { ON_CHART }, draw = holds_no_best(main_state, shown) })
+        centered_text(s, dash, label_box, { color = theme.color.muted, op = LISTING_OPS, draw = holds_no_best(main_state) })
     else
         local date = { value = date_of(main_state, row), size = label_size, overflow = props.text_overflow.SHRINK }
         centered_text(s, date, label_box, kit.arriving(ui.merge(on, { color = theme.color.sub })))
@@ -130,7 +121,7 @@ local function record_row(s, main_state, row, shown)
     local badge = cell(row, LAYOUT.badge, LAYOUT.badge.inset)
     for level = 0, theme.rank_last do
         local key = theme.rank_key[level]
-        local when = { op = { ON_CHART }, draw = level_is(main_state, row, level, shown) }
+        local when = { op = LISTING_OPS, draw = level_is(main_state, row, level) }
         s:rect(badge, theme.rank[key], kit.arriving(when))
         local name = { text = string.upper(key), size = label_size, weight = "bold", align = "center" }
         centered_text(s, name, badge, kit.arriving(ui.merge(when, { color = theme.rank_ink[key] })))
@@ -142,28 +133,25 @@ local function record_row(s, main_state, row, shown)
     centered_number(s, miss, cell(row, LAYOUT.miss), kit.arriving(ui.merge(on, { color = theme.color.sub })))
 end
 
-local function player_is(main_state, row, player, shown)
+local function player_is(main_state, row, player)
     local ref = IR_RANKING.player_first + row
     return function()
-        return shown() and main_state.event_index(ref) == player
+        return main_state.event_index(ref) == player
     end
 end
 
-local function player_is_other(main_state, row, shown)
+local function player_is_other(main_state, row)
     local ref = IR_RANKING.player_first + row
     return function()
-        if not shown() then
-            return false
-        end
         local player = main_state.event_index(ref)
         return player ~= PLAYER_YOU and player ~= PLAYER_RIVAL
     end
 end
 
-local function ranking_row(s, main_state, row, shown)
-    local on = { op = { ON_CHART }, draw = shown }
-    local you = player_is(main_state, row, PLAYER_YOU, shown)
-    s:rect(row_box(row), theme.ranking.you_face, { op = { ON_CHART }, draw = you })
+local function ranking_row(s, main_state, row)
+    local on = { op = RANKING_OPS }
+    local you = player_is(main_state, row, PLAYER_YOU)
+    s:rect(row_box(row), theme.ranking.you_face, { op = RANKING_OPS, draw = you })
 
     local set = lamp_set(s, "set.ranking.lamp" .. row, { ref = IR_RANKING.clear_first + row })
     s:place(set, cell(row, LAYOUT.lamp, LAYOUT.lamp.inset), kit.arriving(on))
@@ -173,35 +161,33 @@ local function ranking_row(s, main_state, row, shown)
 
     local name = { ref = IR_RANKING.name_first + row, size = LAYOUT.name.size, overflow = props.text_overflow.SHRINK }
     local name_box = cell(row, LAYOUT.name)
-    centered_text(s, name, name_box, kit.arriving({ color = theme.ranking.you, op = { ON_CHART }, draw = you }))
-    centered_text(s, name, name_box, kit.arriving({ color = theme.ranking.rival, op = { ON_CHART }, draw = player_is(main_state, row, PLAYER_RIVAL, shown) }))
-    centered_text(s, name, name_box, kit.arriving({ color = theme.color.text, op = { ON_CHART }, draw = player_is_other(main_state, row, shown) }))
+    centered_text(s, name, name_box, kit.arriving({ color = theme.ranking.you, op = RANKING_OPS, draw = you }))
+    centered_text(s, name, name_box, kit.arriving({ color = theme.ranking.rival, op = RANKING_OPS, draw = player_is(main_state, row, PLAYER_RIVAL) }))
+    centered_text(s, name, name_box, kit.arriving({ color = theme.color.text, op = RANKING_OPS, draw = player_is_other(main_state, row) }))
 
     local ex = { sprite = LAYOUT.ranking_ex.sprite, ref = IR_RANKING.ex_first + row, digit = LAYOUT.ranking_ex.digits, align = "right" }
     centered_number(s, ex, cell(row, LAYOUT.ranking_ex), kit.arriving(ui.merge(on, { color = theme.color.text })))
 end
 
-local function heading(s, key, column, shown)
+local function heading(s, key, column, ops)
     local box = { x = AREA.x + column.x, top = AREA.top + LAYOUT.title_drop, w = column.width }
     local spec = { value = i18n.t(key), size = theme.type.caption, align = "right", overflow = props.text_overflow.SHRINK }
-    s:text(spec, box, { color = theme.color.muted, op = { ON_CHART }, draw = shown })
+    s:text(spec, box, { color = theme.color.muted, op = ops })
 end
 
 function records.build(s, main_state)
     local on = { op = { ON_CHART } }
     s:rect({ x = AREA.x, top = AREA.top, w = AREA.width, h = theme.grid.rule }, theme.color.line, on)
     local title_box = { x = AREA.x, top = AREA.top + LAYOUT.title_drop, w = AREA.width }
-    local listing = records_on(main_state)
-    local ranking = ranking_on(main_state)
-    s:text({ value = i18n.t("info_my_records"), size = theme.type.caption }, title_box, { color = theme.color.sub, op = { ON_CHART }, draw = listing })
-    s:text({ value = i18n.t("info_ir_ranking"), size = theme.type.caption }, title_box, { color = theme.color.sub, op = { ON_CHART }, draw = ranking })
-    heading(s, "info_records_ex_score", LAYOUT.ex, listing)
-    heading(s, "info_records_miss", LAYOUT.miss, listing)
-    heading(s, "info_records_ex_score", LAYOUT.ranking_ex, ranking)
+    s:text({ value = i18n.t("info_my_records"), size = theme.type.caption }, title_box, { color = theme.color.sub, op = LISTING_OPS })
+    s:text({ value = i18n.t("info_ir_ranking"), size = theme.type.caption }, title_box, { color = theme.color.sub, op = RANKING_OPS })
+    heading(s, "info_records_ex_score", LAYOUT.ex, LISTING_OPS)
+    heading(s, "info_records_miss", LAYOUT.miss, LISTING_OPS)
+    heading(s, "info_records_ex_score", LAYOUT.ranking_ex, RANKING_OPS)
 
     for row = 0, AREA.rows - 1 do
-        record_row(s, main_state, row, listing)
-        ranking_row(s, main_state, row, ranking)
+        record_row(s, main_state, row)
+        ranking_row(s, main_state, row)
     end
 end
 

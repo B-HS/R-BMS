@@ -29,7 +29,11 @@ end
 
 function Sheet:rising(opts)
     local keys = { { time = 0, dtop = MOTION.rise, a = 0 }, { time = MOTION.move } }
-    return ui.merge(opts, { timer = self.page.on, op = { self.page.option }, keys = keys, acc = props.acc.DECELERATE })
+    local ops = { self.page.option }
+    for _, op in ipairs((opts or {}).op or {}) do
+        table.insert(ops, op)
+    end
+    return ui.merge(opts, { timer = self.page.on, op = ops, keys = keys, acc = props.acc.DECELERATE })
 end
 
 function Sheet:sinking(opts)
@@ -90,8 +94,8 @@ function Sheet:tag(box, text, fill, ink)
     self:write(spec, { x = box.x, top = theme.centered_top(box, size), w = box.w }, ink)
 end
 
-function Sheet:dim(box, draw)
-    self:fill(box, theme.color.bg, { a = OUT_OF_REACH_ALPHA, draw = draw })
+function Sheet:dim(box, op)
+    self:fill(box, theme.color.bg, { a = OUT_OF_REACH_ALPHA, op = op })
 end
 
 function Sheet:key(box, label, color, black, out_of_reach)

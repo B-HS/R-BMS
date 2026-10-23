@@ -3,6 +3,7 @@ local props = require("lua.props")
 local ui = require("lua.ui")
 local motion = require("lua.motion")
 local parts = require("lua.parts")
+local i18n = require("lua.i18n")
 local layout = require("lua.result.layout")
 local score = require("lua.result.score")
 local judges = require("lua.result.judges")
@@ -26,17 +27,19 @@ local HEAD = {
 }
 
 local VERDICT = {
-    chart = { cleared = "STAGE CLEARED", failed = "STAGE FAILED" },
-    course = { cleared = "COURSE CLEARED", failed = "COURSE FAILED" },
+    chart = { cleared = i18n.t("result_stage_cleared"), failed = i18n.t("result_stage_failed") },
+    course = { cleared = i18n.t("result_course_cleared"), failed = i18n.t("result_course_failed") },
 }
+local STAGE_COUNT = { one = i18n.template("result_stage_one"), many = i18n.template("result_stage_many") }
 
 local FOOTER = { hint_top = 1022, hint_fade = 200 }
+local HINT_GAP = "        "
 local HINTS = {
-    chart = "ENTER  CONTINUE        RETRY AND NEXT CHART  THEIR KEYS IN KEY CONFIG (R AND N AS SHIPPED)",
-    course = "ENTER  CONTINUE",
+    chart = i18n.t("result_hint_chart"),
+    course = i18n.t("result_hint_course"),
     gauge = {
-        { modes = { props.option.KEYS_7, props.option.KEYS_14, props.option.KEYS_9 }, text = "        KEY 6  GAUGE" },
-        { modes = { props.option.KEYS_5, props.option.KEYS_10 }, text = "        TURNTABLE  GAUGE" },
+        { modes = { props.option.KEYS_7, props.option.KEYS_14, props.option.KEYS_9 }, text = i18n.t("result_hint_gauge_key") },
+        { modes = { props.option.KEYS_5, props.option.KEYS_10 }, text = i18n.t("result_hint_gauge_turntable") },
     },
 }
 local CLOSING = { cover = 400 }
@@ -77,7 +80,7 @@ local function verdict(s, left, text_x, course)
     end
     local notice = { x = text_x, top = area.top + HEAD.notice_drop, w = box.w }
     local unsaved = layout.appear(order, { op = { props.option.DISABLE_SAVE_SCORE }, color = theme.color.muted })
-    s:text({ text = "SCORE NOT SAVED", size = theme.type.caption, align = "right" }, notice, unsaved)
+    s:text({ text = i18n.t("result_not_saved"), size = theme.type.caption, align = "right" }, notice, unsaved)
 end
 
 local function keys(s, left, baseline)
@@ -117,8 +120,15 @@ local function course_line(s, main_state, left, text_x, baseline)
     end
     local size = theme.type.label
     local box = { x = text_x, top = theme.text_top(baseline, size), w = keys_x - theme.grid.gutter - text_x }
-    local word = count == 1 and " STAGE" or " STAGES"
-    s:text({ text = count .. word, size = size }, box, layout.appear(layout.order.head, { color = theme.color.sub }))
+    local counted = count == 1 and STAGE_COUNT.one or STAGE_COUNT.many
+    local spec = {
+        value = function()
+            return counted(count)
+        end,
+        size = size,
+        overflow = props.text_overflow.SHRINK,
+    }
+    s:text(spec, box, layout.appear(layout.order.head, { color = theme.color.sub }))
 end
 
 local function entering(index, color)
@@ -146,6 +156,12 @@ local function head(s, main_state, course)
     end
 end
 
+local function joined(first, second)
+    return function()
+        return first() .. HINT_GAP .. second()
+    end
+end
+
 local function footer(s, course)
     local grid = theme.grid
     local size = theme.type.caption
@@ -156,11 +172,11 @@ local function footer(s, course)
         for _, op in ipairs(turning.modes) do
             table.insert(elsewhere, -op)
             local shown = motion.fade_in(0, FOOTER.hint_fade, { timer = props.timer.STARTINPUT, op = { op }, color = theme.color.muted })
-            s:text({ text = plain .. turning.text, size = size }, box, shown)
+            s:text({ value = joined(plain, turning.text), size = size, overflow = props.text_overflow.SHRINK }, box, shown)
         end
     end
     local shown = motion.fade_in(0, FOOTER.hint_fade, { timer = props.timer.STARTINPUT, op = elsewhere, color = theme.color.muted })
-    s:text({ text = plain, size = size }, box, shown)
+    s:text({ text = plain, size = size, overflow = props.text_overflow.SHRINK }, box, shown)
 end
 
 function result.build(spec)
@@ -175,7 +191,7 @@ function result.build(spec)
     s:atlas("common")
     s:atlas("result")
     parts.backdrop(s)
-    parts.frame(s, course and "COURSE RESULT" or "RESULT")
+    parts.frame(s, course and i18n.t("result_course_title") or i18n.t("result_title"))
     head(s, main_state, course)
     score.build(s, main_state, course)
     judges.build(s, main_state, course)

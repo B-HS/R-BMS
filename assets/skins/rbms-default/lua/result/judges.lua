@@ -4,6 +4,7 @@ local ui = require("lua.ui")
 local motion = require("lua.motion")
 local parts = require("lua.parts")
 local layout = require("lua.result.layout")
+local i18n = require("lua.i18n")
 
 local judges = {}
 
@@ -17,9 +18,9 @@ local TABLE = {
     fast = { offset = 280, w = 96 },
     slow = { offset = 392, w = 96 },
     bar = { offset = 520, top = 14, h = 10, sprite = "bar", least = 2, grow_at = 500, grow = 500 },
-    total = { rule = 260, baseline = 283, label = "TOTAL EXCL. PGREAT" },
+    total = { rule = 260, baseline = 283, label = i18n.t("result_total_excluding_pgreat") },
     aside = { label_width = 112, gap = 12 },
-    notes = { label = "TOTAL NOTES", sprite = "num18", gap = 8, label_width = 160 },
+    notes = { label = i18n.t("common_total_notes"), sprite = "num18", gap = 8, label_width = 160 },
 }
 
 local function cell(left, column)
@@ -43,19 +44,19 @@ local function note_total(s, main_state, left, top)
     local number_x = left.x + left.w - s:number_box(spec, box).span
     s:number(spec, box, layout.appear(order, { color = theme.color.sub }))
     local label = { x = number_x - TABLE.notes.gap - TABLE.notes.label_width, top = top, w = TABLE.notes.label_width }
-    s:text({ text = TABLE.notes.label, size = size, align = "right" }, label, layout.appear(order, { color = theme.color.muted }))
+    s:text({ text = TABLE.notes.label, size = size, align = "right", overflow = props.text_overflow.SHRINK }, label, layout.appear(order, { color = theme.color.muted }))
 end
 
 local function heading(s, main_state, left, top, course)
     local order = layout.order.judges
-    layout.caption(s, "JUDGE", { x = left.x, top = top, w = TABLE.name_width }, order)
-    for _, column in ipairs({ { "COUNT", TABLE.count }, { "FAST", TABLE.fast }, { "SLOW", TABLE.slow } }) do
+    layout.caption(s, i18n.t("common_judge"), { x = left.x, top = top, w = TABLE.name_width }, order)
+    for _, column in ipairs({ { i18n.t("result_count"), TABLE.count }, { "FAST", TABLE.fast }, { "SLOW", TABLE.slow } }) do
         local box = cell(left, column[2])
         local opts = layout.appear(order, { color = theme.color.muted })
         s:text({ text = column[1], size = theme.type.caption, align = "right" }, { x = box.x, top = top, w = box.w }, opts)
     end
     local bar_x = left.x + TABLE.bar.offset
-    layout.caption(s, "SHARE OF NOTES", { x = bar_x, top = top, w = left.x + left.w - bar_x }, order)
+    layout.caption(s, i18n.t("result_share_of_notes"), { x = bar_x, top = top, w = left.x + left.w - bar_x }, order)
     if not course then
         note_total(s, main_state, left, top)
     end

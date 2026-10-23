@@ -12,11 +12,19 @@ local HEADER = { caption_top = 70, value_top = 66, name_top = 46 }
 local SEARCH = { label_x = HEAD.search.label_x, x = HEAD.search.x, top = HEAD.chip.top, width = HEAD.search.width, height = HEAD.chip.height, inset = 12, id = "txt.search" }
 local FILTER = { top = 40, height = 56, inset = 12 }
 local FILTERS = {
-    { id = "btn.mode", name = "MODE", x = 1128, width = 224, act = props.event.MODE, ref = props.text.MODE_FILTER },
-    { id = "btn.sort", name = "SORT", x = 1368, width = 224, act = props.event.SORT, ref = props.text.SORT, unnamed = "DEFAULT" },
-    { id = "btn.lnmode", name = "LN MODE", x = 1608, width = 248, act = props.event.LNMODE, index = props.index.LNMODE },
+    { id = "btn.mode", name = i18n.t("bar_mode"), x = 1128, width = 224, act = props.event.MODE, ref = props.text.MODE_FILTER, unnamed = "" },
+    { id = "btn.sort", name = i18n.t("bar_sort"), x = 1368, width = 224, act = props.event.SORT, ref = props.text.SORT, unnamed = "DEFAULT" },
+    { id = "btn.lnmode", name = i18n.t("bar_ln_mode"), x = 1608, width = 248, act = props.event.LNMODE, index = props.index.LNMODE },
 }
-local LN_MODE_NAMES = { [0] = "LONG NOTE", "CHARGE NOTE", "HELL CHARGE NOTE" }
+local FILTER_WORDS = {
+    ALL = i18n.t("bar_all"),
+    TITLE = i18n.t("bar_sort_title"),
+    ARTIST = i18n.t("bar_sort_artist"),
+    LENGTH = i18n.t("bar_sort_length"),
+    LEVEL = i18n.t("bar_sort_level"),
+    SCORE = i18n.t("bar_sort_score"),
+}
+local LN_MODE_NAMES = { [0] = i18n.t("common_long_note"), i18n.t("common_charge_note"), i18n.t("common_hell_charge_note") }
 local NO_NAME = "-"
 
 local KEY_MODE_OPTIONS = { props.option.KEYS_7, props.option.KEYS_5, props.option.KEYS_14, props.option.KEYS_10, props.option.KEYS_9 }
@@ -26,8 +34,8 @@ local PLAY_STYLES = {
     { name = "9KEYS", ops = { props.option.KEYS_9 } },
 }
 local PLAY_MODES = {
-    { key = "bar_free_play", op = -props.option.GRADEBAR },
-    { key = "bar_course", op = props.option.GRADEBAR },
+    { text = i18n.t("bar_free_play"), op = -props.option.GRADEBAR },
+    { text = i18n.t("common_course"), op = props.option.GRADEBAR },
 }
 local CLOCK = { hour = 24, minute = 25, format = "%02d:%02d", unknown = "--:--" }
 
@@ -38,7 +46,7 @@ local HINT_KEYS = {
     { key = "H", key_width = 32, label = "bar_hint_all_keys" },
 }
 local HINT = { x = 64, right = 1048, keys_top = 1010, key_height = 26, key_gap = 8, item_gap = 24, line_top = 1046 }
-local HINT_LINE = "SEARCH, FILTER, SORT, FOLDERS, TABLES, SETTINGS, PLAY MENU AND KEY CONFIG: SEE H FOR THE KEY OF EACH"
+local HINT_LINE = i18n.t("bar_hint_line")
 
 local DOCK = { top = 1020, height = 40 }
 local REPLAY = { label_x = 1080, x = 1150, cell = 40, gap = 4, underline = 2 }
@@ -50,9 +58,9 @@ local REPLAY_SLOTS = {
 }
 local ACTIONS = {
     { id = "btn.autoplay", label = "AUTOPLAY", x = 1340, width = 118, act = props.event.AUTOPLAY },
-    { id = "btn.practice", label = "PRACTICE", x = 1466, width = 118, act = props.event.PRACTICE },
-    { id = "btn.ranking", key = "bar_ranking", x = 1592, width = 118, act = props.extension_event.RANKING_MODE, lit = props.extension.RANKING_MODE_ON },
-    { id = "btn.favorite", label = "FAVORITE", x = 1718, width = 138, act = props.event.FAVORITE_CHART, star = true },
+    { id = "btn.practice", label = i18n.t("bar_practice"), x = 1466, width = 118, act = props.event.PRACTICE },
+    { id = "btn.ranking", label = i18n.t("bar_ranking"), x = 1592, width = 118, act = props.extension_event.RANKING_MODE, lit = props.extension.RANKING_MODE_ON },
+    { id = "btn.favorite", label = i18n.t("bar_favorite"), x = 1718, width = 138, act = props.event.FAVORITE_CHART, star = true },
 }
 local STAR = { id = "set.star", inset = 12, gap = 8 }
 local UNDERLINE = 2
@@ -86,7 +94,7 @@ end
 local function play_mode(s)
     local box = chip(s, HEAD.mode_chip.x, HEAD.mode_chip.width)
     for _, mode in ipairs(PLAY_MODES) do
-        chip_text(s, { value = i18n.t(mode.key) }, box, { op = { mode.op } })
+        chip_text(s, { value = mode.text }, box, { op = { mode.op } })
     end
 end
 
@@ -105,7 +113,7 @@ end
 
 local function search(s)
     local size = theme.type.caption
-    s:text({ text = "SEARCH", size = size }, { x = SEARCH.label_x, top = HEADER.caption_top, w = SEARCH.x - SEARCH.label_x }, { color = theme.color.muted })
+    s:text({ text = i18n.t("bar_search"), size = size }, { x = SEARCH.label_x, top = HEADER.caption_top, w = SEARCH.x - SEARCH.label_x }, { color = theme.color.muted })
     local field = { x = SEARCH.x, top = SEARCH.top, w = SEARCH.width, h = SEARCH.height }
     s:rect(field, theme.color.panel)
     s:rect({ x = field.x, top = field.top + field.h - theme.grid.rule, w = field.w, h = theme.grid.rule }, theme.color.line)
@@ -119,6 +127,10 @@ local function named(main_state, ref, unnamed)
         if name == "" then
             return unnamed
         end
+        local word = FILTER_WORDS[name]
+        if word ~= nil then
+            return word()
+        end
         return name
     end
 end
@@ -130,10 +142,8 @@ local function filters(s, main_state)
         local inner = { x = box.x + FILTER.inset, w = box.w - FILTER.inset * 2 }
         s:text({ text = filter.name, size = theme.type.caption }, { x = inner.x, top = HEADER.name_top, w = inner.w }, { color = theme.color.muted })
         local spec = { size = theme.type.label, overflow = props.text_overflow.SHRINK }
-        if filter.unnamed then
+        if filter.ref then
             spec.value = named(main_state, filter.ref, filter.unnamed)
-        elseif filter.ref then
-            spec.ref = filter.ref
         else
             spec.value = parts.choice(main_state, filter.index, LN_MODE_NAMES, NO_NAME)
         end
@@ -161,7 +171,7 @@ end
 local function replays(s)
     local size = theme.type.caption
     local dock = { top = DOCK.top, h = DOCK.height }
-    s:text({ text = "REPLAY", size = size }, { x = REPLAY.label_x, top = theme.centered_top(dock, size), w = REPLAY.x - REPLAY.label_x }, { color = theme.color.muted })
+    s:text({ text = i18n.t("common_replay"), size = size }, { x = REPLAY.label_x, top = theme.centered_top(dock, size), w = REPLAY.x - REPLAY.label_x }, { color = theme.color.muted })
     for index, slot in ipairs(REPLAY_SLOTS) do
         local box = { x = REPLAY.x + (index - 1) * (REPLAY.cell + REPLAY.gap), top = DOCK.top, w = REPLAY.cell, h = DOCK.height }
         kit.button(s, { id = slot.id, act = slot.act }, box)
@@ -183,28 +193,22 @@ local function star(s, box)
     return at.x + at.w + STAR.gap
 end
 
-local function lit_action(s, main_state, action, box, top)
-    local lit = function()
-        return main_state.option(action.lit)
-    end
-    local unlit = function()
-        return not main_state.option(action.lit)
-    end
-    local spec = { value = i18n.t(action.key), size = theme.type.caption, align = "center", overflow = props.text_overflow.SHRINK }
+local function lit_action(s, action, box, top)
+    local spec = { value = action.label, size = theme.type.caption, align = "center", overflow = props.text_overflow.SHRINK }
     local at = { x = box.x, top = top, w = box.w }
-    s:text(spec, at, { color = theme.color.sub, draw = unlit })
-    s:text(spec, at, { color = theme.color.text, draw = lit })
-    s:rect({ x = box.x, top = box.top + box.h - UNDERLINE, w = box.w, h = UNDERLINE }, theme.color.accent, { draw = lit })
+    s:text(spec, at, { color = theme.color.sub, op = { -action.lit } })
+    s:text(spec, at, { color = theme.color.text, op = { action.lit } })
+    s:rect({ x = box.x, top = box.top + box.h - UNDERLINE, w = box.w, h = UNDERLINE }, theme.color.accent, { op = { action.lit } })
 end
 
-local function actions(s, main_state)
+local function actions(s)
     local size = theme.type.caption
     for _, action in ipairs(ACTIONS) do
         local box = { x = action.x, top = DOCK.top, w = action.width, h = DOCK.height }
         kit.button(s, { id = action.id, act = action.act }, box)
         local top = theme.centered_top(box, size)
         if action.lit then
-            lit_action(s, main_state, action, box, top)
+            lit_action(s, action, box, top)
         elseif action.star then
             local x = star(s, box)
             s:text({ text = action.label, size = size }, { x = x, top = top, w = box.x + box.w - x }, { color = theme.color.sub })
@@ -222,10 +226,10 @@ function controls.header(s, main_state)
     filters(s, main_state)
 end
 
-function controls.footer(s, main_state)
+function controls.footer(s)
     hints(s)
     replays(s)
-    actions(s, main_state)
+    actions(s)
 end
 
 return controls

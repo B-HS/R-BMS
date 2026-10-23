@@ -276,6 +276,8 @@ function Builder:define_text(spec)
         text.value = spec.value
     elseif spec.ref ~= nil then
         text.ref = spec.ref
+    elseif type(spec.text) == "function" then
+        text.value = spec.text
     else
         text.constantText = spec.text or ""
     end

@@ -1,3 +1,5 @@
+local i18n = require("lua.i18n")
+
 local theme = {}
 
 theme.name = "R-BMS Default"
@@ -110,7 +112,7 @@ theme.difficulty = {
 }
 
 theme.difficulty_name = {
-    [0] = "UNKNOWN",
+    [0] = i18n.t("common_unknown"),
     [1] = "BEGINNER",
     [2] = "NORMAL",
     [3] = "HYPER",

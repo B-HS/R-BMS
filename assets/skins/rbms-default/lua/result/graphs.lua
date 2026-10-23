@@ -3,6 +3,7 @@ local props = require("lua.props")
 local ui = require("lua.ui")
 local parts = require("lua.parts")
 local layout = require("lua.result.layout")
+local i18n = require("lua.i18n")
 
 local graphs = {}
 
@@ -76,7 +77,12 @@ local TIMING = {
     unit_gap = 6,
     unit_width = 28,
     item_gap = 24,
-    labels = { fast = { "AVG FAST", 90 }, slow = { "AVG SLOW", 97 }, even = { "AVG", 38 }, spread = { "SD", 25 } },
+    labels = {
+        fast = { i18n.t("result_average_fast"), 90 },
+        slow = { i18n.t("result_average_slow"), 97 },
+        even = { i18n.t("result_average"), 38 },
+        spread = { "SD", 25 },
+    },
 }
 local TIMING_LINES = { graphColor = theme.color.text, averageColor = theme.color.accent, devColor = theme.color.muted }
 local TIMING_BANDS = { "PGColor", "GRColor", "GDColor", "BDColor", "PRColor" }
@@ -119,7 +125,7 @@ local function gauge_value(s, main_state, right, baseline)
 end
 
 local function gauge(s, main_state, right, height)
-    caption(s, right, GAUGE, "GAUGE")
+    caption(s, right, GAUGE, i18n.t("common_gauge"))
     local size = theme.type.caption
     local name = { x = right.x + GAUGE.name_offset, top = GAUGE.caption_top, w = right.w / 2 }
     s:text({ value = parts.choice(main_state, props.index.GAUGE_1P, theme.gauge_name, ""), size = size }, name, appear({ color = theme.color.text }))
@@ -140,7 +146,7 @@ local function legend(s, right, top, table_of)
 end
 
 local function timeline(s, right)
-    caption(s, right, TIMELINE, "JUDGES OVER TIME")
+    caption(s, right, TIMELINE, i18n.t("result_judges_over_time"))
     legend(s, right, TIMELINE.caption_top, KIND_LEGEND)
     local box = section(right, TIMELINE)
     parts.panel(s, box, appear())
@@ -152,7 +158,7 @@ local function timeline(s, right)
 end
 
 local function sides(s, right)
-    caption(s, right, SIDES, "FAST / SLOW OVER TIME")
+    caption(s, right, SIDES, i18n.t("result_fast_slow_over_time"))
     legend(s, right, SIDES.caption_top, SIDE_LEGEND)
     local box = section(right, SIDES)
     parts.panel(s, box, appear())
@@ -186,7 +192,7 @@ local function timing_stats(s, main_state, right)
     local average_fraction = main_state.number(props.number.AVERAGE_TIMING_AFTERDOT)
     local spread = main_state.number(props.number.STDDEV_TIMING)
     if not ui.has_value(average) or not ui.has_value(spread) or spread < 0 then
-        s:text({ text = "NO JUDGED NOTES", size = size }, { x = x, top = TIMING.caption_top, w = right.x + right.w - x }, appear({ color = theme.color.sub }))
+        s:text({ text = i18n.t("result_no_judged_notes"), size = size, overflow = props.text_overflow.SHRINK }, { x = x, top = TIMING.caption_top, w = right.x + right.w - x }, appear({ color = theme.color.sub }))
         return
     end
     local label = TIMING.labels.even
@@ -200,7 +206,7 @@ local function timing_stats(s, main_state, right)
 end
 
 local function timing(s, main_state, right)
-    caption(s, right, TIMING, "TIMING DISTRIBUTION")
+    caption(s, right, TIMING, i18n.t("result_timing_distribution"))
     timing_stats(s, main_state, right)
     local box = section(right, TIMING)
     parts.panel(s, box, appear())
@@ -218,7 +224,7 @@ local function stages(s, right, top, titles)
     if #titles == 0 then
         return
     end
-    parts.caption(s, "STAGES", { x = right.x, top = top, w = right.w }, appear())
+    parts.caption(s, i18n.t("common_stages"), { x = right.x, top = top, w = right.w }, appear())
     local size = STAGES.size
     for index, ref in ipairs(titles) do
         local baseline = top + CAPTION_GAP + (index - 1) * STAGES.pitch + theme.cap_height(size)

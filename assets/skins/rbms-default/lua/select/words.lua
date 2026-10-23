@@ -1,4 +1,24 @@
+local i18n = require("lua.i18n")
+
 local words = {}
+
+local t = i18n.t
+
+local function listed(prefix, first, last)
+    local entries = {}
+    for index = first, last do
+        entries[index] = t(prefix .. index)
+    end
+    return entries
+end
+
+local function lines(prefix, count)
+    local entries = {}
+    for line = 1, count do
+        entries[line] = t(prefix .. "_" .. line)
+    end
+    return entries
+end
 
 words.switch = { [0] = "OFF", "ON" }
 words.bga = { [0] = "ON", [2] = "OFF" }
@@ -7,98 +27,66 @@ words.shift = { [0] = "NONE", "CONTINUE", "SURVIVAL TO GROOVE", "BEST CLEAR", "S
 words.algorithm = { [0] = "COMBO", "DURATION", "LOWEST" }
 words.algorithm_set_elsewhere = "SCORE"
 
-words.random = {
-    [0] = "THE CHART IS PLAYED AS IT IS WRITTEN",
-    "THE KEY LANES ARE FLIPPED LEFT TO RIGHT",
-    "THE KEY LANES ARE SHUFFLED ONCE FOR THE WHOLE CHART",
-    "THE KEY LANES ARE ROTATED BY A RANDOM STEP AND KEEP THEIR ORDER",
-    "EVERY NOTE TAKES A KEY LANE OF ITS OWN AT RANDOM",
-    "THE KEY LANES TURN ROUND AS THE CHART GOES ON",
-    "EVERY NOTE TAKES A KEY LANE AT RANDOM, AVOIDING QUICK REPEATS ON ONE KEY",
-    "AS MANY NOTES AS CAN BE ARE MOVED ONTO THE TURNTABLE",
-}
+words.random = listed("words_random_", 0, 7)
 
-words.gauge = {
-    [0] = { "THE GENTLEST GAUGE:", "SMALL LOSSES, A LOW LINE TO CLEAR" },
-    { "A GROOVE GAUGE THAT", "LOSES LESS ON A MISS" },
-    { "THE STANDARD GROOVE GAUGE:", "END ABOVE THE LINE TO CLEAR" },
-    { "STARTS FULL AND DROPS FAST:", "EMPTY MEANS FAILED" },
-    { "HARSHER THAN HARD:", "EMPTY MEANS FAILED" },
-    { "ONE COMBO BREAK", "ENDS THE PLAY" },
-}
+words.gauge = {}
+for gauge = 0, 5 do
+    words.gauge[gauge] = lines("words_gauge_" .. gauge, 2)
+end
 
-words.fix_notes = {
-    [0] = "NO BPM IS HELD: HI-SPEED IS USED AS IT IS SET",
-    "THE SCROLL SPEED IS HELD FOR THE BPM THE CHART STARTS AT",
-    "THE SCROLL SPEED IS HELD FOR THE HIGHEST BPM",
-    "THE SCROLL SPEED IS HELD FOR THE BPM MOST NOTES ARE AT",
-    "THE SCROLL SPEED IS HELD FOR THE LOWEST BPM",
-}
+words.fix_notes = listed("words_fix_note_", 0, 4)
 
-words.target = "THE SCORE GRAPH RACES THIS TARGET"
+words.target = t("words_target")
 
-words.ex_judge = {
-    [0] = "JUDGE WIDTH AND LN MARGIN ARE AS SHIPPED (SETTINGS > JUDGE)",
-    "A WIDENED JUDGE OR LN MARGIN: THE LAMP IS ASSIST AND NO BEST SCORE IS KEPT",
-}
-words.constant = { [0] = "NOTES SCROLL WITH THE CHART'S BPM CHANGES", "NOTES SCROLL AT ONE SPEED WHATEVER THE BPM DOES" }
-words.scratch_auto = {
-    [0] = "YOU PLAY THE TURNTABLE YOURSELF",
-    "THE TURNTABLE IS PLAYED FOR YOU: A CLEAR TAKES AN ASSIST LAMP, ASSIST EASY TO ASSIST EXHARD",
-}
-words.legacy = { [0] = "LONG NOTES ARE HELD TO THEIR ENDS", "LONG NOTES ARE PLAYED AS PLAIN NOTES" }
-words.keep_green = { [0] = "HI-SPEED STAYS AS IT IS SET FROM CHART TO CHART", "EVERY CHART STARTS AT THE SAME GREEN NUMBER" }
-words.lane_cover = { [0] = "THE LANE COVER IS PUT AWAY", "THE LANE COVER (SUDDEN+) HIDES THE TOP OF THE LANES" }
-words.lift = { [0] = "THE JUDGE LINE IS AT THE BOTTOM OF THE LANES", "THE JUDGE LINE IS LIFTED UP THE LANES" }
-words.hidden = { [0] = "THE NOTES STAY IN SIGHT DOWN TO THE JUDGE LINE", "A COVER HIDES THE NOTES NEAR THE JUDGE LINE" }
+words.ex_judge = listed("words_ex_judge_", 0, 1)
+words.constant = listed("words_constant_", 0, 1)
+words.scratch_auto = listed("words_scratch_auto_", 0, 1)
+words.legacy = listed("words_legacy_", 0, 1)
+words.keep_green = listed("words_keep_green_", 0, 1)
+words.lane_cover = listed("words_lane_cover_", 0, 1)
+words.lift = listed("words_lift_", 0, 1)
+words.hidden = listed("words_hidden_", 0, 1)
 
-words.bga_notes = { [0] = "THE BACKGROUND ANIMATION IS SHOWN", [2] = "THE BACKGROUND ANIMATION IS HIDDEN" }
+words.bga_notes = { [0] = t("words_bga_shown"), [2] = t("words_bga_hidden") }
 words.shift_notes = {
-    [0] = { "ONLY THE CHOSEN GAUGE RUNS" },
-    { "A HARD GAUGE THAT EMPTIES", "PLAYS ON TO THE END AT 0%" },
-    { "A HARD GAUGE THAT EMPTIES", "TURNS INTO THE NORMAL GAUGE" },
-    { "EVERY GAUGE RUNS AT ONCE:", "THE BEST ONE CLEARED IS KEPT" },
-    { "THE CHOSEN GAUGE AND THOSE BELOW", "IT RUN: THE BEST CLEARED IS KEPT" },
+    [0] = lines("words_shift_note_0", 1),
+    lines("words_shift_note_1", 2),
+    lines("words_shift_note_2", 2),
+    lines("words_shift_note_3", 2),
+    lines("words_shift_note_4", 2),
 }
-words.auto_adjust = { [0] = "JUDGE TIMING STAYS WHERE IT IS SET", "JUDGE TIMING MOVES A LITTLE WITH EVERY HIT" }
-words.algorithm_notes = {
-    [-1] = "SCORE IS SET IN SETTINGS > JUDGE: THE TURNTABLE LEAVES IT",
-    [0] = "A HIT GOES TO THE NOTE THAT KEEPS THE COMBO",
-    "A HIT GOES TO THE NOTE NEAREST IN TIME",
-    "A HIT GOES TO THE LOWEST NOTE IN REACH",
-}
+words.auto_adjust = listed("words_auto_adjust_", 0, 1)
+words.algorithm_notes = listed("words_algorithm_note_", 0, 2)
+words.algorithm_notes[-1] = t("words_algorithm_note_score")
 
 words.display_time = {
-    name = "NOTE DISPLAY TIME",
+    name = t("sheet_note_display_time"),
     off = "OFF",
-    off_note = "KEEP GREEN NUMBER IS OFF: TURN IT ON WITH SELECT + KEY 5 TO SET THE TIME HERE",
-    off_lines = { "KEEP GREEN NUMBER IS OFF", "(SELECT + KEY 5)" },
-    away_note = "KEEP GREEN NUMBER IS ON: MOVE THE CURSOR TO A CHART TO SET THE TIME HERE",
-    away_lines = { "MOVE THE CURSOR TO", "A CHART TO SET IT" },
-    held_lines = { "LEFT: 1 MS SHORTER", "RIGHT: 1 MS LONGER" },
+    off_note = t("words_display_off_note"),
+    off_lines = { t("words_display_off_line"), "(SELECT + KEY 5)" },
+    away_note = t("words_display_away_note"),
+    away_lines = lines("words_display_away_line", 2),
+    held_lines = lines("words_display_held_line", 2),
     green = "GREEN NUMBER %d",
 }
 
 words.judge_timing = {
-    name = "JUDGE TIMING",
-    zero = "NOTES ARE DRAWN ON THE BEAT",
-    earlier = "NOTES ARE DRAWN %d MS EARLIER",
-    later = "NOTES ARE DRAWN %d MS LATER",
-    advice = { "MANY FAST: MOVE TO -", "MANY SLOW: MOVE TO +" },
+    name = t("sheet_judge_timing"),
+    zero = t("words_timing_zero"),
+    earlier = i18n.template("words_timing_earlier"),
+    later = i18n.template("words_timing_later"),
+    advice = lines("words_timing_advice", 2),
 }
 
 words.guide = {
-    {
-        title = "PLAY OPTIONS",
-        line = "WHITE KEYS STEP DOWN A LIST, BLACK KEYS STEP UP. TURN THE TURNTABLE TO PICK THE TARGET",
-    },
-    { title = "ASSIST OPTIONS", line = "EACH KEY SWITCHES ITS OPTION ON OR OFF. THE TURNTABLE SWITCHES HIDDEN+" },
-    { title = "DETAIL OPTIONS", line = "THE KEYS SET THE DETAIL OPTIONS. THE TURNTABLE STEPS THE JUDGE ALGORITHM" },
+    { title = t("words_guide_1_title"), line = t("words_guide_1_line") },
+    { title = t("words_guide_2_title"), line = t("words_guide_2_line") },
+    { title = t("words_guide_3_title"), line = t("words_guide_3_line") },
 }
 
 words.assist_rule = {
-    title = "ASSIST LAMP",
-    lead = { "WITH SCRATCH AUTO ON, A CLEAR IS", "NAMED FOR THE GAUGE IT ENDED ON" },
+    title = t("words_assist_title"),
+    lead = lines("words_assist_lead", 2),
     rows = {
         { gauge = "EX HARD, HAZARD", grade = 4 },
         { gauge = "HARD", grade = 3 },
@@ -106,7 +94,7 @@ words.assist_rule = {
         { gauge = "EASY", grade = 1 },
         { gauge = "ASSIST EASY", grade = 0 },
     },
-    foot = { "EX JUDGE ON (A WIDENED JUDGE)", "MAKES THE LAMP ASSIST" },
+    foot = lines("words_assist_foot", 2),
 }
 
 return words

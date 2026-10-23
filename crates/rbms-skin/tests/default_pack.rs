@@ -16,6 +16,8 @@
 //! - Every text of the pack's language tables (`lua/i18n`) is written in each language the player
 //!   writes its screens in and is kept in one table only, and `t(key)` reads it in the language the
 //!   host says is on, in English where the host says none.
+//! - A text that takes a value (`{0}`, `{1}`) takes the same values in every language, and a template
+//!   puts them where its language wants them.
 //!
 //! The documents loading, drawing and costing nothing they should not is the dump tool's strict gate
 //! (`rbms-cli`), and the screens being drawn is the player's.
@@ -45,6 +47,10 @@ const SHEET_FOLDER: &str = "image";
 /// host turns on.
 const LANGUAGE_TABLE_FOLDER: &str = "lua/i18n";
 const LANGUAGE_OPTION_FIRST: i32 = 21_150;
+
+/// What opens and closes a place in a text where a value is put.
+const PLACE_OPEN: char = '{';
+const PLACE_CLOSE: char = '}';
 
 /// The seed every interpreter of these checks starts from.
 const TEST_SEED: u64 = 7;
@@ -630,4 +636,115 @@ fn a_key_no_table_holds_is_refused_when_the_text_is_built() {
     let runtime = pack_runtime(LuaMode::Full);
     let error = eval_in_pack::<Value>(&runtime, &MapHost::new(), "return require('lua.i18n').t('no_such_key')").expect_err("an unknown key is refused");
     assert!(error.to_string().contains("unknown i18n key: no_such_key"), "{error}");
+}
+
+/// The places of `text` a value is put in: the digits between each `{` and the `}` that follows when
+/// nothing else lies between them.
+fn places_in(text: &str) -> BTreeSet<String> {
+    let mut places = BTreeSet::new();
+    let mut rest = text;
+    while let Some(open) = rest.find(PLACE_OPEN) {
+        let after = &rest[open + PLACE_OPEN.len_utf8()..];
+        if let Some(close) = after.find(PLACE_CLOSE) {
+            let digits = &after[..close];
+            if !digits.is_empty() && digits.chars().all(|digit| digit.is_ascii_digit()) {
+                places.insert(digits.to_owned());
+            }
+        }
+        rest = after;
+    }
+    places
+}
+
+/// Every entry of one language table whose languages put values in different places, one line each.
+fn language_table_place_problems(area: &str, languages: &[String], table: &Table) -> Vec<String> {
+    let mut problems = Vec::new();
+    for pair in table.pairs::<String, Table>() {
+        let (key, entry) = pair.unwrap_or_else(|error| panic!("{area} should be walkable: {error}"));
+        let mut seen: Vec<(&String, BTreeSet<String>)> = Vec::new();
+        for language in languages {
+            if let Ok(text) = entry.get::<String>(language.as_str()) {
+                seen.push((language, places_in(&text)));
+            }
+        }
+        if let Some((first, places)) = seen.first() {
+            for (language, other) in &seen {
+                if other != places {
+                    problems.push(format!("{area}.{key} puts values in {other:?} in {language} and in {places:?} in {first}"));
+                }
+            }
+        }
+    }
+    problems
+}
+
+/// The check on the places of a text finds a place one language lacks and one it adds, and not a
+/// brace that holds no digits: one that finds nothing would pass the pack's tables whatever they held.
+#[test]
+fn the_check_on_the_places_of_a_text_finds_a_missing_place_and_an_added_one() {
+    let runtime = pack_runtime(LuaMode::Full);
+    let lua = runtime.lua();
+    let languages: Vec<String> = ["en", "ko", "ja"].map(str::to_owned).to_vec();
+    let problems = |source: &str| {
+        let table: Table = lua.load(source).eval().expect("the probe is a table");
+        language_table_place_problems("probe", &languages, &table)
+    };
+
+    assert_eq!(places_in("{0} OF {1}, {0} AGAIN"), BTreeSet::from(["0".to_owned(), "1".to_owned()]));
+    assert!(places_in("{} {x} { 1 } {").is_empty(), "a brace that holds no digits is not a place");
+    assert!(problems("return { a = { en = '{0} OF {1}', ko = '{1}중 {0}', ja = '{0}/{1}' }, b = { en = 'X', ko = 'x', ja = 'e' } }").is_empty());
+    for source in [
+        "return { a = { en = '{0} OF {1}', ko = '{0}', ja = '{0}/{1}' } }",
+        "return { a = { en = 'OF', ko = '{0}', ja = 'e' } }",
+        "return { a = { en = '{0}', ko = '{1}', ja = '{0}' } }",
+    ] {
+        assert!(!problems(source).is_empty(), "{source:?} was not found");
+    }
+}
+
+/// The language tables of the pack put the values a text takes in the same places in each language:
+/// a language that drops or invents a place would show a hole or a stray brace on the screen.
+#[test]
+fn every_text_of_the_packs_language_tables_takes_the_same_values_in_every_language() {
+    let runtime = pack_runtime(LuaMode::Full);
+    let host = MapHost::new();
+    let i18n: Table = eval_in_pack(&runtime, &host, "return require('lua.i18n')").expect("the module loads");
+    let languages: Vec<String> =
+        i18n.get::<Table>("LANGUAGES").expect("the module names its languages").sequence_values().collect::<Result<_, _>>().expect("a language is a code");
+    let areas: Vec<String> =
+        i18n.get::<Table>("AREAS").expect("the module names its tables").sequence_values().collect::<Result<_, _>>().expect("a table is a name");
+
+    let mut problems = Vec::new();
+    for area in &areas {
+        let table: Table =
+            eval_in_pack(&runtime, &host, &format!("return require('lua.i18n.{area}')")).unwrap_or_else(|error| panic!("{area} should be a table: {error}"));
+        problems.extend(language_table_place_problems(area, &languages, &table));
+    }
+    assert!(problems.is_empty(), "the pack's language tables put values in different places:\n{}", problems.join("\n"));
+}
+
+/// A template is read in the language the host has on and puts its values where that language wants
+/// them, a place with no value is left empty, and a list of lines is joined the way its language
+/// writes: with a space between lines in English and Korean and with none in Japanese.
+#[test]
+fn a_template_puts_its_values_where_its_language_wants_them_and_lines_are_joined_as_it_writes() {
+    const PROBE: &str = "
+        local i18n = require('lua.i18n')
+        local _, template = i18n.translator({
+            { count = { en = '{0} OF {1}', ko = '{1}개 중 {0}번째', ja = '{1}件中{0}番目' } },
+        })
+        local say = template('count')
+        return say(2, 5), i18n.join({ 'a', 'b' }), i18n.fill('{0}|{1}', 'x'), i18n.fill('no places')
+    ";
+    let runtime = pack_runtime(LuaMode::Full);
+    let read = |place: Option<usize>| eval_in_pack::<(String, String, String, String)>(&runtime, &host_with_language_on(place), PROBE).expect("the probe runs");
+    let expected = |texts: [&str; 4]| {
+        let [first, second, third, fourth] = texts.map(str::to_owned);
+        (first, second, third, fourth)
+    };
+
+    assert_eq!(read(Some(0)), expected(["2 OF 5", "a b", "x|", "no places"]));
+    assert_eq!(read(Some(1)), expected(["5개 중 2번째", "a b", "x|", "no places"]));
+    assert_eq!(read(Some(2)), expected(["5件中2番目", "ab", "x|", "no places"]));
+    assert_eq!(read(None), expected(["2 OF 5", "a b", "x|", "no places"]), "a host that has no language on is read as English");
 }

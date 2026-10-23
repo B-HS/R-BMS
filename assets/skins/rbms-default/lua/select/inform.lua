@@ -9,6 +9,13 @@ local function settle(seen, page)
     end
 end
 
+local function spoken(text)
+    if type(text) == "function" then
+        return text()
+    end
+    return text
+end
+
 function inform.observer(main_state, page)
     local seen = { opened = nil, last = {}, title = page.guide.title, value = "", line = page.guide.line }
     return function()
@@ -34,7 +41,7 @@ end
 
 function inform.title(observe)
     return function()
-        return observe().title
+        return spoken(observe().title)
     end
 end
 
@@ -46,7 +53,7 @@ end
 
 function inform.line(observe)
     return function()
-        return observe().line
+        return spoken(observe().line)
     end
 end
 
