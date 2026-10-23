@@ -505,6 +505,14 @@
 - [ ] **U21 마이페이지 단위 탭과 배지.** 방법: 이 빌드로 GENOSIDE `初段` 코스를 조건(게이지가 남은 채 클리어, RANDOM 은 OFF 나 MIRROR, 롱노트 LN, SCRATCH AUTO·어시스트 없음)대로 클리어해 서버로 보낸다. 웹의 `/settings?tab=dans`(탭 `단위`), 플레이어 페이지, 순위의 플레이어 열을 본다. 표시 단위를 `자동 (가장 높은 단위)`, `숨김`, 특정 단위로 바꿔 본다. 조건을 어긴 판(SCRATCH AUTO 로 깬 판, 실패한 판)도 한 번씩 보낸다. 기대: 조건대로 깬 뒤 단위 탭의 `GENOSIDE 2018 SP` 카드 표에 `初段`, 코스, 게이지, 받은 날이 생기고 플레이어 페이지와 순위의 이름 옆에 단위 배지가 보인다. 표시 선택을 바꾸면 토스트 `표시할 단위를 바꿨습니다` 가 뜨고 배지가 따라 바뀐다. 조건을 어긴 판과 스테이지 정보가 없는 옛 판은 단위가 생기지 않는다. 탭에 인정 조건 목록이 보이고 `/courses` 로 가는 링크가 있다. 게이지 모드(LR2·BEATORAJA·IIDX)에 따라 단위가 달라지지 않는다(사용자 미확인. 테스트 부채 3.104).
 - [ ] **U22 Cron 첫 실행.** 방법: 사용자가 Vercel 프로젝트에 `CRON_SECRET`(16자 이상)을 등록하고 `web-db.yml` 의 `tables-refresh-count`(읽기)와 `tables-refresh-force` 를 실행한 뒤, Vercel 대시보드의 Cron Jobs 에서 `/api/cron/tables`(일정 `0 15 * * *` = UTC 15:00, KST 0:00)를 한 번 실행하거나 다음 실행을 기다린다. 그 호출의 로그(응답 JSON)를 본다. 비밀 값은 대화·로그에 남기지 않는다. 기대: 호출이 200 이고 응답에는 표마다 `saved`/`unchanged`/`rejected`/`failed` 와 고정 이유 코드만 있다(원본 응답 내용 없음). `tables-refresh-force` 로 저장해 두었으면 `unchanged` 다. `failed` 와 `http_status`·`fetch_failed` 면 Vercel 서버의 요청이 막힌 것이다(테스트 부채 3.105). 그날 웹 표만 낡고 클라이언트는 원본에서 직접 받으므로 영향 없다. 뒤이어 `/tables/stella-st` 의 `마지막 확인` 이 갱신된다. `CRON_SECRET` 이 없으면 503 `SERVICE_NOT_CONFIGURED`, 틀리면 401 이다. 요금제가 Hobby 면 실행이 KST 0:00~0:59 사이에 흩어진다.
 
+### 3.22 2026-10-23: Discord 상태 표시
+
+배경: [Discord ADR](../acknowledge/2026-10-23-adr-discord-rich-presence.md). 가짜 IPC 서버 시험만 했다. 개발 빌드로 해 볼 때는 `HOME` 을 새 임시 폴더로, `--server http://127.0.0.1:9` 를 붙인다.
+
+- [ ] **D1 프로필 표시.** 방법: Discord 데스크톱을 켜고 R-BMS 를 실행해 선곡, 곡 플레이, 결과, 코스 한 판을 지난다. 기대: 프로필에 "R-BMS" 하는 중과 앱 아이콘(여백 없는 그림), 곡 제목, `7K ANOTHER 12` 꼴 줄, 코스는 `1/4 · 코스 이름`, 경과 시간이 보이고 화면이 바뀌면 몇 초 안에 따라온다. 경과 시간이 이상하게(수만 시간 등) 보이면 단위 문제다(테스트 부채 3.111).
+- [ ] **D2 끄기와 다시 붙기.** 방법: 설정 NETWORK > DISCORD STATUS 를 끈다, 다시 켠다. Discord 를 껐다 켠다. R-BMS 를 끈다. 기대: 끄면 사라지고 켜면 다시 보인다. Discord 를 다시 켜면 60초 안에 다시 보인다. 앱을 끄면 사라진다. Discord 가 없을 때 R-BMS 가 느려지거나 알림이 뜨지 않는다.
+- [ ] **D3 Windows·Linux.** 방법: Windows 와 Linux(가능하면 flatpak Discord)에서 D1 을 한다. 기대: 같은 표시. Windows 에서 Discord 가 응답하지 않아도 게임이 멈추지 않는다.
+
 ## 4. 기록
 
 | 날짜 | 확인자 | 기기·OS | 결과 | 비고 |

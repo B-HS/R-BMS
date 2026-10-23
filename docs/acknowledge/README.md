@@ -84,6 +84,7 @@
 | [2026-10-23-adr-table-daily-refresh.md](2026-10-23-adr-table-daily-refresh.md) | Vercel Cron(`0 15 * * *` = UTC 15:00 = KST 0:00)이 Stella·Satellite 원본을 받아 검증(첫 사본 500곡 이상, 90% 이상 유지, 변경 25% 이하)하고 운영 DB `table_snapshot` 에 저장한다. 큰 변경은 `tables-refresh-count` → `tables-refresh-force` 로 사람이 받아들인다. 표 header 의 코스를 카탈로그에 등록하고 새 단위 코스는 소급 판정한다. 표 페이지에 출처 표기 | 2026-10-23 | 유효(코드 반영. 결정 13 은 사용자 결정, 검증 상수·저장 방식·큰 변경 수용 경로는 메인 결정이라 사용자 미확인. 운영 완료 전: `CRON_SECRET` 등록과 첫 저장이 남음) |
 | [2026-10-23-adr-song-mirror-prep.md](2026-10-23-adr-song-mirror-prep.md) | 곡 미러는 업로드하지 않고 준비만 한다. `rbms-cli mirror-pack` 이 곡 폴더를 표 md5 로 골라 결정적 zip 과 매니페스트를 저장소 밖에 만들고(네트워크 없음), R2 업로드·서버·클라이언트 버튼은 설계만 있다. 권리 조사 기록과 사용자 질문 8개를 마지막에 보고한다 | 2026-10-23 | 유효(결정 17 은 사용자 결정, 도구의 세부와 설계 선택 D-1~D-10 은 메인 결정이라 사용자 미확인. 사용자 답 대기) |
 | [2026-10-23-adr-chart-removed-at-owner-request.md](2026-10-23-adr-chart-removed-at-owner-request.md) | 架空ユリカゴ　 [SABOTHER] 를 웹의 표 사본과 운영 DB 에서 모두 지운다(발광 표 1,035 → 1,034곡, 운영 행 삭제 run 39927201095). 사용자 PC 의 로컬 기록과 v0.1.7 에 내장된 표에는 남는다 | 2026-10-23 | 유효(사용자 요청) |
+| [2026-10-23-adr-discord-rich-presence.md](2026-10-23-adr-discord-rich-presence.md) | Discord Rich Presence(로컬 IPC, 새 크레이트 없음, 전용 스레드, 설정 DISCORD STATUS 기본 켬, Art Asset `rbms`, Portal 은 메인이 설정) | 2026-10-23 | 유효(2~4·M1~M11 사용자 미확인) |
 
 ## 그 전의 결정 파일
 

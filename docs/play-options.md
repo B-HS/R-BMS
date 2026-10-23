@@ -980,3 +980,9 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 - 결과 알림: `downloaded: 제목 (n chart(s))`, `the archive had n chart(s) but not this one`, `download failed: 이유`, `download cancelled`. 시작할 수 없는 이유는 `another download is running`, `the chart's link is not a zip archive`, `no download folder is chosen`.
 - 새 의존성은 `zip` 9.0.0 과 `typed-path` 0.12.3 이다(crates.io 게시 14일이 지난 판만 쓴다는 작업 지시를 따랐고, 이 규칙의 출처는 저장소 규칙 문서에서 찾지 못했다). 곡 미러(음원 파일 제공)는 이 기능에 없다.
 - 확인하지 못한 것: 실제 Stella·BMS 사이트에서 받아 본 결과(직접 zip 링크의 실제 응답), Windows 에서 폴더가 막은 이름의 동작(`a6dc73c` 가 접근 거부를 건너뛰게 고쳤다).
+
+## 14. Discord 상태 표시 (2026-10-23)
+
+- 설정 NETWORK > DISCORD > DISCORD STATUS(기본 켬). 켜져 있으면 Discord 데스크톱 앱 프로필에 "R-BMS" 하는 중이 보이고, 선곡·곡 플레이(곡 제목, `7K ANOTHER 12` 꼴, 오토플레이·리플레이·연습 표시)·코스(`n/m · 코스 이름`)·결과에 따라 줄이 바뀌며 경과 시간이 붙는다. 끄면 표시를 지우고 연결도 하지 않는다. 프로필을 볼 수 있는 사람은 곡 제목을 본다.
+- Discord 가 꺼져 있으면 조용히 기다렸다가 다시 붙는다(0.5초부터 60초까지). 앱을 끄면 표시를 지운다. 플레이 중에는 아무것도 보내지 않는다.
+- 근거와 세부: [Discord ADR](acknowledge/2026-10-23-adr-discord-rich-presence.md), 설계 `docs/plan/2026-10-23-discord-presence.md`.
