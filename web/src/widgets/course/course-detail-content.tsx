@@ -1,11 +1,11 @@
 import { dehydrate, HydrationBoundary } from '@tanstack/react-query'
 import { CourseDetailPanel } from '@widgets/course/course-detail-panel'
-import { courseMetaQueryOptions, courseRankingQueryOptions } from '@entities/course.query'
+import { courseCatalogEntryQueryOptions, courseMetaQueryOptions, courseRankingQueryOptions } from '@entities/course.query'
 import { fetchQueryOrNotFound } from '@shared/lib/fetch-query-or-not-found'
 import { getQueryClient } from '@shared/utils/get-query-client'
 import { readIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
 import { rankingQuerySchema } from '@server/dto/score'
-import { parseQueryParams, readCourseMeta, readCourseRanking } from '@server/service/public-reads'
+import { parseQueryParams, readCourseCatalogEntry, readCourseMeta, readCourseRanking } from '@server/service/public-reads'
 
 const RANKING_LIMIT = 50
 
@@ -25,6 +25,7 @@ export const CourseDetailContent = async ({ params, searchParams }: CourseDetail
             ...courseRankingQueryOptions(courseHash, rankingParams),
             queryFn: () => readCourseRanking(courseHash, parseQueryParams(rankingQuerySchema, rankingParams)),
         }),
+        queryClient.prefetchQuery({ ...courseCatalogEntryQueryOptions(courseHash), queryFn: () => readCourseCatalogEntry(courseHash) }),
     ])
 
     return (

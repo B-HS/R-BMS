@@ -3,6 +3,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { DanBadgeList } from '@features/dan/dan-badge-list'
 import { FilterBar } from '@features/filter/filter-bar'
 import { ScratchAutoToggle } from '@features/filter/scratch-auto-toggle'
 import { PanelFootnote } from '@features/shell/panel-footnote'
@@ -41,9 +42,12 @@ const buildColumns = (rankOffset: number): DataTableColumn<PlayerLeaderboardRow>
         label: '플레이어',
         flex: true,
         cell: (row) => (
-            <Link href={`/players/${encodeURIComponent(row.id)}`} className='font-medium hover:underline'>
-                {row.name}
-            </Link>
+            <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
+                <Link href={`/players/${encodeURIComponent(row.id)}`} className='font-medium hover:underline'>
+                    {row.name}
+                </Link>
+                <DanBadgeList dans={row.dans} />
+            </div>
         ),
     },
     { key: 'id', label: 'ID', width: 160, mono: true, hideBelow: 'sm', cell: (row) => row.id },

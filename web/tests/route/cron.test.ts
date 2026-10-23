@@ -20,6 +20,7 @@ const REPORT: TableRefreshReport = {
 
 const createHarness = (secret: string | null = SECRET) => {
     const calls: TableRefreshOptions[] = []
+    const revalidated: (readonly TableRefreshReport[])[] = []
     const route = createTableRefreshCronRoute(
         () => ({
             tableRefreshService: {
@@ -28,27 +29,30 @@ const createHarness = (secret: string | null = SECRET) => {
                     return [REPORT]
                 },
             },
+            revalidate: { onTableRefresh: (reports) => void revalidated.push(reports) },
         }),
         () => secret ?? undefined,
     )
     const call = (headers: Record<string, string> = {}) => route(new Request(`${ORIGIN}/api/cron/tables`, { headers }), undefined)
-    return { call, calls }
+    return { call, calls, revalidated }
 }
 
 describe('GET /api/cron/tables', () => {
     test('CRON_SECRET 이 없으면 503 이고 표를 받지 않는다', async () => {
-        const { call, calls } = createHarness(null)
+        const { call, calls, revalidated } = createHarness(null)
         const response = await call({ authorization: `Bearer ${SECRET}` })
         expect(response.status).toBe(503)
         expect((await response.json()).error.code).toBe('SERVICE_NOT_CONFIGURED')
         expect(calls).toHaveLength(0)
+        expect(revalidated).toHaveLength(0)
     })
 
     test('Authorization 이 없으면 401', async () => {
-        const { call, calls } = createHarness()
+        const { call, calls, revalidated } = createHarness()
         const response = await call()
         expect(response.status).toBe(401)
         expect(calls).toHaveLength(0)
+        expect(revalidated).toHaveLength(0)
     })
 
     test('Bearer 값이 다르면 401 — 길이가 같은 다른 값과 접두사만 맞는 값도 포함', async () => {
@@ -72,6 +76,14 @@ describe('GET /api/cron/tables', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ success: true, data: { tables: [REPORT] } })
         expect(calls).toEqual([{ allowLargeChange: false, dryRun: false }])
+    })
+
+    test('표를 갱신한 뒤 그 결과를 읽기 캐시 무효화에 넘기고 인증 실패에는 무효화하지 않는다', async () => {
+        const { call, revalidated } = createHarness()
+        await call({ authorization: `Bearer ${SAME_LENGTH_OTHER_SECRET}` })
+        expect(revalidated).toEqual([])
+        await call({ authorization: `Bearer ${SECRET}` })
+        expect(revalidated).toEqual([[REPORT]])
     })
 
     test('응답은 캐시하지 않는다', async () => {

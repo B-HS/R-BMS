@@ -33,6 +33,12 @@ export const QUERY_KEY = {
         META: (courseHash: string) => ['course', 'meta', courseHash],
         RANKING: (courseHash: string, params: Record<string, unknown>) => ['course', 'ranking', courseHash, params],
         BEST: (courseHash: string, player: string) => ['course', 'best', courseHash, player],
+        CATALOG: ['course', 'catalog'],
+        CATALOG_ENTRY: (courseHash: string) => ['course', 'catalog', courseHash],
+    },
+    DAN: {
+        ALL: ['dan'],
+        MINE: ['dan', 'mine'],
     },
     TABLE: {
         ALL: ['table'],

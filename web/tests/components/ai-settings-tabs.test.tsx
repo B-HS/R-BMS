@@ -52,7 +52,7 @@ describe('설정 탭의 AI 키 탭', () => {
         installAiRoutes()
         await renderWithQueryClient(withRouter('', <SettingsTabs user={USER} />))
 
-        expect(page.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['프로필', 'API 토큰', '동기화 blob', '라이벌', 'AI 키'])
+        expect(page.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['프로필', 'API 토큰', '동기화 blob', '라이벌', '단위', 'AI 키'])
     })
 
     test('주소에 tab=ai 가 있으면 AI 키 탭이 열리고 그 탭의 요청만 나간다', async () => {

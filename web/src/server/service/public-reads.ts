@@ -12,6 +12,8 @@ import {
     getChartMetaCached,
     getChartRankingCached,
     getClientBuildsCached,
+    getCourseCatalogCached,
+    getCourseCatalogEntryCached,
     getCourseMetaCached,
     getCourseRankingCached,
     getPlayerLeaderboardCached,
@@ -109,6 +111,11 @@ export const readCourseMeta = async (courseHash: string) => {
     if (!meta) throw createAppError(ERROR_CODE.IR_COURSE_NOT_FOUND, { courseHash })
     return meta
 }
+
+export const readCourseCatalog = async () => getCourseCatalogCached()
+
+/** The catalog entry of a course, or null when the course is no part of the catalog (a course a player brought along has none). */
+export const readCourseCatalogEntry = async (courseHash: string) => getCourseCatalogEntryCached(courseHash)
 
 export const readCourseRanking = async (courseHash: string, query: RankingQuery) =>
     getCourseRankingCached({

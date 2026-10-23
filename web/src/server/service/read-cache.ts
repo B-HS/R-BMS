@@ -2,6 +2,8 @@ import 'server-only'
 import { cacheLife, cacheTag, revalidateTag } from 'next/cache'
 import { compose, type Composed } from '@server/compose'
 import { toScoreRecord } from '@server/service/domain/score/score.service'
+import { TABLE_REFRESH_OUTCOME } from '@server/service/domain/table-refresh/table-refresh.validate'
+import type { TableRefreshReport } from '@server/service/domain/table-refresh/table-refresh.service'
 
 export const CACHE_TAG = {
     chart: (hash: string) => `chart:${hash}`,
@@ -10,6 +12,7 @@ export const CACHE_TAG = {
     chartSearch: () => 'chart-search',
     score: (scoreId: string) => `score:${scoreId}`,
     player: (loginId: string) => `player:${loginId}`,
+    playerProfiles: () => 'player-profiles',
     playerScores: (loginId: string) => `player-scores:${loginId}`,
     playerRecent: (loginId: string) => `player-recent:${loginId}`,
     playerStats: (loginId: string) => `player-stats:${loginId}`,
@@ -58,7 +61,7 @@ export const getScoreCached = async (scoreId: string) => {
 export const getPlayerProfileCached = async (loginId: string) => {
     'use cache'
     cacheLife('minutes')
-    cacheTag(CACHE_TAG.player(loginId))
+    cacheTag(CACHE_TAG.player(loginId), CACHE_TAG.playerProfiles())
     return compose().playerService.getProfileByLoginId(loginId)
 }
 
@@ -96,6 +99,7 @@ export const CACHE_TAG_EXT = {
     course: (courseHash: string) => `course:${courseHash}`,
     courseRanking: (courseHash: string) => `course-ranking:${courseHash}`,
     courseBest: (courseHash: string) => `course-best:${courseHash}`,
+    courseCatalog: () => 'course-catalog',
     tables: () => 'tables',
     table: (tableId: string) => `table:${tableId}`,
     playerRivals: (loginId: string) => `player-rivals:${loginId}`,
@@ -120,6 +124,20 @@ export const getCourseBestCached = async (params: Parameters<Composed['courseSer
     cacheLife('minutes')
     cacheTag(CACHE_TAG_EXT.courseBest(params.courseHash))
     return compose().courseService.getBest(params)
+}
+
+export const getCourseCatalogCached = async () => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG_EXT.courseCatalog())
+    return compose().courseCatalogService.listGroups()
+}
+
+export const getCourseCatalogEntryCached = async (courseHash: string) => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG_EXT.courseCatalog())
+    return compose().courseCatalogService.getEntry(courseHash)
 }
 
 export const getChartReplaysCached = async (params: { chartSha256: string; userId?: string; limit: number }) => {
@@ -208,6 +226,24 @@ export const revalidateOnCourseSubmit = (params: { courseHash: string; loginId: 
 export const revalidateOnDanAward = (params: { loginId: string }) => {
     revalidateTag(CACHE_TAG.player(params.loginId), CACHE_PROFILE.player)
     revalidateTag(CACHE_TAG.leaderboardPlayers(), CACHE_PROFILE.feed)
+}
+
+const isCatalogChangedBy = (report: TableRefreshReport) =>
+    report.outcome === TABLE_REFRESH_OUTCOME.SAVED ||
+    (report.courses !== null && report.courses.inserted + report.courses.changed + report.courses.deactivated > 0)
+
+/**
+ * Drops the cached reads a table refresh can have made stale: the course catalog when a table was saved or its courses were registered,
+ * the course pages of the courses that became dan courses, and every cached profile and the player ranking when dans were awarded.
+ */
+export const revalidateOnTableRefresh = (reports: readonly TableRefreshReport[], revalidate: typeof revalidateTag = revalidateTag) => {
+    if (reports.some(isCatalogChangedBy)) revalidate(CACHE_TAG_EXT.courseCatalog(), CACHE_PROFILE.ranking)
+    for (const courseHash of reports.flatMap((report) => report.courses?.newDanHashes ?? [])) {
+        revalidate(CACHE_TAG_EXT.course(courseHash), CACHE_PROFILE.chart)
+    }
+    if (!reports.some((report) => (report.awarded ?? 0) > 0)) return
+    revalidate(CACHE_TAG.playerProfiles(), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.leaderboardPlayers(), CACHE_PROFILE.feed)
 }
 
 export const revalidateOnCourseUpsert = (courseHash: string) => {

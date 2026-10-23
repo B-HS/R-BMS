@@ -1,12 +1,14 @@
 'use client'
 
 import type { FC } from 'react'
+import { DanBadgeList } from '@features/dan/dan-badge-list'
 import { LoadErrorState } from '@features/state/load-error-state'
 import { NotFoundNotice } from '@features/state/not-found-notice'
 import { PlayerRecentPanel } from '@widgets/player/player-recent-panel'
 import { PlayerStatsPanel } from '@widgets/player/player-stats-panel'
 import { ShellPage } from '@widgets/shell/shell-page'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
+import { readDisplayedDans } from '@entities/dan.type'
 import { usePlayer } from '@entities/player.query'
 import type { PlayerRecentParams } from '@entities/player.type'
 import { ApiError } from '@shared/lib/fetch'
@@ -49,6 +51,7 @@ export const PlayerDetailPanel: FC<PlayerDetailPanelProps> = ({ playerId, recent
             <div className='bg-card flex flex-col gap-1 p-3'>
                 <p className='text-lg leading-tight font-semibold tracking-tight wrap-anywhere'>{data.name}</p>
                 <p className='text-muted-foreground font-mono text-xs'>@{data.id}</p>
+                <DanBadgeList dans={readDisplayedDans(data.extra)} />
                 <p className='text-muted-foreground text-xs'>
                     제출 <span className='text-foreground font-medium tabular-nums'>{formatCount(data.total_plays)}</span>
                 </p>

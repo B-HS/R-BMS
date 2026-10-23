@@ -8,6 +8,7 @@ import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { MetaBadge } from '@features/badge/meta-badge'
+import { CourseSourceNotice } from '@features/course/course-source-notice'
 import { LampLabel } from '@features/lamp/lamp-label'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
 import { EmptyState } from '@features/state/empty-state'
@@ -20,25 +21,26 @@ import { ApiError } from '@shared/lib/fetch'
 import { formatCount, formatDateTime, formatHash } from '@shared/lib/format'
 import { writeIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
 import { serializeSearchParams } from '@shared/lib/search-params'
+import { DAN_SETTINGS_HREF } from '@shared/constants/navigation'
 import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/constants/scratch-auto'
-import { useCourseMeta, useCourseRanking } from '@entities/course.query'
+import { useCourseCatalogEntry, useCourseMeta, useCourseRanking } from '@entities/course.query'
 import type { CourseChartRef, CourseRankingParams } from '@entities/course.type'
 import type { ScoreRecord } from '@entities/score.type'
 
-const CHART_COLUMNS: DataTableColumn<CourseChartRef>[] = [
+const buildChartColumns = (titles: readonly string[]): DataTableColumn<CourseChartRef>[] => [
     { key: 'stage', label: 'STAGE', width: 80, align: 'right', cell: (_row, index) => index + 1 },
     {
-        key: 'sha256',
+        key: 'chart',
         label: '차트',
         flex: true,
-        mono: true,
-        cell: (row) => (
-            <Link href={`/charts/${row.sha256}`} className='hover:underline'>
-                {formatHash(row.sha256)}
+        cell: (row, index) => (
+            <Link href={`/charts/${row.sha256 || row.md5}`} className='hover:underline'>
+                {titles[index] || <span className='font-mono'>{formatHash(row.sha256 || row.md5)}</span>}
             </Link>
         ),
     },
-    { key: 'md5', label: 'md5', width: 128, mono: true, cell: (row) => formatHash(row.md5) },
+    { key: 'sha256', label: 'sha256', width: 112, mono: true, hideBelow: 'sm', cell: (row) => (row.sha256 ? formatHash(row.sha256) : '—') },
+    { key: 'md5', label: 'md5', width: 112, mono: true, hideBelow: 'sm', cell: (row) => formatHash(row.md5) },
 ]
 
 const RANKING_COLUMNS: DataTableColumn<ScoreRecord>[] = [
@@ -75,8 +77,10 @@ export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rank
     const pathname = usePathname()
     const meta = useCourseMeta(courseHash)
     const ranking = useCourseRanking(courseHash, rankingParams)
+    const catalogEntry = useCourseCatalogEntry(courseHash).data
 
     const rows = ranking.data ?? []
+    const chartColumns = buildChartColumns(catalogEntry?.charts.map((chart) => chart.title) ?? [])
 
     const handleScratchAutoChange = (checked: boolean) => {
         const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: writeIncludeScratchAutoParam(checked) })
@@ -114,9 +118,26 @@ export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rank
                     ))}
                 </div>
                 <p className='text-muted-foreground font-mono text-xs'>{meta.data.course_hash}</p>
+                {catalogEntry && (
+                    <>
+                        <div className='flex flex-wrap gap-1'>
+                            <MetaBadge>{catalogEntry.group.name}</MetaBadge>
+                            {!catalogEntry.active && <MetaBadge>표에서 빠짐</MetaBadge>}
+                        </div>
+                        {catalogEntry.dan && (
+                            <p className='text-xs'>
+                                이 코스를 조건대로 클리어하면 {catalogEntry.dan.system_name} {catalogEntry.dan.label} 단위를 얻습니다.{' '}
+                                <Link href={DAN_SETTINGS_HREF} className='text-muted-foreground underline'>
+                                    인정 조건
+                                </Link>
+                            </p>
+                        )}
+                        <CourseSourceNotice source={catalogEntry.source} keys={catalogEntry.group.keys} />
+                    </>
+                )}
             </PanelCard>
             <PanelCard title={`구성 차트 ${formatCount(meta.data.charts.length)}곡`}>
-                <DataTable columns={CHART_COLUMNS} rows={meta.data.charts} rowKey={(row) => `${row.sha256}-${row.md5}`} caption='코스 구성 차트' />
+                <DataTable columns={chartColumns} rows={meta.data.charts} rowKey={(row) => `${row.sha256}-${row.md5}`} caption='코스 구성 차트' />
             </PanelCard>
             {meta.data.trophy.length > 0 && (
                 <PanelCard title='트로피' contentClassName='flex flex-col gap-1'>

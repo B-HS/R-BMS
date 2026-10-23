@@ -1,4 +1,5 @@
 import type { AssistGrade, ClearLamp } from '@shared/constants/clear-lamp'
+import type { DisplayedDan } from '@entities/dan.type'
 import type { PlayerProfile } from '@entities/player.type'
 import type { PlayerId } from '@entities/score.type'
 
@@ -38,6 +39,7 @@ export type PlayerLeaderboardParams = {
 }
 
 export type PlayerLeaderboardRow = PlayerProfile & {
+    dans: DisplayedDan[]
     cleared_charts: number
     played_charts: number
 }
