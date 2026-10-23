@@ -7,6 +7,9 @@
 //! the reference will not start a course whose charts it cannot all find
 //! (`BarRenderer.java:154-155`).
 //!
+//! The tab lists the GENOSIDE 2018 grade courses the build carries ([`rbms_course::genoside_2018`])
+//! before the course files the player keeps, so the grades can be played without writing a file.
+//!
 //! [`CourseOverrides`] is the other half: what the constraint set does to the play settings when
 //! the course starts. It answers with values rather than writing them anywhere, so the settings the
 //! player chose are still theirs when the course ends.
@@ -19,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::PlayOptions;
-use rbms_course::{Course, CourseChart, CourseConstraint, CourseRun};
+use rbms_course::{Course, CourseChart, CourseConstraint, CourseRun, bundled_twin, genoside_2018};
 use rbms_judge::GaugeKind;
 use rbms_judge::gauge::GaugeIndex;
 use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
@@ -98,11 +101,25 @@ pub(crate) struct CourseList {
 }
 
 impl CourseList {
-    /// Read every course file under `dir` and resolve each one against `library`.
+    /// List the bundled courses and every course file under `dir`, and resolve each one against
+    /// `library`.
     pub(crate) fn load(dir: &Path, library: &Library) -> CourseList {
-        let mut list = CourseList::from_courses(rbms_course::load_dir(dir));
+        let mut list = CourseList::with_bundled(rbms_course::load_dir(dir));
         list.resolve_in_library(library);
         list
+    }
+
+    /// The GENOSIDE 2018 courses, single play then double play, each group in the grade order the
+    /// data file lists, followed by `own` in the order given.
+    ///
+    /// A course of `own` that plays the charts of a bundled course in the same order is left out,
+    /// whatever it is called: the id of a course includes its name, so a copy under another name
+    /// would be ranked apart from the grade it plays, and the bundled course is the one the website
+    /// registers.
+    pub(crate) fn with_bundled(own: Vec<Course>) -> CourseList {
+        let bundled = genoside_2018().courses().map(|bundled| bundled.course.clone());
+        let own = own.into_iter().filter(|course| bundled_twin(course).is_none());
+        CourseList::from_courses(bundled.chain(own).collect())
     }
 
     /// Hold an already-loaded course list, with nothing resolved yet.

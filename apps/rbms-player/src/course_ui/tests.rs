@@ -2,7 +2,7 @@ use std::path::Path;
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::PlayOptions;
-use rbms_course::{Course, CourseChart, CourseConstraint, CourseRun, StageResult, TrophyRule};
+use rbms_course::{Course, CourseChart, CourseConstraint, CourseRun, StageResult, TrophyRule, genoside_2018};
 use rbms_judge::GaugeKind;
 use rbms_judge::gauge::GaugeIndex;
 use rbms_judge::gauge_tables::{CourseGaugeMode, GaugeSetId};
@@ -20,6 +20,12 @@ const TEST_MD5_ABSENT: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const TEST_NOTES: u32 = 1_000;
 const TEST_EX: u32 = 1_400;
 const TEST_LAMP_HARD: u8 = 6;
+const TEST_BUNDLED_SP_COURSES: usize = 22;
+const TEST_BUNDLED_DP_COURSES: usize = 22;
+const TEST_BUNDLED_COURSES: usize = TEST_BUNDLED_SP_COURSES + TEST_BUNDLED_DP_COURSES;
+const TEST_FIRST_SP_NAME: &str = "GENOSIDE 2018 段位認定 初段";
+const TEST_FIRST_DP_NAME: &str = "GENOSIDE 2018 DP段位認定 初段";
+const TEST_OWN_COURSE_NAME: &str = "My Course";
 
 fn chart(md5: &str, title: &str) -> CourseChart {
     CourseChart { md5: md5.to_string(), sha256: String::new(), title: title.to_string() }
@@ -29,8 +35,8 @@ fn course(name: &str, charts: Vec<CourseChart>, constraints: Vec<CourseConstrain
     Course { name: name.to_string(), charts, constraints, ..Course::default() }
 }
 
-fn library_with(md5: &str) -> Library {
-    Library::from_songs(vec![SongEntry {
+fn song(md5: &str) -> SongEntry {
+    SongEntry {
         path: Path::new("/songs/one.bms").to_path_buf(),
         title: "One".to_string(),
         subtitle: String::new(),
@@ -47,7 +53,19 @@ fn library_with(md5: &str) -> Library {
         stagefile: String::new(),
         banner: String::new(),
         preview: String::new(),
-    }])
+    }
+}
+
+fn library_with(md5: &str) -> Library {
+    Library::from_songs(vec![song(md5)])
+}
+
+fn library_holding(md5s: &[&str]) -> Library {
+    Library::from_songs(md5s.iter().map(|md5| song(md5)).collect())
+}
+
+fn bundled_course(index: usize) -> Course {
+    genoside_2018().courses().nth(index).expect("the bundled course is there").course.clone()
 }
 
 fn stage(ex: u32, gauge: f32, survived: bool) -> StageResult {
@@ -123,6 +141,90 @@ fn a_row_reports_the_stage_count_the_badges_and_whether_it_can_start() {
     assert_eq!(rows[1].detail, "1 STAGES - 1 MISSING");
     assert_eq!(rows[1].badges, vec!["UNRELEASED"]);
     assert!(!rows[1].playable);
+}
+
+#[test]
+fn the_course_tab_lists_the_bundled_courses_before_the_players_own() {
+    let list = CourseList::with_bundled(vec![course(TEST_OWN_COURSE_NAME, vec![chart(TEST_MD5_ABSENT, "One")], vec![])]);
+    let rows = list.rows();
+
+    assert_eq!(rows.len(), TEST_BUNDLED_COURSES + 1);
+    assert_eq!(rows[0].title, TEST_FIRST_SP_NAME);
+    assert_eq!(rows[TEST_BUNDLED_SP_COURSES].title, TEST_FIRST_DP_NAME);
+    assert_eq!(rows[TEST_BUNDLED_COURSES].title, TEST_OWN_COURSE_NAME);
+}
+
+#[test]
+fn the_bundled_courses_are_listed_group_by_group_under_their_group_names() {
+    let list = CourseList::with_bundled(Vec::new());
+    let groups = &genoside_2018().groups;
+    let (single, double) = list.entries().split_at(TEST_BUNDLED_SP_COURSES);
+
+    assert_eq!(groups.iter().map(|group| group.courses.len()).collect::<Vec<_>>(), [TEST_BUNDLED_SP_COURSES, TEST_BUNDLED_DP_COURSES]);
+    assert_eq!(single.len() + double.len(), TEST_BUNDLED_COURSES);
+    assert!(single.iter().all(|entry| entry.course.name.starts_with(groups[0].name.as_str())));
+    assert!(double.iter().all(|entry| entry.course.name.starts_with(groups[1].name.as_str())));
+}
+
+#[test]
+fn a_players_copy_of_a_bundled_course_is_listed_once() {
+    let bundled = bundled_course(0);
+    let list = CourseList::with_bundled(vec![bundled.clone()]);
+
+    assert_eq!(list.len(), TEST_BUNDLED_COURSES);
+    assert_eq!(list.entries().iter().filter(|entry| entry.course.hash() == bundled.hash()).count(), 1);
+    assert_eq!(list.entries()[0].course, bundled, "the bundled course is the one that stays");
+}
+
+#[test]
+fn a_players_course_playing_a_bundled_courses_charts_under_another_name_is_listed_once() {
+    let bundled = bundled_course(0);
+    let renamed = Course {
+        name: "GENOSIDE 2018 初段".to_string(),
+        charts: bundled.charts.iter().map(|chart| CourseChart { md5: chart.md5.to_uppercase(), ..chart.clone() }).collect(),
+        ..bundled.clone()
+    };
+    let list = CourseList::with_bundled(vec![renamed.clone()]);
+
+    assert_eq!(list.len(), TEST_BUNDLED_COURSES);
+    assert!(list.entries().iter().all(|entry| entry.course.name != renamed.name));
+    assert_eq!(list.entries()[0].course, bundled);
+}
+
+#[test]
+fn a_players_course_sharing_only_some_charts_with_a_bundled_course_is_kept() {
+    let bundled = bundled_course(0);
+    let shorter = Course { name: "Warm Up".to_string(), charts: bundled.charts[..bundled.charts.len() - 1].to_vec(), ..bundled.clone() };
+    let reversed = Course { name: "Backwards".to_string(), charts: bundled.charts.iter().rev().cloned().collect(), ..bundled.clone() };
+    let list = CourseList::with_bundled(vec![shorter, reversed]);
+
+    let own: Vec<&str> = list.entries()[TEST_BUNDLED_COURSES..].iter().map(|entry| entry.course.name.as_str()).collect();
+    assert_eq!(own, ["Warm Up", "Backwards"]);
+}
+
+#[test]
+fn a_bundled_course_whose_charts_are_missing_cannot_start() {
+    let mut list = CourseList::with_bundled(Vec::new());
+    list.resolve_in_library(&library_with(TEST_MD5_PRESENT));
+    let stages = bundled_course(0).stage_count();
+
+    assert!(list.entries().iter().all(|entry| !entry.is_playable()));
+    assert_eq!(list.entries()[0].missing, (0..stages).collect::<Vec<_>>());
+    let rows = list.rows();
+    assert_eq!(rows[0].detail, format!("{stages} STAGES - {stages} MISSING"));
+    assert!(!rows[0].playable);
+}
+
+#[test]
+fn a_bundled_course_whose_charts_are_all_in_the_library_can_start() {
+    let first = bundled_course(0);
+    let md5s: Vec<&str> = first.charts.iter().map(|chart| chart.md5.as_str()).collect();
+    let mut list = CourseList::with_bundled(Vec::new());
+    list.resolve_in_library(&library_holding(&md5s));
+
+    assert!(list.entries()[0].is_playable());
+    assert_eq!(list.rows()[0].detail, format!("{} STAGES", first.stage_count()));
+    assert!(list.rows()[0].playable);
 }
 
 #[test]
