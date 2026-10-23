@@ -33,6 +33,11 @@ export const TableSnapshotListItem: FC<TableSnapshotListItemProps> = ({ table, t
                     />
                 }
             />
+            {table.source && (
+                <p className='bg-card text-muted-foreground -mt-1 px-3 pb-2 text-xs'>
+                    출처 {table.source.name}({table.source.maker})
+                </p>
+            )}
         </li>
     )
 }

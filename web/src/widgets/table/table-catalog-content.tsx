@@ -1,14 +1,15 @@
 import 'server-only'
 import { Suspense } from 'react'
+import { connection } from 'next/server'
 import { RowListSkeleton } from '@features/state/row-list-skeleton'
 import { TableListContent } from '@widgets/table/table-list-content'
 import { TableSnapshotListItem } from '@widgets/table/table-snapshot-list-item'
 import { SITE_URL } from '@shared/constants/site'
-import { getSnapshotTables } from '@server/service/domain/table-snapshot/table-snapshot.data'
-import { summariseTable } from '@server/service/domain/table-snapshot/table-snapshot.service'
+import { compose } from '@server/compose'
 
-export const TableCatalogContent = () => {
-    const bundledTables = [...getSnapshotTables().values()].map(summariseTable)
+export const TableCatalogContent = async () => {
+    await connection()
+    const defaultTables = await compose().tableSnapshotService.list()
 
     return (
         <>
@@ -20,7 +21,7 @@ export const TableCatalogContent = () => {
                     기본 표
                 </h2>
                 <ul className='bg-border flex flex-col gap-px border-t'>
-                    {bundledTables.map((table) => (
+                    {defaultTables.map((table) => (
                         <TableSnapshotListItem key={table.id} table={table} tableUrl={`${SITE_URL}${table.standard_paths.page}`} />
                     ))}
                 </ul>
