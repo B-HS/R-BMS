@@ -2967,8 +2967,10 @@ dependencies = [
 name = "rbms-cli"
 version = "0.1.7"
 dependencies = [
+ "encoding_rs",
  "rbms-chart",
  "rbms-config",
+ "rbms-course",
  "rbms-library",
  "rbms-model",
  "rbms-parser",
@@ -2977,6 +2979,8 @@ dependencies = [
  "rbms-table",
  "serde",
  "serde_json",
+ "sha2",
+ "zip",
 ]
 
 [[package]]

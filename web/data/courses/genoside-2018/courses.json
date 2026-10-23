@@ -1,0 +1,1904 @@
+{
+  "schema": 1,
+  "source": {
+    "maker": "GENOCIDE",
+    "page_url": "https://nekokan.dyndns.info/~lobsak/genocide/grade.html",
+    "file_url": "http://nekokan.dyndns.info/~lobsak/genoside/2018_course.zip",
+    "retrieved_on": "2026-10-23",
+    "file_bytes": 4084,
+    "file_sha256": "c426719dcf13c279fe003fcd80258fd625c3b796e7c5adda21abec1655df65ca",
+    "entry_name": "test.lr2crs",
+    "entry_sha256": "9d7981aeab8259d96349cc32237164ba1798344e6372cb6c7ee3bb83b417ffb7",
+    "entry_hash_prefix": "00000000002000000000000000005190",
+    "entry_type": 2,
+    "constraint_sources": [
+      {
+        "url": "https://miraiscarlet.github.io/bms/table/genocide_normal/header_normal.json",
+        "sha256": "0206d0358854f5133ec52720efa54824e55167db492f933c5483f4c0933096fd",
+        "retrieved_on": "2026-10-23"
+      },
+      {
+        "url": "https://miraiscarlet.github.io/bms/table/genocide_insane/header_insane.json",
+        "sha256": "0b98df7687b1d64f07f8282ee3f02bbe43dfa235c6be2126581d3807fd27adaf",
+        "retrieved_on": "2026-10-23"
+      }
+    ],
+    "title_source": "https://www.bms-ir.org/new/course?hash= (chart titles only, for display)"
+  },
+  "groups": [
+    {
+      "id": "genoside-2018-sp",
+      "name": "GENOSIDE 2018 段位認定",
+      "keys": 7,
+      "courses": [
+        {
+          "course_hash": "ae8ddca1ddec7737a393eddbd3862d2be2e42bb7184365fbc4664efe280ed0d1",
+          "name": "GENOSIDE 2018 段位認定 初段",
+          "charts": [
+            {
+              "md5": "ae11930223a8f24e91633f1a7864e1eb",
+              "title": "Agito"
+            },
+            {
+              "md5": "cb661ee05c67990012bfd12703ba656c",
+              "title": "Beat Cannon (KHTP Remix)"
+            },
+            {
+              "md5": "328dbf235f3b6cb2791e71bfb62951f8",
+              "title": "ZetsueN (Radio Edit)"
+            },
+            {
+              "md5": "7c6ca04aa14d07b2c081f4dd35432844",
+              "title": "Scaffold"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "34023a5a5e997d0ef2877fd7080992832fa0cd0eb86e266e9a6dfb3bf9bf41d1",
+          "name": "GENOSIDE 2018 段位認定 二段",
+          "charts": [
+            {
+              "md5": "56528c5f77d140bebf5c3b7070471808",
+              "title": "Reach to the sky"
+            },
+            {
+              "md5": "d3ed28d0958cd17a93635c6a5604d0aa",
+              "title": "さいこ゛のたたかい / たひ゛のおわり"
+            },
+            {
+              "md5": "daab2e157ac86ff4374ffff00a129f85",
+              "title": "Arithmetic of Sounds"
+            },
+            {
+              "md5": "a0aac381114f31691c16b864a401d926",
+              "title": "Asteria"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "2f24295ea60c3b93d47b0ad63f2ed47f43f93d1c0bc10e4266d5a46f15d2c6d8",
+          "name": "GENOSIDE 2018 段位認定 三段",
+          "charts": [
+            {
+              "md5": "ad6a62789520c5591c37dada7a063892",
+              "title": "夏色の舞う蒼色のセカイ"
+            },
+            {
+              "md5": "fba939901ecf81d6d0ffe6c605f17676",
+              "title": "GOODBOUNCE"
+            },
+            {
+              "md5": "d89ea641d2ae9502d43f6905a5ede5a0",
+              "title": "The Formula"
+            },
+            {
+              "md5": "29ff7e29c35b7d72cb1a7437fc09b36d",
+              "title": "DESPERATE"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "a626fd70a2be7bd3b89a270197aa9d8e3c77453f1b28a4df46aafb6d3a893845",
+          "name": "GENOSIDE 2018 段位認定 四段",
+          "charts": [
+            {
+              "md5": "935ac8a2d9a3e2307a6e0206f87c22ad",
+              "title": "Heterochromia Iridis"
+            },
+            {
+              "md5": "b177143ae68115a0702db737a7e7c504",
+              "title": "Lonely Cat"
+            },
+            {
+              "md5": "8e17f96a8440ff15923bfe228409c9b6",
+              "title": "EUROBEATアイドル橘花音のテーマ"
+            },
+            {
+              "md5": "6dddd7873ce15935d891730e6f17b992",
+              "title": "SUNRISE BEACH -暁星の雫-"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "f82936b036e895ae3b05969d39765914a97fe15ff05d5aae901d746886011d02",
+          "name": "GENOSIDE 2018 段位認定 五段",
+          "charts": [
+            {
+              "md5": "c3912d126e1af67d32d236397a7510cb",
+              "title": "空想都市トーキョー"
+            },
+            {
+              "md5": "dbf71bc8344d4fd406e154e599c5c27c",
+              "title": "Blooming"
+            },
+            {
+              "md5": "2e962e84f9ceeb87535fe50a382a380a",
+              "title": "Aeventyr"
+            },
+            {
+              "md5": "d2f44370fe455dc1fbffd8c5c6505e77",
+              "title": "Last Feud ~the period~"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "e06b23214ffbd6774d056c9b9e5312a999007141d20f300835a2be5a31a7f1cb",
+          "name": "GENOSIDE 2018 段位認定 六段",
+          "charts": [
+            {
+              "md5": "33c6dd9cfe024f2600c2cfe6ae42df43",
+              "title": "君の記憶、風の唄"
+            },
+            {
+              "md5": "c72d51c6d648ea7b5863ca3bfe52a66c",
+              "title": "Mirage Imitation"
+            },
+            {
+              "md5": "f2ef13a310d8d500b918c5126e13ccb1",
+              "title": "GO BACK 2 YOUR RAVE"
+            },
+            {
+              "md5": "52650f7ca6b989917f095f0635c71da4",
+              "title": "アリスの空虚で愉快な人形劇"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "51334aa2110662846620cd1cd2c7ff6239630536bab6391f02b05b5dead7b518",
+          "name": "GENOSIDE 2018 段位認定 七段",
+          "charts": [
+            {
+              "md5": "4d87528933213d3427ee870c71791538",
+              "title": "ホーリーサンバランド"
+            },
+            {
+              "md5": "761863c63ecfc1a579f87be40632cce1",
+              "title": "Larix (BMS Edit)"
+            },
+            {
+              "md5": "af07aa8958ee69c4b1ba0876adab86ea",
+              "title": "Castorpollux"
+            },
+            {
+              "md5": "e9d2bc9465b6172c27df0d7da71f10d6",
+              "title": "Laplace"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "bb1b0038ec49309765d6e9c79016d66a124b149498728397b12f5efcbe8c9d22",
+          "name": "GENOSIDE 2018 段位認定 八段",
+          "charts": [
+            {
+              "md5": "07193291a7222c7a1d1f542b6c081953",
+              "title": "88D"
+            },
+            {
+              "md5": "cb95efd400d207ab019bb481c508060a",
+              "title": "BLAZES ASSAULT"
+            },
+            {
+              "md5": "86030ae0cb6945ba653176e021fca4fd",
+              "title": "Fly Again (bms edit)"
+            },
+            {
+              "md5": "5dc2ecda7d5a5615ed10a132ac3cd4bd",
+              "title": "Evanescent"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "32c9ab7989859e7766d3c8e021128490290852ac1edea8ec565a7d89492cf5d0",
+          "name": "GENOSIDE 2018 段位認定 九段",
+          "charts": [
+            {
+              "md5": "18aa482e76edfda904b3cf3d646c59bf",
+              "title": "ラケシスと永遠の祈祷者"
+            },
+            {
+              "md5": "07baa34abf34131ee20ab40b70354037",
+              "title": "Precious!!!"
+            },
+            {
+              "md5": "7f31675fdb02c22e392e5b98de1baec4",
+              "title": "Gamegame"
+            },
+            {
+              "md5": "77dd6afb7bfb291774fbdcf5aa0db282",
+              "title": "Shooting Silver Bullet"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "280cffbd631486e03d497f6d32298f0b3910c34376ba51459390d4787c2a79ba",
+          "name": "GENOSIDE 2018 段位認定 十段",
+          "charts": [
+            {
+              "md5": "f14357d72c2c11081fd45dc00aa4cffa",
+              "title": "AirTrip-SF#2-"
+            },
+            {
+              "md5": "ce73f117ef9c4a3ff40fb8069e1c3dda",
+              "title": "絵空事の世界と私"
+            },
+            {
+              "md5": "2356c21a671f059293a24d4cf14f0db2",
+              "title": "Between Sanity and Insanity"
+            },
+            {
+              "md5": "5f6f1c5d3fca5edba8edd537d9927c61",
+              "title": "Blink"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "4676f1e596a008fbdacd847eb4630033d38cc537ee242d5d8ac61d9822abd290",
+          "name": "GENOSIDE 2018 段位認定 発狂初段",
+          "charts": [
+            {
+              "md5": "f872dd65dd08638b06d80470a3233fb9",
+              "title": "SOLROS"
+            },
+            {
+              "md5": "1b72e8f6439a698e78f94be16470b789",
+              "title": "Calamity Fortune"
+            },
+            {
+              "md5": "2371263af3b0d644fba62526c9f49481",
+              "title": "TURNDOWN"
+            },
+            {
+              "md5": "8a8a6c2f3511eb0876a6c9a2027d7bbe",
+              "title": "Dstorv"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "bb37cb8308a989bb28ef01ef5e52ba120eb799fcb358decbead4a3c46a66c26d",
+          "name": "GENOSIDE 2018 段位認定 発狂二段",
+          "charts": [
+            {
+              "md5": "d70e2549e841819708d279d2478bb1e2",
+              "title": "Dai-katsugeki〔AMAZE Remix〕"
+            },
+            {
+              "md5": "5e3711f2f576f3929156c9594b87efac",
+              "title": "Engine"
+            },
+            {
+              "md5": "a56ddb2169246817fb7527363fb9c687",
+              "title": "YAKUI"
+            },
+            {
+              "md5": "cefb4735c26f9488438021b4d7fdca31",
+              "title": "Meteor Lights"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "746d36f2050efda26bb6ca42c2a6ff0cb5d56a805a0408336f52a5b503950bf7",
+          "name": "GENOSIDE 2018 段位認定 発狂三段",
+          "charts": [
+            {
+              "md5": "19fbf62d711282d81208f97f7135e2a2",
+              "title": "Trahison [E]"
+            },
+            {
+              "md5": "3791d42c00cdfa135df3779eb0f78505",
+              "title": "Danse de Romani [Professional]"
+            },
+            {
+              "md5": "b46b23fa8e2ad96e02763f687bb5a494",
+              "title": "UnFaked phantOm"
+            },
+            {
+              "md5": "efae90d527a71d753ea7ad2847ec2006",
+              "title": "CO5M1C R4ILR0AD [ON3 M0RE 3XTR4]"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "cfed92e56fb5fb833faa92c905a95f5745c25f3a9243c94fdfa7276a6192762e",
+          "name": "GENOSIDE 2018 段位認定 発狂四段",
+          "charts": [
+            {
+              "md5": "47de06762f16d164426e3197c5de967c",
+              "title": "私のヒトミ"
+            },
+            {
+              "md5": "a718de9a2cd2f88deafbd40f5929abb4",
+              "title": "suffruti"
+            },
+            {
+              "md5": "5077cd14b4759d0e8d61e854eac4e88a",
+              "title": "Jack o' Lantern"
+            },
+            {
+              "md5": "c87682922d1b87622b34fe7a7ffba52c",
+              "title": "Le Reve"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "d50583701402ab020fe849c817630296401ad2390a115fb52ae7ad299c06308c",
+          "name": "GENOSIDE 2018 段位認定 発狂五段",
+          "charts": [
+            {
+              "md5": "e9fc0fbbde68bfd10f2d289751a1fc6a",
+              "title": "Y"
+            },
+            {
+              "md5": "3a500560e6ace69e08b51736ff1be0ca",
+              "title": "Infinite Galaxy"
+            },
+            {
+              "md5": "8a8019d432ab4dd9bde4e65faf1b663f",
+              "title": "SCARY BANQUET"
+            },
+            {
+              "md5": "7fd4d1b5a767fd97343129157782a95f",
+              "title": "Toki (Sound piercer's Timesucker Remix)"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "b65430d87e31703cb1488e5fce9897fc9506489c753210608157f6b52105409d",
+          "name": "GENOSIDE 2018 段位認定 発狂六段",
+          "charts": [
+            {
+              "md5": "f96cf3af3d9356407bff483d27f4aecc",
+              "title": "IKAROS"
+            },
+            {
+              "md5": "a29f9500cebd16cbb8d14b69ace79db1",
+              "title": "Fairytale"
+            },
+            {
+              "md5": "871c6aed53c5dd3ac35686d9a92af4f4",
+              "title": "Wizdomiot"
+            },
+            {
+              "md5": "40673cc8ea628a9452f6ae9ac74d5817",
+              "title": "先天性エゴサ依存症候群"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "71fb513b369d1ce4225cf9f3e6ba00147846f6bba09ca6abcd9a28c232329682",
+          "name": "GENOSIDE 2018 段位認定 発狂七段",
+          "charts": [
+            {
+              "md5": "a4b59ca055a856b9a200ccfd1bf5c7bc",
+              "title": "Inherited World"
+            },
+            {
+              "md5": "a0f48e96286e0ce275a33fd8cb851ff0",
+              "title": "We are the xxxx"
+            },
+            {
+              "md5": "c4134c29746e1ece168159ba4ae88d45",
+              "title": "ATHAZA"
+            },
+            {
+              "md5": "67a76e7d26f3c3ea99fdc6f912f83021",
+              "title": "Dreadnought"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "ead939fa5410d7dc3fd4660d70ca44f5569d2b0b9ffdc346f2c26c45d946ccb1",
+          "name": "GENOSIDE 2018 段位認定 発狂八段",
+          "charts": [
+            {
+              "md5": "f0feb9654ae044c0e95ebf68e2497c2e",
+              "title": "Lemuria"
+            },
+            {
+              "md5": "51e0a29d5c7fc9cdf5e5e8eee1ad1124",
+              "title": "現実をカットアップしてみた"
+            },
+            {
+              "md5": "1cf2e138abd7199d6e4656447cfaed6c",
+              "title": "FIONA"
+            },
+            {
+              "md5": "8e0df85dbf59c4753346f1582e2d4422",
+              "title": "FUXXING YOUR BRAIN"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "dd32d40d9562c0ef41eb44533669412074310ac2edfb5b6cf249b68677162f88",
+          "name": "GENOSIDE 2018 段位認定 発狂九段",
+          "charts": [
+            {
+              "md5": "603aae2c3681cc2562b9b53b50408c69",
+              "title": "硬核機動"
+            },
+            {
+              "md5": "79dc444b48299814462ff23a2bf3ab79",
+              "title": "ひつぎとふたご"
+            },
+            {
+              "md5": "ff5d7235ba643bc85b804a3df2778590",
+              "title": "hypocrite"
+            },
+            {
+              "md5": "451ed38cdba0323388027129f5929645",
+              "title": "CHMR"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "5416504f226d0d8cef26341ce3b5113ec0a3547271eca19c192be478a95adca7",
+          "name": "GENOSIDE 2018 段位認定 発狂十段",
+          "charts": [
+            {
+              "md5": "d6fea1389a86fc14eb354fcc5e60e03e",
+              "title": "多重極展開"
+            },
+            {
+              "md5": "e58e3f718d089ec37caa0f2c7149a54b",
+              "title": "Altale"
+            },
+            {
+              "md5": "1e049d189ef9bef79824f55764517a58",
+              "title": "3.14 (TT mix)"
+            },
+            {
+              "md5": "fb975909eb0f60a9190c7a1007515d4b",
+              "title": "天空の城ヴェリエル"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "921017d6af73642b92d043b472fcc43e966dc529c6d5fb8179988632e5a239c0",
+          "name": "GENOSIDE 2018 段位認定 発狂皆伝",
+          "charts": [
+            {
+              "md5": "10420967a85371e65db57967e6c696cd",
+              "title": "Doppelganger"
+            },
+            {
+              "md5": "ebc5946c3de24a01048d1c90cbd5c9d6",
+              "title": "ダークサンバランド"
+            },
+            {
+              "md5": "45446f6c96bdb081a2054b80cd8f7208",
+              "title": "キミとボクへの葬送歌"
+            },
+            {
+              "md5": "39d0732ef7fee9ad0c8b044ccbe8a396",
+              "title": "Love & Justice"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "b3384177ebe6e50487106467179640ac25ce9c461501b5175dc773a25693926d",
+          "name": "GENOSIDE 2018 段位認定 Overjoy",
+          "charts": [
+            {
+              "md5": "cfad3baadce9e02c45021963453d7c94",
+              "title": "Legend of Seeker"
+            },
+            {
+              "md5": "77d23be22b2370925c573d922276bce0",
+              "title": "リジットXXパラダイス"
+            },
+            {
+              "md5": "188a99f74ab71804f2e360dcf484545c",
+              "title": "運命論"
+            },
+            {
+              "md5": "c46a81cb184f5a804c119930d6eba748",
+              "title": "FREEDOM DiVE"
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        }
+      ]
+    },
+    {
+      "id": "genoside-2018-dp",
+      "name": "GENOSIDE 2018 DP段位認定",
+      "keys": 14,
+      "courses": [
+        {
+          "course_hash": "a6de020b904510596dbb78f2c398e2002cfe064a402589d603ae453809cf4ad9",
+          "name": "GENOSIDE 2018 DP段位認定 初段",
+          "charts": [
+            {
+              "md5": "98fa5d9e8e9ddca1dc78ba15d231bd27",
+              "title": ""
+            },
+            {
+              "md5": "9a25380cede7740b2f61d03dc5480daf",
+              "title": ""
+            },
+            {
+              "md5": "50a21694c6d36650104f07e5ecde5a31",
+              "title": ""
+            },
+            {
+              "md5": "6c77ca5053489a4857ed4f6d53ff0bda",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "bb0436d45cf8b6ff0cec231688c63ceb9bb5e6794e068659336dc0197d27df96",
+          "name": "GENOSIDE 2018 DP段位認定 二段",
+          "charts": [
+            {
+              "md5": "b88c27b0eb914887e9866b17a9428f6c",
+              "title": ""
+            },
+            {
+              "md5": "98b5e55861b7d80aa2f804bb8e7da67a",
+              "title": ""
+            },
+            {
+              "md5": "9000d359f49fa0a5b23b57ba53a637b2",
+              "title": ""
+            },
+            {
+              "md5": "d4d1121468e3a2c6df5e7ace219be6ed",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "d0b1f0c772eb85866c63ccd6504c1833be8aa9d27c25a067c109f58690582272",
+          "name": "GENOSIDE 2018 DP段位認定 三段",
+          "charts": [
+            {
+              "md5": "74aed698dbaaefcfb7c127ffa6e52df0",
+              "title": ""
+            },
+            {
+              "md5": "864cd738c77820e47b534d5604076ad5",
+              "title": ""
+            },
+            {
+              "md5": "8afe65a262f4baf6fe3e77ff14053e61",
+              "title": ""
+            },
+            {
+              "md5": "5b0fe12541a65f142e8bbd6a82cfc05c",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "45249ed4b0bcdc2f3ea9ced5700c6807779c99b4958d994e38f7645ec9082b6c",
+          "name": "GENOSIDE 2018 DP段位認定 四段",
+          "charts": [
+            {
+              "md5": "4a61bd30f1c05fd31c4a8674e94cf997",
+              "title": ""
+            },
+            {
+              "md5": "3340e601f36de19f588619bca3711cad",
+              "title": ""
+            },
+            {
+              "md5": "1cedfdbcf57dfb61034742856d98ae49",
+              "title": ""
+            },
+            {
+              "md5": "aa48dcf2d9e1255d486b68cf4ab7030c",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "ace6816be9d94122cc90070532d6ec887d470f12d74ae875d8e21d2ffcdfb1f0",
+          "name": "GENOSIDE 2018 DP段位認定 五段",
+          "charts": [
+            {
+              "md5": "efb3782c7b24dfacdc5b4a82e271285c",
+              "title": ""
+            },
+            {
+              "md5": "4fd0fd1666452b5b8303657e916c7e2b",
+              "title": ""
+            },
+            {
+              "md5": "0b681af46981a7cf2b545b91a342558c",
+              "title": ""
+            },
+            {
+              "md5": "dbf68c2913053f4bdd522bb22b603cf4",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "02a321b823e98293c3b8e604770654160bd0adbcf4335b994ee675681a768f6a",
+          "name": "GENOSIDE 2018 DP段位認定 六段",
+          "charts": [
+            {
+              "md5": "b6c15d50d23d26dd6f4ed704bf841ca0",
+              "title": ""
+            },
+            {
+              "md5": "30da8fb7c26513b4e4ddbe181f9f76f7",
+              "title": ""
+            },
+            {
+              "md5": "d47f8fd5e6869fb8145faef6116d4103",
+              "title": ""
+            },
+            {
+              "md5": "f07a6de8994eb2da3c042c22a312631f",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "2f23fca3098d98d472dd4e442a2ab18675cb8bbda28815e6e9829a991919c4e7",
+          "name": "GENOSIDE 2018 DP段位認定 七段",
+          "charts": [
+            {
+              "md5": "edf3b1ea6f50db56f0e60e6424d6be06",
+              "title": ""
+            },
+            {
+              "md5": "409598edc02012ea8221a51a0e136532",
+              "title": ""
+            },
+            {
+              "md5": "46b4e241f33bd7c6b29747baf35b31ec",
+              "title": ""
+            },
+            {
+              "md5": "537cf5dab0dd15f0269883ca9637369a",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "a2e39ab452d21c37cd1266d8e6a960b4074a8030524442dbdb02716f65d6456d",
+          "name": "GENOSIDE 2018 DP段位認定 八段",
+          "charts": [
+            {
+              "md5": "76ffc39aeb37f764acaf0438b4d96380",
+              "title": ""
+            },
+            {
+              "md5": "8849d1b1d585c41169a0bd293df39bc2",
+              "title": ""
+            },
+            {
+              "md5": "52c1eb44fd0349389922481998467eac",
+              "title": ""
+            },
+            {
+              "md5": "8a5764f0870aef1cd76d7cddc0645dc5",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "37b3bf5fcf4fa02006536d0cb67855bbae824cd6ad2957a0e1677b1fded5892a",
+          "name": "GENOSIDE 2018 DP段位認定 九段",
+          "charts": [
+            {
+              "md5": "bdfe182cded7b5a9a3621e144b2cc721",
+              "title": ""
+            },
+            {
+              "md5": "1aa32cee26bc4bd1015993ba90443b09",
+              "title": ""
+            },
+            {
+              "md5": "163abdc453532bf9fffd7274017785cd",
+              "title": ""
+            },
+            {
+              "md5": "209cc0bcdf99cc8bc20406d503a3aff6",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "5bdbf04c7594cd10a407ae91ab915b19d8d807f2a9c477ec3c81a61ee3fb6586",
+          "name": "GENOSIDE 2018 DP段位認定 十段",
+          "charts": [
+            {
+              "md5": "1c99cfd2b59be2886912d33a4847c54b",
+              "title": ""
+            },
+            {
+              "md5": "cd08172d882815ec050329e414d902b9",
+              "title": ""
+            },
+            {
+              "md5": "3e95ebbb4a00a339a6c2507afa74e804",
+              "title": ""
+            },
+            {
+              "md5": "dde0d1af6661b320ef3b5280e5bd1c7d",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "bronzemedal",
+              "missrate": 7.5,
+              "scorerate": 0.0
+            },
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "83a781f7d196478c256cf5ce0f121ef19004f0fad5f52fdf6a84669fef698677",
+          "name": "GENOSIDE 2018 DP段位認定 発狂初段",
+          "charts": [
+            {
+              "md5": "bce5f4227525f6d985080959d7cf8c45",
+              "title": ""
+            },
+            {
+              "md5": "30ee162381930f52ade58071c5210298",
+              "title": ""
+            },
+            {
+              "md5": "52ffc90743c0f229a15898df0408f6fe",
+              "title": ""
+            },
+            {
+              "md5": "29f477f2d0010cd070f13ba7e799a731",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "46b84b0eb94bfcd253852fddb038d39ae42819606d9d3f13a439242435730ff4",
+          "name": "GENOSIDE 2018 DP段位認定 発狂二段",
+          "charts": [
+            {
+              "md5": "04bd108676a4d74c9667f1d46c598771",
+              "title": ""
+            },
+            {
+              "md5": "93001c4a476b60aefb397cd47e016ee6",
+              "title": ""
+            },
+            {
+              "md5": "0679dc2738135b8584327e7440aa6046",
+              "title": ""
+            },
+            {
+              "md5": "83dfffe6695cad75d18262e58c93803e",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "a5020a9e5ea7f6060b9202986878a9f74ee0c31e784836b33634d7fbeddd4b7c",
+          "name": "GENOSIDE 2018 DP段位認定 発狂三段",
+          "charts": [
+            {
+              "md5": "a18f96c14a98ce2290b35e1827f8ade6",
+              "title": ""
+            },
+            {
+              "md5": "c02d8d918d8ce038129464211c9889af",
+              "title": ""
+            },
+            {
+              "md5": "f05446eb6b77c79ee0d62114005d840b",
+              "title": ""
+            },
+            {
+              "md5": "c0fcc9de190b380187921ebd8171d18a",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "ba2d9b5b40ed3bcad3c9d475275977792ff5ebdc7faf904e42bd679e30cc0e47",
+          "name": "GENOSIDE 2018 DP段位認定 発狂四段",
+          "charts": [
+            {
+              "md5": "a663bfa7a84978c1d96b024c7fa2b7dc",
+              "title": ""
+            },
+            {
+              "md5": "40aaa9dc5ab54026719370c068ea39bd",
+              "title": ""
+            },
+            {
+              "md5": "7345e3f41c6f0918d6dc431fd0be4bf0",
+              "title": ""
+            },
+            {
+              "md5": "a27df82d4fcac0d543a397764a4f265c",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "2c1e82f4411af92fac02431776c300e9d6f83ef994b0267472f5b9e9928a391e",
+          "name": "GENOSIDE 2018 DP段位認定 発狂五段",
+          "charts": [
+            {
+              "md5": "3eb02eb1762dfa2cf6f2689ba15977fe",
+              "title": ""
+            },
+            {
+              "md5": "c4a096ac67f6e8224e9872bd465308f7",
+              "title": ""
+            },
+            {
+              "md5": "1db8dea9aabbe945ff39e16545f10f09",
+              "title": ""
+            },
+            {
+              "md5": "180b0eb62d37b5cc74a3f5937bd9fdda",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "96f803fbb798bbfcfb4e2ffc27eb71f70a92a0fe062ec55d0c393dcf4cedebb1",
+          "name": "GENOSIDE 2018 DP段位認定 発狂六段",
+          "charts": [
+            {
+              "md5": "7480de49b770f6852898bf8b6ab51cbc",
+              "title": ""
+            },
+            {
+              "md5": "a6f82198424691c199e5163f49506554",
+              "title": ""
+            },
+            {
+              "md5": "b0a883ac48797b392c1dcf096592809c",
+              "title": ""
+            },
+            {
+              "md5": "44f2352a791a52d7e584fa063b4d1b24",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "636d8316e5ae8a2bcdd0a51672af949e735273a3ccb491a879364e9a95a30fdf",
+          "name": "GENOSIDE 2018 DP段位認定 発狂七段",
+          "charts": [
+            {
+              "md5": "322ef08c16f7420069a67fb66301f93f",
+              "title": ""
+            },
+            {
+              "md5": "706085fc30e345fb202037e2482e91f7",
+              "title": ""
+            },
+            {
+              "md5": "952e1b207987c5941daa66ed4905e5c4",
+              "title": ""
+            },
+            {
+              "md5": "29b709780e5bafad29dd451b94137bf8",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "8e3892978d68c85d8361bbcb77aaccddedc5e75fd0b81ee64ba152ac543972f4",
+          "name": "GENOSIDE 2018 DP段位認定 発狂八段",
+          "charts": [
+            {
+              "md5": "c8dc214003898e6ace09d3341701fc01",
+              "title": ""
+            },
+            {
+              "md5": "438ab055f0d920b181c67687cebf1cd4",
+              "title": ""
+            },
+            {
+              "md5": "23ad14776bda285fe04640ebdf98e268",
+              "title": ""
+            },
+            {
+              "md5": "1e4c60623dbcdec050af73f4260ba029",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "8fda83b62e855e8d35d19b0e0d0ed9ddbf99ec319b78dbab24632dc95e60a4a2",
+          "name": "GENOSIDE 2018 DP段位認定 発狂九段",
+          "charts": [
+            {
+              "md5": "4d59b6c9c5e7ca79b899dc450c2a26d6",
+              "title": ""
+            },
+            {
+              "md5": "30dc841e3829dfb3003c22fbc77d6fc1",
+              "title": ""
+            },
+            {
+              "md5": "11ea77e96ba9a1a61447cd35ccecdb77",
+              "title": ""
+            },
+            {
+              "md5": "876c09843f04168601f52aa4b17522f6",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "a429f9c635160e86b689b645d9b64cae7d3ff8487d1be08543629b59dea0acd3",
+          "name": "GENOSIDE 2018 DP段位認定 発狂十段",
+          "charts": [
+            {
+              "md5": "a40ee9ce409b7b8ad3a6462843c6950a",
+              "title": ""
+            },
+            {
+              "md5": "07ea69b9a864dac1a7e0535e28adccbc",
+              "title": ""
+            },
+            {
+              "md5": "5eec61334ada9b17e6f9680283e312d8",
+              "title": ""
+            },
+            {
+              "md5": "6abd5e8d57c981af7484d9fa25c44e51",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "0f0e2e54dc10d6bc9a0b151382e405cd1e1fa3c50573944c992683eebe92a696",
+          "name": "GENOSIDE 2018 DP段位認定 発狂皆伝",
+          "charts": [
+            {
+              "md5": "ce4b526b809db30a71e9e2be9880f303",
+              "title": ""
+            },
+            {
+              "md5": "307012cfa0cdb675d0b1d4021cfd416a",
+              "title": ""
+            },
+            {
+              "md5": "400f6ec1dd53fd3b97c82596f313ea56",
+              "title": ""
+            },
+            {
+              "md5": "d085ad2a0303878aefbbd571d02e2790",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        },
+        {
+          "course_hash": "d1a2b0f28028512f8cef7b619e0f141320f46d7c19d78872ffd1bf8a8ec4e0eb",
+          "name": "GENOSIDE 2018 DP段位認定 Overjoy",
+          "charts": [
+            {
+              "md5": "6fe6ad45f4759fe83787b7aa1da94236",
+              "title": ""
+            },
+            {
+              "md5": "344270b1434da215f09d837cf282ca5c",
+              "title": ""
+            },
+            {
+              "md5": "1337ece34d90ced31890c67bca9106da",
+              "title": ""
+            },
+            {
+              "md5": "4d2362fba5a3940ce9c97763bd92a5a2",
+              "title": ""
+            }
+          ],
+          "constraint": [
+            "grade_mirror",
+            "gauge_lr2",
+            "ln"
+          ],
+          "trophy": [
+            {
+              "name": "silvermedal",
+              "missrate": 5.0,
+              "scorerate": 70.0
+            },
+            {
+              "name": "goldmedal",
+              "missrate": 2.5,
+              "scorerate": 85.0
+            }
+          ],
+          "release": true
+        }
+      ]
+    }
+  ]
+}

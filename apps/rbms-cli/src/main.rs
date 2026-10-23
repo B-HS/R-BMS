@@ -1,12 +1,13 @@
 //! Headless companion to the player: inspect a chart, read the player's configuration, scan a song
-//! folder, query the local score book, dump a skin pack, or write the note layout of a library's
-//! charts. The config, scan, scores and skin-dump subcommands drive `rbms-config`, `rbms-library`,
-//! `rbms-store` and `rbms-skin` without a window, which is how those crates get exercised outside
-//! the GUI.
+//! folder, query the local score book, dump a skin pack, write the note layout of a library's
+//! charts, or rebuild the course data the player carries. The config, scan, scores and skin-dump
+//! subcommands drive `rbms-config`, `rbms-library`, `rbms-store` and `rbms-skin` without a window,
+//! which is how those crates get exercised outside the GUI.
 
 #![forbid(unsafe_code)]
 
 mod chart_pattern;
+mod course_snapshot;
 mod skin_dump;
 
 use std::io::ErrorKind;
@@ -26,7 +27,9 @@ const USAGE: &str = "usage:\n  \
     [--scenario <json>] [--overlay <folder>] [--frames <N>] [--seed <n>] [--json] [--probe-budget]\n      \
     [--strict] [--allow-failure <document>]...   fail unless every document but the allowed ones comes out clean\n  \
     rbms-cli chart-pattern <library folder> --out <folder>   write each chart's note layout as <md5>.json\n      \
-    [--table <data.json>] [--mode beat-7k]   with a table, report which of its md5s the library has";
+    [--table <data.json>] [--mode beat-7k]   with a table, report which of its md5s the library has\n  \
+    rbms-cli course-snapshot --zip <2018_course.zip> --normal-header <file> --insane-header <file> --titles <md5-title.json>\n      \
+    --retrieved-on <YYYY-MM-DD> --out <courses.json> [--check]   rebuild (or with --check, compare) the bundled GENOSIDE 2018 course data";
 
 /// Exit code for a usage error, matching the code the bare chart mode has always returned.
 const EXIT_USAGE: u8 = 2;
@@ -68,6 +71,10 @@ fn run(args: impl Iterator<Item = String>) -> ExitCode {
         },
         Some("chart-pattern") => match chart_pattern::parse_args(&args[1..]) {
             Ok(parsed) => chart_pattern::run(&parsed),
+            Err(e) => usage_error(&e),
+        },
+        Some("course-snapshot") => match course_snapshot::parse_args(&args[1..]) {
+            Ok(parsed) => course_snapshot::run(&parsed),
             Err(e) => usage_error(&e),
         },
         Some(chart) => chart_command(chart),
@@ -383,6 +390,13 @@ mod tests {
         assert!(USAGE.contains("rbms-cli chart-pattern"), "the usage line lists it: {USAGE}");
         assert_eq!(run(args(&["rbms-cli", "chart-pattern"]).into_iter()), ExitCode::from(EXIT_USAGE), "the library folder is required");
         assert_eq!(run(args(&["rbms-cli", "chart-pattern", "/library"]).into_iter()), ExitCode::from(EXIT_USAGE), "--out is required");
+    }
+
+    #[test]
+    fn course_snapshot_is_a_subcommand_and_not_read_as_a_chart_path() {
+        assert!(USAGE.contains("rbms-cli course-snapshot"), "the usage line lists it: {USAGE}");
+        assert_eq!(run(args(&["rbms-cli", "course-snapshot"]).into_iter()), ExitCode::from(EXIT_USAGE), "the inputs are required");
+        assert_eq!(run(args(&["rbms-cli", "course-snapshot", "--nope"]).into_iter()), ExitCode::from(EXIT_USAGE), "an unknown option is a usage error");
     }
 
     #[test]
