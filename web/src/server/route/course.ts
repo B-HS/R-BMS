@@ -1,20 +1,33 @@
-import { compose } from '@server/compose'
+import { compose, type Composed } from '@server/compose'
 import { COURSE_SUBMISSION_MAX_BYTES, courseMetaUpsertSchema, courseSubmissionSchema } from '@server/dto/course'
 import { bestQuerySchema, rankingQuerySchema } from '@server/dto/score'
 import { irRaw } from '@server/lib/api-response'
 import { getEnv } from '@server/lib/env'
 import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
+import { summarizeError } from '@server/lib/error-summary'
 import { parseJsonBody, parseLimitedJsonBody, parseSearchParams } from '@server/lib/parse-request'
 import { parseBearerToken } from '@server/lib/token'
 import { withApiToken } from '@server/lib/with-api-token'
 import { withAdmin } from '@server/lib/with-session'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { RATE_LIMIT, enforceUserRateLimit, getClientIp } from '@server/lib/with-rate-limit'
-import { findCourseIntegrityFailure } from '@server/service/domain/course/course.service'
-import { isPlayedAtPlausible } from '@server/service/domain/score/score.service'
+import { resolveDanService } from '@server/route/dan'
+import type { AuthService } from '@server/service/domain/auth/auth.service'
+import { findCourseIntegrityFailure, type CourseService } from '@server/service/domain/course/course.service'
+import type { DanService } from '@server/service/domain/dan/dan.service'
+import { isPlayedAtPlausible, type ScoreService } from '@server/service/domain/score/score.service'
 import { readCourseMeta, readCourseRanking } from '@server/service/public-reads'
-import { getCourseBestCached, revalidateOnCourseSubmit, revalidateOnCourseUpsert } from '@server/service/read-cache'
+import { getCourseBestCached, revalidateOnCourseSubmit, revalidateOnCourseUpsert, revalidateOnDanAward } from '@server/service/read-cache'
+
+export type CourseSubmitRouteDeps = {
+    authService: Pick<AuthService, 'resolveApiTokenUser'>
+    courseService: Pick<CourseService, 'submit'>
+    scoreService: Pick<ScoreService, 'recordRejection' | 'recordAcceptance'>
+    resolveBuildTrust: Composed['resolveBuildTrust']
+    danService: Pick<DanService, 'awardFromRun'>
+    revalidate: { onCourseSubmit: typeof revalidateOnCourseSubmit; onDanAward: typeof revalidateOnDanAward }
+}
 
 type CourseContext = { params: Promise<{ courseHash: string }> }
 
@@ -25,10 +38,22 @@ const SUPPORTED_API_VERSION = 1
 
 export const resolvePathCourseHash = async (context: OptionalCourseContext) => (context?.params ? ((await context.params).courseHash ?? null) : null)
 
-const submitCourse = () =>
+const resolveCourseSubmitDeps = (): CourseSubmitRouteDeps => {
+    const { authService, courseService, scoreService, resolveBuildTrust } = compose()
+    return {
+        authService,
+        courseService,
+        scoreService,
+        resolveBuildTrust,
+        danService: resolveDanService(),
+        revalidate: { onCourseSubmit: revalidateOnCourseSubmit, onDanAward: revalidateOnDanAward },
+    }
+}
+
+const submitCourse = (resolveDeps: () => CourseSubmitRouteDeps = resolveCourseSubmitDeps) =>
     withErrorHandling(async (request: Request, context: OptionalCourseContext) => {
         if (!parseBearerToken(request)) throw createAppError(ERROR_CODE.UNAUTHORIZED)
-        const { authService, courseService, scoreService, resolveBuildTrust } = compose()
+        const { authService, courseService, scoreService, resolveBuildTrust, danService, revalidate } = resolveDeps()
         return withApiToken({ resolveApiTokenUser: authService.resolveApiTokenUser })(
             async (authedRequest, authedContext: OptionalCourseContext, user) => {
                 enforceUserRateLimit('course-submit', user.id, RATE_LIMIT.SCORE_SUBMIT)
@@ -88,7 +113,13 @@ const submitCourse = () =>
                         })
                         .catch(() => undefined)
                 }
-                revalidateOnCourseSubmit({ courseHash: input.course_hash, loginId: user.loginId })
+                try {
+                    const { awarded } = await danService.awardFromRun(result.scoreRow)
+                    if (awarded) revalidate.onDanAward({ loginId: user.loginId })
+                } catch (error) {
+                    console.error('dan award failed', summarizeError(error))
+                }
+                revalidate.onCourseSubmit({ courseHash: input.course_hash, loginId: user.loginId })
                 return irRaw(result.response, result.duplicated ? 200 : CREATED_STATUS)
             },
         )(request, context)

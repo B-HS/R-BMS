@@ -205,6 +205,11 @@ export const revalidateOnCourseSubmit = (params: { courseHash: string; loginId: 
     if (params.loginId) revalidateTag(CACHE_TAG.playerStats(params.loginId), CACHE_PROFILE.player)
 }
 
+export const revalidateOnDanAward = (params: { loginId: string }) => {
+    revalidateTag(CACHE_TAG.player(params.loginId), CACHE_PROFILE.player)
+    revalidateTag(CACHE_TAG.leaderboardPlayers(), CACHE_PROFILE.feed)
+}
+
 export const revalidateOnCourseUpsert = (courseHash: string) => {
     revalidateTag(CACHE_TAG_EXT.course(courseHash), CACHE_PROFILE.chart)
     revalidateTag(CACHE_TAG_EXT.tables(), CACHE_PROFILE.chart)

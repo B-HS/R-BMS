@@ -385,7 +385,7 @@ export const userDan = mysqlTable(
         rank: int('rank').notNull(),
         courseHash: varchar('course_hash', { length: 128 }).notNull(),
         courseScoreId: varchar('course_score_id', { length: 36 }).notNull(),
-        courseGauge: varchar('course_gauge', { length: 16 }).notNull(),
+        courseGauge: varchar('course_gauge', { length: 16 }).$type<CourseGaugeRule>().notNull(),
         gauge: tinyint('gauge').notNull(),
         acquiredAt: bigint('acquired_at', { mode: 'number' }).notNull(),
         createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
