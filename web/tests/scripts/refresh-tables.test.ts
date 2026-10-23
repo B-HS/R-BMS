@@ -55,7 +55,7 @@ describe('refresh-tables 스크립트', () => {
 
 describe('refresh-tables 실행', () => {
     const run = (...args: string[]) =>
-        Bun.spawnSync([process.execPath, 'scripts/refresh-tables.ts', ...args], {
+        Bun.spawnSync([process.execPath, '--no-env-file', 'scripts/refresh-tables.ts', ...args], {
             cwd: WEB_DIR,
             env: { PATH: process.env.PATH ?? '', DATABASE_URL: '' },
         })

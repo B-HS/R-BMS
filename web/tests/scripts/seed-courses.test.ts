@@ -26,7 +26,7 @@ const createRun = () => {
 }
 
 const runScript = async (args: string[]) => {
-    const child = Bun.spawn([process.execPath, SEED_SCRIPT, ...args], {
+    const child = Bun.spawn([process.execPath, '--no-env-file', SEED_SCRIPT, ...args], {
         cwd: WEB_DIRECTORY,
         env: { PATH: process.env.PATH ?? '' },
         stdout: 'pipe',
