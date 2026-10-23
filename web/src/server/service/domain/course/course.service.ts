@@ -105,7 +105,7 @@ export type CourseServiceDb = {
         trophy: unknown[]
         extra: Record<string, unknown>
     }) => Promise<void>
-    replaceCourseCharts: (courseHash: string, charts: { position: number; chartSha256: string }[]) => Promise<void>
+    replaceCourseCharts: (courseHash: string, charts: { position: number; chartSha256: string; md5: string }[]) => Promise<void>
     findCourseScoreByIdempotency: (params: { userId: string; courseHash: string; playedAt: number }) => Promise<StoredCourseRun | null>
     insertCourseScore: (row: CourseScoreInsertRow) => Promise<void>
     getCourseBest: (params: {
@@ -263,8 +263,8 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             extra: meta.extra,
         })
         const charts = meta.charts
-            .map((chart, index) => ({ position: index, chartSha256: chart.sha256 }))
-            .filter((chart) => chart.chartSha256.length > 0)
+            .map((chart, index) => ({ position: index, chartSha256: chart.sha256, md5: chart.md5 }))
+            .filter((chart) => chart.chartSha256.length > 0 || chart.md5.length > 0)
         await deps.db.replaceCourseCharts(meta.course_hash, charts)
         const row = await deps.db.findCourse(meta.course_hash)
         return row ? toCourseMeta(row, await deps.db.findCourseCharts(meta.course_hash)) : null

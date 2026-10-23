@@ -135,12 +135,12 @@ export const composeCourse = (db: Database) => {
             },
             findCourseCharts: async (courseHash) => {
                 const rows = await db
-                    .select({ position: courseChart.position, chartSha256: courseChart.chartSha256, md5: chart.md5 })
+                    .select({ position: courseChart.position, chartSha256: courseChart.chartSha256, courseMd5: courseChart.md5, chartMd5: chart.md5 })
                     .from(courseChart)
                     .leftJoin(chart, eq(chart.sha256, courseChart.chartSha256))
                     .where(eq(courseChart.courseHash, courseHash))
                     .orderBy(asc(courseChart.position))
-                return rows
+                return rows.map((row) => ({ position: row.position, chartSha256: row.chartSha256, md5: row.courseMd5 || row.chartMd5 }))
             },
             upsertCourse: withLockRetry(async (row) => {
                 const values = {
