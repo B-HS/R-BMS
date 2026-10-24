@@ -95,21 +95,22 @@
         "title": "Dan",
         "loading": "Loading Dan ranks",
         "loadError": "Could not load the Dan ranks",
-        "intro": "When you clear a course, the server checks the record and awards the Dan automatically. Other players see only the one Dan you choose below for each system, on your profile and in rankings. Only you can see the list of Dan you have earned.",
+        "intro": "When you clear a course, the server checks the record and awards the Dan automatically. Other players see only the Dan you choose below for each system, on your profile and in rankings. Only you can see the list of Dan you have earned.",
         "noneAcquired": "You have not earned any Dan yet. They are added automatically when you clear a course. You can find the courses that award Dan in the <link>course list</link>.",
         "rulesLabel": "Conditions for earning a Dan",
         "rules": {
-            "cleared": "Plays that finished the course with gauge remaining (FAILED, ASSIST and LIGHT ASSIST lamps are excluded).",
+            "cleared": "Plays that finished the course with gauge remaining (FAILED is excluded; ASSIST and LIGHT ASSIST lamps give an A-Dan).",
             "stages": "Every stage must be played with the songs listed in the course.",
             "constraints": "The course constraints must be followed (MIRROR and RANDOM limits, LN type).",
-            "exclusions": "SCRATCH AUTO and ASSIST plays, and plays that do not enter the ranking, are excluded.",
+            "exclusions": "Plays that do not enter the ranking for a reason other than assist, such as an untrusted build, are excluded.",
+            "assisted": "Plays cleared with SCRATCH AUTO, ASSIST, LIGHT ASSIST or a widened judge are recorded separately as an A-Dan (for example A-十段). In automatic display only the regular Dan is shown when it is the same or higher, and both are shown when the A-Dan is higher.",
             "stageRecords": "Only plays from clients that also send the stage records are counted. Earlier records are not applied retroactively.",
             "gaugeMode": "The gauge mode (LR2, BEATORAJA, IIDX) does not matter. The record is kept either way."
         }
     },
     "danSystemCard": {
         "displayLabel": "Dan shown for {system}",
-        "displayAuto": "Auto (highest Dan)",
+        "displayAuto": "Automatic (the highest Dan, plus the A-Dan when it is higher)",
         "displayHidden": "Hidden",
         "shownToOthers": "Dan shown to other players",
         "shownNone": "None",

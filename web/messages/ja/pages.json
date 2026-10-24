@@ -480,7 +480,8 @@
         }
     },
     "dan": {
-        "displayed": "表示する段位"
+        "displayed": "表示する段位",
+        "assisted": "アシストありで獲得した段位（A-段位）"
     },
     "lamp": {
         "distribution": {

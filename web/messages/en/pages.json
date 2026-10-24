@@ -480,7 +480,8 @@
         }
     },
     "dan": {
-        "displayed": "Displayed dan"
+        "displayed": "Displayed dan",
+        "assisted": "Dan earned with assist (A-Dan)"
     },
     "lamp": {
         "distribution": {

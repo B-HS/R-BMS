@@ -4,26 +4,33 @@ import type { FC } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { DanBadge } from '@features/dan/dan-badge'
+import { DanBadgeList } from '@features/dan/dan-badge-list'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/ui/select'
 import { formatDateTime } from '@shared/lib/format'
+import { danDisplayLabel } from '@server/dto/dan'
 import { useSetDanDisplay } from '@entities/dan.query'
 import type { AcquiredDan, DanDisplay, DanDisplayRequest, DanSystem } from '@entities/dan.type'
 
 const DISPLAY_AUTO = 'auto'
 const DISPLAY_HIDDEN = 'hidden'
 const DISPLAY_LABEL_PREFIX = 'label:'
+const DISPLAY_ASSISTED_PREFIX = 'assisted:'
+
+const danSelectValue = (dan: Pick<AcquiredDan, 'label' | 'assisted'>) =>
+    `${dan.assisted ? DISPLAY_ASSISTED_PREFIX : DISPLAY_LABEL_PREFIX}${dan.label}`
 
 const selectValueOf = (display: DanDisplay) => {
     if (display.mode !== 'label') return display.mode
-    return `${DISPLAY_LABEL_PREFIX}${display.label ?? ''}`
+    return danSelectValue({ label: display.label ?? '', assisted: display.assisted })
 }
 
 const toDisplayRequest = (system: DanSystem['system'], value: string): DanDisplayRequest => {
-    if (value.startsWith(DISPLAY_LABEL_PREFIX)) return { system, mode: 'label', label: value.slice(DISPLAY_LABEL_PREFIX.length) }
+    if (value.startsWith(DISPLAY_ASSISTED_PREFIX))
+        return { system, mode: 'label', label: value.slice(DISPLAY_ASSISTED_PREFIX.length), assisted: true }
+    if (value.startsWith(DISPLAY_LABEL_PREFIX)) return { system, mode: 'label', label: value.slice(DISPLAY_LABEL_PREFIX.length), assisted: false }
     return { system, mode: value === DISPLAY_HIDDEN ? 'hidden' : 'auto' }
 }
 
@@ -40,7 +47,7 @@ export const DanSystemCard: FC<DanSystemCardProps> = ({ system, playerId }) => {
         setDisplay.mutate(toDisplayRequest(system.system, value), { onSuccess: () => toast.success(t('changed')) })
 
     const acquiredColumns: DataTableColumn<AcquiredDan>[] = [
-        { key: 'label', label: t('columnDan'), width: 96, cell: (row) => row.label },
+        { key: 'label', label: t('columnDan'), width: 96, cell: (row) => danDisplayLabel(row) },
         {
             key: 'course',
             label: t('columnCourse'),
@@ -67,31 +74,22 @@ export const DanSystemCard: FC<DanSystemCardProps> = ({ system, playerId }) => {
                         <SelectItem value={DISPLAY_AUTO}>{t('displayAuto')}</SelectItem>
                         <SelectItem value={DISPLAY_HIDDEN}>{t('displayHidden')}</SelectItem>
                         {system.acquired.map((acquired) => (
-                            <SelectItem key={acquired.label} value={`${DISPLAY_LABEL_PREFIX}${acquired.label}`}>
-                                {acquired.label}
+                            <SelectItem key={danSelectValue(acquired)} value={danSelectValue(acquired)}>
+                                {danDisplayLabel(acquired)}
                             </SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
             }
             contentClassName='flex flex-col gap-2'>
-            <p className='flex flex-wrap items-center gap-1.5 text-xs'>
+            <div className='flex flex-wrap items-center gap-1.5 text-xs'>
                 {t('shownToOthers')}
-                {system.shown === null ? (
-                    <span className='text-muted-foreground'>{t('shownNone')}</span>
-                ) : (
-                    <DanBadge dan={{ system: system.system, name: system.name, label: system.shown }} />
-                )}
-            </p>
+                {system.shown.length === 0 ? <span className='text-muted-foreground'>{t('shownNone')}</span> : <DanBadgeList dans={system.shown} />}
+            </div>
             {system.acquired.length === 0 ? (
                 <PanelFootnote>{t('noneAcquired')}</PanelFootnote>
             ) : (
-                <DataTable
-                    columns={acquiredColumns}
-                    rows={system.acquired}
-                    rowKey={(row) => row.label}
-                    caption={t('caption', { system: system.name })}
-                />
+                <DataTable columns={acquiredColumns} rows={system.acquired} rowKey={danSelectValue} caption={t('caption', { system: system.name })} />
             )}
         </PanelCard>
     )

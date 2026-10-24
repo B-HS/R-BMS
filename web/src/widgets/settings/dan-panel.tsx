@@ -11,7 +11,7 @@ import { useMyDans } from '@entities/dan.query'
 
 const SKELETON_ROWS = 4
 
-const ELIGIBILITY_RULES = ['cleared', 'stages', 'constraints', 'exclusions', 'stageRecords', 'gaugeMode'] as const
+const ELIGIBILITY_RULES = ['cleared', 'stages', 'constraints', 'exclusions', 'assisted', 'stageRecords', 'gaugeMode'] as const
 
 export const DanPanel: FC<{ playerId: string }> = ({ playerId }) => {
     const t = useTranslations('settings.danPanel')

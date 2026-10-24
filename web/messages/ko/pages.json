@@ -480,7 +480,8 @@
         }
     },
     "dan": {
-        "displayed": "표시 단위"
+        "displayed": "표시 단위",
+        "assisted": "어시스트 판으로 얻은 단위(A-단위)"
     },
     "lamp": {
         "distribution": {

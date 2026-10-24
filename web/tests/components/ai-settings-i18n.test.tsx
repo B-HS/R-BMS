@@ -80,8 +80,44 @@ const reportView = (): ReportView => ({
 })
 
 const emptyDans = (): MyDans => ({
-    systems: [{ system: 'stella', name: 'Stella', display: { mode: 'auto', label: null }, shown: null, acquired: [] }],
+    systems: [{ system: 'stella', name: 'Stella', display: { mode: 'auto', label: null, assisted: false }, shown: [], acquired: [] }],
 })
+
+const ASSISTED_DAN_LABEL = 'A-st3'
+
+const assistedDans = (): MyDans => ({
+    systems: [
+        {
+            system: 'stella',
+            name: 'Stella',
+            display: { mode: 'auto', label: null, assisted: false },
+            shown: [{ system: 'stella', name: 'Stella', label: ASSISTED_DAN_LABEL, assisted: true }],
+            acquired: [
+                {
+                    label: 'st3',
+                    assisted: true,
+                    rank: 3,
+                    course_hash: 'hash-st3',
+                    course_name: 'Stella st3',
+                    course_gauge: 'LR2',
+                    acquired_at: 1_780_000_000_000,
+                },
+            ],
+        },
+    ],
+})
+
+const ASSISTED_DAN_TITLE = {
+    ko: '어시스트 판으로 얻은 단위(A-단위)',
+    en: 'Dan earned with assist (A-Dan)',
+    ja: 'アシストありで獲得した段位（A-段位）',
+} satisfies Record<Locale, string>
+
+const ASSISTED_DAN_RULE = {
+    ko: /A-단위\(예: A-十段\)로 따로 기록합니다/,
+    en: /recorded separately as an A-Dan \(for example A-十段\)/,
+    ja: /A-段位（例: A-十段）として別に記録します/,
+} satisfies Record<Locale, RegExp>
 
 let restoreFetch: () => void = () => undefined
 
@@ -128,6 +164,17 @@ describe('AI·설정 위젯의 세 언어 렌더', () => {
             await renderWithQueryClient(<DanPanel playerId='alice' />, locale)
 
             expect((await page.findByRole('link', { name: COURSE_LIST_LINK[locale] })).getAttribute('href')).toBe('/courses')
+        })
+
+        test(`${locale}: A-단위는 어떤 언어에서도 같은 A- 글자로 나오고 설명과 인정 조건만 그 언어로 나온다`, async () => {
+            const installed = installFetchRoutes({ 'GET /api/fe/me/dans': () => jsonResponse(assistedDans()) })
+            restoreFetch = installed.restore
+            await renderWithQueryClient(<DanPanel playerId='alice' />, locale)
+
+            const badge = await page.findByText(`Stella ${ASSISTED_DAN_LABEL}`)
+            expect(badge.getAttribute('title')).toBe(ASSISTED_DAN_TITLE[locale])
+            expect(page.getByText(ASSISTED_DAN_RULE[locale])).toBeTruthy()
+            expect(page.getByText(ASSISTED_DAN_LABEL)).toBeTruthy()
         })
 
         test(`${locale}: 리포트 안내 문장이 숫자 묶음과 단복수를 그 언어 규칙으로 쓴다`, async () => {

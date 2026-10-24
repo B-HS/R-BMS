@@ -11,7 +11,7 @@ export const DanBadgeList: FC<{ dans: readonly DisplayedDan[] }> = ({ dans }) =>
     return (
         <ul aria-label={t('displayed')} className='flex flex-wrap items-center gap-1'>
             {dans.map((dan) => (
-                <li key={dan.system}>
+                <li key={`${dan.system}:${dan.assisted}`}>
                     <DanBadge dan={dan} />
                 </li>
             ))}

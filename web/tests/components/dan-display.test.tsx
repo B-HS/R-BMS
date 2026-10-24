@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import type { ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
@@ -15,7 +15,8 @@ mock.module('@shared/lib/auth-client', () => ({
 
 const { cleanup, render: renderBare, within } = await import('@testing-library/react')
 const { withIntl } = await import('../support/intl')
-const render = (ui: ReactElement) => renderBare(withIntl(ui))
+const { LOCALES } = await import('../../src/shared/i18n/locale')
+const render = (ui: ReactElement, locale?: Locale) => renderBare(withIntl(ui, locale))
 const { DanBadgeList } = await import('../../src/features/dan/dan-badge-list')
 const { readDisplayedDans } = await import('../../src/entities/dan.type')
 const { PlayerLeaderboardPanel } = await import('../../src/widgets/leaderboard/player-leaderboard-panel')
@@ -24,12 +25,19 @@ const { QUERY_KEY } = await import('../../src/shared/constants/query-key')
 const { SidebarProvider } = await import('../../src/shared/ui/sidebar')
 const { withLocale } = await import('../support/browse-intl')
 
+type Locale = import('../../src/shared/i18n/locale').Locale
 type DisplayedDan = import('../../src/entities/dan.type').DisplayedDan
 type PlayerLeaderboardRow = import('../../src/entities/stats.type').PlayerLeaderboardRow
 type PlayerProfile = import('../../src/entities/player.type').PlayerProfile
 
-const SP_DAN: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '発狂五段' }
-const STELLA_DAN: DisplayedDan = { system: 'stella', name: 'Stella', label: 'st3' }
+const SP_DAN: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '発狂五段', assisted: false }
+const SP_ASSISTED_DAN: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: 'A-十段', assisted: true }
+const STELLA_DAN: DisplayedDan = { system: 'stella', name: 'Stella', label: 'st3', assisted: false }
+const ASSISTED_BADGE_TITLE = {
+    ko: '어시스트 판으로 얻은 단위(A-단위)',
+    en: 'Dan earned with assist (A-Dan)',
+    ja: 'アシストありで獲得した段位（A-段位）',
+} satisfies Record<Locale, string>
 const PATHNAME = '/leaderboards'
 const LEADERBOARD_PARAMS = { sort: 'cleared', page: 1, limit: 20, include_scratch_auto: false }
 const RECENT_PARAMS = { page: 1, limit: 20 }
@@ -73,11 +81,60 @@ describe('DanBadgeList', () => {
                 .map((item) => item.textContent),
         ).toEqual(['GENOSIDE 2018 SP 発狂五段', 'Stella st3'])
     })
+
+    test('한 체계의 정식 단위와 A-단위가 함께 오면 둘 다 그리고 A-단위만 따로 표시한다', () => {
+        const view = render(<DanBadgeList dans={[SP_DAN, { ...SP_ASSISTED_DAN, label: 'A-発狂五段' }]} />)
+        const [regular, assisted] = within(view.getByLabelText('표시 단위')).getAllByRole('listitem')
+
+        expect(regular.textContent).toBe('GENOSIDE 2018 SP 発狂五段')
+        expect(assisted.textContent).toBe('GENOSIDE 2018 SP A-発狂五段')
+        expect(regular.querySelector('[title]')).toBeNull()
+        expect(assisted.querySelector('[data-variant="outline"]')?.getAttribute('title')).toBe(ASSISTED_BADGE_TITLE.ko)
+        expect(regular.querySelector('[data-variant="secondary"]')).toBeTruthy()
+    })
+
+    test('한 체계의 두 배지는 React 키가 겹치지 않는다', () => {
+        const consoleError = spyOn(console, 'error').mockImplementation(() => undefined)
+        try {
+            render(<DanBadgeList dans={[SP_DAN, SP_ASSISTED_DAN]} />)
+            expect(consoleError).not.toHaveBeenCalled()
+        } finally {
+            consoleError.mockRestore()
+        }
+    })
+
+    test('A-단위 배지는 라이트와 다크 모두 대비가 남는 테마 토큰의 점선 테두리를 쓴다', () => {
+        const view = render(<DanBadgeList dans={[SP_ASSISTED_DAN]} />)
+        const className = view.getByText('GENOSIDE 2018 SP A-十段').className
+
+        expect(className).toContain('border-dashed')
+        expect(className).toContain('border-muted-foreground')
+        expect(className).toContain('text-foreground')
+        expect(className).not.toContain('bg-secondary')
+    })
+
+    for (const locale of LOCALES) {
+        test(`${locale}: A-단위 배지는 어떤 언어에서도 같은 A- 글자이고 설명만 그 언어로 나온다`, () => {
+            const view = render(<DanBadgeList dans={[SP_ASSISTED_DAN]} />, locale)
+            const badge = within(view.getByRole('list')).getByText('GENOSIDE 2018 SP A-十段')
+
+            expect(badge.getAttribute('title')).toBe(ASSISTED_BADGE_TITLE[locale])
+        })
+    }
 })
 
 describe('readDisplayedDans', () => {
     test('프로필 extra 의 dans 를 읽는다', () => {
         expect(readDisplayedDans({ rank: '', dans: [SP_DAN] })).toEqual([SP_DAN])
+    })
+
+    test('정식과 A-단위가 함께 들어 있어도 순서 그대로 둘 다 읽는다', () => {
+        expect(readDisplayedDans({ rank: '', dans: [SP_DAN, SP_ASSISTED_DAN] })).toEqual([SP_DAN, SP_ASSISTED_DAN])
+    })
+
+    test('assisted 가 없는 옛 캐시 원소는 버리지 않고 정식 단위로 읽는다', () => {
+        const cachedBeforeAssistedExisted = { system: SP_DAN.system, name: SP_DAN.name, label: SP_DAN.label }
+        expect(readDisplayedDans({ rank: '', dans: [cachedBeforeAssistedExisted, STELLA_DAN] })).toEqual([SP_DAN, STELLA_DAN])
     })
 
     test('dans 가 없거나 모양이 다르거나 모르는 체계이면 빈 목록이다', () => {
@@ -104,6 +161,24 @@ describe('플레이어 순위 표', () => {
     })
 })
 
+describe('플레이어 순위 표의 A-단위', () => {
+    test('같은 체계의 정식 단위와 A-단위를 이름 옆에 둘 다 보인다', () => {
+        const queryClient = seededClient()
+        queryClient.setQueryData(QUERY_KEY.LEADERBOARD.PLAYERS(LEADERBOARD_PARAMS), {
+            data: [leaderboardRow('alice', [SP_DAN, SP_ASSISTED_DAN])],
+            pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+        })
+        const view = render(withApp(queryClient, <PlayerLeaderboardPanel params={LEADERBOARD_PARAMS} />))
+
+        const [aliceRow] = view.getAllByRole('row').slice(1)
+        expect(
+            within(aliceRow)
+                .getAllByRole('listitem')
+                .map((item) => item.textContent),
+        ).toEqual(['GENOSIDE 2018 SP 発狂五段', 'GENOSIDE 2018 SP A-十段'])
+    })
+})
+
 describe('플레이어 프로필', () => {
     const renderProfile = (extra: PlayerProfile['extra']) => {
         const queryClient = seededClient()
@@ -126,6 +201,14 @@ describe('플레이어 프로필', () => {
     test('이름 아래에 extra.dans 의 표시 단위를 보인다', () => {
         const view = renderProfile({ rank: '', dans: [SP_DAN] })
         expect(within(view.getByLabelText('표시 단위')).getByText('GENOSIDE 2018 SP 発狂五段')).toBeTruthy()
+    })
+
+    test('extra.dans 에 정식 단위와 A-단위가 함께 있으면 둘 다 보인다', () => {
+        const view = renderProfile({ rank: '', dans: [SP_DAN, SP_ASSISTED_DAN] })
+        const list = view.getByLabelText('표시 단위')
+
+        expect(within(list).getByText('GENOSIDE 2018 SP 発狂五段')).toBeTruthy()
+        expect(within(list).getByText('GENOSIDE 2018 SP A-十段').getAttribute('title')).toBe(ASSISTED_BADGE_TITLE.ko)
     })
 
     test('옛 서버의 프로필(extra 에 dans 없음)은 단위 줄 없이 그대로 열린다', () => {
