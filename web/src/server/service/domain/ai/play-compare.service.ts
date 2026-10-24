@@ -9,6 +9,7 @@ import {
 } from '@server/dto/ai-play'
 import { clearLampFromId } from '@server/dto/common'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     cutText,
@@ -25,33 +26,36 @@ import type { PlayScoreDb, PlayScoreRow } from '@server/service/domain/ai/replay
 import type { AiResultService } from '@server/service/domain/ai/result.service'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { AnalyzedPlay, RivalSegmentPlay, TraceService } from '@server/service/domain/trace/trace.service'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_PLAY_COMPARE_FEATURE = 'play_compare'
 export const AI_PLAY_COMPARE_PROMPT_VERSION = 2
 export const AI_PLAY_COMPARE_MAX_OUTPUT_TOKENS = 6_000
 export const AI_PLAY_COMPARE_EFFORT = 'low' satisfies AiEffort
 
-export const AI_PLAY_COMPARE_SYSTEM_PROMPT = [
-    'You explain where one play of a rhythm game (BMS) chart gained or lost against another play of the same chart.',
-    DIGEST_IS_DATA_RULE,
-    '`gaps` are the time segments with the largest differences: `ex_diff` and `bp_diff` are this play minus the other (a positive `ex_diff` means this play scored more EX there), `cumulative_ex_diff` is the difference summed up to the end of the segment, and `top_tags` are the main pattern tags of this play there.',
-    '`overall.ex_diff` is the sum of `ex_diff` over the `overall.compared_segments` segments both plays reached. A segment one of the plays never reached (it left or its gauge ran out first) is left out of that sum and of `gaps`; do not say anything about such segments.',
-    "The other play is the player's own best or a rival who chose to share segment totals; nothing else of the rival is known. Lane options of the two plays may differ.",
-    `For each gap you talk about write \`segment_id\` exactly as given and one Korean sentence \`explanation\`; at most ${COMPARE_GAP_SEGMENTS}. \`takeaway\` is one Korean sentence on what to practise.`,
-    DIGEST_KEY_RULE,
-    'All text is Korean; `summary` is two sentences at most.',
-].join('\n')
+export const buildAiPlayCompareSystemPrompt = (language: Locale) =>
+    [
+        'You explain where one play of a rhythm game (BMS) chart gained or lost against another play of the same chart.',
+        DIGEST_IS_DATA_RULE,
+        '`gaps` are the time segments with the largest differences: `ex_diff` and `bp_diff` are this play minus the other (a positive `ex_diff` means this play scored more EX there), `cumulative_ex_diff` is the difference summed up to the end of the segment, and `top_tags` are the main pattern tags of this play there.',
+        '`overall.ex_diff` is the sum of `ex_diff` over the `overall.compared_segments` segments both plays reached. A segment one of the plays never reached (it left or its gauge ran out first) is left out of that sum and of `gaps`; do not say anything about such segments.',
+        "The other play is the player's own best or a rival who chose to share segment totals; nothing else of the rival is known. Lane options of the two plays may differ.",
+        `For each gap you talk about write \`segment_id\` exactly as given and one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`explanation\`; at most ${COMPARE_GAP_SEGMENTS}. \`takeaway\` is one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence on what to practise.`,
+        DIGEST_KEY_RULE,
+        `All text is ${AI_OUTPUT_LANGUAGE_NAME[language]}; \`summary\` is two sentences at most.`,
+    ].join('\n')
 
-export const AI_PLAY_COMPARE_SPEC = {
-    feature: AI_PLAY_COMPARE_FEATURE,
-    analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_PLAY_COMPARE_PROMPT_VERSION,
-    system: AI_PLAY_COMPARE_SYSTEM_PROMPT,
-    schemaName: 'play_compare',
-    schema: aiCompareOutputSchema,
-    maxOutputTokens: AI_PLAY_COMPARE_MAX_OUTPUT_TOKENS,
-    effort: AI_PLAY_COMPARE_EFFORT,
-} satisfies AiFeatureSpec<typeof aiCompareOutputSchema>
+export const aiPlayCompareSpecOf = (language: Locale) =>
+    ({
+        feature: AI_PLAY_COMPARE_FEATURE,
+        analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_PLAY_COMPARE_PROMPT_VERSION,
+        system: buildAiPlayCompareSystemPrompt(language),
+        schemaName: 'play_compare',
+        schema: aiCompareOutputSchema,
+        maxOutputTokens: AI_PLAY_COMPARE_MAX_OUTPUT_TOKENS,
+        effort: AI_PLAY_COMPARE_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiCompareOutputSchema>
 
 /** A player's public best on a chart (`chart_best` and its score): the judgement totals anyone may read. */
 export type PublicBestRow = {
@@ -381,14 +385,14 @@ export const createAiPlayCompareService = (deps: AiPlayCompareServiceDeps) => {
 
     return {
         /** The comparison and its stored explanation; null when the account has no such score. No provider is called. */
-        view: async (params: { userId: string; scoreId: string; query: AiCompareQuery }) => {
+        view: async (params: { userId: string; scoreId: string; query: AiCompareQuery; language: Locale }) => {
             const built = await build(params)
             if (!built) return null
             const ai =
                 built.digest && built.subjectKey
                     ? await readStoredInterpretation({
                           results: deps.results,
-                          spec: AI_PLAY_COMPARE_SPEC,
+                          spec: aiPlayCompareSpecOf(params.language),
                           userId: params.userId,
                           subjectKey: built.subjectKey,
                           digest: built.digest,
@@ -398,13 +402,13 @@ export const createAiPlayCompareService = (deps: AiPlayCompareServiceDeps) => {
         },
 
         /** Asks the user's AI to explain the segment differences; with no segment comparison (or no difference) no call is made. */
-        interpret: async (params: { userId: string; scoreId: string; query: AiCompareQuery }) => {
+        interpret: async (params: { userId: string; scoreId: string; query: AiCompareQuery; language: Locale }) => {
             const built = await build(params)
             if (!built) return null
             if (!built.digest || !built.subjectKey) return notEnoughData('comparable_play')
             const { digest, gapIds } = built
             return runAiFeature(deps.runner, {
-                ...AI_PLAY_COMPARE_SPEC,
+                ...aiPlayCompareSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: built.subjectKey,
                 digest,

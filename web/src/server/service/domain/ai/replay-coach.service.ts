@@ -2,6 +2,7 @@ import { AI_TEXT_LIMIT, type AiEffort } from '@server/dto/ai'
 import { aiCoachOutputSchema, aiGaugeNameOf, type AiCoachOutput, type AiCoachView } from '@server/dto/ai-play'
 import { clearLampFromId, gaugeTypeFromId } from '@server/dto/common'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     cutText,
@@ -17,32 +18,35 @@ import { exRatioOf, isShownTag, segmentKey } from '@server/service/domain/ai/pla
 import type { AiResultService } from '@server/service/domain/ai/result.service'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { AnalyzedPlay, TraceService } from '@server/service/domain/trace/trace.service'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_REPLAY_COACH_FEATURE = 'replay_coach'
 export const AI_REPLAY_COACH_PROMPT_VERSION = 1
 export const AI_REPLAY_COACH_MAX_OUTPUT_TOKENS = 8_000
 export const AI_REPLAY_COACH_EFFORT = 'low' satisfies AiEffort
 
-export const AI_REPLAY_COACH_SYSTEM_PROMPT = [
-    "You coach a rhythm game (BMS, 7 keys and a scratch) player through one play, segment by segment, from the server's analysis of it.",
-    DIGEST_IS_DATA_RULE,
-    'The play is cut into equal time segments. `problems` are the segments where the player lost the most (BP is BAD plus POOR plus empty POOR), each with its main pattern tags, FAST/SLOW of GREAT to BAD, the gauge at the end of the segment before it and any gauge drop inside it.',
-    `For each problem segment you talk about write \`segment_id\` exactly as given, one Korean sentence \`diagnosis\` and one Korean sentence \`advice\`; at most ${COACH_PROBLEM_SEGMENTS}.`,
-    'Pattern tags describe the notes as the player saw them after lane options. `next_try` is one Korean sentence for the next attempt of this chart.',
-    DIGEST_KEY_RULE,
-    'All text is Korean; `summary` is two sentences at most.',
-].join('\n')
+export const buildAiReplayCoachSystemPrompt = (language: Locale) =>
+    [
+        "You coach a rhythm game (BMS, 7 keys and a scratch) player through one play, segment by segment, from the server's analysis of it.",
+        DIGEST_IS_DATA_RULE,
+        'The play is cut into equal time segments. `problems` are the segments where the player lost the most (BP is BAD plus POOR plus empty POOR), each with its main pattern tags, FAST/SLOW of GREAT to BAD, the gauge at the end of the segment before it and any gauge drop inside it.',
+        `For each problem segment you talk about write \`segment_id\` exactly as given, one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`diagnosis\` and one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`advice\`; at most ${COACH_PROBLEM_SEGMENTS}.`,
+        `Pattern tags describe the notes as the player saw them after lane options. \`next_try\` is one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence for the next attempt of this chart.`,
+        DIGEST_KEY_RULE,
+        `All text is ${AI_OUTPUT_LANGUAGE_NAME[language]}; \`summary\` is two sentences at most.`,
+    ].join('\n')
 
-export const AI_REPLAY_COACH_SPEC = {
-    feature: AI_REPLAY_COACH_FEATURE,
-    analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_REPLAY_COACH_PROMPT_VERSION,
-    system: AI_REPLAY_COACH_SYSTEM_PROMPT,
-    schemaName: 'replay_coach',
-    schema: aiCoachOutputSchema,
-    maxOutputTokens: AI_REPLAY_COACH_MAX_OUTPUT_TOKENS,
-    effort: AI_REPLAY_COACH_EFFORT,
-} satisfies AiFeatureSpec<typeof aiCoachOutputSchema>
+export const aiReplayCoachSpecOf = (language: Locale) =>
+    ({
+        feature: AI_REPLAY_COACH_FEATURE,
+        analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_REPLAY_COACH_PROMPT_VERSION,
+        system: buildAiReplayCoachSystemPrompt(language),
+        schemaName: 'replay_coach',
+        schema: aiCoachOutputSchema,
+        maxOutputTokens: AI_REPLAY_COACH_MAX_OUTPUT_TOKENS,
+        effort: AI_REPLAY_COACH_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiCoachOutputSchema>
 
 /** The account's own score row of one play with its chart's title, what the coach and the comparison show of the play. */
 export type PlayScoreRow = {
@@ -219,13 +223,13 @@ export const createAiReplayCoachService = (deps: AiReplayCoachServiceDeps) => {
 
     return {
         /** One own play's segments and the stored coaching; null when the account has no such score. No provider is called. */
-        view: async (params: { userId: string; scoreId: string }) => {
+        view: async (params: { userId: string; scoreId: string; language: Locale }) => {
             const built = await build(params)
             if (!built) return null
             const ai = built.digest
                 ? await readStoredInterpretation({
                       results: deps.results,
-                      spec: AI_REPLAY_COACH_SPEC,
+                      spec: aiReplayCoachSpecOf(params.language),
                       userId: params.userId,
                       subjectKey: coachSubjectKey(params.scoreId),
                       digest: built.digest,
@@ -235,13 +239,13 @@ export const createAiReplayCoachService = (deps: AiReplayCoachServiceDeps) => {
         },
 
         /** Asks the user's AI to coach the play; a play with no trace (or no per-note figures) makes no call. Null for no such score. */
-        interpret: async (params: { userId: string; scoreId: string }) => {
+        interpret: async (params: { userId: string; scoreId: string; language: Locale }) => {
             const built = await build(params)
             if (!built) return null
             if (!built.digest) return notEnoughData(built.notice?.need ?? 'play_trace')
             const digest = built.digest
             return runAiFeature(deps.runner, {
-                ...AI_REPLAY_COACH_SPEC,
+                ...aiReplayCoachSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: coachSubjectKey(params.scoreId),
                 digest,

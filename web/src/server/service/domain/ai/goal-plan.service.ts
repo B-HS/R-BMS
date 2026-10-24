@@ -11,6 +11,7 @@ import {
 } from '@server/dto/ai'
 import { clearLampToId } from '@server/dto/common'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
@@ -32,6 +33,7 @@ import {
     SCORE_FEATURE_ANALYSIS_VERSION,
 } from '@server/service/domain/ai/score-feature.constants'
 import { isClearLampId, readTableProgress, toCandidate, type ChartProgress, type ProgressTable } from '@server/service/domain/ai/table-progress'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_GOAL_FEATURE = 'goal_plan'
 export const AI_GOAL_PROMPT_VERSION = 2
@@ -41,27 +43,29 @@ export const AI_GOAL_ID_PREFIX = 'aig_'
 
 const DAY_MS = 86_400_000
 
-export const AI_GOAL_SYSTEM_PROMPT = [
-    'You plan the weeks a rhythm game (BMS) player needs to reach one goal they set on a difficulty table.',
-    DIGEST_IS_DATA_RULE,
-    '`goal` is the goal and where the player stands, `pace` how many charts of the goal had a new best in the last weeks, `remaining` the charts still short of the goal.',
-    `Write at most ${AI_GOAL_LIMIT.MAX_WEEKS} steps, one per week, with \`week_index\` from 1 to \`max_weeks\` in order.`,
-    'Each step has one Korean sentence `focus`, the `md5` values of the charts to play that week taken from `remaining` only (`chart_md5s`), and a `check_key` naming the digest item that tells whether the step worked.',
-    ASSIST_GRADE_RULE,
-    DIGEST_KEY_RULE,
-    '`summary` is two Korean sentences at most.',
-].join('\n')
+export const buildAiGoalSystemPrompt = (language: Locale) =>
+    [
+        'You plan the weeks a rhythm game (BMS) player needs to reach one goal they set on a difficulty table.',
+        DIGEST_IS_DATA_RULE,
+        '`goal` is the goal and where the player stands, `pace` how many charts of the goal had a new best in the last weeks, `remaining` the charts still short of the goal.',
+        `Write at most ${AI_GOAL_LIMIT.MAX_WEEKS} steps, one per week, with \`week_index\` from 1 to \`max_weeks\` in order.`,
+        `Each step has one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`focus\`, the \`md5\` values of the charts to play that week taken from \`remaining\` only (\`chart_md5s\`), and a \`check_key\` naming the digest item that tells whether the step worked.`,
+        ASSIST_GRADE_RULE,
+        DIGEST_KEY_RULE,
+        `\`summary\` is two ${AI_OUTPUT_LANGUAGE_NAME[language]} sentences at most.`,
+    ].join('\n')
 
-export const AI_GOAL_SPEC = {
-    feature: AI_GOAL_FEATURE,
-    analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_GOAL_PROMPT_VERSION,
-    system: AI_GOAL_SYSTEM_PROMPT,
-    schemaName: 'goal_plan',
-    schema: aiGoalPlanOutputSchema,
-    maxOutputTokens: AI_GOAL_MAX_OUTPUT_TOKENS,
-    effort: AI_GOAL_EFFORT,
-} satisfies AiFeatureSpec<typeof aiGoalPlanOutputSchema>
+export const aiGoalSpecOf = (language: Locale) =>
+    ({
+        feature: AI_GOAL_FEATURE,
+        analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_GOAL_PROMPT_VERSION,
+        system: buildAiGoalSystemPrompt(language),
+        schemaName: 'goal_plan',
+        schema: aiGoalPlanOutputSchema,
+        maxOutputTokens: AI_GOAL_MAX_OUTPUT_TOKENS,
+        effort: AI_GOAL_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiGoalPlanOutputSchema>
 
 export type AiGoalRow = { id: string; params: AiGoalParams; createdAt: number }
 
@@ -258,12 +262,12 @@ export const createAiGoalService = (deps: AiGoalServiceDeps) => {
             }
         },
 
-        planView: async (params: { userId: string; goalId: string }) => {
+        planView: async (params: { userId: string; goalId: string; language: Locale }) => {
             const built = await buildPlan(params)
             if (!built) return null
             const ai = await readStoredInterpretation({
                 results: deps.results,
-                spec: AI_GOAL_SPEC,
+                spec: aiGoalSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: goalSubjectKey(built.goal.id),
                 digest: built.digest,
@@ -277,13 +281,13 @@ export const createAiGoalService = (deps: AiGoalServiceDeps) => {
         },
 
         /** Asks the user's AI for a week-by-week plan; a reached goal or one with no chart left makes no call. */
-        interpret: async (params: { userId: string; goalId: string }) => {
+        interpret: async (params: { userId: string; goalId: string; language: Locale }) => {
             const built = await buildPlan(params)
             if (!built) return null
             const notice = noticeOf(built)
             if (notice) return notEnoughData(notice.need)
             return runAiFeature(deps.runner, {
-                ...AI_GOAL_SPEC,
+                ...aiGoalSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: goalSubjectKey(built.goal.id),
                 digest: built.digest,

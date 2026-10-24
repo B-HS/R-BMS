@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { clearLampToId } from '@server/dto/common'
 import {
-    AI_JUDGE_HABIT_SYSTEM_PROMPT,
+    buildAiJudgeHabitSystemPrompt,
     computeJudgeHabit,
     createAiJudgeHabitService,
     refineJudgeHabitOutput,
@@ -160,7 +160,7 @@ describe('주간 성장 요약 (기능 10)', () => {
     test('그 주와 앞 주를 [시작, 끝) 으로 읽고, 판이 없으면 AI 를 부르지 않으며 진행 중인 주를 알린다', async () => {
         const context = setupWeekly([play({ playedAt: MONDAY - DAY })], [])
         await registerScoreKey(context)
-        const view = await context.service.view({ userId: SCORE_USER })
+        const view = await context.service.view({ language: 'ko', userId: SCORE_USER })
         expect(view).toMatchObject({
             week: { start: '2026-10-19', end: '2026-10-25', in_progress: true },
             notice: { need: 'week_plays' },
@@ -170,8 +170,12 @@ describe('주간 성장 요약 (기능 10)', () => {
             { from: MONDAY, to: MONDAY + 7 * DAY },
             { from: MONDAY - 7 * DAY, to: MONDAY },
         ])
-        expect(await context.service.interpret({ userId: SCORE_USER })).toEqual({ ok: false, reason: 'not_enough_data', need: 'week_plays' })
-        expect(await context.service.view({ userId: SCORE_USER, week: '2026-10-20' })).toBeNull()
+        expect(await context.service.interpret({ language: 'ko', userId: SCORE_USER })).toEqual({
+            ok: false,
+            reason: 'not_enough_data',
+            need: 'week_plays',
+        })
+        expect(await context.service.view({ language: 'ko', userId: SCORE_USER, week: '2026-10-20' })).toBeNull()
         expect(context.anthropic.generateCalls).toHaveLength(0)
     })
 
@@ -186,12 +190,15 @@ describe('주간 성장 요약 (기능 10)', () => {
         }
         const context = setupWeekly([play({ playedAt: MONDAY - 3 * DAY, clear: clearLampToId('Hard') })], [], MONDAY + DAY, output)
         await registerScoreKey(context)
-        const result = await context.service.interpret({ userId: SCORE_USER, week: '2026-10-12' })
+        const result = await context.service.interpret({ language: 'ko', userId: SCORE_USER, week: '2026-10-12' })
         expect(result).toMatchObject({ ok: true, value: { output: { highlights: [{ key: 'week.lamp_ups' }] } } })
         expect(JSON.parse(context.anthropic.generateCalls[0]?.input ?? '{}')).toMatchObject({
             week: { key: 'week', start: '2026-10-12', in_progress: false },
         })
-        expect((await context.service.view({ userId: SCORE_USER, week: '2026-10-12' }))?.ai).toMatchObject({ is_current: true, cached: true })
+        expect((await context.service.view({ language: 'ko', userId: SCORE_USER, week: '2026-10-12' }))?.ai).toMatchObject({
+            is_current: true,
+            cached: true,
+        })
     })
 })
 
@@ -312,14 +319,14 @@ describe('판정 습관 진단 — 점수 행 부분 (기능 4)', () => {
             runner: services.aiFeatureRunner,
             results: services.aiResultService,
         })
-        expect((await service.view(SCORE_USER)).notice).toEqual({ need: 'recent_plays' })
-        expect(await service.interpret(SCORE_USER)).toEqual({ ok: false, reason: 'not_enough_data', need: 'recent_plays' })
+        expect((await service.view(SCORE_USER, 'ko')).notice).toEqual({ need: 'recent_plays' })
+        expect(await service.interpret(SCORE_USER, 'ko')).toEqual({ ok: false, reason: 'not_enough_data', need: 'recent_plays' })
         expect(anthropic.generateCalls).toHaveLength(0)
         state.rows = Array.from({ length: 12 }, () => timing({}))
-        const result = await service.interpret(SCORE_USER)
+        const result = await service.interpret(SCORE_USER, 'ko')
         expect(result).toMatchObject({ ok: true, value: { output: { offset_direction: 'later' } } })
-        expect(anthropic.generateCalls[0]?.system).toBe(AI_JUDGE_HABIT_SYSTEM_PROMPT)
-        expect(AI_JUDGE_HABIT_SYSTEM_PROMPT).toContain('노트가 보이는 위치를 옮긴다')
+        expect(anthropic.generateCalls[0]?.system).toBe(buildAiJudgeHabitSystemPrompt('ko'))
+        expect(buildAiJudgeHabitSystemPrompt('ko')).toContain('노트가 보이는 위치를 옮긴다')
         expect(JSON.parse(anthropic.generateCalls[0]?.input ?? '{}')).toMatchObject({ offset: { key: 'timing.offset', direction: 'later' } })
     })
 })

@@ -45,6 +45,7 @@ const createRoutes = () => {
             aiRecordQueryService,
         }),
         async () => undefined,
+        async () => 'ko' as const,
     )
     return { routes, services, anthropic, seenUserIds }
 }

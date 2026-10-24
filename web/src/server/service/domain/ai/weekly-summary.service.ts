@@ -1,6 +1,7 @@
 import { AI_TEXT_LIMIT, aiWeeklyOutputSchema, type AiEffort, type AiWeeklyOutput, type AiWeeklyView } from '@server/dto/ai'
 import { clearLampFromId, NO_ASSIST_GRADE, type AssistGrade } from '@server/dto/common'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
@@ -23,6 +24,7 @@ import {
 } from '@server/service/domain/ai/score-feature.constants'
 import { isClearLampId } from '@server/service/domain/ai/table-progress'
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_WEEKLY_FEATURE = 'weekly_summary'
 export const AI_WEEKLY_PROMPT_VERSION = 2
@@ -39,28 +41,30 @@ const ISO_DATE_LENGTH = 10
 const PERCENT = 100
 const MICROS_PER_MILLI = 1000
 
-export const AI_WEEKLY_SYSTEM_PROMPT = [
-    'You write a short weekly progress summary for a rhythm game (BMS) player from the numbers of one UTC week (Monday to Sunday).',
-    DIGEST_IS_DATA_RULE,
-    '`metrics` holds this week (`week.*`) and the week before (`prev.*`); `lamp_changes` and `ex_changes` list charts whose best went up this week; `levels` groups this week by difficulty table level.',
-    'If `week.in_progress` is true the week has not ended; say so instead of judging the whole week.',
-    'In `lamp_changes` and `ex_changes`, `from_assist_grade` and `to_assist_grade` are the `assist_grade` of `from_lamp` and `to_lamp`.',
-    ASSIST_GRADE_RULE,
-    `Write at most ${AI_WEEKLY_HIGHLIGHTS_MAX} \`highlights\`, each with the \`key\` of the digest item it rests on, a short Korean \`title\`, one or two Korean sentences \`body\` and a \`tone\`.`,
-    DIGEST_KEY_RULE,
-    '`headline` is one Korean sentence; `next_week` one or two Korean sentences of what to try next week.',
-].join('\n')
+export const buildAiWeeklySystemPrompt = (language: Locale) =>
+    [
+        'You write a short weekly progress summary for a rhythm game (BMS) player from the numbers of one UTC week (Monday to Sunday).',
+        DIGEST_IS_DATA_RULE,
+        '`metrics` holds this week (`week.*`) and the week before (`prev.*`); `lamp_changes` and `ex_changes` list charts whose best went up this week; `levels` groups this week by difficulty table level.',
+        'If `week.in_progress` is true the week has not ended; say so instead of judging the whole week.',
+        'In `lamp_changes` and `ex_changes`, `from_assist_grade` and `to_assist_grade` are the `assist_grade` of `from_lamp` and `to_lamp`.',
+        ASSIST_GRADE_RULE,
+        `Write at most ${AI_WEEKLY_HIGHLIGHTS_MAX} \`highlights\`, each with the \`key\` of the digest item it rests on, a short ${AI_OUTPUT_LANGUAGE_NAME[language]} \`title\`, one or two ${AI_OUTPUT_LANGUAGE_NAME[language]} sentences \`body\` and a \`tone\`.`,
+        DIGEST_KEY_RULE,
+        `\`headline\` is one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence; \`next_week\` one or two ${AI_OUTPUT_LANGUAGE_NAME[language]} sentences of what to try next week.`,
+    ].join('\n')
 
-export const AI_WEEKLY_SPEC = {
-    feature: AI_WEEKLY_FEATURE,
-    analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_WEEKLY_PROMPT_VERSION,
-    system: AI_WEEKLY_SYSTEM_PROMPT,
-    schemaName: 'weekly_summary',
-    schema: aiWeeklyOutputSchema,
-    maxOutputTokens: AI_WEEKLY_MAX_OUTPUT_TOKENS,
-    effort: AI_WEEKLY_EFFORT,
-} satisfies AiFeatureSpec<typeof aiWeeklyOutputSchema>
+export const aiWeeklySpecOf = (language: Locale) =>
+    ({
+        feature: AI_WEEKLY_FEATURE,
+        analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_WEEKLY_PROMPT_VERSION,
+        system: buildAiWeeklySystemPrompt(language),
+        schemaName: 'weekly_summary',
+        schema: aiWeeklyOutputSchema,
+        maxOutputTokens: AI_WEEKLY_MAX_OUTPUT_TOKENS,
+        effort: AI_WEEKLY_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiWeeklyOutputSchema>
 
 /** One play of the week as the summary reads it. `maxExScore` is the chart's maximum EX (notes × 2 when the row has none). */
 export type WeeklyScoreRow = {
@@ -304,12 +308,12 @@ export const createAiWeeklySummaryService = (deps: AiWeeklySummaryServiceDeps) =
 
     return {
         /** The deterministic week summary and the latest stored AI summary of that week. Nothing is generated ahead of time. */
-        view: async (params: { userId: string; week?: string }) => {
+        view: async (params: { userId: string; week?: string; language: Locale }) => {
             const built = await build(params)
             if (!built) return null
             const ai = await readStoredInterpretation({
                 results: deps.results,
-                spec: AI_WEEKLY_SPEC,
+                spec: aiWeeklySpecOf(params.language),
                 userId: params.userId,
                 subjectKey: weeklySubjectKey(built.start),
                 digest: built.digest,
@@ -327,12 +331,12 @@ export const createAiWeeklySummaryService = (deps: AiWeeklySummaryServiceDeps) =
         },
 
         /** Writes the week summary with the user's AI when the user opens it and presses the button; a week with no play makes no call. */
-        interpret: async (params: { userId: string; week?: string }) => {
+        interpret: async (params: { userId: string; week?: string; language: Locale }) => {
             const built = await build(params)
             if (!built) return null
             if (built.current.totals.plays === 0) return notEnoughData('week_plays')
             return runAiFeature(deps.runner, {
-                ...AI_WEEKLY_SPEC,
+                ...aiWeeklySpecOf(params.language),
                 userId: params.userId,
                 subjectKey: weeklySubjectKey(built.start),
                 digest: built.digest,

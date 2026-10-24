@@ -3,14 +3,16 @@ import type { AuthUser } from '@server/lib/auth-context'
 import { resetRateLimits } from '@server/lib/with-rate-limit'
 import { createAiScoreFeatureRoutes, type AiScoreFeatureRouteDeps } from '@server/route/ai'
 import { createAiJudgeHabitService } from '@server/service/domain/ai/judge-habit.service'
+import { buildAiRecommendSystemPrompt } from '@server/service/domain/ai/recommend.service'
 import { createAiWeeklySummaryService } from '@server/service/domain/ai/weekly-summary.service'
+import type { Locale } from '@shared/i18n/locale'
 import { SCORE_API_KEY, SCORE_USER, levelRecords, makeTable, md5Of, recordOf, setupScoreFeatures } from '../support/ai-score-fixture'
 
 const ALICE: AuthUser = { id: SCORE_USER, loginId: 'alice', name: 'Alice', role: 'user' }
 const ORIGIN = 'http://localhost:3000'
 const BASE = '/api/fe/me/ai'
 
-const createRoutes = () => {
+const createRoutes = (locale: Locale = 'ko') => {
     const table = makeTable()
     const context = setupScoreFeatures({ table, records: { ...levelRecords(table, { '1': 'Hard' }), [md5Of(200)]: recordOf('Failed') } })
     const seenUserIds: string[] = []
@@ -47,6 +49,7 @@ const createRoutes = () => {
         routes: createAiScoreFeatureRoutes(
             () => deps,
             async () => undefined,
+            async () => locale,
         ),
         context,
         seenUserIds,
@@ -106,6 +109,14 @@ describe('점수 기반 AI 기능 API', () => {
             expect((await response.json()).error).toMatchObject({ code: 'AI_NOT_ENOUGH_DATA', details: { reason: 'not_enough_data' } })
         }
         expect(context.anthropic.generateCalls).toHaveLength(0)
+    })
+
+    test('AI 를 부를 때 요청의 화면 언어로 쓰라고 한다', async () => {
+        const { routes, context } = createRoutes('ja')
+        await context.aiCredentialService.register({ userId: ALICE.id, provider: 'anthropic', apiKey: SCORE_API_KEY })
+        await context.aiCredentialService.setModel({ userId: ALICE.id, provider: 'anthropic', model: 'claude-test' })
+        await routes.recommendInterpret(request('/recommend', { user: ALICE, method: 'POST', body: {} }), undefined)
+        expect(context.anthropic.generateCalls.map((call) => call.system)).toEqual([buildAiRecommendSystemPrompt('ja')])
     })
 
     test('키가 없으면 AI_CREDENTIAL_NOT_FOUND 이고 잘못된 주·주 아닌 날짜는 400 이다', async () => {

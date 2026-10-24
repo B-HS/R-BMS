@@ -9,7 +9,7 @@ import {
     type PublicBestRow,
 } from '@server/service/domain/ai/play-compare.service'
 import {
-    AI_PLAY_REPORT_SYSTEM_PROMPT,
+    buildAiPlayReportSystemPrompt,
     computePlayReport,
     createAiPlayReportService,
     refinePlayReportOutput,
@@ -120,10 +120,10 @@ describe('플레이어 리포트(기획 5.1)', () => {
             runner: unusedRunner,
             results: noResults,
         })
-        const view = await service.view(TRACE_USER_ID)
+        const view = await service.view(TRACE_USER_ID, 'ko')
         expect(view).toMatchObject({ notice: { need: 'traced_plays' }, plays: { analyzed: 5, measured: 2 } })
         const before = runnerCalls.length
-        expect(await service.interpret(TRACE_USER_ID)).toEqual({ ok: false, reason: 'not_enough_data', need: 'traced_plays' })
+        expect(await service.interpret(TRACE_USER_ID, 'ko')).toEqual({ ok: false, reason: 'not_enough_data', need: 'traced_plays' })
         expect(runnerCalls).toHaveLength(before)
     })
 
@@ -138,14 +138,14 @@ describe('플레이어 리포트(기획 5.1)', () => {
             runner: unusedRunner,
             results: noResults,
         })
-        expect(await service.view(TRACE_USER_ID)).toMatchObject({ notice: null, plays: { analyzed: 6, measured: PLAYS } })
+        expect(await service.view(TRACE_USER_ID, 'ko')).toMatchObject({ notice: null, plays: { analyzed: 6, measured: PLAYS } })
     })
 
     test('프롬프트가 오차 부호, 피로 차이의 방향, 레인 편차와 FAST 비율의 정의를 적는다', () => {
-        expect(AI_PLAY_REPORT_SYSTEM_PROMPT).toMatch(/`mean_ms`[^.]*positive[^.]*early[^.]*negative[^.]*late/)
-        expect(AI_PLAY_REPORT_SYSTEM_PROMPT).toMatch(/`mean_delta`[^.]*last third[^.]*first third/)
-        expect(AI_PLAY_REPORT_SYSTEM_PROMPT).toMatch(/`deviation`[^.]*lane[^.]*overall/)
-        expect(AI_PLAY_REPORT_SYSTEM_PROMPT).toMatch(/`fast_share`[^.]*early/)
+        expect(buildAiPlayReportSystemPrompt('ko')).toMatch(/`mean_ms`[^.]*positive[^.]*early[^.]*negative[^.]*late/)
+        expect(buildAiPlayReportSystemPrompt('ko')).toMatch(/`mean_delta`[^.]*last third[^.]*first third/)
+        expect(buildAiPlayReportSystemPrompt('ko')).toMatch(/`deviation`[^.]*lane[^.]*overall/)
+        expect(buildAiPlayReportSystemPrompt('ko')).toMatch(/`fast_share`[^.]*early/)
     })
 
     test('판별 데이터가 5판 아래면 안내만 하고 AI 를 부르지 않는다', async () => {
@@ -158,13 +158,13 @@ describe('플레이어 리포트(기획 5.1)', () => {
             runner: unusedRunner,
             results: noResults,
         })
-        const view = await service.view(TRACE_USER_ID)
+        const view = await service.view(TRACE_USER_ID, 'ko')
         expect(view).toMatchObject({
             notice: { need: 'traced_plays' },
             plays: { analyzed: 2, measured: 2, stale: 1, failed: 0 },
             score_rows: { fast: 10, slow: 5 },
         })
-        expect(await service.interpret(TRACE_USER_ID)).toEqual({ ok: false, reason: 'not_enough_data', need: 'traced_plays' })
+        expect(await service.interpret(TRACE_USER_ID, 'ko')).toEqual({ ok: false, reason: 'not_enough_data', need: 'traced_plays' })
         expect(runnerCalls).toEqual([])
     })
 })
@@ -317,7 +317,12 @@ describe('베스트·라이벌 비교(기획 5.3)', () => {
         await context.service.upload({ input: context.rivalTrace, pathHash: NORMAL.chart.md5, userId: RIVAL_ID })
     }
 
-    const RIVAL_PARAMS = { userId: TRACE_USER_ID, scoreId: NORMAL.score_id, query: { against: 'rival' as const, rival: 'rival' } }
+    const RIVAL_PARAMS = {
+        userId: TRACE_USER_ID,
+        scoreId: NORMAL.score_id,
+        query: { against: 'rival' as const, rival: 'rival' },
+        language: 'ko' as const,
+    }
 
     test('구간 요약을 허용하지 않은 라이벌과는 공개 판정 합계만 비교하고 AI 를 부르지 않는다', async () => {
         const context = setupCompare({ isRival: true, shares: false })
@@ -365,7 +370,12 @@ describe('베스트·라이벌 비교(기획 5.3)', () => {
     test('라이벌 목록에 없으면 허용 여부와 관계없이 아무 것도 맞대지 않는다', async () => {
         const context = setupCompare({ isRival: false, shares: true })
         await uploadBoth(context)
-        const view = await context.compare.view({ userId: TRACE_USER_ID, scoreId: NORMAL.score_id, query: { against: 'rival', rival: 'rival' } })
+        const view = await context.compare.view({
+            userId: TRACE_USER_ID,
+            scoreId: NORMAL.score_id,
+            query: { against: 'rival', rival: 'rival' },
+            language: 'ko',
+        })
         expect(view).toMatchObject({ mode: 'none', reason: 'not_a_rival', target: null })
         expect(
             await context.service.rivalSegmentsOnChart({
@@ -379,7 +389,7 @@ describe('베스트·라이벌 비교(기획 5.3)', () => {
 
     test('남의 점수 id 는 없는 점수와 같다', async () => {
         const context = setupCompare({ isRival: true, shares: true })
-        expect(await context.compare.view({ userId: TRACE_USER_ID, scoreId: 'sc_rival', query: { against: 'best' } })).toBeNull()
+        expect(await context.compare.view({ userId: TRACE_USER_ID, scoreId: 'sc_rival', query: { against: 'best' }, language: 'ko' })).toBeNull()
     })
 
     test('라이벌의 이 곡 공개 기록이 없으면 공유를 끈 것과 다른 이유를 말하고 아무 판도 맞대지 않는다', async () => {

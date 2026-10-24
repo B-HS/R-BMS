@@ -1,6 +1,7 @@
 import { AI_TEXT_LIMIT, type AiEffort, type AiInsight } from '@server/dto/ai'
 import { aiReportOutputSchema, type AiReportOutput, type AiReportView } from '@server/dto/ai-play'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     collectDigestKeys,
@@ -35,6 +36,7 @@ import { roundRatio } from '@server/service/domain/analysis/chart-features'
 import { PATTERN_TAGS } from '@server/service/domain/analysis/pattern-tags'
 import { EVIDENCE, TAG_LEANING, aggregateTagEvidence } from '@server/service/domain/analysis/sample'
 import type { AnalyzedPlay, TraceService } from '@server/service/domain/trace/trace.service'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_PLAY_REPORT_FEATURE = 'play_report'
 export const AI_PLAY_REPORT_PROMPT_VERSION = 2
@@ -44,30 +46,32 @@ export const AI_PLAY_REPORT_SUBJECT = 'recent'
 
 const TAG_KEY_PREFIX = 'tag.'
 
-export const AI_PLAY_REPORT_SYSTEM_PROMPT = [
-    "You write a rhythm game (BMS, 7 keys and a scratch) player's report from the server's analysis of their recent plays.",
-    DIGEST_IS_DATA_RULE,
-    'A tag residual is, play by play, the EX ratio of the notes with that pattern tag less the whole play\'s, so a negative residual is a pattern the player loses EX on whatever the chart. `strengths` and `weaknesses` hold only tags the evidence supports (grade "strong").',
-    `Write at most ${PLAY_REPORT_TOP_ITEMS} \`strengths\` and ${PLAY_REPORT_TOP_ITEMS} \`weaknesses\`, each pointing at a tag of the input list of the same name by its \`key\`; never call a tag that is only in \`uncertain_tags\` or \`insufficient_tags\` a strength or a weakness.`,
-    `Write at most ${PLAY_REPORT_TOP_ITEMS} \`habits\` from \`habits\` and \`lanes\`, and practice steps in \`practice_focus\` (\`key\` of the item the step trains, one Korean sentence \`action\`).`,
-    'Every `ex_ratio` is (2 PGREAT + GREAT) / (2 notes) over the notes that took a judgement; `notes` and `plays` say how much data stands behind a figure.',
-    "The habit and lane figures are signed. `mean_ms` (timing bias) is the mean timing error of PGREAT and GREAT notes in milliseconds: positive means the notes were hit early (FAST), negative means late (SLOW). `mean_delta` (fatigue) is the EX ratio of the last third of a play less that of its first third, averaged over plays: negative means the player loses accuracy late in a play. A lane `deviation` is that lane's `ex_ratio` less the player's overall EX ratio: negative means the lane is worse than the player's average. `fast_share` is the share of the lane's GREAT to BAD judgements that were early (FAST): above 0.5 mostly early, below 0.5 mostly late. A `share` is the share of the analysed plays.",
-    'Lane figures use the lanes as played after lane options, and the hands are the default assignment (scratch and keys 1-3 left, 4 shared, 5-7 right); say so when you talk about hands.',
-    'In `caveats` write in Korean what the data cannot tell, always naming the tags in `uncertain_tags` and `insufficient_tags` when there are any.',
-    DIGEST_KEY_RULE,
-    'All text is Korean; `headline` is one sentence.',
-].join('\n')
+export const buildAiPlayReportSystemPrompt = (language: Locale) =>
+    [
+        "You write a rhythm game (BMS, 7 keys and a scratch) player's report from the server's analysis of their recent plays.",
+        DIGEST_IS_DATA_RULE,
+        'A tag residual is, play by play, the EX ratio of the notes with that pattern tag less the whole play\'s, so a negative residual is a pattern the player loses EX on whatever the chart. `strengths` and `weaknesses` hold only tags the evidence supports (grade "strong").',
+        `Write at most ${PLAY_REPORT_TOP_ITEMS} \`strengths\` and ${PLAY_REPORT_TOP_ITEMS} \`weaknesses\`, each pointing at a tag of the input list of the same name by its \`key\`; never call a tag that is only in \`uncertain_tags\` or \`insufficient_tags\` a strength or a weakness.`,
+        `Write at most ${PLAY_REPORT_TOP_ITEMS} \`habits\` from \`habits\` and \`lanes\`, and practice steps in \`practice_focus\` (\`key\` of the item the step trains, one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`action\`).`,
+        'Every `ex_ratio` is (2 PGREAT + GREAT) / (2 notes) over the notes that took a judgement; `notes` and `plays` say how much data stands behind a figure.',
+        "The habit and lane figures are signed. `mean_ms` (timing bias) is the mean timing error of PGREAT and GREAT notes in milliseconds: positive means the notes were hit early (FAST), negative means late (SLOW). `mean_delta` (fatigue) is the EX ratio of the last third of a play less that of its first third, averaged over plays: negative means the player loses accuracy late in a play. A lane `deviation` is that lane's `ex_ratio` less the player's overall EX ratio: negative means the lane is worse than the player's average. `fast_share` is the share of the lane's GREAT to BAD judgements that were early (FAST): above 0.5 mostly early, below 0.5 mostly late. A `share` is the share of the analysed plays.",
+        'Lane figures use the lanes as played after lane options, and the hands are the default assignment (scratch and keys 1-3 left, 4 shared, 5-7 right); say so when you talk about hands.',
+        `In \`caveats\` write in ${AI_OUTPUT_LANGUAGE_NAME[language]} what the data cannot tell, always naming the tags in \`uncertain_tags\` and \`insufficient_tags\` when there are any.`,
+        DIGEST_KEY_RULE,
+        `All text is ${AI_OUTPUT_LANGUAGE_NAME[language]}; \`headline\` is one sentence.`,
+    ].join('\n')
 
-export const AI_PLAY_REPORT_SPEC = {
-    feature: AI_PLAY_REPORT_FEATURE,
-    analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_PLAY_REPORT_PROMPT_VERSION,
-    system: AI_PLAY_REPORT_SYSTEM_PROMPT,
-    schemaName: 'player_report',
-    schema: aiReportOutputSchema,
-    maxOutputTokens: AI_PLAY_REPORT_MAX_OUTPUT_TOKENS,
-    effort: AI_PLAY_REPORT_EFFORT,
-} satisfies AiFeatureSpec<typeof aiReportOutputSchema>
+export const aiPlayReportSpecOf = (language: Locale) =>
+    ({
+        feature: AI_PLAY_REPORT_FEATURE,
+        analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_PLAY_REPORT_PROMPT_VERSION,
+        system: buildAiPlayReportSystemPrompt(language),
+        schemaName: 'player_report',
+        schema: aiReportOutputSchema,
+        maxOutputTokens: AI_PLAY_REPORT_MAX_OUTPUT_TOKENS,
+        effort: AI_PLAY_REPORT_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiReportOutputSchema>
 
 export type AiPlayReportServiceDb = {
     /** FAST and SLOW of the account's newest score rows (autoplay left out), at most `limit`: what a player with no trace still has. */
@@ -267,11 +271,11 @@ export const createAiPlayReportService = (deps: AiPlayReportServiceDeps) => {
 
     return {
         /** The deterministic report and the latest stored AI reading of it. No provider is called. */
-        view: async (userId: string) => {
+        view: async (userId: string, language: Locale) => {
             const built = await build(userId)
             const ai = await readStoredInterpretation({
                 results: deps.results,
-                spec: AI_PLAY_REPORT_SPEC,
+                spec: aiPlayReportSpecOf(language),
                 userId,
                 subjectKey: AI_PLAY_REPORT_SUBJECT,
                 digest: built.digest,
@@ -287,12 +291,12 @@ export const createAiPlayReportService = (deps: AiPlayReportServiceDeps) => {
         },
 
         /** Asks the user's AI to write the report; fewer than PLAY_REPORT_MIN_PLAYS analysed plays make no call. */
-        interpret: async (userId: string) => {
+        interpret: async (userId: string, language: Locale) => {
             const built = await build(userId)
             const notice = noticeOf(built.report)
             if (notice) return notEnoughData(notice.need)
             return runAiFeature(deps.runner, {
-                ...AI_PLAY_REPORT_SPEC,
+                ...aiPlayReportSpecOf(language),
                 userId,
                 subjectKey: AI_PLAY_REPORT_SUBJECT,
                 digest: built.digest,

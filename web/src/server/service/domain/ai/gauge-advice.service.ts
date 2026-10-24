@@ -10,6 +10,7 @@ import {
 } from '@server/dto/ai-play'
 import { isClearLampId } from '@server/service/domain/ai/table-progress'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     cutText,
@@ -33,6 +34,7 @@ import { GAUGE_OUTCOME, RUN_END } from '@server/service/domain/analysis/play-met
 import { LAYOUT_DEPENDENT_TAGS } from '@server/service/domain/analysis/pattern-tags'
 import { aggregateTagEvidence } from '@server/service/domain/analysis/sample'
 import type { AnalyzedPlay, TraceService } from '@server/service/domain/trace/trace.service'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_GAUGE_ADVICE_FEATURE = 'gauge_advice'
 export const AI_GAUGE_ADVICE_PROMPT_VERSION = 1
@@ -43,26 +45,28 @@ export const AI_GAUGE_ADVICE_ITEMS_MAX = 5
 
 const UNKNOWN_LEVEL = '?'
 
-export const AI_GAUGE_ADVICE_SYSTEM_PROMPT = [
-    'You advise a rhythm game (BMS) player which gauge and which lane option to choose, from how their recent plays ended.',
-    DIGEST_IS_DATA_RULE,
-    'The game logs all nine gauges during a play, so `rescues` counts plays that failed on the gauge played but that another gauge would have cleared (`rescued_by`). After an empty gauge ends a play the other gauges cannot be known; those plays are counted in `unknown_runs` and never as rescued.',
-    '`options` lists each lane option with the EX ratio of its plays and the pattern tags whose residual (the tag notes\' EX ratio less the whole play\'s) moves most under it; a tag with grade other than "strong" is only a hint.',
-    `Write at most ${AI_GAUGE_ADVICE_ITEMS_MAX} \`gauge_advice\` items and ${AI_GAUGE_ADVICE_ITEMS_MAX} \`option_advice\` items, each naming a gauge or an option that appears in the input and one Korean sentence \`reasoning\`.`,
-    DIGEST_KEY_RULE,
-    'All text is Korean; `summary` is two sentences at most.',
-].join('\n')
+export const buildAiGaugeAdviceSystemPrompt = (language: Locale) =>
+    [
+        'You advise a rhythm game (BMS) player which gauge and which lane option to choose, from how their recent plays ended.',
+        DIGEST_IS_DATA_RULE,
+        'The game logs all nine gauges during a play, so `rescues` counts plays that failed on the gauge played but that another gauge would have cleared (`rescued_by`). After an empty gauge ends a play the other gauges cannot be known; those plays are counted in `unknown_runs` and never as rescued.',
+        '`options` lists each lane option with the EX ratio of its plays and the pattern tags whose residual (the tag notes\' EX ratio less the whole play\'s) moves most under it; a tag with grade other than "strong" is only a hint.',
+        `Write at most ${AI_GAUGE_ADVICE_ITEMS_MAX} \`gauge_advice\` items and ${AI_GAUGE_ADVICE_ITEMS_MAX} \`option_advice\` items, each naming a gauge or an option that appears in the input and one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`reasoning\`.`,
+        DIGEST_KEY_RULE,
+        `All text is ${AI_OUTPUT_LANGUAGE_NAME[language]}; \`summary\` is two sentences at most.`,
+    ].join('\n')
 
-export const AI_GAUGE_ADVICE_SPEC = {
-    feature: AI_GAUGE_ADVICE_FEATURE,
-    analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_GAUGE_ADVICE_PROMPT_VERSION,
-    system: AI_GAUGE_ADVICE_SYSTEM_PROMPT,
-    schemaName: 'gauge_option_advice',
-    schema: aiGaugeAdviceOutputSchema,
-    maxOutputTokens: AI_GAUGE_ADVICE_MAX_OUTPUT_TOKENS,
-    effort: AI_GAUGE_ADVICE_EFFORT,
-} satisfies AiFeatureSpec<typeof aiGaugeAdviceOutputSchema>
+export const aiGaugeAdviceSpecOf = (language: Locale) =>
+    ({
+        feature: AI_GAUGE_ADVICE_FEATURE,
+        analysisVersion: PLAY_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_GAUGE_ADVICE_PROMPT_VERSION,
+        system: buildAiGaugeAdviceSystemPrompt(language),
+        schemaName: 'gauge_option_advice',
+        schema: aiGaugeAdviceOutputSchema,
+        maxOutputTokens: AI_GAUGE_ADVICE_MAX_OUTPUT_TOKENS,
+        effort: AI_GAUGE_ADVICE_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiGaugeAdviceOutputSchema>
 
 export type AiGaugeAdviceServiceDb = {
     /** The gauge and lamp of the account's newest score rows (autoplay left out), at most `limit`. */
@@ -195,11 +199,11 @@ export const createAiGaugeAdviceService = (deps: AiGaugeAdviceServiceDeps) => {
 
     return {
         /** The deterministic gauge and option figures and the stored advice. No provider is called. */
-        view: async (userId: string) => {
+        view: async (userId: string, language: Locale) => {
             const built = await build(userId)
             const ai = await readStoredInterpretation({
                 results: deps.results,
-                spec: AI_GAUGE_ADVICE_SPEC,
+                spec: aiGaugeAdviceSpecOf(language),
                 userId,
                 subjectKey: AI_GAUGE_ADVICE_SUBJECT,
                 digest: built.digest,
@@ -214,12 +218,12 @@ export const createAiGaugeAdviceService = (deps: AiGaugeAdviceServiceDeps) => {
         },
 
         /** Asks the user's AI for gauge and option advice; fewer than PLAY_REPORT_MIN_PLAYS analysed plays make no call. */
-        interpret: async (userId: string) => {
+        interpret: async (userId: string, language: Locale) => {
             const built = await build(userId)
             const notice = noticeOf(built.advice)
             if (notice) return notEnoughData(notice.need)
             return runAiFeature(deps.runner, {
-                ...AI_GAUGE_ADVICE_SPEC,
+                ...aiGaugeAdviceSpecOf(language),
                 userId,
                 subjectKey: AI_GAUGE_ADVICE_SUBJECT,
                 digest: built.digest,

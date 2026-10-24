@@ -12,6 +12,7 @@ import {
 import { clearLampToId } from '@server/dto/common'
 import { FOLDER_LIMIT } from '@server/dto/folder'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
@@ -36,6 +37,7 @@ import {
 import { readTableProgress, toCandidate } from '@server/service/domain/ai/table-progress'
 import { PATTERN_TAGS } from '@server/service/domain/analysis/pattern-tags'
 import type { FolderService } from '@server/service/domain/folder/folder.service'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_PRACTICE_FEATURE = 'practice_folder'
 export const AI_PRACTICE_PROMPT_VERSION = 2
@@ -45,29 +47,36 @@ export const AI_PRACTICE_EFFORT = 'low' satisfies AiEffort
 const ISO_DATE_LENGTH = 10
 const FULL_COMBO_LAMP_ID = clearLampToId('FullCombo')
 
-const DEFAULT_SUFFIX = { recommend: '다음 도전', tag: '패턴 연습', goal: '목표' } as const satisfies Record<AiPracticeSourceInput['source'], string>
+/** The folder name used when the AI's name does not fit, in the language the AI was asked to write in. */
+export const AI_PRACTICE_DEFAULT_SUFFIX = {
+    ko: { recommend: '다음 도전', tag: '패턴 연습', goal: '목표' },
+    en: { recommend: 'Next challenges', tag: 'Pattern practice', goal: 'Goal' },
+    ja: { recommend: '次の挑戦', tag: 'パターン練習', goal: '目標' },
+} as const satisfies Record<Locale, Record<AiPracticeSourceInput['source'], string>>
 
-export const AI_PRACTICE_SYSTEM_PROMPT = [
-    'You build one practice folder of charts for a rhythm game (BMS) player from charts the server already chose.',
-    DIGEST_IS_DATA_RULE,
-    '`source` says why these charts were chosen (next challenges, a pattern tag to practise, or a goal) and `candidates` lists them.',
-    `Choose at most \`limits.max_items\` charts from \`candidates\` only, by \`md5\`, in the order to play them, each with a Korean \`memo\` of at most \`limits.memo_max\` characters on one line.`,
-    '`name_suffix` is a short Korean folder name of at most `limits.name_suffix_max` characters; `description` one Korean sentence of at most `limits.description_max` characters.',
-    'Chart `tags` describe the chart layout with no lane option (layout "original").',
-    ASSIST_GRADE_RULE,
-    DIGEST_KEY_RULE,
-].join('\n')
+export const buildAiPracticeSystemPrompt = (language: Locale) =>
+    [
+        'You build one practice folder of charts for a rhythm game (BMS) player from charts the server already chose.',
+        DIGEST_IS_DATA_RULE,
+        '`source` says why these charts were chosen (next challenges, a pattern tag to practise, or a goal) and `candidates` lists them.',
+        `Choose at most \`limits.max_items\` charts from \`candidates\` only, by \`md5\`, in the order to play them, each with a ${AI_OUTPUT_LANGUAGE_NAME[language]} \`memo\` of at most \`limits.memo_max\` characters on one line.`,
+        `\`name_suffix\` is a short ${AI_OUTPUT_LANGUAGE_NAME[language]} folder name of at most \`limits.name_suffix_max\` characters; \`description\` one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence of at most \`limits.description_max\` characters.`,
+        'Chart `tags` describe the chart layout with no lane option (layout "original").',
+        ASSIST_GRADE_RULE,
+        DIGEST_KEY_RULE,
+    ].join('\n')
 
-export const AI_PRACTICE_SPEC = {
-    feature: AI_PRACTICE_FEATURE,
-    analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_PRACTICE_PROMPT_VERSION,
-    system: AI_PRACTICE_SYSTEM_PROMPT,
-    schemaName: 'practice_folder',
-    schema: aiPracticeFolderOutputSchema,
-    maxOutputTokens: AI_PRACTICE_MAX_OUTPUT_TOKENS,
-    effort: AI_PRACTICE_EFFORT,
-} satisfies AiFeatureSpec<typeof aiPracticeFolderOutputSchema>
+export const aiPracticeSpecOf = (language: Locale) =>
+    ({
+        feature: AI_PRACTICE_FEATURE,
+        analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_PRACTICE_PROMPT_VERSION,
+        system: buildAiPracticeSystemPrompt(language),
+        schemaName: 'practice_folder',
+        schema: aiPracticeFolderOutputSchema,
+        maxOutputTokens: AI_PRACTICE_MAX_OUTPUT_TOKENS,
+        effort: AI_PRACTICE_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiPracticeFolderOutputSchema>
 
 export type AiPracticeFolderServiceDb = {
     findLinkedFolderId: (params: { userId: string; previewHash: string }) => Promise<string | null>
@@ -108,7 +117,7 @@ const isPatternTag = (tag: string) => (PATTERN_TAGS as readonly string[]).includ
  */
 export const refinePracticeOutput = (
     output: AiPracticeFolderOutput,
-    params: { candidates: readonly { md5: string }[]; source: AiPracticeSourceInput['source'] },
+    params: { candidates: readonly { md5: string }[]; source: AiPracticeSourceInput['source']; language: Locale },
 ) => {
     const allowed = new Set(params.candidates.map((candidate) => candidate.md5))
     const items = output.items
@@ -118,7 +127,9 @@ export const refinePracticeOutput = (
         .map((item) => ({ md5: item.md5, memo: item.memo.trim() }))
     if (items.length === 0) return null
     return {
-        name_suffix: fitsLine(output.name_suffix, AI_PRACTICE_LIMIT.NAME_SUFFIX_MAX) ? output.name_suffix.trim() : DEFAULT_SUFFIX[params.source],
+        name_suffix: fitsLine(output.name_suffix, AI_PRACTICE_LIMIT.NAME_SUFFIX_MAX)
+            ? output.name_suffix.trim()
+            : AI_PRACTICE_DEFAULT_SUFFIX[params.language][params.source],
         description: fitsLine(output.description, AI_PRACTICE_LIMIT.DESCRIPTION_MAX) ? output.description.trim() : '',
         items,
     }
@@ -211,12 +222,12 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
 
     return {
         /** The candidates for one source, the folder room left and the latest stored AI preview. No provider is called. */
-        view: async (params: { userId: string; input: AiPracticeSourceInput }) => {
+        view: async (params: { userId: string; input: AiPracticeSourceInput; language: Locale }) => {
             const resolved = await resolveSource(params.userId, params.input)
             if (!resolved.ok) return resolved
             const ai = await readStoredInterpretation({
                 results: deps.results,
-                spec: AI_PRACTICE_SPEC,
+                spec: aiPracticeSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: subjectOf(params.input, resolved),
                 digest: digestOf(params.input, resolved),
@@ -238,7 +249,7 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
          * Asks the user's AI for a folder preview. Nothing is created here: the folder is made only when the user presses create on
          * the preview. With the folder limit reached or no candidate there is no call.
          */
-        preview: async (params: { userId: string; input: AiPracticeSourceInput }) => {
+        preview: async (params: { userId: string; input: AiPracticeSourceInput; language: Locale }) => {
             const resolved = await resolveSource(params.userId, params.input)
             if (!resolved.ok) return resolved
             const notice = noticeOf(resolved)
@@ -246,11 +257,12 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
             const room = await folderRoom(params.userId)
             if (!room.can_create) return { ok: false, reason: 'folder_limit', used: room.used, limit: room.limit } as const
             return runAiFeature(deps.runner, {
-                ...AI_PRACTICE_SPEC,
+                ...aiPracticeSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: subjectOf(params.input, resolved),
                 digest: digestOf(params.input, resolved),
-                refine: (output) => refinePracticeOutput(output, { candidates: resolved.candidates, source: params.input.source }),
+                refine: (output) =>
+                    refinePracticeOutput(output, { candidates: resolved.candidates, source: params.input.source, language: params.language }),
             })
         },
 

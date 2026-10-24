@@ -1,5 +1,6 @@
 import { AI_TEXT_LIMIT, aiRecommendOutputSchema, type AiEffort, type AiRecommendOutput, type AiRecommendView } from '@server/dto/ai'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     ASSIST_GRADE_RULE,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
@@ -27,34 +28,37 @@ import {
     type ProgressRecords,
     type ProgressTable,
 } from '@server/service/domain/ai/table-progress'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_RECOMMEND_FEATURE = 'recommend'
 export const AI_RECOMMEND_PROMPT_VERSION = 2
 export const AI_RECOMMEND_MAX_OUTPUT_TOKENS = 8_000
 export const AI_RECOMMEND_EFFORT = 'low' satisfies AiEffort
 
-export const AI_RECOMMEND_SYSTEM_PROMPT = [
-    'You help a rhythm game (BMS, 7 keys and a scratch) player choose which charts of a difficulty table to challenge next.',
-    DIGEST_IS_DATA_RULE,
-    'The server already chose the candidates in `candidates` and scored them; `frontier` is the level the player is working on and `levels` summarises nearby levels.',
-    `Pick up to ${RECOMMEND_PICKS} charts from \`candidates\` only, in the order you would play them, each identified by its \`md5\`.`,
-    'For each pick give one short Korean sentence `reason` and a `focus_key` naming the digest item the reason rests on (the chart key, a level key or `frontier`).',
-    'Chart `tags` describe the chart layout with no lane option (layout "original"), not how the player plays it.',
-    ASSIST_GRADE_RULE,
-    DIGEST_KEY_RULE,
-    '`summary` is two Korean sentences at most about where the player stands in the table.',
-].join('\n')
+export const buildAiRecommendSystemPrompt = (language: Locale) =>
+    [
+        'You help a rhythm game (BMS, 7 keys and a scratch) player choose which charts of a difficulty table to challenge next.',
+        DIGEST_IS_DATA_RULE,
+        'The server already chose the candidates in `candidates` and scored them; `frontier` is the level the player is working on and `levels` summarises nearby levels.',
+        `Pick up to ${RECOMMEND_PICKS} charts from \`candidates\` only, in the order you would play them, each identified by its \`md5\`.`,
+        `For each pick give one short ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`reason\` and a \`focus_key\` naming the digest item the reason rests on (the chart key, a level key or \`frontier\`).`,
+        'Chart `tags` describe the chart layout with no lane option (layout "original"), not how the player plays it.',
+        ASSIST_GRADE_RULE,
+        DIGEST_KEY_RULE,
+        `\`summary\` is two ${AI_OUTPUT_LANGUAGE_NAME[language]} sentences at most about where the player stands in the table.`,
+    ].join('\n')
 
-export const AI_RECOMMEND_SPEC = {
-    feature: AI_RECOMMEND_FEATURE,
-    analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_RECOMMEND_PROMPT_VERSION,
-    system: AI_RECOMMEND_SYSTEM_PROMPT,
-    schemaName: 'chart_recommendations',
-    schema: aiRecommendOutputSchema,
-    maxOutputTokens: AI_RECOMMEND_MAX_OUTPUT_TOKENS,
-    effort: AI_RECOMMEND_EFFORT,
-} satisfies AiFeatureSpec<typeof aiRecommendOutputSchema>
+export const aiRecommendSpecOf = (language: Locale) =>
+    ({
+        feature: AI_RECOMMEND_FEATURE,
+        analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_RECOMMEND_PROMPT_VERSION,
+        system: buildAiRecommendSystemPrompt(language),
+        schemaName: 'chart_recommendations',
+        schema: aiRecommendOutputSchema,
+        maxOutputTokens: AI_RECOMMEND_MAX_OUTPUT_TOKENS,
+        effort: AI_RECOMMEND_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiRecommendOutputSchema>
 
 export type TableFeatureDeps = {
     loadTable: (tableId: string | undefined) => ProgressTable | null
@@ -143,12 +147,12 @@ export const createAiRecommendService = (deps: AiRecommendServiceDeps) => {
         buildDigest,
 
         /** The digest view and the latest stored AI answer for it. No provider is called. */
-        view: async (params: { userId: string; tableId?: string }) => {
+        view: async (params: { userId: string; tableId?: string; language: Locale }) => {
             const built = await buildDigest(params)
             if (!built) return null
             const ai = await readStoredInterpretation({
                 results: deps.results,
-                spec: AI_RECOMMEND_SPEC,
+                spec: aiRecommendSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: recommendSubjectKey(built.table.id),
                 digest: built.digest,
@@ -165,13 +169,13 @@ export const createAiRecommendService = (deps: AiRecommendServiceDeps) => {
         },
 
         /** Asks the user's AI to order and explain the candidates. Called only from the user's button; no table record means no call. */
-        interpret: async (params: { userId: string; tableId?: string }) => {
+        interpret: async (params: { userId: string; tableId?: string; language: Locale }) => {
             const built = await buildDigest(params)
             if (!built) return null
             const notice = noticeOf(built)
             if (notice) return notEnoughData(notice.need)
             return runAiFeature(deps.runner, {
-                ...AI_RECOMMEND_SPEC,
+                ...aiRecommendSpecOf(params.language),
                 userId: params.userId,
                 subjectKey: recommendSubjectKey(built.table.id),
                 digest: built.digest,

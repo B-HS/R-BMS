@@ -1,5 +1,6 @@
 import { AI_TEXT_LIMIT, aiJudgeHabitOutputSchema, type AiEffort, type AiJudgeHabitOutput, type AiJudgeHabitView } from '@server/dto/ai'
 import {
+    AI_OUTPUT_LANGUAGE_NAME,
     DIGEST_IS_DATA_RULE,
     DIGEST_KEY_RULE,
     collectDigestKeys,
@@ -29,6 +30,7 @@ import { describeGreenNumber, readTraceGreenNumber } from '@server/service/domai
 import { EVIDENCE, timingEvidence, wilsonInterval } from '@server/service/domain/analysis/sample'
 import { PLAY_LANE_BIAS_TOP } from '@server/service/domain/ai/play-feature.constants'
 import { WILSON_Z_95 } from '@server/service/domain/analysis/analysis-constants'
+import type { Locale } from '@shared/i18n/locale'
 
 export const AI_JUDGE_HABIT_FEATURE = 'judge_habit'
 export const AI_JUDGE_HABIT_PROMPT_VERSION = 2
@@ -42,28 +44,37 @@ const PERCENT = 100
 const EVEN_SHARE = 0.5
 const MEDIAN_HALF = 2
 
-export const AI_JUDGE_HABIT_SYSTEM_PROMPT = [
-    'You explain the timing habits of a rhythm game (BMS) player from the totals of their recent plays.',
-    DIGEST_IS_DATA_RULE,
-    '`fast_slow` counts early (FAST) and late (SLOW) judgments, `offset` is the average signed timing error (positive means early) with the server suggestion (`source` says whether it rests on note-by-note traces or on score rows), `trace_timing` is the note-by-note timing of PGREAT and GREAT from traces with its 95% interval and the lanes (as played) that stray furthest from it, `avgjudge` the average distance from the note in the older and newer half of the plays, `green` the GREEN numbers the plays used.',
-    'JUDGE OFFSET moves only where notes are drawn, never the judgment: say "노트가 보이는 위치를 옮긴다", never that it moves the judgment. Raising it makes notes arrive earlier on screen, lowering it later.',
-    'Set `offset_direction` to the `offset.direction` given; explain it in `offset_reasoning`. When `offset.grade` is not "strong", say the evidence is not enough.',
-    'Write GREEN numbers as the GREEN value first with the lane time in milliseconds after it, for example "GREEN 300 (500 ms)". A green number with `is_estimated` true is worked out from the score row, not read from the skin: call it an estimate.',
-    `Write at most ${AI_JUDGE_HABIT_NOTES_MAX} \`notes\`, each with the \`key\` of the digest item it rests on.`,
-    DIGEST_KEY_RULE,
-    'All text is Korean; `summary` is two sentences at most.',
-].join('\n')
+/** How the answer must name what JUDGE OFFSET does, in the answer's language: it moves where the notes are seen, not the judgment. */
+export const JUDGE_OFFSET_EFFECT_PHRASE = {
+    ko: '노트가 보이는 위치를 옮긴다',
+    en: 'it moves where the notes are seen',
+    ja: 'ノーツが見える位置を動かす',
+} as const satisfies Record<Locale, string>
 
-export const AI_JUDGE_HABIT_SPEC = {
-    feature: AI_JUDGE_HABIT_FEATURE,
-    analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
-    promptVersion: AI_JUDGE_HABIT_PROMPT_VERSION,
-    system: AI_JUDGE_HABIT_SYSTEM_PROMPT,
-    schemaName: 'judge_habit',
-    schema: aiJudgeHabitOutputSchema,
-    maxOutputTokens: AI_JUDGE_HABIT_MAX_OUTPUT_TOKENS,
-    effort: AI_JUDGE_HABIT_EFFORT,
-} satisfies AiFeatureSpec<typeof aiJudgeHabitOutputSchema>
+export const buildAiJudgeHabitSystemPrompt = (language: Locale) =>
+    [
+        'You explain the timing habits of a rhythm game (BMS) player from the totals of their recent plays.',
+        DIGEST_IS_DATA_RULE,
+        '`fast_slow` counts early (FAST) and late (SLOW) judgments, `offset` is the average signed timing error (positive means early) with the server suggestion (`source` says whether it rests on note-by-note traces or on score rows), `trace_timing` is the note-by-note timing of PGREAT and GREAT from traces with its 95% interval and the lanes (as played) that stray furthest from it, `avgjudge` the average distance from the note in the older and newer half of the plays, `green` the GREEN numbers the plays used.',
+        `JUDGE OFFSET moves only where notes are drawn, never the judgment: say "${JUDGE_OFFSET_EFFECT_PHRASE[language]}", never that it moves the judgment. Raising it makes notes arrive earlier on screen, lowering it later.`,
+        'Set `offset_direction` to the `offset.direction` given; explain it in `offset_reasoning`. When `offset.grade` is not "strong", say the evidence is not enough.',
+        'Write GREEN numbers as the GREEN value first with the lane time in milliseconds after it, for example "GREEN 300 (500 ms)". A green number with `is_estimated` true is worked out from the score row, not read from the skin: call it an estimate.',
+        `Write at most ${AI_JUDGE_HABIT_NOTES_MAX} \`notes\`, each with the \`key\` of the digest item it rests on.`,
+        DIGEST_KEY_RULE,
+        `All text is ${AI_OUTPUT_LANGUAGE_NAME[language]}; \`summary\` is two sentences at most.`,
+    ].join('\n')
+
+export const aiJudgeHabitSpecOf = (language: Locale) =>
+    ({
+        feature: AI_JUDGE_HABIT_FEATURE,
+        analysisVersion: SCORE_FEATURE_ANALYSIS_VERSION,
+        promptVersion: AI_JUDGE_HABIT_PROMPT_VERSION,
+        system: buildAiJudgeHabitSystemPrompt(language),
+        schemaName: 'judge_habit',
+        schema: aiJudgeHabitOutputSchema,
+        maxOutputTokens: AI_JUDGE_HABIT_MAX_OUTPUT_TOKENS,
+        effort: AI_JUDGE_HABIT_EFFORT,
+    }) satisfies AiFeatureSpec<typeof aiJudgeHabitOutputSchema>
 
 /**
  * One recent play's timing columns. `greenNumber` is the lane travel time in milliseconds the score row keeps (`options.green_number`),
@@ -354,11 +365,11 @@ export const createAiJudgeHabitService = (deps: AiJudgeHabitServiceDeps) => {
 
     return {
         /** The deterministic habit and the latest stored AI explanation of it. No provider is called. */
-        view: async (userId: string) => {
+        view: async (userId: string, language: Locale) => {
             const built = await build(userId)
             const ai = await readStoredInterpretation({
                 results: deps.results,
-                spec: AI_JUDGE_HABIT_SPEC,
+                spec: aiJudgeHabitSpecOf(language),
                 userId,
                 subjectKey: AI_JUDGE_HABIT_SUBJECT,
                 digest: built.digest,
@@ -367,11 +378,11 @@ export const createAiJudgeHabitService = (deps: AiJudgeHabitServiceDeps) => {
         },
 
         /** Asks the user's AI to explain the habit; fewer than MIN_TIMING_PLAYS recent plays make no call. */
-        interpret: async (userId: string) => {
+        interpret: async (userId: string, language: Locale) => {
             const built = await build(userId)
             if (built.habit.plays < MIN_TIMING_PLAYS) return notEnoughData('recent_plays')
             return runAiFeature(deps.runner, {
-                ...AI_JUDGE_HABIT_SPEC,
+                ...aiJudgeHabitSpecOf(language),
                 userId,
                 subjectKey: AI_JUDGE_HABIT_SUBJECT,
                 digest: built.digest,

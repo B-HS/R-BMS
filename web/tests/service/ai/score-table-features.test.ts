@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { FOLDER_LIMIT } from '@server/dto/folder'
 import { ASSIST_GRADE_RULE, DIGEST_IS_DATA_RULE } from '@server/service/domain/ai/ai-digest'
-import { AI_GOAL_SYSTEM_PROMPT, computeGoalProgress, refineGoalPlanOutput } from '@server/service/domain/ai/goal-plan.service'
-import { AI_PRACTICE_SYSTEM_PROMPT, refinePracticeOutput } from '@server/service/domain/ai/practice-folder.service'
-import { AI_RECOMMEND_FEATURE, AI_RECOMMEND_SYSTEM_PROMPT, refineRecommendOutput } from '@server/service/domain/ai/recommend.service'
+import { buildAiGoalSystemPrompt, computeGoalProgress, refineGoalPlanOutput } from '@server/service/domain/ai/goal-plan.service'
+import { buildAiPracticeSystemPrompt, refinePracticeOutput } from '@server/service/domain/ai/practice-folder.service'
+import { AI_RECOMMEND_FEATURE, buildAiRecommendSystemPrompt, refineRecommendOutput } from '@server/service/domain/ai/recommend.service'
 import { readTableProgress } from '@server/service/domain/ai/table-progress'
 import { FAKE_USAGE } from '../../support/ai-memory-db'
 import { SCORE_NOW, SCORE_USER, levelRecords, makeTable, md5Of, recordOf, registerScoreKey, setupScoreFeatures } from '../../support/ai-score-fixture'
@@ -15,7 +15,7 @@ describe('다음 도전 곡 추천 (기능 5)', () => {
     test('보기는 결정론 후보와 경계를 주고 공급자를 부르지 않는다', async () => {
         const context = setupScoreFeatures({ records: RECORDS, tags: new Map([[md5Of(300), { trill: 0.3, jack: 0.02 }]]) })
         await registerScoreKey(context)
-        const view = await context.recommend.view({ userId: SCORE_USER })
+        const view = await context.recommend.view({ language: 'ko', userId: SCORE_USER })
         expect(view?.frontier?.level).toBe('3')
         expect(view?.candidates[0]).toMatchObject({
             md5: md5Of(300),
@@ -28,7 +28,7 @@ describe('다음 도전 곡 추천 (기능 5)', () => {
         expect(view?.notice).toBeNull()
         expect(view?.ai).toBeNull()
         expect(context.anthropic.generateCalls).toHaveLength(0)
-        expect(await context.recommend.view({ userId: SCORE_USER, tableId: 'missing' })).toBeNull()
+        expect(await context.recommend.view({ language: 'ko', userId: SCORE_USER, tableId: 'missing' })).toBeNull()
     })
 
     test('옛 분석 버전으로 쓴 곡 수를 pattern_coverage.stale_features 로 알린다', async () => {
@@ -37,15 +37,19 @@ describe('다음 도전 곡 추천 (기능 5)', () => {
             [md5Of(301), { jack: 0.2 }],
         ])
         const context = setupScoreFeatures({ records: RECORDS, tags, staleChartMd5s: [md5Of(301), md5Of(999)] })
-        const view = await context.recommend.view({ userId: SCORE_USER })
+        const view = await context.recommend.view({ language: 'ko', userId: SCORE_USER })
         expect(view?.pattern_coverage).toMatchObject({ with_features: 2, stale_features: 1 })
     })
 
     test('표 기록이 하나도 없으면 AI 를 부르지 않고 표본 부족을 돌려준다', async () => {
         const context = setupScoreFeatures()
         await registerScoreKey(context)
-        expect(await context.recommend.interpret({ userId: SCORE_USER })).toEqual({ ok: false, reason: 'not_enough_data', need: 'table_records' })
-        expect((await context.recommend.view({ userId: SCORE_USER }))?.notice).toEqual({ need: 'table_records' })
+        expect(await context.recommend.interpret({ language: 'ko', userId: SCORE_USER })).toEqual({
+            ok: false,
+            reason: 'not_enough_data',
+            need: 'table_records',
+        })
+        expect((await context.recommend.view({ language: 'ko', userId: SCORE_USER }))?.notice).toEqual({ need: 'table_records' })
         expect(context.anthropic.generateCalls).toHaveLength(0)
     })
 
@@ -64,7 +68,7 @@ describe('다음 도전 곡 추천 (기능 5)', () => {
             },
         })
         await registerScoreKey(context)
-        const result = await context.recommend.interpret({ userId: SCORE_USER })
+        const result = await context.recommend.interpret({ language: 'ko', userId: SCORE_USER })
         expect(result).toMatchObject({
             ok: true,
             value: {
@@ -81,15 +85,15 @@ describe('다음 도전 곡 추천 (기능 5)', () => {
             },
         })
         const [call] = context.anthropic.generateCalls
-        expect(call?.system).toBe(AI_RECOMMEND_SYSTEM_PROMPT)
+        expect(call?.system).toBe(buildAiRecommendSystemPrompt('ko'))
         expect(call?.system).toContain(DIGEST_IS_DATA_RULE)
         expect(JSON.parse(call?.input ?? '{}')).toMatchObject({ frontier: { key: 'frontier', level: '3' }, table: { id: 'insane1' } })
-        const stored = await context.recommend.view({ userId: SCORE_USER })
+        const stored = await context.recommend.view({ language: 'ko', userId: SCORE_USER })
         expect(stored?.ai).toMatchObject({ cached: true, is_current: true, output: { picks: [{ md5: md5Of(300) }, { md5: md5Of(302) }] } })
         expect([...context.memory.results.values()].map((row) => row.feature)).toEqual([AI_RECOMMEND_FEATURE])
 
         context.state.records = { ...RECORDS, [md5Of(303)]: recordOf('Easy') }
-        expect((await context.recommend.view({ userId: SCORE_USER }))?.ai).toMatchObject({ is_current: false })
+        expect((await context.recommend.view({ language: 'ko', userId: SCORE_USER }))?.ai).toMatchObject({ is_current: false })
         expect(context.anthropic.generateCalls).toHaveLength(1)
     })
 
@@ -99,7 +103,11 @@ describe('다음 도전 곡 추천 (기능 5)', () => {
             output: { summary: 's', picks: [{ md5: md5Of(999), reason: 'x', focus_key: 'frontier' }] },
         })
         await registerScoreKey(context)
-        expect(await context.recommend.interpret({ userId: SCORE_USER })).toEqual({ ok: false, reason: 'output_invalid', provider: 'anthropic' })
+        expect(await context.recommend.interpret({ language: 'ko', userId: SCORE_USER })).toEqual({
+            ok: false,
+            reason: 'output_invalid',
+            provider: 'anthropic',
+        })
         expect(context.memory.results.size).toBe(0)
     })
 
@@ -140,7 +148,7 @@ describe('AI 연습 폴더 (기능 6)', () => {
     test('미리보기는 후보 안 곡만 남기고 폴더를 만들지 않는다', async () => {
         const context = setupScoreFeatures({ records: RECORDS, output: PREVIEW })
         await registerScoreKey(context)
-        const preview = await context.practice.preview({ userId: SCORE_USER, input: { source: 'recommend' } })
+        const preview = await context.practice.preview({ language: 'ko', userId: SCORE_USER, input: { source: 'recommend' } })
         expect(preview).toMatchObject({
             ok: true,
             value: { output: { name_suffix: '★3 실패곡', items: [{ md5: md5Of(300) }, { md5: md5Of(301), memo: '' }] } },
@@ -150,7 +158,7 @@ describe('AI 연습 폴더 (기능 6)', () => {
             source: { kind: 'recommend' },
             limits: { max_items: 30 },
         })
-        expect(context.anthropic.generateCalls[0]?.system).toBe(AI_PRACTICE_SYSTEM_PROMPT)
+        expect(context.anthropic.generateCalls[0]?.system).toBe(buildAiPracticeSystemPrompt('ko'))
     })
 
     test('만들기를 누를 때만 폴더가 생기고, 같은 미리보기로 다시 누르면 같은 폴더를 갱신한다', async () => {
@@ -217,9 +225,9 @@ describe('AI 연습 폴더 (기능 6)', () => {
         for (const index of Array.from({ length: FOLDER_LIMIT.FOLDERS_PER_USER }, (_, value) => value)) {
             await context.folderService.create({ userId: SCORE_USER, input: { name: `f${index}`, description: '' } })
         }
-        const view = await context.practice.view({ userId: SCORE_USER, input: { source: 'recommend' } })
+        const view = await context.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'recommend' } })
         expect(view).toMatchObject({ ok: true, value: { folders: { used: 50, limit: 50, can_create: false } } })
-        expect(await context.practice.preview({ userId: SCORE_USER, input: { source: 'recommend' } })).toEqual({
+        expect(await context.practice.preview({ language: 'ko', userId: SCORE_USER, input: { source: 'recommend' } })).toEqual({
             ok: false,
             reason: 'folder_limit',
             used: 50,
@@ -234,11 +242,11 @@ describe('AI 연습 폴더 (기능 6)', () => {
 
     test('태그 출처는 곡별 패턴이 없으면 안내하고, 있으면 태그 비율 순으로 후보를 고른다', async () => {
         const noPattern = setupScoreFeatures({ records: RECORDS })
-        expect(await noPattern.practice.view({ userId: SCORE_USER, input: { source: 'tag', tag: 'trill' } })).toMatchObject({
+        expect(await noPattern.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'tag', tag: 'trill' } })).toMatchObject({
             ok: true,
             value: { notice: { need: 'chart_patterns' }, candidates: [] },
         })
-        expect(await noPattern.practice.view({ userId: SCORE_USER, input: { source: 'tag', tag: 'nope' } })).toEqual({
+        expect(await noPattern.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'tag', tag: 'nope' } })).toEqual({
             ok: false,
             reason: 'invalid_source',
             field: 'tag',
@@ -250,7 +258,7 @@ describe('AI 연습 폴더 (기능 6)', () => {
             [md5Of(401), { trill: 0.05 }],
         ])
         const withPattern = setupScoreFeatures({ records: RECORDS, tags })
-        const view = await withPattern.practice.view({ userId: SCORE_USER, input: { source: 'tag', tag: 'trill' } })
+        const view = await withPattern.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'tag', tag: 'trill' } })
         expect(view.ok && view.value.candidates.map((candidate) => candidate.md5)).toEqual([md5Of(301), md5Of(400), md5Of(200)])
     })
 
@@ -264,7 +272,7 @@ describe('AI 연습 폴더 (기능 6)', () => {
                     { md5: md5Of(2), memo: 'ok' },
                 ],
             },
-            { candidates: [{ md5: md5Of(1) }, { md5: md5Of(2) }], source: 'tag' },
+            { candidates: [{ md5: md5Of(1) }, { md5: md5Of(2) }], source: 'tag', language: 'ko' },
         )
         expect(refined).toEqual({ name_suffix: '패턴 연습', description: '', items: [{ md5: md5Of(2), memo: 'ok' }] })
     })
@@ -280,7 +288,7 @@ describe('AI 연습 폴더 (기능 6)', () => {
                     { md5: md5Of(1), memo: '또' },
                 ],
             },
-            { candidates: [{ md5: md5Of(1) }], source: 'tag' },
+            { candidates: [{ md5: md5Of(1) }], source: 'tag', language: 'ko' },
         )
         expect(refined?.items).toEqual([{ md5: md5Of(1), memo: '맞는 메모' }])
     })
@@ -375,7 +383,7 @@ describe('목표 계획 (기능 7)', () => {
         await registerScoreKey(context)
         const created = await context.goals.create({ userId: SCORE_USER, input: { kind: 'clear_all_level', table: 'insane1', level: '3' } })
         const goalId = created.ok ? created.value.id : ''
-        const plan = await context.goals.interpret({ userId: SCORE_USER, goalId })
+        const plan = await context.goals.interpret({ language: 'ko', userId: SCORE_USER, goalId })
         expect(plan).toMatchObject({
             ok: true,
             value: {
@@ -387,15 +395,15 @@ describe('목표 계획 (기능 7)', () => {
                 },
             },
         })
-        expect(context.anthropic.generateCalls[0]?.system).toBe(AI_GOAL_SYSTEM_PROMPT)
-        expect((await context.goals.planView({ userId: SCORE_USER, goalId }))?.ai).toMatchObject({ is_current: true })
+        expect(context.anthropic.generateCalls[0]?.system).toBe(buildAiGoalSystemPrompt('ko'))
+        expect((await context.goals.planView({ language: 'ko', userId: SCORE_USER, goalId }))?.ai).toMatchObject({ is_current: true })
         const reached = await context.goals.create({ userId: SCORE_USER, input: { kind: 'clear_all_level', table: 'insane1', level: '1' } })
-        expect(await context.goals.interpret({ userId: SCORE_USER, goalId: reached.ok ? reached.value.id : '' })).toEqual({
+        expect(await context.goals.interpret({ language: 'ko', userId: SCORE_USER, goalId: reached.ok ? reached.value.id : '' })).toEqual({
             ok: false,
             reason: 'not_enough_data',
             need: 'goal_reached',
         })
-        expect(await context.goals.interpret({ userId: 'user-bob', goalId })).toBeNull()
+        expect(await context.goals.interpret({ language: 'ko', userId: 'user-bob', goalId })).toBeNull()
         expect(context.anthropic.generateCalls).toHaveLength(1)
     })
 
@@ -403,9 +411,9 @@ describe('목표 계획 (기능 7)', () => {
         const context = setupScoreFeatures({ records: RECORDS })
         const created = await context.goals.create({ userId: SCORE_USER, input: { kind: 'clear_all_level', table: 'insane1', level: '3' } })
         const goalId = created.ok ? created.value.id : ''
-        const view = await context.practice.view({ userId: SCORE_USER, input: { source: 'goal', goal_id: goalId } })
+        const view = await context.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'goal', goal_id: goalId } })
         expect(view.ok && view.value.candidates.map((candidate) => candidate.md5)).toEqual([md5Of(300), md5Of(301), md5Of(302), md5Of(303)])
-        expect(await context.practice.view({ userId: SCORE_USER, input: { source: 'goal' } })).toEqual({
+        expect(await context.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'goal' } })).toEqual({
             ok: false,
             reason: 'invalid_source',
             field: 'goal_id',
@@ -443,7 +451,7 @@ describe('목표 계획 (기능 7)', () => {
 
 describe('어시스트 등급 프롬프트', () => {
     test('등급이 든 digest 를 받는 기능의 프롬프트는 같은 등급 규칙 문장을 싣는다', () => {
-        for (const prompt of [AI_RECOMMEND_SYSTEM_PROMPT, AI_GOAL_SYSTEM_PROMPT, AI_PRACTICE_SYSTEM_PROMPT])
+        for (const prompt of [buildAiRecommendSystemPrompt('ko'), buildAiGoalSystemPrompt('ko'), buildAiPracticeSystemPrompt('ko')])
             expect(prompt).toContain(ASSIST_GRADE_RULE)
         expect(ASSIST_GRADE_RULE).toContain('1 (ASSIST EASY), 2 (ASSIST CLEAR), 3 (ASSIST HARD), 4 (ASSIST EXHARD)')
         expect(ASSIST_GRADE_RULE).toContain('LightAssistEasy')

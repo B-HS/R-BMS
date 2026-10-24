@@ -3,6 +3,14 @@ import { ASSIST_GRADE_NAMES } from '@server/dto/common'
 import type { AiFeatureRunInput, AiFeatureRunOutput, AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import { hashAiRunInput } from '@server/service/domain/ai/feature-runner.service'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
+import type { Locale } from '@shared/i18n/locale'
+
+/**
+ * The language a feature prompt asks the free sentences of an answer to be written in: the language the screen is shown in (plan
+ * M11). The name is part of the system prompt, so the same digest asked in another language gets its own cache key; Korean keeps
+ * the exact prompt it had before the web spoke other languages, so the answers stored before stay current.
+ */
+export const AI_OUTPUT_LANGUAGE_NAME = { ko: 'Korean', en: 'English', ja: 'Japanese' } as const satisfies Record<Locale, string>
 
 /** What a feature fixes for every call: its name, versions, prompt, output schema and output budget. */
 export type AiFeatureSpec<TSchema extends z.ZodType> = Pick<

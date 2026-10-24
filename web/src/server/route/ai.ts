@@ -1,4 +1,5 @@
 import { NextResponse, connection } from 'next/server'
+import { getLocale } from 'next-intl/server'
 import { compose } from '@server/compose'
 import {
     AI_FAILURE_KIND,
@@ -50,6 +51,10 @@ import type { AuthService } from '@server/service/domain/auth/auth.service'
 import { AI_SCHEMA_UNSUPPORTED_ERROR_TYPE } from '@server/service/shared/ai-provider/http'
 import type { AiFailureDetail } from '@server/service/shared/ai-provider/types'
 import { unwrapFolderResult } from '@server/route/folder'
+import type { Locale } from '@shared/i18n/locale'
+
+/** Reads the screen's language for the request (the same rule as the pages: locale cookie, then `Accept-Language`, then Korean). */
+type ReadRequestLocale = () => Promise<Locale>
 
 export type AiRouteDeps = {
     authService: Pick<AuthService, 'resolveSessionUser'>
@@ -154,7 +159,9 @@ const createAiRouteWrappers = <TDeps extends SessionDeps>(resolveDeps: () => TDe
 
 /**
  * `waitForRequest` keeps the GET handlers out of build-time prerendering (Cache Components prerenders GET route handlers that touch
- * no request data first); tests pass a no-op because `connection()` needs a Next request scope.
+ * no request data first); tests pass a no-op because `connection()` needs a Next request scope. The feature route factories below
+ * take `readLocale` the same way: the AI writes in the screen's language (plan M11), and tests pass a fixed locale because
+ * `getLocale()` needs the request too.
  */
 export const createAiRoutes = (resolveDeps: () => AiRouteDeps = compose, waitForRequest: () => Promise<void> = connection) => {
     const { withUser, withAdminUser } = createAiRouteWrappers(resolveDeps, waitForRequest)
@@ -238,14 +245,19 @@ export const createAiRoutes = (resolveDeps: () => AiRouteDeps = compose, waitFor
 export type AiRecordQueryRouteDeps = SessionDeps & { aiRecordQueryService: Pick<AiRecordQueryService, 'ask' | 'run'> }
 
 /** Feature 9: the AI turns a question into filters (`ask`), and the user's edited filters run again with no AI call (`run`). */
-export const createAiRecordQueryRoutes = (resolveDeps: () => AiRecordQueryRouteDeps = compose, waitForRequest: () => Promise<void> = connection) => {
+export const createAiRecordQueryRoutes = (
+    resolveDeps: () => AiRecordQueryRouteDeps = compose,
+    waitForRequest: () => Promise<void> = connection,
+    readLocale: ReadRequestLocale = getLocale,
+) => {
     const { withUser } = createAiRouteWrappers(resolveDeps, waitForRequest)
 
     return {
         ask: withUser<unknown>(async (request, _context, user, deps) => {
             enforceUserRateLimit('ai-record-query', user.id, RATE_LIMIT.TABLE_RECORDS)
             const input = await parseLimitedJsonBody(request, aiRecordQueryAskSchema, AI_LIMIT.WRITE_MAX_BYTES)
-            return aiPrivateJson(successResponse(unwrapAiResult(await deps.aiRecordQueryService.ask({ userId: user.id, question: input.question }))))
+            const asked = await deps.aiRecordQueryService.ask({ userId: user.id, question: input.question, language: await readLocale() })
+            return aiPrivateJson(successResponse(unwrapAiResult(asked)))
         }),
 
         run: withUser<unknown>(async (request, _context, user, deps) => {
@@ -314,6 +326,7 @@ const isSourceFailure = (result: { ok: boolean; reason?: string }): result is { 
 export const createAiScoreFeatureRoutes = (
     resolveDeps: () => AiScoreFeatureRouteDeps = compose,
     waitForRequest: () => Promise<void> = connection,
+    readLocale: ReadRequestLocale = getLocale,
 ) => {
     const { withUser } = createAiRouteWrappers(resolveDeps, waitForRequest)
 
@@ -328,24 +341,25 @@ export const createAiScoreFeatureRoutes = (
     return {
         recommendView: withLimited<unknown>('ai-recommend', async (request, _context, user, deps) => {
             const query = parseSearchParams(request, aiTableQuerySchema)
-            return ok(requireTable(await deps.aiRecommendService.view({ userId: user.id, tableId: query.table })))
+            return ok(requireTable(await deps.aiRecommendService.view({ userId: user.id, tableId: query.table, language: await readLocale() })))
         }),
 
         recommendInterpret: withLimited<unknown>('ai-recommend-run', async (request, _context, user, deps) => {
             const input = await parseLimitedJsonBody(request, aiTableQuerySchema, AI_LIMIT.WRITE_MAX_BYTES)
-            return ok(unwrapAiResult(requireTable(await deps.aiRecommendService.interpret({ userId: user.id, tableId: input.table }))))
+            const interpreted = await deps.aiRecommendService.interpret({ userId: user.id, tableId: input.table, language: await readLocale() })
+            return ok(unwrapAiResult(requireTable(interpreted)))
         }),
 
         practiceView: withLimited<unknown>('ai-practice', async (request, _context, user, deps) => {
             const input = parseSearchParams(request, aiPracticeSourceSchema)
-            const result = await deps.aiPracticeFolderService.view({ userId: user.id, input })
+            const result = await deps.aiPracticeFolderService.view({ userId: user.id, input, language: await readLocale() })
             if (!result.ok) throw sourceFailureError(result)
             return ok(result.value)
         }),
 
         practicePreview: withLimited<unknown>('ai-practice-run', async (request, _context, user, deps) => {
             const input = await parseLimitedJsonBody(request, aiPracticeSourceSchema, AI_LIMIT.WRITE_MAX_BYTES)
-            const result = await deps.aiPracticeFolderService.preview({ userId: user.id, input })
+            const result = await deps.aiPracticeFolderService.preview({ userId: user.id, input, language: await readLocale() })
             if (isSourceFailure(result)) throw sourceFailureError(result)
             if (!result.ok && result.reason === 'folder_limit') {
                 throw createAppError(ERROR_CODE.IR_FOLDER_LIMIT_EXCEEDED, {
@@ -393,30 +407,31 @@ export const createAiScoreFeatureRoutes = (
 
         goalPlanView: withLimited<GoalContext>('ai-goal', async (_request, context, user, deps) => {
             const goalId = await parseGoalId(context)
-            return ok(requireGoal(await deps.aiGoalService.planView({ userId: user.id, goalId })))
+            return ok(requireGoal(await deps.aiGoalService.planView({ userId: user.id, goalId, language: await readLocale() })))
         }),
 
         goalPlanInterpret: withLimited<GoalContext>('ai-goal-run', async (_request, context, user, deps) => {
             const goalId = await parseGoalId(context)
-            return ok(unwrapAiResult(requireGoal(await deps.aiGoalService.interpret({ userId: user.id, goalId }))))
+            return ok(unwrapAiResult(requireGoal(await deps.aiGoalService.interpret({ userId: user.id, goalId, language: await readLocale() }))))
         }),
 
         weeklyView: withLimited<unknown>('ai-weekly', async (request, _context, user, deps) => {
             const query = parseSearchParams(request, aiWeekQuerySchema)
-            return ok(requireWeek(await deps.aiWeeklySummaryService.view({ userId: user.id, week: query.week })))
+            return ok(requireWeek(await deps.aiWeeklySummaryService.view({ userId: user.id, week: query.week, language: await readLocale() })))
         }),
 
         weeklyInterpret: withLimited<unknown>('ai-weekly-run', async (request, _context, user, deps) => {
             const input = await parseLimitedJsonBody(request, aiWeekQuerySchema, AI_LIMIT.WRITE_MAX_BYTES)
-            return ok(unwrapAiResult(requireWeek(await deps.aiWeeklySummaryService.interpret({ userId: user.id, week: input.week }))))
+            const interpreted = await deps.aiWeeklySummaryService.interpret({ userId: user.id, week: input.week, language: await readLocale() })
+            return ok(unwrapAiResult(requireWeek(interpreted)))
         }),
 
         judgeHabitView: withLimited<unknown>('ai-judge-habit', async (_request, _context, user, deps) =>
-            ok(await deps.aiJudgeHabitService.view(user.id)),
+            ok(await deps.aiJudgeHabitService.view(user.id, await readLocale())),
         ),
 
         judgeHabitInterpret: withLimited<unknown>('ai-judge-habit-run', async (_request, _context, user, deps) =>
-            ok(unwrapAiResult(await deps.aiJudgeHabitService.interpret(user.id))),
+            ok(unwrapAiResult(await deps.aiJudgeHabitService.interpret(user.id, await readLocale()))),
         ),
     }
 }
@@ -447,7 +462,11 @@ const requirePlay = <T>(value: T | null) => {
  * rival's segment totals only when that rival shares them. Each GET returns the deterministic result with the latest stored AI answer
  * and never calls a provider; each POST is the user's "AI 해석 만들기" press and calls the shared runner once (no automatic retry).
  */
-export const createAiPlayFeatureRoutes = (resolveDeps: () => AiPlayFeatureRouteDeps = compose, waitForRequest: () => Promise<void> = connection) => {
+export const createAiPlayFeatureRoutes = (
+    resolveDeps: () => AiPlayFeatureRouteDeps = compose,
+    waitForRequest: () => Promise<void> = connection,
+    readLocale: ReadRequestLocale = getLocale,
+) => {
     const { withUser } = createAiRouteWrappers(resolveDeps, waitForRequest)
 
     const withLimited = <TContext>(scope: string, handler: AiHandler<TContext, AiPlayFeatureRouteDeps>) =>
@@ -459,40 +478,44 @@ export const createAiPlayFeatureRoutes = (resolveDeps: () => AiPlayFeatureRouteD
     const ok = (data: unknown) => aiPrivateJson(successResponse(data))
 
     return {
-        reportView: withLimited<unknown>('ai-report', async (_request, _context, user, deps) => ok(await deps.aiPlayReportService.view(user.id))),
+        reportView: withLimited<unknown>('ai-report', async (_request, _context, user, deps) =>
+            ok(await deps.aiPlayReportService.view(user.id, await readLocale())),
+        ),
 
         reportInterpret: withLimited<unknown>('ai-report-run', async (_request, _context, user, deps) =>
-            ok(unwrapAiResult(await deps.aiPlayReportService.interpret(user.id))),
+            ok(unwrapAiResult(await deps.aiPlayReportService.interpret(user.id, await readLocale()))),
         ),
 
         coachView: withLimited<ScoreContext>('ai-coach', async (_request, context, user, deps) => {
             const scoreId = await parseScoreId(context)
-            return ok(requirePlay(await deps.aiReplayCoachService.view({ userId: user.id, scoreId })))
+            return ok(requirePlay(await deps.aiReplayCoachService.view({ userId: user.id, scoreId, language: await readLocale() })))
         }),
 
         coachInterpret: withLimited<ScoreContext>('ai-coach-run', async (_request, context, user, deps) => {
             const scoreId = await parseScoreId(context)
-            return ok(unwrapAiResult(requirePlay(await deps.aiReplayCoachService.interpret({ userId: user.id, scoreId }))))
+            const interpreted = await deps.aiReplayCoachService.interpret({ userId: user.id, scoreId, language: await readLocale() })
+            return ok(unwrapAiResult(requirePlay(interpreted)))
         }),
 
         compareView: withLimited<ScoreContext>('ai-compare', async (request, context, user, deps) => {
             const scoreId = await parseScoreId(context)
             const query = parseSearchParams(request, aiCompareQuerySchema)
-            return ok(requirePlay(await deps.aiPlayCompareService.view({ userId: user.id, scoreId, query })))
+            return ok(requirePlay(await deps.aiPlayCompareService.view({ userId: user.id, scoreId, query, language: await readLocale() })))
         }),
 
         compareInterpret: withLimited<ScoreContext>('ai-compare-run', async (request, context, user, deps) => {
             const scoreId = await parseScoreId(context)
             const query = await parseLimitedJsonBody(request, aiCompareQuerySchema, AI_LIMIT.WRITE_MAX_BYTES)
-            return ok(unwrapAiResult(requirePlay(await deps.aiPlayCompareService.interpret({ userId: user.id, scoreId, query }))))
+            const interpreted = await deps.aiPlayCompareService.interpret({ userId: user.id, scoreId, query, language: await readLocale() })
+            return ok(unwrapAiResult(requirePlay(interpreted)))
         }),
 
         gaugeAdviceView: withLimited<unknown>('ai-gauge-advice', async (_request, _context, user, deps) =>
-            ok(await deps.aiGaugeAdviceService.view(user.id)),
+            ok(await deps.aiGaugeAdviceService.view(user.id, await readLocale())),
         ),
 
         gaugeAdviceInterpret: withLimited<unknown>('ai-gauge-advice-run', async (_request, _context, user, deps) =>
-            ok(unwrapAiResult(await deps.aiGaugeAdviceService.interpret(user.id))),
+            ok(unwrapAiResult(await deps.aiGaugeAdviceService.interpret(user.id, await readLocale()))),
         ),
     }
 }

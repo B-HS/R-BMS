@@ -74,6 +74,7 @@ const createRoutes = async (options: { withTrace: boolean }) => {
         routes: createAiPlayFeatureRoutes(
             () => deps,
             async () => undefined,
+            async () => 'ko' as const,
         ),
         runs,
         memory,
