@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { clearLampToId, gaugeTypeToId } from '@server/dto/common'
 import type { StoredCourseStage } from '@server/dto/course'
-import { DAN_INELIGIBLE_REASON, judgeDanEligibility, type DanCourseFacts, type DanRunFacts } from '@server/service/domain/dan/dan-eligibility'
+import {
+    DAN_ASSIST_SOURCE,
+    DAN_AWARD_KIND,
+    DAN_INELIGIBLE_REASON,
+    judgeDanEligibility,
+    type DanCourseFacts,
+    type DanRunFacts,
+} from '@server/service/domain/dan/dan-eligibility'
 import { SCORE_FLAG } from '@server/service/domain/score/ranked-policy'
 
 const USER_ID = 'user-1'
@@ -19,6 +26,7 @@ const baseRun = (overrides: Partial<DanRunFacts> = {}): DanRunFacts => ({
     ranked: true,
     scratchAuto: false,
     flags: [],
+    rankedWithoutAssist: null,
     gauge: gaugeTypeToId('Class'),
     courseGauge: 'LR2',
     gaugeValue: GAUGE_LEFT,
@@ -38,10 +46,21 @@ const reasonOf = (run: DanRunFacts, course: DanCourseFacts) => {
     return verdict.eligible ? null : verdict.reason
 }
 
+const kindOf = (run: DanRunFacts, course: DanCourseFacts = baseCourse()) => {
+    const verdict = judgeDanEligibility(run, course)
+    return verdict.eligible ? { kind: verdict.kind, assistedBy: verdict.assistedBy } : verdict.reason
+}
+
+const ASSISTED = DAN_AWARD_KIND.ASSISTED
+
+const CUSTOM_JUDGE_RUN = { clear: clearLampToId('AssistEasy'), ranked: false, flags: [SCORE_FLAG.ASSIST, SCORE_FLAG.UNKNOWN_BUILD] }
+
 describe('judgeDanEligibility 인정', () => {
     test('조건을 모두 지킨 LR2 판은 인정된다', () => {
         expect(judgeDanEligibility(baseRun(), baseCourse())).toEqual({
             eligible: true,
+            kind: DAN_AWARD_KIND.FORMAL,
+            assistedBy: [],
             grant: { userId: USER_ID, dan: DAN, courseGauge: 'LR2', gauge: gaugeTypeToId('Class') },
         })
     })
@@ -86,6 +105,48 @@ describe('judgeDanEligibility 인정', () => {
     })
 })
 
+describe('judgeDanEligibility A-단위', () => {
+    test('SCRATCH AUTO 로 LIGHT ASSIST 램프가 된 순위 판은 A-단위다', () => {
+        const run = baseRun({ scratchAuto: true, flags: [SCORE_FLAG.SCRATCH_AUTO], clear: clearLampToId('LightAssistEasy') })
+        expect(kindOf(run)).toEqual({ kind: ASSISTED, assistedBy: [DAN_ASSIST_SOURCE.SCRATCH_AUTO, DAN_ASSIST_SOURCE.ASSIST_LAMP] })
+    })
+
+    test('EASY 이상 램프라도 SCRATCH AUTO 판은 A-단위다', () => {
+        expect(kindOf(baseRun({ scratchAuto: true }))).toEqual({ kind: ASSISTED, assistedBy: [DAN_ASSIST_SOURCE.SCRATCH_AUTO] })
+        expect(kindOf(baseRun({ flags: [SCORE_FLAG.SCRATCH_AUTO] }))).toEqual({ kind: ASSISTED, assistedBy: [DAN_ASSIST_SOURCE.SCRATCH_AUTO] })
+    })
+
+    test('ASSIST·LIGHT ASSIST 램프만 있는 순위 판은 A-단위다', () => {
+        for (const lamp of ['AssistEasy', 'LightAssistEasy'] as const)
+            expect(kindOf(baseRun({ clear: clearLampToId(lamp) }))).toEqual({ kind: ASSISTED, assistedBy: [DAN_ASSIST_SOURCE.ASSIST_LAMP] })
+    })
+
+    test('넓힌 판정 판은 어시스트만 빼면 순위였다는 사실이 참이면 A-단위다', () => {
+        expect(kindOf(baseRun({ ...CUSTOM_JUDGE_RUN, rankedWithoutAssist: true }))).toEqual({
+            kind: ASSISTED,
+            assistedBy: [DAN_ASSIST_SOURCE.ASSIST_LAMP, DAN_ASSIST_SOURCE.ASSIST_FLAG],
+        })
+    })
+
+    test('그 사실이 저장되지 않은 넓힌 판정 판은 순위였다고 보고 A-단위다', () => {
+        expect(kindOf(baseRun({ ...CUSTOM_JUDGE_RUN, rankedWithoutAssist: null }))).toEqual({
+            kind: ASSISTED,
+            assistedBy: [DAN_ASSIST_SOURCE.ASSIST_LAMP, DAN_ASSIST_SOURCE.ASSIST_FLAG],
+        })
+    })
+
+    test('어시스트 판도 스테이지 제약을 지켜야 한다', () => {
+        const run = baseRun({ ...CUSTOM_JUDGE_RUN, rankedWithoutAssist: true, stages: stagesOf({ random: 'Random' }) })
+        expect(reasonOf(run, baseCourse())).toBe(DAN_INELIGIBLE_REASON.RANDOM_NOT_ALLOWED)
+        expect(reasonOf(baseRun({ scratchAuto: true, stages: null }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.NO_STAGE_FACTS)
+        expect(reasonOf(baseRun({ scratchAuto: true, stages: stagesOf({ lntype: 1 }) }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.LN_MODE_MISMATCH)
+    })
+
+    test('UNKNOWN_BUILD 만 있는 순위 판은 정식 단위다', () => {
+        expect(kindOf(baseRun({ flags: [SCORE_FLAG.UNKNOWN_BUILD] }))).toEqual({ kind: DAN_AWARD_KIND.FORMAL, assistedBy: [] })
+    })
+})
+
 describe('judgeDanEligibility 거절 이유', () => {
     test('단위 코스가 아니면 not_a_dan_course', () => {
         expect(reasonOf(baseRun(), baseCourse({ dan: null }))).toBe(DAN_INELIGIBLE_REASON.NOT_A_DAN_COURSE)
@@ -99,8 +160,8 @@ describe('judgeDanEligibility 거절 이유', () => {
         expect(reasonOf(baseRun({ ranked: false }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.UNRANKED)
     })
 
-    test('NO PLAY·FAILED·ASSIST·LIGHT ASSIST 램프는 not_cleared', () => {
-        for (const lamp of ['NoPlay', 'Failed', 'AssistEasy', 'LightAssistEasy'] as const)
+    test('NO PLAY·FAILED 램프는 not_cleared', () => {
+        for (const lamp of ['NoPlay', 'Failed'] as const)
             expect(reasonOf(baseRun({ clear: clearLampToId(lamp) }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.NOT_CLEARED)
     })
 
@@ -109,17 +170,30 @@ describe('judgeDanEligibility 거절 이유', () => {
         expect(reasonOf(baseRun({ gaugeValue: -1 }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.NOT_CLEARED)
     })
 
-    test('SCRATCH AUTO 는 scratch_auto', () => {
-        expect(reasonOf(baseRun({ scratchAuto: true }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.SCRATCH_AUTO)
-        expect(reasonOf(baseRun({ flags: [SCORE_FLAG.SCRATCH_AUTO] }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.SCRATCH_AUTO)
+    test('어시스트 판도 FAILED 나 게이지 0 이면 not_cleared', () => {
+        expect(reasonOf(baseRun({ ...CUSTOM_JUDGE_RUN, rankedWithoutAssist: true, clear: clearLampToId('Failed') }), baseCourse())).toBe(
+            DAN_INELIGIBLE_REASON.NOT_CLEARED,
+        )
+        expect(reasonOf(baseRun({ scratchAuto: true, clear: clearLampToId('LightAssistEasy'), gaugeValue: 0 }), baseCourse())).toBe(
+            DAN_INELIGIBLE_REASON.NOT_CLEARED,
+        )
     })
 
-    test('ASSIST 플래그는 assisted', () => {
-        expect(reasonOf(baseRun({ flags: [SCORE_FLAG.ASSIST] }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.ASSISTED)
+    test('빌드가 막아 순위에 오르지 않은 어시스트 없는 판은 unranked', () => {
+        expect(reasonOf(baseRun({ ranked: false, flags: [SCORE_FLAG.UNKNOWN_BUILD] }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.UNRANKED)
+        expect(reasonOf(baseRun({ ranked: false, flags: [SCORE_FLAG.UNKNOWN_BUILD], rankedWithoutAssist: true }), baseCourse())).toBe(
+            DAN_INELIGIBLE_REASON.UNRANKED,
+        )
     })
 
-    test('UNKNOWN_BUILD 같은 순위를 막지 않는 플래그는 거절 이유가 아니다', () => {
-        expect(reasonOf(baseRun({ flags: [SCORE_FLAG.UNKNOWN_BUILD] }), baseCourse())).toBeNull()
+    test('어시스트만 빼도 순위에 오르지 않았을 판은 unranked', () => {
+        expect(reasonOf(baseRun({ ...CUSTOM_JUDGE_RUN, rankedWithoutAssist: false }), baseCourse())).toBe(DAN_INELIGIBLE_REASON.UNRANKED)
+    })
+
+    test('저장된 사실이 없을 때 어시스트 말고 순위를 막는 플래그가 있으면 unranked', () => {
+        expect(reasonOf(baseRun({ ...CUSTOM_JUDGE_RUN, flags: [SCORE_FLAG.ASSIST, SCORE_FLAG.JUDGE_WIDTH] }), baseCourse())).toBe(
+            DAN_INELIGIBLE_REASON.UNRANKED,
+        )
     })
 
     test('스테이지·코스 게이지·최종 게이지 중 하나라도 없으면 no_stage_facts', () => {

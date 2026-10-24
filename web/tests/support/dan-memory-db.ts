@@ -1,7 +1,8 @@
 import type { SubmittedCourseRun } from '@server/service/domain/course/course.service'
 import type { AcquiredDanRow, DanCourseRecord, DanDisplayRow, DanServiceDb, UserDanRow } from '@server/service/domain/dan/dan.service'
 
-const keyOf = (row: { userId: string; system: string; label: string }) => `${row.userId}\n${row.system}\n${row.label}`
+const keyOf = (row: { userId: string; system: string; label: string; assisted: boolean }) =>
+    `${row.userId}\n${row.system}\n${row.label}\n${row.assisted}`
 
 /** The dan tables held in memory: the dan courses and stored runs are given, the acquired dans and display choices are written by the service. */
 export const createMemoryDanDb = (seed: { courses: DanCourseRecord[]; runs?: SubmittedCourseRun[]; courseNames?: Record<string, string> }) => {

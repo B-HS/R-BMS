@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { z } from 'zod'
+import { clearLampToId } from '@server/dto/common'
 import { displayedDanSchema, type DisplayedDan } from '@server/dto/dan'
 import { createDanService } from '@server/service/domain/dan/dan.service'
+import { SCORE_FLAG } from '@server/service/domain/score/ranked-policy'
 import { createScoreService, toScoreRecord, type ScoreChartRankedRow, type ScoreServiceDb } from '@server/service/domain/score/score.service'
 import { createMemoryDanDb } from '../support/dan-memory-db'
 import { danRun, FIRST_DAN_COURSE, SECOND_DAN_COURSE, STELLA_DAN_COURSE } from '../support/dan-fixture'
@@ -15,9 +17,10 @@ const ALICE = 'u_alice'
 const BOB = 'u_bob'
 const CAROL = 'u_carol'
 
-const GENOSIDE_SECOND: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '二段' }
-const GENOSIDE_FIRST: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '初段' }
-const STELLA_ZERO: DisplayedDan = { system: 'stella', name: 'Stella', label: 'st0' }
+const GENOSIDE_SECOND: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '二段', assisted: false }
+const GENOSIDE_FIRST: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '初段', assisted: false }
+const GENOSIDE_ASSISTED_SECOND: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: 'A-二段', assisted: true }
+const STELLA_ZERO: DisplayedDan = { system: 'stella', name: 'Stella', label: 'st0', assisted: false }
 
 const rankedRow = (overrides: Partial<ScoreChartRankedRow>): ScoreChartRankedRow => ({
     scoreId: 'sc_1',
@@ -260,5 +263,27 @@ describe('프로필과 같은 단위 묶음 조회로 붙는 순위 줄의 단�
         const rows = await service.getRanking(ranking)
 
         expect(rows.map((row) => row.extra.dans)).toEqual([[STELLA_ZERO], [], []])
+    })
+
+    test('정식보다 높은 A-단위는 정식 다음에 A- 가 붙은 label 로 붙는다', async () => {
+        const { danService, service } = await createService()
+        await danService.awardFromRun(
+            danRun(SECOND_DAN_COURSE, {
+                id: 'cs_5',
+                userId: BOB,
+                scratchAuto: true,
+                flags: [SCORE_FLAG.SCRATCH_AUTO],
+                clear: clearLampToId('LightAssistEasy'),
+            }),
+        )
+
+        const rows = await service.getRanking(ranking)
+
+        expect(rows.map((row) => row.extra.dans)).toEqual([[GENOSIDE_SECOND, STELLA_ZERO], [GENOSIDE_FIRST, GENOSIDE_ASSISTED_SECOND], []])
+        for (const row of rows) expect(z.array(displayedDanSchema).parse(row.extra.dans)).toEqual(row.extra.dans)
+    })
+
+    test('assisted 가 없는 옛 원소는 정식 단위로 읽힌다', () => {
+        expect(displayedDanSchema.parse({ system: 'stella', name: 'Stella', label: 'st0' })).toEqual(STELLA_ZERO)
     })
 })

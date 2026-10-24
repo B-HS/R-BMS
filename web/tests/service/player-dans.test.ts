@@ -7,8 +7,9 @@ const ALICE: PlayerRow = { id: 'u_alice', loginId: 'alice', name: 'Alice', rank:
 const BOB: PlayerRow = { id: 'u_bob', loginId: 'bob', name: 'Bob', rank: '', rankPoints: 0, totalPlays: 0, role: 'user' }
 const ALICE_PLAYS = 12
 
-const GENOSIDE_SP_DAN: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '発狂五段' }
-const STELLA_DAN: DisplayedDan = { system: 'stella', name: 'Stella', label: 'st3' }
+const GENOSIDE_SP_DAN: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '発狂五段', assisted: false }
+const GENOSIDE_SP_ASSISTED_DAN: DisplayedDan = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: 'A-発狂六段', assisted: true }
+const STELLA_DAN: DisplayedDan = { system: 'stella', name: 'Stella', label: 'st3', assisted: false }
 
 const leaderboardRow = (row: PlayerRow): LeaderboardRow => ({ ...row, plays: 1, clearedCharts: 1, playedCharts: 1 })
 
@@ -30,7 +31,7 @@ describe('플레이어 프로필의 표시 단위', () => {
             db: { findByLoginId: async () => ALICE, findById: async () => ALICE, countScores: async () => ALICE_PLAYS },
             listDisplayedDans: async (userId) => {
                 asked.push(userId)
-                return [GENOSIDE_SP_DAN, STELLA_DAN]
+                return [GENOSIDE_SP_DAN, GENOSIDE_SP_ASSISTED_DAN, STELLA_DAN]
             },
         })
 
@@ -42,7 +43,7 @@ describe('플레이어 프로필의 표시 단위', () => {
             name: 'Alice',
             total_plays: ALICE_PLAYS,
             rank_points: 0,
-            extra: { rank: '', dans: [GENOSIDE_SP_DAN, STELLA_DAN] },
+            extra: { rank: '', dans: [GENOSIDE_SP_DAN, GENOSIDE_SP_ASSISTED_DAN, STELLA_DAN] },
         })
     })
 

@@ -63,7 +63,7 @@ export type TableCourseSync = {
 }
 
 export type TableDanAward = {
-    awardForCourses: (params: { courseHashes: string[]; dryRun: boolean }) => Promise<{ scanned: number; awarded: number }>
+    awardForCourses: (params: { courseHashes: string[]; dryRun: boolean }) => Promise<{ scanned: number; awarded: number; awardedAssisted: number }>
 }
 
 export type TableRefreshDeps = {
@@ -267,10 +267,11 @@ export const createTableRefreshService = (deps: TableRefreshDeps) => {
             const plan = await deps.courses.planSync(courseInput)
             if (options.dryRun || !hasCourseWork(plan)) return { ...report, courses: plan }
             const applied = await deps.courses.applySync(courseInput)
-            const awarded =
+            const award =
                 deps.dan && applied.newDanHashes.length > 0
-                    ? (await deps.dan.awardForCourses({ courseHashes: applied.newDanHashes, dryRun: false })).awarded
+                    ? await deps.dan.awardForCourses({ courseHashes: applied.newDanHashes, dryRun: false })
                     : null
+            const awarded = award === null ? null : award.awarded + award.awardedAssisted
             return { ...report, courses: applied, awarded }
         } catch (error) {
             log.error('table refresh course sync failed', { tableId: report.tableId, ...summarizeError(error) })

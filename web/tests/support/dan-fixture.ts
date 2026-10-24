@@ -45,6 +45,7 @@ export const danRun = (course: DanCourseRecord, overrides: Partial<SubmittedCour
     ranked: true,
     scratchAuto: false,
     flags: [],
+    rankedWithoutAssist: null,
     gauge: gaugeTypeToId('Class'),
     courseGauge: 'LR2',
     gaugeValue: DAN_GAUGE_LEFT,

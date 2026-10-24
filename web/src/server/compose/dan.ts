@@ -5,7 +5,7 @@ import { user } from '@server/db/auth-schema'
 import { course, courseChart, courseScore, danCourse, userDan, userDanDisplay } from '@server/db/schema'
 import { danSystemIdSchema } from '@server/dto/course-catalog'
 import { withLockRetry } from '@server/lib/with-lock-retry'
-import { storedFlagsOf } from '@server/service/domain/course/course.service'
+import { storedFlagsOf, storedRankedWithoutAssistOf } from '@server/service/domain/course/course.service'
 import { canonicalConstraints } from '@server/service/domain/course-catalog/constraint-tokens'
 import { createDanService, type AcquiredDanRow, type DanCourseRecord, type DanDisplayRow } from '@server/service/domain/dan/dan.service'
 
@@ -79,7 +79,9 @@ export const composeDan = (db: Database) => {
                     )
                     .orderBy(asc(courseScore.playedAt), asc(courseScore.id))
                     .limit(limit)
-                return rows.flatMap(({ extra, stages, ...run }) => (stages === null ? [] : [{ ...run, stages, flags: storedFlagsOf(extra) }]))
+                return rows.flatMap(({ extra, stages, ...run }) =>
+                    stages === null ? [] : [{ ...run, stages, flags: storedFlagsOf(extra), rankedWithoutAssist: storedRankedWithoutAssistOf(extra) }],
+                )
             },
 
             insertUserDanIgnore: withLockRetry(async (row) => {
@@ -87,11 +89,11 @@ export const composeDan = (db: Database) => {
                 return result.affectedRows > 0
             }),
 
-            hasUserDan: async ({ userId, system, label }) => {
+            hasUserDan: async ({ userId, system, label, assisted }) => {
                 const [row] = await db
                     .select({ userId: userDan.userId })
                     .from(userDan)
-                    .where(and(eq(userDan.userId, userId), eq(userDan.system, system), eq(userDan.label, label)))
+                    .where(and(eq(userDan.userId, userId), eq(userDan.system, system), eq(userDan.label, label), eq(userDan.assisted, assisted)))
                     .limit(1)
                 return row !== undefined
             },
@@ -103,6 +105,7 @@ export const composeDan = (db: Database) => {
                         userId: userDan.userId,
                         system: userDan.system,
                         label: userDan.label,
+                        assisted: userDan.assisted,
                         rank: userDan.rank,
                         courseHash: userDan.courseHash,
                         courseScoreId: userDan.courseScoreId,
@@ -114,14 +117,19 @@ export const composeDan = (db: Database) => {
                     .from(userDan)
                     .leftJoin(course, eq(course.courseHash, userDan.courseHash))
                     .where(inArray(userDan.userId, userIds))
-                    .orderBy(asc(userDan.rank))
+                    .orderBy(asc(userDan.rank), asc(userDan.assisted))
                 return withKnownSystem(rows).map((row) => ({ ...row, courseName: row.courseName ?? '' }))
             },
 
             listDisplays: async (userIds): Promise<DanDisplayRow[]> => {
                 if (userIds.length === 0) return []
                 const rows = await db
-                    .select({ userId: userDanDisplay.userId, system: userDanDisplay.system, label: userDanDisplay.label })
+                    .select({
+                        userId: userDanDisplay.userId,
+                        system: userDanDisplay.system,
+                        label: userDanDisplay.label,
+                        assisted: userDanDisplay.assisted,
+                    })
                     .from(userDanDisplay)
                     .where(inArray(userDanDisplay.userId, userIds))
                 return withKnownSystem(rows)
@@ -131,7 +139,7 @@ export const composeDan = (db: Database) => {
                 await db
                     .insert(userDanDisplay)
                     .values(row)
-                    .onDuplicateKeyUpdate({ set: { label: row.label, updatedAt: new Date() } })
+                    .onDuplicateKeyUpdate({ set: { label: row.label, assisted: row.assisted, updatedAt: new Date() } })
             }),
 
             deleteDisplay: withLockRetry(async ({ userId, system }) => {

@@ -66,12 +66,12 @@ const createCourses = (plan = planOf(STELLA.id)) => {
     return { courses, calls }
 }
 
-const createDan = (awarded = 3) => {
+const createDan = (awarded = 3, awardedAssisted = 0) => {
     const calls: Parameters<TableDanAward['awardForCourses']>[0][] = []
     const dan: TableDanAward = {
         awardForCourses: async (params) => {
             calls.push(params)
-            return { scanned: awarded, awarded }
+            return { scanned: awarded + awardedAssisted, awarded, awardedAssisted }
         },
     }
     return { dan, calls }
@@ -189,6 +189,14 @@ describe('표 매일 갱신 — 저장', () => {
         expect(danCalls).toEqual([{ courseHashes: [DAN_HASH], dryRun: false }])
         expect(report.awarded).toBe(4)
         expect(report.courses?.changed).toBe(2)
+    })
+
+    test('소급이 준 A-단위도 awarded 에 더해 캐시 무효화 기준이 된다', async () => {
+        const { courses } = createCourses(planOf(STELLA.id, { changed: 1, newDanHashes: [DAN_HASH] }))
+        const assistedOnly = await createHarness({ initial: [storedStella()], courses, dan: createDan(0, 2).dan }).refresh()
+        expect(assistedOnly[0].awarded).toBe(2)
+        const both = await createHarness({ initial: [storedStella()], courses, dan: createDan(1, 2).dan }).refresh()
+        expect(both[0].awarded).toBe(3)
     })
 
     test('새 단위 코스가 없으면 소급 판정을 부르지 않는다', async () => {

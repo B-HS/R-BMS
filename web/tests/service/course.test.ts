@@ -6,6 +6,7 @@ import {
     createCourseService,
     findCourseIntegrityFailure,
     storedFlagsOf,
+    storedRankedWithoutAssistOf,
     toCourseMeta,
     toStoredStages,
     type CourseScoreInsertRow,
@@ -240,7 +241,64 @@ describe('courseService.submit', () => {
         const result = await service.submit({ input: submission({ assist: ['CUSTOM_JUDGE'] }), user: USER, ...TRUSTED })
         expect(result.response.ranked).toBe(false)
         expect(result.response.flags).toEqual(['ASSIST'])
-        expect(inserted[0].extra).toEqual({ flags: ['ASSIST'], scratch_auto: false, assist: ['CUSTOM_JUDGE'] })
+        expect(inserted[0].extra).toEqual({ flags: ['ASSIST'], scratch_auto: false, assist: ['CUSTOM_JUDGE'], ranked_without_assist: true })
+        expect(result.scoreRow).toMatchObject({ ranked: false, flags: ['ASSIST'], rankedWithoutAssist: true })
+    })
+
+    test('빌드가 막은 넓힌 판정 코스는 어시스트만 빼도 순위가 아니었다고 남긴다', async () => {
+        for (const trust of [
+            { buildTrust: BUILD_TRUST.UNTRUSTED, requireTrustedBuild: false },
+            { buildTrust: BUILD_TRUST.UNKNOWN, requireTrustedBuild: true },
+        ] as const) {
+            const { service, inserted } = createService()
+            const result = await service.submit({ input: submission({ assist: ['CUSTOM_JUDGE'] }), user: USER, ...trust })
+            expect(inserted[0].extra).toMatchObject({ flags: ['ASSIST', 'UNKNOWN_BUILD'], ranked_without_assist: false })
+            expect(result.scoreRow.rankedWithoutAssist).toBe(false)
+        }
+    })
+
+    test('미등록 빌드라도 기본 설정의 넓힌 판정 코스는 어시스트만 빼면 순위였다고 남긴다', async () => {
+        const { service, inserted } = createService()
+        await service.submit({
+            input: submission({ assist: ['CUSTOM_JUDGE'] }),
+            user: USER,
+            buildTrust: BUILD_TRUST.UNKNOWN,
+            requireTrustedBuild: false,
+        })
+        expect(inserted[0].extra).toMatchObject({ flags: ['ASSIST', 'UNKNOWN_BUILD'], ranked_without_assist: true })
+    })
+
+    test('클라이언트가 extra 에 보낸 ranked_without_assist 는 ASSIST 판에서 서버 값으로 덮인다', async () => {
+        const { service, inserted } = createService()
+        await service.submit({
+            input: submission({ assist: ['CUSTOM_JUDGE'], extra: { ranked_without_assist: true, note: 'kept' } }),
+            user: USER,
+            buildTrust: BUILD_TRUST.UNTRUSTED,
+            requireTrustedBuild: false,
+        })
+        expect(inserted[0].extra).toMatchObject({ note: 'kept', ranked_without_assist: false })
+    })
+
+    test('ASSIST 가 없는 판은 ranked_without_assist 를 새로 쓰지 않는다', async () => {
+        const { service, inserted } = createService()
+        await service.submit({ input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH'] }), user: USER, ...TRUSTED })
+        expect(inserted[0].extra).toEqual({ flags: ['SCRATCH_AUTO'], scratch_auto: true, assist: ['AUTO_SCRATCH'] })
+    })
+
+    test('넓힌 판정 코스의 재전송은 저장된 ranked_without_assist 를 판정에 넘긴다', async () => {
+        const extraOf = (rankedWithoutAssist: boolean | undefined) => ({
+            flags: [SCORE_FLAG.ASSIST, SCORE_FLAG.UNKNOWN_BUILD],
+            ...(rankedWithoutAssist === undefined ? {} : { ranked_without_assist: rankedWithoutAssist }),
+        })
+        for (const [stored, expected] of [
+            [true, true],
+            [false, false],
+            [undefined, null],
+        ] as const) {
+            const { service } = createService({ existing: storedRun({ id: 'cs_existing', ranked: false, extra: extraOf(stored) }) })
+            const result = await service.submit({ input: submission({ assist: ['CUSTOM_JUDGE'] }), user: USER, ...TRUSTED })
+            expect(result.scoreRow).toMatchObject({ flags: [SCORE_FLAG.ASSIST, SCORE_FLAG.UNKNOWN_BUILD], rankedWithoutAssist: expected })
+        }
     })
 
     test('SCRATCH AUTO 와 넓힌 판정이 함께 낀 코스는 unranked 이고 베스트에 넣지 않는다', async () => {
@@ -375,6 +433,7 @@ describe('코스 게이지와 어시스트 등급 (결정 6)', () => {
             ranked: true,
             scratchAuto: true,
             flags: [SCORE_FLAG.SCRATCH_AUTO],
+            rankedWithoutAssist: true,
             gauge: gaugeTypeToId('Class'),
             courseGauge: 'LR2',
             gaugeValue: 42,
@@ -407,6 +466,7 @@ describe('코스 게이지와 어시스트 등급 (결정 6)', () => {
             ranked: true,
             scratchAuto: true,
             flags: [SCORE_FLAG.SCRATCH_AUTO],
+            rankedWithoutAssist: null,
             gauge: gaugeTypeToId('ExClass'),
             courseGauge: 'BEATORAJA',
             gaugeValue: 17,
@@ -432,6 +492,16 @@ describe('storedFlagsOf', () => {
         expect(storedFlagsOf({ flags: 'ASSIST' })).toEqual([])
         expect(storedFlagsOf({})).toEqual([])
         expect(storedFlagsOf(null)).toEqual([])
+    })
+})
+
+describe('storedRankedWithoutAssistOf', () => {
+    test('저장된 extra.ranked_without_assist 가 불리언일 때만 그 값이고 아니면 null 이다', () => {
+        expect(storedRankedWithoutAssistOf({ ranked_without_assist: true })).toBe(true)
+        expect(storedRankedWithoutAssistOf({ ranked_without_assist: false })).toBe(false)
+        expect(storedRankedWithoutAssistOf({ ranked_without_assist: 'true' })).toBeNull()
+        expect(storedRankedWithoutAssistOf({})).toBeNull()
+        expect(storedRankedWithoutAssistOf(null)).toBeNull()
     })
 })
 

@@ -37,7 +37,7 @@ if (!hasDatabase) {
 }
 
 const PREFIX = 'dnaw'
-const PLAYERS = ['alice', 'bob', 'carol', 'dave', 'erin', 'frank'] as const
+const PLAYERS = ['alice', 'bob', 'carol', 'dave', 'erin', 'frank', 'grace', 'heidi'] as const
 const BULK_COUNT = DAN_BACKFILL_PAGE + 1
 const BULK_TIE_BUCKETS = 7
 const BASE_PLAYED_AT = 1_760_000_000_000
@@ -51,7 +51,9 @@ const GENOSIDE_SOURCE = 'genoside-2018'
 const STELLA_GROUP = 'stella-st'
 const COURSES_FILE = join(import.meta.dirname, '..', '..', 'data', 'courses', 'genoside-2018', 'courses.json')
 const INSERT_CHUNK = 250
-const SUMMARY_LINE = /^applied danCourses \d+, scanned \d+, eligible \d+, awarded 0$/
+const SUMMARY_LINE = /^applied danCourses \d+, scanned \d+, eligible \d+, awarded 0, eligibleAssisted \d+, awardedAssisted 0, assistedLegacy \d+$/
+const SP_DISPLAY = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP' } as const
+const NO_ASSISTED_TOTALS = { eligibleAssisted: 0, awardedAssisted: 0, assistedLegacy: 0 }
 
 type Player = (typeof PLAYERS)[number]
 
@@ -193,10 +195,9 @@ describe.skipIf(!hasDatabase)('단위 자동 판정 (임시 MySQL)', () => {
         expect(rows[0]).toEqual(before)
     })
 
-    test('FAILED·SCRATCH AUTO·RANDOM 판과 스테이지 사실이 없는 옛 본문은 단위를 주지 않는다', async () => {
+    test('FAILED·RANDOM 판과 스테이지 사실이 없는 옛 본문은 단위를 주지 않는다', async () => {
         const submissions = [
             ['bob', { clear: 'Failed', gauge_value: 0 }],
-            ['carol', { scratch_auto: true, assist: ['AUTO_SCRATCH'] }],
             ['dave', { stages: firstDan.charts.map((_, index) => ({ gauge: 'Class', random: index === 0 ? 'Random' : 'Off', lntype: 0 })) }],
             ['erin', { gauge: undefined, course_gauge: undefined, stages: undefined }],
         ] as const
@@ -207,13 +208,75 @@ describe.skipIf(!hasDatabase)('단위 자동 판정 (임시 MySQL)', () => {
         }
     })
 
+    test('SCRATCH AUTO 판은 A-단위를 주고 같은 단위의 정식 판은 정식 행을 따로 더한다', async () => {
+        const id = loginOf('carol')
+        const assisted = await submit(
+            'carol',
+            submissionOf(id, firstDan, 3, { clear: 'LightAssistEasy', scratch_auto: true, assist: ['AUTO_SCRATCH'] }),
+        )
+        expect(assisted.status).toBe(CREATED)
+        expect((await rowsOf('carol')).map((row) => [row.label, row.assisted])).toEqual([['初段', true]])
+        expect((await dans().listDisplayed([id])).get(id)).toEqual([{ ...SP_DISPLAY, label: 'A-初段', assisted: true }])
+
+        expect((await submit('carol', submissionOf(id, firstDan, 4))).status).toBe(CREATED)
+        const rows = await rowsOf('carol')
+        expect(rows.map((row) => [row.label, row.assisted]).toSorted()).toEqual([
+            ['初段', false],
+            ['初段', true],
+        ])
+        expect((await dans().listDisplayed([id])).get(id)).toEqual([{ ...SP_DISPLAY, label: '初段', assisted: false }])
+        await dans().setDisplay(id, { system: 'genoside2018_sp', mode: 'label', label: '初段', assisted: true })
+        expect((await dans().listDisplayed([id])).get(id)).toEqual([{ ...SP_DISPLAY, label: 'A-初段', assisted: true }])
+        expect((await dans().listMine(id)).systems[0]).toMatchObject({ display: { mode: 'label', label: '初段', assisted: true } })
+    })
+
+    test('넓힌 판정 판은 어시스트만 빼면 순위였다는 사실을 남기고 A-단위를 준다', async () => {
+        const id = loginOf('grace')
+        const response = await submit('grace', submissionOf(id, firstDan, 5, { clear: 'AssistEasy', assist: ['CUSTOM_JUDGE'] }))
+        expect(response.status).toBe(CREATED)
+        const [stored] = await getDb().select().from(courseScore).where(eq(courseScore.userId, id))
+        expect(stored.ranked).toBe(false)
+        expect(stored.extra).toMatchObject({ flags: ['ASSIST', 'UNKNOWN_BUILD'], ranked_without_assist: true })
+        expect((await rowsOf('grace')).map((row) => [row.label, row.assisted])).toEqual([['初段', true]])
+    })
+
+    test('ranked_without_assist 없이 저장된 넓힌 판정 판은 소급에서 assistedLegacy 로 세고 A-단위를 준다', async () => {
+        const id = loginOf('heidi')
+        await getDb()
+            .insert(courseScore)
+            .values({
+                id: `cs_${id}`,
+                userId: id,
+                courseHash: firstDan.courseHash,
+                clear: clearLampToId('AssistEasy'),
+                ranked: false,
+                gaugeValue: GAUGE_LEFT,
+                playedAt: BASE_PLAYED_AT,
+                gauge: gaugeTypeToId('Class'),
+                courseGauge: 'LR2',
+                stages: firstDan.charts.map((chart): StoredCourseStage => ({
+                    gauge: 'Class',
+                    random: 'Off',
+                    lntype: 0,
+                    md5: chart.md5,
+                    sha256: chart.sha256,
+                })),
+                extra: { flags: ['ASSIST', 'UNKNOWN_BUILD'], scratch_auto: false, assist: ['CUSTOM_JUDGE'] },
+            })
+        const plan = await dans().awardForCourses({ courseHashes: [firstDan.courseHash], dryRun: true })
+        expect(plan.assistedLegacy).toBe(1)
+        const applied = await dans().awardForCourses({ courseHashes: [firstDan.courseHash], dryRun: false })
+        expect(applied).toMatchObject({ assistedLegacy: 1, awarded: 0, awardedAssisted: 1 })
+        expect((await rowsOf('heidi')).map((row) => [row.label, row.assisted, row.courseScoreId])).toEqual([['初段', true, `cs_${id}`]])
+    })
+
     test('표시 단위는 자동이면 획득한 단위이고 숨기면 공개 목록에서 빠진다', async () => {
         const id = loginOf('alice')
-        expect((await dans().listDisplayed([id])).get(id)).toEqual([{ system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP', label: '初段' }])
+        expect((await dans().listDisplayed([id])).get(id)).toEqual([{ ...SP_DISPLAY, label: '初段', assisted: false }])
         await dans().setDisplay(id, { system: 'genoside2018_sp', mode: 'hidden' })
         expect((await dans().listDisplayed([id])).get(id)).toEqual([])
         const mine = await dans().listMine(id)
-        expect(mine.systems[0]).toMatchObject({ shown: null, display: { mode: 'hidden' }, acquired: [{ label: '初段', course_name: firstDan.name }] })
+        expect(mine.systems[0]).toMatchObject({ shown: [], display: { mode: 'hidden' }, acquired: [{ label: '初段', course_name: firstDan.name }] })
         await dans().setDisplay(id, { system: 'genoside2018_sp', mode: 'auto' })
         expect((await dans().listDisplayed([id])).get(id)).toHaveLength(1)
     })
@@ -258,6 +321,7 @@ describe.skipIf(!hasDatabase)('단위 자동 판정 (임시 MySQL)', () => {
             scanned: runs.length,
             eligible: runs.length,
             awarded: 0,
+            ...NO_ASSISTED_TOTALS,
         })
         expect(await countDanRows('stella')).toBe(0)
 
@@ -265,6 +329,7 @@ describe.skipIf(!hasDatabase)('단위 자동 판정 (임시 MySQL)', () => {
             scanned: runs.length,
             eligible: runs.length,
             awarded: runs.length,
+            ...NO_ASSISTED_TOTALS,
         })
         expect(await countDanRows('stella')).toBe(runs.length)
         expect(await rowsOf('frank')).toEqual([
@@ -282,6 +347,7 @@ describe.skipIf(!hasDatabase)('단위 자동 판정 (임시 MySQL)', () => {
             scanned: runs.length,
             eligible: runs.length,
             awarded: 0,
+            ...NO_ASSISTED_TOTALS,
         })
     })
 

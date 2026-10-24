@@ -389,8 +389,9 @@ export const userDan = mysqlTable(
         gauge: tinyint('gauge').notNull(),
         acquiredAt: bigint('acquired_at', { mode: 'number' }).notNull(),
         createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+        assisted: boolean('assisted').default(false).notNull(),
     },
-    (table) => [primaryKey({ columns: [table.userId, table.system, table.label] })],
+    (table) => [primaryKey({ columns: [table.userId, table.system, table.label, table.assisted] })],
 )
 
 export const userDanDisplay = mysqlTable(
@@ -405,6 +406,7 @@ export const userDanDisplay = mysqlTable(
             .defaultNow()
             .$onUpdate(() => new Date())
             .notNull(),
+        assisted: boolean('assisted').default(false).notNull(),
     },
     (table) => [primaryKey({ columns: [table.userId, table.system] })],
 )

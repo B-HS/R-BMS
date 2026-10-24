@@ -16,8 +16,9 @@ export const parseRecomputeCommand = (args: readonly string[]) => {
 
 /**
  * Judges every stored run of every dan course again. `count` only counts what `apply` would do; `apply` gives the dans the runs
- * earn. A player keeps the dan of the first run that earned it, so running `apply` twice gives nothing the second time. Only
- * numbers are printed: the Actions log is public.
+ * earn, regular dans and A-dans (the `*Assisted` counts, and `assistedLegacy` for the A-dans of runs stored before the server
+ * wrote whether they would have been ranked without assist). A player keeps the dan of the first run that earned it, so running
+ * `apply` twice gives nothing the second time. Only numbers are printed: the Actions log is public.
  */
 export const recomputeDans = async (params: {
     command: RecomputeCommand
@@ -28,7 +29,7 @@ export const recomputeDans = async (params: {
     const courseHashes = await service.listDanCourseHashes()
     const totals = await service.awardForCourses({ courseHashes, dryRun: command === RECOMPUTE_COMMAND.COUNT })
     log(
-        `${command === RECOMPUTE_COMMAND.COUNT ? 'plan' : 'applied'} danCourses ${courseHashes.length}, scanned ${totals.scanned}, eligible ${totals.eligible}, awarded ${totals.awarded}`,
+        `${command === RECOMPUTE_COMMAND.COUNT ? 'plan' : 'applied'} danCourses ${courseHashes.length}, scanned ${totals.scanned}, eligible ${totals.eligible}, awarded ${totals.awarded}, eligibleAssisted ${totals.eligibleAssisted}, awardedAssisted ${totals.awardedAssisted}, assistedLegacy ${totals.assistedLegacy}`,
     )
     return EXIT_CODE.OK
 }

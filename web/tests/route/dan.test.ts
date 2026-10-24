@@ -5,6 +5,8 @@ import { resetRateLimits } from '@server/lib/with-rate-limit'
 import { createMyDanDisplayRoute, createMyDansRoute, type DanRouteDeps } from '@server/route/dan'
 import { createCourseSubmitRoute, type CourseSubmitRouteDeps } from '@server/route/course'
 import { createDanService, type DanService } from '@server/service/domain/dan/dan.service'
+import { clearLampToId } from '@server/dto/common'
+import { SCORE_FLAG } from '@server/service/domain/score/ranked-policy'
 import { createMemoryDanDb } from '../support/dan-memory-db'
 import { danRun, FIRST_DAN_COURSE, SECOND_DAN_COURSE } from '../support/dan-fixture'
 
@@ -17,6 +19,7 @@ const SYSTEM_COUNT = 4
 const OVERSIZED_BODY_BYTES = 4096
 const SUBMITTED_PLAYED_AT = 1_760_000_000_000
 const SECRET_QUERY = 'insert into user_dan values (secret-value)'
+const SP = { system: 'genoside2018_sp', name: 'GENOSIDE 2018 SP' } as const
 
 beforeEach(() => resetRateLimits())
 
@@ -70,6 +73,7 @@ describe('GET·PUT /api/fe/me/dans', () => {
             { system: 'unknown', mode: 'auto' },
             { system: 'stella', mode: 'label' },
             { system: 'stella', mode: 'label', label: '' },
+            { system: 'stella', mode: 'label', label: 'st0', assisted: 'yes' },
             {},
         ]
         for (const body of invalid) {
@@ -95,15 +99,45 @@ describe('GET·PUT /api/fe/me/dans', () => {
             const body = await (await routes.list(call('GET', '/api/fe/me/dans', { user: ALICE }), undefined)).json()
             return body.data.systems[0].shown
         }
-        expect(await shownOf()).toBe('二段')
+        expect(await shownOf()).toEqual([{ ...SP, label: '二段', assisted: false }])
 
         const put = await routes.setDisplay(
             call('PUT', '/api/fe/me/dans/display', { user: ALICE, body: { system: 'genoside2018_sp', mode: 'label', label: '初段' } }),
             undefined,
         )
         expect(put.status).toBe(200)
-        expect((await put.json()).data.systems[0]).toMatchObject({ shown: '初段', display: { mode: 'label', label: '初段' } })
-        expect(await shownOf()).toBe('初段')
+        expect((await put.json()).data.systems[0]).toMatchObject({
+            shown: [{ ...SP, label: '初段', assisted: false }],
+            display: { mode: 'label', label: '初段', assisted: false },
+        })
+        expect(await shownOf()).toEqual([{ ...SP, label: '初段', assisted: false }])
+        expect(routes.revalidated).toEqual(['alice'])
+    })
+
+    test('PUT 의 assisted 가 참이면 A-단위를, 없으면 정식 단위를 고른다', async () => {
+        const routes = createDanRoutes()
+        await routes.danService.awardFromRun(
+            danRun(FIRST_DAN_COURSE, {
+                id: 'cs_1',
+                userId: ALICE.id,
+                scratchAuto: true,
+                flags: [SCORE_FLAG.SCRATCH_AUTO],
+                clear: clearLampToId('LightAssistEasy'),
+            }),
+        )
+        const put = (body: unknown) => routes.setDisplay(call('PUT', '/api/fe/me/dans/display', { user: ALICE, body }), undefined)
+
+        const legacy = await put({ system: 'genoside2018_sp', mode: 'label', label: '初段' })
+        expect(legacy.status).toBe(400)
+        expect((await legacy.json()).error.details).toEqual({ field: 'label' })
+
+        const chosen = await put({ system: 'genoside2018_sp', mode: 'label', label: '初段', assisted: true })
+        expect(chosen.status).toBe(200)
+        expect((await chosen.json()).data.systems[0]).toMatchObject({
+            shown: [{ ...SP, label: 'A-初段', assisted: true }],
+            display: { mode: 'label', label: '初段', assisted: true },
+            acquired: [{ label: '初段', assisted: true }],
+        })
         expect(routes.revalidated).toEqual(['alice'])
     })
 
@@ -128,7 +162,7 @@ describe('GET·PUT /api/fe/me/dans', () => {
             undefined,
         )
         const bob = await (await routes.list(call('GET', '/api/fe/me/dans', { user: BOB }), undefined)).json()
-        expect(bob.data.systems[0]).toMatchObject({ shown: '初段', display: { mode: 'auto' } })
+        expect(bob.data.systems[0]).toMatchObject({ shown: [{ ...SP, label: '初段', assisted: false }], display: { mode: 'auto' } })
     })
 })
 
@@ -221,7 +255,7 @@ describe('POST /api/courses 의 단위 판정', () => {
     })
 
     test('저장된 판 그대로를 판정에 넘기고, 단위를 새로 얻으면 프로필 캐시를 갱신한다', async () => {
-        const { submit, events, awardedRuns } = createSubmit(async () => ({ awarded: FIRST_DAN_COURSE.dan, reason: null }))
+        const { submit, events, awardedRuns } = createSubmit(async () => ({ awarded: FIRST_DAN_COURSE.dan, kind: 'formal', reason: null }))
         expect((await submit(request(), noContext)).status).toBe(201)
         expect(awardedRuns).toEqual([scoreRow])
         expect(awardedRuns[0]).toBe(scoreRow)
@@ -230,19 +264,19 @@ describe('POST /api/courses 의 단위 판정', () => {
     })
 
     test('단위를 얻지 못한 판은 프로필 캐시를 갱신하지 않는다', async () => {
-        const { submit, events } = createSubmit(async () => ({ awarded: null, reason: 'not_cleared' }))
+        const { submit, events } = createSubmit(async () => ({ awarded: null, kind: null, reason: 'not_cleared' }))
         expect((await submit(request(), noContext)).status).toBe(201)
         expect(events).toEqual([`course:${FIRST_DAN_COURSE.courseHash}`])
     })
 
     test('같은 판의 재전송도 판정을 부르고 응답은 200 이다', async () => {
-        const { submit, awardedRuns } = createSubmit(async () => ({ awarded: null, reason: null }), { duplicated: true })
+        const { submit, awardedRuns } = createSubmit(async () => ({ awarded: null, kind: 'formal', reason: null }), { duplicated: true })
         expect((await submit(request(), noContext)).status).toBe(200)
         expect(awardedRuns).toHaveLength(1)
     })
 
     test('인증에 실패한 제출은 판정하지 않는다', async () => {
-        const { submit, awardedRuns } = createSubmit(async () => ({ awarded: null, reason: null }))
+        const { submit, awardedRuns } = createSubmit(async () => ({ awarded: null, kind: null, reason: null }))
         const response = await submit(
             new Request(`${ORIGIN}/api/courses`, {
                 method: 'POST',

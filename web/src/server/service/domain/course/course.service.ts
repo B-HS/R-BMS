@@ -89,10 +89,15 @@ export type CourseScoreInsertRow = {
 export type StoredCourseRun = StoredRunForBest &
     Pick<CourseScoreInsertRow, 'gauge' | 'courseGauge' | 'gaugeValue' | 'stages' | 'playedAt'> & { extra: unknown }
 
+/**
+ * A course run as the dan judgement reads it. `rankedWithoutAssist` is whether the run would have been ranked without assist: the
+ * server's answer for a run it judges as it is submitted, the stored answer for a stored run with the assist flag, and null when
+ * none was stored.
+ */
 export type SubmittedCourseRun = Pick<
     CourseScoreInsertRow,
     'id' | 'userId' | 'courseHash' | 'clear' | 'ranked' | 'scratchAuto' | 'gauge' | 'courseGauge' | 'gaugeValue' | 'stages' | 'playedAt'
-> & { flags: ScoreFlag[] }
+> & { flags: ScoreFlag[]; rankedWithoutAssist: boolean | null }
 
 export type CourseServiceDb = {
     findCourse: (courseHash: string) => Promise<CourseRow | null>
@@ -171,6 +176,12 @@ const isScoreFlag = (value: unknown): value is ScoreFlag => SCORE_FLAGS.includes
 export const storedFlagsOf = (extra: unknown): ScoreFlag[] =>
     typeof extra === 'object' && extra !== null && 'flags' in extra && Array.isArray(extra.flags) ? extra.flags.filter(isScoreFlag) : []
 
+/** Whether a stored run would have been ranked without assist, as `extra.ranked_without_assist` of its row says, or null when it says nothing. */
+export const storedRankedWithoutAssistOf = (extra: unknown) =>
+    typeof extra === 'object' && extra !== null && 'ranked_without_assist' in extra && typeof extra.ranked_without_assist === 'boolean'
+        ? extra.ranked_without_assist
+        : null
+
 /**
  * The first reason a course body can not be what a real run sends, or null. Only the body is read: the judgements that
  * took a note are held to the best EX the body claims (two per note), because the chart rows the server keeps were
@@ -195,6 +206,7 @@ export const buildCourseScoreRow = (params: {
     exScore: number
     minbp: number
     ranked: boolean
+    rankedWithoutAssist: boolean
     scratchAuto: boolean
     flags: ScoreFlag[]
 }): CourseScoreInsertRow => {
@@ -239,7 +251,15 @@ export const buildCourseScoreRow = (params: {
         courseGauge: input.course_gauge,
         stages: toStoredStages(input),
         extra:
-            params.flags.length > 0 ? { ...input.extra, flags: params.flags, scratch_auto: input.scratch_auto, assist: input.assist } : input.extra,
+            params.flags.length > 0
+                ? {
+                      ...input.extra,
+                      flags: params.flags,
+                      scratch_auto: input.scratch_auto,
+                      assist: input.assist,
+                      ...(params.flags.includes(SCORE_FLAG.ASSIST) ? { ranked_without_assist: params.rankedWithoutAssist } : {}),
+                  }
+                : input.extra,
     }
 }
 
@@ -281,7 +301,9 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
         const flags = [...assistFlags(input), ...buildTrustFlags(params.buildTrust)]
-        const ranked = rankBlockingFlags(flags).length === 0 && !isBuildBlockingRank(params.buildTrust, params.requireTrustedBuild)
+        const isBuildBlocking = isBuildBlockingRank(params.buildTrust, params.requireTrustedBuild)
+        const ranked = rankBlockingFlags(flags).length === 0 && !isBuildBlocking
+        const rankedWithoutAssist = rankBlockingFlags(flags.filter((flag) => flag !== SCORE_FLAG.ASSIST)).length === 0 && !isBuildBlocking
         const scratchAuto = isScratchAutoPlay(input)
 
         const countRank = async (run: { clear: number; assistGrade: AssistGrade; exScore: number; minbp: number; scratchAuto: boolean }) =>
@@ -331,6 +353,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                 ranked: stored.ranked,
                 scratchAuto: stored.scratchAuto,
                 flags: storedFlagsOf(stored.extra),
+                rankedWithoutAssist: storedRankedWithoutAssistOf(stored.extra),
                 gauge: stored.gauge,
                 courseGauge: stored.courseGauge,
                 gaugeValue: stored.gaugeValue,
@@ -341,7 +364,17 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
         }
 
         const courseScoreId = deps.newId('cs_')
-        const row = buildCourseScoreRow({ id: courseScoreId, userId: user.id, input, exScore, minbp, ranked, scratchAuto, flags })
+        const row = buildCourseScoreRow({
+            id: courseScoreId,
+            userId: user.id,
+            input,
+            exScore,
+            minbp,
+            ranked,
+            rankedWithoutAssist,
+            scratchAuto,
+            flags,
+        })
         const assistGrade = courseAssistGrade({ clear, gauge: row.gauge })
         const previous = await deps.db.getCourseBest({ courseHash: input.course_hash, userId: user.id, scratchAuto })
         await deps.db.insertCourseScore(row)
@@ -382,6 +415,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             ranked: row.ranked,
             scratchAuto: row.scratchAuto,
             flags,
+            rankedWithoutAssist,
             gauge: row.gauge,
             courseGauge: row.courseGauge,
             gaugeValue: row.gaugeValue,
