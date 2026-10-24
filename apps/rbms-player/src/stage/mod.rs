@@ -15,7 +15,7 @@ use crate::pointer::{PointerInput, route_pointer};
 
 pub(crate) mod canvas;
 #[cfg(test)]
-mod capture;
+pub(crate) mod capture;
 pub(crate) mod course_result;
 pub(crate) mod decide;
 pub(crate) mod folders;

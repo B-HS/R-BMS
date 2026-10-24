@@ -371,7 +371,7 @@ const PACK_LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 /// How long a frame of a captured pack waits for the frame of a movie that is due at its scene time.
 /// A movie is decoded off the frame loop and a capture draws one frame, so without the wait a
 /// capture would show whatever had been decoded by then, or nothing.
-const MOVIE_FRAME_PATIENCE: Duration = Duration::from_secs(120);
+pub(crate) const MOVIE_FRAME_PATIENCE: Duration = Duration::from_secs(120);
 
 /// One screen a pack is captured on.
 struct PackScreen {

@@ -591,9 +591,13 @@ fn another_button_on_a_bar_closes_the_folder() {
 
 /// The reference takes input from a scene's first frame: the input time of a skin's header only
 /// lights a timer on the browser. And the browser never fades out.
+///
+/// The machine's side of the scene clock is stopped, so the scene is as old as the test has aged it
+/// and the time the machine takes between two lines is no part of it.
 #[test]
 fn the_input_timer_goes_on_after_the_input_time_and_holds_no_input_back() {
     let mut browser = Browser::three_songs("timer-input");
+    browser.app.shared.stop_scene_clock();
     browser.app.shared.start_skin_scene_clock();
     browser.frame_after(SHORT_STEP);
     assert_eq!(browser.timer(timer_id::STARTINPUT), None, "the input timer was on before the input time");

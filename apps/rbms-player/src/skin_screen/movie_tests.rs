@@ -8,6 +8,11 @@
 //! a test waits for the movie frame that is due at its scene time, as a capture does, and every
 //! scene time asked for is the middle of the time a movie frame is on show for, a whole half a
 //! frame away from the frames beside it.
+//!
+//! The machine's side of the scene clock is stopped ([`AppShared::stop_scene_clock`]), so a frame
+//! reads exactly the scene time it was put at: however long the machine takes between putting the
+//! clock and the frame reading it -- a loaded runner, a software GPU -- is no part of the scene, and
+//! which movie frame is due depends on nothing but the time asked for.
 
 use rbms_video::VideoError;
 
@@ -15,20 +20,17 @@ use super::*;
 use crate::assets::scripted_movie::{self, ScriptedMovie};
 use crate::gpu::Gpu;
 use crate::stage::HeadlessCanvas;
+use crate::stage::capture::MOVIE_FRAME_PATIENCE;
 
 /// How long a document is given to compile, and how long a frame that finds it still on the worker
 /// pool stands back.
 const COMPILE_WAIT: Duration = Duration::from_secs(20);
 const COMPILE_FRAME_PAUSE: Duration = Duration::from_millis(1);
 
-/// How long a frame waits for the frame of a movie that is due.
-const FRAME_PATIENCE: Duration = Duration::from_secs(20);
-
 /// The size of the scripted movies' frames.
 const MOVIE_SIZE: (u32, u32) = (4, 2);
 
-/// How many frames a scripted movie has, and how long each is on show: long enough that the
-/// moments a real clock adds to a scene time asked for never reach the next frame.
+/// How many frames a scripted movie has, and how long each is on show.
 const MOVIE_FRAMES: u32 = 5;
 const MOVIE_FRAME_US: i64 = 2_000_000;
 
@@ -41,17 +43,31 @@ const STARTED_AT_US: i64 = 1_000_000;
 /// How many frames are drawn at one scene time to see that the movie does not move.
 const STILL_FRAMES: usize = 4;
 
+/// How long a scene is parked for in the test of what parking does to a movie: a whole frame of the
+/// movie, so a movie that was played off for it is a frame away from where it should be.
+const PARKED_FOR: Duration = Duration::from_micros(MOVIE_FRAME_US.unsigned_abs());
+
 /// What the frame is cleared to before a document is drawn on it.
 const NOTHING_DRAWN: crate::Color = crate::Color::rgb(0, 0, 0);
 
 /// The option the documents' customisation row grants.
 const GRANTED_OPTION: i32 = 901;
 
-/// An app drawing its key configuration screen with a document of the test's own.
+/// An app drawing its key configuration screen with a document of the test's own, on the headless
+/// canvas, or on `gpu` once a test has put one there.
 struct Pack {
     app: crate::App,
     folder: PathBuf,
     pixels: HeadlessCanvas,
+    gpu: Option<Gpu>,
+}
+
+/// The canvas a pack's frames are drawn on: the GPU when there is one, the headless canvas when not.
+fn canvas_of<'a>(pixels: &'a mut HeadlessCanvas, gpu: Option<&'a mut Gpu>) -> Canvas<'a> {
+    match gpu {
+        Some(gpu) => Canvas::Window(gpu),
+        None => Canvas::Headless(pixels),
+    }
 }
 
 impl Pack {
@@ -70,8 +86,9 @@ impl Pack {
         let mut config = crate::Config::default();
         config.skin.pack = Some(folder.to_string_lossy().into_owned());
         let mut app = crate::App::new(String::new(), config, crate::LaunchOptions::default(), home.join("settings.ron"));
-        app.shared.skin_screens.wait_for_movie_frames(Some(FRAME_PATIENCE));
-        Pack { app, folder, pixels: HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1) }
+        app.shared.stop_scene_clock();
+        app.shared.skin_screens.wait_for_movie_frames(Some(MOVIE_FRAME_PATIENCE));
+        Pack { app, folder, pixels: HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1), gpu: None }
     }
 
     /// Puts the scene clock at `scene_us`.
@@ -83,7 +100,7 @@ impl Pack {
     /// One frame of the key configuration screen with the scene clock where it is; answers whether
     /// its document drew it.
     fn frame(&mut self) -> bool {
-        let mut canvas = Canvas::Headless(&mut self.pixels);
+        let mut canvas = canvas_of(&mut self.pixels, self.gpu.as_mut());
         self.app.shared.prepare_skin(&mut canvas, SKIN_TYPE_KEY_CONFIG);
         let drew = self.app.shared.draw_keyconfig_skin(&mut canvas, &[]);
         self.app.shared.finish_skin_frame(&mut canvas);
@@ -96,17 +113,26 @@ impl Pack {
         self.frame()
     }
 
-    /// Frames at the scene's start until the document has compiled, and then the frame that starts
-    /// its movies, at [`STARTED_AT_US`].
-    fn start(&mut self) {
+    /// Frames that draw nothing, until the document has compiled. The scene is held for it, so the
+    /// first frame that draws it is the first moment of the scene, as [`Pack::start`] puts it.
+    fn compile(&mut self) {
         let began = Instant::now();
-        while !self.app.shared.has_compiled_skin(SKIN_TYPE_KEY_CONFIG) {
-            let mut canvas = Canvas::Headless(&mut self.pixels);
+        loop {
+            let mut canvas = canvas_of(&mut self.pixels, self.gpu.as_mut());
             self.app.shared.prepare_skin(&mut canvas, SKIN_TYPE_KEY_CONFIG);
             self.app.shared.finish_skin_frame(&mut canvas);
+            if self.app.shared.has_compiled_skin(SKIN_TYPE_KEY_CONFIG) {
+                return;
+            }
             assert!(began.elapsed() <= COMPILE_WAIT, "the document never compiled: {:?}", self.app.shared.skin_failure(SKIN_TYPE_KEY_CONFIG));
             std::thread::sleep(COMPILE_FRAME_PAUSE);
         }
+    }
+
+    /// Waits for the document to compile, and then draws the frame that starts its movies, at
+    /// [`STARTED_AT_US`]: the first frame that draws it.
+    fn start(&mut self) {
+        self.compile();
         assert!(self.frame_at(STARTED_AT_US), "the compiled document did not draw its screen");
     }
 
@@ -184,14 +210,7 @@ fn one_movie_pack(tag: &str, movie: ScriptedMovie) -> Pack {
 fn a_movie_starts_on_the_first_frame_of_its_screen_and_follows_the_scene_clock_round() {
     let mut pack = one_movie_pack("follows", movie());
     let path = pack.movie_path("clip.mp4");
-    let began = Instant::now();
-    while !pack.app.shared.has_compiled_skin(SKIN_TYPE_KEY_CONFIG) {
-        let mut canvas = Canvas::Headless(&mut pack.pixels);
-        pack.app.shared.prepare_skin(&mut canvas, SKIN_TYPE_KEY_CONFIG);
-        pack.app.shared.finish_skin_frame(&mut canvas);
-        assert!(began.elapsed() <= COMPILE_WAIT, "the document never compiled");
-        std::thread::sleep(COMPILE_FRAME_PAUSE);
-    }
+    pack.compile();
     assert_eq!(scripted_movie::open_on(&path), 1, "the movie was not opened with its screen");
     assert_eq!(pack.playing(), 0, "a movie nothing has prepared yet is being decoded");
     assert!(pack.app.shared.skin_warnings(SKIN_TYPE_KEY_CONFIG).is_empty(), "{:?}", pack.app.shared.skin_warnings(SKIN_TYPE_KEY_CONFIG));
@@ -209,7 +228,8 @@ fn a_movie_starts_on_the_first_frame_of_its_screen_and_follows_the_scene_clock_r
 }
 
 /// The scene clock is the only clock a movie has: frame after frame at one scene time shows one
-/// movie frame, however long the frames take, and so does a scene that was parked and put back.
+/// movie frame, however long the frames take, and so does a scene that was parked and put back,
+/// however long it was parked.
 #[test]
 fn a_movie_stands_still_while_the_scene_clock_does() {
     let mut pack = one_movie_pack("stands-still", movie());
@@ -225,7 +245,8 @@ fn a_movie_stands_still_while_the_scene_clock_does() {
     pack.set_clock(STARTED_AT_US + middle_of(0, 1));
     let parked = pack.app.shared.suspend_skin_scene();
     assert_eq!(pack.playing(), 1, "a parked screen's movie was stopped rather than left waiting");
-    std::thread::sleep(Duration::from_millis(30));
+    let parked_at = pack.app.shared.scene_instant();
+    pack.app.shared.stop_scene_clock_at(parked_at + PARKED_FOR);
     pack.app.shared.resume_skin_scene(parked);
     assert!(pack.frame());
     assert_eq!(pack.ink(0, 1), frame_ink(1), "the time a scene spent parked was played off its movie");
@@ -273,14 +294,7 @@ fn leaving_the_screen_stops_its_movies_and_closes_their_files() {
 fn a_movie_that_never_started_is_closed_with_its_screen() {
     let mut pack = one_movie_pack("never-started", movie());
     let path = pack.movie_path("clip.mp4");
-    let began = Instant::now();
-    while !pack.app.shared.has_compiled_skin(SKIN_TYPE_KEY_CONFIG) {
-        let mut canvas = Canvas::Headless(&mut pack.pixels);
-        pack.app.shared.prepare_skin(&mut canvas, SKIN_TYPE_KEY_CONFIG);
-        pack.app.shared.finish_skin_frame(&mut canvas);
-        assert!(began.elapsed() <= COMPILE_WAIT, "the document never compiled");
-        std::thread::sleep(COMPILE_FRAME_PAUSE);
-    }
+    pack.compile();
     assert_eq!(scripted_movie::open_on(&path), 1);
     pack.app.shared.begin_skin_scene();
     let mut canvas = Canvas::Headless(&mut pack.pixels);
@@ -406,32 +420,17 @@ const GPU_TOLERANCE: i32 = 2;
 /// drawing on a machine with no adapter.
 #[test]
 fn a_movie_plays_on_the_gpu_backend_frame_after_frame() {
-    let Some(mut gpu) = Gpu::offscreen_if_available(UI_SIZE.0, UI_SIZE.1, UI_SIZE) else {
+    let Some(gpu) = Gpu::offscreen_if_available(UI_SIZE.0, UI_SIZE.1, UI_SIZE) else {
         return;
     };
     let mut pack = one_movie_pack("gpu", movie());
-    let frame_on = |pack: &mut Pack, gpu: &mut Gpu, scene_us: Option<i64>| {
-        if let Some(scene_us) = scene_us {
-            pack.set_clock(scene_us);
-        }
-        let mut canvas = Canvas::Window(gpu);
-        pack.app.shared.prepare_skin(&mut canvas, SKIN_TYPE_KEY_CONFIG);
-        let drew = pack.app.shared.draw_keyconfig_skin(&mut canvas, &[]);
-        pack.app.shared.finish_skin_frame(&mut canvas);
-        drew
-    };
-    let began = Instant::now();
-    while !pack.app.shared.has_compiled_skin(SKIN_TYPE_KEY_CONFIG) {
-        frame_on(&mut pack, &mut gpu, None);
-        assert!(began.elapsed() <= COMPILE_WAIT, "the document never compiled");
-        std::thread::sleep(COMPILE_FRAME_PAUSE);
-    }
-    assert!(frame_on(&mut pack, &mut gpu, Some(STARTED_AT_US)));
+    pack.gpu = Some(gpu);
+    pack.start();
 
     let middle = ((UI_SIZE.1 / 2 * UI_SIZE.0 + UI_SIZE.0 / 2) * 4) as usize;
     for (pass, index) in [(0, 0), (0, 3), (1, 1), (1, 4), (2, 2)] {
-        assert!(frame_on(&mut pack, &mut gpu, Some(STARTED_AT_US + middle_of(pass, index))));
-        let drawn = gpu.capture().expect("an offscreen target reads back");
+        pack.frame_into_movie(middle_of(pass, index));
+        let drawn = pack.gpu.as_mut().expect("the pack draws on the GPU").capture().expect("an offscreen target reads back");
         let wanted = ScriptedMovie::pixel_of(index);
         for channel in 0..3 {
             let apart = (i32::from(drawn[middle + channel]) - i32::from(wanted[channel])).abs();

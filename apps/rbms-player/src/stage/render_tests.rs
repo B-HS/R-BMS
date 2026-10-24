@@ -366,8 +366,11 @@ const LONG_VISIT: Duration = Duration::from_secs(100);
 
 const SECOND_US: i64 = 1_000_000;
 
+/// An app whose scene is [`SCENE_AGE`] old on a clock the machine's time does not move, so a scene
+/// that a transition begins reads exactly zero.
 fn aged_app() -> App {
     let mut app = app();
+    app.shared.stop_scene_clock();
     app.shared.age_skin_scene(SCENE_AGE);
     app
 }
