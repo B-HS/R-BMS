@@ -1,6 +1,6 @@
 # R-BMS — PROCESS (작업 체크리스트와 상태)
 
-최종 갱신 2026-10-24 · 대응 커밋 `ec48d8d`
+최종 갱신 2026-10-24 · 대응 커밋 `0434628`
 
 이 문서는 체크리스트와 현재 상태만 둔다. 끝난 구간의 세부 결과, 웨이브 기록, 사용자 결정 원문은 `docs/history/` 로 옮긴다(ai-process 2.1). 옛 0~9절과 Phase 0~7 로드맵도 같은 곳에 있다(아래 "아카이브").
 
@@ -9,6 +9,10 @@
 > 위치: 저장소 루트 `/Users/hyunseokbyun/development/R-BMS`, 원격 `B-HS/R-BMS`, 작업 브랜치 `dev`. `prod` 브랜치는 만든 적이 없고(`release.yml` 은 `prod` 푸시도 받게 돼 있지만 쓴 적이 없다) 릴리스는 `dev` 에서 `release.yml` 을 수동 실행한다([ci-release.md](ci-release.md) 2절).
 > 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 2026-10-23 Discord 병합 뒤 Rust 6,644 통과·0 실패, 웹 1,808 통과·0 실패).
 > Git: Conventional Commits, 설명은 한국어([acknowledge/2026-09-17-commit-language.md](acknowledge/2026-09-17-commit-language.md)), author 사용자 단독, AI 트레일러 금지, 선별 스테이징, force push 금지. 게이트를 통과하면 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 CI 를 확인한다. `Cargo.lock` 은 추적한다(2026-10-11 부터, 결정 D12). `target/` 과 곡 차트는 커밋하지 않는다.
+
+## 상태 (2026-10-24)
+
+- 2026-10-24 "다국어·리플레이 대전·랭킹 보기·NOTES RADAR·선곡 UI"(아래 첫 체크리스트) 구현·문서 완료(`72726c7`~`0434628`, 웨이브 W1~W6). 클라이언트 릴리스는 하지 않았다(사용자 실행 `release.yml`). 남은 것: 실기 점검 QA 3.23(Y1~Y17)과 3.20~3.22, 일본어 원어민 감수, `CRON_SECRET` 확인, 곡 미러(보류).
 
 ## 상태 (2026-10-23)
 
@@ -26,15 +30,15 @@
 - [x] N0. 복원 결과 정리 — 문서-코드 동작 불일치 0, 표현 불일치 10건 문서 수리, 이전 세션 인수인계 커밋 `9fed3c0`
 - [x] N1. 조사 — 5개 기능의 현재 코드·원본(beatoraja)·IIDX 기준 조사, 결과 `docs/reference/2026-10-24-*.md` (wf_77c97e35-052, `d2a636c`)
 - [x] N2. 설계와 결정 — 통합 계획 `docs/plan/2026-10-24-five-features-plan.md`(wf_25f77f5a-21d, `bca5306`, 웨이브 W1~W6). 결정 묶음 1~21 사용자 답(2026-10-24 원문 "18번까지 전부 추천안대로 19번은 그럼 보류 20,21도 추천대로"): 1~18 추천안 A(웹 다국어·next-intl 포함), 19 곡 미러 보류, 20 미확인 13~18 지금대로, 21 표 코스 막대 PRACTICE 키 = 코스 시작. 확인 부탁 1~3(CRON_SECRET, 웹 화면, 실기)은 사용자 "아마 다 문제없을거야"(실제 확인 결과는 아님), CRON_SECRET 은 구현이 끝난 뒤 2026-10-24 오전 10시 43분에 다시 알림(세션 Cron 6e7a0ed0)
-- [ ] N3. 다국어(한·영·일)
-- [ ] N4. 리플레이 배치로 플레이하는 모드
-- [ ] N5. 랭킹 보기(2·4·6 키)
-- [ ] N6. NOTES RADAR(6축)
-- [ ] N7. 선곡 UI 꾸미기(막대 왼쪽 등급, MUSIC DATA·SCORE DATA·다른 수치 패널)
+- [x] N3. 다국어(한·영·일)
+- [x] N4. 리플레이 배치로 플레이하는 모드
+- [x] N5. 랭킹 보기(2·4·6 키)
+- [x] N6. NOTES RADAR(6축)
+- [x] N7. 선곡 UI 꾸미기(막대 왼쪽 등급, MUSIC DATA·SCORE DATA·다른 수치 패널)
 - [x] N9. 표 코스 막대 위 PRACTICE 키로 코스 시작(결정 21, 원본과 같게) (`5014bb6`)
-- [ ] N8. 통합 리뷰, 게이트, 문서·ADR·QA, 커밋·푸시·CI
+- [x] N8. 통합 리뷰, 게이트, 문서·ADR·QA, 커밋·푸시·CI
 
-  진행 기록: W1(wf_240136df-843) K0 `72726c7`, I0 `b7efac1`(LANGUAGE 행 포함, SETTING_COUNT 98, DISPLAY 탭도 스크롤), R1 `0e74d08`, RK-D `d727923`, RK-W `d74794b`. L1 은 호출부가 없어 clippy dead_code 8건이라 커밋하지 않고 W2 RP-P 가 먼저 적용(패치 보관). W1 게이트: Rust 6,765 통과·0 실패·6 무시, clippy·fmt 통과, 스킨 덤프 통과, 웹 1,818 통과·DB 153 통과(임시 MySQL 8.4.11)·빌드 통과. W2(wf_b6e33e9b-58c): 레이더 저장·칠하기(R2·R4) `54ff02c`, 랭킹 모드·오버레이·스킨 순위 슬롯(RK-M·RK-V·RK-S) `423484b`(SETTING_COUNT 99 RANKING KEYS), 배치 플레이 단축키 J·고스트·L1(RP-P) `30264b8`. 병합 충돌 2곳(`bridge.rs`, `text/mod.rs`)은 메인이 손으로. W2 게이트: Rust 6,866 통과·0 실패·6 무시, clippy·fmt·스킨 덤프·설정 계약 234 통과. W3 로 넘김: 외부 스킨 순위 목록 스크롤(rate 8 쓰기, RK-S 미완) → S3, 기록 모달의 로컬 기록 고스트 진입·내장 선곡 랭킹 머리 곡 제목 → L2. W1 푸시 CI 통과(ci 40001562553, web 40001562460). W3(wf_94f5727d-90f): 색·배치 토큰(D0) `038481b`, 기록 모달·랭킹 줄 배치 치기(L2) `eba8a73`, 커서 차트 분석·스킨 언어(A3·I1) `d75b819`, 막대 등급·썸네일·선곡 보조 값·순위 스크롤(BAR·S3) `b5f15df`. 손으로 합친 곳: `skin_host/tests.rs`(NOT_YET_FILLED 가 비어 상수 삭제), `stage/select/mod.rs` 3줄. W3 게이트: Rust 6,968 통과·0 실패·6 무시, clippy·fmt·스킨 덤프·시트 검사 통과. W2 푸시 CI 통과(ci 40006501338, web 40006501405). N9(표 코스 막대 PRACTICE 키)는 W5 I4 에 넣음. W4(wf_459eabfb-920): 선곡 목록 IIDX 식(D1) `c0bebfa`, 정보창·NOTES RADAR·기록(D2) `90d57d1`, 설정·렌더·메뉴·알림 번역(I2·I3·I5·I6) `7c9bb0d`. 손으로 합친 곳 `text/mod.rs`, `tablesrc.rs`. W4 게이트: Rust 7,062 통과·0 실패·6 무시, clippy·fmt·스킨 덤프·시트·선곡 캡처 통과(캡처를 메인이 직접 봄). W5 로 넘김: 확장 불린을 `op` 에 쓰면 스킨 옵션으로 오인되는 로더(`loader/track.rs` `is_builtin_option`), 경로 이중 표시(`info.lua` 머리와 목록 위), 남은 영어(설정 미리보기·스킨·플레이 메뉴 값, ir_session·ir_sync·record_sync IR 줄, 키 편집기 줄 이름, 스테이지 알림의 notify_text 이전), 용어집 새 용어 → DOC. W5(wf_61981d30-e03): 선곡 번역·코스 막대 PRACTICE 키(I4, N9) `5014bb6`, 기본 스킨 세 언어·확장 불린 op 로더 수리·경로 이중 표시(I7) `eadde84`, 남은 플레이어 문구(I8, 계획 밖 정리 단위) `f82e6a9`, 웹 다국어 기반 next-intl 4.14.9(WI0) `eb5ddbb`. 충돌 0. W5 게이트: Rust 7,129 통과·0 실패·6 무시, clippy·fmt·스킨 덤프(세 언어)·시트 통과, 웹 1,834 통과·빌드 통과. 메인 결정: 루트 레이아웃이 언어 쿠키를 읽어 웹 전 페이지가 요청마다 렌더(정적 셸 없음, `instant = false`, 데이터 캐시는 유지)되는 것을 받아들임(M11 쿠키 방식의 대가, 대안 `app/[locale]` 이동은 ADR 에 기록). W6: WI1~WI4 웹 문구, DOC.
+  진행 기록: W1(wf_240136df-843) K0 `72726c7`, I0 `b7efac1`(LANGUAGE 행 포함, SETTING_COUNT 98, DISPLAY 탭도 스크롤), R1 `0e74d08`, RK-D `d727923`, RK-W `d74794b`. L1 은 호출부가 없어 clippy dead_code 8건이라 커밋하지 않고 W2 RP-P 가 먼저 적용(패치 보관). W1 게이트: Rust 6,765 통과·0 실패·6 무시, clippy·fmt 통과, 스킨 덤프 통과, 웹 1,818 통과·DB 153 통과(임시 MySQL 8.4.11)·빌드 통과. W2(wf_b6e33e9b-58c): 레이더 저장·칠하기(R2·R4) `54ff02c`, 랭킹 모드·오버레이·스킨 순위 슬롯(RK-M·RK-V·RK-S) `423484b`(SETTING_COUNT 99 RANKING KEYS), 배치 플레이 단축키 J·고스트·L1(RP-P) `30264b8`. 병합 충돌 2곳(`bridge.rs`, `text/mod.rs`)은 메인이 손으로. W2 게이트: Rust 6,866 통과·0 실패·6 무시, clippy·fmt·스킨 덤프·설정 계약 234 통과. W3 로 넘김: 외부 스킨 순위 목록 스크롤(rate 8 쓰기, RK-S 미완) → S3, 기록 모달의 로컬 기록 고스트 진입·내장 선곡 랭킹 머리 곡 제목 → L2. W1 푸시 CI 통과(ci 40001562553, web 40001562460). W3(wf_94f5727d-90f): 색·배치 토큰(D0) `038481b`, 기록 모달·랭킹 줄 배치 치기(L2) `eba8a73`, 커서 차트 분석·스킨 언어(A3·I1) `d75b819`, 막대 등급·썸네일·선곡 보조 값·순위 스크롤(BAR·S3) `b5f15df`. 손으로 합친 곳: `skin_host/tests.rs`(NOT_YET_FILLED 가 비어 상수 삭제), `stage/select/mod.rs` 3줄. W3 게이트: Rust 6,968 통과·0 실패·6 무시, clippy·fmt·스킨 덤프·시트 검사 통과. W2 푸시 CI 통과(ci 40006501338, web 40006501405). N9(표 코스 막대 PRACTICE 키)는 W5 I4 에 넣음. W4(wf_459eabfb-920): 선곡 목록 IIDX 식(D1) `c0bebfa`, 정보창·NOTES RADAR·기록(D2) `90d57d1`, 설정·렌더·메뉴·알림 번역(I2·I3·I5·I6) `7c9bb0d`. 손으로 합친 곳 `text/mod.rs`, `tablesrc.rs`. W4 게이트: Rust 7,062 통과·0 실패·6 무시, clippy·fmt·스킨 덤프·시트·선곡 캡처 통과(캡처를 메인이 직접 봄). W5 로 넘김: 확장 불린을 `op` 에 쓰면 스킨 옵션으로 오인되는 로더(`loader/track.rs` `is_builtin_option`), 경로 이중 표시(`info.lua` 머리와 목록 위), 남은 영어(설정 미리보기·스킨·플레이 메뉴 값, ir_session·ir_sync·record_sync IR 줄, 키 편집기 줄 이름, 스테이지 알림의 notify_text 이전), 용어집 새 용어 → DOC. W5(wf_61981d30-e03): 선곡 번역·코스 막대 PRACTICE 키(I4, N9) `5014bb6`, 기본 스킨 세 언어·확장 불린 op 로더 수리·경로 이중 표시(I7) `eadde84`, 남은 플레이어 문구(I8, 계획 밖 정리 단위) `f82e6a9`, 웹 다국어 기반 next-intl 4.14.9(WI0) `eb5ddbb`. 충돌 0. W5 게이트: Rust 7,129 통과·0 실패·6 무시, clippy·fmt·스킨 덤프(세 언어)·시트 통과, 웹 1,834 통과·빌드 통과. 메인 결정: 루트 레이아웃이 언어 쿠키를 읽어 웹 전 페이지가 요청마다 렌더(정적 셸 없음, `instant = false`, 데이터 캐시는 유지)되는 것을 받아들임(M11 쿠키 방식의 대가, 대안 `app/[locale]` 이동은 ADR 에 기록). W6(wf_2498787d-a5b 는 세 시간 한도로 5단위가 모두 시작 직후 끊겼고 남은 worktree 가 없어 wf_4b3aa1c6-c35 로 다시 실행): AI·설정 화면(WI1) `8d01908`, 셸·탐색 화면과 사이드바 언어 선택(WI2) `c9404f7`, AI 결과 언어·오류 코드 번역 도우미(WI4) `0405496`, 페이지·메타데이터·공용 기능(WI3)과 메인 수리 `b0cf509`, 문서(DOC) `0434628`. 메인 수리: 내비게이션 라벨을 `NAV_ITEMS.labelKey` + `common.nav` 하나로(WI2·WI3 겹침), 셸 바닥 단추 수를 공용 상수 3 으로, 리치 텍스트 태그를 못 읽는 중복 ICU 시험 삭제(WI2 의 `i18n-icu-format.test.ts` 가 같은 검사를 태그까지 함), next-intl 요청 설정과 시험 공급자에 `timeZone`(표시 시간대 Asia/Seoul)을 넣어 `ENVIRONMENT_FALLBACK` 제거. W6 게이트: 웹 1,930 통과·0 실패, DB 153 통과(임시 MySQL 8.4.11), 포맷·빌드 통과. Rust 는 W6 에서 바뀌지 않아 W5 게이트(7,129 통과)를 그대로 씀.
 
 ## 체크리스트 — Stella·코스·단위와 클라이언트 보완 (2026-10-23)
 
