@@ -92,6 +92,13 @@
       "when": 1792731542379,
       "tag": "0012_course_dan_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1792824932355,
+      "tag": "0013_assisted_dan",
+      "breakpoints": true
     }
   ]
 }
