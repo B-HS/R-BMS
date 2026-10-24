@@ -30,5 +30,11 @@ const EX_SCORE_PER_NOTE = 2
 
 export const getMaxExScore = (totalNotes: number) => totalNotes * EX_SCORE_PER_NOTE
 
-/** Falls back to a hash preview so a chart without uploaded metadata never renders as an empty link. */
-export const formatChartTitle = (chart: { title: string; sha256: string }) => chart.title.trim() || `제목 미등록 ${formatHash(chart.sha256)}`
+const UNTITLED_CHART_LABEL = '제목 미등록'
+
+/**
+ * Falls back to a hash preview so a chart without uploaded metadata never renders as an empty link.
+ * Callers that know the language pass `untitledLabel`; without it the Korean label is used.
+ */
+export const formatChartTitle = (chart: { title: string; sha256: string }, untitledLabel = UNTITLED_CHART_LABEL) =>
+    chart.title.trim() || `${untitledLabel} ${formatHash(chart.sha256)}`

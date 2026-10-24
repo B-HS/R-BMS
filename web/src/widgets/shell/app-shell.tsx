@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 import { NAV_ITEMS } from '@shared/constants/navigation'
 import { SITE_NAME } from '@shared/constants/site'
 import {
+    SHELL_FOOTER_COLLAPSED_HEIGHT_PX,
     SHELL_RAIL_CHROME_HEIGHT_PX,
     SHELL_SIDEBAR_COLLAPSED_WIDTH_PX,
     SHELL_SIDEBAR_MOBILE_WIDTH_PX,
@@ -20,7 +21,6 @@ import { ShellNavMenu } from '@widgets/shell/shell-nav-menu'
 import { ShellThemeControl } from '@widgets/shell/shell-theme-control'
 
 const SKIP_LINK_TARGET_ID = 'main-content'
-const FOOTER_CONTROL_COUNT = 3
 
 export const AppShell: FC<PropsWithChildren> = ({ children }) => {
     const [sidebarSlotElement, setSidebarSlotElement] = useState<HTMLElement | null>(null)
@@ -68,7 +68,7 @@ export const AppShell: FC<PropsWithChildren> = ({ children }) => {
                             style={
                                 {
                                     '--shell-footer-row-height': `${SHELL_RAIL_CHROME_HEIGHT_PX}px`,
-                                    '--shell-footer-collapsed-height': `${SHELL_RAIL_CHROME_HEIGHT_PX * FOOTER_CONTROL_COUNT}px`,
+                                    '--shell-footer-collapsed-height': `${SHELL_FOOTER_COLLAPSED_HEIGHT_PX}px`,
                                 } as CSSProperties
                             }>
                             <SidebarMenu className='grid h-full grid-cols-[auto_auto_minmax(0,1fr)] items-stretch gap-0 group-data-[collapsible=icon]:auto-rows-fr group-data-[collapsible=icon]:grid-cols-1'>

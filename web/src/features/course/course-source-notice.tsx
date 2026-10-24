@@ -1,4 +1,5 @@
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { TableExternalLink } from '@features/table/table-external-link'
 import { formatDateTime } from '@shared/lib/format'
 import { readConstraintSources, type CourseCatalogSource } from '@entities/course.type'
@@ -30,13 +31,14 @@ type CourseSourceNoticeProps = {
  * SHA-256 of what was received, so a viewer can tell the copy from the original.
  */
 export const CourseSourceNotice: FC<CourseSourceNoticeProps> = ({ source, keys }) => {
+    const t = useTranslations('pages.course.source')
     const hashPrefix = <span className='font-mono'>{source.file_sha256.slice(0, HASH_PREFIX_LENGTH)}</span>
 
     if (source.kind === 'table')
         return (
             <p className='text-muted-foreground text-xs'>
-                출처 {source.name}({source.maker}) · {linkOf(source.page_url, '원본 표')} · 내용 받은 날 {formatDateTime(source.retrieved_at)} (KST) ·
-                SHA-256 {hashPrefix}
+                {t('label')} {source.name}({source.maker}) · {linkOf(source.page_url, t('originalTable'))} ·{' '}
+                {t('receivedOn', { date: formatDateTime(source.retrieved_at) })} · SHA-256 {hashPrefix}
             </p>
         )
 
@@ -46,23 +48,23 @@ export const CourseSourceNotice: FC<CourseSourceNoticeProps> = ({ source, keys }
     return (
         <div className='text-muted-foreground flex flex-col gap-0.5 text-xs'>
             <p>
-                출처 {source.name} · 코스 정의 {source.maker} 공식 코스 파일({fileName}) ·{' '}
-                {new Date(source.retrieved_at).toISOString().slice(0, ISO_DATE_LENGTH)} 받음 · SHA-256 {hashPrefix} ·{' '}
-                {linkOf(source.page_url, '공식 페이지')}
+                {t('label')} {source.name} · {t('officialFile', { maker: source.maker, file: fileName })} ·{' '}
+                {t('received', { date: new Date(source.retrieved_at).toISOString().slice(0, ISO_DATE_LENGTH) })} · SHA-256 {hashPrefix} ·{' '}
+                {linkOf(source.page_url, t('officialPage'))}
             </p>
             {constraintSources.length > 0 && (
                 <p>
-                    제약·트로피{' '}
+                    {t('constraints')}{' '}
                     {constraintSources.map((constraintSource, index) => (
                         <span key={constraintSource.url}>
                             {index > 0 && ', '}
-                            {linkOf(constraintSource.url, safeUrlOf(constraintSource.url)?.host ?? constraintSource.url)} (
-                            {constraintSource.retrieved_on} 받음)
+                            {linkOf(constraintSource.url, safeUrlOf(constraintSource.url)?.host ?? constraintSource.url)}{' '}
+                            {t('constraintReceived', { date: constraintSource.retrieved_on })}
                         </span>
                     ))}
                 </p>
             )}
-            {keys >= DOUBLE_PLAY_KEYS && <p>DP 코스의 제약·트로피는 같은 단의 SP 값입니다(DP 값의 원천이 없습니다).</p>}
+            {keys >= DOUBLE_PLAY_KEYS && <p>{t('dpNote')}</p>}
         </div>
     )
 }

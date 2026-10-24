@@ -1,5 +1,5 @@
 import type { FC } from 'react'
-import { formatCount } from '@shared/lib/format'
+import { useTranslations } from 'next-intl'
 
 type AiTokenUsageLineProps = {
     inputTokens: number
@@ -7,8 +7,12 @@ type AiTokenUsageLineProps = {
     cachedInputTokens: number
 }
 
-export const AiTokenUsageLine: FC<AiTokenUsageLineProps> = ({ inputTokens, outputTokens, cachedInputTokens }) => (
-    <p className='text-muted-foreground text-xs tabular-nums'>
-        입력 {formatCount(inputTokens)} · 출력 {formatCount(outputTokens)} 토큰(캐시 {formatCount(cachedInputTokens)})
-    </p>
-)
+export const AiTokenUsageLine: FC<AiTokenUsageLineProps> = ({ inputTokens, outputTokens, cachedInputTokens }) => {
+    const t = useTranslations('pages.ai')
+
+    return (
+        <p className='text-muted-foreground text-xs tabular-nums'>
+            {t('tokenUsage', { input: inputTokens, output: outputTokens, cached: cachedInputTokens })}
+        </p>
+    )
+}

@@ -6,6 +6,7 @@ import { DEFAULT_LOCALE, type Locale } from '../../src/shared/i18n/locale'
 import { MESSAGES } from '../../src/shared/i18n/messages'
 import { createQueryClient } from '../../src/shared/utils/get-query-client'
 import { mount, unmountAll } from './dom-harness'
+import { DISPLAY_TIME_ZONE } from '../../src/shared/lib/format'
 
 export type FetchCall = { method: string; path: string; body: unknown }
 type FetchHandler = (call: FetchCall, query: { search: string }) => Response | Promise<Response>
@@ -41,7 +42,7 @@ export const renderWithQueryClient = async (ui: ReactNode, locale: Locale = DEFA
     queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, retry: false } })
     clients.push(queryClient)
     await mount(
-        <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]}>
+        <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]} timeZone={DISPLAY_TIME_ZONE}>
             <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
         </NextIntlClientProvider>,
     )

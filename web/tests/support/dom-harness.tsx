@@ -1,6 +1,8 @@
 import { mock } from 'bun:test'
 import { act, useLayoutEffect, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import type { Locale } from '../../src/shared/i18n/locale'
+import { withIntl } from './intl'
 
 const skipLayoutEffect: typeof useLayoutEffect = () => undefined
 
@@ -38,11 +40,11 @@ export const runInAct = async (work: () => void | Promise<void>) => {
     }
 }
 
-export const mount = async (ui: ReactNode) => {
+export const mount = async (ui: ReactNode, locale?: Locale) => {
     const container = document.body.appendChild(document.createElement('div'))
     const root = createRoot(container)
     mounted.push({ root, container })
-    await runInAct(() => root.render(ui))
+    await runInAct(() => root.render(withIntl(ui, locale)))
 }
 
 export const unmountAll = async () => {

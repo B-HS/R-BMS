@@ -1,1 +1,491 @@
-{}
+{
+    "site": {
+        "tagline": "BMS 플레이어의 점수 서버",
+        "description": "R-BMS 플레이어의 점수 서버. 차트별 순위와 플레이어 기록, 난이도표를 봅니다."
+    },
+    "shared": {
+        "retry": "다시 시도",
+        "cancel": "취소",
+        "loading": "불러오는 중",
+        "untitled": "제목 미등록",
+        "untitledWithHash": "제목 미등록 {hash}",
+        "artistMissing": "아티스트 미등록",
+        "songCount": "{count, number}곡"
+    },
+    "pagination": {
+        "navigation": "페이지 이동",
+        "previous": "이전 페이지",
+        "next": "다음 페이지",
+        "previousShort": "이전",
+        "nextShort": "다음",
+        "more": "더 많은 페이지"
+    },
+    "sidebar": {
+        "title": "사이드바",
+        "description": "주 메뉴와 계정 메뉴",
+        "toggle": "사이드바 접기 · 펼치기"
+    },
+    "copyButton": {
+        "copied": "복사했습니다.",
+        "failed": "복사하지 못했습니다. 직접 선택해 복사하세요."
+    },
+    "toaster": {
+        "label": "알림"
+    },
+    "errors": {
+        "http": "요청이 실패했습니다 ({status})",
+        "unknown": "요청을 처리하지 못했습니다."
+    },
+    "auth": {
+        "signInFailed": "아이디 또는 비밀번호가 올바르지 않습니다.",
+        "signOutFailed": "로그아웃하지 못했습니다. 잠시 후 다시 시도하세요."
+    },
+    "state": {
+        "requestFailed": "요청이 실패했습니다. 잠시 후 다시 시도하세요.",
+        "queryErrorTitle": "검색식을 해석할 수 없습니다",
+        "notFound": {
+            "title": "페이지를 찾을 수 없습니다",
+            "description": "주소가 바뀌었거나 없는 페이지입니다.",
+            "home": "홈으로"
+        }
+    },
+    "scratchAuto": {
+        "badgeTitle": "SCRATCH AUTO 로 친 기록",
+        "toggle": "SCRATCH AUTO 포함"
+    },
+    "globalError": {
+        "title": "오류",
+        "heading": "문제가 생겼습니다",
+        "description": "화면을 그리지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        "retry": "다시 시도"
+    },
+    "route": {
+        "home": {
+            "title": "홈",
+            "description": "R-BMS 플레이어의 점수 서버",
+            "serverStatus": "서버 현황",
+            "serverStatusLoading": "서버 현황 불러오는 중",
+            "recentActivity": "최근 활동",
+            "recentActivityLoading": "최근 활동 불러오는 중"
+        },
+        "admin": {
+            "title": "관리"
+        },
+        "adminAi": {
+            "title": "AI 한도",
+            "metaDescription": "AI 호출의 사용자별 한도.",
+            "description": "사용자별 AI 호출 한도"
+        },
+        "adminBuilds": {
+            "title": "빌드 관리",
+            "metaDescription": "클라이언트 빌드 허용 목록.",
+            "description": "순위에 반영할 클라이언트 빌드",
+            "loading": "빌드 목록 불러오는 중"
+        },
+        "ai": {
+            "metaDescription": "내 AI 키로 기록을 해석하는 기능 모음.",
+            "description": "내 키로 기록을 해석합니다"
+        },
+        "aiPlay": {
+            "title": "판 코치",
+            "metaDescription": "내 판 하나를 구간별로 보고 다른 판과 비교합니다."
+        },
+        "chart": {
+            "title": "차트",
+            "fallbackTitle": "차트 {hash}",
+            "metaDescription": "{subject} 의 R-BMS 순위."
+        },
+        "courseDetail": {
+            "title": "코스",
+            "metaDescription": "{name} 의 구성 차트와 R-BMS 순위."
+        },
+        "courses": {
+            "title": "코스",
+            "metaDescription": "R-BMS 에 등록된 GENOSIDE 2018 단위 코스와 Stella·Satellite 표 코스, 각 코스의 출처.",
+            "description": "등록된 코스와 출처",
+            "loading": "코스 불러오는 중"
+        },
+        "folderEditor": {
+            "title": "폴더 편집",
+            "loadingTitle": "폴더",
+            "metaDescription": "내 곡 폴더의 곡과 순서를 고칩니다."
+        },
+        "folders": {
+            "title": "내 폴더",
+            "metaDescription": "R-BMS 선곡 화면에 나타나는 내 곡 폴더.",
+            "description": "R-BMS 선곡 화면에 표처럼 나타나는 곡 묶음"
+        },
+        "leaderboards": {
+            "title": "순위",
+            "metaDescription": "R-BMS 점수 서버의 플레이어 종합 순위.",
+            "description": "플레이어 종합 순위",
+            "loading": "순위 불러오는 중"
+        },
+        "player": {
+            "title": "플레이어",
+            "metaDescription": "{name} (@{id}) 의 R-BMS 기록과 램프 분포."
+        },
+        "replay": {
+            "title": "리플레이",
+            "metaDescription": "R-BMS 리플레이의 입력 기록."
+        },
+        "search": {
+            "title": "차트 검색",
+            "metaDescription": "R-BMS 점수 서버에 등록된 차트를 제목, 아티스트, 모드, 레벨로 찾습니다.",
+            "description": "제목 · 아티스트 · 모드 · 레벨로 차트 찾기",
+            "loading": "차트 검색 불러오는 중"
+        },
+        "settings": {
+            "title": "설정",
+            "metaDescription": "프로필, API 토큰, 동기화, 라이벌 설정.",
+            "description": "프로필 · API 토큰 · 동기화 · 라이벌",
+            "loading": "설정 불러오는 중"
+        },
+        "tableDetail": {
+            "title": "난이도표",
+            "metaDescription": "{name} 난이도표의 차트 목록."
+        },
+        "insane1": {
+            "metaDescription": "発狂BMS難易度表(★1 ~ ★25). R-BMS 에 표 주소로 등록하고 레벨별로 내 램프를 봅니다."
+        },
+        "tableSnapshot": {
+            "metaDescription": "{name} 난이도표. R-BMS 에 표 주소로 등록하고 레벨별로 내 램프를 봅니다."
+        },
+        "tables": {
+            "title": "난이도표",
+            "metaDescription": "R-BMS 에 기본 등록된 BMS 난이도표와 점수 서버가 제공하는 표.",
+            "description": "R-BMS 에 기본 등록된 표와 서버가 제공하는 표",
+            "loading": "난이도표 불러오는 중"
+        },
+        "guide": {
+            "title": "가이드",
+            "metaDescription": "R-BMS 플레이어를 점수 서버에 연결하는 방법: 서버 주소, 계정, 순위, 리플레이, 설정 동기화, 라이벌.",
+            "description": "게임 안에서 점수 서버에 연결하기"
+        },
+        "login": {
+            "title": "로그인",
+            "metaDescription": "R-BMS 계정으로 로그인합니다.",
+            "description": "가입할 때 정한 아이디와 비밀번호로 로그인합니다."
+        },
+        "signup": {
+            "title": "가입",
+            "metaDescription": "R-BMS 계정을 만듭니다.",
+            "description": "R-BMS 계정을 만듭니다. 아이디는 순위에 표시되는 플레이어 ID 로 쓰입니다."
+        },
+        "notFound": {
+            "title": "찾을 수 없음",
+            "description": "주소가 바뀌었거나 없는 페이지입니다."
+        },
+        "error": {
+            "title": "오류",
+            "heading": "문제가 생겼습니다",
+            "description": "잠시 후 다시 시도해 주세요."
+        }
+    },
+    "ai": {
+        "patternTag": {
+            "chord_2": "2키 동시치기",
+            "chord_3": "3키 동시치기",
+            "chord_4plus": "4키 이상 동시치기",
+            "jack": "연타",
+            "trill": "트릴",
+            "stair": "계단",
+            "stream": "연속 난타",
+            "scratch_solo": "단독 스크래치",
+            "scratch_chord": "스크래치 동시치기",
+            "scratch_mixed": "스크래치 섞임",
+            "with_scratch": "스크래치 곁 건반",
+            "scratch_run": "스크래치 연속",
+            "ln_head": "LN 시작",
+            "ln_end": "LN 끝",
+            "ln_hold_hit": "LN 누른 채 치기",
+            "ln_release_then_hit": "LN 뗀 뒤 치기",
+            "soflan": "소프란",
+            "dense": "고밀도",
+            "mine_near": "지뢰 근처"
+        },
+        "evidence": {
+            "strong": "근거 충분",
+            "uncertain": "불확실",
+            "insufficient": "표본 부족"
+        },
+        "failureKind": {
+            "invalid_key": "키가 거부됨",
+            "forbidden": "키 권한 또는 모델 접근을 확인하세요",
+            "model_unavailable": "모델이 없거나 은퇴함",
+            "quota": "잔액 또는 지출 한도 도달",
+            "rate_limited": "요청 한도 초과",
+            "unavailable": "공급자 연결 실패",
+            "refused": "답변 거절",
+            "truncated": "출력이 잘림",
+            "invalid_output": "출력 형식 오류",
+            "bad_request": "요청 형식 오류"
+        },
+        "dataNotice": "{reason} 이 상태에서는 AI 를 부르지 않습니다.",
+        "dataNeed": {
+            "fallback": "아직 해석할 기록이 모자랍니다.",
+            "table_records": "난이도표 곡의 기록이 아직 없습니다. 표의 곡을 몇 판 친 뒤 다시 열어 보세요.",
+            "candidates": "지금 기록으로는 고를 후보 곡이 없습니다.",
+            "chart_patterns": "이 패턴으로 고를 곡별 패턴 데이터가 아직 없습니다.",
+            "goal_reached": "이미 이룬 목표입니다.",
+            "remaining_charts": "남은 곡이 없습니다.",
+            "table": "목표의 난이도표를 찾을 수 없습니다.",
+            "week_plays": "이 주에 친 판이 없습니다.",
+            "recent_plays": "최근 판이 10판 아래입니다. 더 친 뒤 다시 열어 보세요.",
+            "traced_plays": "판별 데이터(새 클라이언트로 친 판의 노트 단위 기록, 리포트는 7키 단일 플레이만)가 5판 아래입니다. 몇 판 더 친 뒤 다시 열어 보세요.",
+            "play_trace": "이 판에는 판별 데이터가 없습니다(옛 클라이언트로 쳤거나 업로드를 끈 판). 점수 기록만 보입니다.",
+            "play_metrics": "이 판은 7키 단일 플레이가 아니라 구간 분석이 없습니다.",
+            "comparable_play": "구간을 맞대어 볼 판이 없습니다. 판정 합계만 비교합니다."
+        },
+        "failureNotice": {
+            "title": "AI 호출이 실패했습니다",
+            "fallback": "AI 요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
+            "retryAfter": "공급자가 {seconds}초 뒤에 다시 시도하라고 알려 왔습니다.",
+            "reselectModel": "설정에서 모델을 다시 고르세요.",
+            "openSettings": "AI 설정 열기"
+        },
+        "interpret": {
+            "generating": "AI 가 만드는 중",
+            "regenerate": "AI 해석 다시 만들기",
+            "generate": "AI 해석 만들기",
+            "hint": "누를 때만 내 키로 한 번 호출합니다. 같은 입력이면 저장된 해석을 씁니다."
+        },
+        "interpretationMeta": {
+            "cached": "저장된 해석",
+            "stale": "기록이나 설정이 바뀜 · 다시 만들 수 있음"
+        },
+        "keyForm": {
+            "description": "등록하면 입력란이 바로 비워지며 키는 화면에 다시 나타나지 않습니다."
+        },
+        "modelIdForm": {
+            "description": "목록을 받지 못하면 공급자 콘솔에 보이는 모델 id 를 그대로 적으세요. 틀린 id 는 호출할 때 실패합니다.",
+            "submit": "이 모델 쓰기"
+        },
+        "modelSelect": {
+            "label": "모델",
+            "placeholder": "모델을 고르세요",
+            "unverified": "형식 지원 확인 안 됨",
+            "unsupported": "형식 미지원"
+        },
+        "principle": {
+            "title": "AI 해석의 원칙",
+            "computed": "숫자, 표, 그래프는 서버가 계산한 결과입니다. 같은 기록이면 언제나 같은 값이 나옵니다.",
+            "interpretation": "문장 해석만 AI 가 만들며, 어느 공급자와 모델이 만들었는지 함께 표시합니다.",
+            "onRequest": "AI 는 직접 요청할 때만 호출됩니다. 호출은 내 키와 사용 한도를 쓰고, 같은 입력은 저장된 결과를 다시 보여 줍니다."
+        },
+        "providerNotice": {
+            "title": "키 보관과 비용 안내",
+            "storage": "키는 이 서버에 암호화해 보관하고 AI 호출에만 씁니다. 공급자 콘솔에서 언제든 취소할 수 있습니다.",
+            "billing": "AI 호출은 직접 요청할 때만 일어나며 비용은 내 공급자 계정에 청구됩니다. 공급자 콘솔에서 지출 한도를 걸어 두기를 권합니다."
+        },
+        "segmentChart": {
+            "bpBySegment": "구간별 BP"
+        },
+        "setup": {
+            "no_key": {
+                "title": "등록된 AI 키가 없습니다",
+                "description": "Anthropic, OpenAI, Ollama Cloud 중 하나의 API 키를 설정에서 등록하면 AI 해석을 쓸 수 있습니다.",
+                "action": "AI 키 등록하기"
+            },
+            "no_model": {
+                "title": "사용할 모델을 고르지 않았습니다",
+                "description": "키는 등록되어 있습니다. 설정에서 모델을 고르면 AI 해석을 쓸 수 있습니다.",
+                "action": "모델 고르기"
+            }
+        },
+        "tokenUsage": "입력 {input, number} · 출력 {output, number} 토큰(캐시 {cached, number})",
+        "usageMeter": {
+            "unlimited": "{used, number} {unit} · 제한 없음",
+            "rate": "{label} 사용률"
+        },
+        "credential": {
+            "key": "키",
+            "registered": "등록",
+            "lastValidated": "마지막 검증",
+            "notValidated": "검증 전"
+        },
+        "goalForm": {
+            "ariaLabel": "새 목표",
+            "kind": "목표 종류",
+            "level": "레벨",
+            "lamp": "램프",
+            "lampOrAbove": "{lamp} 이상",
+            "count": "곡 수",
+            "md5": "차트 md5",
+            "md5Placeholder": "표 곡의 md5",
+            "exRate": "목표 EX 비율(%)",
+            "submit": "목표 추가",
+            "goalKind": {
+                "lamp_count_at_level": "레벨에서 램프 N곡",
+                "clear_all_level": "레벨 전부 클리어",
+                "ex_rate_on_chart": "한 곡의 EX 비율"
+            }
+        },
+        "insightTone": {
+            "strength": "강점",
+            "weakness": "약점",
+            "neutral": "참고"
+        },
+        "compareTotals": {
+            "play": "판",
+            "lamp": "램프",
+            "thisPlay": "이 판",
+            "comparedPlay": "비교 판"
+        },
+        "practiceFolder": {
+            "created": "연습 폴더 \"{name}\" 를 만들었습니다",
+            "updated": "연습 폴더 \"{name}\" 를 갱신했습니다"
+        }
+    },
+    "folder": {
+        "formError": {
+            "controlCharacter": "줄바꿈이나 제어 문자는 쓸 수 없습니다.",
+            "nameTooLong": "이름은 {nameMax}자까지 쓸 수 있습니다.",
+            "nameRequired": "이름을 입력하세요.",
+            "descriptionTooLong": "설명은 {descriptionMax}자까지 쓸 수 있습니다.",
+            "noteTooLong": "메모는 {noteMax}자까지 쓸 수 있습니다."
+        },
+        "meta": {
+            "name": "이름",
+            "nameHint": "R-BMS 선곡 화면에 보이는 이름입니다. {max}자까지, 다른 폴더와 겹치면 안 됩니다.",
+            "description": "설명 (선택)",
+            "descriptionHint": "한 줄, {max}자까지. {length} / {max}"
+        },
+        "note": {
+            "title": "메모 고치기",
+            "apply": "적용",
+            "label": "메모",
+            "hint": "{max}자까지. 저장 버튼을 눌러야 반영됩니다."
+        },
+        "searchResult": {
+            "add": "추가",
+            "added": "추가됨",
+            "addAria": "{title} 추가"
+        },
+        "chartRow": {
+            "new": "새로",
+            "note": "메모 {note}",
+            "moveUp": "{title} 위로",
+            "moveDown": "{title} 아래로",
+            "menu": "{title} 메뉴",
+            "remove": "{title} 빼기",
+            "moveTop": "맨 위로",
+            "moveBottom": "맨 아래로",
+            "editNote": "메모 고치기"
+        },
+        "conflict": {
+            "title": "다른 곳에서 먼저 고친 폴더입니다",
+            "summary": "서버의 폴더는 {updatedAt} 에 고쳐졌고 {count, number}곡입니다.",
+            "differences": "이 화면과 다른 곳: {list}.",
+            "same": "곡 목록은 이 화면과 같습니다.",
+            "onlyServer": "서버에만 있는 곡 {count, number}곡",
+            "onlyMine": "이 화면에만 있는 곡 {count, number}곡",
+            "order": "곡 순서",
+            "name": "이름(서버: {name})",
+            "description": "설명",
+            "useServer": "서버 내용 불러오기 (내 변경 버림)",
+            "overwrite": "내 변경으로 덮어쓰기"
+        },
+        "guide": {
+            "title": "R-BMS 에서 보기",
+            "body": "R-BMS 에 로그인하면 선곡 화면의 MY FOLDERS 아래에 이 폴더들이 같은 순서로 나타납니다. R-BMS 는 읽기만 하므로 고치는 일은 여기서 합니다.",
+            "link": "연결 방법 보기"
+        },
+        "listItem": {
+            "updated": "{date} 수정",
+            "noDescription": "설명 없음",
+            "moveUp": "{name} 위로",
+            "moveDown": "{name} 아래로",
+            "menu": "{name} 메뉴",
+            "editMeta": "이름·설명 고치기",
+            "delete": "폴더 지우기"
+        },
+        "tableImport": {
+            "title": "표에서 가져오기",
+            "description": "고른 레벨의 곡을 목록 끝에 붙입니다. 저장 버튼을 눌러야 R-BMS 에 반영됩니다.",
+            "submitCount": "{count, number}곡 넣기",
+            "submit": "넣기",
+            "table": "난이도표",
+            "levels": "{name} 레벨",
+            "clearAll": "모두 해제",
+            "selectAll": "모두 선택",
+            "chooseLevels": "가져올 레벨을 고르세요.",
+            "summaryAdd": "{count, number}곡 추가",
+            "summaryDuplicates": "(이미 든 {count, number}곡 제외)",
+            "overflow": "폴더에는 {capacity, number}곡을 더 넣을 수 있습니다. 레벨을 줄여 {overflow, number}곡을 덜어 주세요."
+        }
+    },
+    "table": {
+        "chartCard": {
+            "untitled": "제목 없음"
+        },
+        "chartRecord": {
+            "signInPrompt": "로그인하면 내 램프와 점수가 표시됩니다.",
+            "signIn": "로그인",
+            "loading": "내 기록 불러오는 중",
+            "noRecord": "아직 이 차트의 기록이 없습니다.",
+            "maxCombo": "최대 콤보",
+            "playedAt": "기록 시각"
+        },
+        "externalLink": "외부 사이트, 새 탭",
+        "filter": {
+            "level": "레벨",
+            "fromLevel": "시작 레벨",
+            "toLevel": "끝 레벨",
+            "lamp": "램프",
+            "sort": "정렬"
+        },
+        "levelJump": "레벨 이동",
+        "levelSection": {
+            "count": "{total, number}곡",
+            "countShown": "{shown, number} / {total, number}곡",
+            "playedOfTotal": "{total, number}곡 중 {played, number}곡 플레이",
+            "matching": "조건에 맞는 {shown, number}곡",
+            "condition": "조건 {shown, number}"
+        },
+        "loading": "난이도표 불러오는 중",
+        "progress": {
+            "title": "내 진행",
+            "collapse": "접기",
+            "byLevel": "레벨별 보기",
+            "playedSongs": "플레이한 곡",
+            "lampByLevel": "레벨별 램프 분포"
+        },
+        "snapshotCard": {
+            "levelCount": "{count, number}단계",
+            "updated": "갱신 {date}",
+            "played": "플레이",
+            "recordsFailed": "내 기록을 불러오지 못했습니다.",
+            "signInPrompt": "로그인하면 내 진행이 보입니다."
+        },
+        "source": {
+            "ariaLabel": "표 출처",
+            "label": "출처",
+            "originalTable": "원본 표",
+            "fetchedAt": "내용 받은 날 {date}",
+            "checkedAt": "마지막 확인 {date}"
+        }
+    },
+    "course": {
+        "source": {
+            "label": "출처",
+            "originalTable": "원본 표",
+            "receivedOn": "내용 받은 날 {date} (KST)",
+            "officialFile": "코스 정의 {maker} 공식 코스 파일({file})",
+            "received": "{date} 받음",
+            "officialPage": "공식 페이지",
+            "constraints": "제약·트로피",
+            "constraintReceived": "({date} 받음)",
+            "dpNote": "DP 코스의 제약·트로피는 같은 단의 SP 값입니다(DP 값의 원천이 없습니다)."
+        }
+    },
+    "dan": {
+        "displayed": "표시 단위"
+    },
+    "lamp": {
+        "distribution": {
+            "played": "플레이한 차트",
+            "rate": "플레이 비율"
+        }
+    }
+}

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import type { ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime'
@@ -12,7 +13,9 @@ mock.module('@shared/lib/auth-client', () => ({
     authClient: { useSession: () => ({ data: null, isPending: false }), $store: { notify: () => undefined } },
 }))
 
-const { cleanup, render, within } = await import('@testing-library/react')
+const { cleanup, render: renderBare, within } = await import('@testing-library/react')
+const { withIntl } = await import('../support/intl')
+const render = (ui: ReactElement) => renderBare(withIntl(ui))
 const { DanBadgeList } = await import('../../src/features/dan/dan-badge-list')
 const { readDisplayedDans } = await import('../../src/entities/dan.type')
 const { PlayerLeaderboardPanel } = await import('../../src/widgets/leaderboard/player-leaderboard-panel')

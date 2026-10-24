@@ -2,6 +2,7 @@
 
 import { useId, useState, type FC } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { DashboardPanel } from '@features/dashboard/dashboard-panel'
 import { LampDistribution } from '@features/lamp/lamp-distribution'
 import { LampStackBar, type LampCount } from '@features/lamp/lamp-stack-bar'
@@ -26,12 +27,13 @@ type TableProgressPanelProps = {
 }
 
 export const TableProgressPanel: FC<TableProgressPanelProps> = ({ lamps, played, total, levels }) => {
+    const t = useTranslations('pages.table.progress')
     const [isDetailOpen, setIsDetailOpen] = useState(false)
     const detailId = useId()
 
     return (
         <DashboardPanel
-            title='내 진행'
+            title={t('title')}
             badge={
                 <span className='text-muted-foreground text-xs tabular-nums'>
                     <span className='text-foreground font-medium'>{formatCount(played)}</span> / {formatCount(total)} ·{' '}
@@ -46,7 +48,7 @@ export const TableProgressPanel: FC<TableProgressPanelProps> = ({ lamps, played,
                     aria-expanded={isDetailOpen}
                     aria-controls={detailId}
                     onClick={() => setIsDetailOpen((isOpen) => !isOpen)}>
-                    {isDetailOpen ? '접기' : '레벨별 보기'}
+                    {isDetailOpen ? t('collapse') : t('byLevel')}
                     <ChevronDown aria-hidden className={cn('transition-transform', !isDetailOpen && '-rotate-90')} />
                 </Button>
             }
@@ -54,9 +56,9 @@ export const TableProgressPanel: FC<TableProgressPanelProps> = ({ lamps, played,
             {!isDetailOpen && <LampStackBar lamps={lamps} />}
             <div id={detailId} hidden={!isDetailOpen} className='flex flex-col gap-3 md:flex-row md:gap-6'>
                 <div className='md:w-72 md:shrink-0'>
-                    <LampDistribution lamps={lamps} played={played} total={total} playedLabel='플레이한 곡' rateLabel='플레이 비율' />
+                    <LampDistribution lamps={lamps} played={played} total={total} playedLabel={t('playedSongs')} />
                 </div>
-                <ul aria-label='레벨별 램프 분포' className='grid min-w-0 flex-1 grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2 xl:grid-cols-3'>
+                <ul aria-label={t('lampByLevel')} className='grid min-w-0 flex-1 grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2 xl:grid-cols-3'>
                     {levels.map((level) => (
                         <li key={level.key} className='flex h-6 min-w-0 items-center gap-2 px-1 text-xs'>
                             <span className='w-10 shrink-0 font-medium tabular-nums'>{level.label}</span>

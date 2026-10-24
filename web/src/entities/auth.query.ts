@@ -1,6 +1,7 @@
 'use client'
 
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useTranslations } from 'next-intl'
 import { QUERY_KEY } from '@shared/constants/query-key'
 import { useIsHydrated } from '@shared/hooks/use-is-hydrated'
 import { authClient } from '@shared/lib/auth-client'
@@ -9,7 +10,6 @@ import { clientSessionUserSchema, type RegisterInput, type SessionLoginInput, ty
 
 const jsonInit = (body: unknown) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
 
-const SIGN_IN_FAILED_MESSAGE = '아이디 또는 비밀번호가 올바르지 않습니다.'
 const UNAUTHORIZED_STATUS = 401
 
 const notifySessionChanged = () => authClient.$store.notify('$sessionSignal')
@@ -32,6 +32,7 @@ export const removeUserScopedQueries = (queryClient: QueryClient) => {
 /** Signs in with the player id on the session-only web route, so the web never mints a native API token. */
 export const useSessionLogin = () => {
     const queryClient = useQueryClient()
+    const t = useTranslations('pages.auth')
     return useMutation({
         mutationFn: async (input: SessionLoginInput) => {
             try {
@@ -40,8 +41,7 @@ export const useSessionLogin = () => {
                 notifySessionChanged()
                 return result.user
             } catch (error) {
-                if (error instanceof ApiError && error.status === UNAUTHORIZED_STATUS)
-                    throw new ApiError(error.code, SIGN_IN_FAILED_MESSAGE, error.status)
+                if (error instanceof ApiError && error.status === UNAUTHORIZED_STATUS) throw new ApiError(error.code, t('signInFailed'), error.status)
                 throw error
             }
         },
@@ -51,10 +51,11 @@ export const useSessionLogin = () => {
 
 export const useSessionLogout = () => {
     const queryClient = useQueryClient()
+    const t = useTranslations('pages.auth')
     return useMutation({
         mutationFn: async () => {
             const result = await authClient.signOut()
-            if (result.error) throw new Error('로그아웃하지 못했습니다. 잠시 후 다시 시도하세요.')
+            if (result.error) throw new Error(t('signOutFailed'))
         },
         onSuccess: () => removeUserScopedQueries(queryClient),
     })

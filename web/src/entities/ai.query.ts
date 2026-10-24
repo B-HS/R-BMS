@@ -1,4 +1,5 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { QUERY_KEY } from '@shared/constants/query-key'
 import { buildApiUrl, fetchEnvelope, fetchNoContent } from '@shared/lib/fetch'
@@ -404,6 +405,7 @@ export const useSaveAiShareSetting = () => {
 /** Makes (or, for the same preview, updates) the practice folder the user confirmed; it shows in the game's MY FOLDERS on the next refresh. */
 export const useCreateAiPracticeFolder = () => {
     const queryClient = useQueryClient()
+    const t = useTranslations('pages.ai.practiceFolder')
     return useMutation({
         mutationFn: (input: AiPracticeFolderCreateInput) =>
             fetchEnvelope<AiPracticeFolderResult>(buildApiUrl(AI_FEATURE_PATH.PRACTICE), {
@@ -416,7 +418,7 @@ export const useCreateAiPracticeFolder = () => {
                 queryClient.invalidateQueries({ queryKey: QUERY_KEY.FOLDER.ALL }),
                 queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.DIGEST_FEATURE(AI_DIGEST.PRACTICE) }),
             ])
-            toast.success(result.outcome === 'created' ? `연습 폴더 "${result.name}" 를 만들었습니다` : `연습 폴더 "${result.name}" 를 갱신했습니다`)
+            toast.success(t(result.outcome, { name: result.name }))
         },
     })
 }

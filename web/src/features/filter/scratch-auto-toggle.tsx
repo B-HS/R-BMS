@@ -1,7 +1,7 @@
 'use client'
 
 import { useId, type FC } from 'react'
-import { SCRATCH_AUTO_TOGGLE_LABEL } from '@shared/constants/scratch-auto'
+import { useTranslations } from 'next-intl'
 import { Switch } from '@shared/ui/switch'
 
 type ScratchAutoToggleProps = {
@@ -10,13 +10,14 @@ type ScratchAutoToggleProps = {
 }
 
 export const ScratchAutoToggle: FC<ScratchAutoToggleProps> = ({ checked, onCheckedChange }) => {
+    const t = useTranslations('pages.scratchAuto')
     const id = useId()
 
     return (
         <div className='flex items-center gap-2'>
             <Switch id={id} size='sm' checked={checked} onCheckedChange={onCheckedChange} />
             <label htmlFor={id} className='cursor-pointer text-xs whitespace-nowrap'>
-                {SCRATCH_AUTO_TOGGLE_LABEL}
+                {t('toggle')}
             </label>
         </div>
     )

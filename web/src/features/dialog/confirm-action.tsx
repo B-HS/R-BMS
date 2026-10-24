@@ -1,6 +1,7 @@
 'use client'
 
 import { type FC, type ReactNode, type RefObject } from 'react'
+import { useTranslations } from 'next-intl'
 import {
     AlertDialog,
     AlertDialogAction,
@@ -33,9 +34,10 @@ export const ConfirmAction: FC<ConfirmActionProps> = ({
     confirmLabel,
     confirmDisabled,
     onConfirm,
-    cancelLabel = '취소',
+    cancelLabel,
     returnFocusRef,
 }) => {
+    const t = useTranslations('pages.shared')
     const focusReturn = useDialogFocusReturn(returnFocusRef)
 
     return (
@@ -46,7 +48,7 @@ export const ConfirmAction: FC<ConfirmActionProps> = ({
                     <AlertDialogDescription>{description}</AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                    <AlertDialogCancel variant='ghost'>{cancelLabel}</AlertDialogCancel>
+                    <AlertDialogCancel variant='ghost'>{cancelLabel ?? t('cancel')}</AlertDialogCancel>
                     <AlertDialogAction variant='destructive' disabled={confirmDisabled} onClick={onConfirm}>
                         {confirmLabel}
                     </AlertDialogAction>

@@ -91,19 +91,6 @@ export const AI_PROVIDER_NOTE = {
     ollama: 'Ollama Cloud API 키를 등록합니다. 출력 형식을 보장하지 않아 해석이 실패할 수 있고, 그때는 다시 요청해야 합니다.',
 } satisfies Record<AiProviderId, string>
 
-export const AI_FAILURE_LABEL = {
-    invalid_key: '키가 거부됨',
-    forbidden: '키 권한 또는 모델 접근을 확인하세요',
-    model_unavailable: '모델이 없거나 은퇴함',
-    quota: '잔액 또는 지출 한도 도달',
-    rate_limited: '요청 한도 초과',
-    unavailable: '공급자 연결 실패',
-    refused: '답변 거절',
-    truncated: '출력이 잘림',
-    invalid_output: '출력 형식 오류',
-    bad_request: '요청 형식 오류',
-} satisfies Record<AiFailureKind, string>
-
 export const AI_FORM_LIMIT = {
     API_KEY_MIN_LENGTH: 8,
     API_KEY_MAX_LENGTH: 512,
@@ -123,14 +110,12 @@ export const AI_ERROR_CODE = {
 
 const AI_SETTINGS_ERROR_CODES = new Set<string>(Object.values(AI_ERROR_CODE))
 
-const AI_FAILURE_FALLBACK_MESSAGE = 'AI 요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'
-
 /**
- * What a screen shows for a failed AI call: the server's sentence, the seconds the provider asked to wait (kept in production
+ * What a screen shows for a failed AI call: the server's sentence (`null` when the failure is not an API error, so the screen words it), the seconds the provider asked to wait (kept in production
  * details), and whether the fix is in the AI settings (no key, a rejected or forbidden key, a missing or retired model).
  */
 export const toAiFailureView = (error: unknown) => {
-    if (!(error instanceof ApiError)) return { message: AI_FAILURE_FALLBACK_MESSAGE, retryAfterSeconds: null, needsSettings: false, code: null }
+    if (!(error instanceof ApiError)) return { message: null, retryAfterSeconds: null, needsSettings: false, code: null }
     const retryAfter = error.details?.retry_after_seconds
     return {
         message: error.message,
@@ -232,21 +217,24 @@ export const AI_HUB_TAB_LABEL = {
 } satisfies Record<AiHubTab, string>
 
 /** Why a feature shows numbers only and makes no AI call: what it still needs (the server's `notice.need`). */
-export const AI_DATA_NEED_LABEL: Record<string, string> = {
-    table_records: '난이도표 곡의 기록이 아직 없습니다. 표의 곡을 몇 판 친 뒤 다시 열어 보세요.',
-    candidates: '지금 기록으로는 고를 후보 곡이 없습니다.',
-    chart_patterns: '이 패턴으로 고를 곡별 패턴 데이터가 아직 없습니다.',
-    goal_reached: '이미 이룬 목표입니다.',
-    remaining_charts: '남은 곡이 없습니다.',
-    table: '목표의 난이도표를 찾을 수 없습니다.',
-    week_plays: '이 주에 친 판이 없습니다.',
-    recent_plays: '최근 판이 10판 아래입니다. 더 친 뒤 다시 열어 보세요.',
-    traced_plays:
-        '판별 데이터(새 클라이언트로 친 판의 노트 단위 기록, 리포트는 7키 단일 플레이만)가 5판 아래입니다. 몇 판 더 친 뒤 다시 열어 보세요.',
-    play_trace: '이 판에는 판별 데이터가 없습니다(옛 클라이언트로 쳤거나 업로드를 끈 판). 점수 기록만 보입니다.',
-    play_metrics: '이 판은 7키 단일 플레이가 아니라 구간 분석이 없습니다.',
-    comparable_play: '구간을 맞대어 볼 판이 없습니다. 판정 합계만 비교합니다.',
-}
+export const AI_DATA_NEEDS = [
+    'table_records',
+    'candidates',
+    'chart_patterns',
+    'goal_reached',
+    'remaining_charts',
+    'table',
+    'week_plays',
+    'recent_plays',
+    'traced_plays',
+    'play_trace',
+    'play_metrics',
+    'comparable_play',
+] as const
+
+export type AiDataNeed = (typeof AI_DATA_NEEDS)[number]
+
+export const isAiDataNeed = (need: string): need is AiDataNeed => AI_DATA_NEEDS.some((known) => known === need)
 
 export const AI_RECOMMEND_KIND_LABEL = {
     failed: '실패한 곡',
@@ -254,17 +242,7 @@ export const AI_RECOMMEND_KIND_LABEL = {
     lamp_up: '램프 올리기',
 } satisfies Record<AiRecommendView['candidates'][number]['kind'], string>
 
-export const AI_INSIGHT_TONE_LABEL = {
-    strength: '강점',
-    weakness: '약점',
-    neutral: '참고',
-} satisfies Record<AiInsight['tone'], string>
-
-export const AI_GOAL_KIND_LABEL = {
-    lamp_count_at_level: '레벨에서 램프 N곡',
-    clear_all_level: '레벨 전부 클리어',
-    ex_rate_on_chart: '한 곡의 EX 비율',
-} satisfies Record<AiGoalKind, string>
+export const AI_GOAL_KINDS = ['lamp_count_at_level', 'clear_all_level', 'ex_rate_on_chart'] as const satisfies readonly AiGoalKind[]
 
 export const AI_OFFSET_DIRECTION_LABEL = {
     earlier: '노트가 먼저 보이도록 올리기',
@@ -308,6 +286,8 @@ export const AI_PATTERN_TAG_LABEL = {
 } as const
 
 export type AiPatternTag = keyof typeof AI_PATTERN_TAG_LABEL
+
+export type AiEvidenceGrade = keyof typeof AI_EVIDENCE_LABEL
 
 export const isAiPatternTag = (tag: string): tag is AiPatternTag => tag in AI_PATTERN_TAG_LABEL
 

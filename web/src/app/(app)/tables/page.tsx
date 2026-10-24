@@ -1,21 +1,25 @@
 import { Suspense } from 'react'
+import { getTranslations } from 'next-intl/server'
 import { RowListSkeleton } from '@features/state/row-list-skeleton'
 import { buildPageMetadata } from '@shared/lib/metadata'
 import { ShellPage } from '@widgets/shell/shell-page'
 import { TableCatalogContent } from '@widgets/table/table-catalog-content'
 
-export const metadata = buildPageMetadata({
-    title: '난이도표',
-    description: 'R-BMS 에 기본 등록된 BMS 난이도표와 점수 서버가 제공하는 표.',
-    path: '/tables',
-})
+export const generateMetadata = async () => {
+    const t = await getTranslations('pages.route.tables')
+    return buildPageMetadata({ title: t('title'), description: t('metaDescription'), path: '/tables' })
+}
 
-const TablesPage = () => (
-    <ShellPage title='난이도표' description='R-BMS 에 기본 등록된 표와 서버가 제공하는 표'>
-        <Suspense fallback={<RowListSkeleton label='난이도표 불러오는 중' />}>
-            <TableCatalogContent />
-        </Suspense>
-    </ShellPage>
-)
+const TablesPage = async () => {
+    const t = await getTranslations('pages.route.tables')
+
+    return (
+        <ShellPage title={t('title')} description={t('description')}>
+            <Suspense fallback={<RowListSkeleton label={t('loading')} />}>
+                <TableCatalogContent />
+            </Suspense>
+        </ShellPage>
+    )
+}
 
 export default TablesPage

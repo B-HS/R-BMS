@@ -3,8 +3,9 @@
 import { useRef, type FC } from 'react'
 import Link from 'next/link'
 import { ArrowDown, ArrowUp, Ellipsis, Pencil, Trash2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import type { FolderSummary } from '@entities/folder.type'
-import { formatCount, formatDateTime } from '@shared/lib/format'
+import { formatDateTime } from '@shared/lib/format'
 import { Button } from '@shared/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@shared/ui/dropdown-menu'
 
@@ -20,9 +21,11 @@ type FolderListItemProps = {
 
 export const FolderListItem: FC<FolderListItemProps> = ({ folder, href, isFirst, isLast, onMove, onEdit, onDelete }) => {
     const menuTriggerRef = useRef<HTMLButtonElement>(null)
+    const t = useTranslations('pages.folder.listItem')
+    const tShared = useTranslations('pages.shared')
 
-    const countLabel = `${formatCount(folder.item_count)}곡`
-    const updatedLabel = `${formatDateTime(folder.updated_at)} 수정`
+    const countLabel = tShared('songCount', { count: folder.item_count })
+    const updatedLabel = t('updated', { date: formatDateTime(folder.updated_at) })
 
     return (
         <li
@@ -32,7 +35,7 @@ export const FolderListItem: FC<FolderListItemProps> = ({ folder, href, isFirst,
                 <Link href={href} className='truncate text-sm font-medium outline-none after:absolute after:inset-0'>
                     {folder.name}
                 </Link>
-                <p className='text-muted-foreground truncate text-xs'>{folder.description || '설명 없음'}</p>
+                <p className='text-muted-foreground truncate text-xs'>{folder.description || t('noDescription')}</p>
                 <p className='text-muted-foreground text-2xs tabular-nums sm:hidden'>
                     {countLabel} · {updatedLabel}
                 </p>
@@ -43,7 +46,7 @@ export const FolderListItem: FC<FolderListItemProps> = ({ folder, href, isFirst,
                 <Button
                     variant='ghost'
                     size='icon-sm'
-                    aria-label={`${folder.name} 위로`}
+                    aria-label={t('moveUp', { name: folder.name })}
                     aria-disabled={isFirst}
                     data-action='up'
                     className='aria-disabled:opacity-40'
@@ -53,7 +56,7 @@ export const FolderListItem: FC<FolderListItemProps> = ({ folder, href, isFirst,
                 <Button
                     variant='ghost'
                     size='icon-sm'
-                    aria-label={`${folder.name} 아래로`}
+                    aria-label={t('moveDown', { name: folder.name })}
                     aria-disabled={isLast}
                     data-action='down'
                     className='aria-disabled:opacity-40'
@@ -62,19 +65,19 @@ export const FolderListItem: FC<FolderListItemProps> = ({ folder, href, isFirst,
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button ref={menuTriggerRef} variant='ghost' size='icon-sm' aria-label={`${folder.name} 메뉴`}>
+                        <Button ref={menuTriggerRef} variant='ghost' size='icon-sm' aria-label={t('menu', { name: folder.name })}>
                             <Ellipsis />
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end' className='w-44'>
                         <DropdownMenuItem onSelect={() => onEdit(menuTriggerRef.current)}>
                             <Pencil />
-                            이름·설명 고치기
+                            {t('editMeta')}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant='destructive' onSelect={() => onDelete(menuTriggerRef.current)}>
                             <Trash2 />
-                            폴더 지우기
+                            {t('delete')}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>

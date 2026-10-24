@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { DISPLAY_TIME_ZONE } from '../../src/shared/lib/format'
 
 GlobalRegistrator.register({ url: 'http://localhost:3000/' })
 
@@ -21,7 +22,7 @@ const ErrorLine = ({ error }: { error: unknown }) => <p role='alert'>{useApiErro
 
 const renderError = (locale: Locale, error: unknown) => {
     const { container } = render(
-        <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]}>
+        <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]} timeZone={DISPLAY_TIME_ZONE}>
             <ErrorLine error={error} />
         </NextIntlClientProvider>,
     )

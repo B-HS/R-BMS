@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, type FC, type FormEvent } from 'react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@shared/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@shared/ui/field'
 import { Input } from '@shared/ui/input'
@@ -16,6 +17,8 @@ type AiKeyFormProps = {
 }
 
 export const AiKeyForm: FC<AiKeyFormProps> = ({ inputId, label, submitLabel, isPending, onSubmitKey, onCancel }) => {
+    const t = useTranslations('pages.ai')
+    const tShared = useTranslations('pages.shared')
     const keyInputRef = useRef<HTMLInputElement>(null)
 
     const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -44,7 +47,7 @@ export const AiKeyForm: FC<AiKeyFormProps> = ({ inputId, label, submitLabel, isP
                     maxLength={AI_FORM_LIMIT.API_KEY_MAX_LENGTH}
                     disabled={isPending}
                 />
-                <FieldDescription>등록하면 입력란이 바로 비워지며 키는 화면에 다시 나타나지 않습니다.</FieldDescription>
+                <FieldDescription>{t('keyForm.description')}</FieldDescription>
             </Field>
             <div className='flex gap-1'>
                 <Button type='submit' size='sm' disabled={isPending}>
@@ -52,7 +55,7 @@ export const AiKeyForm: FC<AiKeyFormProps> = ({ inputId, label, submitLabel, isP
                 </Button>
                 {onCancel && (
                     <Button type='button' variant='ghost' size='sm' onClick={onCancel}>
-                        취소
+                        {tShared('cancel')}
                     </Button>
                 )}
             </div>

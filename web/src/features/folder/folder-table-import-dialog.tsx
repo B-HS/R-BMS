@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, type FC, type RefObject } from 'react'
+import { useTranslations } from 'next-intl'
 import { FormDialog } from '@features/dialog/form-dialog'
 import type { FolderTableEntry, FolderTableIndex } from '@entities/folder.type'
-import { formatCount } from '@shared/lib/format'
 import { Button } from '@shared/ui/button'
 import { Checkbox } from '@shared/ui/checkbox'
 import { FieldLegend, FieldSet } from '@shared/ui/field'
@@ -28,6 +28,7 @@ export const FolderTableImportDialog: FC<FolderTableImportDialogProps> = ({
     onImport,
     returnFocusRef,
 }) => {
+    const t = useTranslations('pages.folder.tableImport')
     const [wasOpen, setWasOpen] = useState(open)
     const [tableId, setTableId] = useState(tables[0]?.id ?? '')
     const [selectedLevels, setSelectedLevels] = useState<string[]>([])
@@ -49,16 +50,16 @@ export const FolderTableImportDialog: FC<FolderTableImportDialogProps> = ({
 
     const summary =
         selectedLevels.length === 0
-            ? '가져올 레벨을 고르세요.'
-            : `${formatCount(freshEntries.length)}곡 추가${duplicateCount > 0 ? ` (이미 든 ${formatCount(duplicateCount)}곡 제외)` : ''}`
+            ? t('chooseLevels')
+            : `${t('summaryAdd', { count: freshEntries.length })}${duplicateCount > 0 ? ` ${t('summaryDuplicates', { count: duplicateCount })}` : ''}`
 
     return (
         <FormDialog
             open={open}
             onOpenChange={onOpenChange}
-            title='표에서 가져오기'
-            description='고른 레벨의 곡을 목록 끝에 붙입니다. 저장 버튼을 눌러야 R-BMS 에 반영됩니다.'
-            submitLabel={freshEntries.length > 0 ? `${formatCount(freshEntries.length)}곡 넣기` : '넣기'}
+            title={t('title')}
+            description={t('description')}
+            submitLabel={freshEntries.length > 0 ? t('submitCount', { count: freshEntries.length }) : t('submit')}
             submitDisabled={freshEntries.length === 0 || overflow > 0}
             onSubmit={() => onImport(freshEntries)}
             returnFocusRef={returnFocusRef}>
@@ -69,7 +70,7 @@ export const FolderTableImportDialog: FC<FolderTableImportDialogProps> = ({
                         setTableId(value)
                         setSelectedLevels([])
                     }}>
-                    <SelectTrigger aria-label='난이도표' className='w-full'>
+                    <SelectTrigger aria-label={t('table')} className='w-full'>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -85,14 +86,14 @@ export const FolderTableImportDialog: FC<FolderTableImportDialogProps> = ({
                 <FieldSet className='gap-2'>
                     <div className='flex items-center justify-between gap-2'>
                         <FieldLegend variant='label' className='mb-0'>
-                            {table.name} 레벨
+                            {t('levels', { name: table.name })}
                         </FieldLegend>
                         <Button
                             type='button'
                             variant='ghost'
                             size='xs'
                             onClick={() => setSelectedLevels(isAllSelected ? [] : table.levels.map((group) => group.level))}>
-                            {isAllSelected ? '모두 해제' : '모두 선택'}
+                            {isAllSelected ? t('clearAll') : t('selectAll')}
                         </Button>
                     </div>
                     <ul className='grid grid-cols-3 gap-1 sm:grid-cols-5'>
@@ -124,11 +125,7 @@ export const FolderTableImportDialog: FC<FolderTableImportDialogProps> = ({
             )}
             <div aria-live='polite' className='flex flex-col gap-1 text-sm'>
                 <p className='tabular-nums'>{summary}</p>
-                {overflow > 0 && (
-                    <p className='text-destructive text-xs'>
-                        폴더에는 {formatCount(capacity)}곡을 더 넣을 수 있습니다. 레벨을 줄여 {formatCount(overflow)}곡을 덜어 주세요.
-                    </p>
-                )}
+                {overflow > 0 && <p className='text-destructive text-xs'>{t('overflow', { capacity, overflow })}</p>}
             </div>
         </FormDialog>
     )

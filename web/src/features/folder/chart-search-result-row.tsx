@@ -1,5 +1,6 @@
 import type { FC } from 'react'
 import { Check, Plus } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { formatHash } from '@shared/lib/format'
 import { Button } from '@shared/ui/button'
 
@@ -24,7 +25,9 @@ export const ChartSearchResultRow: FC<ChartSearchResultRowProps> = ({
     isAddDisabled,
     onAdd,
 }) => {
-    const displayTitle = title.trim() || `제목 미등록 ${formatHash(md5)}`
+    const t = useTranslations('pages.folder.searchResult')
+    const tShared = useTranslations('pages.shared')
+    const displayTitle = title.trim() || tShared('untitledWithHash', { hash: formatHash(md5) })
 
     return (
         <li className='border-border flex min-h-10 items-center gap-2 border-b py-1 pr-1.5 pl-3'>
@@ -37,18 +40,18 @@ export const ChartSearchResultRow: FC<ChartSearchResultRowProps> = ({
                         </span>
                     )}
                     {isKnownToServer && <span className='border-border shrink-0 border px-1 leading-tight'>IR</span>}
-                    <span className='truncate'>{artist || '아티스트 미등록'}</span>
+                    <span className='truncate'>{artist || tShared('artistMissing')}</span>
                 </span>
             </div>
             {isAdded ? (
                 <span className='text-muted-foreground flex shrink-0 items-center gap-1 px-2 text-xs'>
                     <Check className='size-3' aria-hidden />
-                    추가됨
+                    {t('added')}
                 </span>
             ) : (
-                <Button variant='ghost' size='xs' aria-label={`${displayTitle} 추가`} disabled={isAddDisabled} onClick={onAdd}>
+                <Button variant='ghost' size='xs' aria-label={t('addAria', { title: displayTitle })} disabled={isAddDisabled} onClick={onAdd}>
                     <Plus />
-                    추가
+                    {t('add')}
                 </Button>
             )}
         </li>

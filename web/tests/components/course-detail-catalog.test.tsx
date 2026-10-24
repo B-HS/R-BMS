@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test'
+import type { ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime'
@@ -8,7 +9,9 @@ GlobalRegistrator.register({ url: 'http://localhost:3000/' })
 
 afterAll(() => GlobalRegistrator.unregister())
 
-const { cleanup, render, within } = await import('@testing-library/react')
+const { cleanup, render: renderBare, within } = await import('@testing-library/react')
+const { withIntl } = await import('../support/intl')
+const render = (ui: ReactElement) => renderBare(withIntl(ui))
 const { CourseDetailPanel } = await import('../../src/widgets/course/course-detail-panel')
 const { QUERY_KEY } = await import('../../src/shared/constants/query-key')
 const { SidebarProvider } = await import('../../src/shared/ui/sidebar')

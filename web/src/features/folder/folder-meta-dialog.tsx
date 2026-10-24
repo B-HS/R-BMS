@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, type FC, type RefObject } from 'react'
+import { useTranslations } from 'next-intl'
 import { FormDialog } from '@features/dialog/form-dialog'
-import { FOLDER_LIMIT, folderMetaFormSchema, type FolderMetaInput } from '@entities/folder.type'
+import { FOLDER_LIMIT, folderMetaFormSchema, isFolderFormError, type FolderMetaInput } from '@entities/folder.type'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@shared/ui/field'
 import { Input } from '@shared/ui/input'
 import { Textarea } from '@shared/ui/textarea'
@@ -36,6 +37,7 @@ export const FolderMetaDialog: FC<FolderMetaDialogProps> = ({
     onSubmit,
     returnFocusRef,
 }) => {
+    const t = useTranslations('pages.folder')
     const [wasOpen, setWasOpen] = useState(open)
     const [name, setName] = useState(initialValue.name)
     const [folderDescription, setFolderDescription] = useState(initialValue.description)
@@ -60,7 +62,12 @@ export const FolderMetaDialog: FC<FolderMetaDialogProps> = ({
         onSubmit(parsed.data)
     }
 
-    const nameError = errors.name
+    const describeError = (code: string | undefined) =>
+        code !== undefined && isFolderFormError(code)
+            ? t(`formError.${code}`, { nameMax: FOLDER_LIMIT.NAME_MAX, descriptionMax: FOLDER_LIMIT.DESCRIPTION_MAX, noteMax: FOLDER_LIMIT.NOTE_MAX })
+            : code
+    const nameError = describeError(errors.name)
+    const descriptionError = describeError(errors.description)
 
     return (
         <FormDialog
@@ -74,7 +81,7 @@ export const FolderMetaDialog: FC<FolderMetaDialogProps> = ({
             size='md'
             returnFocusRef={returnFocusRef}>
             <Field data-invalid={nameError ? true : undefined}>
-                <FieldLabel htmlFor='folder-name'>이름</FieldLabel>
+                <FieldLabel htmlFor='folder-name'>{t('meta.name')}</FieldLabel>
                 <Input
                     id='folder-name'
                     autoComplete='off'
@@ -87,18 +94,16 @@ export const FolderMetaDialog: FC<FolderMetaDialogProps> = ({
                 {nameError ? (
                     <FieldError id='folder-name-hint'>{nameError}</FieldError>
                 ) : (
-                    <FieldDescription id='folder-name-hint'>
-                        R-BMS 선곡 화면에 보이는 이름입니다. {FOLDER_LIMIT.NAME_MAX}자까지, 다른 폴더와 겹치면 안 됩니다.
-                    </FieldDescription>
+                    <FieldDescription id='folder-name-hint'>{t('meta.nameHint', { max: FOLDER_LIMIT.NAME_MAX })}</FieldDescription>
                 )}
             </Field>
-            <Field data-invalid={errors.description ? true : undefined}>
-                <FieldLabel htmlFor='folder-description'>설명 (선택)</FieldLabel>
+            <Field data-invalid={descriptionError ? true : undefined}>
+                <FieldLabel htmlFor='folder-description'>{t('meta.description')}</FieldLabel>
                 <Textarea
                     id='folder-description'
                     rows={DESCRIPTION_ROWS}
                     maxLength={FOLDER_LIMIT.DESCRIPTION_MAX}
-                    aria-invalid={errors.description ? true : undefined}
+                    aria-invalid={descriptionError ? true : undefined}
                     aria-describedby='folder-description-hint'
                     value={folderDescription}
                     onChange={(event) => setFolderDescription(event.target.value.replace(/[\r\n]+/g, ' '))}
@@ -108,11 +113,11 @@ export const FolderMetaDialog: FC<FolderMetaDialogProps> = ({
                         event.currentTarget.form?.requestSubmit()
                     }}
                 />
-                {errors.description ? (
-                    <FieldError id='folder-description-hint'>{errors.description}</FieldError>
+                {descriptionError ? (
+                    <FieldError id='folder-description-hint'>{descriptionError}</FieldError>
                 ) : (
                     <FieldDescription id='folder-description-hint'>
-                        한 줄, {FOLDER_LIMIT.DESCRIPTION_MAX}자까지. {folderDescription.length} / {FOLDER_LIMIT.DESCRIPTION_MAX}
+                        {t('meta.descriptionHint', { max: FOLDER_LIMIT.DESCRIPTION_MAX, length: folderDescription.length })}
                     </FieldDescription>
                 )}
             </Field>

@@ -9,19 +9,22 @@ import {
 } from '../../src/server/dto/ai'
 import { PATTERN_TAGS } from '../../src/server/service/domain/analysis/pattern-tags'
 import {
-    AI_DATA_NEED_LABEL,
-    AI_GOAL_KIND_LABEL,
+    AI_DATA_NEEDS,
+    AI_GOAL_KINDS as SCREEN_GOAL_KINDS,
     AI_GREEN_DIRECTION_LABEL,
     AI_OFFSET_DIRECTION_LABEL,
     AI_PATTERN_TAG_LABEL,
     AI_RECOMMEND_KIND_LABEL,
     AI_SCORE_FEATURE_FORM_LIMIT,
 } from '../../src/entities/ai.type'
+import { MESSAGES } from '../../src/shared/i18n/messages'
 
 describe('점수 기반 AI 기능 화면과 서버의 계약', () => {
     test('패턴 태그·목표 종류·후보 종류·방향 이름이 서버와 같다', () => {
         expect(Object.keys(AI_PATTERN_TAG_LABEL)).toEqual([...PATTERN_TAGS])
-        expect(Object.keys(AI_GOAL_KIND_LABEL)).toEqual([...AI_GOAL_KINDS])
+        expect([...SCREEN_GOAL_KINDS]).toEqual([...AI_GOAL_KINDS])
+        expect(Object.keys(MESSAGES.ko.pages.ai.goalForm.goalKind)).toEqual([...AI_GOAL_KINDS])
+        expect(Object.keys(MESSAGES.ko.pages.ai.patternTag)).toEqual([...PATTERN_TAGS])
         expect(Object.keys(AI_RECOMMEND_KIND_LABEL)).toEqual([...AI_RECOMMEND_KINDS])
         expect(Object.keys(AI_OFFSET_DIRECTION_LABEL)).toEqual([...AI_OFFSET_DIRECTIONS])
         expect(Object.keys(AI_GREEN_DIRECTION_LABEL)).toEqual([...AI_GREEN_DIRECTIONS])
@@ -49,7 +52,12 @@ describe('점수 기반 AI 기능 화면과 서버의 계약', () => {
             'play_metrics',
             'comparable_play',
         ]
-        expect(Object.keys(AI_DATA_NEED_LABEL).toSorted()).toEqual(serverNeeds.toSorted())
+        expect<string[]>([...AI_DATA_NEEDS].toSorted()).toEqual(serverNeeds.toSorted())
+        expect(
+            Object.keys(MESSAGES.ko.pages.ai.dataNeed)
+                .filter((need) => need !== 'fallback')
+                .toSorted(),
+        ).toEqual(serverNeeds.toSorted())
     })
 })
 

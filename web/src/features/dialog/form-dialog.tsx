@@ -1,6 +1,7 @@
 'use client'
 
 import { type FC, type PropsWithChildren, type ReactNode, type RefObject } from 'react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@shared/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@shared/ui/dialog'
 import { useDialogFocusReturn } from '@features/dialog/use-dialog-focus-return'
@@ -31,6 +32,7 @@ export const FormDialog: FC<FormDialogProps> = ({
     returnFocusRef,
     children,
 }) => {
+    const t = useTranslations('pages.shared')
     const focusReturn = useDialogFocusReturn(returnFocusRef)
 
     return (
@@ -50,7 +52,7 @@ export const FormDialog: FC<FormDialogProps> = ({
                     {children}
                     <DialogFooter>
                         <Button type='button' variant='ghost' onClick={() => onOpenChange(false)}>
-                            취소
+                            {t('cancel')}
                         </Button>
                         <Button type='submit' disabled={submitDisabled}>
                             {submitLabel}

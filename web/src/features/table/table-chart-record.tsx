@@ -1,5 +1,6 @@
 import type { FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { LampLabel } from '@features/lamp/lamp-label'
 import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import type { TableSnapshotRecord } from '@entities/table-snapshot.type'
@@ -19,12 +20,14 @@ type TableChartRecordProps = {
 const BOX_CLASS_NAME = 'border-border flex flex-col gap-2 border p-2'
 
 export const TableChartRecord: FC<TableChartRecordProps> = ({ record, isSignedIn, isPending, loginHref }) => {
+    const t = useTranslations('pages.table.chartRecord')
+
     if (!isSignedIn)
         return (
             <div className={BOX_CLASS_NAME}>
-                <p className='text-muted-foreground text-xs'>로그인하면 내 램프와 점수가 표시됩니다.</p>
+                <p className='text-muted-foreground text-xs'>{t('signInPrompt')}</p>
                 <Button asChild variant='outline' size='sm' className='self-start'>
-                    <Link href={loginHref}>로그인</Link>
+                    <Link href={loginHref}>{t('signIn')}</Link>
                 </Button>
             </div>
         )
@@ -32,7 +35,7 @@ export const TableChartRecord: FC<TableChartRecordProps> = ({ record, isSignedIn
     if (isPending)
         return (
             <div className={BOX_CLASS_NAME} role='status' aria-busy='true'>
-                <span className='sr-only'>내 기록 불러오는 중</span>
+                <span className='sr-only'>{t('loading')}</span>
                 <Skeleton className='h-4 w-32' />
                 <Skeleton className='h-4 w-48' />
             </div>
@@ -42,7 +45,7 @@ export const TableChartRecord: FC<TableChartRecordProps> = ({ record, isSignedIn
         return (
             <div className={BOX_CLASS_NAME}>
                 <LampLabel lamp='NoPlay' className='text-xs' />
-                <p className='text-muted-foreground text-xs'>아직 이 차트의 기록이 없습니다.</p>
+                <p className='text-muted-foreground text-xs'>{t('noRecord')}</p>
             </div>
         )
 
@@ -71,13 +74,13 @@ export const TableChartRecord: FC<TableChartRecordProps> = ({ record, isSignedIn
                     <dd className='tabular-nums'>{formatCount(record.minbp)}</dd>
                 </div>
                 <div className='flex justify-between gap-2'>
-                    <dt className='text-muted-foreground'>최대 콤보</dt>
+                    <dt className='text-muted-foreground'>{t('maxCombo')}</dt>
                     <dd className='tabular-nums'>
                         {formatCount(record.max_combo)} <span className='text-muted-foreground'>/ {formatCount(record.total_notes)}</span>
                     </dd>
                 </div>
                 <div className='flex justify-between gap-2'>
-                    <dt className='text-muted-foreground'>기록 시각</dt>
+                    <dt className='text-muted-foreground'>{t('playedAt')}</dt>
                     <dd className='tabular-nums'>{formatDateTime(record.played_at)}</dd>
                 </div>
             </dl>

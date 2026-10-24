@@ -2,19 +2,19 @@ import { BookOpen, FolderHeart, House, Layers, ListOrdered, Search, Sparkles, Tr
 
 export type NavItem = {
     href: string
-    label: string
+    labelKey: 'home' | 'search' | 'leaderboards' | 'guide' | 'folders' | 'tables' | 'courses' | 'ai'
     icon: LucideIcon
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
-    { href: '/', label: '홈', icon: House },
-    { href: '/search', label: '차트 검색', icon: Search },
-    { href: '/leaderboards', label: '순위', icon: Trophy },
-    { href: '/guide', label: '가이드', icon: BookOpen },
-    { href: '/folders', label: '내 폴더', icon: FolderHeart },
-    { href: '/tables', label: '난이도표', icon: Layers },
-    { href: '/courses', label: '코스', icon: ListOrdered },
-    { href: '/ai', label: 'AI', icon: Sparkles },
+    { href: '/', labelKey: 'home', icon: House },
+    { href: '/search', labelKey: 'search', icon: Search },
+    { href: '/leaderboards', labelKey: 'leaderboards', icon: Trophy },
+    { href: '/guide', labelKey: 'guide', icon: BookOpen },
+    { href: '/folders', labelKey: 'folders', icon: FolderHeart },
+    { href: '/tables', labelKey: 'tables', icon: Layers },
+    { href: '/courses', labelKey: 'courses', icon: ListOrdered },
+    { href: '/ai', labelKey: 'ai', icon: Sparkles },
 ]
 
 export const SETTINGS_TAB_PARAM = 'tab'

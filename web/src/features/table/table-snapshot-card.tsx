@@ -1,6 +1,7 @@
 import type { FC, ReactNode } from 'react'
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { LampStackBar, type LampCount } from '@features/lamp/lamp-stack-bar'
 import type { TableSnapshotSummary } from '@entities/table-snapshot.type'
 import { PERCENT_SCALE } from '@shared/constants/ui'
@@ -16,6 +17,8 @@ type TableSnapshotCardProps = {
 }
 
 export const TableSnapshotCard: FC<TableSnapshotCardProps> = ({ table, progress, isProgressPending, isSignedIn, action }) => {
+    const t = useTranslations('pages.table.snapshotCard')
+    const tShared = useTranslations('pages.shared')
     const firstLevel = table.levels[0]?.level
     const lastLevel = table.levels[table.levels.length - 1]?.level
 
@@ -35,9 +38,9 @@ export const TableSnapshotCard: FC<TableSnapshotCardProps> = ({ table, progress,
                         </Link>
                     </h3>
                     <p className='text-muted-foreground text-xs tabular-nums'>
-                        {formatCount(table.entry_count)}곡 ·{' '}
+                        {tShared('songCount', { count: table.entry_count })} ·{' '}
                         {firstLevel && lastLevel && `${table.symbol}${firstLevel} ~ ${table.symbol}${lastLevel} · `}
-                        {formatCount(table.level_count)}단계 · 갱신 {table.last_update}
+                        {t('levelCount', { count: table.level_count })} · {t('updated', { date: table.last_update })}
                     </p>
                 </div>
             </div>
@@ -48,7 +51,7 @@ export const TableSnapshotCard: FC<TableSnapshotCardProps> = ({ table, progress,
                             <LampStackBar lamps={progress.lamps} />
                             <span className='text-muted-foreground text-xs tabular-nums'>
                                 <span className='text-foreground font-medium'>{formatCount(progress.played)}</span> / {formatCount(table.entry_count)}{' '}
-                                플레이 · {table.entry_count === 0 ? 0 : Math.round((progress.played / table.entry_count) * PERCENT_SCALE)}%
+                                {t('played')} · {table.entry_count === 0 ? 0 : Math.round((progress.played / table.entry_count) * PERCENT_SCALE)}%
                             </span>
                         </>
                     )}
@@ -59,9 +62,7 @@ export const TableSnapshotCard: FC<TableSnapshotCardProps> = ({ table, progress,
                         </>
                     )}
                     {!progress && !isProgressPending && (
-                        <span className='text-muted-foreground text-xs'>
-                            {isSignedIn ? '내 기록을 불러오지 못했습니다.' : '로그인하면 내 진행이 보입니다.'}
-                        </span>
+                        <span className='text-muted-foreground text-xs'>{isSignedIn ? t('recordsFailed') : t('signInPrompt')}</span>
                     )}
                 </div>
                 {action && <div className='relative z-(--z-raised) shrink-0'>{action}</div>}

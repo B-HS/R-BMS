@@ -1,17 +1,25 @@
 import { Suspense } from 'react'
+import { getTranslations } from 'next-intl/server'
 import { PanelSkeleton } from '@features/state/panel-skeleton'
 import { buildPageMetadata } from '@shared/lib/metadata'
 import { SettingsContent } from '@widgets/settings/settings-content'
 import { ShellPage } from '@widgets/shell/shell-page'
 
-export const metadata = buildPageMetadata({ title: '설정', description: '프로필, API 토큰, 동기화, 라이벌 설정.', index: false })
+export const generateMetadata = async () => {
+    const t = await getTranslations('pages.route.settings')
+    return buildPageMetadata({ title: t('title'), description: t('metaDescription'), index: false })
+}
 
-const SettingsPage = () => (
-    <ShellPage title='설정' description='프로필 · API 토큰 · 동기화 · 라이벌'>
-        <Suspense fallback={<PanelSkeleton height='page' label='설정 불러오는 중' />}>
-            <SettingsContent />
-        </Suspense>
-    </ShellPage>
-)
+const SettingsPage = async () => {
+    const t = await getTranslations('pages.route.settings')
+
+    return (
+        <ShellPage title={t('title')} description={t('description')}>
+            <Suspense fallback={<PanelSkeleton height='page' label={t('loading')} />}>
+                <SettingsContent />
+            </Suspense>
+        </ShellPage>
+    )
+}
 
 export default SettingsPage

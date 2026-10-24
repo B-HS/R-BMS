@@ -14,19 +14,6 @@ type ShellNavMenuProps = {
 const NAV_MENU_BUTTON_CLASS_NAME =
     'h-9 rounded-none px-3 group-data-[collapsible=icon]:h-9! group-data-[collapsible=icon]:w-full! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!'
 
-const NAV_LABEL_KEY = {
-    '/': 'home',
-    '/search': 'search',
-    '/leaderboards': 'leaderboards',
-    '/guide': 'guide',
-    '/folders': 'folders',
-    '/tables': 'tables',
-    '/courses': 'courses',
-    '/ai': 'ai',
-} as const
-
-const hasNavLabelKey = (href: string): href is keyof typeof NAV_LABEL_KEY => href in NAV_LABEL_KEY
-
 const isActivePath = (pathname: string, href: string) => (href === '/' ? pathname === href : pathname === href || pathname.startsWith(`${href}/`))
 
 const ShellNavMenuItems: FC<ShellNavMenuProps & { pathname: string | null }> = ({ items, pathname }) => {
@@ -35,8 +22,8 @@ const ShellNavMenuItems: FC<ShellNavMenuProps & { pathname: string | null }> = (
 
     return (
         <SidebarMenu className='gap-0 p-0'>
-            {items.map(({ href, label, icon: Icon }) => {
-                const text = hasNavLabelKey(href) ? t(NAV_LABEL_KEY[href]) : label
+            {items.map(({ href, labelKey, icon: Icon }) => {
+                const text = t(labelKey)
                 return (
                     <SidebarMenuItem key={href} className='min-w-0 flex-1'>
                         <SidebarMenuButton

@@ -1,4 +1,5 @@
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { cn } from '@shared/lib/cn'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 
@@ -20,6 +21,7 @@ const CHART_HEIGHT_CLASS = 'h-28'
  * Each bar is a button that selects its segment.
  */
 export const AiSegmentChart: FC<AiSegmentChartProps> = ({ segments, gaugeMax, selectedId, onSelect }) => {
+    const t = useTranslations('pages.ai')
     const maxBp = Math.max(1, ...segments.map((segment) => segment.bp))
     const points = segments.flatMap((segment, index) =>
         segment.gauge === null || gaugeMax <= 0
@@ -31,7 +33,7 @@ export const AiSegmentChart: FC<AiSegmentChartProps> = ({ segments, gaugeMax, se
 
     return (
         <div className={cn('relative w-full', CHART_HEIGHT_CLASS)}>
-            <ul aria-label='구간별 BP' className='flex h-full items-end gap-px'>
+            <ul aria-label={t('segmentChart.bpBySegment')} className='flex h-full items-end gap-px'>
                 {segments.map((segment) => (
                     <li key={segment.id} className='flex h-full flex-1 items-end'>
                         <button

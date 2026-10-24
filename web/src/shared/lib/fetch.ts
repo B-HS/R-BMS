@@ -3,6 +3,8 @@ export type ApiPagination = { page: number; limit: number; total: number; totalP
 export type ApiErrorResponse = { success: false; error: { code: string; message: string; details?: Record<string, unknown> } }
 export type ApiEnvelope<T> = ApiSuccessResponse<T> & { pagination?: ApiPagination }
 
+export const HTTP_ERROR_CODE = 'HTTP_ERROR'
+
 export class ApiError extends Error {
     code: string
     status: number
@@ -32,7 +34,7 @@ const readBody = async (response: Response) => {
 
 const failFromBody = (body: unknown, status: number) => {
     if (isEnvelope(body) && !body.success) return new ApiError(body.error.code, body.error.message, status, body.error.details)
-    return new ApiError('HTTP_ERROR', `요청이 실패했습니다 (${status})`, status)
+    return new ApiError(HTTP_ERROR_CODE, `요청이 실패했습니다 (${status})`, status)
 }
 
 export const API_BASE_PATH = '/api'

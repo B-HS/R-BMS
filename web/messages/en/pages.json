@@ -1,1 +1,491 @@
-{}
+{
+    "site": {
+        "tagline": "Score server for BMS players",
+        "description": "Score server for R-BMS players. Browse per-chart rankings, player records and difficulty tables."
+    },
+    "shared": {
+        "retry": "Try again",
+        "cancel": "Cancel",
+        "loading": "Loading",
+        "untitled": "Untitled",
+        "untitledWithHash": "Untitled {hash}",
+        "artistMissing": "Artist not registered",
+        "songCount": "{count, plural, one {# song} other {# songs}}"
+    },
+    "pagination": {
+        "navigation": "Page navigation",
+        "previous": "Previous page",
+        "next": "Next page",
+        "previousShort": "Previous",
+        "nextShort": "Next",
+        "more": "More pages"
+    },
+    "sidebar": {
+        "title": "Sidebar",
+        "description": "Main menu and account menu",
+        "toggle": "Collapse or expand the sidebar"
+    },
+    "copyButton": {
+        "copied": "Copied.",
+        "failed": "Could not copy. Select the text and copy it yourself."
+    },
+    "toaster": {
+        "label": "Notifications"
+    },
+    "errors": {
+        "http": "Request failed ({status})",
+        "unknown": "Could not process the request."
+    },
+    "auth": {
+        "signInFailed": "The ID or password is incorrect.",
+        "signOutFailed": "Could not sign out. Try again in a moment."
+    },
+    "state": {
+        "requestFailed": "The request failed. Try again in a moment.",
+        "queryErrorTitle": "The search expression could not be parsed",
+        "notFound": {
+            "title": "Page not found",
+            "description": "The address may have changed, or the page does not exist.",
+            "home": "Back to home"
+        }
+    },
+    "scratchAuto": {
+        "badgeTitle": "Play made with SCRATCH AUTO",
+        "toggle": "Include SCRATCH AUTO"
+    },
+    "globalError": {
+        "title": "Error",
+        "heading": "Something went wrong",
+        "description": "The page could not be displayed. Try again in a moment.",
+        "retry": "Try again"
+    },
+    "route": {
+        "home": {
+            "title": "Home",
+            "description": "Score server for R-BMS players",
+            "serverStatus": "Server status",
+            "serverStatusLoading": "Loading server status",
+            "recentActivity": "Recent activity",
+            "recentActivityLoading": "Loading recent activity"
+        },
+        "admin": {
+            "title": "Admin"
+        },
+        "adminAi": {
+            "title": "AI limits",
+            "metaDescription": "Per-user limits on AI calls.",
+            "description": "Per-user AI call limits"
+        },
+        "adminBuilds": {
+            "title": "Build management",
+            "metaDescription": "Allowlist of client builds.",
+            "description": "Client builds counted in the rankings",
+            "loading": "Loading build list"
+        },
+        "ai": {
+            "metaDescription": "Features that interpret your records with your own AI key.",
+            "description": "Interpret your records with your own key"
+        },
+        "aiPlay": {
+            "title": "Play coach",
+            "metaDescription": "Review one of your plays segment by segment and compare it with another play."
+        },
+        "chart": {
+            "title": "Chart",
+            "fallbackTitle": "Chart {hash}",
+            "metaDescription": "R-BMS rankings for {subject}."
+        },
+        "courseDetail": {
+            "title": "Course",
+            "metaDescription": "Charts in {name} and its R-BMS rankings."
+        },
+        "courses": {
+            "title": "Courses",
+            "metaDescription": "GENOSIDE 2018 dan courses and Stella/Satellite table courses registered in R-BMS, with the source of each course.",
+            "description": "Registered courses and their sources",
+            "loading": "Loading courses"
+        },
+        "folderEditor": {
+            "title": "Edit folder",
+            "loadingTitle": "Folder",
+            "metaDescription": "Edit the songs and order of your folder."
+        },
+        "folders": {
+            "title": "My folders",
+            "metaDescription": "Your song folders shown on the R-BMS song select screen.",
+            "description": "Song collections that appear like tables on the R-BMS song select screen"
+        },
+        "leaderboards": {
+            "title": "Rankings",
+            "metaDescription": "Overall player rankings on the R-BMS score server.",
+            "description": "Overall player rankings",
+            "loading": "Loading rankings"
+        },
+        "player": {
+            "title": "Player",
+            "metaDescription": "R-BMS records and lamp distribution of {name} (@{id})."
+        },
+        "replay": {
+            "title": "Replay",
+            "metaDescription": "Input record of an R-BMS replay."
+        },
+        "search": {
+            "title": "Chart search",
+            "metaDescription": "Find charts registered on the R-BMS score server by title, artist, mode or level.",
+            "description": "Find charts by title, artist, mode or level",
+            "loading": "Loading chart search"
+        },
+        "settings": {
+            "title": "Settings",
+            "metaDescription": "Profile, API token, sync and rival settings.",
+            "description": "Profile · API token · Sync · Rivals",
+            "loading": "Loading settings"
+        },
+        "tableDetail": {
+            "title": "Difficulty table",
+            "metaDescription": "Chart list of the {name} difficulty table."
+        },
+        "insane1": {
+            "metaDescription": "発狂BMS難易度表 (★1 ~ ★25). Register it in R-BMS by its table URL and see your lamps by level."
+        },
+        "tableSnapshot": {
+            "metaDescription": "{name} difficulty table. Register it in R-BMS by its table URL and see your lamps by level."
+        },
+        "tables": {
+            "title": "Difficulty tables",
+            "metaDescription": "BMS difficulty tables registered by default in R-BMS and tables provided by the score server.",
+            "description": "Tables registered by default in R-BMS and tables provided by the server",
+            "loading": "Loading difficulty tables"
+        },
+        "guide": {
+            "title": "Guide",
+            "metaDescription": "How to connect the R-BMS player to the score server: server address, account, rankings, replays, settings sync and rivals.",
+            "description": "Connect to the score server from inside the game"
+        },
+        "login": {
+            "title": "Sign in",
+            "metaDescription": "Sign in with your R-BMS account.",
+            "description": "Sign in with the ID and password you chose when signing up."
+        },
+        "signup": {
+            "title": "Sign up",
+            "metaDescription": "Create an R-BMS account.",
+            "description": "Create an R-BMS account. Your ID is used as the player ID shown in the rankings."
+        },
+        "notFound": {
+            "title": "Not found",
+            "description": "The address may have changed, or the page does not exist."
+        },
+        "error": {
+            "title": "Error",
+            "heading": "Something went wrong",
+            "description": "Try again in a moment."
+        }
+    },
+    "ai": {
+        "patternTag": {
+            "chord_2": "2-key chord",
+            "chord_3": "3-key chord",
+            "chord_4plus": "Chord of 4+ keys",
+            "jack": "Jack",
+            "trill": "Trill",
+            "stair": "Stairs",
+            "stream": "Stream",
+            "scratch_solo": "Scratch alone",
+            "scratch_chord": "Scratch chord",
+            "scratch_mixed": "Mixed with scratch",
+            "with_scratch": "Keys beside scratch",
+            "scratch_run": "Scratch run",
+            "ln_head": "LN start",
+            "ln_end": "LN end",
+            "ln_hold_hit": "Hit while holding LN",
+            "ln_release_then_hit": "Hit after releasing LN",
+            "soflan": "Soflan",
+            "dense": "High density",
+            "mine_near": "Near mines"
+        },
+        "evidence": {
+            "strong": "Strong evidence",
+            "uncertain": "Uncertain",
+            "insufficient": "Insufficient sample"
+        },
+        "failureKind": {
+            "invalid_key": "Key rejected",
+            "forbidden": "Check the key's permissions or model access",
+            "model_unavailable": "Model missing or retired",
+            "quota": "Balance or spending limit reached",
+            "rate_limited": "Rate limit exceeded",
+            "unavailable": "Could not reach the provider",
+            "refused": "Answer refused",
+            "truncated": "Output truncated",
+            "invalid_output": "Invalid output format",
+            "bad_request": "Invalid request format"
+        },
+        "dataNotice": "{reason} AI is not called in this state.",
+        "dataNeed": {
+            "fallback": "There are not enough records to interpret yet.",
+            "table_records": "You have no records on the table's songs yet. Play a few of its songs and open this again.",
+            "candidates": "There are no candidate songs to pick from your current records.",
+            "chart_patterns": "There is no per-song pattern data to pick from for this pattern yet.",
+            "goal_reached": "This goal has already been reached.",
+            "remaining_charts": "There are no songs left.",
+            "table": "The goal's difficulty table could not be found.",
+            "week_plays": "There were no plays this week.",
+            "recent_plays": "You have fewer than 10 recent plays. Play more and open this again.",
+            "traced_plays": "You have fewer than 5 plays with judgement data (note-level records of plays made with the new client; reports cover 7KEYS SP plays only). Play a few more and open this again.",
+            "play_trace": "This play has no judgement data (played with an old client or with upload turned off). Only the score record is shown.",
+            "play_metrics": "This play is not a 7KEYS SP play, so there is no segment analysis.",
+            "comparable_play": "There is no play to compare segments with. Only judgement totals are compared."
+        },
+        "failureNotice": {
+            "title": "The AI call failed",
+            "fallback": "The AI request could not be processed. Try again in a moment.",
+            "retryAfter": "The provider asked to try again in {seconds} seconds.",
+            "reselectModel": "Choose the model again in Settings.",
+            "openSettings": "Open AI settings"
+        },
+        "interpret": {
+            "generating": "AI is generating",
+            "regenerate": "Regenerate AI interpretation",
+            "generate": "Generate AI interpretation",
+            "hint": "Called once with your key only when you press the button. The same input reuses the stored interpretation."
+        },
+        "interpretationMeta": {
+            "cached": "Stored interpretation",
+            "stale": "Records or settings changed · can be regenerated"
+        },
+        "keyForm": {
+            "description": "After you register, the field is cleared at once and the key never appears on screen again."
+        },
+        "modelIdForm": {
+            "description": "If the list could not be fetched, enter the model id shown in the provider console as it is. A wrong id fails when called.",
+            "submit": "Use this model"
+        },
+        "modelSelect": {
+            "label": "Model",
+            "placeholder": "Choose a model",
+            "unverified": "Format support unverified",
+            "unsupported": "Format unsupported"
+        },
+        "principle": {
+            "title": "Principles of AI interpretation",
+            "computed": "Numbers, tables and graphs are computed by the server. The same records always give the same values.",
+            "interpretation": "Only the written interpretation is made by the AI, shown together with the provider and model that made it.",
+            "onRequest": "The AI is called only when you ask for it. A call uses your key and your usage limits, and the same input shows the stored result again."
+        },
+        "providerNotice": {
+            "title": "About key storage and costs",
+            "storage": "The key is stored encrypted on this server and used only for AI calls. You can revoke it at any time in the provider console.",
+            "billing": "AI calls happen only when you request them, and the cost is billed to your provider account. Setting a spending limit in the provider console is recommended."
+        },
+        "segmentChart": {
+            "bpBySegment": "BP by segment"
+        },
+        "setup": {
+            "no_key": {
+                "title": "No AI key is registered",
+                "description": "Register an API key for Anthropic, OpenAI or Ollama Cloud in Settings to use AI interpretation.",
+                "action": "Register an AI key"
+            },
+            "no_model": {
+                "title": "No model has been chosen",
+                "description": "A key is registered. Choose a model in Settings to use AI interpretation.",
+                "action": "Choose a model"
+            }
+        },
+        "tokenUsage": "Input {input, number} · output {output, number} tokens (cached {cached, number})",
+        "usageMeter": {
+            "unlimited": "{used, number} {unit} · no limit",
+            "rate": "{label} usage rate"
+        },
+        "credential": {
+            "key": "Key",
+            "registered": "Registered",
+            "lastValidated": "Last validated",
+            "notValidated": "Not validated yet"
+        },
+        "goalForm": {
+            "ariaLabel": "New goal",
+            "kind": "Goal type",
+            "level": "Level",
+            "lamp": "Lamp",
+            "lampOrAbove": "{lamp} or better",
+            "count": "Number of songs",
+            "md5": "Chart md5",
+            "md5Placeholder": "md5 of a song in the table",
+            "exRate": "Target EX rate (%)",
+            "submit": "Add goal",
+            "goalKind": {
+                "lamp_count_at_level": "N songs with a lamp at a level",
+                "clear_all_level": "Clear every song at a level",
+                "ex_rate_on_chart": "EX rate on one song"
+            }
+        },
+        "insightTone": {
+            "strength": "Strength",
+            "weakness": "Weakness",
+            "neutral": "Note"
+        },
+        "compareTotals": {
+            "play": "Play",
+            "lamp": "Lamp",
+            "thisPlay": "This play",
+            "comparedPlay": "Compared play"
+        },
+        "practiceFolder": {
+            "created": "Created practice folder \"{name}\"",
+            "updated": "Updated practice folder \"{name}\""
+        }
+    },
+    "folder": {
+        "formError": {
+            "controlCharacter": "Line breaks and control characters are not allowed.",
+            "nameTooLong": "The name can be up to {nameMax} characters.",
+            "nameRequired": "Enter a name.",
+            "descriptionTooLong": "The description can be up to {descriptionMax} characters.",
+            "noteTooLong": "The note can be up to {noteMax} characters."
+        },
+        "meta": {
+            "name": "Name",
+            "nameHint": "The name shown on the R-BMS song select screen. Up to {max} characters, and it must not match another folder.",
+            "description": "Description (optional)",
+            "descriptionHint": "One line, up to {max} characters. {length} / {max}"
+        },
+        "note": {
+            "title": "Edit note",
+            "apply": "Apply",
+            "label": "Note",
+            "hint": "Up to {max} characters. Press the save button for it to take effect."
+        },
+        "searchResult": {
+            "add": "Add",
+            "added": "Added",
+            "addAria": "Add {title}"
+        },
+        "chartRow": {
+            "new": "New",
+            "note": "Note: {note}",
+            "moveUp": "Move {title} up",
+            "moveDown": "Move {title} down",
+            "menu": "{title} menu",
+            "remove": "Remove {title}",
+            "moveTop": "Move to top",
+            "moveBottom": "Move to bottom",
+            "editNote": "Edit note"
+        },
+        "conflict": {
+            "title": "This folder was edited somewhere else first",
+            "summary": "The folder on the server was edited at {updatedAt} and has {count, plural, one {# song} other {# songs}}.",
+            "differences": "Differences from this screen: {list}.",
+            "same": "The song list is the same as on this screen.",
+            "onlyServer": "{count, plural, one {# song} other {# songs}} only on the server",
+            "onlyMine": "{count, plural, one {# song} other {# songs}} only on this screen",
+            "order": "Song order",
+            "name": "Name (server: {name})",
+            "description": "Description",
+            "useServer": "Load the server's version (discard my changes)",
+            "overwrite": "Overwrite with my changes"
+        },
+        "guide": {
+            "title": "View in R-BMS",
+            "body": "When you sign in to R-BMS, these folders appear in the same order under MY FOLDERS on the song select screen. R-BMS only reads them, so edit them here.",
+            "link": "See how to connect"
+        },
+        "listItem": {
+            "updated": "Edited {date}",
+            "noDescription": "No description",
+            "moveUp": "Move {name} up",
+            "moveDown": "Move {name} down",
+            "menu": "{name} menu",
+            "editMeta": "Edit name and description",
+            "delete": "Delete folder"
+        },
+        "tableImport": {
+            "title": "Import from a table",
+            "description": "Appends the songs of the chosen levels to the end of the list. Press the save button for it to take effect in R-BMS.",
+            "submitCount": "Add {count, plural, one {# song} other {# songs}}",
+            "submit": "Add",
+            "table": "Difficulty table",
+            "levels": "{name} levels",
+            "clearAll": "Clear all",
+            "selectAll": "Select all",
+            "chooseLevels": "Choose the levels to import.",
+            "summaryAdd": "Adding {count, plural, one {# song} other {# songs}}",
+            "summaryDuplicates": "({count, plural, one {# song} other {# songs}} already in the folder excluded)",
+            "overflow": "The folder has room for {capacity, plural, one {# more song} other {# more songs}}. Choose fewer levels to remove {overflow, plural, one {# song} other {# songs}}."
+        }
+    },
+    "table": {
+        "chartCard": {
+            "untitled": "No title"
+        },
+        "chartRecord": {
+            "signInPrompt": "Sign in to see your lamps and scores.",
+            "signIn": "Sign in",
+            "loading": "Loading your record",
+            "noRecord": "You have no record on this chart yet.",
+            "maxCombo": "Max combo",
+            "playedAt": "Recorded at"
+        },
+        "externalLink": "external site, new tab",
+        "filter": {
+            "level": "Level",
+            "fromLevel": "From level",
+            "toLevel": "To level",
+            "lamp": "Lamp",
+            "sort": "Sort"
+        },
+        "levelJump": "Jump to level",
+        "levelSection": {
+            "count": "{total, plural, one {# song} other {# songs}}",
+            "countShown": "{shown, number} / {total, plural, one {# song} other {# songs}}",
+            "playedOfTotal": "Played {played, number} of {total, plural, one {# song} other {# songs}}",
+            "matching": "{shown, plural, one {# song matches} other {# songs match}} the filter",
+            "condition": "Matching {shown, number}"
+        },
+        "loading": "Loading difficulty table",
+        "progress": {
+            "title": "My progress",
+            "collapse": "Collapse",
+            "byLevel": "By level",
+            "playedSongs": "Songs played",
+            "lampByLevel": "Lamp distribution by level"
+        },
+        "snapshotCard": {
+            "levelCount": "{count, plural, one {# level} other {# levels}}",
+            "updated": "updated {date}",
+            "played": "played",
+            "recordsFailed": "Could not load your records.",
+            "signInPrompt": "Sign in to see your progress."
+        },
+        "source": {
+            "ariaLabel": "Table source",
+            "label": "Source",
+            "originalTable": "Original table",
+            "fetchedAt": "Content retrieved {date}",
+            "checkedAt": "Last checked {date}"
+        }
+    },
+    "course": {
+        "source": {
+            "label": "Source",
+            "originalTable": "Original table",
+            "receivedOn": "Content retrieved {date} (KST)",
+            "officialFile": "Course definition: official course file from {maker} ({file})",
+            "received": "retrieved {date}",
+            "officialPage": "Official page",
+            "constraints": "Constraints and trophies",
+            "constraintReceived": "(retrieved {date})",
+            "dpNote": "The constraints and trophies of a DP course are the SP values of the same dan (there is no source for DP values)."
+        }
+    },
+    "dan": {
+        "displayed": "Displayed dan"
+    },
+    "lamp": {
+        "distribution": {
+            "played": "Charts played",
+            "rate": "Play rate"
+        }
+    }
+}

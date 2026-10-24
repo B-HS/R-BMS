@@ -20,7 +20,6 @@ import {
 } from '../../src/entities/ai.query'
 import {
     AI_ERROR_CODE,
-    AI_FAILURE_LABEL,
     AI_FORM_LIMIT,
     AI_PROVIDER_LABEL,
     AI_PROVIDER_NOTE,
@@ -31,6 +30,7 @@ import {
 } from '../../src/entities/ai.type'
 import { ERROR_CODE } from '../../src/server/lib/error-code'
 import { removeUserScopedQueries } from '../../src/entities/auth.query'
+import { MESSAGES } from '../../src/shared/i18n/messages'
 import { parseLimitInput } from '../../src/features/ai/parse-limit-input'
 import { AI_SETTINGS_HREF, NAV_ITEMS } from '../../src/shared/constants/navigation'
 import { QUERY_KEY } from '../../src/shared/constants/query-key'
@@ -70,7 +70,7 @@ describe('AI 화면과 서버의 계약', () => {
     })
 
     test('실패 종류 이름표가 서버의 실패 종류와 같다', () => {
-        expect(Object.keys(AI_FAILURE_LABEL).toSorted()).toEqual(Object.values(AI_FAILURE_KIND).toSorted())
+        expect(Object.keys(MESSAGES.ko.pages.ai.failureKind).toSorted()).toEqual(Object.values(AI_FAILURE_KIND).toSorted())
     })
 
     test('화면의 입력 한도가 서버 한도와 같다', () => {
@@ -141,7 +141,7 @@ describe('AI 실패 표시', () => {
         })
         expect(toAiFailureView(new ApiError('VALIDATION_ERROR', '모델', 400, { reason: 'model_not_selected' })).needsSettings).toBe(true)
         expect(toAiFailureView(new ApiError('AI_PROVIDER_RATE_LIMITED', 'x', 429, { retry_after_seconds: '17' })).retryAfterSeconds).toBeNull()
-        expect(toAiFailureView(new TypeError('network'))).toMatchObject({ needsSettings: false, code: null })
+        expect(toAiFailureView(new TypeError('network'))).toEqual({ message: null, retryAfterSeconds: null, needsSettings: false, code: null })
     })
 })
 
@@ -212,7 +212,7 @@ describe('AI entities 쿼리가 실제 라우트 주소와 응답 형태를 따�
 
 describe('AI 진입점 상수', () => {
     test('내비게이션에 AI 가 있고 설정의 AI 탭 주소가 고정되어 있다', () => {
-        expect(NAV_ITEMS.some((item) => item.href === '/ai' && item.label === 'AI')).toBe(true)
+        expect(NAV_ITEMS.some((item) => item.href === '/ai' && item.labelKey === 'ai')).toBe(true)
         expect(AI_SETTINGS_HREF).toBe('/settings?tab=ai')
     })
 

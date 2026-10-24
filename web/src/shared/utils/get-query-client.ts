@@ -1,14 +1,27 @@
 import { isServer, MutationCache, QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ApiError } from '@shared/lib/fetch'
+import { ApiError, HTTP_ERROR_CODE } from '@shared/lib/fetch'
 
 const STALE_TIME_MS = 60_000
 const GC_TIME_MS = 600_000
 
+type MutationErrorMessages = { http: (status: number) => string; unknown: string }
+
+const boundMessages: { current: MutationErrorMessages | null } = { current: null }
+
+/** Hands the toast of a failed mutation the sentences of the language on screen; the returned function unbinds them. */
+export const bindMutationErrorMessages = (messages: MutationErrorMessages) => {
+    boundMessages.current = messages
+    return () => {
+        if (boundMessages.current === messages) boundMessages.current = null
+    }
+}
+
 const toMessage = (error: unknown) => {
-    if (error instanceof ApiError) return error.message
+    const messages = boundMessages.current
+    if (error instanceof ApiError) return error.code === HTTP_ERROR_CODE && messages ? messages.http(error.status) : error.message
     if (error instanceof Error) return error.message
-    return '요청을 처리하지 못했습니다.'
+    return messages?.unknown ?? String(error)
 }
 
 export const createQueryClient = () =>

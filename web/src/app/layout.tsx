@@ -1,18 +1,22 @@
 import type { Metadata, Viewport } from 'next'
 import { NextIntlClientProvider } from 'next-intl'
-import { getLocale } from 'next-intl/server'
+import { getLocale, getTranslations } from 'next-intl/server'
 import '@app/globals.css'
 import { Providers } from '@app/providers'
-import { SITE_DESCRIPTION, SITE_LOCALE, SITE_NAME, SITE_URL } from '@shared/constants/site'
+import { OPEN_GRAPH_LOCALE, SITE_NAME, SITE_URL } from '@shared/constants/site'
 import { AppShell } from '@widgets/shell/app-shell'
 
-export const metadata: Metadata = {
-    metadataBase: new URL(SITE_URL),
-    applicationName: SITE_NAME,
-    title: { template: `%s | ${SITE_NAME}`, default: SITE_NAME },
-    description: SITE_DESCRIPTION,
-    openGraph: { type: 'website', siteName: SITE_NAME, locale: SITE_LOCALE, title: SITE_NAME, description: SITE_DESCRIPTION, url: '/' },
-    twitter: { card: 'summary', title: SITE_NAME, description: SITE_DESCRIPTION },
+export const generateMetadata = async (): Promise<Metadata> => {
+    const [locale, t] = await Promise.all([getLocale(), getTranslations('pages.site')])
+    const description = t('description')
+    return {
+        metadataBase: new URL(SITE_URL),
+        applicationName: SITE_NAME,
+        title: { template: `%s | ${SITE_NAME}`, default: SITE_NAME },
+        description,
+        openGraph: { type: 'website', siteName: SITE_NAME, locale: OPEN_GRAPH_LOCALE[locale], title: SITE_NAME, description, url: '/' },
+        twitter: { card: 'summary', title: SITE_NAME, description },
+    }
 }
 
 export const instant = false

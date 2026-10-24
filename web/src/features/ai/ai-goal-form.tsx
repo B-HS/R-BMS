@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@shared/ui/button'
 import { Input } from '@shared/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/ui/select'
 import { CLEAR_LAMPS, CLEAR_LAMP_LABEL, MIN_CLEAR_LAMP, type ClearLamp } from '@shared/constants/clear-lamp'
-import { AI_GOAL_KIND_LABEL, AI_SCORE_FEATURE_FORM_LIMIT, type AiGoalKind, type AiGoalParams } from '@entities/ai.type'
+import { AI_GOAL_KINDS, AI_SCORE_FEATURE_FORM_LIMIT, type AiGoalKind, type AiGoalParams } from '@entities/ai.type'
 
 const GOAL_LAMPS = CLEAR_LAMPS.slice(CLEAR_LAMPS.indexOf(MIN_CLEAR_LAMP))
 const DEFAULT_LAMP = 'Hard' satisfies ClearLamp
@@ -13,9 +14,8 @@ const DEFAULT_COUNT = '5'
 const DEFAULT_EX_RATE = '90'
 const MD5_PATTERN = /^[0-9a-f]{32}$/
 
-const isGoalKind = (value: string): value is AiGoalKind => value in AI_GOAL_KIND_LABEL
+const isGoalKind = (value: string): value is AiGoalKind => AI_GOAL_KINDS.some((kind) => kind === value)
 const isGoalLamp = (value: string): value is ClearLamp => GOAL_LAMPS.some((lamp) => lamp === value)
-const GOAL_KINDS = Object.keys(AI_GOAL_KIND_LABEL).filter(isGoalKind)
 
 type AiGoalFormProps = {
     tableId: string
@@ -27,6 +27,7 @@ type AiGoalFormProps = {
 
 /** Builds one goal of the fixed kinds (plan 5.7, no free sentence). The server checks it again against the table. */
 export const AiGoalForm: FC<AiGoalFormProps> = ({ tableId, symbol, levels, isSubmitting, onSubmit }) => {
+    const t = useTranslations('pages.ai.goalForm')
     const [kind, setKind] = useState<AiGoalKind>('lamp_count_at_level')
     const [level, setLevel] = useState(levels[0] ?? '')
     const [lamp, setLamp] = useState<ClearLamp>(DEFAULT_LAMP)
@@ -50,7 +51,7 @@ export const AiGoalForm: FC<AiGoalFormProps> = ({ tableId, symbol, levels, isSub
 
     return (
         <form
-            aria-label='새 목표'
+            aria-label={t('ariaLabel')}
             className='flex flex-wrap items-center gap-2'
             noValidate
             onSubmit={(event) => {
@@ -58,20 +59,20 @@ export const AiGoalForm: FC<AiGoalFormProps> = ({ tableId, symbol, levels, isSub
                 if (isValid) handleSubmit()
             }}>
             <Select value={kind} onValueChange={(value) => isGoalKind(value) && setKind(value)}>
-                <SelectTrigger size='sm' className='w-44' aria-label='목표 종류'>
+                <SelectTrigger size='sm' className='w-44' aria-label={t('kind')}>
                     <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                    {GOAL_KINDS.map((value) => (
+                    {AI_GOAL_KINDS.map((value) => (
                         <SelectItem key={value} value={value}>
-                            {AI_GOAL_KIND_LABEL[value]}
+                            {t(`goalKind.${value}`)}
                         </SelectItem>
                     ))}
                 </SelectContent>
             </Select>
             {kind !== 'ex_rate_on_chart' && (
                 <Select value={level} onValueChange={setLevel}>
-                    <SelectTrigger size='sm' className='w-24' aria-label='레벨'>
+                    <SelectTrigger size='sm' className='w-24' aria-label={t('level')}>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -87,19 +88,19 @@ export const AiGoalForm: FC<AiGoalFormProps> = ({ tableId, symbol, levels, isSub
             {kind === 'lamp_count_at_level' && (
                 <>
                     <Select value={lamp} onValueChange={(value) => isGoalLamp(value) && setLamp(value)}>
-                        <SelectTrigger size='sm' className='w-32' aria-label='램프'>
+                        <SelectTrigger size='sm' className='w-32' aria-label={t('lamp')}>
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                             {GOAL_LAMPS.map((value) => (
                                 <SelectItem key={value} value={value}>
-                                    {CLEAR_LAMP_LABEL[value]} 이상
+                                    {t('lampOrAbove', { lamp: CLEAR_LAMP_LABEL[value] })}
                                 </SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
                     <Input
-                        aria-label='곡 수'
+                        aria-label={t('count')}
                         inputMode='numeric'
                         className='h-7 w-20'
                         value={countText}
@@ -110,14 +111,14 @@ export const AiGoalForm: FC<AiGoalFormProps> = ({ tableId, symbol, levels, isSub
             {kind === 'ex_rate_on_chart' && (
                 <>
                     <Input
-                        aria-label='차트 md5'
+                        aria-label={t('md5')}
                         className='h-7 w-72 max-w-full font-mono'
                         value={md5}
-                        placeholder='표 곡의 md5'
+                        placeholder={t('md5Placeholder')}
                         onChange={(event) => setMd5(event.target.value)}
                     />
                     <Input
-                        aria-label='목표 EX 비율(%)'
+                        aria-label={t('exRate')}
                         inputMode='decimal'
                         className='h-7 w-20'
                         value={exRateText}
@@ -126,7 +127,7 @@ export const AiGoalForm: FC<AiGoalFormProps> = ({ tableId, symbol, levels, isSub
                 </>
             )}
             <Button type='submit' size='sm' disabled={!isValid || isSubmitting}>
-                목표 추가
+                {t('submit')}
             </Button>
         </form>
     )

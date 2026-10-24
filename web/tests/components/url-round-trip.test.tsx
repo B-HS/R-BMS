@@ -1,11 +1,14 @@
 import { afterAll, describe, expect, test } from 'bun:test'
+import type { ReactElement } from 'react'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 
 GlobalRegistrator.register()
 
 afterAll(() => GlobalRegistrator.unregister())
 
-const { fireEvent, render, within, cleanup } = await import('@testing-library/react')
+const { fireEvent, render: renderBare, within, cleanup } = await import('@testing-library/react')
+const { withIntl } = await import('../support/intl')
+const render = (ui: ReactElement) => renderBare(withIntl(ui))
 const { Pager } = await import('../../src/features/table/pager')
 const { ColumnToggle } = await import('../../src/features/table/column-toggle')
 const { serializeSearchParams, toggleListValue } = await import('../../src/shared/lib/search-params')

@@ -1,1 +1,491 @@
-{}
+{
+    "site": {
+        "tagline": "BMSプレーヤーのスコアサーバー",
+        "description": "R-BMSプレーヤーのスコアサーバー。譜面ごとのランキング、プレーヤーの記録、難易度表を見られます。"
+    },
+    "shared": {
+        "retry": "もう一度試す",
+        "cancel": "キャンセル",
+        "loading": "読み込み中",
+        "untitled": "タイトル未登録",
+        "untitledWithHash": "タイトル未登録 {hash}",
+        "artistMissing": "アーティスト未登録",
+        "songCount": "{count, number}曲"
+    },
+    "pagination": {
+        "navigation": "ページ移動",
+        "previous": "前のページ",
+        "next": "次のページ",
+        "previousShort": "前へ",
+        "nextShort": "次へ",
+        "more": "他のページ"
+    },
+    "sidebar": {
+        "title": "サイドバー",
+        "description": "メインメニューとアカウントメニュー",
+        "toggle": "サイドバーを折りたたむ・展開する"
+    },
+    "copyButton": {
+        "copied": "コピーしました。",
+        "failed": "コピーできませんでした。手動で選択してコピーしてください。"
+    },
+    "toaster": {
+        "label": "通知"
+    },
+    "errors": {
+        "http": "リクエストに失敗しました ({status})",
+        "unknown": "リクエストを処理できませんでした。"
+    },
+    "auth": {
+        "signInFailed": "IDまたはパスワードが正しくありません。",
+        "signOutFailed": "ログアウトできませんでした。しばらくしてからもう一度お試しください。"
+    },
+    "state": {
+        "requestFailed": "リクエストに失敗しました。しばらくしてからもう一度お試しください。",
+        "queryErrorTitle": "検索式を解釈できません",
+        "notFound": {
+            "title": "ページが見つかりません",
+            "description": "アドレスが変わったか、存在しないページです。",
+            "home": "ホームへ"
+        }
+    },
+    "scratchAuto": {
+        "badgeTitle": "SCRATCH AUTOでプレーした記録",
+        "toggle": "SCRATCH AUTOを含める"
+    },
+    "globalError": {
+        "title": "エラー",
+        "heading": "問題が発生しました",
+        "description": "画面を表示できませんでした。しばらくしてからもう一度お試しください。",
+        "retry": "もう一度試す"
+    },
+    "route": {
+        "home": {
+            "title": "ホーム",
+            "description": "R-BMSプレーヤーのスコアサーバー",
+            "serverStatus": "サーバーの状況",
+            "serverStatusLoading": "サーバーの状況を読み込み中",
+            "recentActivity": "最近の活動",
+            "recentActivityLoading": "最近の活動を読み込み中"
+        },
+        "admin": {
+            "title": "管理"
+        },
+        "adminAi": {
+            "title": "AIの上限",
+            "metaDescription": "AI呼び出しのユーザー別上限。",
+            "description": "ユーザー別のAI呼び出し上限"
+        },
+        "adminBuilds": {
+            "title": "ビルド管理",
+            "metaDescription": "クライアントビルドの許可リスト。",
+            "description": "ランキングに反映するクライアントビルド",
+            "loading": "ビルド一覧を読み込み中"
+        },
+        "ai": {
+            "metaDescription": "自分のAIキーで記録を解釈する機能の集まり。",
+            "description": "自分のキーで記録を解釈します"
+        },
+        "aiPlay": {
+            "title": "プレーコーチ",
+            "metaDescription": "自分のプレーを区間ごとに見て、別のプレーと比較します。"
+        },
+        "chart": {
+            "title": "譜面",
+            "fallbackTitle": "譜面 {hash}",
+            "metaDescription": "{subject}のR-BMSランキング。"
+        },
+        "courseDetail": {
+            "title": "コース",
+            "metaDescription": "{name}の構成譜面とR-BMSランキング。"
+        },
+        "courses": {
+            "title": "コース",
+            "metaDescription": "R-BMSに登録されたGENOSIDE 2018の段位コースとStella・Satelliteの表コース、各コースの出典。",
+            "description": "登録されたコースと出典",
+            "loading": "コースを読み込み中"
+        },
+        "folderEditor": {
+            "title": "フォルダの編集",
+            "loadingTitle": "フォルダ",
+            "metaDescription": "自分の曲フォルダの曲と順序を編集します。"
+        },
+        "folders": {
+            "title": "マイフォルダ",
+            "metaDescription": "R-BMSの選曲画面に表示される自分の曲フォルダ。",
+            "description": "R-BMSの選曲画面に表のように表示される曲のまとまり"
+        },
+        "leaderboards": {
+            "title": "ランキング",
+            "metaDescription": "R-BMSスコアサーバーのプレーヤー総合ランキング。",
+            "description": "プレーヤー総合ランキング",
+            "loading": "ランキングを読み込み中"
+        },
+        "player": {
+            "title": "プレーヤー",
+            "metaDescription": "{name}(@{id})のR-BMS記録とランプ分布。"
+        },
+        "replay": {
+            "title": "リプレイ",
+            "metaDescription": "R-BMSリプレイの入力記録。"
+        },
+        "search": {
+            "title": "譜面検索",
+            "metaDescription": "R-BMSスコアサーバーに登録された譜面を、タイトル、アーティスト、モード、レベルで探します。",
+            "description": "タイトル・アーティスト・モード・レベルで譜面を探す",
+            "loading": "譜面検索を読み込み中"
+        },
+        "settings": {
+            "title": "設定",
+            "metaDescription": "プロフィール、APIトークン、同期、ライバルの設定。",
+            "description": "プロフィール・APIトークン・同期・ライバル",
+            "loading": "設定を読み込み中"
+        },
+        "tableDetail": {
+            "title": "難易度表",
+            "metaDescription": "{name}難易度表の譜面一覧。"
+        },
+        "insane1": {
+            "metaDescription": "発狂BMS難易度表(★1 ~ ★25)。表のURLとしてR-BMSに登録すると、レベル別に自分のランプを確認できます。"
+        },
+        "tableSnapshot": {
+            "metaDescription": "{name}難易度表。表のURLとしてR-BMSに登録すると、レベル別に自分のランプを確認できます。"
+        },
+        "tables": {
+            "title": "難易度表",
+            "metaDescription": "R-BMSに標準で登録されているBMS難易度表と、スコアサーバーが提供する表。",
+            "description": "R-BMSに標準で登録されている表とサーバーが提供する表",
+            "loading": "難易度表を読み込み中"
+        },
+        "guide": {
+            "title": "ガイド",
+            "metaDescription": "R-BMSプレーヤーをスコアサーバーに接続する方法：サーバーのアドレス、アカウント、ランキング、リプレイ、設定の同期、ライバル。",
+            "description": "ゲーム内からスコアサーバーに接続する"
+        },
+        "login": {
+            "title": "ログイン",
+            "metaDescription": "R-BMSアカウントでログインします。",
+            "description": "登録時に決めたIDとパスワードでログインします。"
+        },
+        "signup": {
+            "title": "新規登録",
+            "metaDescription": "R-BMSアカウントを作成します。",
+            "description": "R-BMSアカウントを作成します。IDはランキングに表示されるプレーヤーIDとして使われます。"
+        },
+        "notFound": {
+            "title": "見つかりません",
+            "description": "アドレスが変わったか、存在しないページです。"
+        },
+        "error": {
+            "title": "エラー",
+            "heading": "問題が発生しました",
+            "description": "しばらくしてからもう一度お試しください。"
+        }
+    },
+    "ai": {
+        "patternTag": {
+            "chord_2": "2鍵同時押し",
+            "chord_3": "3鍵同時押し",
+            "chord_4plus": "4鍵以上の同時押し",
+            "jack": "連打",
+            "trill": "トリル",
+            "stair": "階段",
+            "stream": "連続乱打",
+            "scratch_solo": "単独スクラッチ",
+            "scratch_chord": "スクラッチ同時押し",
+            "scratch_mixed": "スクラッチ混じり",
+            "with_scratch": "スクラッチ横の鍵盤",
+            "scratch_run": "スクラッチ連続",
+            "ln_head": "LN始点",
+            "ln_end": "LN終点",
+            "ln_hold_hit": "LNを押したまま打つ",
+            "ln_release_then_hit": "LNを離した後に打つ",
+            "soflan": "ソフラン",
+            "dense": "高密度",
+            "mine_near": "地雷付近"
+        },
+        "evidence": {
+            "strong": "根拠十分",
+            "uncertain": "不確か",
+            "insufficient": "サンプル不足"
+        },
+        "failureKind": {
+            "invalid_key": "キーが拒否された",
+            "forbidden": "キーの権限またはモデルへのアクセスを確認してください",
+            "model_unavailable": "モデルが存在しないか提供終了",
+            "quota": "残高または支出上限に到達",
+            "rate_limited": "リクエスト上限超過",
+            "unavailable": "プロバイダーに接続できません",
+            "refused": "回答を拒否",
+            "truncated": "出力が途切れた",
+            "invalid_output": "出力形式エラー",
+            "bad_request": "リクエスト形式エラー"
+        },
+        "dataNotice": "{reason}この状態ではAIを呼び出しません。",
+        "dataNeed": {
+            "fallback": "解釈する記録がまだ足りません。",
+            "table_records": "難易度表の曲の記録がまだありません。表の曲を何回かプレーしてから、もう一度開いてください。",
+            "candidates": "現在の記録では選べる候補曲がありません。",
+            "chart_patterns": "このパターンで選べる曲別パターンデータがまだありません。",
+            "goal_reached": "すでに達成した目標です。",
+            "remaining_charts": "残りの曲はありません。",
+            "table": "目標の難易度表が見つかりません。",
+            "week_plays": "この週のプレーはありません。",
+            "recent_plays": "最近のプレーが10回未満です。さらにプレーしてから、もう一度開いてください。",
+            "traced_plays": "判定データ(新しいクライアントでプレーした回のノート単位の記録。レポートは7KEYS SPのプレーのみ)が5回未満です。あと何回かプレーしてから、もう一度開いてください。",
+            "play_trace": "このプレーには判定データがありません(古いクライアントでプレーしたか、アップロードをオフにしたプレー)。スコア記録のみ表示されます。",
+            "play_metrics": "このプレーは7KEYS SPのプレーではないため、区間分析がありません。",
+            "comparable_play": "区間を比べられるプレーがありません。判定の合計のみ比較します。"
+        },
+        "failureNotice": {
+            "title": "AI呼び出しに失敗しました",
+            "fallback": "AIリクエストを処理できませんでした。しばらくしてからもう一度お試しください。",
+            "retryAfter": "プロバイダーから{seconds}秒後に再試行するよう通知がありました。",
+            "reselectModel": "設定でモデルを選び直してください。",
+            "openSettings": "AI設定を開く"
+        },
+        "interpret": {
+            "generating": "AIが作成中",
+            "regenerate": "AI解釈を作り直す",
+            "generate": "AI解釈を作成",
+            "hint": "ボタンを押したときだけ、自分のキーで1回呼び出します。同じ入力なら保存済みの解釈を使います。"
+        },
+        "interpretationMeta": {
+            "cached": "保存済みの解釈",
+            "stale": "記録や設定が変わりました · 作り直せます"
+        },
+        "keyForm": {
+            "description": "登録すると入力欄がすぐに空になり、キーが画面に再表示されることはありません。"
+        },
+        "modelIdForm": {
+            "description": "一覧を取得できない場合は、プロバイダーのコンソールに表示されるモデルidをそのまま入力してください。誤ったidは呼び出し時に失敗します。",
+            "submit": "このモデルを使う"
+        },
+        "modelSelect": {
+            "label": "モデル",
+            "placeholder": "モデルを選択",
+            "unverified": "形式対応は未確認",
+            "unsupported": "形式未対応"
+        },
+        "principle": {
+            "title": "AI解釈の原則",
+            "computed": "数字、表、グラフはサーバーが計算した結果です。同じ記録なら常に同じ値になります。",
+            "interpretation": "文章の解釈だけをAIが作成し、どのプロバイダーとモデルが作成したかを併せて表示します。",
+            "onRequest": "AIは自分で要求したときだけ呼び出されます。呼び出しには自分のキーと使用上限が使われ、同じ入力には保存済みの結果が再表示されます。"
+        },
+        "providerNotice": {
+            "title": "キーの保管と費用について",
+            "storage": "キーはこのサーバーに暗号化して保管し、AI呼び出しにのみ使います。プロバイダーのコンソールからいつでも取り消せます。",
+            "billing": "AI呼び出しは自分で要求したときだけ行われ、費用は自分のプロバイダーアカウントに請求されます。プロバイダーのコンソールで支出上限を設定することをおすすめします。"
+        },
+        "segmentChart": {
+            "bpBySegment": "区間別BP"
+        },
+        "setup": {
+            "no_key": {
+                "title": "登録されたAIキーがありません",
+                "description": "設定でAnthropic、OpenAI、Ollama CloudのいずれかのAPIキーを登録すると、AI解釈を使えます。",
+                "action": "AIキーを登録する"
+            },
+            "no_model": {
+                "title": "使用するモデルが選択されていません",
+                "description": "キーは登録されています。設定でモデルを選ぶと、AI解釈を使えます。",
+                "action": "モデルを選ぶ"
+            }
+        },
+        "tokenUsage": "入力{input, number} · 出力{output, number}トークン(キャッシュ{cached, number})",
+        "usageMeter": {
+            "unlimited": "{used, number} {unit} · 制限なし",
+            "rate": "{label}の使用率"
+        },
+        "credential": {
+            "key": "キー",
+            "registered": "登録",
+            "lastValidated": "最終検証",
+            "notValidated": "未検証"
+        },
+        "goalForm": {
+            "ariaLabel": "新しい目標",
+            "kind": "目標の種類",
+            "level": "レベル",
+            "lamp": "ランプ",
+            "lampOrAbove": "{lamp}以上",
+            "count": "曲数",
+            "md5": "譜面md5",
+            "md5Placeholder": "表の曲のmd5",
+            "exRate": "目標EX率(%)",
+            "submit": "目標を追加",
+            "goalKind": {
+                "lamp_count_at_level": "レベルでランプN曲",
+                "clear_all_level": "レベルの全曲クリア",
+                "ex_rate_on_chart": "1曲のEX率"
+            }
+        },
+        "insightTone": {
+            "strength": "強み",
+            "weakness": "弱点",
+            "neutral": "参考"
+        },
+        "compareTotals": {
+            "play": "プレー",
+            "lamp": "ランプ",
+            "thisPlay": "このプレー",
+            "comparedPlay": "比較プレー"
+        },
+        "practiceFolder": {
+            "created": "練習フォルダ「{name}」を作成しました",
+            "updated": "練習フォルダ「{name}」を更新しました"
+        }
+    },
+    "folder": {
+        "formError": {
+            "controlCharacter": "改行や制御文字は使えません。",
+            "nameTooLong": "名前は{nameMax}文字まで使えます。",
+            "nameRequired": "名前を入力してください。",
+            "descriptionTooLong": "説明は{descriptionMax}文字まで使えます。",
+            "noteTooLong": "メモは{noteMax}文字まで使えます。"
+        },
+        "meta": {
+            "name": "名前",
+            "nameHint": "R-BMSの選曲画面に表示される名前です。{max}文字まで、他のフォルダと重複してはいけません。",
+            "description": "説明(任意)",
+            "descriptionHint": "1行、{max}文字まで。{length} / {max}"
+        },
+        "note": {
+            "title": "メモの編集",
+            "apply": "適用",
+            "label": "メモ",
+            "hint": "{max}文字まで。保存ボタンを押すと反映されます。"
+        },
+        "searchResult": {
+            "add": "追加",
+            "added": "追加済み",
+            "addAria": "{title}を追加"
+        },
+        "chartRow": {
+            "new": "新規",
+            "note": "メモ：{note}",
+            "moveUp": "{title}を上へ",
+            "moveDown": "{title}を下へ",
+            "menu": "{title}のメニュー",
+            "remove": "{title}を外す",
+            "moveTop": "一番上へ",
+            "moveBottom": "一番下へ",
+            "editNote": "メモを編集"
+        },
+        "conflict": {
+            "title": "別の場所で先に編集されたフォルダです",
+            "summary": "サーバーのフォルダは{updatedAt}に編集され、{count, number}曲です。",
+            "differences": "この画面との違い：{list}。",
+            "same": "曲リストはこの画面と同じです。",
+            "onlyServer": "サーバーにのみある曲{count, number}曲",
+            "onlyMine": "この画面にのみある曲{count, number}曲",
+            "order": "曲順",
+            "name": "名前(サーバー：{name})",
+            "description": "説明",
+            "useServer": "サーバーの内容を読み込む(自分の変更は破棄)",
+            "overwrite": "自分の変更で上書き"
+        },
+        "guide": {
+            "title": "R-BMSで見る",
+            "body": "R-BMSにログインすると、選曲画面のMY FOLDERSの下にこれらのフォルダが同じ順序で表示されます。R-BMSは読み取りのみのため、編集はここで行います。",
+            "link": "接続方法を見る"
+        },
+        "listItem": {
+            "updated": "{date}に編集",
+            "noDescription": "説明なし",
+            "moveUp": "{name}を上へ",
+            "moveDown": "{name}を下へ",
+            "menu": "{name}のメニュー",
+            "editMeta": "名前・説明を編集",
+            "delete": "フォルダを削除"
+        },
+        "tableImport": {
+            "title": "表から取り込み",
+            "description": "選んだレベルの曲をリストの末尾に追加します。保存ボタンを押すとR-BMSに反映されます。",
+            "submitCount": "{count, number}曲を追加",
+            "submit": "追加",
+            "table": "難易度表",
+            "levels": "{name}のレベル",
+            "clearAll": "すべて解除",
+            "selectAll": "すべて選択",
+            "chooseLevels": "取り込むレベルを選んでください。",
+            "summaryAdd": "{count, number}曲を追加",
+            "summaryDuplicates": "(すでに入っている{count, number}曲を除く)",
+            "overflow": "フォルダにはあと{capacity, number}曲追加できます。レベルを減らして{overflow, number}曲を減らしてください。"
+        }
+    },
+    "table": {
+        "chartCard": {
+            "untitled": "タイトルなし"
+        },
+        "chartRecord": {
+            "signInPrompt": "ログインすると自分のランプとスコアが表示されます。",
+            "signIn": "ログイン",
+            "loading": "自分の記録を読み込み中",
+            "noRecord": "この譜面の記録はまだありません。",
+            "maxCombo": "最大コンボ",
+            "playedAt": "記録日時"
+        },
+        "externalLink": "外部サイト、新しいタブ",
+        "filter": {
+            "level": "レベル",
+            "fromLevel": "開始レベル",
+            "toLevel": "終了レベル",
+            "lamp": "ランプ",
+            "sort": "並べ替え"
+        },
+        "levelJump": "レベルへ移動",
+        "levelSection": {
+            "count": "{total, number}曲",
+            "countShown": "{shown, number} / {total, number}曲",
+            "playedOfTotal": "{total, number}曲中{played, number}曲プレー",
+            "matching": "条件に合う{shown, number}曲",
+            "condition": "条件{shown, number}"
+        },
+        "loading": "難易度表を読み込み中",
+        "progress": {
+            "title": "自分の進捗",
+            "collapse": "折りたたむ",
+            "byLevel": "レベル別に見る",
+            "playedSongs": "プレーした曲",
+            "lampByLevel": "レベル別ランプ分布"
+        },
+        "snapshotCard": {
+            "levelCount": "{count, number}段階",
+            "updated": "更新{date}",
+            "played": "プレー済み",
+            "recordsFailed": "自分の記録を読み込めませんでした。",
+            "signInPrompt": "ログインすると自分の進捗が表示されます。"
+        },
+        "source": {
+            "ariaLabel": "表の出典",
+            "label": "出典",
+            "originalTable": "元の表",
+            "fetchedAt": "内容取得日 {date}",
+            "checkedAt": "最終確認 {date}"
+        }
+    },
+    "course": {
+        "source": {
+            "label": "出典",
+            "originalTable": "元の表",
+            "receivedOn": "内容取得日 {date} (KST)",
+            "officialFile": "コース定義 {maker}公式コースファイル({file})",
+            "received": "{date}取得",
+            "officialPage": "公式ページ",
+            "constraints": "制約・トロフィー",
+            "constraintReceived": "({date}取得)",
+            "dpNote": "DPコースの制約・トロフィーは同じ段位のSPの値です(DPの値の出典はありません)。"
+        }
+    },
+    "dan": {
+        "displayed": "表示する段位"
+    },
+    "lamp": {
+        "distribution": {
+            "played": "プレーした譜面",
+            "rate": "プレー率"
+        }
+    }
+}

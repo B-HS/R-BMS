@@ -1,6 +1,7 @@
 'use client'
 
 import { useId, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { cn } from '@shared/lib/cn'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/ui/select'
 
@@ -41,6 +42,7 @@ export const TableFilterFields: FC<TableFilterFieldsProps> = ({
     sort,
     onSortChange,
 }) => {
+    const t = useTranslations('pages.table.filter')
     const fieldId = useId()
     const isStacked = layout === 'stacked'
     const fieldClassName = cn('flex min-w-0 gap-2', isStacked ? 'flex-col' : 'items-center')
@@ -50,11 +52,11 @@ export const TableFilterFields: FC<TableFilterFieldsProps> = ({
         <div className={cn('flex min-w-0 gap-3', isStacked ? 'flex-col' : 'flex-wrap items-center')}>
             <div role='group' aria-labelledby={`${fieldId}-level`} className={fieldClassName}>
                 <span id={`${fieldId}-level`} className={FIELD_LABEL_CLASS_NAME}>
-                    레벨
+                    {t('level')}
                 </span>
                 <div className='flex items-center gap-1'>
                     <Select value={from} onValueChange={onFromChange}>
-                        <SelectTrigger aria-label='시작 레벨' size={triggerSize} className={isStacked ? 'flex-1' : 'w-24'}>
+                        <SelectTrigger aria-label={t('fromLevel')} size={triggerSize} className={isStacked ? 'flex-1' : 'w-24'}>
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -69,7 +71,7 @@ export const TableFilterFields: FC<TableFilterFieldsProps> = ({
                         ~
                     </span>
                     <Select value={to} onValueChange={onToChange}>
-                        <SelectTrigger aria-label='끝 레벨' size={triggerSize} className={isStacked ? 'flex-1' : 'w-24'}>
+                        <SelectTrigger aria-label={t('toLevel')} size={triggerSize} className={isStacked ? 'flex-1' : 'w-24'}>
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -84,7 +86,7 @@ export const TableFilterFields: FC<TableFilterFieldsProps> = ({
             </div>
             <div className={fieldClassName}>
                 <label htmlFor={`${fieldId}-lamp`} className={FIELD_LABEL_CLASS_NAME}>
-                    램프
+                    {t('lamp')}
                 </label>
                 <Select value={lamp} onValueChange={onLampChange} disabled={isLampDisabled}>
                     <SelectTrigger
@@ -110,7 +112,7 @@ export const TableFilterFields: FC<TableFilterFieldsProps> = ({
             </div>
             <div className={fieldClassName}>
                 <label htmlFor={`${fieldId}-sort`} className={FIELD_LABEL_CLASS_NAME}>
-                    정렬
+                    {t('sort')}
                 </label>
                 <Select value={sort} onValueChange={onSortChange}>
                     <SelectTrigger id={`${fieldId}-sort`} size={triggerSize} className={isStacked ? 'w-full' : 'w-36'}>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { formatCount, formatDateTime, formatHash, formatPercent } from '../../src/shared/lib/format'
+import { formatChartTitle, formatCount, formatDateTime, formatHash, formatPercent } from '../../src/shared/lib/format'
 
 describe('formatDateTime 은 실행 타임존과 무관하게 같은 문자열을 만든다', () => {
     test('UTC 2025-09-04 15:33:20 은 KST 로 하루 넘겨 표시된다', () => {
@@ -27,5 +27,12 @@ describe('format 유틸', () => {
     test('formatPercent 는 분모 0 을 0.00% 로 처리한다', () => {
         expect(formatPercent(3, 0)).toBe('0.00%')
         expect(formatPercent(1, 8)).toBe('12.50%')
+    })
+
+    test('formatChartTitle 은 제목이 비면 받은 이름표에 해시를 붙이고 이름표가 없으면 한국어 이름표를 쓴다', () => {
+        const untitled = { title: '  ', sha256: 'b1946ac92492d2347c6235b4d2611184' }
+        expect(formatChartTitle(untitled, 'Untitled')).toBe('Untitled b1946ac9…')
+        expect(formatChartTitle(untitled)).toBe('제목 미등록 b1946ac9…')
+        expect(formatChartTitle({ title: ' Song ', sha256: untitled.sha256 }, 'Untitled')).toBe('Song')
     })
 })

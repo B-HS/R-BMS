@@ -1,8 +1,9 @@
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { LampStrip } from '@features/lamp/lamp-strip'
 import type { TableSnapshotEntry, TableSnapshotRecord } from '@entities/table-snapshot.type'
 import { lampLabel } from '@shared/constants/clear-lamp'
-import { SCRATCH_AUTO_BADGE_LABEL, SCRATCH_AUTO_BADGE_TITLE } from '@shared/constants/scratch-auto'
+import { SCRATCH_AUTO_BADGE_LABEL } from '@shared/constants/scratch-auto'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
 import { formatCount, getMaxExScore } from '@shared/lib/format'
@@ -17,10 +18,12 @@ type TableChartCardProps = {
 }
 
 export const TableChartCard: FC<TableChartCardProps> = ({ entry, symbol, record, isRecordPending, onOpen }) => {
+    const t = useTranslations('pages.table.chartCard')
+    const tScratchAuto = useTranslations('pages.scratchAuto')
     const lamp = record?.clear ?? 'NoPlay'
     const maxExScore = record ? getMaxExScore(record.total_notes) : 0
     const rank = record ? getDjRank(record.ex_score, maxExScore) : null
-    const title = entry.title || '제목 없음'
+    const title = entry.title || t('untitled')
 
     return (
         <button
@@ -32,7 +35,7 @@ export const TableChartCard: FC<TableChartCardProps> = ({ entry, symbol, record,
                 `${symbol}${entry.level}`,
                 lampLabel(lamp, record?.assist_grade),
                 rank,
-                record?.scratch_auto && SCRATCH_AUTO_BADGE_TITLE,
+                record?.scratch_auto && tScratchAuto('badgeTitle'),
             ]
                 .filter(Boolean)
                 .join(' · ')}

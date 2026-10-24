@@ -1,6 +1,7 @@
 'use client'
 
 import type { ComponentProps, FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { useTheme } from 'next-themes'
 import { Toaster } from 'sonner'
 
@@ -19,12 +20,13 @@ const TOAST_OPTIONS = {
 
 export const AppToaster: FC = () => {
     const { resolvedTheme } = useTheme()
+    const t = useTranslations('pages.toaster')
 
     return (
         <Toaster
             position='bottom-right'
             theme={resolvedTheme === 'light' ? 'light' : 'dark'}
-            containerAriaLabel='알림'
+            containerAriaLabel={t('label')}
             className={TOASTER_CLASS_NAME}
             toastOptions={TOAST_OPTIONS}
         />

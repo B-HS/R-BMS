@@ -77,23 +77,38 @@ export const toNewFolderItemInput = (item: Pick<FolderItem, 'md5'> & Partial<Fol
     note: item.note ?? '',
 })
 
-const singleLineText = (max: number, tooLongMessage: string) =>
+export const FOLDER_FORM_ERROR = {
+    CONTROL_CHARACTER: 'controlCharacter',
+    NAME_TOO_LONG: 'nameTooLong',
+    NAME_REQUIRED: 'nameRequired',
+    DESCRIPTION_TOO_LONG: 'descriptionTooLong',
+    NOTE_TOO_LONG: 'noteTooLong',
+} as const
+
+export type FolderFormError = (typeof FOLDER_FORM_ERROR)[keyof typeof FOLDER_FORM_ERROR]
+
+export const isFolderFormError = (value: string): value is FolderFormError => Object.values<string>(FOLDER_FORM_ERROR).includes(value)
+
+const singleLineText = (max: number, tooLongError: FolderFormError) =>
     z
         .string()
         .transform((value) => value.normalize('NFC').trim())
-        .refine((value) => !CONTROL_CHARACTERS.test(value), '줄바꿈이나 제어 문자는 쓸 수 없습니다.')
-        .refine((value) => value.length <= max, tooLongMessage)
+        .refine((value) => !CONTROL_CHARACTERS.test(value), FOLDER_FORM_ERROR.CONTROL_CHARACTER)
+        .refine((value) => value.length <= max, tooLongError)
 
-/** Mirrors the server's folder name and description rules so the form rejects what the API would reject. */
+/**
+ * Mirrors the server's folder name and description rules so the form rejects what the API would reject.
+ * An issue's message is a `FOLDER_FORM_ERROR` code that the form words in the current language.
+ */
 export const folderMetaFormSchema = z.object({
-    name: singleLineText(FOLDER_LIMIT.NAME_MAX, `이름은 ${FOLDER_LIMIT.NAME_MAX}자까지 쓸 수 있습니다.`).refine(
+    name: singleLineText(FOLDER_LIMIT.NAME_MAX, FOLDER_FORM_ERROR.NAME_TOO_LONG).refine(
         (value) => value.length >= 1,
-        '이름을 입력하세요.',
+        FOLDER_FORM_ERROR.NAME_REQUIRED,
     ),
-    description: singleLineText(FOLDER_LIMIT.DESCRIPTION_MAX, `설명은 ${FOLDER_LIMIT.DESCRIPTION_MAX}자까지 쓸 수 있습니다.`),
+    description: singleLineText(FOLDER_LIMIT.DESCRIPTION_MAX, FOLDER_FORM_ERROR.DESCRIPTION_TOO_LONG),
 })
 
-export const folderNoteFormSchema = singleLineText(FOLDER_LIMIT.NOTE_MAX, `메모는 ${FOLDER_LIMIT.NOTE_MAX}자까지 쓸 수 있습니다.`)
+export const folderNoteFormSchema = singleLineText(FOLDER_LIMIT.NOTE_MAX, FOLDER_FORM_ERROR.NOTE_TOO_LONG)
 
 export type FolderMetaInput = z.infer<typeof folderMetaFormSchema>
 

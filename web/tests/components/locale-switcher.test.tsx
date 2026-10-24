@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test'
 import { AppRouterContext, type AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { DISPLAY_TIME_ZONE } from '../../src/shared/lib/format'
 
 GlobalRegistrator.register({ url: 'http://localhost/' })
 
@@ -31,7 +32,7 @@ type Locale = import('../../src/shared/i18n/locale').Locale
 const renderSwitcher = (locale: Locale) =>
     mount(
         <AppRouterContext.Provider value={ROUTER}>
-            <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]}>
+            <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]} timeZone={DISPLAY_TIME_ZONE}>
                 <TooltipProvider>
                     <SidebarProvider>
                         <LocaleSwitcher />
