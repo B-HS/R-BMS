@@ -19,6 +19,7 @@ const { PlayerLeaderboardPanel } = await import('../../src/widgets/leaderboard/p
 const { PlayerDetailPanel } = await import('../../src/widgets/player/player-detail-panel')
 const { QUERY_KEY } = await import('../../src/shared/constants/query-key')
 const { SidebarProvider } = await import('../../src/shared/ui/sidebar')
+const { withLocale } = await import('../support/browse-intl')
 
 type DisplayedDan = import('../../src/entities/dan.type').DisplayedDan
 type PlayerLeaderboardRow = import('../../src/entities/stats.type').PlayerLeaderboardRow
@@ -45,7 +46,7 @@ const router = { push: () => undefined, back: () => undefined, forward: () => un
 const withApp = (queryClient: QueryClient, ui: React.ReactNode) => (
     <AppRouterContext.Provider value={router as never}>
         <PathnameContext.Provider value={PATHNAME}>
-            <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+            <QueryClientProvider client={queryClient}>{withLocale(ui)}</QueryClientProvider>
         </PathnameContext.Provider>
     </AppRouterContext.Provider>
 )

@@ -1,1 +1,643 @@
-{}
+{
+    "home": {
+        "intro": {
+            "title": "R-BMS スコアサーバー",
+            "description": "R-BMS はBMSプレーヤーです。このサイトは、そのプレーヤーがスコアを送信するインターネットランキングサーバーで、送信された記録や難易度表をここで見ることができます。",
+            "highlights": {
+                "scores": "プレーした譜面のスコアとランプがアカウントに蓄積され、譜面ごとに順位が付きます。",
+                "rivals": "ライバルを登録すると、ゲーム内のランキングパネルですぐに比較できます。",
+                "sync": "設定とキー配置をサーバーにアップロードして、別の端末でダウンロードできます。"
+            },
+            "guideLink": "接続方法を見る",
+            "insaneLink": "発狂BMS難易度表を見る",
+            "searchLink": "譜面検索"
+        },
+        "recent": {
+            "title": "最近のアクティビティ",
+            "loading": "最近のアクティビティを読み込み中",
+            "loadError": "最近のアクティビティを読み込めませんでした。",
+            "empty": "まだ記録が投稿されていません。",
+            "guideButton": "ガイドを見る",
+            "listLabel": "最近の送信一覧",
+            "note": "ランキングに反映される送信のみ表示されます。SCRATCH AUTOのプレーはこの一覧には表示されず、譜面・コースのランキングで確認できます。"
+        },
+        "stats": {
+            "title": "サーバー状況",
+            "loading": "サーバー状況を読み込み中",
+            "loadError": "サーバー状況を読み込めませんでした。",
+            "charts": "登録譜面",
+            "players": "プレーヤー",
+            "submissions": "累計送信数"
+        }
+    },
+    "leaderboard": {
+        "columns": {
+            "rank": "順位",
+            "player": "プレーヤー",
+            "cleared": "クリア",
+            "playedCharts": "プレー曲数",
+            "totalPlays": "送信数"
+        },
+        "sortLabel": "並び替え",
+        "sort": {
+            "cleared": "クリアした譜面数",
+            "played": "プレーした譜面数",
+            "plays": "スコア送信数"
+        },
+        "summaryLoading": "読み込み中",
+        "summaryPlayers": "プレーヤー{count, number}人",
+        "loading": "ランキングを読み込み中",
+        "loadError": "ランキングを読み込めませんでした",
+        "empty": "まだランキングに載っているプレーヤーはいません",
+        "caption": "プレーヤー総合ランキング",
+        "note": "クリア数・プレー曲数・送信数は、初期状態ではSCRATCH AUTOのプレーを含め、曲ごとに高い方の記録で集計されます。「SCRATCH AUTOを含める」をオフにすると通常プレーのみ集計されます。クリアとはFAILED以外のすべてのランプ(ASSISTを含む)です。"
+    },
+    "player": {
+        "detail": {
+            "pageTitle": "プレーヤー",
+            "notFoundTitle": "プレーヤーが見つかりません",
+            "notFoundDescription": "IDが変更されたか、登録していないプレーヤーです。",
+            "notFoundAction": "ランキングへ",
+            "loadError": "プレーヤーを読み込めませんでした",
+            "plays": "送信数 <value>{total, number}</value>"
+        },
+        "recent": {
+            "title": "プレー履歴",
+            "count": "{count, number}プレー",
+            "loading": "プレー履歴を読み込み中",
+            "loadError": "プレー履歴を読み込めませんでした。",
+            "empty": "まだ記録がありません。",
+            "pageEmpty": "このページには記録がありません。",
+            "lastPage": "最後のページへ",
+            "listLabel": "プレーヤーのプレー履歴",
+            "coach": "プレーコーチ",
+            "note": "ランキングへの反映の有無にかかわらず、すべてのプレーを新しい順に表示します。A-SCRはSCRATCH AUTOで行った記録です。"
+        },
+        "stats": {
+            "lampTitle": "ランプ分布",
+            "loading": "統計を読み込み中",
+            "loadError": "統計を読み込めませんでした。",
+            "totalPlays": "総送信数",
+            "totalPlaysHint": "スコア送信回数",
+            "clearedCharts": "クリアした譜面",
+            "clearedHint": "プレーした譜面{played, number}個中",
+            "clearedHintWithScratchAuto": "プレーした譜面{played, number}個中 · SCRATCH AUTOの記録{scratchAuto, number}曲を含む",
+            "clearRate": "クリア率",
+            "clearRateHint": "プレーした譜面が基準",
+            "clearedLabel": "クリアした譜面"
+        }
+    },
+    "replay": {
+        "pageTitle": "リプレイ",
+        "notFoundTitle": "リプレイが見つかりません",
+        "notFoundDescription": "このリプレイは削除されたか、アップロードされたことがありません。",
+        "loadError": "リプレイを読み込めませんでした",
+        "chart": "譜面",
+        "score": "スコア",
+        "events": "イベント",
+        "length": "長さ",
+        "seconds": "{seconds}秒",
+        "build": "ビルド",
+        "size": "サイズ",
+        "bytes": "{size, number} bytes",
+        "waterfallTitle": "入力ウォーターフォール",
+        "waterfallFootnote": "イベントのタイムスタンプはμs単位の元の値です。横1秒 = 96px、キーボードナビゲーションには対応していません。",
+        "waterfallFootnoteLimited": "イベントのタイムスタンプはμs単位の元の値です。横1秒 = 96px、キーボードナビゲーションには対応していません。全{total, number}件のうち先頭の{shown, number}件のみ描画します。",
+        "waterfallLabel": "{lanes}レーンにわたる入力イベント{events}件、全長{seconds}秒"
+    },
+    "search": {
+        "filter": {
+            "label": "検索条件",
+            "keywordLabel": "検索キーワード",
+            "keywordPlaceholder": "タイトル · アーティスト",
+            "levelLabel": "レベル",
+            "all": "すべて",
+            "submit": "検索",
+            "modeLabel": "モード",
+            "sortLabel": "並び替え"
+        },
+        "sort": {
+            "title": "タイトル順",
+            "level": "レベル順",
+            "notes": "ノーツ数の多い順",
+            "recent": "最近登録された順"
+        },
+        "columns": {
+            "title": "タイトル",
+            "artist": "アーティスト",
+            "mode": "モード",
+            "level": "レベル",
+            "notes": "ノーツ"
+        },
+        "searching": "検索中",
+        "resultCount": "{count, number}件",
+        "loading": "譜面検索結果を読み込み中",
+        "loadError": "譜面を読み込めませんでした",
+        "emptyTitle": "条件に合う譜面がありません",
+        "emptyFiltered": "検索キーワードやフィルターを変えてみてください。",
+        "emptyNone": "まだ登録された譜面がありません。",
+        "resetFilters": "フィルターをリセット",
+        "caption": "譜面検索結果"
+    },
+    "admin": {
+        "aiLimits": {
+            "title": "AI使用上限",
+            "toSettings": "設定へ",
+            "loading": "AI使用上限を読み込み中",
+            "loadError": "AI使用上限を読み込めませんでした",
+            "footnote": "保存した値は、次のAI呼び出しからすべてのユーザーに適用されます。ユーザーが月間トークン上限を自分で設定している場合は、その値が既定の月間トークン上限より優先されます。",
+            "rangeError": "1以上{max, number}以下の整数を入力してください。",
+            "saved": "AI使用上限を保存しました。",
+            "dailyCalls": "ユーザーあたりの1日の呼び出し数",
+            "dailyCallsDescription": "ユーザー1人が1日(UTC)にプロバイダーを呼び出せる回数です。",
+            "concurrentRuns": "ユーザーあたりの同時実行数",
+            "concurrentRunsDescription": "ユーザー1人が同時に進行できるAI呼び出しの数です。",
+            "monthlyTokenLimit": "既定の月間トークン上限",
+            "monthlyTokenLimitPlaceholder": "空にすると無制限",
+            "monthlyTokenLimitDescription": "ユーザーが自分の月間上限を設定していない場合に使う値です。入力トークンと出力トークンの合計で、空にすると制限しません。",
+            "save": "保存",
+            "neverChanged": "まだ変更されていないため、既定値です。",
+            "lastChanged": "最終変更 {time}"
+        },
+        "builds": {
+            "title": "クライアントビルドallowlist",
+            "toSettings": "設定へ",
+            "register": "ビルドを登録",
+            "loadError": "ビルド一覧を読み込めませんでした",
+            "empty": "登録されたビルドはありません",
+            "footnote": "allowlistにない、またはuntrustedのビルドが送信すると、UNKNOWN_BUILDフラグが付き、unrankedとして扱われます。",
+            "registered": "ビルドを登録しました。",
+            "markedTrusted": "ビルドをtrustedに変更しました。",
+            "markedUntrusted": "ビルドをuntrustedに変更しました。",
+            "version": "バージョン",
+            "platform": "プラットフォーム",
+            "channel": "チャンネル",
+            "trust": "信頼",
+            "note": "メモ",
+            "releasedAt": "登録",
+            "revokeTrust": "信頼を解除",
+            "grantTrust": "信頼を付与",
+            "dialogTitle": "クライアントビルドの登録",
+            "dialogDescription": "リリースバイナリのsha256をallowlistに追加します。",
+            "submit": "登録",
+            "sha256Hint": "64文字のhex文字列です。",
+            "trustedHint": "オフにすると、このビルドの送信はunrankedとして記録されます。"
+        }
+    },
+    "auth": {
+        "errors": {
+            "idRequired": "IDを入力してください",
+            "idMin": "IDは{min}文字以上で入力してください",
+            "idPattern": "半角英数字と-、_のみ使用できます",
+            "emailInvalid": "メールアドレスの形式が正しくありません",
+            "nameRequired": "表示名を入力してください",
+            "passwordMin": "パスワードは{min}文字以上で入力してください",
+            "passwordMismatch": "パスワードが一致しません"
+        },
+        "fields": {
+            "id": "ID",
+            "email": "メールアドレス",
+            "displayName": "表示名",
+            "password": "パスワード",
+            "passwordConfirm": "パスワード(確認)"
+        },
+        "loggedIn": "{name}さんとしてログインしました。",
+        "signedUp": "{name}さんとして登録しました。",
+        "login": "ログイン",
+        "signup": "登録",
+        "toSignup": "アカウントをお持ちでないですか? 登録",
+        "toLogin": "すでにアカウントをお持ちですか? ログイン",
+        "guideHint": "ゲーム内でアカウントを連携する方法は<guide>ガイド</guide>にあります。"
+    },
+    "chart": {
+        "pageTitle": "譜面",
+        "loadError": "譜面を読み込めませんでした",
+        "notFoundTitle": "この譜面は登録されていません",
+        "notFoundDescription": "このハッシュで送信された記録はまだありません。",
+        "notFoundAction": "譜面検索",
+        "membershipsLabel": "この譜面が含まれる難易度表",
+        "membershipLink": "{name}の{level}レベルへ移動",
+        "meta": {
+            "mode": "モード",
+            "level": "レベル",
+            "notes": "ノーツ",
+            "longNote": "ロングノーツ"
+        },
+        "copyMd5": "md5をコピー",
+        "copySha256": "sha256をコピー",
+        "stats": {
+            "bestEx": "最高EX",
+            "bestLamp": "最高ランプ",
+            "rankedPlayers": "ランキング内のプレーヤー",
+            "shown": "ランキング表示数",
+            "scopeHint": "サーバーが返す上位範囲が基準"
+        },
+        "ranking": "ランキング",
+        "emptyTitle": "登録された記録がありません",
+        "emptyDescription": "R-BMSでこの譜面をプレーすると、ここに記録が載ります。",
+        "caption": "譜面ランキング",
+        "footnote": "ランキングから除外された(unranked)記録は表示されません。A-SCRはターンテーブルをSCRATCH AUTOで行った記録です。「SCRATCH AUTOを含める」をオフにすると通常プレーの記録のみ表示されます。",
+        "columns": {
+            "rank": "順位",
+            "player": "プレーヤー",
+            "lamp": "ランプ",
+            "djRank": "DJ LEVEL",
+            "combo": "COMBO",
+            "playedAt": "記録日時",
+            "replay": "リプレイ",
+            "replayLink": "見る"
+        }
+    },
+    "course": {
+        "pageTitle": "コース",
+        "loadError": "コースを読み込めませんでした",
+        "removedFromTable": "表から外れました",
+        "catalog": {
+            "course": "コース",
+            "dan": "段位",
+            "loading": "コースを読み込み中",
+            "emptyTitle": "まだ登録されたコースがありません",
+            "emptyDescription": "GENOSIDE 2018とStella·Satelliteのコースは、サーバーに登録されるとここに表示されます。",
+            "groupTitle": "{name} ({count, number})",
+            "keys": "{keys}KEYS",
+            "footnote": "段位欄に印があるコースを条件どおりにクリアすると、サーバーが自動で段位を付与します。条件や表示する段位は<link>マイページの段位タブ</link>で確認できます。"
+        },
+        "detail": {
+            "chart": "譜面",
+            "rank": "順位",
+            "player": "プレーヤー",
+            "lamp": "ランプ",
+            "recorded": "記録",
+            "notFoundTitle": "コースが見つかりません",
+            "notFoundDescription": "このハッシュで登録されたコースはありません。",
+            "notFoundAction": "難易度表へ",
+            "chartCount": "構成譜面 {count, number}曲",
+            "danAward": "このコースを条件どおりにクリアすると、{system} {label}段位を獲得できます。<link>認定条件</link>",
+            "chartsCaption": "コース構成譜面",
+            "trophies": "トロフィー",
+            "ranking": "ランキング",
+            "rankingLoadError": "ランキングを読み込めませんでした",
+            "noRecords": "記録がありません",
+            "rankingCaption": "コースランキング",
+            "footnote": "ランキングから除外された(unranked)記録は表示されません。A-SCRはターンテーブルをSCRATCH AUTOで行った記録です。「SCRATCH AUTOを含める」をオフにすると通常プレーの記録のみ表示されます。"
+        }
+    },
+    "folder": {
+        "pageTitle": "フォルダ",
+        "notFoundTitle": "フォルダが見つかりません",
+        "notFoundDescription": "削除されたか、他のアカウントのフォルダです。",
+        "notFoundAction": "マイフォルダへ",
+        "loadError": "フォルダを読み込めませんでした",
+        "noFolders": "まだフォルダがありません",
+        "itemCount": "{count, number}曲",
+        "deleted": "フォルダ「{name}」を削除しました。",
+        "deleteConfirmTitle": "フォルダを削除しますか?",
+        "deleteConfirmDescription": "フォルダ「{name}」とその中の{count, number}曲のリストを削除します。R-BMSの選曲画面からも消え、元に戻せません。",
+        "deleteConfirm": "削除",
+        "addMenu": {
+            "trigger": "マイフォルダに追加",
+            "signIn": "ログインしてフォルダに追加",
+            "title": "マイフォルダ",
+            "loading": "読み込み中",
+            "retry": "読み込めませんでした。再試行",
+            "noFolders": "まだフォルダがありません",
+            "full": "満杯",
+            "itemCount": "{count, number}曲",
+            "createAndAdd": "新しいフォルダを作成して追加",
+            "manage": "マイフォルダを管理",
+            "added": "「{name}」に追加しました。",
+            "removed": "「{name}」から削除しました。",
+            "createdAndAdded": "フォルダ「{name}」を作成し、曲を追加しました。",
+            "createdButNotAdded": "フォルダは作成しましたが、曲を追加できませんでした。{reason}",
+            "dialogTitle": "新しいフォルダに追加",
+            "dialogDescription": "「{chart}」を新しいフォルダに追加します。",
+            "dialogSubmit": "作成して追加"
+        },
+        "search": {
+            "hint": "2文字以上入力してください。曲名、アーティスト、md5の先頭6文字で検索できます。",
+            "searching": "検索中",
+            "none": "条件に合う曲がありません。",
+            "count": "{count, number}曲",
+            "countAtLeast": "{count, number}曲以上",
+            "narrowHint": "検索キーワードを絞り込んでください",
+            "searchingServer": "IR検索中",
+            "label": "曲を追加",
+            "placeholder": "曲名 · アーティスト · md5",
+            "addedAnnouncement": "{title}をリストの末尾に追加しました。",
+            "full": "フォルダが満杯です。曲を削除すると追加できます。",
+            "serverError": "IR検索を読み込めなかったため、難易度表の結果のみ表示されます。",
+            "retry": "再試行",
+            "resultsLabel": "検索結果"
+        },
+        "changes": {
+            "added": "追加 {count}",
+            "removed": "削除 {count}",
+            "reordered": "順序",
+            "notes": "メモ {count}",
+            "renamed": "名前",
+            "description": "説明"
+        },
+        "editor": {
+            "headerDirty": "{items} · 未保存の変更 {changes}件",
+            "headerClean": "{items} · {updated} 更新",
+            "saved": "保存しました。R-BMSは次回ログイン時に変更されたフォルダを読み込みます。",
+            "imported": "{count, number}曲をリストの末尾に追加しました。保存するとR-BMSに反映されます。",
+            "importFromTable": "表からインポート",
+            "addCharts": "曲を追加",
+            "saving": "保存中",
+            "save": "保存",
+            "folderMenu": "フォルダメニュー",
+            "editMeta": "名前と説明を編集",
+            "revertChanges": "変更を元に戻す",
+            "deleteFolder": "フォルダを削除",
+            "saveFailed": "保存できませんでした",
+            "saveFailedDescription": "{error}変更はこの画面にそのまま残っています。",
+            "unsaved": "未保存 · {changes}",
+            "revert": "元に戻す",
+            "emptyTitle": "曲がありません",
+            "emptyDescription": "曲を探して追加するか、発狂難易度表からレベルごとインポートしてください。追加後に保存するとR-BMSに表示されます。",
+            "listLabel": "{name}の曲",
+            "sheetDescription": "追加した曲はリストの末尾に付き、保存するとR-BMSに反映されます。",
+            "metaDescription": "保存ボタンを押すと反映されます。",
+            "apply": "適用",
+            "leaveTitle": "未保存の変更があります",
+            "leaveDescription": "このまま移動すると、変更{count}件({summary})が失われます。",
+            "leaveConfirm": "保存せずに移動",
+            "leaveCancel": "編集を続ける"
+        },
+        "list": {
+            "created": "フォルダ「{name}」を作成しました。",
+            "updated": "名前と説明を更新しました。",
+            "newFolder": "新しいフォルダ",
+            "pageTitle": "マイフォルダ",
+            "pageDescription": "R-BMSの選曲画面に表のように表示される曲のまとまり",
+            "loading": "フォルダを読み込み中",
+            "emptyDescription": "フォルダを作成して曲を追加すると、R-BMSにログインしたときに選曲画面のMY FOLDERSの下に表示されます。発狂難易度表から曲を選んで追加することもできます。",
+            "createFirst": "最初のフォルダを作成",
+            "viewInsaneTable": "発狂難易度表を見る",
+            "listLabel": "マイフォルダ一覧",
+            "createDescription": "名前はR-BMSの選曲画面にそのまま表示されます。曲は作成後に編集画面で追加します。",
+            "create": "作成",
+            "edit": "変更する"
+        }
+    },
+    "table": {
+        "copyTableUrl": "表のURLをコピー",
+        "copiedTableUrl": "表のURLをコピーしました。R-BMSの難易度表設定に貼り付けてください。",
+        "source": "出典 {name}({maker})",
+        "snapshotDescription": "{levels} · {count, number}曲 · 更新 {updated}",
+        "catalog": {
+            "intro": "表のURLをR-BMSの難易度表設定に入れると、選曲画面にレベル別フォルダとして表示されます。既定の表はR-BMSを初めて起動したときに登録されます。",
+            "bundledHeading": "既定の表",
+            "serverHeading": "サーバーの表",
+            "serverLoading": "サーバーの表を読み込み中"
+        },
+        "sidebar": {
+            "heading": "表の情報",
+            "updated": "更新",
+            "chartsAndLevels": "曲 · レベル"
+        },
+        "list": {
+            "loading": "難易度表一覧を読み込み中",
+            "loadError": "表一覧を読み込めませんでした",
+            "empty": "サーバーに個別に登録されたIR難易度表はまだありません。",
+            "listLabel": "サーバーの表一覧",
+            "stats": "譜面 {charts, number} · フォルダ {folders, number} · コース {courses, number}"
+        },
+        "detail": {
+            "pageTitle": "難易度表",
+            "notFoundTitle": "難易度表が見つかりません",
+            "notFoundDescription": "このアドレスで登録された表はありません。",
+            "notFoundAction": "難易度表一覧",
+            "loadError": "表を読み込めませんでした",
+            "summary": "フォルダ {folders, number}個 · コース {courses, number}個",
+            "emptyFolders": "フォルダがありません",
+            "folderTitle": "{name} ({count, number})",
+            "folderCaption": "{name}フォルダの譜面"
+        },
+        "chartDetails": {
+            "addOnNamed": "差分: {name}",
+            "addOn": "差分",
+            "untitled": "タイトルなし",
+            "noArtist": "アーティスト情報なし",
+            "sources": "入手先",
+            "mainAndAddOn": "本編 · 差分",
+            "main": "本編",
+            "noSources": "この表には入手先が記載されていません。",
+            "sourcesNote": "作者が示したアドレスにリンクします。古いアドレスは開けない場合があります。",
+            "bestRecord": "自分の最高記録",
+            "copyMd5": "md5をコピー",
+            "chartRanking": "譜面ランキング",
+            "playerCount": "{count, number}人",
+            "serverCheckFailed": "サーバーの譜面情報を確認できませんでした。",
+            "noServerRecord": "サーバーにはこの譜面の記録がまだありません。"
+        },
+        "workspace": {
+            "all": "すべて",
+            "sorts": {
+                "table": "元の順",
+                "title": "曲名順",
+                "lamp": "ランプが低い順",
+                "rate": "達成率が低い順"
+            },
+            "lampFilters": {
+                "all": "すべてのランプ",
+                "noplay": "未プレー",
+                "failed": "FAILED",
+                "unclear": "未クリア (未プレーを含む)",
+                "cleared": "クリア (ASSIST以上)",
+                "easy": "EASY以上",
+                "clear": "CLEAR以上",
+                "hard": "HARD以上",
+                "exhard": "EX HARD以上",
+                "fullcombo": "FULL COMBO以上"
+            },
+            "signedOutLampHint": "ログインするとランプで絞り込めます。",
+            "loginPrompt": "ログインすると、レベルごとのランプ分布と、カードごとの自分のランプ・ランクが表示されます。",
+            "signIn": "ログイン",
+            "recordsError": "自分の記録を読み込めませんでした。表はそのまま閲覧できます。",
+            "retry": "再試行",
+            "searchLabel": "曲を探す",
+            "searchPlaceholder": "曲名 · アーティスト · md5",
+            "searchAria": "曲名、アーティスト、またはmd5で検索",
+            "filter": "フィルター",
+            "filtersApplied": "{count}件適用中",
+            "filterDescription": "レベル範囲、ランプ、並び順を選びます。変更するとすぐに適用されます。",
+            "shownOfTotal": "{shown, number} / {total, number}曲",
+            "chartCount": "{count, number}曲",
+            "reset": "リセット",
+            "showResults": "結果を見る",
+            "expandAll": "すべてのレベルを展開",
+            "collapseAll": "すべてのレベルを折りたたむ",
+            "emptyTitle": "条件に合う曲がありません",
+            "emptyDescription": "検索キーワードを短くするか、フィルターを解除してみてください。",
+            "resetFilters": "フィルターをリセット",
+            "gridLabel": "{level}の曲"
+        }
+    },
+    "guide": {
+        "intro": "R-BMS プレーヤーは、ゲーム内でIR連携をすべて完了できます。選曲画面でTabキーを押してSETTINGSを開き、NETWORKタブに移動すると、サーバーアドレス、アカウント、同期、ライバルをすべて設定できます。",
+        "advancedLabel": "上級 (Advanced)",
+        "nextSteps": {
+            "label": "次のステップ",
+            "signup": "アカウントを作成",
+            "login": "ログイン",
+            "apiToken": "APIトークンを発行"
+        },
+        "toc": {
+            "label": "ガイドの目次",
+            "title": "目次"
+        },
+        "connect": {
+            "title": "1. サーバーに接続 (Connect)",
+            "body": "選曲画面でTabキーを押すとSETTINGSが開きます。上部のタブからNETWORKを選び、SERVER URL行でEnterキーまたは右方向キーを押すと、その場でアドレスを入力できます。Enterキーで確定、Escキーでキャンセルします。アドレスを空にするとオフラインで動作します。",
+            "steps": {
+                "open": "選曲画面でTab → SETTINGS",
+                "network": "TabキーでNETWORKタブを選択 (PLAY · GAUGE · JUDGE · DISPLAY · INPUT · NETWORK)",
+                "server": "SERVER URL行でEnter → {url}を入力 → Enter",
+                "player": "PLAYER ID行に使用するアカウントIDを入力 (初期値はguest)",
+                "close": "EscキーでSETTINGSを閉じると保存されます"
+            },
+            "code": "SERVER URL   {url}\nPLAYER ID    '<アカウントID>'"
+        },
+        "account": {
+            "title": "2. アカウント (Account)",
+            "body": "NETWORKタブのEMAIL · PASSWORD行を入力してから、REGISTERで登録するかLOGINでログインします。PASSWORDは入力中も*でのみ表示され、設定ファイルには保存されず、ログインや登録で使用された直後にメモリから消去されます。成功するとトークンとログインIDがローカル設定に保存され、PLAYER IDはサーバーが返したログインIDに合わせられます。",
+            "rows": {
+                "playerId": {
+                    "label": "PLAYER ID",
+                    "description": "サーバーアカウントのログインIDであり、ランキングに表示される識別子です。LOGIN · REGISTERはこの値をIDとして使用します。"
+                },
+                "email": {
+                    "label": "EMAIL",
+                    "description": "REGISTERでのみ使用します。ログインの認証には使われません。"
+                },
+                "password": {
+                    "label": "PASSWORD",
+                    "description": "マスク入力で、保存されません。値がない場合は(not set)と表示されます。"
+                },
+                "login": {
+                    "label": "LOGIN",
+                    "description": "PLAYER ID + PASSWORDでバックグラウンドログインします。成功するとトークンの保存 · スコアサーバーの再構成 · ライバル一覧の更新まで続けて行われます。"
+                },
+                "register": {
+                    "label": "REGISTER",
+                    "description": "PLAYER ID · EMAIL · PASSWORDで登録します。成功後の動作はLOGINと同じです。"
+                },
+                "logout": {
+                    "label": "LOGOUT",
+                    "description": "トークンとログインID、保持中のパスワードを消去します。PLAYER IDは残るため、再ログインは1回の入力で済みます。"
+                },
+                "account": {
+                    "label": "ACCOUNT",
+                    "description": "現在の状態を表示する読み取り専用の行です。guest / logging in... / logged in as '<id>' / login failed: '<エラー>' / session expired: '<エラー>' などが表示されます。"
+                }
+            }
+        },
+        "ranked": {
+            "title": "3. ランキングに反映されるプレー (Playing ranked)",
+            "body": "プレーが終わると、結果画面の左側にIR結果が表示されます。サーバーが受理するとIR: RANK #'<順位>'またはIR: SENTが、自己ベストを更新するとNEW BESTが一緒に表示されます。以下の条件に当てはまるプレーは、送信自体をスキップするかUNRANKEDとして記録され、ランキングから外れます。人が行ったプレーはアシストがあってもサーバーに記録が残り、コースも同じです。SCRATCH AUTOのプレーだけはランキングに載りますが、別に集計されます。",
+            "rows": {
+                "skipped": {
+                    "label": "autoplay · リプレイ再生",
+                    "description": "記録の対象ではないため送信しません。結果画面にIR: SKIPPED (autoplay)またはIR: SKIPPED (replay playback)が表示されます。"
+                },
+                "widenedJudge": {
+                    "label": "判定幅の拡大",
+                    "description": "JUDGE WIDTHまたはLNマージンを100より広く設定したプレーは送信されて記録は残りますが、ランキングとサーバーの最高記録から外れます (UNRANKED: widened judge または assist options)。そのようなステージが1つでも含まれるコースも同じです。"
+                },
+                "scratchAuto": {
+                    "label": "SCRATCH AUTO",
+                    "description": "SCRATCH AUTOで行ったプレーは、ターンテーブルのノーツを判定から除いて送信され、ランキングに載ります。サーバーは通常プレーの最高記録とSCRATCH AUTOプレーの最高記録を別々に保存します。Webのランキング一覧は初期状態で「SCRATCH AUTOを含める」がオンになっており、プレーヤーごとに通常プレーとSCRATCH AUTOプレーのうち高い方の記録をA-SCRの印付きで表示し、「SCRATCH AUTOを含める」をオフにすると通常プレーのみを表示します。結果画面の順位はそのプレーが属する一覧が基準になるため、IR: RANK #'<順位>' (SCRATCH AUTO)と表示されます。選曲のランキングパネルは通常プレーのみの一覧を使います。SCRATCH AUTOのステージが1つでも含まれるコースも同じです。判定幅の拡大と併用したプレーは、判定幅の拡大のためUNRANKEDになります。"
+                },
+                "assist": {
+                    "label": "アシストオプション · guest送信",
+                    "description": "サーバーが受理しても、ランキングから除外される場合があります。その場合はUNRANKED: assist options, guest submissionのように、サーバーが返した理由がそのまま表示されます。"
+                }
+            },
+            "code": "IR: RANK #12\nNEW BEST\nREPLAY UPLOADED"
+        },
+        "rankingPanel": {
+            "title": "4. 選曲ランキングパネル (IR RANKING)",
+            "body": "選曲画面でIキーを押すと、右側にIR RANKINGパネルが開き、フォーカスが移ります。上下キーで行を移動し、Enterキーでリプレイを再生し、I · Esc · 左方向キーで閉じます。フォーカスした譜面にしばらくとどまると、ランキング上位10人、自分のベスト、ライバルの記録、リプレイ一覧をまとめて取得し、譜面ごとにキャッシュします。",
+            "rows": {
+                "layout": {
+                    "label": "行の構成",
+                    "description": "順位 · プレーヤー名 · EXスコア · クリアランプの順に表示され、サーバーが判定の詳細を返した場合はF'<fast>'/S'<slow>'が、ダウンロードできるリプレイがある場合はREPが右側に付きます。"
+                },
+                "youRival": {
+                    "label": "YOU · RIVAL行",
+                    "description": "ランキングの下に自分のベストを表示するYOU行が、その下にRIVAL '<プレーヤーID>'行が続きます。記録がない場合は、順位とスコアが-で表示されます。"
+                },
+                "replay": {
+                    "label": "REP再生",
+                    "description": "REPが付いた行でEnterキーを押すと、リプレイをダウンロードしてすぐに再生します。リプレイがない行ではno replay for that rowと表示されます。"
+                },
+                "status": {
+                    "label": "ステータスメッセージ",
+                    "description": "IR OFF - SET SERVER URL IN SETTINGS · SELECT A CHART · LOADING... · NO SCORES YET · ERROR: '<エラー>'のいずれかが1行で表示されます。"
+                }
+            }
+        },
+        "replay": {
+            "title": "5. リプレイのアップロード (Replays)",
+            "body": "NETWORKタブのAUTO UPLOAD REPLAYをON (初期値はON) にしておくと、スコアが正常に受理され、ランキング除外の理由がない場合にリプレイも一緒にアップロードされます。結果画面にREPLAY UPLOADEDまたはREPLAY ERROR: '<エラー>'が表示されます。アップロードされたリプレイは、ランキングパネルのREP行から誰でもダウンロードして再生できます。",
+            "rows": {
+                "autoUpload": {
+                    "label": "AUTO UPLOAD REPLAY",
+                    "description": "左右の方向キー · Enter · クリックでON / OFFを切り替え、すぐに保存されます。"
+                },
+                "condition": {
+                    "label": "アップロードの条件",
+                    "description": "ログイン状態で、そのプレーが実際にリプレイを保存しており、スコアが受理され、ランキング除外のフラグがないことが必要です。"
+                }
+            }
+        },
+        "sync": {
+            "title": "6. 設定の同期 (Settings sync)",
+            "body": "SYNC SETTINGSをON (初期値はOFF) にすると、プレー設定とキー配置をサーバーに保管できます。UPLOAD SETTINGS NOWで現在の設定をアップロードし、DOWNLOAD SETTINGS NOWでダウンロードして適用します。別の端末で先にアップロードされた内容がある場合はconflict: server newer, download firstと表示されるので、先にダウンロードしてから再度アップロードしてください。",
+            "rows": {
+                "uploaded": {
+                    "label": "アップロードされるもの",
+                    "description": "プレー設定とキー配置です。トークン · ログインID · メールアドレス · パスワードは決してアップロードされません。"
+                },
+                "downloaded": {
+                    "label": "ダウンロード時",
+                    "description": "プレー設定とキー配置のみが上書きされます。SERVER URL · PLAYER ID · 曲フォルダ · フォントパスなどの端末ごとの値はそのまま維持されます。"
+                },
+                "requirement": {
+                    "label": "必要な条件",
+                    "description": "SERVER URLが設定済みで、ログインしている必要があります。そうでない場合は、ステータス行にset SERVER URL firstまたはlog in firstの案内が表示されます。"
+                }
+            }
+        },
+        "rivals": {
+            "title": "7. ライバル (Rivals)",
+            "body": "NETWORKタブの一番下にあるRIVALS行でEnterキーを押すと、ライバル一覧が開きます。+ ADD RIVAL (PLAYER ID)行でEnterキーを押して相手のPLAYER IDを入力し、Dキーで選択したライバルを削除します。Escキーで閉じると設定ファイルに保存され、ログイン中であればサーバーにも一覧全体が反映されます。",
+            "rows": {
+                "controls": {
+                    "label": "操作",
+                    "description": "UP DOWN 移動 · ENTER 追加 · D 削除 · ESC 保存して閉じる。空のIDと重複したIDは無視されます。"
+                },
+                "sync": {
+                    "label": "同期",
+                    "description": "ログイン · 登録の直後と、保存済みのトークンがある状態での起動時に、サーバーの一覧で更新されます。"
+                },
+                "display": {
+                    "label": "表示",
+                    "description": "登録したライバルは、選曲のランキングパネルにRIVAL '<プレーヤーID>'行として一緒に表示されます。"
+                }
+            }
+        },
+        "apiToken": {
+            "title": "8. 他のツール用APIトークン (Advanced)",
+            "body": "ゲームクライアントは、上記のLOGINだけで十分です。自作のスクリプトや外部ツールからこのIRを呼び出す場合は、Web設定画面のAPIトークンタブでトークンを発行し、Authorizationヘッダーに載せて送ってください。平文のトークンは発行直後に一度だけ表示されるため、その場で保存する必要があります。不要になったトークンは一覧から破棄します。",
+            "code": "curl -H 'Authorization: Bearer rbms_'<発行されたトークン>''' {url}/auth/me"
+        },
+        "cliOverrides": {
+            "title": "9. 起動引数による上書き (Advanced)",
+            "body": "通常は必要ありません。保存済みの設定を先に適用したうえで、その起動時だけ値を変えたい場合に、--serverと--playerでサーバーアドレスとプレーヤーIDを上書きできます。",
+            "code": "rbms-player --server {url} --player '<プレーヤーID>'"
+        }
+    }
+}

@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { LoadErrorState } from '@features/state/load-error-state'
 import { NotFoundNotice } from '@features/state/not-found-notice'
 import { FolderEditorWorkspace } from '@widgets/folder/folder-editor-workspace'
@@ -10,7 +11,6 @@ import { useGetFolderDetail } from '@entities/folder.query'
 import type { FolderTableIndex } from '@entities/folder.type'
 import { ApiError } from '@shared/lib/fetch'
 
-const PAGE_TITLE = '폴더'
 const NOT_FOUND_STATUS = 404
 
 type FolderEditorProps = {
@@ -19,6 +19,7 @@ type FolderEditorProps = {
 }
 
 export const FolderEditor: FC<FolderEditorProps> = ({ folderId, tables }) => {
+    const t = useTranslations('browse.folder')
     const { data, isLoading, error, isFetching, refetch } = useGetFolderDetail(folderId)
 
     const reload = async () => {
@@ -28,23 +29,23 @@ export const FolderEditor: FC<FolderEditorProps> = ({ folderId, tables }) => {
 
     if (data) return <FolderEditorWorkspace key={folderId} folder={data} tables={tables} onReload={reload} />
 
-    if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+    if (isLoading) return <ShellPageLoading title={t('pageTitle')} />
 
     if (error instanceof ApiError && error.status === NOT_FOUND_STATUS)
         return (
-            <ShellPage title={PAGE_TITLE}>
+            <ShellPage title={t('pageTitle')}>
                 <NotFoundNotice
-                    title='폴더를 찾을 수 없습니다'
-                    description='지워졌거나 다른 계정의 폴더입니다.'
+                    title={t('notFoundTitle')}
+                    description={t('notFoundDescription')}
                     actionHref='/folders'
-                    actionLabel='내 폴더로'
+                    actionLabel={t('notFoundAction')}
                 />
             </ShellPage>
         )
 
     return (
-        <ShellPage title={PAGE_TITLE}>
-            <LoadErrorState title='폴더를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+        <ShellPage title={t('pageTitle')}>
+            <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />
         </ShellPage>
     )
 }

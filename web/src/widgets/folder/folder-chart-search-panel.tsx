@@ -3,10 +3,10 @@
 import { useEffect, useId, useState, type FC } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { ChartSearchResultRow } from '@features/folder/chart-search-result-row'
 import { chartSearchQueryOptions } from '@entities/chart.query'
 import { isFolderMd5, type FolderItem, type FolderTableIndex } from '@entities/folder.type'
-import { formatCount } from '@shared/lib/format'
 import { cn } from '@shared/lib/cn'
 import { Button } from '@shared/ui/button'
 import { Input } from '@shared/ui/input'
@@ -17,6 +17,7 @@ const MD5_PREFIX_MIN_LENGTH = 6
 const TABLE_RESULT_LIMIT = 50
 const SERVER_RESULT_LIMIT = 30
 const HEX_PATTERN = /^[0-9a-f]+$/
+const STATUS_SEPARATOR = ' · '
 
 type SearchResult = Pick<FolderItem, 'md5' | 'sha256' | 'title' | 'artist'> & { isKnownToServer: boolean }
 
@@ -47,6 +48,7 @@ export const FolderChartSearchPanel: FC<FolderChartSearchPanelProps> = ({
     const [debouncedQuery, setDebouncedQuery] = useState('')
     const [lastAddedTitle, setLastAddedTitle] = useState('')
 
+    const t = useTranslations('browse.folder.search')
     const inputId = useId()
     const needle = normaliseSearchText(debouncedQuery)
     const isSearchable = needle.length >= SEARCH_MIN_LENGTH
@@ -94,17 +96,23 @@ export const FolderChartSearchPanel: FC<FolderChartSearchPanelProps> = ({
     const isWaiting = query.trim() !== debouncedQuery
 
     const statusText = (() => {
-        if (!isSearchable) return '두 글자 이상 입력하세요. 곡명, 아티스트, md5 앞 6자로 찾습니다.'
-        if (results.length === 0 && (isServerSearching || isWaiting)) return '찾는 중'
-        if (results.length === 0) return '조건에 맞는 곡이 없습니다.'
-        return `${formatCount(results.length)}곡${isTruncated ? ' 이상 · 검색어를 더 좁혀 보세요' : ''}${isServerSearching ? ' · IR 검색 중' : ''}`
+        if (!isSearchable) return t('hint')
+        if (results.length === 0 && (isServerSearching || isWaiting)) return t('searching')
+        if (results.length === 0) return t('none')
+        return [
+            isTruncated ? t('countAtLeast', { count: results.length }) : t('count', { count: results.length }),
+            isTruncated && t('narrowHint'),
+            isServerSearching && t('searchingServer'),
+        ]
+            .filter((part) => typeof part === 'string')
+            .join(STATUS_SEPARATOR)
     })()
 
     return (
         <section aria-labelledby={`${inputId}-label`} className={cn('flex min-h-0 min-w-0 flex-col', className)}>
             <div className='border-border flex flex-col gap-2 border-b p-3'>
                 <label id={`${inputId}-label`} htmlFor={inputId} className={isLabelVisible ? 'rbms-micro-label' : 'sr-only'}>
-                    곡 추가
+                    {t('label')}
                 </label>
                 <div className='relative'>
                     <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2' aria-hidden />
@@ -114,7 +122,7 @@ export const FolderChartSearchPanel: FC<FolderChartSearchPanelProps> = ({
                         autoComplete='off'
                         enterKeyHint='search'
                         autoFocus={autoFocus}
-                        placeholder='곡명 · 아티스트 · md5'
+                        placeholder={t('placeholder')}
                         className='bg-background pl-7'
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
@@ -122,20 +130,20 @@ export const FolderChartSearchPanel: FC<FolderChartSearchPanelProps> = ({
                 </div>
                 <p aria-live='polite' className='text-muted-foreground text-xs tabular-nums'>
                     {statusText}
-                    {lastAddedTitle && <span className='sr-only'>. {lastAddedTitle} 을 목록 끝에 넣었습니다.</span>}
+                    {lastAddedTitle && <span className='sr-only'>. {t('addedAnnouncement', { title: lastAddedTitle })}</span>}
                 </p>
-                {isFull && <p className='text-destructive text-xs'>폴더가 가득 찼습니다. 곡을 빼야 더 넣을 수 있습니다.</p>}
+                {isFull && <p className='text-destructive text-xs'>{t('full')}</p>}
                 {isSearchable && server.isError && (
                     <p className='text-muted-foreground flex items-center gap-1 text-xs'>
-                        IR 검색을 불러오지 못해 난이도표 결과만 보입니다.
+                        {t('serverError')}
                         <Button variant='link' size='xs' className='h-auto px-0' onClick={() => void server.refetch()}>
-                            다시 시도
+                            {t('retry')}
                         </Button>
                     </p>
                 )}
             </div>
             {results.length > 0 && (
-                <ul aria-label='검색 결과' className='rbms-list-scroll min-h-0 flex-1 overflow-y-auto'>
+                <ul aria-label={t('resultsLabel')} className='rbms-list-scroll min-h-0 flex-1 overflow-y-auto'>
                     {results.map((result) => (
                         <ChartSearchResultRow
                             key={result.md5}

@@ -2,10 +2,10 @@
 
 import { Suspense, useState, type CSSProperties, type FC, type PropsWithChildren } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { NAV_ITEMS } from '@shared/constants/navigation'
 import { SITE_NAME } from '@shared/constants/site'
 import {
-    SHELL_FOOTER_COLLAPSED_HEIGHT_PX,
     SHELL_RAIL_CHROME_HEIGHT_PX,
     SHELL_SIDEBAR_COLLAPSED_WIDTH_PX,
     SHELL_SIDEBAR_MOBILE_WIDTH_PX,
@@ -14,14 +14,18 @@ import {
 import { ShellSidebarSlotContext } from '@shared/providers/shell-sidebar-slot-context'
 import { ScrollIndicator } from '@shared/ui/scroll-indicator'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, SidebarMenu, SidebarProvider, SidebarTrigger } from '@shared/ui/sidebar'
+import { LocaleSwitcher } from '@widgets/locale-switcher/locale-switcher'
 import { ShellAccountControl } from '@widgets/shell/shell-account-control'
 import { ShellNavMenu } from '@widgets/shell/shell-nav-menu'
 import { ShellThemeControl } from '@widgets/shell/shell-theme-control'
 
 const SKIP_LINK_TARGET_ID = 'main-content'
+const FOOTER_CONTROL_COUNT = 3
 
 export const AppShell: FC<PropsWithChildren> = ({ children }) => {
     const [sidebarSlotElement, setSidebarSlotElement] = useState<HTMLElement | null>(null)
+
+    const t = useTranslations('common.shell')
 
     return (
         <SidebarProvider
@@ -36,22 +40,22 @@ export const AppShell: FC<PropsWithChildren> = ({ children }) => {
             <a
                 href={`#${SKIP_LINK_TARGET_ID}`}
                 className='bg-primary text-primary-foreground sr-only z-(--z-overlay) px-3 py-2 text-sm font-medium focus:not-sr-only focus:fixed focus:top-2 focus:left-2'>
-                본문으로 건너뛰기
+                {t('skipToContent')}
             </a>
             <ShellSidebarSlotContext.Provider value={{ element: sidebarSlotElement }}>
                 <div className='flex min-h-dvh w-full md:h-full md:min-h-0 md:overflow-hidden'>
                     <Sidebar collapsible='icon' className='border-r-0 group-data-[side=left]:border-r-0'>
                         <SidebarHeader className='flex shrink-0 flex-row items-center gap-2 p-0' style={{ height: SHELL_RAIL_CHROME_HEIGHT_PX }}>
-                            <SidebarTrigger className='ml-2 size-8 shrink-0' />
+                            <SidebarTrigger aria-label={t('toggleSidebar')} className='ml-2 size-8 shrink-0' />
                             <Link
                                 href='/'
-                                aria-label={`${SITE_NAME} 홈`}
+                                aria-label={t('homeLink', { siteName: SITE_NAME })}
                                 className='text-foreground flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden'>
                                 <span className='truncate text-sm font-semibold tracking-tight'>{SITE_NAME}</span>
                             </Link>
                         </SidebarHeader>
                         <SidebarContent className='min-h-0 p-0'>
-                            <nav aria-label='주 메뉴' className='min-w-0'>
+                            <nav aria-label={t('mainNav')} className='min-w-0'>
                                 <ShellNavMenu items={NAV_ITEMS} />
                             </nav>
                             <div
@@ -64,11 +68,12 @@ export const AppShell: FC<PropsWithChildren> = ({ children }) => {
                             style={
                                 {
                                     '--shell-footer-row-height': `${SHELL_RAIL_CHROME_HEIGHT_PX}px`,
-                                    '--shell-footer-collapsed-height': `${SHELL_FOOTER_COLLAPSED_HEIGHT_PX}px`,
+                                    '--shell-footer-collapsed-height': `${SHELL_RAIL_CHROME_HEIGHT_PX * FOOTER_CONTROL_COUNT}px`,
                                 } as CSSProperties
                             }>
-                            <SidebarMenu className='grid h-full grid-cols-[auto_minmax(0,1fr)] items-stretch gap-0 group-data-[collapsible=icon]:auto-rows-fr group-data-[collapsible=icon]:grid-cols-1'>
+                            <SidebarMenu className='grid h-full grid-cols-[auto_auto_minmax(0,1fr)] items-stretch gap-0 group-data-[collapsible=icon]:auto-rows-fr group-data-[collapsible=icon]:grid-cols-1'>
                                 <ShellThemeControl />
+                                <LocaleSwitcher />
                                 <Suspense fallback={null}>
                                     <ShellAccountControl />
                                 </Suspense>

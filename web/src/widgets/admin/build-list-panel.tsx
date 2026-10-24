@@ -2,6 +2,7 @@
 
 import { useState, type FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
@@ -27,6 +28,7 @@ export const BuildListPanel: FC = () => {
     const [open, setOpen] = useState(false)
     const [draft, setDraft] = useState(EMPTY_BUILD)
 
+    const t = useTranslations('browse.admin.builds')
     const { data, isLoading, isError, isFetching, refetch } = useClientBuildList()
     const registerBuild = useRegisterClientBuild()
 
@@ -40,7 +42,7 @@ export const BuildListPanel: FC = () => {
                 onSuccess: () => {
                     setDraft(EMPTY_BUILD)
                     setOpen(false)
-                    toast.success('빌드를 등록했습니다.')
+                    toast.success(t('registered'))
                 },
             },
         )
@@ -49,18 +51,24 @@ export const BuildListPanel: FC = () => {
     const toggleTrusted = (row: ClientBuild) => {
         registerBuild.mutate(
             { ...row, trusted: !row.trusted },
-            { onSuccess: () => toast.success(row.trusted ? '빌드를 untrusted 로 바꿨습니다.' : '빌드를 trusted 로 바꿨습니다.') },
+            { onSuccess: () => toast.success(row.trusted ? t('markedUntrusted') : t('markedTrusted')) },
         )
     }
 
     const columns: DataTableColumn<ClientBuild>[] = [
         { key: 'sha256', label: 'sha256', width: 128, mono: true, cell: (row) => formatHash(row.sha256) },
-        { key: 'version', label: '버전', flex: true, cell: (row) => row.version },
-        { key: 'platform', label: '플랫폼', width: 160, cell: (row) => row.platform },
-        { key: 'channel', label: '채널', width: 96, cell: (row) => <MetaBadge>{row.channel}</MetaBadge> },
-        { key: 'trusted', label: '신뢰', width: 80, cell: (row) => (row.trusted ? 'trusted' : 'untrusted') },
-        { key: 'note', label: '메모', width: 160, cell: (row) => row.note || '—' },
-        { key: 'released_at', label: '등록', width: 144, align: 'right', cell: (row) => (row.released_at ? formatDateTime(row.released_at) : '—') },
+        { key: 'version', label: t('version'), flex: true, cell: (row) => row.version },
+        { key: 'platform', label: t('platform'), width: 160, cell: (row) => row.platform },
+        { key: 'channel', label: t('channel'), width: 96, cell: (row) => <MetaBadge>{row.channel}</MetaBadge> },
+        { key: 'trusted', label: t('trust'), width: 80, cell: (row) => (row.trusted ? 'trusted' : 'untrusted') },
+        { key: 'note', label: t('note'), width: 160, cell: (row) => row.note || '—' },
+        {
+            key: 'released_at',
+            label: t('releasedAt'),
+            width: 144,
+            align: 'right',
+            cell: (row) => (row.released_at ? formatDateTime(row.released_at) : '—'),
+        },
         {
             key: 'action',
             label: '',
@@ -68,7 +76,7 @@ export const BuildListPanel: FC = () => {
             align: 'right',
             cell: (row) => (
                 <Button variant='ghost' size='sm' disabled={registerBuild.isPending} onClick={() => toggleTrusted(row)}>
-                    {row.trusted ? '신뢰 해제' : '신뢰 부여'}
+                    {row.trusted ? t('revokeTrust') : t('grantTrust')}
                 </Button>
             ),
         },
@@ -77,40 +85,32 @@ export const BuildListPanel: FC = () => {
     return (
         <>
             <PanelCard
-                title='클라이언트 빌드 allowlist'
+                title={t('title')}
                 action={
                     <div className='flex items-center gap-2'>
                         <Link href='/settings' className='text-muted-foreground text-xs underline'>
-                            설정으로
+                            {t('toSettings')}
                         </Link>
                         <Button size='sm' onClick={() => setOpen(true)}>
-                            빌드 등록
+                            {t('register')}
                         </Button>
                     </div>
                 }
                 contentClassName='flex flex-col gap-2'>
                 {isLoading && <TableSkeleton />}
-                {!isLoading && isError && (
-                    <LoadErrorState title='빌드 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
-                )}
-                {!isLoading && !isError && rows.length === 0 && <EmptyState title='등록된 빌드가 없습니다' />}
+                {!isLoading && isError && <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
+                {!isLoading && !isError && rows.length === 0 && <EmptyState title={t('empty')} />}
                 {!isLoading && !isError && rows.length > 0 && (
-                    <DataTable
-                        columns={columns}
-                        rows={rows}
-                        rowKey={(row) => row.sha256}
-                        rowMuted={(row) => !row.trusted}
-                        caption='클라이언트 빌드 allowlist'
-                    />
+                    <DataTable columns={columns} rows={rows} rowKey={(row) => row.sha256} rowMuted={(row) => !row.trusted} caption={t('title')} />
                 )}
-                <PanelFootnote>allowlist 에 없거나 untrusted 인 빌드가 제출하면 UNKNOWN_BUILD 플래그가 붙고 unranked 처리됩니다.</PanelFootnote>
+                <PanelFootnote>{t('footnote')}</PanelFootnote>
             </PanelCard>
             <FormDialog
                 open={open}
                 onOpenChange={setOpen}
-                title='클라이언트 빌드 등록'
-                description='릴리스 바이너리의 sha256 을 allowlist 에 추가합니다.'
-                submitLabel='등록'
+                title={t('dialogTitle')}
+                description={t('dialogDescription')}
+                submitLabel={t('submit')}
                 submitDisabled={!isDraftValid || registerBuild.isPending}
                 onSubmit={submit}>
                 <Field>
@@ -121,22 +121,22 @@ export const BuildListPanel: FC = () => {
                         value={draft.sha256}
                         onChange={(event) => setDraft({ ...draft, sha256: event.target.value.trim() })}
                     />
-                    <FieldDescription>64자 hex 문자열입니다.</FieldDescription>
+                    <FieldDescription>{t('sha256Hint')}</FieldDescription>
                 </Field>
                 <Field>
-                    <FieldLabel htmlFor='build-version'>버전</FieldLabel>
+                    <FieldLabel htmlFor='build-version'>{t('version')}</FieldLabel>
                     <Input id='build-version' value={draft.version} onChange={(event) => setDraft({ ...draft, version: event.target.value })} />
                 </Field>
                 <Field>
-                    <FieldLabel htmlFor='build-platform'>플랫폼</FieldLabel>
+                    <FieldLabel htmlFor='build-platform'>{t('platform')}</FieldLabel>
                     <Input id='build-platform' value={draft.platform} onChange={(event) => setDraft({ ...draft, platform: event.target.value })} />
                 </Field>
                 <Field>
-                    <FieldLabel htmlFor='build-channel'>채널</FieldLabel>
+                    <FieldLabel htmlFor='build-channel'>{t('channel')}</FieldLabel>
                     <Input id='build-channel' value={draft.channel} onChange={(event) => setDraft({ ...draft, channel: event.target.value })} />
                 </Field>
                 <Field>
-                    <FieldLabel htmlFor='build-note'>메모</FieldLabel>
+                    <FieldLabel htmlFor='build-note'>{t('note')}</FieldLabel>
                     <Input
                         id='build-note'
                         maxLength={NOTE_MAX}
@@ -147,7 +147,7 @@ export const BuildListPanel: FC = () => {
                 <Field orientation='horizontal'>
                     <FieldLabel htmlFor='build-trusted'>trusted</FieldLabel>
                     <Switch id='build-trusted' checked={draft.trusted} onCheckedChange={(checked) => setDraft({ ...draft, trusted: checked })} />
-                    <FieldDescription>끄면 이 빌드의 제출이 unranked 로 기록됩니다.</FieldDescription>
+                    <FieldDescription>{t('trustedHint')}</FieldDescription>
                 </Field>
             </FormDialog>
         </>

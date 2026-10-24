@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { DanBadgeList } from '@features/dan/dan-badge-list'
 import { LoadErrorState } from '@features/state/load-error-state'
 import { NotFoundNotice } from '@features/state/not-found-notice'
@@ -12,9 +13,7 @@ import { readDisplayedDans } from '@entities/dan.type'
 import { usePlayer } from '@entities/player.query'
 import type { PlayerRecentParams } from '@entities/player.type'
 import { ApiError } from '@shared/lib/fetch'
-import { formatCount } from '@shared/lib/format'
 
-const PAGE_TITLE = '플레이어'
 const NOT_FOUND_STATUS = 404
 
 type PlayerDetailPanelProps = {
@@ -23,26 +22,27 @@ type PlayerDetailPanelProps = {
 }
 
 export const PlayerDetailPanel: FC<PlayerDetailPanelProps> = ({ playerId, recentParams }) => {
+    const t = useTranslations('browse.player.detail')
     const { data, isLoading, isError, error, isFetching, refetch } = usePlayer(playerId)
 
-    if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+    if (isLoading) return <ShellPageLoading title={t('pageTitle')} />
 
     if (error instanceof ApiError && error.status === NOT_FOUND_STATUS)
         return (
-            <ShellPage title={PAGE_TITLE}>
+            <ShellPage title={t('pageTitle')}>
                 <NotFoundNotice
-                    title='없는 플레이어입니다'
-                    description='아이디가 바뀌었거나 가입하지 않은 플레이어입니다.'
+                    title={t('notFoundTitle')}
+                    description={t('notFoundDescription')}
                     actionHref='/leaderboards'
-                    actionLabel='순위로'
+                    actionLabel={t('notFoundAction')}
                 />
             </ShellPage>
         )
 
     if (isError || !data)
         return (
-            <ShellPage title={PAGE_TITLE}>
-                <LoadErrorState title='플레이어를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+            <ShellPage title={t('pageTitle')}>
+                <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />
             </ShellPage>
         )
 
@@ -53,7 +53,10 @@ export const PlayerDetailPanel: FC<PlayerDetailPanelProps> = ({ playerId, recent
                 <p className='text-muted-foreground font-mono text-xs'>@{data.id}</p>
                 <DanBadgeList dans={readDisplayedDans(data.extra)} />
                 <p className='text-muted-foreground text-xs'>
-                    제출 <span className='text-foreground font-medium tabular-nums'>{formatCount(data.total_plays)}</span>
+                    {t.rich('plays', {
+                        total: data.total_plays,
+                        value: (chunks) => <span className='text-foreground font-medium tabular-nums'>{chunks}</span>,
+                    })}
                 </p>
             </div>
             <PlayerStatsPanel playerId={playerId} />

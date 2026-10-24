@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { createTranslator } from 'next-intl'
 import { FOLDER_LIMIT, type FolderDetail, type FolderItem } from '../../src/entities/folder.type'
+import { MESSAGES } from '../../src/shared/i18n/messages'
 import {
     appendFolderItems,
     buildLevelLabelByMd5,
@@ -10,6 +12,9 @@ import {
     toFolderDraft,
     toReplaceItems,
 } from '../../src/widgets/folder/folder-draft'
+
+const changesTranslator = (locale: keyof typeof MESSAGES) =>
+    createTranslator({ locale, messages: MESSAGES[locale], namespace: 'browse.folder.changes' })
 
 const md5Of = (seed: number) => seed.toString(16).padStart(32, '0')
 
@@ -46,7 +51,9 @@ describe('폴더 편집 초안의 변경 세기', () => {
         const changes = countFolderDraftChanges(base, draft)
         expect(changes).toMatchObject({ added: 1, removed: 1, notes: 1, isReordered: true, isRenamed: true, isDescriptionChanged: false })
         expect(changes.total).toBe(5)
-        expect(describeFolderDraftChanges(changes)).toBe('추가 1 · 빼기 1 · 순서 · 메모 1 · 이름')
+        expect(describeFolderDraftChanges(changes, changesTranslator('ko'))).toBe('추가 1 · 빼기 1 · 순서 · 메모 1 · 이름')
+        expect(describeFolderDraftChanges(changes, changesTranslator('en'))).toBe('Added 1 · Removed 1 · Order · Notes 1 · Name')
+        expect(describeFolderDraftChanges(changes, changesTranslator('ja'))).toBe('追加 1 · 削除 1 · 順序 · メモ 1 · 名前')
     })
 
     test('빠진 곡 때문에 남은 곡의 상대 순서가 같으면 순서 변경으로 세지 않는다', () => {

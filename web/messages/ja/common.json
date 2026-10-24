@@ -1,5 +1,33 @@
 {
     "localeSwitcher": {
         "label": "言語"
+    },
+    "nav": {
+        "home": "ホーム",
+        "search": "譜面検索",
+        "leaderboards": "ランキング",
+        "guide": "ガイド",
+        "folders": "マイフォルダ",
+        "tables": "難易度表",
+        "courses": "コース",
+        "ai": "AI"
+    },
+    "shell": {
+        "skipToContent": "本文へスキップ",
+        "homeLink": "{siteName} ホーム",
+        "mainNav": "メインメニュー",
+        "openMenu": "メニューを開く",
+        "toggleSidebar": "サイドバーを折りたたむ・展開する",
+        "pageLoading": "{title}を読み込み中",
+        "themeToggle": "ライト・ダークテーマの切り替え",
+        "signIn": "ログイン",
+        "accountMenu": "アカウントメニュー",
+        "sessionChecking": "ログイン状態を確認中",
+        "signedOut": "ログアウトしました。",
+        "myPage": "マイページ",
+        "myFolders": "マイフォルダ",
+        "settings": "設定",
+        "buildAdmin": "ビルド管理",
+        "signOut": "ログアウト"
     }
 }

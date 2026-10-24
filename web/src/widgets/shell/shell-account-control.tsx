@@ -4,6 +4,7 @@ import type { FC } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { CircleUserRound, FolderHeart, LogIn, LogOut, Settings, ShieldCheck, UserRound } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { useSessionLogout, useSessionUser } from '@entities/auth.query'
 import { buildLoginHref, DEFAULT_NEXT_PATH, LOGIN_PATH, PROTECTED_PATH_PREFIXES } from '@shared/constants/auth-route'
@@ -21,12 +22,11 @@ import { Skeleton } from '@shared/ui/skeleton'
 
 const AUTH_PATHS = [LOGIN_PATH, '/signup']
 const ADMIN_ROLE = 'admin'
-const SIGN_IN_LABEL = '로그인'
-const ACCOUNT_MENU_LABEL = '계정 메뉴'
 
 export const ShellAccountControl: FC = () => {
     const router = useRouter()
     const pathname = usePathname()
+    const t = useTranslations('common.shell')
     const { isMobile, setOpenMobile } = useSidebar()
     const { user, isPending } = useSessionUser()
     const logout = useSessionLogout()
@@ -36,7 +36,7 @@ export const ShellAccountControl: FC = () => {
     const handleSignOut = () =>
         logout.mutate(undefined, {
             onSuccess: () => {
-                toast.success('로그아웃했습니다.')
+                toast.success(t('signedOut'))
                 if (PROTECTED_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) window.location.assign(DEFAULT_NEXT_PATH)
                 else router.refresh()
             },
@@ -47,7 +47,7 @@ export const ShellAccountControl: FC = () => {
             {isPending && (
                 <div
                     role='status'
-                    aria-label='로그인 상태를 확인하는 중'
+                    aria-label={t('sessionChecking')}
                     aria-busy='true'
                     className='flex h-full w-full items-center justify-center gap-2 px-3 group-data-[collapsible=icon]:px-1'>
                     <Skeleton className='size-4' />
@@ -55,20 +55,20 @@ export const ShellAccountControl: FC = () => {
                 </div>
             )}
             {!isPending && !user && (
-                <SidebarMenuButton asChild className={FOOTER_TEXT_BUTTON_CLASS_NAME} tooltip={SIGN_IN_LABEL}>
+                <SidebarMenuButton asChild className={FOOTER_TEXT_BUTTON_CLASS_NAME} tooltip={t('signIn')}>
                     <Link
                         href={AUTH_PATHS.includes(pathname) ? LOGIN_PATH : buildLoginHref(pathname)}
-                        aria-label={SIGN_IN_LABEL}
+                        aria-label={t('signIn')}
                         onClick={closeMobileSidebar}>
                         <LogIn />
-                        <span className='min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden'>{SIGN_IN_LABEL}</span>
+                        <span className='min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden'>{t('signIn')}</span>
                     </Link>
                 </SidebarMenuButton>
             )}
             {!isPending && user && (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <SidebarMenuButton className={FOOTER_TEXT_BUTTON_CLASS_NAME} aria-label={ACCOUNT_MENU_LABEL} tooltip={ACCOUNT_MENU_LABEL}>
+                        <SidebarMenuButton className={FOOTER_TEXT_BUTTON_CLASS_NAME} aria-label={t('accountMenu')} tooltip={t('accountMenu')}>
                             <UserRound />
                             <span className='min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden'>{user.name}</span>
                         </SidebarMenuButton>
@@ -81,32 +81,34 @@ export const ShellAccountControl: FC = () => {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem asChild>
                             <Link href={`/players/${encodeURIComponent(user.login_id)}`} onClick={closeMobileSidebar}>
-                                <CircleUserRound />내 페이지
+                                <CircleUserRound />
+                                {t('myPage')}
                             </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem asChild>
                             <Link href='/folders' onClick={closeMobileSidebar}>
-                                <FolderHeart />내 폴더
+                                <FolderHeart />
+                                {t('myFolders')}
                             </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem asChild>
                             <Link href='/settings' onClick={closeMobileSidebar}>
                                 <Settings />
-                                설정
+                                {t('settings')}
                             </Link>
                         </DropdownMenuItem>
                         {user.role === ADMIN_ROLE && (
                             <DropdownMenuItem asChild>
                                 <Link href='/admin/builds' onClick={closeMobileSidebar}>
                                     <ShieldCheck />
-                                    빌드 관리
+                                    {t('buildAdmin')}
                                 </Link>
                             </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem disabled={logout.isPending} onSelect={handleSignOut}>
                             <LogOut />
-                            로그아웃
+                            {t('signOut')}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>

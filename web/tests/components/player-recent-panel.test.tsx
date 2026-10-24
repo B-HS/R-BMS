@@ -17,6 +17,7 @@ mock.module('@shared/lib/auth-client', () => ({
 const { cleanup, fireEvent, render } = await import('@testing-library/react')
 const { PlayerRecentPanel } = await import('../../src/widgets/player/player-recent-panel')
 const { QUERY_KEY } = await import('../../src/shared/constants/query-key')
+const { withLocale } = await import('../support/browse-intl')
 
 const PLAYER_ID = 'alice'
 const PATHNAME = '/players/alice'
@@ -51,7 +52,7 @@ const renderPanel = (params: { page: number; limit: number }, page: { data: Rece
         <AppRouterContext.Provider value={router as never}>
             <PathnameContext.Provider value={PATHNAME}>
                 <QueryClientProvider client={queryClient}>
-                    <PlayerRecentPanel playerId={PLAYER_ID} params={params} />
+                    {withLocale(<PlayerRecentPanel playerId={PLAYER_ID} params={params} />)}
                 </QueryClientProvider>
             </PathnameContext.Provider>
         </AppRouterContext.Provider>,

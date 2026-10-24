@@ -1,1 +1,643 @@
-{}
+{
+    "home": {
+        "intro": {
+            "title": "R-BMS 점수 서버",
+            "description": "R-BMS 는 BMS 플레이어입니다. 이 사이트는 그 플레이어가 점수를 올리는 인터넷 랭킹 서버이고, 올라온 기록과 난이도표를 여기서 볼 수 있습니다.",
+            "highlights": {
+                "scores": "플레이한 차트의 점수와 램프가 계정에 쌓이고, 차트마다 순위가 매겨집니다.",
+                "rivals": "라이벌을 등록하면 게임 안의 순위 패널에서 바로 견줄 수 있습니다.",
+                "sync": "설정과 키 배치를 서버에 올려 다른 기기에서 내려받습니다."
+            },
+            "guideLink": "연결 방법 보기",
+            "insaneLink": "発狂BMS難易度表 보기",
+            "searchLink": "차트 검색"
+        },
+        "recent": {
+            "title": "최근 활동",
+            "loading": "최근 활동 불러오는 중",
+            "loadError": "최근 활동을 불러오지 못했습니다.",
+            "empty": "아직 올라온 기록이 없습니다.",
+            "guideButton": "가이드 보기",
+            "listLabel": "최근 제출 목록",
+            "note": "순위에 반영되는 제출만 표시됩니다. SCRATCH AUTO 판은 이 목록에 나오지 않고, 차트·코스 순위에서 볼 수 있습니다."
+        },
+        "stats": {
+            "title": "서버 현황",
+            "loading": "서버 현황 불러오는 중",
+            "loadError": "서버 현황을 불러오지 못했습니다.",
+            "charts": "등록 차트",
+            "players": "플레이어",
+            "submissions": "누적 제출"
+        }
+    },
+    "leaderboard": {
+        "columns": {
+            "rank": "순위",
+            "player": "플레이어",
+            "cleared": "클리어",
+            "playedCharts": "플레이 곡",
+            "totalPlays": "제출 수"
+        },
+        "sortLabel": "정렬",
+        "sort": {
+            "cleared": "클리어한 차트 수",
+            "played": "플레이한 차트 수",
+            "plays": "점수 제출 수"
+        },
+        "summaryLoading": "불러오는 중",
+        "summaryPlayers": "플레이어 {count, number}명",
+        "loading": "순위 불러오는 중",
+        "loadError": "순위를 불러오지 못했습니다",
+        "empty": "아직 순위에 오른 플레이어가 없습니다",
+        "caption": "플레이어 종합 순위",
+        "note": "클리어·플레이 곡·제출 수는 기본으로 SCRATCH AUTO 판을 포함해 곡마다 더 높은 기록으로 셉니다. SCRATCH AUTO 포함을 끄면 일반 판만 셉니다. 클리어는 FAILED 가 아닌 모든 램프(ASSIST 포함)입니다."
+    },
+    "player": {
+        "detail": {
+            "pageTitle": "플레이어",
+            "notFoundTitle": "없는 플레이어입니다",
+            "notFoundDescription": "아이디가 바뀌었거나 가입하지 않은 플레이어입니다.",
+            "notFoundAction": "순위로",
+            "loadError": "플레이어를 불러오지 못했습니다",
+            "plays": "제출 <value>{total, number}</value>"
+        },
+        "recent": {
+            "title": "플레이 기록",
+            "count": "{count, number}판",
+            "loading": "플레이 기록 불러오는 중",
+            "loadError": "플레이 기록을 불러오지 못했습니다.",
+            "empty": "아직 기록이 없습니다.",
+            "pageEmpty": "이 페이지에는 기록이 없습니다.",
+            "lastPage": "마지막 페이지로",
+            "listLabel": "플레이어 플레이 기록",
+            "coach": "판 코치",
+            "note": "순위 반영 여부와 무관하게 모든 판을 최신순으로 표시합니다. A-SCR 은 SCRATCH AUTO 로 친 기록입니다."
+        },
+        "stats": {
+            "lampTitle": "램프 분포",
+            "loading": "통계 불러오는 중",
+            "loadError": "통계를 불러오지 못했습니다.",
+            "totalPlays": "총 제출",
+            "totalPlaysHint": "스코어 제출 횟수",
+            "clearedCharts": "클리어 차트",
+            "clearedHint": "플레이한 차트 {played, number}개 중",
+            "clearedHintWithScratchAuto": "플레이한 차트 {played, number}개 중 · SCRATCH AUTO 기록 {scratchAuto, number}곡 포함",
+            "clearRate": "클리어 비율",
+            "clearRateHint": "플레이한 차트 기준",
+            "clearedLabel": "클리어한 차트"
+        }
+    },
+    "replay": {
+        "pageTitle": "리플레이",
+        "notFoundTitle": "없는 리플레이입니다",
+        "notFoundDescription": "지워졌거나 올라온 적이 없는 리플레이입니다.",
+        "loadError": "리플레이를 불러오지 못했습니다",
+        "chart": "차트",
+        "score": "스코어",
+        "events": "이벤트",
+        "length": "길이",
+        "seconds": "{seconds}초",
+        "build": "빌드",
+        "size": "크기",
+        "bytes": "{size, number} bytes",
+        "waterfallTitle": "입력 워터폴",
+        "waterfallFootnote": "이벤트 타임스탬프는 µs 원본입니다. 가로 1초 = 96px, 키보드 내비게이션은 지원하지 않습니다.",
+        "waterfallFootnoteLimited": "이벤트 타임스탬프는 µs 원본입니다. 가로 1초 = 96px, 키보드 내비게이션은 지원하지 않습니다. 전체 {total, number}건 중 앞 {shown, number}건만 그립니다.",
+        "waterfallLabel": "레인 {lanes}개에 걸친 입력 이벤트 {events}건, 총 길이 {seconds}초"
+    },
+    "search": {
+        "filter": {
+            "label": "검색 조건",
+            "keywordLabel": "검색어",
+            "keywordPlaceholder": "제목 · 아티스트",
+            "levelLabel": "레벨",
+            "all": "전체",
+            "submit": "검색",
+            "modeLabel": "모드",
+            "sortLabel": "정렬"
+        },
+        "sort": {
+            "title": "제목 순",
+            "level": "레벨 순",
+            "notes": "노트 많은 순",
+            "recent": "최근 등록 순"
+        },
+        "columns": {
+            "title": "제목",
+            "artist": "아티스트",
+            "mode": "모드",
+            "level": "레벨",
+            "notes": "노트"
+        },
+        "searching": "검색 중",
+        "resultCount": "{count, number}건",
+        "loading": "차트 검색 결과 불러오는 중",
+        "loadError": "차트를 불러오지 못했습니다",
+        "emptyTitle": "조건에 맞는 차트가 없습니다",
+        "emptyFiltered": "검색어나 필터를 바꿔 보세요.",
+        "emptyNone": "아직 등록된 차트가 없습니다.",
+        "resetFilters": "필터 초기화",
+        "caption": "차트 검색 결과"
+    },
+    "admin": {
+        "aiLimits": {
+            "title": "AI 사용 한도",
+            "toSettings": "설정으로",
+            "loading": "AI 사용 한도 불러오는 중",
+            "loadError": "AI 사용 한도를 불러오지 못했습니다",
+            "footnote": "저장한 값은 다음 AI 호출부터 모든 사용자에게 적용됩니다. 사용자가 월 토큰 상한을 직접 정했다면 그 값이 기본 월 토큰 상한보다 먼저 적용됩니다.",
+            "rangeError": "1 이상 {max, number} 이하의 정수를 입력하세요.",
+            "saved": "AI 사용 한도를 저장했습니다.",
+            "dailyCalls": "사용자당 하루 호출 수",
+            "dailyCallsDescription": "사용자 한 명이 하루(UTC)에 공급자를 부를 수 있는 횟수입니다.",
+            "concurrentRuns": "사용자당 동시 실행 수",
+            "concurrentRunsDescription": "사용자 한 명이 동시에 진행할 수 있는 AI 호출 수입니다.",
+            "monthlyTokenLimit": "기본 월 토큰 상한",
+            "monthlyTokenLimitPlaceholder": "비워 두면 제한 없음",
+            "monthlyTokenLimitDescription": "사용자가 자기 월 상한을 정하지 않았을 때 쓰는 값입니다. 입력과 출력 토큰의 합이며, 비워 두면 제한하지 않습니다.",
+            "save": "저장",
+            "neverChanged": "아직 바꾼 적이 없어 기본값입니다.",
+            "lastChanged": "마지막 변경 {time}"
+        },
+        "builds": {
+            "title": "클라이언트 빌드 allowlist",
+            "toSettings": "설정으로",
+            "register": "빌드 등록",
+            "loadError": "빌드 목록을 불러오지 못했습니다",
+            "empty": "등록된 빌드가 없습니다",
+            "footnote": "allowlist 에 없거나 untrusted 인 빌드가 제출하면 UNKNOWN_BUILD 플래그가 붙고 unranked 처리됩니다.",
+            "registered": "빌드를 등록했습니다.",
+            "markedTrusted": "빌드를 trusted 로 바꿨습니다.",
+            "markedUntrusted": "빌드를 untrusted 로 바꿨습니다.",
+            "version": "버전",
+            "platform": "플랫폼",
+            "channel": "채널",
+            "trust": "신뢰",
+            "note": "메모",
+            "releasedAt": "등록",
+            "revokeTrust": "신뢰 해제",
+            "grantTrust": "신뢰 부여",
+            "dialogTitle": "클라이언트 빌드 등록",
+            "dialogDescription": "릴리스 바이너리의 sha256 을 allowlist 에 추가합니다.",
+            "submit": "등록",
+            "sha256Hint": "64자 hex 문자열입니다.",
+            "trustedHint": "끄면 이 빌드의 제출이 unranked 로 기록됩니다."
+        }
+    },
+    "auth": {
+        "errors": {
+            "idRequired": "아이디를 입력하세요",
+            "idMin": "아이디는 {min}자 이상이어야 합니다",
+            "idPattern": "영문·숫자·-·_ 만 사용할 수 있습니다",
+            "emailInvalid": "이메일 형식이 올바르지 않습니다",
+            "nameRequired": "표시 이름을 입력하세요",
+            "passwordMin": "비밀번호는 {min}자 이상이어야 합니다",
+            "passwordMismatch": "비밀번호가 일치하지 않습니다"
+        },
+        "fields": {
+            "id": "아이디",
+            "email": "이메일",
+            "displayName": "표시 이름",
+            "password": "비밀번호",
+            "passwordConfirm": "비밀번호 확인"
+        },
+        "loggedIn": "{name} 님으로 로그인했습니다.",
+        "signedUp": "{name} 님으로 가입했습니다.",
+        "login": "로그인",
+        "signup": "가입",
+        "toSignup": "계정이 없으신가요? 가입",
+        "toLogin": "이미 계정이 있으신가요? 로그인",
+        "guideHint": "게임 안에서 계정을 연결하는 방법은 <guide>가이드</guide>에 있습니다."
+    },
+    "chart": {
+        "pageTitle": "차트",
+        "loadError": "차트를 불러오지 못했습니다",
+        "notFoundTitle": "등록되지 않은 차트입니다",
+        "notFoundDescription": "이 해시로 제출된 기록이 아직 없습니다.",
+        "notFoundAction": "차트 검색",
+        "membershipsLabel": "이 차트가 든 난이도표",
+        "membershipLink": "{name} {level} 레벨로 이동",
+        "meta": {
+            "mode": "모드",
+            "level": "레벨",
+            "notes": "노트",
+            "longNote": "롱노트"
+        },
+        "copyMd5": "md5 복사",
+        "copySha256": "sha256 복사",
+        "stats": {
+            "bestEx": "최고 EX",
+            "bestLamp": "최고 램프",
+            "rankedPlayers": "순위 내 플레이어",
+            "shown": "순위 표시",
+            "scopeHint": "서버가 내려주는 상위 구간 기준"
+        },
+        "ranking": "순위",
+        "emptyTitle": "등록된 기록이 없습니다",
+        "emptyDescription": "R-BMS 로 이 차트를 플레이하면 여기에 올라옵니다.",
+        "caption": "차트 순위",
+        "footnote": "순위에서 제외된(unranked) 기록은 표시되지 않습니다. A-SCR 은 턴테이블을 SCRATCH AUTO 로 친 기록입니다. SCRATCH AUTO 포함을 끄면 일반 판 기록만 보입니다.",
+        "columns": {
+            "rank": "순위",
+            "player": "플레이어",
+            "lamp": "램프",
+            "djRank": "랭크",
+            "combo": "콤보",
+            "playedAt": "기록 시각",
+            "replay": "리플레이",
+            "replayLink": "보기"
+        }
+    },
+    "course": {
+        "pageTitle": "코스",
+        "loadError": "코스를 불러오지 못했습니다",
+        "removedFromTable": "표에서 빠짐",
+        "catalog": {
+            "course": "코스",
+            "dan": "단위",
+            "loading": "코스 불러오는 중",
+            "emptyTitle": "등록된 코스가 아직 없습니다",
+            "emptyDescription": "GENOSIDE 2018 과 Stella·Satellite 코스는 서버에 등록되면 여기에 나타납니다.",
+            "groupTitle": "{name} ({count, number})",
+            "keys": "{keys}키",
+            "footnote": "단위 칸에 표시가 있는 코스를 조건대로 클리어하면 서버가 단위를 자동으로 줍니다. 조건과 표시할 단위는 <link>마이페이지 단위 탭</link>에서 봅니다."
+        },
+        "detail": {
+            "chart": "차트",
+            "rank": "순위",
+            "player": "플레이어",
+            "lamp": "램프",
+            "recorded": "기록",
+            "notFoundTitle": "없는 코스입니다",
+            "notFoundDescription": "이 해시로 등록된 코스가 없습니다.",
+            "notFoundAction": "난이도표로",
+            "chartCount": "구성 차트 {count, number}곡",
+            "danAward": "이 코스를 조건대로 클리어하면 {system} {label} 단위를 얻습니다. <link>인정 조건</link>",
+            "chartsCaption": "코스 구성 차트",
+            "trophies": "트로피",
+            "ranking": "순위",
+            "rankingLoadError": "순위를 불러오지 못했습니다",
+            "noRecords": "기록이 없습니다",
+            "rankingCaption": "코스 순위",
+            "footnote": "순위에서 제외된(unranked) 기록은 표시되지 않습니다. A-SCR 은 턴테이블을 SCRATCH AUTO 로 친 기록입니다. SCRATCH AUTO 포함을 끄면 일반 판 기록만 보입니다."
+        }
+    },
+    "folder": {
+        "pageTitle": "폴더",
+        "notFoundTitle": "폴더를 찾을 수 없습니다",
+        "notFoundDescription": "지워졌거나 다른 계정의 폴더입니다.",
+        "notFoundAction": "내 폴더로",
+        "loadError": "폴더를 불러오지 못했습니다",
+        "noFolders": "아직 폴더가 없습니다",
+        "itemCount": "{count, number}곡",
+        "deleted": "''{name}'' 폴더를 지웠습니다.",
+        "deleteConfirmTitle": "폴더를 지울까요?",
+        "deleteConfirmDescription": "''{name}'' 폴더와 그 안의 {count, number}곡 목록을 지웁니다. R-BMS 선곡 화면에서도 사라지며 되돌릴 수 없습니다.",
+        "deleteConfirm": "지우기",
+        "addMenu": {
+            "trigger": "내 폴더에 넣기",
+            "signIn": "로그인하고 폴더에 넣기",
+            "title": "내 폴더",
+            "loading": "불러오는 중",
+            "retry": "불러오지 못했습니다. 다시 시도",
+            "noFolders": "아직 폴더가 없습니다",
+            "full": "가득 참",
+            "itemCount": "{count, number}곡",
+            "createAndAdd": "새 폴더를 만들어 넣기",
+            "manage": "내 폴더 관리",
+            "added": "''{name}'' 에 넣었습니다.",
+            "removed": "''{name}'' 에서 뺐습니다.",
+            "createdAndAdded": "''{name}'' 폴더를 만들고 곡을 넣었습니다.",
+            "createdButNotAdded": "폴더는 만들었지만 곡을 넣지 못했습니다. {reason}",
+            "dialogTitle": "새 폴더에 넣기",
+            "dialogDescription": "''{chart}'' 을 새 폴더에 넣습니다.",
+            "dialogSubmit": "만들고 넣기"
+        },
+        "search": {
+            "hint": "두 글자 이상 입력하세요. 곡명, 아티스트, md5 앞 6자로 찾습니다.",
+            "searching": "찾는 중",
+            "none": "조건에 맞는 곡이 없습니다.",
+            "count": "{count, number}곡",
+            "countAtLeast": "{count, number}곡 이상",
+            "narrowHint": "검색어를 더 좁혀 보세요",
+            "searchingServer": "IR 검색 중",
+            "label": "곡 추가",
+            "placeholder": "곡명 · 아티스트 · md5",
+            "addedAnnouncement": "{title} 을 목록 끝에 넣었습니다.",
+            "full": "폴더가 가득 찼습니다. 곡을 빼야 더 넣을 수 있습니다.",
+            "serverError": "IR 검색을 불러오지 못해 난이도표 결과만 보입니다.",
+            "retry": "다시 시도",
+            "resultsLabel": "검색 결과"
+        },
+        "changes": {
+            "added": "추가 {count}",
+            "removed": "빼기 {count}",
+            "reordered": "순서",
+            "notes": "메모 {count}",
+            "renamed": "이름",
+            "description": "설명"
+        },
+        "editor": {
+            "headerDirty": "{items} · 저장하지 않은 변경 {changes}건",
+            "headerClean": "{items} · {updated} 수정",
+            "saved": "저장했습니다. R-BMS 는 다음에 로그인할 때 바뀐 폴더를 읽습니다.",
+            "imported": "{count, number}곡을 목록 끝에 넣었습니다. 저장해야 R-BMS 에 반영됩니다.",
+            "importFromTable": "표에서 가져오기",
+            "addCharts": "곡 추가",
+            "saving": "저장 중",
+            "save": "저장",
+            "folderMenu": "폴더 메뉴",
+            "editMeta": "이름·설명 고치기",
+            "revertChanges": "변경 되돌리기",
+            "deleteFolder": "폴더 지우기",
+            "saveFailed": "저장하지 못했습니다",
+            "saveFailedDescription": "{error} 변경은 이 화면에 그대로 있습니다.",
+            "unsaved": "저장 안 됨 · {changes}",
+            "revert": "되돌리기",
+            "emptyTitle": "곡이 없습니다",
+            "emptyDescription": "곡을 찾아 넣거나 발광 난이도표에서 레벨째 가져오세요. 넣은 뒤 저장해야 R-BMS 에 보입니다.",
+            "listLabel": "{name}의 곡",
+            "sheetDescription": "넣은 곡은 목록 끝에 붙고, 저장해야 R-BMS 에 반영됩니다.",
+            "metaDescription": "저장 버튼을 눌러야 반영됩니다.",
+            "apply": "적용",
+            "leaveTitle": "저장하지 않은 변경이 있습니다",
+            "leaveDescription": "이대로 나가면 변경 {count}건({summary})이 사라집니다.",
+            "leaveConfirm": "저장하지 않고 나가기",
+            "leaveCancel": "계속 편집"
+        },
+        "list": {
+            "created": "''{name}'' 폴더를 만들었습니다.",
+            "updated": "이름과 설명을 고쳤습니다.",
+            "newFolder": "새 폴더",
+            "pageTitle": "내 폴더",
+            "pageDescription": "R-BMS 선곡 화면에 표처럼 나타나는 곡 묶음",
+            "loading": "폴더 불러오는 중",
+            "emptyDescription": "폴더를 만들고 곡을 넣으면 R-BMS 에 로그인했을 때 선곡 화면의 MY FOLDERS 아래에 나타납니다. 발광 난이도표에서 곡을 골라 넣을 수도 있습니다.",
+            "createFirst": "첫 폴더 만들기",
+            "viewInsaneTable": "발광 난이도표 보기",
+            "listLabel": "내 폴더 목록",
+            "createDescription": "이름은 R-BMS 선곡 화면에 그대로 보입니다. 곡은 만든 뒤 편집 화면에서 넣습니다.",
+            "create": "만들기",
+            "edit": "고치기"
+        }
+    },
+    "table": {
+        "copyTableUrl": "표 주소 복사",
+        "copiedTableUrl": "표 주소를 복사했습니다. R-BMS 의 난이도표 설정에 붙여 넣으세요.",
+        "source": "출처 {name}({maker})",
+        "snapshotDescription": "{levels} · {count, number}곡 · 갱신 {updated}",
+        "catalog": {
+            "intro": "표 주소를 R-BMS 의 난이도표 설정에 넣으면 선곡 화면에 레벨별 폴더로 나옵니다. 기본 표는 R-BMS 를 처음 실행할 때 등록됩니다.",
+            "bundledHeading": "기본 표",
+            "serverHeading": "서버 표",
+            "serverLoading": "서버 표 불러오는 중"
+        },
+        "sidebar": {
+            "heading": "표 정보",
+            "updated": "갱신",
+            "chartsAndLevels": "곡 · 레벨"
+        },
+        "list": {
+            "loading": "난이도표 목록 불러오는 중",
+            "loadError": "표 목록을 불러오지 못했습니다",
+            "empty": "서버에 따로 등록된 IR 난이도표가 아직 없습니다.",
+            "listLabel": "서버 표 목록",
+            "stats": "차트 {charts, number} · 폴더 {folders, number} · 코스 {courses, number}"
+        },
+        "detail": {
+            "pageTitle": "난이도표",
+            "notFoundTitle": "없는 난이도표입니다",
+            "notFoundDescription": "이 주소로 등록된 표가 없습니다.",
+            "notFoundAction": "난이도표 목록",
+            "loadError": "표를 불러오지 못했습니다",
+            "summary": "폴더 {folders, number}개 · 코스 {courses, number}개",
+            "emptyFolders": "폴더가 없습니다",
+            "folderTitle": "{name} ({count, number})",
+            "folderCaption": "{name} 폴더의 차트"
+        },
+        "chartDetails": {
+            "addOnNamed": "차분: {name}",
+            "addOn": "차분",
+            "untitled": "제목 없음",
+            "noArtist": "아티스트 정보 없음",
+            "sources": "받는 곳",
+            "mainAndAddOn": "본편 · 차분",
+            "main": "본편",
+            "noSources": "표에 받는 곳이 적혀 있지 않습니다.",
+            "sourcesNote": "원작자의 주소로 잇습니다. 오래된 주소는 열리지 않을 수 있습니다.",
+            "bestRecord": "내 최고 기록",
+            "copyMd5": "md5 복사",
+            "chartRanking": "차트 순위",
+            "playerCount": "{count, number}명",
+            "serverCheckFailed": "서버의 차트 정보를 확인하지 못했습니다.",
+            "noServerRecord": "서버에 아직 이 차트의 기록이 없습니다."
+        },
+        "workspace": {
+            "all": "전체",
+            "sorts": {
+                "table": "원본 순",
+                "title": "곡명 순",
+                "lamp": "램프 낮은 순",
+                "rate": "달성률 낮은 순"
+            },
+            "lampFilters": {
+                "all": "모든 램프",
+                "noplay": "미플레이",
+                "failed": "FAILED",
+                "unclear": "미클리어 (미플레이 포함)",
+                "cleared": "클리어 (ASSIST 이상)",
+                "easy": "EASY 이상",
+                "clear": "CLEAR 이상",
+                "hard": "HARD 이상",
+                "exhard": "EX HARD 이상",
+                "fullcombo": "FULL COMBO 이상"
+            },
+            "signedOutLampHint": "로그인하면 램프로 거를 수 있습니다.",
+            "loginPrompt": "로그인하면 레벨별 램프 분포와 카드마다 내 램프·랭크가 표시됩니다.",
+            "signIn": "로그인",
+            "recordsError": "내 기록을 불러오지 못했습니다. 표는 그대로 볼 수 있습니다.",
+            "retry": "다시 시도",
+            "searchLabel": "곡 찾기",
+            "searchPlaceholder": "곡명 · 아티스트 · md5",
+            "searchAria": "곡명, 아티스트 또는 md5 로 찾기",
+            "filter": "필터",
+            "filtersApplied": "{count}개 적용됨",
+            "filterDescription": "레벨 범위, 램프, 정렬을 고릅니다. 바꾸면 바로 적용됩니다.",
+            "shownOfTotal": "{shown, number} / {total, number}곡",
+            "chartCount": "{count, number}곡",
+            "reset": "초기화",
+            "showResults": "결과 보기",
+            "expandAll": "모든 레벨 펼치기",
+            "collapseAll": "모든 레벨 접기",
+            "emptyTitle": "조건에 맞는 곡이 없습니다",
+            "emptyDescription": "검색어를 줄이거나 필터를 풀어 보세요.",
+            "resetFilters": "필터 초기화",
+            "gridLabel": "{level} 곡"
+        }
+    },
+    "guide": {
+        "intro": "R-BMS 플레이어는 게임 안에서 IR 연동을 전부 끝낼 수 있습니다. 곡 선택 화면에서 Tab 을 눌러 SETTINGS 를 열고 NETWORK 탭으로 이동하면 서버 주소, 계정, 동기화, 라이벌을 모두 설정할 수 있습니다.",
+        "advancedLabel": "고급 (Advanced)",
+        "nextSteps": {
+            "label": "다음 단계",
+            "signup": "계정 만들기",
+            "login": "로그인",
+            "apiToken": "API 토큰 발급"
+        },
+        "toc": {
+            "label": "가이드 목차",
+            "title": "목차"
+        },
+        "connect": {
+            "title": "1. 서버 연결 (Connect)",
+            "body": "곡 선택 화면에서 Tab 을 누르면 SETTINGS 가 열립니다. 상단 탭 중 NETWORK 를 고르고 SERVER URL 행에서 Enter 또는 오른쪽 방향키를 누르면 그 자리에서 주소를 입력할 수 있습니다. Enter 로 확정, Esc 로 취소합니다. 주소를 비우면 오프라인으로 동작합니다.",
+            "steps": {
+                "open": "곡 선택 화면에서 Tab → SETTINGS",
+                "network": "Tab 으로 NETWORK 탭 선택 (PLAY · GAUGE · JUDGE · DISPLAY · INPUT · NETWORK)",
+                "server": "SERVER URL 행에서 Enter → {url} 입력 → Enter",
+                "player": "PLAYER ID 행에 사용할 계정 아이디 입력 (기본값 guest)",
+                "close": "Esc 로 SETTINGS 를 닫으면 저장됩니다"
+            },
+            "code": "SERVER URL   {url}\nPLAYER ID    '<계정 아이디>'"
+        },
+        "account": {
+            "title": "2. 계정 (Account)",
+            "body": "NETWORK 탭의 EMAIL · PASSWORD 행을 채운 뒤 REGISTER 로 가입하거나 LOGIN 으로 로그인합니다. PASSWORD 는 입력 중에도 * 로만 표시되고 설정 파일에 저장되지 않으며, 로그인이나 가입이 사용하는 즉시 메모리에서 지워집니다. 성공하면 토큰과 로그인 아이디가 로컬 설정에 저장되고 PLAYER ID 가 서버가 돌려준 로그인 아이디로 맞춰집니다.",
+            "rows": {
+                "playerId": {
+                    "label": "PLAYER ID",
+                    "description": "서버 계정의 로그인 아이디이자 랭킹에 표시되는 식별자입니다. LOGIN · REGISTER 는 이 값을 아이디로 사용합니다."
+                },
+                "email": {
+                    "label": "EMAIL",
+                    "description": "REGISTER 에서만 사용합니다. 로그인 인증에는 쓰이지 않습니다."
+                },
+                "password": {
+                    "label": "PASSWORD",
+                    "description": "마스킹 입력이며 저장되지 않습니다. 값이 없으면 (not set) 으로 표시됩니다."
+                },
+                "login": {
+                    "label": "LOGIN",
+                    "description": "PLAYER ID + PASSWORD 로 백그라운드 로그인. 성공하면 토큰 저장 · 스코어 서버 재구성 · 라이벌 목록 갱신까지 이어집니다."
+                },
+                "register": {
+                    "label": "REGISTER",
+                    "description": "PLAYER ID · EMAIL · PASSWORD 로 가입합니다. 성공 후 동작은 LOGIN 과 같습니다."
+                },
+                "logout": {
+                    "label": "LOGOUT",
+                    "description": "토큰과 로그인 아이디, 보관 중인 비밀번호를 지웁니다. PLAYER ID 는 남아 있어 재로그인이 한 번의 입력으로 끝납니다."
+                },
+                "account": {
+                    "label": "ACCOUNT",
+                    "description": "현재 상태를 보여주는 읽기 전용 행입니다. guest / logging in... / logged in as '<id>' / login failed: '<오류>' / session expired: '<오류>' 등이 표시됩니다."
+                }
+            }
+        },
+        "ranked": {
+            "title": "3. 랭킹에 반영되는 플레이 (Playing ranked)",
+            "body": "플레이가 끝나면 결과 화면 왼쪽에 IR 결과가 표시됩니다. 서버가 받아들이면 IR: RANK #'<순위>' 또는 IR: SENT 가, 개인 베스트를 갱신하면 NEW BEST 가 함께 나옵니다. 아래 조건에 해당하는 플레이는 제출 자체를 건너뛰거나 UNRANKED 로 기록되어 랭킹에서 빠집니다. 사람이 친 판은 어시스트가 있어도 서버에 기록이 남고, 코스도 같습니다. SCRATCH AUTO 판만은 랭킹에 오르되 따로 셉니다.",
+            "rows": {
+                "skipped": {
+                    "label": "autoplay · 리플레이 재생",
+                    "description": "기록 대상이 아니므로 제출하지 않습니다. 결과 화면에 IR: SKIPPED (autoplay) 또는 IR: SKIPPED (replay playback) 이 표시됩니다."
+                },
+                "widenedJudge": {
+                    "label": "판정폭 확대",
+                    "description": "JUDGE WIDTH 나 LN 마진을 100 보다 넓게 설정한 플레이는 제출되어 기록이 남지만 랭킹과 서버 최고 기록에서 빠집니다 (UNRANKED: widened judge 또는 assist options). 이런 스테이지가 하나라도 낀 코스도 같습니다."
+                },
+                "scratchAuto": {
+                    "label": "SCRATCH AUTO",
+                    "description": "SCRATCH AUTO 로 친 플레이는 턴테이블 노트를 판정에서 빼고 제출되며 랭킹에 오릅니다. 서버는 일반 판 최고 기록과 SCRATCH AUTO 판 최고 기록을 따로 남깁니다. 웹 순위 목록은 기본으로 SCRATCH AUTO 포함이 켜져 있어 플레이어마다 일반 판과 SCRATCH AUTO 판 가운데 더 높은 기록을 A-SCR 표지와 함께 보여 주고, SCRATCH AUTO 포함을 끄면 일반 판만 보여 줍니다. 결과 화면의 순위는 그 판이 속한 목록 기준이라 IR: RANK #'<순위>' (SCRATCH AUTO) 로 나옵니다. 곡 선택 랭킹 패널은 일반 판만의 목록을 씁니다. SCRATCH AUTO 스테이지가 하나라도 낀 코스도 같습니다. 판정폭 확대와 함께 쓴 판은 판정폭 확대 때문에 UNRANKED 입니다."
+                },
+                "assist": {
+                    "label": "어시스트 옵션 · guest 제출",
+                    "description": "서버가 받아들이더라도 랭킹에서 제외하는 경우가 있습니다. 이때는 UNRANKED: assist options, guest submission 처럼 서버가 알려준 사유가 그대로 표시됩니다."
+                }
+            },
+            "code": "IR: RANK #12\nNEW BEST\nREPLAY UPLOADED"
+        },
+        "rankingPanel": {
+            "title": "4. 곡 선택 랭킹 패널 (IR RANKING)",
+            "body": "곡 선택 화면에서 I 를 누르면 오른쪽에 IR RANKING 패널이 열리고 포커스가 옮겨갑니다. 위/아래로 행을 이동하고 Enter 로 리플레이를 재생하며, I · Esc · 왼쪽 방향키로 닫습니다. 포커스한 차트가 잠깐 머무르면 랭킹 상위 10명, 내 베스트, 라이벌 기록, 리플레이 목록을 한 번에 불러와 차트별로 캐시합니다.",
+            "rows": {
+                "layout": {
+                    "label": "행 구성",
+                    "description": "순위 · 플레이어 이름 · EX 점수 · 클리어 램프 순으로 표시되고, 서버가 판정 상세를 주면 F'<fast>'/S'<slow>' 가, 내려받을 수 있는 리플레이가 있으면 REP 가 오른쪽에 붙습니다."
+                },
+                "youRival": {
+                    "label": "YOU · RIVAL 행",
+                    "description": "랭킹 아래에 내 베스트를 담은 YOU 행이, 그 아래에 RIVAL '<플레이어 ID>' 행이 이어집니다. 기록이 없으면 순위와 점수가 - 로 표시됩니다."
+                },
+                "replay": {
+                    "label": "REP 재생",
+                    "description": "REP 가 붙은 행에서 Enter 를 누르면 리플레이를 내려받아 곧바로 재생합니다. 리플레이가 없는 행에서는 no replay for that row 가 표시됩니다."
+                },
+                "status": {
+                    "label": "상태 메시지",
+                    "description": "IR OFF - SET SERVER URL IN SETTINGS · SELECT A CHART · LOADING... · NO SCORES YET · ERROR: '<오류>' 중 하나가 한 줄로 표시됩니다."
+                }
+            }
+        },
+        "replay": {
+            "title": "5. 리플레이 업로드 (Replays)",
+            "body": "NETWORK 탭의 AUTO UPLOAD REPLAY 를 ON 으로 두면 (기본값 ON) 스코어가 정상적으로 접수되고 랭킹 제외 사유가 없을 때 리플레이가 함께 올라갑니다. 결과 화면에 REPLAY UPLOADED 또는 REPLAY ERROR: '<오류>' 가 표시됩니다. 업로드된 리플레이는 랭킹 패널의 REP 행에서 누구나 내려받아 재생할 수 있습니다.",
+            "rows": {
+                "autoUpload": {
+                    "label": "AUTO UPLOAD REPLAY",
+                    "description": "좌우 방향키 · Enter · 클릭으로 ON / OFF 를 전환하고 즉시 저장합니다."
+                },
+                "condition": {
+                    "label": "업로드 조건",
+                    "description": "로그인 상태이고, 그 플레이가 실제로 리플레이를 저장했으며, 스코어가 접수되고 랭킹 제외 플래그가 없어야 합니다."
+                }
+            }
+        },
+        "sync": {
+            "title": "6. 설정 동기화 (Settings sync)",
+            "body": "SYNC SETTINGS 를 ON 으로 두면 (기본값 OFF) 플레이 설정과 키 배치를 서버에 보관할 수 있습니다. UPLOAD SETTINGS NOW 로 현재 설정을 올리고, DOWNLOAD SETTINGS NOW 로 내려받아 적용합니다. 다른 기기에서 먼저 올린 내용이 있으면 conflict: server newer, download first 가 표시되므로 먼저 내려받은 뒤 다시 올리면 됩니다.",
+            "rows": {
+                "uploaded": {
+                    "label": "올라가는 것",
+                    "description": "플레이 설정과 키 배치입니다. 토큰 · 로그인 아이디 · 이메일 · 비밀번호는 절대 올라가지 않습니다."
+                },
+                "downloaded": {
+                    "label": "내려받을 때",
+                    "description": "플레이 설정과 키 배치만 덮어씁니다. SERVER URL · PLAYER ID · 곡 폴더 · 폰트 경로 같은 기기별 값은 그대로 유지됩니다."
+                },
+                "requirement": {
+                    "label": "필요 조건",
+                    "description": "SERVER URL 이 설정되어 있고 로그인되어 있어야 합니다. 아니면 set SERVER URL first · log in first 안내가 상태 줄에 표시됩니다."
+                }
+            }
+        },
+        "rivals": {
+            "title": "7. 라이벌 (Rivals)",
+            "body": "NETWORK 탭 맨 아래 RIVALS 행에서 Enter 를 누르면 라이벌 목록이 열립니다. + ADD RIVAL (PLAYER ID) 행에서 Enter 를 눌러 상대의 PLAYER ID 를 입력하고, D 로 선택한 라이벌을 지웁니다. Esc 로 닫으면 설정 파일에 저장되고, 로그인 상태라면 서버에도 목록 전체가 반영됩니다.",
+            "rows": {
+                "controls": {
+                    "label": "조작",
+                    "description": "UP DOWN 이동 · ENTER 추가 · D 삭제 · ESC 저장 후 닫기. 빈 아이디와 중복 아이디는 무시됩니다."
+                },
+                "sync": {
+                    "label": "동기화",
+                    "description": "로그인 · 가입 직후와 저장된 토큰이 있는 상태의 시작 시점에 서버 목록으로 갱신됩니다."
+                },
+                "display": {
+                    "label": "표시",
+                    "description": "등록한 라이벌은 곡 선택 랭킹 패널에 RIVAL '<플레이어 ID>' 행으로 함께 표시됩니다."
+                }
+            }
+        },
+        "apiToken": {
+            "title": "8. 다른 도구용 API 토큰 (Advanced)",
+            "body": "게임 클라이언트는 위의 LOGIN 만으로 충분합니다. 직접 만든 스크립트나 외부 도구에서 이 IR 을 호출하려면 웹 설정 화면의 API 토큰 탭에서 토큰을 발급해 Authorization 헤더에 실어 보내세요. 평문 토큰은 발급 직후 한 번만 표시되므로 그 자리에서 저장해야 하며, 필요 없어진 토큰은 목록에서 폐기합니다.",
+            "code": "curl -H 'Authorization: Bearer rbms_'<발급받은_토큰>''' {url}/auth/me"
+        },
+        "cliOverrides": {
+            "title": "9. 실행 인자 덮어쓰기 (Advanced)",
+            "body": "평소에는 필요하지 않습니다. 저장된 설정을 먼저 적용한 뒤 그 실행에서만 값을 바꾸고 싶을 때 --server 와 --player 로 서버 주소와 플레이어 아이디를 덮어쓸 수 있습니다.",
+            "code": "rbms-player --server {url} --player '<플레이어_ID>'"
+        }
+    }
+}

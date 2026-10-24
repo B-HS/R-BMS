@@ -3,6 +3,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
 import { Pager } from '@features/table/pager'
 import { EmptyState } from '@features/state/empty-state'
@@ -18,17 +19,19 @@ import { Button } from '@shared/ui/button'
 const DEFAULT_SORT = 'title'
 const SKELETON_ROWS = 10
 
-const SORT_OPTIONS = [
-    { value: 'title', label: '제목 순' },
-    { value: 'level', label: '레벨 순' },
-    { value: 'notes', label: '노트 많은 순' },
-    { value: 'recent', label: '최근 등록 순' },
+type SearchTranslator = ReturnType<typeof useTranslations<'browse.search'>>
+
+const buildSortOptions = (t: SearchTranslator) => [
+    { value: 'title', label: t('sort.title') },
+    { value: 'level', label: t('sort.level') },
+    { value: 'notes', label: t('sort.notes') },
+    { value: 'recent', label: t('sort.recent') },
 ]
 
-const COLUMN_OPTIONS = [
-    { key: 'mode', label: '모드' },
-    { key: 'level', label: '레벨' },
-    { key: 'notes', label: '노트' },
+const buildColumnOptions = (t: SearchTranslator) => [
+    { key: 'mode', label: t('columns.mode') },
+    { key: 'level', label: t('columns.level') },
+    { key: 'notes', label: t('columns.notes') },
     { key: 'bpm', label: 'BPM' },
     { key: 'md5', label: 'MD5' },
 ]
@@ -36,10 +39,10 @@ const COLUMN_OPTIONS = [
 const DEFAULT_COLUMNS = ['mode', 'level', 'notes', 'bpm']
 const FIXED_COLUMNS = ['title', 'artist']
 
-const ALL_COLUMNS: DataTableColumn<ChartSearchRow>[] = [
+const buildAllColumns = (t: SearchTranslator): DataTableColumn<ChartSearchRow>[] => [
     {
         key: 'title',
-        label: '제목',
+        label: t('columns.title'),
         flex: true,
         cell: (row) => (
             <Link href={`/charts/${row.sha256}`} className='font-medium hover:underline'>
@@ -47,10 +50,10 @@ const ALL_COLUMNS: DataTableColumn<ChartSearchRow>[] = [
             </Link>
         ),
     },
-    { key: 'artist', label: '아티스트', width: 160, hideBelow: 'sm', cell: (row) => row.artist || '—' },
-    { key: 'mode', label: '모드', width: 96, hideBelow: 'md', cell: (row) => row.mode },
-    { key: 'level', label: '레벨', width: 64, align: 'right', cell: (row) => row.level ?? '—' },
-    { key: 'notes', label: '노트', width: 96, align: 'right', hideBelow: 'sm', cell: (row) => formatCount(row.notes) },
+    { key: 'artist', label: t('columns.artist'), width: 160, hideBelow: 'sm', cell: (row) => row.artist || '—' },
+    { key: 'mode', label: t('columns.mode'), width: 96, hideBelow: 'md', cell: (row) => row.mode },
+    { key: 'level', label: t('columns.level'), width: 64, align: 'right', cell: (row) => row.level ?? '—' },
+    { key: 'notes', label: t('columns.notes'), width: 96, align: 'right', hideBelow: 'sm', cell: (row) => formatCount(row.notes) },
     {
         key: 'bpm',
         label: 'BPM',
@@ -66,11 +69,12 @@ export const ChartSearchPanel: FC<{ params: ChartSearchParams }> = ({ params }) 
     const router = useRouter()
     const pathname = usePathname()
     const searchParams = useSearchParams()
+    const t = useTranslations('browse.search')
     const { data, isLoading, isError, isFetching, refetch } = useChartSearch(params)
 
     const activeSort = params.sort ?? DEFAULT_SORT
     const activeColumns = (searchParams.get('cols') ?? DEFAULT_COLUMNS.join(',')).split(',').filter(Boolean)
-    const columns = ALL_COLUMNS.filter((column) => FIXED_COLUMNS.includes(column.key) || activeColumns.includes(column.key))
+    const columns = buildAllColumns(t).filter((column) => FIXED_COLUMNS.includes(column.key) || activeColumns.includes(column.key))
     const rows = data?.data ?? []
     const totalPages = data?.pagination?.totalPages ?? 1
     const hasFilter = Boolean(params.q || params.mode || params.level)
@@ -96,27 +100,27 @@ export const ChartSearchPanel: FC<{ params: ChartSearchParams }> = ({ params }) 
                 mode={params.mode ?? ''}
                 level={params.level ?? ''}
                 sort={activeSort}
-                sortOptions={SORT_OPTIONS}
-                columnOptions={COLUMN_OPTIONS}
+                sortOptions={buildSortOptions(t)}
+                columnOptions={buildColumnOptions(t)}
                 activeColumns={activeColumns}
-                summary={isLoading ? '검색 중' : `${formatCount(data?.pagination?.total ?? rows.length)}건`}
+                summary={isLoading ? t('searching') : t('resultCount', { count: data?.pagination?.total ?? rows.length })}
                 onChange={(next) => push({ ...next, page: 1 })}
                 onToggleColumn={(key) => push({ cols: toggleListValue(activeColumns, key) })}
             />
             {isLoading && (
                 <div className='bg-card p-3'>
-                    <TableSkeleton rows={SKELETON_ROWS} label='차트 검색 결과 불러오는 중' />
+                    <TableSkeleton rows={SKELETON_ROWS} label={t('loading')} />
                 </div>
             )}
-            {!isLoading && isError && <LoadErrorState title='차트를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />}
+            {!isLoading && isError && <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
             {!isLoading && !isError && rows.length === 0 && (
                 <EmptyState
-                    title='조건에 맞는 차트가 없습니다'
-                    description={hasFilter ? '검색어나 필터를 바꿔 보세요.' : '아직 등록된 차트가 없습니다.'}
+                    title={t('emptyTitle')}
+                    description={hasFilter ? t('emptyFiltered') : t('emptyNone')}
                     action={
                         hasFilter && (
                             <Button variant='outline' size='sm' onClick={() => push({ q: undefined, mode: undefined, level: undefined, page: 1 })}>
-                                필터 초기화
+                                {t('resetFilters')}
                             </Button>
                         )
                     }
@@ -124,7 +128,7 @@ export const ChartSearchPanel: FC<{ params: ChartSearchParams }> = ({ params }) 
             )}
             {!isLoading && !isError && rows.length > 0 && (
                 <div className='bg-card flex flex-col px-1 pb-2'>
-                    <DataTable columns={columns} rows={rows} rowKey={(row) => row.sha256} caption='차트 검색 결과' />
+                    <DataTable columns={columns} rows={rows} rowKey={(row) => row.sha256} caption={t('caption')} />
                     <div className='px-2'>
                         <Pager page={params.page} totalPages={totalPages} onPageChange={(page) => push({ page })} />
                     </div>

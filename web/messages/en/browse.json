@@ -1,1 +1,643 @@
-{}
+{
+    "home": {
+        "intro": {
+            "title": "R-BMS score server",
+            "description": "R-BMS is a BMS player. This site is the online ranking server that the player submits scores to, and you can browse the submitted records and difficulty tables here.",
+            "highlights": {
+                "scores": "Scores and lamps for the charts you play accumulate on your account, and every chart has its own ranking.",
+                "rivals": "Register rivals and compare with them right in the in-game ranking panel.",
+                "sync": "Upload your settings and key layout to the server and download them on another device."
+            },
+            "guideLink": "How to connect",
+            "insaneLink": "View the 発狂BMS難易度表",
+            "searchLink": "Chart search"
+        },
+        "recent": {
+            "title": "Recent activity",
+            "loading": "Loading recent activity",
+            "loadError": "Could not load recent activity.",
+            "empty": "No records have been submitted yet.",
+            "guideButton": "View the guide",
+            "listLabel": "Recent submissions",
+            "note": "Only submissions that count toward rankings are shown. SCRATCH AUTO plays do not appear in this list; you can see them in the chart and course rankings."
+        },
+        "stats": {
+            "title": "Server status",
+            "loading": "Loading server status",
+            "loadError": "Could not load server status.",
+            "charts": "Registered charts",
+            "players": "Players",
+            "submissions": "Total submissions"
+        }
+    },
+    "leaderboard": {
+        "columns": {
+            "rank": "Rank",
+            "player": "Player",
+            "cleared": "Cleared",
+            "playedCharts": "Charts played",
+            "totalPlays": "Submissions"
+        },
+        "sortLabel": "Sort",
+        "sort": {
+            "cleared": "Cleared charts",
+            "played": "Played charts",
+            "plays": "Score submissions"
+        },
+        "summaryLoading": "Loading",
+        "summaryPlayers": "{count, plural, one {# player} other {# players}}",
+        "loading": "Loading rankings",
+        "loadError": "Could not load the rankings",
+        "empty": "No players are ranked yet",
+        "caption": "Overall player ranking",
+        "note": "By default, cleared charts, played charts, and submissions include SCRATCH AUTO plays and count the higher record for each chart. Turning \"Include SCRATCH AUTO\" off counts normal plays only. A clear means any lamp other than FAILED (ASSIST included)."
+    },
+    "player": {
+        "detail": {
+            "pageTitle": "Player",
+            "notFoundTitle": "Player not found",
+            "notFoundDescription": "The ID may have changed, or this player has not signed up.",
+            "notFoundAction": "Go to rankings",
+            "loadError": "Could not load the player",
+            "plays": "Submissions <value>{total, number}</value>"
+        },
+        "recent": {
+            "title": "Play history",
+            "count": "{count, plural, one {# play} other {# plays}}",
+            "loading": "Loading play history",
+            "loadError": "Could not load play history.",
+            "empty": "No records yet.",
+            "pageEmpty": "There are no records on this page.",
+            "lastPage": "Go to the last page",
+            "listLabel": "Player play history",
+            "coach": "Play coach",
+            "note": "All plays are shown newest first, whether or not they count toward rankings. A-SCR marks records played with SCRATCH AUTO."
+        },
+        "stats": {
+            "lampTitle": "Lamp distribution",
+            "loading": "Loading statistics",
+            "loadError": "Could not load statistics.",
+            "totalPlays": "Total submissions",
+            "totalPlaysHint": "Number of score submissions",
+            "clearedCharts": "Cleared charts",
+            "clearedHint": "Out of {played, plural, one {# played chart} other {# played charts}}",
+            "clearedHintWithScratchAuto": "Out of {played, plural, one {# played chart} other {# played charts}} · includes {scratchAuto, plural, one {# SCRATCH AUTO record} other {# SCRATCH AUTO records}}",
+            "clearRate": "Clear rate",
+            "clearRateHint": "Based on played charts",
+            "clearedLabel": "Cleared charts"
+        }
+    },
+    "replay": {
+        "pageTitle": "Replay",
+        "notFoundTitle": "Replay not found",
+        "notFoundDescription": "This replay was deleted or has never been uploaded.",
+        "loadError": "Could not load the replay",
+        "chart": "Chart",
+        "score": "Score",
+        "events": "Events",
+        "length": "Length",
+        "seconds": "{seconds} s",
+        "build": "Build",
+        "size": "Size",
+        "bytes": "{size, number} bytes",
+        "waterfallTitle": "Input waterfall",
+        "waterfallFootnote": "Event timestamps are the original microseconds. One second spans 96px horizontally; keyboard navigation is not supported.",
+        "waterfallFootnoteLimited": "Event timestamps are the original microseconds. One second spans 96px horizontally; keyboard navigation is not supported. Only the first {shown, number} of {total, number} events are drawn.",
+        "waterfallLabel": "{events, plural, one {# input event} other {# input events}} across {lanes, plural, one {# lane} other {# lanes}}, {seconds} seconds long in total"
+    },
+    "search": {
+        "filter": {
+            "label": "Search conditions",
+            "keywordLabel": "Search keyword",
+            "keywordPlaceholder": "Title · artist",
+            "levelLabel": "Level",
+            "all": "All",
+            "submit": "Search",
+            "modeLabel": "Mode",
+            "sortLabel": "Sort"
+        },
+        "sort": {
+            "title": "By title",
+            "level": "By level",
+            "notes": "Most notes first",
+            "recent": "Recently added"
+        },
+        "columns": {
+            "title": "Title",
+            "artist": "Artist",
+            "mode": "Mode",
+            "level": "Level",
+            "notes": "Notes"
+        },
+        "searching": "Searching",
+        "resultCount": "{count, plural, one {# result} other {# results}}",
+        "loading": "Loading chart search results",
+        "loadError": "Could not load charts",
+        "emptyTitle": "No charts match",
+        "emptyFiltered": "Try changing the keyword or filters.",
+        "emptyNone": "No charts have been registered yet.",
+        "resetFilters": "Reset filters",
+        "caption": "Chart search results"
+    },
+    "admin": {
+        "aiLimits": {
+            "title": "AI usage limits",
+            "toSettings": "Go to settings",
+            "loading": "Loading AI usage limits",
+            "loadError": "Could not load the AI usage limits",
+            "footnote": "Saved values apply to all users from the next AI call. If a user has set their own monthly token limit, that value takes precedence over the default monthly token limit.",
+            "rangeError": "Enter a whole number from 1 to {max, number}.",
+            "saved": "AI usage limits saved.",
+            "dailyCalls": "Daily calls per user",
+            "dailyCallsDescription": "The number of times a single user can call the provider per day (UTC).",
+            "concurrentRuns": "Concurrent runs per user",
+            "concurrentRunsDescription": "The number of AI calls a single user can have in progress at the same time.",
+            "monthlyTokenLimit": "Default monthly token limit",
+            "monthlyTokenLimitPlaceholder": "Leave empty for no limit",
+            "monthlyTokenLimitDescription": "Used when a user has not set their own monthly limit. It is the sum of input and output tokens; leave it empty for no limit.",
+            "save": "Save",
+            "neverChanged": "Never changed, so the defaults are in effect.",
+            "lastChanged": "Last changed {time}"
+        },
+        "builds": {
+            "title": "Client build allowlist",
+            "toSettings": "Go to settings",
+            "register": "Register build",
+            "loadError": "Could not load the build list",
+            "empty": "No builds are registered",
+            "footnote": "When a build that is not on the allowlist or is untrusted submits a score, the UNKNOWN_BUILD flag is attached and it is treated as unranked.",
+            "registered": "Build registered.",
+            "markedTrusted": "Build marked as trusted.",
+            "markedUntrusted": "Build marked as untrusted.",
+            "version": "Version",
+            "platform": "Platform",
+            "channel": "Channel",
+            "trust": "Trust",
+            "note": "Note",
+            "releasedAt": "Registered",
+            "revokeTrust": "Revoke trust",
+            "grantTrust": "Grant trust",
+            "dialogTitle": "Register client build",
+            "dialogDescription": "Adds the sha256 of a release binary to the allowlist.",
+            "submit": "Register",
+            "sha256Hint": "A 64-character hex string.",
+            "trustedHint": "When off, submissions from this build are recorded as unranked."
+        }
+    },
+    "auth": {
+        "errors": {
+            "idRequired": "Enter your ID",
+            "idMin": "The ID must be at least {min} characters",
+            "idPattern": "Only letters, numbers, - and _ are allowed",
+            "emailInvalid": "The email address is not valid",
+            "nameRequired": "Enter a display name",
+            "passwordMin": "The password must be at least {min} characters",
+            "passwordMismatch": "The passwords do not match"
+        },
+        "fields": {
+            "id": "ID",
+            "email": "Email",
+            "displayName": "Display name",
+            "password": "Password",
+            "passwordConfirm": "Confirm password"
+        },
+        "loggedIn": "Signed in as {name}.",
+        "signedUp": "Signed up as {name}.",
+        "login": "Sign in",
+        "signup": "Sign up",
+        "toSignup": "No account yet? Sign up",
+        "toLogin": "Already have an account? Sign in",
+        "guideHint": "You can find how to connect your account inside the game in the <guide>guide</guide>."
+    },
+    "chart": {
+        "pageTitle": "Chart",
+        "loadError": "Could not load the chart",
+        "notFoundTitle": "This chart is not registered",
+        "notFoundDescription": "No records have been submitted for this hash yet.",
+        "notFoundAction": "Chart search",
+        "membershipsLabel": "Difficulty tables containing this chart",
+        "membershipLink": "Go to level {level} of {name}",
+        "meta": {
+            "mode": "Mode",
+            "level": "Level",
+            "notes": "Notes",
+            "longNote": "Long note"
+        },
+        "copyMd5": "Copy md5",
+        "copySha256": "Copy sha256",
+        "stats": {
+            "bestEx": "Best EX",
+            "bestLamp": "Best lamp",
+            "rankedPlayers": "Players in the ranking",
+            "shown": "Ranks shown",
+            "scopeHint": "Based on the top range the server returns"
+        },
+        "ranking": "Ranking",
+        "emptyTitle": "No records registered",
+        "emptyDescription": "Play this chart with R-BMS and your record will appear here.",
+        "caption": "Chart ranking",
+        "footnote": "Records excluded from the ranking (unranked) are not shown. A-SCR marks records where the turntable was played with SCRATCH AUTO. Turning \"Include SCRATCH AUTO\" off shows normal plays only.",
+        "columns": {
+            "rank": "Rank",
+            "player": "Player",
+            "lamp": "Lamp",
+            "djRank": "DJ LEVEL",
+            "combo": "COMBO",
+            "playedAt": "Recorded at",
+            "replay": "Replay",
+            "replayLink": "View"
+        }
+    },
+    "course": {
+        "pageTitle": "Course",
+        "loadError": "Could not load courses",
+        "removedFromTable": "Removed from table",
+        "catalog": {
+            "course": "Course",
+            "dan": "Dan",
+            "loading": "Loading courses",
+            "emptyTitle": "No courses are registered yet",
+            "emptyDescription": "GENOSIDE 2018 and Stella·Satellite courses will appear here once they are registered on the server.",
+            "groupTitle": "{name} ({count, number})",
+            "keys": "{keys}KEYS",
+            "footnote": "Clearing a course with a mark in the Dan column under its conditions automatically awards you that dan on the server. See the conditions and choose which dan to display on the <link>Dan tab of My Page</link>."
+        },
+        "detail": {
+            "chart": "Chart",
+            "rank": "Rank",
+            "player": "Player",
+            "lamp": "Lamp",
+            "recorded": "Recorded",
+            "notFoundTitle": "Course not found",
+            "notFoundDescription": "No course is registered for this hash.",
+            "notFoundAction": "Go to difficulty tables",
+            "chartCount": "{count, plural, one {# chart} other {# charts}} in this course",
+            "danAward": "Clearing this course under its conditions awards you the {system} {label} dan. <link>Requirements</link>",
+            "chartsCaption": "Course charts",
+            "trophies": "Trophies",
+            "ranking": "Ranking",
+            "rankingLoadError": "Could not load the ranking",
+            "noRecords": "No records",
+            "rankingCaption": "Course ranking",
+            "footnote": "Records excluded from the ranking (unranked) are not shown. A-SCR marks records where the turntable was played with SCRATCH AUTO. Turning \"Include SCRATCH AUTO\" off shows normal plays only."
+        }
+    },
+    "folder": {
+        "pageTitle": "Folder",
+        "notFoundTitle": "Folder not found",
+        "notFoundDescription": "It was deleted or belongs to another account.",
+        "notFoundAction": "Go to my folders",
+        "loadError": "Could not load the folder",
+        "noFolders": "No folders yet",
+        "itemCount": "{count, plural, one {# chart} other {# charts}}",
+        "deleted": "Deleted the folder ''{name}''.",
+        "deleteConfirmTitle": "Delete this folder?",
+        "deleteConfirmDescription": "This deletes the folder ''{name}'' and its list of {count, plural, one {# chart} other {# charts}}. It will also disappear from the R-BMS song select screen and cannot be undone.",
+        "deleteConfirm": "Delete",
+        "addMenu": {
+            "trigger": "Add to my folder",
+            "signIn": "Sign in to add to a folder",
+            "title": "My folders",
+            "loading": "Loading",
+            "retry": "Could not load. Try again",
+            "noFolders": "No folders yet",
+            "full": "Full",
+            "itemCount": "{count, plural, one {# chart} other {# charts}}",
+            "createAndAdd": "Create a new folder and add",
+            "manage": "Manage my folders",
+            "added": "Added to ''{name}''.",
+            "removed": "Removed from ''{name}''.",
+            "createdAndAdded": "Created the folder ''{name}'' and added the chart.",
+            "createdButNotAdded": "The folder was created, but the chart could not be added. {reason}",
+            "dialogTitle": "Add to a new folder",
+            "dialogDescription": "Adds ''{chart}'' to a new folder.",
+            "dialogSubmit": "Create and add"
+        },
+        "search": {
+            "hint": "Enter at least two characters. Search by title, artist, or the first 6 characters of the md5.",
+            "searching": "Searching",
+            "none": "No charts match.",
+            "count": "{count, plural, one {# chart} other {# charts}}",
+            "countAtLeast": "{count, number}+ charts",
+            "narrowHint": "narrow your search",
+            "searchingServer": "searching IR",
+            "label": "Add charts",
+            "placeholder": "Title · artist · md5",
+            "addedAnnouncement": "Added {title} to the end of the list.",
+            "full": "The folder is full. Remove a chart to add more.",
+            "serverError": "Could not load the IR search, so only difficulty table results are shown.",
+            "retry": "Try again",
+            "resultsLabel": "Search results"
+        },
+        "changes": {
+            "added": "Added {count}",
+            "removed": "Removed {count}",
+            "reordered": "Order",
+            "notes": "Notes {count}",
+            "renamed": "Name",
+            "description": "Description"
+        },
+        "editor": {
+            "headerDirty": "{items} · {changes, plural, one {# unsaved change} other {# unsaved changes}}",
+            "headerClean": "{items} · edited {updated}",
+            "saved": "Saved. R-BMS reads the changed folders the next time you log in.",
+            "imported": "Added {count, plural, one {# chart} other {# charts}} to the end of the list. Save to apply the change in R-BMS.",
+            "importFromTable": "Import from table",
+            "addCharts": "Add charts",
+            "saving": "Saving",
+            "save": "Save",
+            "folderMenu": "Folder menu",
+            "editMeta": "Edit name and description",
+            "revertChanges": "Revert changes",
+            "deleteFolder": "Delete folder",
+            "saveFailed": "Could not save",
+            "saveFailedDescription": "{error} Your changes are still on this screen.",
+            "unsaved": "Unsaved · {changes}",
+            "revert": "Revert",
+            "emptyTitle": "No charts",
+            "emptyDescription": "Find charts to add, or import a whole level from the 発狂 difficulty table. Save after adding for them to appear in R-BMS.",
+            "listLabel": "Charts in {name}",
+            "sheetDescription": "Added charts go to the end of the list, and you need to save for them to apply in R-BMS.",
+            "metaDescription": "Changes apply only after you press Save.",
+            "apply": "Apply",
+            "leaveTitle": "You have unsaved changes",
+            "leaveDescription": "If you leave now, {count, plural, one {# change} other {# changes}} ({summary}) will be lost.",
+            "leaveConfirm": "Leave without saving",
+            "leaveCancel": "Keep editing"
+        },
+        "list": {
+            "created": "Created the folder ''{name}''.",
+            "updated": "Updated the name and description.",
+            "newFolder": "New folder",
+            "pageTitle": "My folders",
+            "pageDescription": "Groups of charts that appear like tables on the R-BMS song select screen",
+            "loading": "Loading folders",
+            "emptyDescription": "Create a folder and add charts, and it appears under MY FOLDERS on the song select screen when you are logged in to R-BMS. You can also pick charts from the 発狂 difficulty table.",
+            "createFirst": "Create your first folder",
+            "viewInsaneTable": "View the 発狂 difficulty table",
+            "listLabel": "My folder list",
+            "createDescription": "The name is shown as is on the R-BMS song select screen. Add charts from the editor after creating the folder.",
+            "create": "Create",
+            "edit": "Save changes"
+        }
+    },
+    "table": {
+        "copyTableUrl": "Copy table URL",
+        "copiedTableUrl": "Copied the table URL. Paste it into the difficulty table settings of R-BMS.",
+        "source": "Source: {name} ({maker})",
+        "snapshotDescription": "{levels} · {count, plural, one {# chart} other {# charts}} · updated {updated}",
+        "catalog": {
+            "intro": "Put a table URL into the difficulty table settings of R-BMS and it appears as level folders on the song select screen. The default tables are registered the first time you run R-BMS.",
+            "bundledHeading": "Default tables",
+            "serverHeading": "Server tables",
+            "serverLoading": "Loading server tables"
+        },
+        "sidebar": {
+            "heading": "Table info",
+            "updated": "Updated",
+            "chartsAndLevels": "Charts · levels"
+        },
+        "list": {
+            "loading": "Loading difficulty tables",
+            "loadError": "Could not load the table list",
+            "empty": "No IR difficulty tables have been registered separately on the server yet.",
+            "listLabel": "Server table list",
+            "stats": "Charts {charts, number} · Folders {folders, number} · Courses {courses, number}"
+        },
+        "detail": {
+            "pageTitle": "Difficulty table",
+            "notFoundTitle": "Difficulty table not found",
+            "notFoundDescription": "No table is registered at this address.",
+            "notFoundAction": "Difficulty table list",
+            "loadError": "Could not load the table",
+            "summary": "{folders, plural, one {# folder} other {# folders}} · {courses, plural, one {# course} other {# courses}}",
+            "emptyFolders": "No folders",
+            "folderTitle": "{name} ({count, number})",
+            "folderCaption": "Charts in the {name} folder"
+        },
+        "chartDetails": {
+            "addOnNamed": "Add-on chart: {name}",
+            "addOn": "Add-on chart",
+            "untitled": "Untitled",
+            "noArtist": "No artist information",
+            "sources": "Download sources",
+            "mainAndAddOn": "Main chart · Add-on chart",
+            "main": "Main chart",
+            "noSources": "The table does not list where to get this chart.",
+            "sourcesNote": "Links to the address given by the original creator. Old addresses may no longer open.",
+            "bestRecord": "My best record",
+            "copyMd5": "Copy md5",
+            "chartRanking": "Chart ranking",
+            "playerCount": "{count, plural, one {# player} other {# players}}",
+            "serverCheckFailed": "Could not check the chart information on the server.",
+            "noServerRecord": "The server has no records for this chart yet."
+        },
+        "workspace": {
+            "all": "All",
+            "sorts": {
+                "table": "Original order",
+                "title": "By title",
+                "lamp": "Lowest lamp first",
+                "rate": "Lowest achievement first"
+            },
+            "lampFilters": {
+                "all": "All lamps",
+                "noplay": "Not played",
+                "failed": "FAILED",
+                "unclear": "Not cleared (including not played)",
+                "cleared": "Cleared (ASSIST or higher)",
+                "easy": "EASY or higher",
+                "clear": "CLEAR or higher",
+                "hard": "HARD or higher",
+                "exhard": "EX HARD or higher",
+                "fullcombo": "FULL COMBO or higher"
+            },
+            "signedOutLampHint": "Sign in to filter by lamp.",
+            "loginPrompt": "Sign in to see the lamp distribution per level and your lamp and rank on every card.",
+            "signIn": "Sign in",
+            "recordsError": "Could not load your records. You can still view the table.",
+            "retry": "Try again",
+            "searchLabel": "Find charts",
+            "searchPlaceholder": "Title · artist · md5",
+            "searchAria": "Search by title, artist, or md5",
+            "filter": "Filters",
+            "filtersApplied": "{count, plural, one {# filter applied} other {# filters applied}}",
+            "filterDescription": "Choose the level range, lamp, and sort order. Changes apply immediately.",
+            "shownOfTotal": "{shown, number} / {total, plural, one {# chart} other {# charts}}",
+            "chartCount": "{count, plural, one {# chart} other {# charts}}",
+            "reset": "Reset",
+            "showResults": "Show results",
+            "expandAll": "Expand all levels",
+            "collapseAll": "Collapse all levels",
+            "emptyTitle": "No charts match",
+            "emptyDescription": "Shorten the keyword or clear the filters.",
+            "resetFilters": "Reset filters",
+            "gridLabel": "{level} charts"
+        }
+    },
+    "guide": {
+        "intro": "The R-BMS player lets you finish the whole IR setup inside the game. On the song select screen, press Tab to open SETTINGS and go to the NETWORK tab to set the server address, account, sync, and rivals.",
+        "advancedLabel": "Advanced",
+        "nextSteps": {
+            "label": "Next steps",
+            "signup": "Create an account",
+            "login": "Sign in",
+            "apiToken": "Issue an API token"
+        },
+        "toc": {
+            "label": "Guide table of contents",
+            "title": "Contents"
+        },
+        "connect": {
+            "title": "1. Connect to the server",
+            "body": "On the song select screen, press Tab to open SETTINGS. Choose NETWORK among the tabs at the top, then press Enter or the right arrow key on the SERVER URL row to type the address in place. Press Enter to confirm or Esc to cancel. If you leave the address empty, the game runs offline.",
+            "steps": {
+                "open": "On the song select screen: Tab → SETTINGS",
+                "network": "Select the NETWORK tab with Tab (PLAY · GAUGE · JUDGE · DISPLAY · INPUT · NETWORK)",
+                "server": "On the SERVER URL row: Enter → type {url} → Enter",
+                "player": "Enter your account ID on the PLAYER ID row (default: guest)",
+                "close": "Closing SETTINGS with Esc saves the changes"
+            },
+            "code": "SERVER URL   {url}\nPLAYER ID    '<account ID>'"
+        },
+        "account": {
+            "title": "2. Account",
+            "body": "Fill in the EMAIL and PASSWORD rows on the NETWORK tab, then sign up with REGISTER or sign in with LOGIN. PASSWORD is shown only as * while you type, is never saved to the settings file, and is wiped from memory as soon as a login or sign-up has used it. On success, the token and login ID are saved in the local settings and PLAYER ID is set to the login ID the server returned.",
+            "rows": {
+                "playerId": {
+                    "label": "PLAYER ID",
+                    "description": "The login ID of your server account and the identifier shown in rankings. LOGIN and REGISTER use this value as the ID."
+                },
+                "email": {
+                    "label": "EMAIL",
+                    "description": "Used only by REGISTER. It is not used to authenticate logins."
+                },
+                "password": {
+                    "label": "PASSWORD",
+                    "description": "Masked input that is never saved. It shows (not set) when empty."
+                },
+                "login": {
+                    "label": "LOGIN",
+                    "description": "Signs in in the background with PLAYER ID + PASSWORD. On success it goes on to save the token, rebuild the score server connection, and refresh the rival list."
+                },
+                "register": {
+                    "label": "REGISTER",
+                    "description": "Signs up with PLAYER ID · EMAIL · PASSWORD. What happens after success is the same as LOGIN."
+                },
+                "logout": {
+                    "label": "LOGOUT",
+                    "description": "Clears the token, the login ID, and any password kept in memory. PLAYER ID stays, so signing in again takes a single input."
+                },
+                "account": {
+                    "label": "ACCOUNT",
+                    "description": "A read-only row that shows the current state, such as guest / logging in... / logged in as '<id>' / login failed: '<error>' / session expired: '<error>'."
+                }
+            }
+        },
+        "ranked": {
+            "title": "3. Ranked play",
+            "body": "When a play ends, the IR result appears on the left of the result screen. If the server accepts it, you see IR: RANK #'<rank>' or IR: SENT, and NEW BEST appears too when you beat your personal best. Plays that meet the conditions below either skip submission or are recorded as UNRANKED and drop out of the ranking. A play made by a person is stored on the server even with assist options, and the same goes for courses. Only SCRATCH AUTO plays enter the ranking but are counted separately.",
+            "rows": {
+                "skipped": {
+                    "label": "autoplay · replay playback",
+                    "description": "These are not recorded, so nothing is submitted. The result screen shows IR: SKIPPED (autoplay) or IR: SKIPPED (replay playback)."
+                },
+                "widenedJudge": {
+                    "label": "Widened judge window",
+                    "description": "A play with JUDGE WIDTH or the LN margin set wider than 100 is submitted and recorded, but excluded from the ranking and the server best (UNRANKED: widened judge or assist options). A course containing even one such stage is treated the same way."
+                },
+                "scratchAuto": {
+                    "label": "SCRATCH AUTO",
+                    "description": "A play made with SCRATCH AUTO is submitted with the turntable notes left out of judgement and does enter the ranking. The server keeps the best normal play and the best SCRATCH AUTO play separately. The web ranking list has \"Include SCRATCH AUTO\" turned on by default, so for each player it shows the higher of the normal and SCRATCH AUTO records with an A-SCR marker; turning \"Include SCRATCH AUTO\" off shows normal plays only. The rank on the result screen is based on the list the play belongs to, so it appears as IR: RANK #'<rank>' (SCRATCH AUTO). The song select ranking panel uses the list of normal plays only. A course containing even one SCRATCH AUTO stage is treated the same way. A play that also uses a widened judge window is UNRANKED because of the widened judge window."
+                },
+                "assist": {
+                    "label": "Assist options · guest submissions",
+                    "description": "Even when the server accepts a play, it may exclude it from the ranking. In that case the reason the server reports is shown as is, for example UNRANKED: assist options, guest submission."
+                }
+            },
+            "code": "IR: RANK #12\nNEW BEST\nREPLAY UPLOADED"
+        },
+        "rankingPanel": {
+            "title": "4. Song select ranking panel (IR RANKING)",
+            "body": "On the song select screen, press I to open the IR RANKING panel on the right and move focus to it. Move between rows with up/down, play a replay with Enter, and close the panel with I, Esc, or the left arrow key. When the focused chart stays selected for a moment, the top 10 players, your best, rival records, and the replay list are fetched together and cached per chart.",
+            "rows": {
+                "layout": {
+                    "label": "Row layout",
+                    "description": "Each row shows rank · player name · EX score · clear lamp in that order. F'<fast>'/S'<slow>' is added on the right when the server provides judgement details, and REP when a downloadable replay exists."
+                },
+                "youRival": {
+                    "label": "YOU · RIVAL rows",
+                    "description": "Below the ranking comes a YOU row with your best, followed by RIVAL '<player ID>' rows. If there is no record, the rank and score are shown as -."
+                },
+                "replay": {
+                    "label": "REP playback",
+                    "description": "Press Enter on a row marked REP to download and play the replay right away. On a row without a replay, no replay for that row is shown."
+                },
+                "status": {
+                    "label": "Status messages",
+                    "description": "One of IR OFF - SET SERVER URL IN SETTINGS · SELECT A CHART · LOADING... · NO SCORES YET · ERROR: '<error>' is shown on a single line."
+                }
+            }
+        },
+        "replay": {
+            "title": "5. Replay upload",
+            "body": "With AUTO UPLOAD REPLAY on the NETWORK tab set to ON (the default), the replay is uploaded along with the score when the score is accepted normally and nothing excludes it from the ranking. The result screen shows REPLAY UPLOADED or REPLAY ERROR: '<error>'. Anyone can download and play an uploaded replay from the REP row in the ranking panel.",
+            "rows": {
+                "autoUpload": {
+                    "label": "AUTO UPLOAD REPLAY",
+                    "description": "Switch ON / OFF with the left/right arrow keys, Enter, or a click; the change is saved immediately."
+                },
+                "condition": {
+                    "label": "Upload conditions",
+                    "description": "You must be signed in, the play must actually have saved a replay, and the score must be accepted without a ranking-exclusion flag."
+                }
+            }
+        },
+        "sync": {
+            "title": "6. Settings sync",
+            "body": "With SYNC SETTINGS set to ON (the default is OFF), your play settings and key layout can be kept on the server. Upload the current settings with UPLOAD SETTINGS NOW and download and apply them with DOWNLOAD SETTINGS NOW. If something was uploaded earlier from another device, conflict: server newer, download first is shown, so download first and then upload again.",
+            "rows": {
+                "uploaded": {
+                    "label": "What is uploaded",
+                    "description": "Your play settings and key layout. The token, login ID, email, and password are never uploaded."
+                },
+                "downloaded": {
+                    "label": "When downloading",
+                    "description": "Only the play settings and key layout are overwritten. Per-device values such as SERVER URL, PLAYER ID, song folders, and font paths stay as they are."
+                },
+                "requirement": {
+                    "label": "Requirements",
+                    "description": "SERVER URL must be set and you must be signed in. Otherwise set SERVER URL first or log in first is shown on the status line."
+                }
+            }
+        },
+        "rivals": {
+            "title": "7. Rivals",
+            "body": "Press Enter on the RIVALS row at the bottom of the NETWORK tab to open the rival list. Press Enter on the + ADD RIVAL (PLAYER ID) row to enter the PLAYER ID of the other player, and press D to delete the selected rival. Closing with Esc saves the list to the settings file and, if you are signed in, applies the whole list to the server too.",
+            "rows": {
+                "controls": {
+                    "label": "Controls",
+                    "description": "UP DOWN move · ENTER add · D delete · ESC save and close. Empty and duplicate IDs are ignored."
+                },
+                "sync": {
+                    "label": "Sync",
+                    "description": "The list is refreshed from the server right after you log in or sign up, and at startup when a saved token exists."
+                },
+                "display": {
+                    "label": "Display",
+                    "description": "Registered rivals are shown in the song select ranking panel as RIVAL '<player ID>' rows."
+                }
+            }
+        },
+        "apiToken": {
+            "title": "8. API token for other tools (Advanced)",
+            "body": "The game client needs nothing more than LOGIN above. To call this IR from your own scripts or external tools, issue a token on the API token tab of the web settings screen and send it in the Authorization header. The plain-text token is shown only once, right after it is issued, so save it on the spot, and revoke tokens you no longer need from the list.",
+            "code": "curl -H 'Authorization: Bearer rbms_'<issued_token>''' {url}/auth/me"
+        },
+        "cliOverrides": {
+            "title": "9. Overriding launch arguments (Advanced)",
+            "body": "You normally do not need this. When you want to change values for a single run after the saved settings have been applied, you can override the server address and player ID with --server and --player.",
+            "code": "rbms-player --server {url} --player '<player_ID>'"
+        }
+    }
+}

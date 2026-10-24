@@ -2,6 +2,7 @@
 
 import type { FC } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { DashboardPanel } from '@features/dashboard/dashboard-panel'
 import { DashboardPanelEmpty } from '@features/dashboard/dashboard-panel-empty'
 import { DashboardPanelError } from '@features/dashboard/dashboard-panel-error'
@@ -12,7 +13,7 @@ import { aiPlayHref } from '@entities/ai.type'
 import { useSessionUser } from '@entities/auth.query'
 import { usePlayerRecent } from '@entities/player.query'
 import type { PlayerRecentParams } from '@entities/player.type'
-import { formatChartTitle, formatCount } from '@shared/lib/format'
+import { formatChartTitle } from '@shared/lib/format'
 import { serializeSearchParams } from '@shared/lib/search-params'
 import { Button } from '@shared/ui/button'
 
@@ -26,6 +27,7 @@ type PlayerRecentPanelProps = {
 export const PlayerRecentPanel: FC<PlayerRecentPanelProps> = ({ playerId, params }) => {
     const router = useRouter()
     const pathname = usePathname()
+    const t = useTranslations('browse.player.recent')
     const { data, isLoading, isError, isFetching, refetch } = usePlayerRecent(playerId, params)
     const { user } = useSessionUser()
     const rows = data?.data ?? []
@@ -40,23 +42,21 @@ export const PlayerRecentPanel: FC<PlayerRecentPanelProps> = ({ playerId, params
 
     return (
         <DashboardPanel
-            title='플레이 기록'
-            badge={total > 0 && <span className='text-muted-foreground text-2xs tabular-nums'>{formatCount(total)}판</span>}
+            title={t('title')}
+            badge={total > 0 && <span className='text-muted-foreground text-2xs tabular-nums'>{t('count', { count: total })}</span>}
             bodyClassName='px-0 pb-0'>
-            {isLoading && <DashboardPanelLoading label='플레이 기록 불러오는 중' className='px-3 pb-3' />}
-            {!isLoading && isError && (
-                <DashboardPanelError message='플레이 기록을 불러오지 못했습니다.' isRetrying={isFetching} onRetry={() => void refetch()} />
-            )}
-            {!isLoading && !isError && total === 0 && <DashboardPanelEmpty message='아직 기록이 없습니다.' />}
+            {isLoading && <DashboardPanelLoading label={t('loading')} className='px-3 pb-3' />}
+            {!isLoading && isError && <DashboardPanelError message={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
+            {!isLoading && !isError && total === 0 && <DashboardPanelEmpty message={t('empty')} />}
             {!isLoading && !isError && total > 0 && rows.length === 0 && (
-                <DashboardPanelEmpty message='이 페이지에는 기록이 없습니다.'>
+                <DashboardPanelEmpty message={t('pageEmpty')}>
                     <Button variant='outline' size='xs' onClick={() => handlePageChange(totalPages)}>
-                        마지막 페이지로
+                        {t('lastPage')}
                     </Button>
                 </DashboardPanelEmpty>
             )}
             {!isLoading && !isError && rows.length > 0 && (
-                <ul aria-label='플레이어 플레이 기록' className='border-border flex flex-col border-t'>
+                <ul aria-label={t('listLabel')} className='border-border flex flex-col border-t'>
                     {rows.map((row) => (
                         <ScoreRow
                             key={row.score_id}
@@ -69,7 +69,7 @@ export const PlayerRecentPanel: FC<PlayerRecentPanelProps> = ({ playerId, params
                             minBp={row.minbp}
                             playedAt={row.played_at}
                             isScratchAuto={row.scratch_auto}
-                            action={isOwnRecord ? { href: aiPlayHref(row.score_id), label: '판 코치' } : undefined}
+                            action={isOwnRecord ? { href: aiPlayHref(row.score_id), label: t('coach') } : undefined}
                         />
                     ))}
                 </ul>
@@ -79,9 +79,7 @@ export const PlayerRecentPanel: FC<PlayerRecentPanelProps> = ({ playerId, params
                     <Pager page={params.page} totalPages={totalPages} onPageChange={handlePageChange} />
                 </div>
             )}
-            <p className='text-muted-foreground px-3 py-2 text-xs'>
-                순위 반영 여부와 무관하게 모든 판을 최신순으로 표시합니다. A-SCR 은 SCRATCH AUTO 로 친 기록입니다.
-            </p>
+            <p className='text-muted-foreground px-3 py-2 text-xs'>{t('note')}</p>
         </DashboardPanel>
     )
 }

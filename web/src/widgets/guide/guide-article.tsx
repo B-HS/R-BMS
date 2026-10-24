@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
-import { GUIDE_ADVANCED_SECTIONS, GUIDE_INTRO, GUIDE_SECTIONS, type GuideSection } from '@widgets/guide/guide-sections'
+import { useTranslations } from 'next-intl'
+import { buildGuideAdvancedSections, buildGuideSections, type GuideSection } from '@widgets/guide/guide-sections'
 
 const GuideSectionBlock: FC<{ section: GuideSection }> = ({ section }) => (
     <section id={section.id} className='flex scroll-mt-3 flex-col gap-2'>
@@ -27,26 +28,30 @@ const GuideSectionBlock: FC<{ section: GuideSection }> = ({ section }) => (
     </section>
 )
 
-export const GuideArticle: FC = () => (
-    <article className='flex w-full max-w-3xl flex-col gap-8 p-3 pb-12 text-sm leading-6 break-keep'>
-        <p className='text-muted-foreground'>{GUIDE_INTRO}</p>
-        {GUIDE_SECTIONS.map((section) => (
-            <GuideSectionBlock key={section.id} section={section} />
-        ))}
-        <p className='rbms-micro-label border-border border-t pt-3'>고급 (Advanced)</p>
-        {GUIDE_ADVANCED_SECTIONS.map((section) => (
-            <GuideSectionBlock key={section.id} section={section} />
-        ))}
-        <nav aria-label='다음 단계' className='flex flex-wrap gap-4'>
-            <Link href='/signup' className='underline'>
-                계정 만들기
-            </Link>
-            <Link href='/login' className='underline'>
-                로그인
-            </Link>
-            <Link href='/settings' className='underline'>
-                API 토큰 발급
-            </Link>
-        </nav>
-    </article>
-)
+export const GuideArticle: FC = () => {
+    const t = useTranslations('browse.guide')
+
+    return (
+        <article className='flex w-full max-w-3xl flex-col gap-8 p-3 pb-12 text-sm leading-6 break-keep'>
+            <p className='text-muted-foreground'>{t('intro')}</p>
+            {buildGuideSections(t).map((section) => (
+                <GuideSectionBlock key={section.id} section={section} />
+            ))}
+            <p className='rbms-micro-label border-border border-t pt-3'>{t('advancedLabel')}</p>
+            {buildGuideAdvancedSections(t).map((section) => (
+                <GuideSectionBlock key={section.id} section={section} />
+            ))}
+            <nav aria-label={t('nextSteps.label')} className='flex flex-wrap gap-4'>
+                <Link href='/signup' className='underline'>
+                    {t('nextSteps.signup')}
+                </Link>
+                <Link href='/login' className='underline'>
+                    {t('nextSteps.login')}
+                </Link>
+                <Link href='/settings' className='underline'>
+                    {t('nextSteps.apiToken')}
+                </Link>
+            </nav>
+        </article>
+    )
+}

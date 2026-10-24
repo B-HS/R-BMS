@@ -3,6 +3,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { ScratchAutoToggle } from '@features/filter/scratch-auto-toggle'
 import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import { PanelFootnote } from '@features/shell/panel-footnote'
@@ -19,7 +20,7 @@ import { useChartLeaderboard } from '@entities/chart.query'
 import type { ChartLeaderboardParams } from '@entities/chart.type'
 import type { ScoreRecord } from '@entities/score.type'
 import { displayLampRank, lampLabel } from '@shared/constants/clear-lamp'
-import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/constants/scratch-auto'
+import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
 import { formatChartTitle, formatCount, formatDateTime, formatHash, getMaxExScore } from '@shared/lib/format'
@@ -28,18 +29,18 @@ import { serializeSearchParams } from '@shared/lib/search-params'
 import { Badge } from '@shared/ui/badge'
 import { CopyButton } from '@shared/ui/copy-button'
 
-const PAGE_TITLE = '차트'
-const RANKING_SCOPE_HINT = '서버가 내려주는 상위 구간 기준'
 const LN_TYPE_LABEL: Record<number, string> = { 0: 'LN', 1: 'CN', 2: 'HCN' }
 const META_LABEL_CLASS = 'text-muted-foreground'
 
 const formatBpmRange = (minbpm: number, maxbpm: number) => (minbpm === maxbpm ? String(minbpm) : `${minbpm}–${maxbpm}`)
 
-const COLUMNS: DataTableColumn<ScoreRecord>[] = [
-    { key: 'rank', label: '순위', width: 56, align: 'right', cell: (row) => row.rank ?? '—' },
+type ChartTranslator = ReturnType<typeof useTranslations<'browse.chart'>>
+
+const buildColumns = (t: ChartTranslator): DataTableColumn<ScoreRecord>[] => [
+    { key: 'rank', label: t('columns.rank'), width: 56, align: 'right', cell: (row) => row.rank ?? '—' },
     {
         key: 'player',
-        label: '플레이어',
+        label: t('columns.player'),
         flex: true,
         cell: (row) => (
             <span className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5'>
@@ -50,10 +51,10 @@ const COLUMNS: DataTableColumn<ScoreRecord>[] = [
             </span>
         ),
     },
-    { key: 'clear', label: '램프', width: 144, cell: (row) => <LampLabel lamp={row.clear} assistGrade={row.assist_grade} /> },
+    { key: 'clear', label: t('columns.lamp'), width: 144, cell: (row) => <LampLabel lamp={row.clear} assistGrade={row.assist_grade} /> },
     {
         key: 'dj_rank',
-        label: '랭크',
+        label: t('columns.djRank'),
         width: 64,
         hideBelow: 'sm',
         cell: (row) => (
@@ -64,17 +65,17 @@ const COLUMNS: DataTableColumn<ScoreRecord>[] = [
     },
     { key: 'ex_score', label: 'EX', width: 80, align: 'right', cell: (row) => formatCount(row.ex_score) },
     { key: 'minbp', label: 'BP', width: 64, align: 'right', cell: (row) => formatCount(row.minbp) },
-    { key: 'max_combo', label: '콤보', width: 80, align: 'right', hideBelow: 'md', cell: (row) => formatCount(row.max_combo) },
-    { key: 'played_at', label: '기록 시각', width: 144, align: 'right', hideBelow: 'md', cell: (row) => formatDateTime(row.played_at) },
+    { key: 'max_combo', label: t('columns.combo'), width: 80, align: 'right', hideBelow: 'md', cell: (row) => formatCount(row.max_combo) },
+    { key: 'played_at', label: t('columns.playedAt'), width: 144, align: 'right', hideBelow: 'md', cell: (row) => formatDateTime(row.played_at) },
     {
         key: 'replay',
-        label: '리플레이',
+        label: t('columns.replay'),
         width: 80,
         align: 'right',
         cell: (row) =>
             typeof row.extra.replay_id === 'string' ? (
                 <Link href={`/replays/${encodeURIComponent(row.extra.replay_id)}`} className='hover:underline'>
-                    보기
+                    {t('columns.replayLink')}
                 </Link>
             ) : (
                 <span className='text-muted-foreground'>—</span>
@@ -99,6 +100,7 @@ type ChartLeaderboardPanelProps = {
 export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, params, tableMemberships }) => {
     const router = useRouter()
     const pathname = usePathname()
+    const t = useTranslations('browse.chart')
     const { data, isLoading, isError, isFetching, refetch } = useChartLeaderboard(hash, params)
 
     const handleScratchAutoChange = (checked: boolean) => {
@@ -106,28 +108,29 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
         router.push(query ? `${pathname}?${query}` : pathname, { scroll: false })
     }
 
-    if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+    if (isLoading) return <ShellPageLoading title={t('pageTitle')} />
 
     if (isError)
         return (
-            <ShellPage title={PAGE_TITLE}>
-                <LoadErrorState title='차트를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+            <ShellPage title={t('pageTitle')}>
+                <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />
             </ShellPage>
         )
 
     if (!data?.chart)
         return (
-            <ShellPage title={PAGE_TITLE}>
+            <ShellPage title={t('pageTitle')}>
                 <NotFoundNotice
-                    title='등록되지 않은 차트입니다'
-                    description='이 해시로 제출된 기록이 아직 없습니다.'
+                    title={t('notFoundTitle')}
+                    description={t('notFoundDescription')}
                     actionHref='/search'
-                    actionLabel='차트 검색'
+                    actionLabel={t('notFoundAction')}
                 />
             </ShellPage>
         )
 
     const { chart, ranking } = data
+    const columns = buildColumns(t)
     const primaryMembership = tableMemberships.at(0)
     const chartLevel = chart.level === null ? undefined : String(chart.level)
     const folderLevel = primaryMembership ? `${primaryMembership.symbol}${primaryMembership.level}` : chartLevel
@@ -153,13 +156,13 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
                     <p className='text-muted-foreground text-xs'>{[chart.subtitle, chart.artist].filter(Boolean).join(' · ')}</p>
                 )}
                 {tableMemberships.length > 0 && (
-                    <ul aria-label='이 차트가 든 난이도표' className='flex flex-wrap gap-1'>
+                    <ul aria-label={t('membershipsLabel')} className='flex flex-wrap gap-1'>
                         {tableMemberships.map((membership) => (
                             <li key={`${membership.tableId}-${membership.level}`}>
                                 <Badge asChild variant='outline' className='h-6 rounded-none text-xs'>
                                     <Link
                                         href={membership.href}
-                                        aria-label={`${membership.name} ${membership.symbol}${membership.level} 레벨로 이동`}>
+                                        aria-label={t('membershipLink', { name: membership.name, level: `${membership.symbol}${membership.level}` })}>
                                         <span className='font-semibold tabular-nums'>
                                             {membership.symbol}
                                             {membership.level}
@@ -173,15 +176,15 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
                 )}
                 <dl className='flex flex-wrap gap-x-4 gap-y-1 text-xs'>
                     <div className='flex gap-1.5'>
-                        <dt className={META_LABEL_CLASS}>모드</dt>
+                        <dt className={META_LABEL_CLASS}>{t('meta.mode')}</dt>
                         <dd>{chart.mode}</dd>
                     </div>
                     <div className='flex gap-1.5'>
-                        <dt className={META_LABEL_CLASS}>레벨</dt>
+                        <dt className={META_LABEL_CLASS}>{t('meta.level')}</dt>
                         <dd className='tabular-nums'>{chart.level ?? '—'}</dd>
                     </div>
                     <div className='flex gap-1.5'>
-                        <dt className={META_LABEL_CLASS}>노트</dt>
+                        <dt className={META_LABEL_CLASS}>{t('meta.notes')}</dt>
                         <dd className='tabular-nums'>{formatCount(chart.notes)}</dd>
                     </div>
                     <div className='flex gap-1.5'>
@@ -193,7 +196,7 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
                         <dd className='tabular-nums'>{chart.total ?? '—'}</dd>
                     </div>
                     <div className='flex gap-1.5'>
-                        <dt className={META_LABEL_CLASS}>롱노트</dt>
+                        <dt className={META_LABEL_CLASS}>{t('meta.longNote')}</dt>
                         <dd>{LN_TYPE_LABEL[chart.lntype] ?? 'LN'}</dd>
                     </div>
                 </dl>
@@ -201,38 +204,42 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, pa
                     <div className='flex items-center gap-1.5'>
                         <dt className={META_LABEL_CLASS}>md5</dt>
                         <dd className='font-mono'>{formatHash(chart.md5)}</dd>
-                        <CopyButton value={chart.md5} label='md5 복사' variant='ghost' size='icon-xs' />
+                        <CopyButton value={chart.md5} label={t('copyMd5')} variant='ghost' size='icon-xs' />
                     </div>
                     <div className='flex items-center gap-1.5'>
                         <dt className={META_LABEL_CLASS}>sha256</dt>
                         <dd className='font-mono'>{formatHash(chart.sha256)}</dd>
-                        <CopyButton value={chart.sha256} label='sha256 복사' variant='ghost' size='icon-xs' />
+                        <CopyButton value={chart.sha256} label={t('copySha256')} variant='ghost' size='icon-xs' />
                     </div>
                 </dl>
             </div>
 
             <div className='grid grid-cols-2 gap-px md:grid-cols-4'>
-                <StatTile label='최고 EX' value={formatCount(bestExScore)} />
-                <StatTile label='최고 램프' value={lampLabel(bestLamp.clear, bestLamp.assist_grade)} />
-                <StatTile label='순위 내 플레이어' value={formatCount(new Set(ranking.map((row) => row.player.id)).size)} hint={RANKING_SCOPE_HINT} />
-                <StatTile label='순위 표시' value={formatCount(ranking.length)} hint={RANKING_SCOPE_HINT} />
+                <StatTile label={t('stats.bestEx')} value={formatCount(bestExScore)} />
+                <StatTile label={t('stats.bestLamp')} value={lampLabel(bestLamp.clear, bestLamp.assist_grade)} />
+                <StatTile
+                    label={t('stats.rankedPlayers')}
+                    value={formatCount(new Set(ranking.map((row) => row.player.id)).size)}
+                    hint={t('stats.scopeHint')}
+                />
+                <StatTile label={t('stats.shown')} value={formatCount(ranking.length)} hint={t('stats.scopeHint')} />
             </div>
 
             <section aria-labelledby='chart-ranking-heading' className='bg-card flex flex-col'>
                 <div className='flex min-h-9 flex-wrap items-center justify-between gap-2 px-3 py-1'>
                     <h2 id='chart-ranking-heading' className='text-sm font-semibold'>
-                        순위
+                        {t('ranking')}
                     </h2>
                     <ScratchAutoToggle checked={params.include_scratch_auto} onCheckedChange={handleScratchAutoChange} />
                 </div>
-                {ranking.length === 0 && <EmptyState title='등록된 기록이 없습니다' description='R-BMS 로 이 차트를 플레이하면 여기에 올라옵니다.' />}
+                {ranking.length === 0 && <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />}
                 {ranking.length > 0 && (
                     <div className='px-1'>
-                        <DataTable columns={COLUMNS} rows={ranking} rowKey={(row) => `${row.player.id}-${row.played_at}`} caption='차트 순위' />
+                        <DataTable columns={columns} rows={ranking} rowKey={(row) => `${row.player.id}-${row.played_at}`} caption={t('caption')} />
                     </div>
                 )}
                 <div className='px-3 py-2'>
-                    <PanelFootnote>순위에서 제외된(unranked) 기록은 표시되지 않습니다. {SCRATCH_AUTO_LIST_NOTE}</PanelFootnote>
+                    <PanelFootnote>{t('footnote')}</PanelFootnote>
                 </div>
             </section>
         </ShellPage>

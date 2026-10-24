@@ -2,6 +2,7 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { PanelCard } from '@features/shell/panel-card'
 import { MetaBadge } from '@features/badge/meta-badge'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
@@ -11,11 +12,10 @@ import { NotFoundNotice } from '@features/state/not-found-notice'
 import { ShellPage } from '@widgets/shell/shell-page'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 import { ApiError } from '@shared/lib/fetch'
-import { formatCount, formatHash } from '@shared/lib/format'
+import { formatHash } from '@shared/lib/format'
 import { useTableDetail } from '@entities/table.query'
 import type { TableChartRef } from '@entities/table.type'
 
-const PAGE_TITLE = '난이도표'
 const NOT_FOUND_STATUS = 404
 
 const COLUMNS: DataTableColumn<TableChartRef>[] = [
@@ -34,35 +34,34 @@ const COLUMNS: DataTableColumn<TableChartRef>[] = [
 ]
 
 export const TableDetailPanel: FC<{ tableId: string }> = ({ tableId }) => {
+    const t = useTranslations('browse.table.detail')
     const { data, isLoading, isError, error, isFetching, refetch } = useTableDetail(tableId)
 
-    if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+    if (isLoading) return <ShellPageLoading title={t('pageTitle')} />
 
     if (error instanceof ApiError && error.status === NOT_FOUND_STATUS)
         return (
-            <ShellPage title={PAGE_TITLE}>
+            <ShellPage title={t('pageTitle')}>
                 <NotFoundNotice
-                    title='없는 난이도표입니다'
-                    description='이 주소로 등록된 표가 없습니다.'
+                    title={t('notFoundTitle')}
+                    description={t('notFoundDescription')}
                     actionHref='/tables'
-                    actionLabel='난이도표 목록'
+                    actionLabel={t('notFoundAction')}
                 />
             </ShellPage>
         )
 
     if (isError || !data)
         return (
-            <ShellPage title={PAGE_TITLE}>
-                <LoadErrorState title='표를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+            <ShellPage title={t('pageTitle')}>
+                <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />
             </ShellPage>
         )
 
     return (
-        <ShellPage title={data.name} description={`폴더 ${formatCount(data.folders.length)}개 · 코스 ${formatCount(data.courses.length)}개`}>
-            <PanelCard title='난이도표' contentClassName='flex flex-col gap-2'>
-                <p className='text-muted-foreground text-xs'>
-                    폴더 {formatCount(data.folders.length)}개 · 코스 {formatCount(data.courses.length)}개
-                </p>
+        <ShellPage title={data.name} description={t('summary', { folders: data.folders.length, courses: data.courses.length })}>
+            <PanelCard title={t('pageTitle')} contentClassName='flex flex-col gap-2'>
+                <p className='text-muted-foreground text-xs'>{t('summary', { folders: data.folders.length, courses: data.courses.length })}</p>
                 {data.courses.length > 0 && (
                     <div className='flex flex-wrap gap-1'>
                         {data.courses.map((course) => (
@@ -73,10 +72,15 @@ export const TableDetailPanel: FC<{ tableId: string }> = ({ tableId }) => {
                     </div>
                 )}
             </PanelCard>
-            {data.folders.length === 0 && <EmptyState title='폴더가 없습니다' />}
+            {data.folders.length === 0 && <EmptyState title={t('emptyFolders')} />}
             {data.folders.map((folder, index) => (
-                <PanelCard key={`${index}-${folder.name}`} title={`${folder.name} (${formatCount(folder.charts.length)})`}>
-                    <DataTable columns={COLUMNS} rows={folder.charts} rowKey={(row) => row.sha256} caption={`${folder.name} 폴더의 차트`} />
+                <PanelCard key={`${index}-${folder.name}`} title={t('folderTitle', { name: folder.name, count: folder.charts.length })}>
+                    <DataTable
+                        columns={COLUMNS}
+                        rows={folder.charts}
+                        rowKey={(row) => row.sha256}
+                        caption={t('folderCaption', { name: folder.name })}
+                    />
                 </PanelCard>
             ))}
         </ShellPage>

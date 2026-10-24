@@ -4,6 +4,7 @@ import { useRef, useState, type FC } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { FolderOpen, FolderPlus, LogIn, RotateCw } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { FolderMetaDialog } from '@features/folder/folder-meta-dialog'
 import { useSessionUser } from '@entities/auth.query'
@@ -17,7 +18,6 @@ import {
     type FolderSummary,
 } from '@entities/folder.type'
 import { buildLoginHref } from '@shared/constants/auth-route'
-import { formatCount } from '@shared/lib/format'
 import { Button } from '@shared/ui/button'
 import {
     DropdownMenu,
@@ -29,8 +29,6 @@ import {
     DropdownMenuTrigger,
 } from '@shared/ui/dropdown-menu'
 
-const TRIGGER_LABEL = '내 폴더에 넣기'
-const SIGN_IN_LABEL = '로그인하고 폴더에 넣기'
 const EMPTY_META: FolderMetaInput = { name: '', description: '' }
 
 type AddToFolderMenuProps = {
@@ -49,6 +47,7 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
     const [busyFolderId, setBusyFolderId] = useState<string | null>(null)
 
     const pathname = usePathname()
+    const t = useTranslations('browse.folder.addMenu')
     const { user, isPending: isSessionPending } = useSessionUser()
 
     const chartMd5 = md5.trim().toLowerCase()
@@ -75,13 +74,13 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
         if (shouldContain) {
             addItems.mutate(
                 { folderId: folder.id, items: [itemInput] },
-                { onSuccess: () => toast.success(`'${folder.name}' 에 넣었습니다.`), onError, onSettled },
+                { onSuccess: () => toast.success(t('added', { name: folder.name })), onError, onSettled },
             )
             return
         }
         removeItems.mutate(
             { folderId: folder.id, md5s: [chartMd5] },
-            { onSuccess: () => toast.success(`'${folder.name}' 에서 뺐습니다.`), onError, onSettled },
+            { onSuccess: () => toast.success(t('removed', { name: folder.name })), onError, onSettled },
         )
     }
 
@@ -93,11 +92,11 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
                     {
                         onSuccess: () => {
                             setIsCreateOpen(false)
-                            toast.success(`'${created.name}' 폴더를 만들고 곡을 넣었습니다.`)
+                            toast.success(t('createdAndAdded', { name: created.name }))
                         },
                         onError: (error) => {
                             setIsCreateOpen(false)
-                            toast.error(`폴더는 만들었지만 곡을 넣지 못했습니다. ${toFolderErrorMessage(error)}`)
+                            toast.error(t('createdButNotAdded', { reason: toFolderErrorMessage(error) }))
                         },
                     },
                 ),
@@ -107,18 +106,18 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
 
     if (isSessionPending)
         return (
-            <Button variant='outline' size='sm' disabled aria-label={TRIGGER_LABEL}>
+            <Button variant='outline' size='sm' disabled aria-label={t('trigger')}>
                 <FolderPlus />
-                <span className='hidden sm:inline'>{TRIGGER_LABEL}</span>
+                <span className='hidden sm:inline'>{t('trigger')}</span>
             </Button>
         )
 
     if (!user)
         return (
             <Button asChild variant='outline' size='sm'>
-                <Link href={buildLoginHref(pathname)} aria-label={SIGN_IN_LABEL}>
+                <Link href={buildLoginHref(pathname)} aria-label={t('signIn')}>
                     <LogIn />
-                    <span className='hidden sm:inline'>{SIGN_IN_LABEL}</span>
+                    <span className='hidden sm:inline'>{t('signIn')}</span>
                 </Link>
             </Button>
         )
@@ -127,14 +126,14 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
         <>
             <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
                 <DropdownMenuTrigger asChild>
-                    <Button ref={triggerRef} variant='outline' size='sm' aria-label={TRIGGER_LABEL}>
+                    <Button ref={triggerRef} variant='outline' size='sm' aria-label={t('trigger')}>
                         <FolderPlus />
-                        <span className='hidden sm:inline'>{TRIGGER_LABEL}</span>
+                        <span className='hidden sm:inline'>{t('trigger')}</span>
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align='end' className='w-72'>
                     <DropdownMenuLabel className='flex min-w-0 flex-col gap-0.5'>
-                        <span className='rbms-micro-label'>내 폴더</span>
+                        <span className='rbms-micro-label'>{t('title')}</span>
                         <span className='truncate text-xs font-normal'>
                             {level && <span className='mr-1.5 font-mono font-semibold'>{level}</span>}
                             {chartLabel}
@@ -143,7 +142,7 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
                     <DropdownMenuSeparator />
                     {!isListReady && !isListError && (
                         <DropdownMenuItem disabled role='status'>
-                            불러오는 중
+                            {t('loading')}
                         </DropdownMenuItem>
                     )}
                     {!isListReady && isListError && (
@@ -154,10 +153,10 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
                                 void containing.refetch()
                             }}>
                             <RotateCw />
-                            불러오지 못했습니다. 다시 시도
+                            {t('retry')}
                         </DropdownMenuItem>
                     )}
-                    {isListReady && folders.length === 0 && <DropdownMenuItem disabled>아직 폴더가 없습니다</DropdownMenuItem>}
+                    {isListReady && folders.length === 0 && <DropdownMenuItem disabled>{t('noFolders')}</DropdownMenuItem>}
                     {isListReady &&
                         folders.map((folder) => {
                             const isContained = containingIds.has(folder.id)
@@ -171,7 +170,7 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
                                     onCheckedChange={(checked) => toggleFolder(folder, checked === true)}>
                                     <span className='min-w-0 flex-1 truncate'>{folder.name}</span>
                                     <span className='text-muted-foreground text-xs tabular-nums'>
-                                        {isFull ? '가득 참' : `${formatCount(folder.item_count)}곡`}
+                                        {isFull ? t('full') : t('itemCount', { count: folder.item_count })}
                                     </span>
                                 </DropdownMenuCheckboxItem>
                             )
@@ -183,11 +182,13 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
                             createFolder.reset()
                             setIsCreateOpen(true)
                         }}>
-                        <FolderPlus />새 폴더를 만들어 넣기
+                        <FolderPlus />
+                        {t('createAndAdd')}
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                         <Link href='/folders'>
-                            <FolderOpen />내 폴더 관리
+                            <FolderOpen />
+                            {t('manage')}
                         </Link>
                     </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -195,9 +196,9 @@ export const AddToFolderMenu: FC<AddToFolderMenuProps> = ({ md5, sha256, title, 
             <FolderMetaDialog
                 open={isCreateOpen}
                 onOpenChange={setIsCreateOpen}
-                title='새 폴더에 넣기'
-                description={`'${chartLabel}' 을 새 폴더에 넣습니다.`}
-                submitLabel='만들고 넣기'
+                title={t('dialogTitle')}
+                description={t('dialogDescription', { chart: chartLabel })}
+                submitLabel={t('dialogSubmit')}
                 initialValue={EMPTY_META}
                 isPending={createFolder.isPending || addItems.isPending}
                 serverError={createFolder.error ? toFolderErrorMessage(createFolder.error) : undefined}

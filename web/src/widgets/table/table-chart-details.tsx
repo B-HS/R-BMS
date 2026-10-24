@@ -3,13 +3,13 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { Trophy } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { TableChartRecord } from '@features/table/table-chart-record'
 import { TableExternalLink } from '@features/table/table-external-link'
 import { AddToFolderMenu } from '@widgets/folder/add-to-folder-menu'
 import { useChartLeaderboard } from '@entities/chart.query'
 import type { TableSnapshotEntry, TableSnapshotRecord } from '@entities/table-snapshot.type'
 import { DEFAULT_INCLUDE_SCRATCH_AUTO } from '@shared/constants/scratch-auto'
-import { formatCount } from '@shared/lib/format'
 import { Badge } from '@shared/ui/badge'
 import { Button } from '@shared/ui/button'
 import { CopyButton } from '@shared/ui/copy-button'
@@ -38,6 +38,7 @@ const toWebUrl = (value: string) => {
 }
 
 export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, record, isSignedIn, isRecordPending, loginHref }) => {
+    const t = useTranslations('browse.table.chartDetails')
     const {
         data: leaderboard,
         isPending: isChartPending,
@@ -46,7 +47,7 @@ export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, r
     const bodyUrl = toWebUrl(entry.url)
     const diffUrl = toWebUrl(entry.url_diff)
     const isSameLink = bodyUrl !== null && bodyUrl === diffUrl
-    const diffLabel = entry.name_diff && !WEB_URL_PATTERN.test(entry.name_diff) ? `차분: ${entry.name_diff}` : '차분'
+    const diffLabel = entry.name_diff && !WEB_URL_PATTERN.test(entry.name_diff) ? t('addOnNamed', { name: entry.name_diff }) : t('addOn')
     const serverChart = leaderboard?.chart ?? null
 
     return (
@@ -56,28 +57,26 @@ export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, r
                     {symbol}
                     {entry.level}
                 </Badge>
-                <DialogTitle className='text-base leading-snug font-semibold wrap-anywhere'>{entry.title || '제목 없음'}</DialogTitle>
-                <DialogDescription className='text-xs wrap-anywhere'>{entry.artist || '아티스트 정보 없음'}</DialogDescription>
+                <DialogTitle className='text-base leading-snug font-semibold wrap-anywhere'>{entry.title || t('untitled')}</DialogTitle>
+                <DialogDescription className='text-xs wrap-anywhere'>{entry.artist || t('noArtist')}</DialogDescription>
             </DialogHeader>
             <ScrollContainer variant='always' className='flex flex-col gap-4 p-4'>
-                <section aria-label='받는 곳' className='flex flex-col gap-2'>
+                <section aria-label={t('sources')} className='flex flex-col gap-2'>
                     <div className='flex flex-wrap gap-1'>
-                        {bodyUrl && <TableExternalLink href={bodyUrl} label={isSameLink ? '본편 · 차분' : '본편'} appearance='button' />}
+                        {bodyUrl && <TableExternalLink href={bodyUrl} label={isSameLink ? t('mainAndAddOn') : t('main')} appearance='button' />}
                         {diffUrl && !isSameLink && <TableExternalLink href={diffUrl} label={diffLabel} appearance='button' />}
-                        {!bodyUrl && !diffUrl && <p className='text-muted-foreground text-xs'>표에 받는 곳이 적혀 있지 않습니다.</p>}
+                        {!bodyUrl && !diffUrl && <p className='text-muted-foreground text-xs'>{t('noSources')}</p>}
                     </div>
-                    {(bodyUrl || diffUrl) && (
-                        <p className='text-muted-foreground text-2xs'>원작자의 주소로 잇습니다. 오래된 주소는 열리지 않을 수 있습니다.</p>
-                    )}
+                    {(bodyUrl || diffUrl) && <p className='text-muted-foreground text-2xs'>{t('sourcesNote')}</p>}
                 </section>
-                <section aria-label='내 최고 기록' className='flex flex-col gap-1.5'>
-                    <h3 className='rbms-micro-label'>내 최고 기록</h3>
+                <section aria-label={t('bestRecord')} className='flex flex-col gap-1.5'>
+                    <h3 className='rbms-micro-label'>{t('bestRecord')}</h3>
                     <TableChartRecord record={record} isSignedIn={isSignedIn} isPending={isRecordPending} loginHref={loginHref} />
                 </section>
                 <dl className='flex min-w-0 items-center gap-2 text-xs'>
                     <dt className='rbms-micro-label'>md5</dt>
                     <dd className='min-w-0 flex-1 truncate font-mono'>{entry.md5}</dd>
-                    <CopyButton value={entry.md5} label='md5 복사' variant='ghost' size='icon-xs' />
+                    <CopyButton value={entry.md5} label={t('copyMd5')} variant='ghost' size='icon-xs' />
                 </dl>
             </ScrollContainer>
             <div className='border-border flex flex-wrap items-center gap-2 border-t px-4 py-3'>
@@ -93,17 +92,15 @@ export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, r
                     <Button asChild variant='outline' size='sm'>
                         <Link href={`/charts/${serverChart.sha256}`}>
                             <Trophy aria-hidden />
-                            차트 순위
+                            {t('chartRanking')}
                             {leaderboard && leaderboard.ranking.length > 0 && (
-                                <span className='text-muted-foreground tabular-nums'>{formatCount(leaderboard.ranking.length)}명</span>
+                                <span className='text-muted-foreground tabular-nums'>{t('playerCount', { count: leaderboard.ranking.length })}</span>
                             )}
                         </Link>
                     </Button>
                 )}
-                {!isChartPending && isChartError && <span className='text-muted-foreground text-xs'>서버의 차트 정보를 확인하지 못했습니다.</span>}
-                {!isChartPending && !isChartError && !serverChart && (
-                    <span className='text-muted-foreground text-xs'>서버에 아직 이 차트의 기록이 없습니다.</span>
-                )}
+                {!isChartPending && isChartError && <span className='text-muted-foreground text-xs'>{t('serverCheckFailed')}</span>}
+                {!isChartPending && !isChartError && !serverChart && <span className='text-muted-foreground text-xs'>{t('noServerRecord')}</span>}
             </div>
         </>
     )

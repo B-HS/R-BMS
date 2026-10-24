@@ -1,5 +1,33 @@
 {
     "localeSwitcher": {
         "label": "언어"
+    },
+    "nav": {
+        "home": "홈",
+        "search": "차트 검색",
+        "leaderboards": "순위",
+        "guide": "가이드",
+        "folders": "내 폴더",
+        "tables": "난이도표",
+        "courses": "코스",
+        "ai": "AI"
+    },
+    "shell": {
+        "skipToContent": "본문으로 건너뛰기",
+        "homeLink": "{siteName} 홈",
+        "mainNav": "주 메뉴",
+        "openMenu": "메뉴 열기",
+        "toggleSidebar": "사이드바 접기 · 펼치기",
+        "pageLoading": "{title} 불러오는 중",
+        "themeToggle": "라이트 · 다크 테마 전환",
+        "signIn": "로그인",
+        "accountMenu": "계정 메뉴",
+        "sessionChecking": "로그인 상태를 확인하는 중",
+        "signedOut": "로그아웃했습니다.",
+        "myPage": "내 페이지",
+        "myFolders": "내 폴더",
+        "settings": "설정",
+        "buildAdmin": "빌드 관리",
+        "signOut": "로그아웃"
     }
 }

@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useRef, useState, type FC } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { ChevronsDownUp, ChevronsUpDown, Search, SlidersHorizontal } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { EmptyState } from '@features/state/empty-state'
 import { TableChartGrid } from '@features/table/table-chart-grid'
 import { TableDeferredMount } from '@features/table/table-deferred-mount'
@@ -32,7 +33,6 @@ import { useSessionUser } from '@entities/auth.query'
 import { useGetTableSnapshotRecords } from '@entities/table-snapshot.query'
 import type { TableSnapshotDetail, TableSnapshotEntry } from '@entities/table-snapshot.type'
 import { buildLoginHref } from '@shared/constants/auth-route'
-import { formatCount } from '@shared/lib/format'
 import { Alert, AlertAction, AlertDescription } from '@shared/ui/alert'
 import { Badge } from '@shared/ui/badge'
 import { Button } from '@shared/ui/button'
@@ -48,7 +48,6 @@ type TableSnapshotWorkspaceProps = {
 const SEARCH_COMMIT_DELAY_MS = 250
 const SEARCH_SHORTCUT_KEY = '/'
 const ANY_LEVEL = 'any'
-const SIGNED_OUT_LAMP_HINT = '로그인하면 램프로 거를 수 있습니다.'
 const EAGER_LEVEL_COUNT = 2
 
 const isTypingTarget = (target: EventTarget | null) =>
@@ -64,6 +63,7 @@ const replaceAddress = (filter: TableFilterState, mode: 'push' | 'replace') => {
 export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail, initialUserId, tableUrl }) => {
     const searchParams = useSearchParams()
     const pathname = usePathname()
+    const t = useTranslations('browse.table.workspace')
     const { user, isPending: isSessionPending } = useSessionUser()
     const { table, levels } = detail
     const levelOrder = levels.map((group) => group.level)
@@ -98,8 +98,12 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
     const hasNarrowing = activeFilterCount > 0 || searchText.trim() !== ''
     const loginHref = buildLoginHref(`${pathname}${searchParams.size > 0 ? `?${searchParams.toString()}` : ''}`)
     const levelLabel = (level: string) => `${table.symbol}${level}`
-    const levelOptions = [{ value: ANY_LEVEL, label: '전체' }, ...levelOrder.map((level) => ({ value: level, label: levelLabel(level) }))]
-    const sortOptions = TABLE_SORTS.map((sort) => ({ value: sort.value, label: sort.label, disabled: sort.needsRecords && records === null }))
+    const levelOptions = [{ value: ANY_LEVEL, label: t('all') }, ...levelOrder.map((level) => ({ value: level, label: levelLabel(level) }))]
+    const sortOptions = TABLE_SORTS.map((sort) => ({
+        value: sort.value,
+        label: t(`sorts.${sort.value}`),
+        disabled: sort.needsRecords && records === null,
+    }))
     const allEntries = levels.flatMap((group) => group.entries)
     const overallLamps = records ? countTableLamps(allEntries, records) : null
     const overallPlayed = records ? countPlayedEntries(allEntries, records) : 0
@@ -146,10 +150,10 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
             to={filter.to ?? ANY_LEVEL}
             onFromChange={(value) => handleRangeChange('from', value)}
             onToChange={(value) => handleRangeChange('to', value)}
-            lampOptions={TABLE_LAMP_FILTERS.map((option) => ({ value: option.value, label: option.label }))}
+            lampOptions={TABLE_LAMP_FILTERS.map((option) => ({ value: option.value, label: t(`lampFilters.${option.value}`) }))}
             lamp={records ? filter.lamp : DEFAULT_TABLE_FILTER.lamp}
             isLampDisabled={records === null}
-            lampHint={userId === null ? SIGNED_OUT_LAMP_HINT : undefined}
+            lampHint={userId === null ? t('signedOutLampHint') : undefined}
             onLampChange={(value) => commitFilter({ lamp: parseTableLampFilter(value) })}
             sortOptions={sortOptions}
             sort={sortOptions.find((option) => option.value === filter.sort)?.disabled ? DEFAULT_TABLE_FILTER.sort : filter.sort}
@@ -193,24 +197,24 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
             )}
             {userId === null && (
                 <div className='bg-card flex flex-wrap items-center justify-between gap-2 px-3 py-2'>
-                    <p className='text-muted-foreground text-xs'>로그인하면 레벨별 램프 분포와 카드마다 내 램프·랭크가 표시됩니다.</p>
+                    <p className='text-muted-foreground text-xs'>{t('loginPrompt')}</p>
                     <Button asChild variant='outline' size='sm'>
-                        <Link href={loginHref}>로그인</Link>
+                        <Link href={loginHref}>{t('signIn')}</Link>
                     </Button>
                 </div>
             )}
             {recordsQuery.isError && (
                 <Alert className='bg-card rounded-none border-0'>
-                    <AlertDescription className='text-xs'>내 기록을 불러오지 못했습니다. 표는 그대로 볼 수 있습니다.</AlertDescription>
+                    <AlertDescription className='text-xs'>{t('recordsError')}</AlertDescription>
                     <AlertAction>
                         <Button variant='outline' size='xs' disabled={recordsQuery.isFetching} onClick={() => void recordsQuery.refetch()}>
-                            다시 시도
+                            {t('retry')}
                         </Button>
                     </AlertAction>
                 </Alert>
             )}
 
-            <div role='search' aria-label='곡 찾기' className='bg-background flex min-h-12 flex-wrap items-center gap-2 border-b px-3 py-2'>
+            <div role='search' aria-label={t('searchLabel')} className='bg-background flex min-h-12 flex-wrap items-center gap-2 border-b px-3 py-2'>
                 <div className='relative min-w-0 flex-1 md:w-56 md:flex-none'>
                     <Search aria-hidden className='text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2' />
                     <Input
@@ -218,8 +222,8 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
                         type='search'
                         value={searchText}
                         onChange={(event) => handleSearchChange(event.target.value)}
-                        placeholder='곡명 · 아티스트 · md5'
-                        aria-label='곡명, 아티스트 또는 md5 로 찾기'
+                        placeholder={t('searchPlaceholder')}
+                        aria-label={t('searchAria')}
                         aria-keyshortcuts={SEARCH_SHORTCUT_KEY}
                         className='h-8 pl-7 text-sm md:h-7 md:text-xs'
                     />
@@ -229,31 +233,31 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
                     <SheetTrigger asChild>
                         <Button type='button' variant='outline' size='sm' className='relative md:hidden'>
                             <SlidersHorizontal aria-hidden />
-                            필터
+                            {t('filter')}
                             {activeFilterCount > 0 && (
                                 <Badge className='text-2xs h-4 min-w-4 rounded-none px-1 tabular-nums'>
-                                    {activeFilterCount}
-                                    <span className='sr-only'>개 적용됨</span>
+                                    <span aria-hidden>{activeFilterCount}</span>
+                                    <span className='sr-only'>{t('filtersApplied', { count: activeFilterCount })}</span>
                                 </Badge>
                             )}
                         </Button>
                     </SheetTrigger>
                     <SheetContent side='bottom' className='max-h-[85dvh] gap-0 rounded-none'>
                         <SheetHeader className='border-b'>
-                            <SheetTitle>필터</SheetTitle>
-                            <SheetDescription className='text-xs'>레벨 범위, 램프, 정렬을 고릅니다. 바꾸면 바로 적용됩니다.</SheetDescription>
+                            <SheetTitle>{t('filter')}</SheetTitle>
+                            <SheetDescription className='text-xs'>{t('filterDescription')}</SheetDescription>
                         </SheetHeader>
                         <div className='overflow-y-auto p-4'>{filterFields('stacked')}</div>
                         <SheetFooter className='flex-row items-center justify-between border-t'>
                             <span className='text-muted-foreground text-xs tabular-nums'>
-                                {formatCount(shownCount)} / {formatCount(table.entry_count)}곡
+                                {t('shownOfTotal', { shown: shownCount, total: table.entry_count })}
                             </span>
                             <div className='flex gap-2'>
                                 <Button type='button' variant='outline' size='sm' disabled={!hasNarrowing} onClick={handleReset}>
-                                    초기화
+                                    {t('reset')}
                                 </Button>
                                 <Button type='button' size='sm' onClick={() => setIsFilterSheetOpen(false)}>
-                                    결과 보기
+                                    {t('showResults')}
                                 </Button>
                             </div>
                         </SheetFooter>
@@ -261,18 +265,20 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
                 </Sheet>
                 <div className='ml-auto flex shrink-0 items-center gap-1'>
                     <span role='status' className='text-muted-foreground px-1 text-xs tabular-nums'>
-                        {hasNarrowing ? `${formatCount(shownCount)} / ${formatCount(table.entry_count)}곡` : `${formatCount(table.entry_count)}곡`}
+                        {hasNarrowing
+                            ? t('shownOfTotal', { shown: shownCount, total: table.entry_count })
+                            : t('chartCount', { count: table.entry_count })}
                     </span>
                     {hasNarrowing && (
                         <Button type='button' variant='ghost' size='sm' onClick={handleReset} className='hidden md:inline-flex'>
-                            초기화
+                            {t('reset')}
                         </Button>
                     )}
                     <Button
                         type='button'
                         variant='ghost'
                         size='icon-sm'
-                        aria-label={isEveryVisibleCollapsed ? '모든 레벨 펼치기' : '모든 레벨 접기'}
+                        aria-label={isEveryVisibleCollapsed ? t('expandAll') : t('collapseAll')}
                         disabled={visibleLevels.length === 0}
                         onClick={() => setCollapsedLevels(isEveryVisibleCollapsed ? [] : levelOrder)}>
                         {isEveryVisibleCollapsed ? <ChevronsUpDown aria-hidden /> : <ChevronsDownUp aria-hidden />}
@@ -292,11 +298,11 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
 
             {visibleLevels.length === 0 && (
                 <EmptyState
-                    title='조건에 맞는 곡이 없습니다'
-                    description='검색어를 줄이거나 필터를 풀어 보세요.'
+                    title={t('emptyTitle')}
+                    description={t('emptyDescription')}
                     action={
                         <Button variant='outline' size='sm' onClick={handleReset}>
-                            필터 초기화
+                            {t('resetFilters')}
                         </Button>
                     }
                 />
@@ -317,7 +323,7 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
                     }>
                     <TableDeferredMount itemCount={group.entries.length} isInitiallyMounted={index < EAGER_LEVEL_COUNT}>
                         <TableChartGrid
-                            label={`${levelLabel(group.level)} 곡`}
+                            label={t('gridLabel', { level: levelLabel(group.level) })}
                             symbol={table.symbol}
                             entries={group.entries}
                             records={records}

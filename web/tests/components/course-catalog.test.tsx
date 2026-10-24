@@ -6,6 +6,7 @@ GlobalRegistrator.register()
 afterAll(() => GlobalRegistrator.unregister())
 
 const { page, within } = await import('../support/dom-harness')
+const { withLocale } = await import('../support/browse-intl')
 const { CourseCatalogPanel } = await import('../../src/widgets/course/course-catalog-panel')
 const { cleanupScreens, errorResponse, installFetchRoutes, jsonResponse, renderWithQueryClient } = await import('../support/ai-screen')
 const fixture = await import('../support/course-catalog-fixture')
@@ -31,7 +32,7 @@ describe('코스 목록 패널', () => {
     test('묶음마다 제목과 코스 수, 키 수, 출처 블록을 보인다', async () => {
         const catalog = await (await fixture.createCatalogFixture()).listGroups()
         useCatalog(() => jsonResponse(catalog))
-        await renderWithQueryClient(<CourseCatalogPanel />)
+        await renderWithQueryClient(withLocale(<CourseCatalogPanel />))
 
         expect(await page.findByRole('heading', { name: 'GENOSIDE 2018 段位認定 (1)' })).toBeTruthy()
         expect(page.getByRole('heading', { name: 'GENOSIDE 2018 DP段位認定 (1)' })).toBeTruthy()
@@ -45,7 +46,7 @@ describe('코스 목록 패널', () => {
     test('코스 줄은 코스 페이지로 가는 링크와 단위 배지를 갖고 단위를 주지 않는 코스는 표시가 없다', async () => {
         const catalog = await (await fixture.createCatalogFixture()).listGroups()
         useCatalog(() => jsonResponse(catalog))
-        await renderWithQueryClient(<CourseCatalogPanel />)
+        await renderWithQueryClient(withLocale(<CourseCatalogPanel />))
 
         const link = await page.findByRole('link', { name: fixture.GENOSIDE_FIRST_NAME })
         expect(link.getAttribute('href')).toBe(`/courses/${fixture.GENOSIDE_FIRST.courseHash}`)
@@ -63,7 +64,7 @@ describe('코스 목록 패널', () => {
         await service.applySync({ ...fixture.STELLA_DEFINITION, groups: [{ ...stellaGroup, courses: [fixture.STELLA_FIRST] }] })
         const catalog = await service.listGroups()
         useCatalog(() => jsonResponse(catalog))
-        await renderWithQueryClient(<CourseCatalogPanel />)
+        await renderWithQueryClient(withLocale(<CourseCatalogPanel />))
 
         const trainingRow = (await page.findByRole('link', { name: fixture.STELLA_TRAINING_NAME })).closest('tr') as HTMLElement
         expect(within(trainingRow).getByText('표에서 빠짐')).toBeTruthy()
@@ -74,21 +75,21 @@ describe('코스 목록 패널', () => {
     test('마이페이지 단위 탭으로 가는 길을 둔다', async () => {
         const catalog = await (await fixture.createCatalogFixture()).listGroups()
         useCatalog(() => jsonResponse(catalog))
-        await renderWithQueryClient(<CourseCatalogPanel />)
+        await renderWithQueryClient(withLocale(<CourseCatalogPanel />))
 
         expect((await page.findByRole('link', { name: '마이페이지 단위 탭' })).getAttribute('href')).toBe(DAN_SETTINGS_HREF)
     })
 
     test('등록된 코스가 없으면 빈 상태를 보인다', async () => {
         useCatalog(() => jsonResponse({ groups: [] }))
-        await renderWithQueryClient(<CourseCatalogPanel />)
+        await renderWithQueryClient(withLocale(<CourseCatalogPanel />))
 
         expect(await page.findByText('등록된 코스가 아직 없습니다')).toBeTruthy()
     })
 
     test('불러오지 못하면 오류 상태를 보인다', async () => {
         useCatalog(() => errorResponse(500, 'INTERNAL_ERROR', '서버 오류'))
-        await renderWithQueryClient(<CourseCatalogPanel />)
+        await renderWithQueryClient(withLocale(<CourseCatalogPanel />))
 
         expect(await page.findByText('코스를 불러오지 못했습니다')).toBeTruthy()
     })

@@ -3,6 +3,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { ScratchAutoToggle } from '@features/filter/scratch-auto-toggle'
 import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import { PanelCard } from '@features/shell/panel-card'
@@ -22,16 +23,18 @@ import { formatCount, formatDateTime, formatHash } from '@shared/lib/format'
 import { writeIncludeScratchAutoParam } from '@shared/lib/scratch-auto-param'
 import { serializeSearchParams } from '@shared/lib/search-params'
 import { DAN_SETTINGS_HREF } from '@shared/constants/navigation'
-import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/constants/scratch-auto'
+import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
 import { useCourseCatalogEntry, useCourseMeta, useCourseRanking } from '@entities/course.query'
 import type { CourseChartRef, CourseRankingParams } from '@entities/course.type'
 import type { ScoreRecord } from '@entities/score.type'
 
-const buildChartColumns = (titles: readonly string[]): DataTableColumn<CourseChartRef>[] => [
+type CourseTranslator = ReturnType<typeof useTranslations<'browse.course'>>
+
+const buildChartColumns = (titles: readonly string[], t: CourseTranslator): DataTableColumn<CourseChartRef>[] => [
     { key: 'stage', label: 'STAGE', width: 80, align: 'right', cell: (_row, index) => index + 1 },
     {
         key: 'chart',
-        label: '차트',
+        label: t('detail.chart'),
         flex: true,
         cell: (row, index) => (
             <Link href={`/charts/${row.sha256 || row.md5}`} className='hover:underline'>
@@ -43,11 +46,11 @@ const buildChartColumns = (titles: readonly string[]): DataTableColumn<CourseCha
     { key: 'md5', label: 'md5', width: 112, mono: true, hideBelow: 'sm', cell: (row) => formatHash(row.md5) },
 ]
 
-const RANKING_COLUMNS: DataTableColumn<ScoreRecord>[] = [
-    { key: 'rank', label: '순위', width: 64, align: 'right', cell: (row) => row.rank ?? '—' },
+const buildRankingColumns = (t: CourseTranslator): DataTableColumn<ScoreRecord>[] => [
+    { key: 'rank', label: t('detail.rank'), width: 64, align: 'right', cell: (row) => row.rank ?? '—' },
     {
         key: 'player_name',
-        label: '플레이어',
+        label: t('detail.player'),
         flex: true,
         cell: (row) => (
             <span className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5'>
@@ -58,13 +61,12 @@ const RANKING_COLUMNS: DataTableColumn<ScoreRecord>[] = [
             </span>
         ),
     },
-    { key: 'clear', label: '램프', width: 144, cell: (row) => <LampLabel lamp={row.clear} assistGrade={row.assist_grade} /> },
+    { key: 'clear', label: t('detail.lamp'), width: 144, cell: (row) => <LampLabel lamp={row.clear} assistGrade={row.assist_grade} /> },
     { key: 'ex_score', label: 'EX', width: 96, align: 'right', cell: (row) => formatCount(row.ex_score) },
     { key: 'minbp', label: 'BP', width: 80, align: 'right', cell: (row) => formatCount(row.minbp) },
-    { key: 'played_at', label: '기록', width: 144, align: 'right', cell: (row) => formatDateTime(row.played_at) },
+    { key: 'played_at', label: t('detail.recorded'), width: 144, align: 'right', cell: (row) => formatDateTime(row.played_at) },
 ]
 
-const PAGE_TITLE = '코스'
 const NOT_FOUND_STATUS = 404
 
 type CourseDetailPanelProps = {
@@ -75,42 +77,43 @@ type CourseDetailPanelProps = {
 export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rankingParams }) => {
     const router = useRouter()
     const pathname = usePathname()
+    const t = useTranslations('browse.course')
     const meta = useCourseMeta(courseHash)
     const ranking = useCourseRanking(courseHash, rankingParams)
     const catalogEntry = useCourseCatalogEntry(courseHash).data
 
     const rows = ranking.data ?? []
-    const chartColumns = buildChartColumns(catalogEntry?.charts.map((chart) => chart.title) ?? [])
+    const chartColumns = buildChartColumns(catalogEntry?.charts.map((chart) => chart.title) ?? [], t)
 
     const handleScratchAutoChange = (checked: boolean) => {
         const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: writeIncludeScratchAutoParam(checked) })
         router.push(query ? `${pathname}?${query}` : pathname, { scroll: false })
     }
 
-    if (meta.isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+    if (meta.isLoading) return <ShellPageLoading title={t('pageTitle')} />
 
     if (meta.error instanceof ApiError && meta.error.status === NOT_FOUND_STATUS)
         return (
-            <ShellPage title={PAGE_TITLE}>
+            <ShellPage title={t('pageTitle')}>
                 <NotFoundNotice
-                    title='없는 코스입니다'
-                    description='이 해시로 등록된 코스가 없습니다.'
+                    title={t('detail.notFoundTitle')}
+                    description={t('detail.notFoundDescription')}
                     actionHref='/tables'
-                    actionLabel='난이도표로'
+                    actionLabel={t('detail.notFoundAction')}
                 />
             </ShellPage>
         )
 
     if (meta.isError || !meta.data)
         return (
-            <ShellPage title={PAGE_TITLE}>
-                <LoadErrorState title='코스를 불러오지 못했습니다' isRetrying={meta.isFetching} onRetry={() => void meta.refetch()} />
+            <ShellPage title={t('pageTitle')}>
+                <LoadErrorState title={t('loadError')} isRetrying={meta.isFetching} onRetry={() => void meta.refetch()} />
             </ShellPage>
         )
 
     return (
-        <ShellPage title={meta.data.name || PAGE_TITLE} description={`구성 차트 ${formatCount(meta.data.charts.length)}곡`}>
-            <PanelCard title='코스' contentClassName='flex flex-col gap-2'>
+        <ShellPage title={meta.data.name || t('pageTitle')} description={t('detail.chartCount', { count: meta.data.charts.length })}>
+            <PanelCard title={t('pageTitle')} contentClassName='flex flex-col gap-2'>
                 <div className='flex flex-wrap gap-1'>
                     <MetaBadge>lntype {meta.data.lntype}</MetaBadge>
                     {meta.data.constraint.map((value) => (
@@ -122,25 +125,35 @@ export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rank
                     <>
                         <div className='flex flex-wrap gap-1'>
                             <MetaBadge>{catalogEntry.group.name}</MetaBadge>
-                            {!catalogEntry.active && <MetaBadge>표에서 빠짐</MetaBadge>}
+                            {!catalogEntry.active && <MetaBadge>{t('removedFromTable')}</MetaBadge>}
                         </div>
                         {catalogEntry.dan && (
                             <p className='text-xs'>
-                                이 코스를 조건대로 클리어하면 {catalogEntry.dan.system_name} {catalogEntry.dan.label} 단위를 얻습니다.{' '}
-                                <Link href={DAN_SETTINGS_HREF} className='text-muted-foreground underline'>
-                                    인정 조건
-                                </Link>
+                                {t.rich('detail.danAward', {
+                                    system: catalogEntry.dan.system_name,
+                                    label: catalogEntry.dan.label,
+                                    link: (chunks) => (
+                                        <Link href={DAN_SETTINGS_HREF} className='text-muted-foreground underline'>
+                                            {chunks}
+                                        </Link>
+                                    ),
+                                })}
                             </p>
                         )}
                         <CourseSourceNotice source={catalogEntry.source} keys={catalogEntry.group.keys} />
                     </>
                 )}
             </PanelCard>
-            <PanelCard title={`구성 차트 ${formatCount(meta.data.charts.length)}곡`}>
-                <DataTable columns={chartColumns} rows={meta.data.charts} rowKey={(row) => `${row.sha256}-${row.md5}`} caption='코스 구성 차트' />
+            <PanelCard title={t('detail.chartCount', { count: meta.data.charts.length })}>
+                <DataTable
+                    columns={chartColumns}
+                    rows={meta.data.charts}
+                    rowKey={(row) => `${row.sha256}-${row.md5}`}
+                    caption={t('detail.chartsCaption')}
+                />
             </PanelCard>
             {meta.data.trophy.length > 0 && (
-                <PanelCard title='트로피' contentClassName='flex flex-col gap-1'>
+                <PanelCard title={t('detail.trophies')} contentClassName='flex flex-col gap-1'>
                     {meta.data.trophy.map((trophy) => (
                         <p key={trophy.name} className='text-xs'>
                             <span className='font-medium'>{trophy.name}</span>
@@ -153,18 +166,23 @@ export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rank
                 </PanelCard>
             )}
             <PanelCard
-                title='순위'
+                title={t('detail.ranking')}
                 action={<ScratchAutoToggle checked={rankingParams.include_scratch_auto} onCheckedChange={handleScratchAutoChange} />}
                 contentClassName='flex flex-col gap-2'>
                 {ranking.isLoading && <TableSkeleton />}
                 {!ranking.isLoading && ranking.isError && (
-                    <LoadErrorState title='순위를 불러오지 못했습니다' isRetrying={ranking.isFetching} onRetry={() => void ranking.refetch()} />
+                    <LoadErrorState title={t('detail.rankingLoadError')} isRetrying={ranking.isFetching} onRetry={() => void ranking.refetch()} />
                 )}
-                {!ranking.isLoading && !ranking.isError && rows.length === 0 && <EmptyState title='기록이 없습니다' />}
+                {!ranking.isLoading && !ranking.isError && rows.length === 0 && <EmptyState title={t('detail.noRecords')} />}
                 {!ranking.isLoading && !ranking.isError && rows.length > 0 && (
-                    <DataTable columns={RANKING_COLUMNS} rows={rows} rowKey={(row) => `${row.player.id}-${row.played_at}`} caption='코스 순위' />
+                    <DataTable
+                        columns={buildRankingColumns(t)}
+                        rows={rows}
+                        rowKey={(row) => `${row.player.id}-${row.played_at}`}
+                        caption={t('detail.rankingCaption')}
+                    />
                 )}
-                <PanelFootnote>순위에서 제외된(unranked) 기록은 표시되지 않습니다. {SCRATCH_AUTO_LIST_NOTE}</PanelFootnote>
+                <PanelFootnote>{t('detail.footnote')}</PanelFootnote>
             </PanelCard>
         </ShellPage>
     )

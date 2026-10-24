@@ -1,7 +1,12 @@
+import type { useTranslations } from 'next-intl'
 import { FOLDER_LIMIT, toNewFolderItemInput, type FolderDetail, type FolderItem, type FolderTableIndex } from '@entities/folder.type'
 import type { FolderChartMove } from '@features/folder/folder-chart-row'
 
 type FolderDraft = Pick<FolderDetail, 'name' | 'description' | 'items'>
+
+export type FolderChangesTranslator = ReturnType<typeof useTranslations<'browse.folder.changes'>>
+
+const CHANGE_SEPARATOR = ' · '
 
 export type FolderBase = FolderDraft & Pick<FolderDetail, 'updated_at'>
 
@@ -36,17 +41,17 @@ export const countFolderDraftChanges = (base: FolderDraft, draft: FolderDraft) =
     return { added, removed, notes, isReordered, isRenamed, isDescriptionChanged, total }
 }
 
-export const describeFolderDraftChanges = (changes: ReturnType<typeof countFolderDraftChanges>) =>
+export const describeFolderDraftChanges = (changes: ReturnType<typeof countFolderDraftChanges>, t: FolderChangesTranslator) =>
     [
-        changes.added > 0 && `추가 ${changes.added}`,
-        changes.removed > 0 && `빼기 ${changes.removed}`,
-        changes.isReordered && '순서',
-        changes.notes > 0 && `메모 ${changes.notes}`,
-        changes.isRenamed && '이름',
-        changes.isDescriptionChanged && '설명',
+        changes.added > 0 && t('added', { count: changes.added }),
+        changes.removed > 0 && t('removed', { count: changes.removed }),
+        changes.isReordered && t('reordered'),
+        changes.notes > 0 && t('notes', { count: changes.notes }),
+        changes.isRenamed && t('renamed'),
+        changes.isDescriptionChanged && t('description'),
     ]
         .filter((value) => typeof value === 'string')
-        .join(' · ')
+        .join(CHANGE_SEPARATOR)
 
 /** Moves one item and returns a new array; out-of-range moves leave the list unchanged. */
 export const moveFolderItem = (items: FolderItem[], index: number, move: FolderChartMove) => {

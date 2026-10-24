@@ -2,12 +2,12 @@ import 'server-only'
 import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { connection } from 'next/server'
+import { getTranslations } from 'next-intl/server'
 import { TableLevelSkeleton } from '@features/table/table-level-skeleton'
 import { TableSourceAttribution } from '@features/table/table-source-attribution'
 import { ShellPage } from '@widgets/shell/shell-page'
 import { TableSnapshotSession } from '@widgets/table/table-snapshot-session'
 import { SITE_URL } from '@shared/constants/site'
-import { formatCount } from '@shared/lib/format'
 import { CopyButton } from '@shared/ui/copy-button'
 import { compose } from '@server/compose'
 import { getSnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
@@ -21,6 +21,7 @@ export const TableSnapshotContent = async ({ tableId }: { tableId: string }) => 
     const detail = bundledSnapshot ? groupTableByLevel(bundledSnapshot) : await compose().tableSnapshotService.getDetail(tableId)
     if (!detail) notFound()
 
+    const t = await getTranslations('browse.table')
     const { table, levels } = detail
     const tableUrl = `${SITE_URL}${table.standard_paths.page}`
     const levelRange = levels.length > 0 ? `${table.symbol}${levels[0].level} ~ ${table.symbol}${levels[levels.length - 1].level}` : ''
@@ -28,15 +29,9 @@ export const TableSnapshotContent = async ({ tableId }: { tableId: string }) => 
     return (
         <ShellPage
             title={table.name}
-            description={`${levelRange} · ${formatCount(table.entry_count)}곡 · 갱신 ${table.last_update}`}
+            description={t('snapshotDescription', { levels: levelRange, count: table.entry_count, updated: table.last_update })}
             actions={
-                <CopyButton
-                    value={tableUrl}
-                    label='표 주소 복사'
-                    copiedMessage='표 주소를 복사했습니다. R-BMS 의 난이도표 설정에 붙여 넣으세요.'
-                    variant='ghost'
-                    className='md:hidden'
-                />
+                <CopyButton value={tableUrl} label={t('copyTableUrl')} copiedMessage={t('copiedTableUrl')} variant='ghost' className='md:hidden' />
             }>
             {table.source && <TableSourceAttribution source={table.source} />}
             <Suspense

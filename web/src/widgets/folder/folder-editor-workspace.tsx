@@ -3,6 +3,7 @@
 import { useEffect, useEffectEvent, useRef, useState, type FC } from 'react'
 import { useRouter } from 'next/navigation'
 import { Ellipsis, Import, Pencil, Plus, Save, Trash2, Undo2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { ConfirmAction } from '@features/dialog/confirm-action'
 import { FolderChartRow, type FolderChartMove } from '@features/folder/folder-chart-row'
@@ -77,6 +78,8 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
     const [isSearchSheetOpen, setIsSearchSheetOpen] = useState(false)
 
     const router = useRouter()
+    const t = useTranslations('browse.folder')
+    const tChanges = useTranslations('browse.folder.changes')
     const replaceItems = useReplaceFolderItems()
     const deleteFolder = useDeleteFolder()
 
@@ -96,10 +99,11 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
     const presentMd5s = new Set(draft.items.map((item) => item.md5))
     const capacity = Math.max(0, FOLDER_LIMIT.ITEMS_PER_FOLDER - draft.items.length)
     const isFull = capacity === 0
-    const itemCountLabel = `${formatCount(draft.items.length)}곡`
+    const itemCountLabel = t('itemCount', { count: draft.items.length })
+    const changeSummary = describeFolderDraftChanges(changes, tChanges)
     const headerDescription = isDirty
-        ? `${itemCountLabel} · 저장하지 않은 변경 ${changes.total}건`
-        : `${itemCountLabel} · ${formatDateTime(base.updated_at)} 수정`
+        ? t('editor.headerDirty', { items: itemCountLabel, changes: changes.total })
+        : t('editor.headerClean', { items: itemCountLabel, updated: formatDateTime(base.updated_at) })
 
     const save = async (target: FolderBase) => {
         if (isSaving) return
@@ -124,7 +128,7 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
                 setBase(toFolderBase(fresh))
                 setDraft((current) => (current === snapshot ? toFolderDraft(fresh) : current))
             }
-            toast.success('저장했습니다. R-BMS 는 다음에 로그인할 때 바뀐 폴더를 읽습니다.')
+            toast.success(t('editor.saved'))
         } catch (error) {
             if (getFolderErrorCode(error) === FOLDER_ERROR_CODE.CONFLICT) {
                 const latest = await onReload()
@@ -164,7 +168,7 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
         const result = appendFolderItems(draft.items, entries)
         setDraft({ ...draft, items: result.items })
         setDialog(null)
-        toast.success(`${formatCount(result.added)}곡을 목록 끝에 넣었습니다. 저장해야 R-BMS 에 반영됩니다.`)
+        toast.success(t('editor.imported', { count: result.added }))
     }
 
     const handleRevert = () => {
@@ -192,7 +196,7 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
             onSuccess: () => {
                 setDialog(null)
                 setDraft(toFolderDraft(base))
-                toast.success(`'${base.name}' 폴더를 지웠습니다.`)
+                toast.success(t('deleted', { name: base.name }))
                 router.replace(FOLDERS_PATH)
             },
         })
@@ -233,13 +237,23 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
                 description={headerDescription}
                 actions={
                     <>
-                        <Button ref={importButtonRef} variant='outline' size='sm' aria-label='표에서 가져오기' onClick={() => setDialog('import')}>
+                        <Button
+                            ref={importButtonRef}
+                            variant='outline'
+                            size='sm'
+                            aria-label={t('editor.importFromTable')}
+                            onClick={() => setDialog('import')}>
                             <Import />
-                            <span className='hidden sm:inline'>표에서 가져오기</span>
+                            <span className='hidden sm:inline'>{t('editor.importFromTable')}</span>
                         </Button>
-                        <Button variant='outline' size='sm' aria-label='곡 추가' className='xl:hidden' onClick={() => setIsSearchSheetOpen(true)}>
+                        <Button
+                            variant='outline'
+                            size='sm'
+                            aria-label={t('editor.addCharts')}
+                            className='xl:hidden'
+                            onClick={() => setIsSearchSheetOpen(true)}>
                             <Plus />
-                            <span className='hidden sm:inline'>곡 추가</span>
+                            <span className='hidden sm:inline'>{t('editor.addCharts')}</span>
                         </Button>
                         <Button
                             size='sm'
@@ -247,27 +261,27 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
                             className='aria-disabled:opacity-50'
                             onClick={() => isDirty && void save(base)}>
                             <Save />
-                            {isSaving ? '저장 중' : '저장'}
+                            {isSaving ? t('editor.saving') : t('editor.save')}
                         </Button>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button ref={menuTriggerRef} variant='ghost' size='icon-sm' aria-label='폴더 메뉴'>
+                                <Button ref={menuTriggerRef} variant='ghost' size='icon-sm' aria-label={t('editor.folderMenu')}>
                                     <Ellipsis />
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-48'>
                                 <DropdownMenuItem onSelect={() => setDialog('meta')}>
                                     <Pencil />
-                                    이름·설명 고치기
+                                    {t('editor.editMeta')}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem disabled={!isDirty} onSelect={handleRevert}>
                                     <Undo2 />
-                                    변경 되돌리기
+                                    {t('editor.revertChanges')}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem variant='destructive' onSelect={() => setDialog('delete')}>
                                     <Trash2 />
-                                    폴더 지우기
+                                    {t('editor.deleteFolder')}
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
@@ -287,8 +301,8 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
             )}
             {saveError && !conflict && (
                 <Alert role='alert' variant='destructive' className='rounded-none border-x-0 border-t-0'>
-                    <AlertTitle>저장하지 못했습니다</AlertTitle>
-                    <AlertDescription>{saveError} 변경은 이 화면에 그대로 있습니다.</AlertDescription>
+                    <AlertTitle>{t('editor.saveFailed')}</AlertTitle>
+                    <AlertDescription>{t('editor.saveFailedDescription', { error: saveError })}</AlertDescription>
                 </Alert>
             )}
             <div className='flex min-w-0 flex-1 flex-col md:min-h-0 md:flex-row'>
@@ -299,35 +313,40 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
                                 {itemCountLabel}
                                 <span className='text-muted-foreground'> / {formatCount(FOLDER_LIMIT.ITEMS_PER_FOLDER)}</span>
                             </span>
-                            {isDirty && <span className='text-warning truncate'>저장 안 됨 · {describeFolderDraftChanges(changes)}</span>}
+                            {isDirty && <span className='text-warning truncate'>{t('editor.unsaved', { changes: changeSummary })}</span>}
                         </p>
                         {isDirty && (
                             <Button variant='ghost' size='xs' onClick={handleRevert}>
                                 <Undo2 />
-                                되돌리기
+                                {t('editor.revert')}
                             </Button>
                         )}
                     </div>
                     <ScrollContainer className='pb-12'>
                         {draft.items.length === 0 ? (
                             <EmptyState
-                                title='곡이 없습니다'
-                                description='곡을 찾아 넣거나 발광 난이도표에서 레벨째 가져오세요. 넣은 뒤 저장해야 R-BMS 에 보입니다.'
+                                title={t('editor.emptyTitle')}
+                                description={t('editor.emptyDescription')}
                                 className='min-h-64'
                                 action={
                                     <div className='flex flex-wrap justify-center gap-1'>
                                         <Button variant='outline' size='sm' onClick={() => setDialog('import')}>
                                             <Import />
-                                            표에서 가져오기
+                                            {t('editor.importFromTable')}
                                         </Button>
                                         <Button variant='outline' size='sm' className='xl:hidden' onClick={() => setIsSearchSheetOpen(true)}>
-                                            <Plus />곡 추가
+                                            <Plus />
+                                            {t('editor.addCharts')}
                                         </Button>
                                     </div>
                                 }
                             />
                         ) : (
-                            <ol ref={listRef} tabIndex={-1} aria-label={`${draft.name}의 곡`} className='flex flex-col outline-none'>
+                            <ol
+                                ref={listRef}
+                                tabIndex={-1}
+                                aria-label={t('editor.listLabel', { name: draft.name })}
+                                className='flex flex-col outline-none'>
                                 {draft.items.map((item, index) => (
                                     <FolderChartRow
                                         key={item.md5}
@@ -350,15 +369,17 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
                         )}
                     </ScrollContainer>
                 </div>
-                <aside aria-label='곡 추가' className='border-border bg-sidebar w-context-panel hidden shrink-0 flex-col border-l xl:flex xl:min-h-0'>
+                <aside
+                    aria-label={t('editor.addCharts')}
+                    className='border-border bg-sidebar w-context-panel hidden shrink-0 flex-col border-l xl:flex xl:min-h-0'>
                     <FolderChartSearchPanel {...searchPanelProps} className='flex-1' />
                 </aside>
             </div>
             <Sheet open={isSearchSheetOpen} onOpenChange={setIsSearchSheetOpen}>
                 <SheetContent side='right' className='gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-sm'>
                     <SheetHeader className='border-border border-b pr-12'>
-                        <SheetTitle>곡 추가</SheetTitle>
-                        <SheetDescription>넣은 곡은 목록 끝에 붙고, 저장해야 R-BMS 에 반영됩니다.</SheetDescription>
+                        <SheetTitle>{t('editor.addCharts')}</SheetTitle>
+                        <SheetDescription>{t('editor.sheetDescription')}</SheetDescription>
                     </SheetHeader>
                     <FolderChartSearchPanel {...searchPanelProps} autoFocus isLabelVisible={false} className='flex-1' />
                 </SheetContent>
@@ -366,9 +387,9 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
             <FolderMetaDialog
                 open={dialog === 'meta'}
                 onOpenChange={(open) => setDialog(open ? 'meta' : null)}
-                title='이름·설명 고치기'
-                description='저장 버튼을 눌러야 반영됩니다.'
-                submitLabel='적용'
+                title={t('editor.editMeta')}
+                description={t('editor.metaDescription')}
+                submitLabel={t('editor.apply')}
                 initialValue={{ name: draft.name, description: draft.description }}
                 onSubmit={(value) => {
                     setDraft((current) => ({ ...current, ...value }))
@@ -400,9 +421,9 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
             <ConfirmAction
                 open={dialog === 'delete'}
                 onOpenChange={(open) => setDialog(open ? 'delete' : null)}
-                title='폴더를 지울까요?'
-                description={`'${base.name}' 폴더와 그 안의 ${formatCount(base.items.length)}곡 목록을 지웁니다. R-BMS 선곡 화면에서도 사라지며 되돌릴 수 없습니다.`}
-                confirmLabel='지우기'
+                title={t('deleteConfirmTitle')}
+                description={t('deleteConfirmDescription', { name: base.name, count: base.items.length })}
+                confirmLabel={t('deleteConfirm')}
                 confirmDisabled={deleteFolder.isPending}
                 onConfirm={handleDelete}
                 returnFocusRef={menuTriggerRef}
@@ -410,10 +431,10 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
             <ConfirmAction
                 open={leaveHref !== null}
                 onOpenChange={(open) => !open && setLeaveHref(null)}
-                title='저장하지 않은 변경이 있습니다'
-                description={`이대로 나가면 변경 ${changes.total}건(${describeFolderDraftChanges(changes)})이 사라집니다.`}
-                confirmLabel='저장하지 않고 나가기'
-                cancelLabel='계속 편집'
+                title={t('editor.leaveTitle')}
+                description={t('editor.leaveDescription', { count: changes.total, summary: changeSummary })}
+                confirmLabel={t('editor.leaveConfirm')}
+                cancelLabel={t('editor.leaveCancel')}
                 onConfirm={handleLeave}
             />
         </section>

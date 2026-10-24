@@ -5,6 +5,7 @@ import { ReplayDetailPanel } from '../../src/widgets/replay/replay-detail-panel'
 import { QUERY_KEY } from '../../src/shared/constants/query-key'
 import { SCRATCH_AUTO_BADGE_LABEL } from '../../src/shared/constants/scratch-auto'
 import { SidebarProvider } from '../../src/shared/ui/sidebar'
+import { withLocale } from '../support/browse-intl'
 import type { ReplayData } from '../../src/entities/replay.type'
 
 const REPLAY_ID = 'replay-1'
@@ -37,11 +38,13 @@ const renderPanel = (data: ReplayData) => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(QUERY_KEY.REPLAY.DETAIL(REPLAY_ID), data)
     return renderToStaticMarkup(
-        <QueryClientProvider client={queryClient}>
-            <SidebarProvider>
-                <ReplayDetailPanel replayId={REPLAY_ID} />
-            </SidebarProvider>
-        </QueryClientProvider>,
+        withLocale(
+            <QueryClientProvider client={queryClient}>
+                <SidebarProvider>
+                    <ReplayDetailPanel replayId={REPLAY_ID} />
+                </SidebarProvider>
+            </QueryClientProvider>,
+        ),
     )
 }
 

@@ -12,6 +12,7 @@ const { cleanup, render, within } = await import('@testing-library/react')
 const { CourseDetailPanel } = await import('../../src/widgets/course/course-detail-panel')
 const { QUERY_KEY } = await import('../../src/shared/constants/query-key')
 const { SidebarProvider } = await import('../../src/shared/ui/sidebar')
+const { withLocale } = await import('../support/browse-intl')
 const { DAN_SETTINGS_HREF } = await import('../../src/shared/constants/navigation')
 const fixture = await import('../support/course-catalog-fixture')
 const { createCourseCatalogService } = await import('../../src/server/service/domain/course-catalog/course-catalog.service')
@@ -55,9 +56,11 @@ const renderDetail = (course: CatalogCourse, entry: CourseCatalogEntry | null, s
         <AppRouterContext.Provider value={router as never}>
             <PathnameContext.Provider value={PATHNAME}>
                 <QueryClientProvider client={queryClient}>
-                    <SidebarProvider>
-                        <CourseDetailPanel courseHash={course.courseHash} rankingParams={RANKING_PARAMS} />
-                    </SidebarProvider>
+                    {withLocale(
+                        <SidebarProvider>
+                            <CourseDetailPanel courseHash={course.courseHash} rankingParams={RANKING_PARAMS} />
+                        </SidebarProvider>,
+                    )}
                 </QueryClientProvider>
             </PathnameContext.Provider>
         </AppRouterContext.Provider>,

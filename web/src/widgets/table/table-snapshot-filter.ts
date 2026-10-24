@@ -14,28 +14,28 @@ import { serializeSearchParams } from '@shared/lib/search-params'
 
 const TABLE_FILTER_PARAM = { QUERY: 'q', FROM: 'from', TO: 'to', LAMP: 'lamp', SORT: 'sort' } as const
 
-type LampFilterDefinition = { value: string; label: string; min?: ClearLamp; max?: ClearLamp }
+type LampFilterDefinition = { value: string; min?: ClearLamp; max?: ClearLamp }
 
 export const TABLE_LAMP_FILTERS = [
-    { value: 'all', label: '모든 램프' },
-    { value: 'noplay', label: '미플레이', max: 'NoPlay' },
-    { value: 'failed', label: 'FAILED', min: 'Failed', max: 'Failed' },
-    { value: 'unclear', label: '미클리어 (미플레이 포함)', max: 'Failed' },
-    { value: 'cleared', label: '클리어 (ASSIST 이상)', min: MIN_CLEAR_LAMP },
-    { value: 'easy', label: 'EASY 이상', min: 'Easy' },
-    { value: 'clear', label: 'CLEAR 이상', min: 'Normal' },
-    { value: 'hard', label: 'HARD 이상', min: 'Hard' },
-    { value: 'exhard', label: 'EX HARD 이상', min: 'ExHard' },
-    { value: 'fullcombo', label: 'FULL COMBO 이상', min: 'FullCombo' },
+    { value: 'all' },
+    { value: 'noplay', max: 'NoPlay' },
+    { value: 'failed', min: 'Failed', max: 'Failed' },
+    { value: 'unclear', max: 'Failed' },
+    { value: 'cleared', min: MIN_CLEAR_LAMP },
+    { value: 'easy', min: 'Easy' },
+    { value: 'clear', min: 'Normal' },
+    { value: 'hard', min: 'Hard' },
+    { value: 'exhard', min: 'ExHard' },
+    { value: 'fullcombo', min: 'FullCombo' },
 ] as const satisfies readonly LampFilterDefinition[]
 
 type TableLampFilter = (typeof TABLE_LAMP_FILTERS)[number]['value']
 
 export const TABLE_SORTS = [
-    { value: 'table', label: '원본 순', needsRecords: false },
-    { value: 'title', label: '곡명 순', needsRecords: false },
-    { value: 'lamp', label: '램프 낮은 순', needsRecords: true },
-    { value: 'rate', label: '달성률 낮은 순', needsRecords: true },
+    { value: 'table', needsRecords: false },
+    { value: 'title', needsRecords: false },
+    { value: 'lamp', needsRecords: true },
+    { value: 'rate', needsRecords: true },
 ] as const
 
 type TableSort = (typeof TABLE_SORTS)[number]['value']

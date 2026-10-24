@@ -1,5 +1,33 @@
 {
     "localeSwitcher": {
         "label": "Language"
+    },
+    "nav": {
+        "home": "Home",
+        "search": "Chart search",
+        "leaderboards": "Rankings",
+        "guide": "Guide",
+        "folders": "My folders",
+        "tables": "Difficulty tables",
+        "courses": "Courses",
+        "ai": "AI"
+    },
+    "shell": {
+        "skipToContent": "Skip to main content",
+        "homeLink": "{siteName} home",
+        "mainNav": "Main menu",
+        "openMenu": "Open menu",
+        "toggleSidebar": "Collapse or expand the sidebar",
+        "pageLoading": "Loading {title}",
+        "themeToggle": "Switch between light and dark theme",
+        "signIn": "Sign in",
+        "accountMenu": "Account menu",
+        "sessionChecking": "Checking sign-in status",
+        "signedOut": "Signed out.",
+        "myPage": "My page",
+        "myFolders": "My folders",
+        "settings": "Settings",
+        "buildAdmin": "Build management",
+        "signOut": "Sign out"
     }
 }

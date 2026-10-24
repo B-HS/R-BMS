@@ -9,6 +9,7 @@ const { changeValue, click, page, waitFor } = await import('../support/dom-harne
 const { toast } = await import('sonner')
 const { AiLimitsPanel } = await import('../../src/widgets/admin/ai-limits-panel')
 const { cleanupScreens, errorResponse, installFetchRoutes, jsonResponse, renderWithQueryClient, toastTexts } = await import('../support/ai-screen')
+const { withLocale } = await import('../support/browse-intl')
 
 type Limits = { daily_calls: number; concurrent_runs: number; default_monthly_token_limit: number | null; updated_at: number | null }
 
@@ -44,7 +45,7 @@ afterEach(async () => {
 describe('운영자 AI 한도 패널', () => {
     test('저장된 한도를 채워 보이고 바꾸기 전에는 저장 버튼이 꺼져 있다', async () => {
         useLimitRoutes()
-        await renderWithQueryClient(<AiLimitsPanel />)
+        await renderWithQueryClient(withLocale(<AiLimitsPanel />))
 
         expect(((await page.findByLabelText('사용자당 하루 호출 수')) as HTMLInputElement).value).toBe('30')
         expect(field('사용자당 동시 실행 수').value).toBe('1')
@@ -55,7 +56,7 @@ describe('운영자 AI 한도 패널', () => {
 
     test('범위를 벗어난 값은 필드별 오류를 보이고 저장하지 못하게 한다', async () => {
         useLimitRoutes()
-        await renderWithQueryClient(<AiLimitsPanel />)
+        await renderWithQueryClient(withLocale(<AiLimitsPanel />))
         await page.findByLabelText('사용자당 하루 호출 수')
 
         for (const value of ['0', '1001', 'abc', '']) {
@@ -75,7 +76,7 @@ describe('운영자 AI 한도 패널', () => {
 
     test('유효한 값을 저장하면 PUT 으로 세 값을 보내고 저장된 값과 변경 시각을 보인다', async () => {
         const calls = useLimitRoutes()
-        await renderWithQueryClient(<AiLimitsPanel />)
+        await renderWithQueryClient(withLocale(<AiLimitsPanel />))
         await page.findByLabelText('사용자당 하루 호출 수')
 
         await changeValue(field('사용자당 하루 호출 수'), '50')
@@ -97,7 +98,7 @@ describe('운영자 AI 한도 패널', () => {
 
     test('월 토큰 상한을 비우면 제한 없음(null)으로 저장한다', async () => {
         const calls = useLimitRoutes({ daily_calls: 30, concurrent_runs: 1, default_monthly_token_limit: 9000, updated_at: NOW })
-        await renderWithQueryClient(<AiLimitsPanel />)
+        await renderWithQueryClient(withLocale(<AiLimitsPanel />))
         await page.findByLabelText('사용자당 하루 호출 수')
 
         await changeValue(field('기본 월 토큰 상한'), '')
@@ -114,7 +115,7 @@ describe('운영자 AI 한도 패널', () => {
 
     test('관리자가 아니라는 응답이면 서버 메시지를 알리고 입력값을 그대로 둔다', async () => {
         useLimitRoutes(DEFAULT_LIMITS, () => errorResponse(403, 'FORBIDDEN', '접근 권한이 없습니다.'))
-        await renderWithQueryClient(<AiLimitsPanel />)
+        await renderWithQueryClient(withLocale(<AiLimitsPanel />))
         await page.findByLabelText('사용자당 하루 호출 수')
 
         await changeValue(field('사용자당 하루 호출 수'), '45')
@@ -128,7 +129,7 @@ describe('운영자 AI 한도 패널', () => {
         installFetchRoutes({}).restore()
         const installed = installFetchRoutes({ [`GET ${LIMITS_PATH}`]: () => errorResponse(403, 'FORBIDDEN', '접근 권한이 없습니다.') })
         restoreFetch = installed.restore
-        await renderWithQueryClient(<AiLimitsPanel />)
+        await renderWithQueryClient(withLocale(<AiLimitsPanel />))
 
         expect(await page.findByText('AI 사용 한도를 불러오지 못했습니다')).toBeTruthy()
         expect(page.queryByLabelText('사용자당 하루 호출 수')).toBeNull()

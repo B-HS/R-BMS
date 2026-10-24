@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import type { ReplayEvent } from '@entities/replay.type'
 
 const LANE_HEIGHT_PX = 26
@@ -22,6 +23,7 @@ type ReplayWaterfallProps = {
 }
 
 export const ReplayWaterfall: FC<ReplayWaterfallProps> = ({ events, durationUs }) => {
+    const t = useTranslations('browse.replay')
     const renderedEvents = events.slice(0, MAX_RENDERED_REPLAY_EVENTS)
     const lanes = Array.from(new Set(renderedEvents.map((event) => event.lane))).sort((a, b) => a - b)
     const durationSeconds = Math.max(durationUs / MICROSECONDS_PER_SECOND, 1)
@@ -38,7 +40,7 @@ export const ReplayWaterfall: FC<ReplayWaterfallProps> = ({ events, durationUs }
                 height={svgHeight}
                 viewBox={`0 0 ${svgWidth} ${svgHeight}`}
                 role='img'
-                aria-label={`레인 ${lanes.length}개에 걸친 입력 이벤트 ${renderedEvents.length}건, 총 길이 ${durationSeconds.toFixed(1)}초`}>
+                aria-label={t('waterfallLabel', { lanes: lanes.length, events: renderedEvents.length, seconds: durationSeconds.toFixed(1) })}>
                 {lanes.map((lane, index) => (
                     <g key={lane}>
                         <rect

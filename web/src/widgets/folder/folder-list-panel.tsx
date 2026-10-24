@@ -4,6 +4,7 @@ import { useRef, useState, type FC } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { FolderPlus, Plus } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { ConfirmAction } from '@features/dialog/confirm-action'
 import { FolderGuidePanel } from '@features/folder/folder-guide-panel'
@@ -19,8 +20,6 @@ import { FOLDER_LIMIT, toFolderErrorMessage, type FolderMetaInput, type FolderSu
 import { formatCount } from '@shared/lib/format'
 import { Button } from '@shared/ui/button'
 
-const PAGE_TITLE = '내 폴더'
-const PAGE_DESCRIPTION = 'R-BMS 선곡 화면에 표처럼 나타나는 곡 묶음'
 const INSANE_TABLE_PATH = '/tables/insane1'
 const EMPTY_META: FolderMetaInput = { name: '', description: '' }
 
@@ -36,6 +35,7 @@ export const FolderListPanel: FC = () => {
     const [deleteTarget, setDeleteTarget] = useState<FolderSummary | null>(null)
 
     const router = useRouter()
+    const t = useTranslations('browse.folder')
     const { data, isLoading, isError, isFetching, refetch } = useGetFolderList()
     const createFolder = useCreateFolder()
     const updateFolder = useUpdateFolder()
@@ -55,7 +55,7 @@ export const FolderListPanel: FC = () => {
         createFolder.mutate(input, {
             onSuccess: (created) => {
                 setIsCreateOpen(false)
-                toast.success(`'${created.name}' 폴더를 만들었습니다.`)
+                toast.success(t('list.created', { name: created.name }))
                 router.push(folderHref(created.id))
             },
         })
@@ -67,7 +67,7 @@ export const FolderListPanel: FC = () => {
             {
                 onSuccess: () => {
                     setEditTarget(null)
-                    toast.success('이름과 설명을 고쳤습니다.')
+                    toast.success(t('list.updated'))
                 },
             },
         )
@@ -80,7 +80,7 @@ export const FolderListPanel: FC = () => {
             onSuccess: () => {
                 setDeleteTarget(null)
                 returnFocusRef.current = createButtonRef.current
-                toast.success(`'${target.name}' 폴더를 지웠습니다.`)
+                toast.success(t('deleted', { name: target.name }))
             },
         })
     }
@@ -100,16 +100,16 @@ export const FolderListPanel: FC = () => {
     }
 
     const createButton = (
-        <Button ref={createButtonRef} size='sm' disabled={isAtLimit} aria-label='새 폴더' onClick={openCreate}>
+        <Button ref={createButtonRef} size='sm' disabled={isAtLimit} aria-label={t('list.newFolder')} onClick={openCreate}>
             <Plus />
-            <span className='hidden sm:inline'>새 폴더</span>
+            <span className='hidden sm:inline'>{t('list.newFolder')}</span>
         </Button>
     )
 
     return (
         <ShellPage
-            title={PAGE_TITLE}
-            description={PAGE_DESCRIPTION}
+            title={t('list.pageTitle')}
+            description={t('list.pageDescription')}
             actions={
                 <>
                     {data && (
@@ -125,30 +125,29 @@ export const FolderListPanel: FC = () => {
             <ShellSidebarPortal>
                 <FolderGuidePanel />
             </ShellSidebarPortal>
-            {isLoading && <RowListSkeleton rows={3} label='폴더 불러오는 중' />}
-            {!isLoading && isError && !data && (
-                <LoadErrorState title='폴더를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
-            )}
+            {isLoading && <RowListSkeleton rows={3} label={t('list.loading')} />}
+            {!isLoading && isError && !data && <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
             {data && folders.length === 0 && (
                 <EmptyState
                     eyebrow='MY FOLDERS'
-                    title='아직 폴더가 없습니다'
-                    description='폴더를 만들고 곡을 넣으면 R-BMS 에 로그인했을 때 선곡 화면의 MY FOLDERS 아래에 나타납니다. 발광 난이도표에서 곡을 골라 넣을 수도 있습니다.'
+                    title={t('noFolders')}
+                    description={t('list.emptyDescription')}
                     className='min-h-64'
                     action={
                         <div className='flex flex-wrap justify-center gap-1'>
                             <Button size='sm' onClick={openCreate}>
-                                <FolderPlus />첫 폴더 만들기
+                                <FolderPlus />
+                                {t('list.createFirst')}
                             </Button>
                             <Button asChild variant='outline' size='sm'>
-                                <Link href={INSANE_TABLE_PATH}>발광 난이도표 보기</Link>
+                                <Link href={INSANE_TABLE_PATH}>{t('list.viewInsaneTable')}</Link>
                             </Button>
                         </div>
                     }
                 />
             )}
             {folders.length > 0 && (
-                <ul ref={listRef} aria-label='내 폴더 목록' aria-busy={reorderFolders.isPending} className='flex flex-col'>
+                <ul ref={listRef} aria-label={t('list.listLabel')} aria-busy={reorderFolders.isPending} className='flex flex-col'>
                     {folders.map((folder, index) => (
                         <FolderListItem
                             key={folder.id}
@@ -173,9 +172,9 @@ export const FolderListPanel: FC = () => {
             <FolderMetaDialog
                 open={isCreateOpen}
                 onOpenChange={setIsCreateOpen}
-                title='새 폴더'
-                description='이름은 R-BMS 선곡 화면에 그대로 보입니다. 곡은 만든 뒤 편집 화면에서 넣습니다.'
-                submitLabel='만들기'
+                title={t('list.newFolder')}
+                description={t('list.createDescription')}
+                submitLabel={t('list.create')}
                 initialValue={EMPTY_META}
                 isPending={createFolder.isPending}
                 serverError={createFolder.error ? toFolderErrorMessage(createFolder.error) : undefined}
@@ -184,8 +183,8 @@ export const FolderListPanel: FC = () => {
             <FolderMetaDialog
                 open={editTarget !== null}
                 onOpenChange={(open) => !open && setEditTarget(null)}
-                title='이름·설명 고치기'
-                submitLabel='고치기'
+                title={t('editor.editMeta')}
+                submitLabel={t('list.edit')}
                 initialValue={{ name: editTarget?.name ?? '', description: editTarget?.description ?? '' }}
                 isPending={updateFolder.isPending}
                 serverError={updateFolder.error ? toFolderErrorMessage(updateFolder.error) : undefined}
@@ -195,9 +194,9 @@ export const FolderListPanel: FC = () => {
             <ConfirmAction
                 open={deleteTarget !== null}
                 onOpenChange={(open) => !open && setDeleteTarget(null)}
-                title='폴더를 지울까요?'
-                description={`'${deleteTarget?.name ?? ''}' 폴더와 그 안의 ${formatCount(deleteTarget?.item_count ?? 0)}곡 목록을 지웁니다. R-BMS 선곡 화면에서도 사라지며 되돌릴 수 없습니다.`}
-                confirmLabel='지우기'
+                title={t('deleteConfirmTitle')}
+                description={t('deleteConfirmDescription', { name: deleteTarget?.name ?? '', count: deleteTarget?.item_count ?? 0 })}
+                confirmLabel={t('deleteConfirm')}
                 confirmDisabled={deleteFolder.isPending}
                 onConfirm={handleDelete}
                 returnFocusRef={returnFocusRef}

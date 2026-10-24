@@ -2,6 +2,7 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { MetaBadge } from '@features/badge/meta-badge'
@@ -15,33 +16,33 @@ import { ApiError } from '@shared/lib/fetch'
 import { formatCount, formatHash } from '@shared/lib/format'
 import { useReplayDetail } from '@entities/replay.query'
 
-const PAGE_TITLE = '리플레이'
 const NOT_FOUND_STATUS = 404
 const MICROSECONDS_PER_SECOND = 1_000_000
 const META_ROW_CLASS = 'flex items-center justify-between gap-4 py-1'
 
 export const ReplayDetailPanel: FC<{ replayId: string }> = ({ replayId }) => {
+    const t = useTranslations('browse.replay')
     const { data, isLoading, isError, error, isFetching, refetch } = useReplayDetail(replayId)
 
-    if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
+    if (isLoading) return <ShellPageLoading title={t('pageTitle')} />
 
     if (error instanceof ApiError && error.status === NOT_FOUND_STATUS)
         return (
-            <ShellPage title={PAGE_TITLE}>
-                <NotFoundNotice title='없는 리플레이입니다' description='지워졌거나 올라온 적이 없는 리플레이입니다.' />
+            <ShellPage title={t('pageTitle')}>
+                <NotFoundNotice title={t('notFoundTitle')} description={t('notFoundDescription')} />
             </ShellPage>
         )
 
     if (isError || !data)
         return (
-            <ShellPage title={PAGE_TITLE}>
-                <LoadErrorState title='리플레이를 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
+            <ShellPage title={t('pageTitle')}>
+                <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />
             </ShellPage>
         )
 
     return (
-        <ShellPage title={PAGE_TITLE} description={data.id}>
-            <PanelCard title='리플레이' contentClassName='flex flex-col gap-2'>
+        <ShellPage title={t('pageTitle')} description={data.id}>
+            <PanelCard title={t('pageTitle')} contentClassName='flex flex-col gap-2'>
                 <div className='flex flex-wrap items-center gap-1'>
                     <MetaBadge>{data.mode}</MetaBadge>
                     <MetaBadge>{data.random}</MetaBadge>
@@ -51,7 +52,7 @@ export const ReplayDetailPanel: FC<{ replayId: string }> = ({ replayId }) => {
                 </div>
                 <dl className='flex flex-col text-xs'>
                     <div className={META_ROW_CLASS}>
-                        <dt className='text-muted-foreground'>차트</dt>
+                        <dt className='text-muted-foreground'>{t('chart')}</dt>
                         <dd>
                             <Link href={`/charts/${data.chart.sha256}`} className='font-mono hover:underline'>
                                 {formatHash(data.chart.sha256)}
@@ -59,33 +60,33 @@ export const ReplayDetailPanel: FC<{ replayId: string }> = ({ replayId }) => {
                         </dd>
                     </div>
                     <div className={META_ROW_CLASS}>
-                        <dt className='text-muted-foreground'>스코어</dt>
+                        <dt className='text-muted-foreground'>{t('score')}</dt>
                         <dd className='font-mono'>{data.score_id ?? '—'}</dd>
                     </div>
                     <div className={META_ROW_CLASS}>
-                        <dt className='text-muted-foreground'>이벤트</dt>
+                        <dt className='text-muted-foreground'>{t('events')}</dt>
                         <dd className='tabular-nums'>{formatCount(data.event_count)}</dd>
                     </div>
                     <div className={META_ROW_CLASS}>
-                        <dt className='text-muted-foreground'>길이</dt>
-                        <dd className='tabular-nums'>{(data.duration_us / MICROSECONDS_PER_SECOND).toFixed(3)}초</dd>
+                        <dt className='text-muted-foreground'>{t('length')}</dt>
+                        <dd className='tabular-nums'>{t('seconds', { seconds: (data.duration_us / MICROSECONDS_PER_SECOND).toFixed(3) })}</dd>
                     </div>
                     <div className={META_ROW_CLASS}>
-                        <dt className='text-muted-foreground'>빌드</dt>
+                        <dt className='text-muted-foreground'>{t('build')}</dt>
                         <dd className='font-mono'>{data.client_build_sha256 ? formatHash(data.client_build_sha256) : '—'}</dd>
                     </div>
                     <div className={META_ROW_CLASS}>
-                        <dt className='text-muted-foreground'>크기</dt>
-                        <dd className='tabular-nums'>{formatCount(data.size)} bytes</dd>
+                        <dt className='text-muted-foreground'>{t('size')}</dt>
+                        <dd className='tabular-nums'>{t('bytes', { size: data.size })}</dd>
                     </div>
                 </dl>
             </PanelCard>
-            <PanelCard title='입력 워터폴' contentClassName='flex flex-col gap-2'>
+            <PanelCard title={t('waterfallTitle')} contentClassName='flex flex-col gap-2'>
                 <ReplayWaterfall events={data.events} durationUs={data.duration_us} />
                 <PanelFootnote>
-                    이벤트 타임스탬프는 µs 원본입니다. 가로 1초 = 96px, 키보드 내비게이션은 지원하지 않습니다.
-                    {data.events.length > MAX_RENDERED_REPLAY_EVENTS &&
-                        ` 전체 ${formatCount(data.events.length)}건 중 앞 ${formatCount(MAX_RENDERED_REPLAY_EVENTS)}건만 그립니다.`}
+                    {data.events.length > MAX_RENDERED_REPLAY_EVENTS
+                        ? t('waterfallFootnoteLimited', { total: data.events.length, shown: MAX_RENDERED_REPLAY_EVENTS })
+                        : t('waterfallFootnote')}
                 </PanelFootnote>
             </PanelCard>
         </ShellPage>

@@ -1,17 +1,26 @@
 import { describe, expect, test } from 'bun:test'
+import { createTranslator } from 'next-intl'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { GuideArticle } from '../../src/widgets/guide/guide-article'
-import { GUIDE_ADVANCED_SECTIONS, GUIDE_SECTIONS } from '../../src/widgets/guide/guide-sections'
+import { buildGuideAdvancedSections, buildGuideSections } from '../../src/widgets/guide/guide-sections'
 import { IR_SERVER_BASE_URL } from '../../src/shared/constants/server-info'
+import { MESSAGES } from '../../src/shared/i18n/messages'
+import { withLocale } from '../support/browse-intl'
 
-const markup = () => renderToStaticMarkup(<GuideArticle />)
+type Locale = keyof typeof MESSAGES
+
+const guideTranslator = (locale: Locale) => createTranslator({ locale, messages: MESSAGES[locale], namespace: 'browse.guide' })
+
+const markup = (locale: Locale = 'ko') => renderToStaticMarkup(withLocale(<GuideArticle />, locale))
 
 describe('연동 가이드 문서', () => {
     test('GUI 절차 순서대로 8개 절과 고급 2개 절을 렌더한다', () => {
         const html = markup()
-        expect(GUIDE_SECTIONS.map((section) => section.id)).toEqual(['connect', 'account', 'ranked', 'ranking-panel', 'replay', 'sync', 'rivals'])
-        expect(GUIDE_ADVANCED_SECTIONS.map((section) => section.id)).toEqual(['api-token', 'cli-overrides'])
-        for (const section of [...GUIDE_SECTIONS, ...GUIDE_ADVANCED_SECTIONS]) expect(html).toContain(`id="${section.id}"`)
+        const sections = buildGuideSections(guideTranslator('ko'))
+        const advancedSections = buildGuideAdvancedSections(guideTranslator('ko'))
+        expect(sections.map((section) => section.id)).toEqual(['connect', 'account', 'ranked', 'ranking-panel', 'replay', 'sync', 'rivals'])
+        expect(advancedSections.map((section) => section.id)).toEqual(['api-token', 'cli-overrides'])
+        for (const section of [...sections, ...advancedSections]) expect(html).toContain(`id="${section.id}"`)
     })
 
     test('설정 화면 진입 경로와 서버 주소를 안내한다', () => {
@@ -70,5 +79,23 @@ describe('연동 가이드 문서', () => {
 
     test('Bearer 토큰 사용법을 고급 절에 담는다', () => {
         expect(markup()).toContain('Bearer rbms_')
+    })
+
+    test('영어와 일본어로도 같은 절과 같은 명령 예시를 렌더한다', () => {
+        for (const locale of ['en', 'ja'] as const) {
+            const html = markup(locale)
+            const sections = [...buildGuideSections(guideTranslator(locale)), ...buildGuideAdvancedSections(guideTranslator(locale))]
+            for (const section of sections) {
+                expect(html).toContain(`id="${section.id}"`)
+                expect(html).toContain(section.title.replaceAll('&', '&amp;'))
+            }
+            expect(html).toContain(IR_SERVER_BASE_URL)
+            expect(html).toContain('IR: RANK #&lt;')
+            expect(html).toContain(`curl -H &#x27;Authorization: Bearer rbms_&lt;`)
+            expect(html).not.toContain('가이드')
+            expect(html).not.toContain('고급 (Advanced)')
+        }
+        expect(markup('en')).toContain('Create an account')
+        expect(markup('ja')).toContain('アカウントを作成')
     })
 })
