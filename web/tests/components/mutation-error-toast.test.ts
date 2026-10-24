@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { MutationObserver } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { MESSAGES } from '../../src/shared/i18n/messages'
@@ -15,6 +15,10 @@ const failMutation = async (error: unknown, meta?: Record<string, unknown>) => {
 const toastTitles = () => toast.getToasts().flatMap((entry) => ('title' in entry ? [String(entry.title)] : []))
 
 let unbind: () => void = () => undefined
+
+beforeEach(() => {
+    toast.dismiss()
+})
 
 afterEach(() => {
     unbind()
