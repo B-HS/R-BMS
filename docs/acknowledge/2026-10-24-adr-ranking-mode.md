@@ -42,7 +42,7 @@
 
 ### 4) 웹 순위 응답의 단위 배지
 
-`GET /api/charts/{hash}/ranking` 의 줄마다 `extra.dans: [{ system, name, label }]` 가 항상 있다(단위가 없으면 `[]`). `system` 은 `genoside2018_sp|genoside2018_dp|stella|satellite`, 체계 순서대로 체계마다 하나. 줄의 사용자 id 전체로 `danService.listDisplayed` 를 한 번만 부른다(쿼리 2개, 순위가 비면 부르지 않는다). `/best`, `/api/scores/{id}`, 코스 순위에는 붙지 않는다. 순위·정렬·`X-Total-Count`(넣지 않음)·캐시 태그는 그대로고 마이그레이션이 없다. 응답은 순위 캐시(`cacheLife('minutes')`)에 같이 들어가 단위를 얻거나 표시를 바꿔도 최대 그 시간만큼 이전 값이 보인다. 응답 타입 `RankingRecordOutput`(`dto/score.ts`), 필수 의존 `ScoreServiceDeps.listDisplayedDans`, 새 행 타입 `ScoreChartRankedRow` 는 웹 내부 변경이다. 자세한 계약은 [api-spec.md](../backend/api-spec.md) 4절.
+`GET /api/charts/{hash}/ranking` 의 줄마다 `extra.dans: [{ system, name, label }]` 가 항상 있다(단위가 없으면 `[]`). `system` 은 `genoside2018_sp|genoside2018_dp|stella|satellite`, 체계 순서대로 체계마다 하나. (같은 날 뒤의 [A-단위 ADR](2026-10-24-adr-assisted-dan.md)로 원소에 `assisted` 가 더해지고 체계마다 0~2개가 된다: 정식 다음에 A-단위. A-단위의 `label` 은 `A-` 가 붙은 글자라 클라이언트 변경은 없다.) 줄의 사용자 id 전체로 `danService.listDisplayed` 를 한 번만 부른다(쿼리 2개, 순위가 비면 부르지 않는다). `/best`, `/api/scores/{id}`, 코스 순위에는 붙지 않는다. 순위·정렬·`X-Total-Count`(넣지 않음)·캐시 태그는 그대로고 마이그레이션이 없다. 응답은 순위 캐시(`cacheLife('minutes')`)에 같이 들어가 단위를 얻거나 표시를 바꿔도 최대 그 시간만큼 이전 값이 보인다. 응답 타입 `RankingRecordOutput`(`dto/score.ts`), 필수 의존 `ScoreServiceDeps.listDisplayedDans`, 새 행 타입 `ScoreChartRankedRow` 는 웹 내부 변경이다. 자세한 계약은 [api-spec.md](../backend/api-spec.md) 4절.
 
 ### 5) 앱 오버레이(그리기)
 

@@ -1,8 +1,8 @@
 # ADR: 코스 기록으로 단위를 자동 판정해 user_dan 에 넣고 표시 단위를 고르게 함
 
 > 최종 갱신 2026-10-23 · 대응 커밋 5a0eacf
-> 상태: 유효(결정 19 는 사용자 확인 2026-10-23: "맞어", 결정 20 은 "추천대로". 인정 조건의 세부는 메인 결정이고 사용자 확인 2026-10-24(미확인 14 지금대로): 게이지 모드 무관 인정(J-11), ranked 판만·ASSIST·LIGHT ASSIST 램프 제외·0012 이전 판 소급 없음(J-13)) · 결정일 2026-10-23 · 결정자 사용자(결정 19·20), 세부 메인 · 커밋 9e39262(마이그레이션 0012 의 `user_dan`·`user_dan_display`·`dan_course`. 웨이브 1 전체가 섞인 커밋), d57c6c2(판정·표시 API·재판정 서비스), c79f53f(단위 코스 등록), 942ed71(표 갱신과 소급 연결), 608eae7(마이페이지 단위 탭·배지), df52b3c(`dan-recompute` 액션)
-> 관계: 코스 제출의 스테이지 사실은 [코스 제출 게이지](2026-10-23-adr-course-submission-gauge.md), 단위 코스의 등록은 [GENOSIDE 데이터](2026-10-23-adr-genoside-2018-course-data.md)와 [표 매일 갱신](2026-10-23-adr-table-daily-refresh.md).
+> 상태: 일부 대체됨(2026-10-24 어시스트 판은 거절하지 않고 A-단위로 따로 기록한다: 3절 1~3번의 `unranked`·`not_cleared`·`scratch_auto`·`assisted` 조건, 1절 `user_dan` 의 기본 키, 5절 표시 모드 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md). 나머지는 유효. 결정 19 는 사용자 확인 2026-10-23: "맞어", 결정 20 은 "추천대로". 인정 조건의 세부는 메인 결정이고 사용자 확인 2026-10-24(미확인 14 지금대로): 게이지 모드 무관 인정(J-11), ranked 판만·ASSIST·LIGHT ASSIST 램프 제외·0012 이전 판 소급 없음(J-13)) · 결정일 2026-10-23 · 결정자 사용자(결정 19·20), 세부 메인 · 커밋 9e39262(마이그레이션 0012 의 `user_dan`·`user_dan_display`·`dan_course`. 웨이브 1 전체가 섞인 커밋), d57c6c2(판정·표시 API·재판정 서비스), c79f53f(단위 코스 등록), 942ed71(표 갱신과 소급 연결), 608eae7(마이페이지 단위 탭·배지), df52b3c(`dan-recompute` 액션)
+> 관계: 어시스트 판의 A-단위 기록은 [A-단위 ADR](2026-10-24-adr-assisted-dan.md)가 이 ADR 의 일부를 대체한다. 코스 제출의 스테이지 사실은 [코스 제출 게이지](2026-10-23-adr-course-submission-gauge.md), 단위 코스의 등록은 [GENOSIDE 데이터](2026-10-23-adr-genoside-2018-course-data.md)와 [표 매일 갱신](2026-10-23-adr-table-daily-refresh.md).
 
 ## 배경
 
@@ -15,8 +15,8 @@
 ### 1) 데이터 모델 (마이그레이션 0012)
 
 - `dan_course`(PK `course_hash`; `system`, `label`, `rank`): 어느 코스가 어느 체계의 어느 단위를 주는가. 코스 등록 때 이름 규칙으로 채운다.
-- `user_dan`(PK `user_id + system + label`; `rank`, `course_hash`, `course_score_id`, `course_gauge`, `gauge`, `acquired_at`): 획득 기록. 한 단위는 한 번만 남는다.
-- `user_dan_display`(PK `user_id + system`; `label` NULL = 숨김): 표시 선택. 행이 없으면 자동.
+- `user_dan`(PK `user_id + system + label`; `rank`, `course_hash`, `course_score_id`, `course_gauge`, `gauge`, `acquired_at`): 획득 기록. 한 단위는 한 번만 남는다. (일부 대체됨: 0013 이 `assisted` 열을 더하고 PK 를 `user_id + system + label + assisted` 로 넓혀 정식과 A-단위가 따로 한 번씩 남는다 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md))
+- `user_dan_display`(PK `user_id + system`; `label` NULL = 숨김): 표시 선택. 행이 없으면 자동. (일부 대체됨: 0013 이 `assisted` 열을 더한다 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md))
 - `user.rank` 는 쓰지 않는다. 한 칸 문자열이 네 체계와 표시 선택을 담지 못한다.
 
 ### 2) 체계 네 개와 단위 이름
@@ -35,9 +35,9 @@
 
 코스 판 하나를 위에서 아래로 보아 처음 걸리는 사유를 돌려준다(저장하지 않고 시험·로그용).
 
-1. 단위 코스일 것 (`not_a_dan_course`), 로그인 사용자일 것 (`guest`), `ranked = true` 일 것 (`unranked`: 넓힌 판정·TOTAL 덮어쓰기·오토플레이·신뢰하지 않는 빌드가 막는다).
-2. 램프가 EASY(id 4) 이상이고 끝 게이지 값이 0 초과일 것 (`not_cleared`). NO PLAY·FAILED·ASSIST·LIGHT ASSIST 램프는 제외된다.
-3. SCRATCH AUTO 가 아니고 (`scratch_auto`) ASSIST 플래그가 없을 것 (`assisted`).
+1. 단위 코스일 것 (`not_a_dan_course`), 로그인 사용자일 것 (`guest`), `ranked = true` 일 것 (`unranked`: 넓힌 판정·TOTAL 덮어쓰기·오토플레이·신뢰하지 않는 빌드가 막는다). (일부 대체됨: 어시스트만 빼면 ranked 였을 판은 통과하고 A-단위가 된다. 넓힌 판정·TOTAL 덮어쓰기 판이 여기서 거절되던 서술은 더 이상 맞지 않다 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md))
+2. 램프가 EASY(id 4) 이상이고 끝 게이지 값이 0 초과일 것 (`not_cleared`). NO PLAY·FAILED·ASSIST·LIGHT ASSIST 램프는 제외된다. (일부 대체됨: 하한이 ASSIST(id 2)로 내려가 ASSIST·LIGHT ASSIST 램프는 A-단위가 된다. NO PLAY·FAILED·게이지 0 은 그대로 제외 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md))
+3. SCRATCH AUTO 가 아니고 (`scratch_auto`) ASSIST 플래그가 없을 것 (`assisted`). (대체됨: 거절 사유가 아니라 판의 종류를 정한다. SCRATCH AUTO·ASSIST 플래그·ASSIST 계열 램프가 있으면 `kind: 'assisted'` 로 A-단위를 주고 `scratch_auto`·`assisted` 사유 코드는 없어졌다 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md))
 4. 판이 스테이지 사실(`stages`·`course_gauge`·`gauge`)을 가질 것 (`no_stage_facts`). 모든 게이지가 CLASS 계열(Class·ExClass·ExHardClass)일 것 (`not_a_course_gauge`).
 5. 스테이지 수 = 코스 차트 수, 스테이지 i 의 차트 = 코스의 i 번째 차트(md5, md5 가 없으면 sha256) (`stage_count`, `chart_mismatch`).
 6. RANDOM: 코스 제약 `grade` 면 모든 스테이지가 Off, `grade_mirror` 면 Off 또는 Mirror (`random_not_allowed`). LN: 제약 `ln`·`cn`·`hcn` 이면 모든 스테이지의 `lntype` 이 0·1·2 (`ln_mode_mismatch`).
@@ -53,7 +53,7 @@
 
 ### 5) 표시와 공개
 
-- 표시 모드: `auto`(체계 안에서 가장 높은 rank), `hidden`(체계 단위를 숨김), `label`(가진 단위 중 하나. 없는 label 이면 검증 오류). 체계마다 따로 고른다.
+- 표시 모드: `auto`(체계 안에서 가장 높은 rank), `hidden`(체계 단위를 숨김), `label`(가진 단위 중 하나. 없는 label 이면 검증 오류). 체계마다 따로 고른다. (일부 대체됨: 체계마다 0~2개가 보이고 `auto` 는 정식이 같거나 높으면 정식만, A-단위가 더 높으면 둘 다 보이며 `label` 모드는 `assisted` 로 정식과 A-단위를 가려 고른다 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md))
 - 공개 범위는 남에게 보이는 표시 단위(체계 이름 + label)뿐이다: 플레이어 프로필, 순위 행 배지, IR 프로필의 `extra.dans`. 획득 목록·판 id·게이지 모드·획득 시각은 본인만 본다.
 - API: `GET /api/fe/me/dans`(내 체계별 획득·표시), `PUT /api/fe/me/dans/display`(표시 선택, 본문 1 KiB 제한). 마이페이지 설정 탭 "단위".
 
@@ -71,13 +71,13 @@
 | 사용자가 자기 단위를 신고 | 결정 19 가 기록에 의한 자동 판정을 정했다 |
 | 램프만으로 옛 판까지 소급(제약 미확인 표시) | 결정 20 의 미러·LN 제약을 어겼을 수 있다. 소급은 `stages` 가 있는 판만 한다 |
 | 게이지 모드별로 순위·단위를 나눔 | IR 순위 와이어와 `course_best` 키 변경이 필요하다. 모드는 기록만 한다 |
-| `ranked` 를 무시하고 어시스트 플래그만 봄 | 넓힌 판정·신뢰하지 않는 빌드를 같은 기준으로 막으려 한다(J-13, 메인 판단) |
+| `ranked` 를 무시하고 어시스트 플래그만 봄 | 넓힌 판정·신뢰하지 않는 빌드를 같은 기준으로 막으려 한다(J-13, 메인 판단). 이 기각은 유지되고, A-단위는 "어시스트만 빼면 ranked 였던 판"(`rankedWithoutAssist`)으로 이 기각을 지킨다 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md) |
 | 판정 실패를 제출 실패로 | 모든 판 저장 원칙에 어긋난다 |
 | 획득 목록 전체를 공개 / 기본 숨김 | 사용자가 고른 표시 단위만 남에게 보인다 |
 
 ## 영향과 관련 파일
 
-- 사용자 확인 2026-10-24(지금대로 확정): J-11 게이지 모드 무관 인정, J-13 `ranked` 판만·ASSIST·LIGHT ASSIST 제외·소급 없음. 질문 원문이 저장소에 없어 결정 19·20 의 정확한 문구와는 대조하지 못했다.
+- 사용자 확인 2026-10-24(지금대로 확정): J-11 게이지 모드 무관 인정, J-13 `ranked` 판만·ASSIST·LIGHT ASSIST 제외·소급 없음. (같은 날 뒤의 사용자 요청으로 ASSIST·LIGHT ASSIST·SCRATCH AUTO 판의 제외는 바뀌었다: A-단위로 따로 기록한다 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md). "0012 이전 판 소급 없음"은 그대로다.) 질문 원문이 저장소에 없어 결정 19·20 의 정확한 문구와는 대조하지 못했다.
 - 남은 위험: 차트 자체의 `#LNMODE` 가 LN 종류를 고정한 곡이면 `lntype` 이 달라 `ln_mode_mismatch` 로 단위가 안 나올 수 있다(실기에서 보이면 본문에 차트 고정 여부를 싣는 후속이 필요하다). 처음 획득만 남아 뒤에 더 높은 게이지로 다시 깨도 단위 기록은 바뀌지 않는다. 트로피와 DP 의 FLIP·DP 제약 원천은 구현하지 않았다.
 - 확인하지 못한 사실: LR2IR 의 단위 표시 방식. 운영에서 `dan-recompute` 를 실행한 적이 없다(2026-10-23 확인 시점의 마지막 `web-db` 실행은 `tables-refresh-count`).
 - 코드: `web/src/server/service/domain/dan/{dan-eligibility,dan.service}.ts`, `course-catalog/dan-of-course.ts`, `web/src/server/{route/dan,route/course,compose/dan,dto/dan}.ts`, `web/src/server/db/schema.ts`, `web/scripts/dan-recompute.ts`, `web/src/widgets/settings/{dan-panel,dan-system-card}.tsx`, `web/src/features/dan/*`.

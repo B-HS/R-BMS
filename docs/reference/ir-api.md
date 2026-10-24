@@ -58,7 +58,7 @@
 
 미등록 차트의 ranking/replays 는 404 가 아니라 **빈 배열**, best 는 **`null`** 이다.
 
-차트 순위의 쪽 받기와 줄의 `extra`(2026-10-24, 클라이언트 쪽): 클라이언트는 `chart_ranking_page(limit = 100, page)` 로 100줄씩 받고(서버가 이 메서드를 지원하지 않으면 `chart_ranking(100)` 으로 물러나며 이때 더 받을 쪽은 없다), 내 순위가 받은 구간 밖이면 그 쪽을 한 번 더 받는다. 받은 보드는 10분 뒤 만료되고 점수 제출이 받아들여지면 그 곡만 무효화되며 실패는 30초 뒤 다시 받는다. 줄의 리플레이 id 는 별도의 `chart_replays` 호출 없이 줄의 `extra.replay_id` 에서 읽는다. `extra.dans`(`[{ system, name, label }]`)는 그 줄 플레이어가 남에게 보이기로 한 단위이고 옛 서버에는 없다(없으면 빈 목록으로 읽고, 깨진 항목은 건너뛴다). 읽는 도우미는 `crates/rbms-ir/src/dto/score.rs` 의 `replay_id()`·`is_scratch_auto()`·`dans()`(`DisplayedDan`)이다. 서버 쪽 계약은 [backend/api-spec.md](../backend/api-spec.md) 4절, 결정은 [랭킹 모드 ADR](../acknowledge/2026-10-24-adr-ranking-mode.md).
+차트 순위의 쪽 받기와 줄의 `extra`(2026-10-24, 클라이언트 쪽): 클라이언트는 `chart_ranking_page(limit = 100, page)` 로 100줄씩 받고(서버가 이 메서드를 지원하지 않으면 `chart_ranking(100)` 으로 물러나며 이때 더 받을 쪽은 없다), 내 순위가 받은 구간 밖이면 그 쪽을 한 번 더 받는다. 받은 보드는 10분 뒤 만료되고 점수 제출이 받아들여지면 그 곡만 무효화되며 실패는 30초 뒤 다시 받는다. 줄의 리플레이 id 는 별도의 `chart_replays` 호출 없이 줄의 `extra.replay_id` 에서 읽는다. `extra.dans`(`[{ system, name, label }]`)는 그 줄 플레이어가 남에게 보이기로 한 단위이고 옛 서버에는 없다(없으면 빈 목록으로 읽고, 깨진 항목은 건너뛴다). 2026-10-24 부터 서버가 원소에 `assisted` 를 더하고 어시스트로 얻은 단위(A-단위)의 `label` 에 `A-` 를 붙여 보내며 체계마다 0~2개가 올 수 있다. 클라이언트는 `assisted` 를 읽지 않고(`DisplayedDan` 에 `deny_unknown_fields` 없음) `label` 을 그대로 그린다([A-단위 ADR](../acknowledge/2026-10-24-adr-assisted-dan.md)). 읽는 도우미는 `crates/rbms-ir/src/dto/score.rs` 의 `replay_id()`·`is_scratch_auto()`·`dans()`(`DisplayedDan`)이다. 서버 쪽 계약은 [backend/api-spec.md](../backend/api-spec.md) 4절, 결정은 [랭킹 모드 ADR](../acknowledge/2026-10-24-adr-ranking-mode.md).
 
 ### 비인증 제출은 player id 가 반드시 `guest` 여야 한다
 
