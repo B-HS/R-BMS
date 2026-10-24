@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { AiDataNotice } from '@features/ai/ai-data-notice'
 import { AiInterpretSection } from '@features/ai/ai-interpret-section'
 import { AiSegmentChart } from '@features/ai/ai-segment-chart'
@@ -24,6 +25,7 @@ const formatSeconds = (ms: number) => `${(ms / MS_PER_SECOND).toFixed(RATIO_DECI
 export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
     const [selectedId, setSelectedId] = useState<string | null>(null)
 
+    const t = useTranslations('ai.coach')
     const coach = useAiCoach(scoreId)
     const interpret = useInterpretAiCoach(scoreId)
 
@@ -34,14 +36,12 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
     const selectedAdvice = ai?.output.segments.find((segment) => segment.segment_id === selectedId) ?? null
 
     return (
-        <PanelCard title='리플레이 코치' contentClassName='flex flex-col gap-4'>
-            {coach.isPending && <PanelSkeleton label='판 분석 불러오는 중' />}
-            {coach.isError && (
-                <LoadErrorState title='판 분석을 불러오지 못했습니다' isRetrying={coach.isFetching} onRetry={() => void coach.refetch()} />
-            )}
+        <PanelCard title={t('title')} contentClassName='flex flex-col gap-4'>
+            {coach.isPending && <PanelSkeleton label={t('loading')} />}
+            {coach.isError && <LoadErrorState title={t('loadError')} isRetrying={coach.isFetching} onRetry={() => void coach.refetch()} />}
             {view && (
                 <>
-                    <section aria-label='판' className='flex flex-col gap-1 text-xs tabular-nums'>
+                    <section aria-label={t('playLabel')} className='flex flex-col gap-1 text-xs tabular-nums'>
                         <p className='text-sm font-medium break-keep'>{view.play.chart.title || view.play.chart.sha256}</p>
                         <p className='text-muted-foreground'>
                             <LampLabel lamp={view.play.lamp} assistGrade={view.play.assist_grade} /> · EX {formatCount(view.play.ex_score)}/
@@ -63,16 +63,25 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                                 selectedId={selectedId}
                                 onSelect={setSelectedId}
                             />
-                            <p className='text-muted-foreground text-xs'>막대는 구간별 BP, 선은 친 게이지입니다. 막대를 누르면 그 구간을 봅니다.</p>
+                            <p className='text-muted-foreground text-xs'>{t('chartHint')}</p>
                             {selected && (
-                                <section aria-label='고른 구간' className='border-border flex flex-col gap-1 border p-2 text-xs tabular-nums'>
+                                <section
+                                    aria-label={t('selectedLabel')}
+                                    className='border-border flex flex-col gap-1 border p-2 text-xs tabular-nums'>
                                     <p className='font-medium'>
                                         {selected.id} ({formatSeconds(selected.from_ms)}~{formatSeconds(selected.to_ms)})
                                     </p>
                                     <p>
-                                        BP {formatCount(selected.bp)} · 콤보 끊김 {formatCount(selected.combo_breaks)} · FAST{' '}
-                                        {formatCount(selected.fast)} / SLOW {formatCount(selected.slow)} · EX{' '}
-                                        {selected.ex_ratio === null ? MISSING : `${(selected.ex_ratio * PERCENT_SCALE).toFixed(RATIO_DECIMALS)}%`}
+                                        {t('selectedStats', {
+                                            bp: formatCount(selected.bp),
+                                            comboBreaks: formatCount(selected.combo_breaks),
+                                            fast: formatCount(selected.fast),
+                                            slow: formatCount(selected.slow),
+                                            exRatio:
+                                                selected.ex_ratio === null
+                                                    ? MISSING
+                                                    : `${(selected.ex_ratio * PERCENT_SCALE).toFixed(RATIO_DECIMALS)}%`,
+                                        })}
                                     </p>
                                     {selected.top_tags.length > 0 && (
                                         <p className='text-muted-foreground'>
@@ -88,13 +97,14 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                             )}
                             {analysis.drops.length > 0 && (
                                 <p className='text-xs tabular-nums'>
-                                    게이지 꺾임:{' '}
-                                    {analysis.drops
-                                        .map((drop) => `${formatSeconds(drop.from_ms)}~${formatSeconds(drop.to_ms)} −${drop.drop}`)
-                                        .join(' · ')}
+                                    {t('drops', {
+                                        drops: analysis.drops
+                                            .map((drop) => `${formatSeconds(drop.from_ms)}~${formatSeconds(drop.to_ms)} −${drop.drop}`)
+                                            .join(' · '),
+                                    })}
                                 </p>
                             )}
-                            <ul aria-label='다른 게이지였다면' className='text-muted-foreground flex flex-wrap gap-3 text-xs'>
+                            <ul aria-label={t('otherGaugesLabel')} className='text-muted-foreground flex flex-wrap gap-3 text-xs'>
                                 {analysis.gauge.curves.map((curve) => (
                                     <li key={curve.gauge}>
                                         {AI_GAUGE_LABEL[curve.gauge]} {AI_GAUGE_OUTCOME_LABEL[curve.outcome]}
@@ -105,7 +115,7 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                     )}
                     {view.notice && <AiDataNotice need={view.notice.need} />}
                     <AiInterpretSection
-                        label='AI 코치'
+                        label={t('aiLabel')}
                         meta={ai}
                         isPending={interpret.isPending}
                         error={interpret.error}
@@ -113,7 +123,7 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                         onInterpret={() => interpret.mutate({})}>
                         {ai && <p className='text-sm break-keep'>{ai.output.summary}</p>}
                         {ai && ai.output.segments.length > 0 && (
-                            <ul aria-label='구간 진단' className='flex flex-col gap-1 text-xs break-keep'>
+                            <ul aria-label={t('diagnosisLabel')} className='flex flex-col gap-1 text-xs break-keep'>
                                 {ai.output.segments.map((segment) => (
                                     <li key={segment.segment_id}>
                                         <button
@@ -127,7 +137,7 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                                 ))}
                             </ul>
                         )}
-                        {ai && ai.output.next_try && <p className='text-xs break-keep'>다음 판: {ai.output.next_try}</p>}
+                        {ai && ai.output.next_try && <p className='text-xs break-keep'>{t('nextTry', { text: ai.output.next_try })}</p>}
                     </AiInterpretSection>
                 </>
             )}

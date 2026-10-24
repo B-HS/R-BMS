@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { getTranslations } from 'next-intl/server'
 import { AiPrincipleNote } from '@features/ai/ai-principle-note'
 import { AiCoachPanel } from '@widgets/ai/ai-coach-panel'
 import { AiComparePanel } from '@widgets/ai/ai-compare-panel'
@@ -10,8 +11,10 @@ export const AiPlayDetailContent = async ({ params }: { params: Promise<{ scoreI
     const { scoreId } = await params
     if (!isAiScoreId(scoreId)) notFound()
 
+    const t = await getTranslations('ai.playDetail')
+
     return (
-        <ShellPage title='판 코치' description='내 판 하나를 구간별로 봅니다'>
+        <ShellPage title={t('title')} description={t('description')}>
             <AiPrincipleNote />
             <AiCoachPanel scoreId={scoreId} />
             <AiComparePanel scoreId={scoreId} />

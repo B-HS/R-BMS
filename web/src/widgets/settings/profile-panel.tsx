@@ -3,6 +3,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
@@ -15,13 +16,14 @@ import type { SessionUser } from '@entities/auth.type'
 const FIELD_CLASS = 'flex items-center justify-between gap-4 py-1'
 
 export const ProfilePanel: FC<{ user: SessionUser }> = ({ user }) => {
+    const t = useTranslations('settings.profilePanel')
     const router = useRouter()
     const logout = useSessionLogout()
 
     const handleSignOut = () =>
         logout.mutate(undefined, {
             onSuccess: () => {
-                toast.success('로그아웃했습니다.')
+                toast.success(t('signedOut'))
                 router.replace(LOGIN_PATH)
                 router.refresh()
             },
@@ -29,46 +31,46 @@ export const ProfilePanel: FC<{ user: SessionUser }> = ({ user }) => {
 
     return (
         <PanelCard
-            title='프로필'
+            title={t('title')}
             action={
                 <div className='flex items-center gap-2'>
                     {user.role === 'admin' && (
                         <>
                             <Link href='/admin/builds' className='text-muted-foreground text-xs underline'>
-                                빌드 관리
+                                {t('builds')}
                             </Link>
                             <Link href='/admin/ai' className='text-muted-foreground text-xs underline'>
-                                AI 한도
+                                {t('aiLimits')}
                             </Link>
                         </>
                     )}
                     <Button variant='ghost' size='sm' disabled={logout.isPending} onClick={handleSignOut}>
-                        로그아웃
+                        {t('signOut')}
                     </Button>
                 </div>
             }
             contentClassName='flex flex-col gap-2'>
             <dl className='flex flex-col text-xs'>
                 <div className={FIELD_CLASS}>
-                    <dt className='text-muted-foreground'>플레이어 ID</dt>
+                    <dt className='text-muted-foreground'>{t('playerId')}</dt>
                     <dd className='font-mono'>{user.login_id}</dd>
                 </div>
                 <div className={FIELD_CLASS}>
-                    <dt className='text-muted-foreground'>표시 이름</dt>
+                    <dt className='text-muted-foreground'>{t('displayName')}</dt>
                     <dd>{user.name}</dd>
                 </div>
                 <div className={FIELD_CLASS}>
-                    <dt className='text-muted-foreground'>이메일</dt>
+                    <dt className='text-muted-foreground'>{t('email')}</dt>
                     <dd>{user.email}</dd>
                 </div>
                 <div className={FIELD_CLASS}>
-                    <dt className='text-muted-foreground'>역할</dt>
+                    <dt className='text-muted-foreground'>{t('role')}</dt>
                     <dd>
                         <MetaBadge>{user.role}</MetaBadge>
                     </dd>
                 </div>
             </dl>
-            <PanelFootnote>플레이어 ID 는 R-BMS 의 PLAYER ID 값과 같습니다.</PanelFootnote>
+            <PanelFootnote>{t('footnote')}</PanelFootnote>
         </PanelCard>
     )
 }

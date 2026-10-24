@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
@@ -26,6 +27,7 @@ export const TokenPanel: FC = () => {
     const [revokeTarget, setRevokeTarget] = useState<ApiTokenRow | null>(null)
     const [issuedToken, setIssuedToken] = useState('')
 
+    const t = useTranslations('settings.tokenPanel')
     const { data, isLoading, isError, isFetching, refetch } = useApiTokenList()
     const issue = useIssueApiToken()
     const revoke = useRevokeApiToken()
@@ -40,7 +42,7 @@ export const TokenPanel: FC = () => {
                     setIssuedToken(created.token)
                     setIssueOpen(false)
                     setLabel('')
-                    toast.success('토큰을 발급했습니다. 이 화면을 벗어나면 다시 볼 수 없습니다.')
+                    toast.success(t('issued'))
                 },
             },
         )
@@ -51,18 +53,18 @@ export const TokenPanel: FC = () => {
         revoke.mutate(revokeTarget.id, {
             onSuccess: () => {
                 setRevokeTarget(null)
-                toast.success('토큰을 폐기했습니다.')
+                toast.success(t('revoked'))
             },
         })
     }
 
     const columns: DataTableColumn<ApiTokenRow>[] = [
-        { key: 'label', label: '라벨', flex: true, cell: (row) => row.label || '(이름 없음)' },
-        { key: 'id', label: '토큰 ID', width: 160, mono: true, cell: (row) => row.id },
-        { key: 'created_at', label: '발급', width: 144, align: 'right', cell: (row) => formatDateTime(row.created_at) },
+        { key: 'label', label: t('columnLabel'), flex: true, cell: (row) => row.label || t('unnamed') },
+        { key: 'id', label: t('columnId'), width: 160, mono: true, cell: (row) => row.id },
+        { key: 'created_at', label: t('columnIssuedAt'), width: 144, align: 'right', cell: (row) => formatDateTime(row.created_at) },
         {
             key: 'last_used_at',
-            label: '마지막 사용',
+            label: t('columnLastUsedAt'),
             width: 144,
             align: 'right',
             cell: (row) => (row.last_used_at ? formatDateTime(row.last_used_at) : '—'),
@@ -74,7 +76,7 @@ export const TokenPanel: FC = () => {
             align: 'right',
             cell: (row) => (
                 <Button variant='ghost' size='sm' onClick={() => setRevokeTarget(row)}>
-                    폐기
+                    {t('revoke')}
                 </Button>
             ),
         },
@@ -83,66 +85,64 @@ export const TokenPanel: FC = () => {
     return (
         <>
             <PanelCard
-                title='API 토큰'
+                title={t('title')}
                 action={
                     <Button size='sm' onClick={() => setIssueOpen(true)}>
-                        토큰 발급
+                        {t('issue')}
                     </Button>
                 }
                 contentClassName='flex flex-col gap-2'>
                 {issuedToken && (
                     <div className='border-border flex flex-col gap-2 border p-2'>
-                        <p className='text-xs font-medium'>발급된 토큰</p>
+                        <p className='text-xs font-medium'>{t('issuedTitle')}</p>
                         <code className='font-mono text-xs break-all'>{issuedToken}</code>
-                        <p className='text-warning text-xs'>이 상자를 닫으면 다시 볼 수 없습니다. 지금 복사해 두세요.</p>
+                        <p className='text-warning text-xs'>{t('issuedWarning')}</p>
                         <div className='flex gap-1'>
-                            <CopyButton value={issuedToken} label='토큰 복사' showLabel />
+                            <CopyButton value={issuedToken} label={t('copy')} showLabel />
                             <Button variant='ghost' size='sm' onClick={() => setIssuedToken('')}>
-                                닫기
+                                {t('close')}
                             </Button>
                         </div>
                     </div>
                 )}
                 {isLoading && <TableSkeleton rows={3} />}
-                {!isLoading && isError && (
-                    <LoadErrorState title='토큰 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
-                )}
+                {!isLoading && isError && <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
                 {!isLoading && !isError && rows.length === 0 && (
                     <EmptyState
-                        title='발급한 토큰이 없습니다'
-                        description='다른 도구에서 R-BMS 서버에 접속할 때 토큰이 필요합니다.'
+                        title={t('emptyTitle')}
+                        description={t('emptyDescription')}
                         action={
                             <Button variant='outline' size='sm' onClick={() => setIssueOpen(true)}>
-                                토큰 발급
+                                {t('issue')}
                             </Button>
                         }
                     />
                 )}
                 {!isLoading && !isError && rows.length > 0 && (
-                    <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption='발급한 API 토큰 목록' />
+                    <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption={t('caption')} />
                 )}
-                <PanelFootnote>목록에는 유효한 토큰만 남습니다. 평문은 발급 직후 1회만 표시되므로 분실하면 새로 발급하세요.</PanelFootnote>
+                <PanelFootnote>{t('footnote')}</PanelFootnote>
             </PanelCard>
             <FormDialog
                 open={issueOpen}
                 onOpenChange={setIssueOpen}
-                title='API 토큰 발급'
-                description='네이티브 클라이언트가 Bearer 인증에 사용할 토큰을 만듭니다.'
-                submitLabel='발급'
+                title={t('dialogTitle')}
+                description={t('dialogDescription')}
+                submitLabel={t('dialogSubmit')}
                 submitDisabled={issue.isPending}
                 onSubmit={submitIssue}>
                 <Field>
-                    <FieldLabel htmlFor='token-label'>라벨</FieldLabel>
+                    <FieldLabel htmlFor='token-label'>{t('fieldLabel')}</FieldLabel>
                     <Input id='token-label' maxLength={TOKEN_LABEL_MAX} value={label} onChange={(event) => setLabel(event.target.value)} />
-                    <FieldDescription>기기 이름처럼 나중에 구분할 수 있는 이름을 적습니다.</FieldDescription>
+                    <FieldDescription>{t('fieldDescription')}</FieldDescription>
                 </Field>
             </FormDialog>
             <ConfirmAction
                 open={revokeTarget !== null}
                 onOpenChange={(open) => !open && setRevokeTarget(null)}
-                title='토큰을 폐기할까요?'
-                description={`${revokeTarget?.label || revokeTarget?.id} 토큰으로는 더 이상 제출할 수 없습니다.`}
-                confirmLabel='폐기'
+                title={t('revokeTitle')}
+                description={t('revokeDescription', { name: revokeTarget?.label || revokeTarget?.id || '' })}
+                confirmLabel={t('revokeConfirm')}
                 confirmDisabled={revoke.isPending}
                 onConfirm={submitRevoke}
             />

@@ -2,6 +2,7 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { AiUsageMeter } from '@features/ai/ai-usage-meter'
 import { PanelCard } from '@features/shell/panel-card'
 import { Button } from '@shared/ui/button'
@@ -10,6 +11,7 @@ import { useAiCredentialList, useAiUsageSummary, useAiUserSetting } from '@entit
 import { AI_PROVIDER_LABEL, selectActiveAiCredential } from '@entities/ai.type'
 
 export const AiActiveProviderPanel: FC = () => {
+    const t = useTranslations('ai.activeProvider')
     const credentials = useAiCredentialList()
     const setting = useAiUserSetting()
     const usage = useAiUsageSummary()
@@ -18,19 +20,21 @@ export const AiActiveProviderPanel: FC = () => {
 
     return (
         <PanelCard
-            title='사용 중인 AI'
+            title={t('title')}
             action={
                 <Button asChild variant='ghost' size='sm'>
-                    <Link href={AI_SETTINGS_HREF}>AI 설정</Link>
+                    <Link href={AI_SETTINGS_HREF}>{t('settingsLink')}</Link>
                 </Button>
             }
             contentClassName='flex max-w-xl flex-col gap-3'>
             {active && (
                 <p className='text-xs'>
-                    {AI_PROVIDER_LABEL[active.provider]} · <code className='font-mono'>{active.model ?? '모델 미선택'}</code>
+                    {AI_PROVIDER_LABEL[active.provider]} · <code className='font-mono'>{active.model ?? t('modelNotSelected')}</code>
                 </p>
             )}
-            {usage.data && <AiUsageMeter label='오늘 호출' used={usage.data.today.calls} limit={usage.data.limits.daily_calls} unit='회' />}
+            {usage.data && (
+                <AiUsageMeter label={t('todayCalls')} used={usage.data.today.calls} limit={usage.data.limits.daily_calls} unit={t('callsUnit')} />
+            )}
         </PanelCard>
     )
 }

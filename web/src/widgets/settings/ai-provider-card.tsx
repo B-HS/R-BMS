@@ -1,6 +1,7 @@
 'use client'
 
 import { useId, useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { AiCredentialStatus } from '@features/ai/ai-credential-status'
 import { AiKeyForm } from '@features/ai/ai-key-form'
@@ -10,8 +11,6 @@ import { Button } from '@shared/ui/button'
 import { AiModelPicker } from '@widgets/settings/ai-model-picker'
 import { useRegisterAiCredential, useRemoveAiCredential, useRevalidateAiCredential } from '@entities/ai.query'
 import { AI_PROVIDER_LABEL, AI_PROVIDER_NOTE, type AiCredential, type AiProviderId } from '@entities/ai.type'
-
-const FORBIDDEN_HINT = '키 권한 또는 모델 접근을 확인하세요.'
 
 type AiProviderCardProps = {
     provider: AiProviderId
@@ -23,6 +22,7 @@ export const AiProviderCard: FC<AiProviderCardProps> = ({ provider, credential, 
     const [isReplacing, setIsReplacing] = useState(false)
     const [isRemoveOpen, setIsRemoveOpen] = useState(false)
 
+    const t = useTranslations('settings.providerCard')
     const headingId = useId()
     const register = useRegisterAiCredential()
     const revalidate = useRevalidateAiCredential()
@@ -37,10 +37,10 @@ export const AiProviderCard: FC<AiProviderCardProps> = ({ provider, credential, 
                 onSuccess: (saved) => {
                     setIsReplacing(false)
                     if (saved.last_error_kind === 'forbidden') {
-                        toast.warning(`${label} 키를 저장했지만 공급자가 일부 요청을 막았습니다. ${FORBIDDEN_HINT}`)
+                        toast.warning(t('savedForbidden', { provider: label }))
                         return
                     }
-                    toast.success(saved.model ? `${label} 키를 저장했습니다.` : `${label} 키를 저장했습니다. 모델을 고르면 AI 기능에 쓸 수 있습니다.`)
+                    toast.success(t(saved.model ? 'saved' : 'savedNeedsModel', { provider: label }))
                 },
                 onSettled: () => register.reset(),
             },
@@ -51,7 +51,7 @@ export const AiProviderCard: FC<AiProviderCardProps> = ({ provider, credential, 
             onSuccess: () => {
                 setIsRemoveOpen(false)
                 setIsReplacing(false)
-                toast.success(`${label} 키를 삭제했습니다.`)
+                toast.success(t('removed', { provider: label }))
             },
         })
 
@@ -61,8 +61,8 @@ export const AiProviderCard: FC<AiProviderCardProps> = ({ provider, credential, 
                 <h3 id={headingId} className='text-sm font-semibold'>
                     {label}
                 </h3>
-                <Badge variant={credential ? 'secondary' : 'outline'}>{credential ? '등록됨' : '미등록'}</Badge>
-                {isActive && <Badge>사용 중</Badge>}
+                <Badge variant={credential ? 'secondary' : 'outline'}>{credential ? t('registered') : t('unregistered')}</Badge>
+                {isActive && <Badge>{t('active')}</Badge>}
             </div>
             <p className='text-muted-foreground text-xs break-keep'>{AI_PROVIDER_NOTE[provider]}</p>
             {credential && (
@@ -71,26 +71,34 @@ export const AiProviderCard: FC<AiProviderCardProps> = ({ provider, credential, 
                     <AiModelPicker provider={provider} model={credential.model} />
                     {!isReplacing && (
                         <div className='flex flex-wrap gap-1'>
-                            <Button variant='outline' size='sm' aria-label={`${label} 키 교체`} onClick={() => setIsReplacing(true)}>
-                                키 교체
+                            <Button
+                                variant='outline'
+                                size='sm'
+                                aria-label={t('replaceLabel', { provider: label })}
+                                onClick={() => setIsReplacing(true)}>
+                                {t('replace')}
                             </Button>
                             <Button
                                 variant='outline'
                                 size='sm'
                                 disabled={revalidate.isPending}
-                                aria-label={`${label} 키 다시 검증`}
+                                aria-label={t('revalidateLabel', { provider: label })}
                                 onClick={() =>
                                     revalidate.mutate(provider, {
                                         onSuccess: (checked) =>
                                             checked.last_error_kind === 'forbidden'
-                                                ? toast.warning(`${label} 키는 유효하지만 공급자가 일부 요청을 막았습니다. ${FORBIDDEN_HINT}`)
-                                                : toast.success(`${label} 키가 유효합니다.`),
+                                                ? toast.warning(t('validForbidden', { provider: label }))
+                                                : toast.success(t('valid', { provider: label })),
                                     })
                                 }>
-                                다시 검증
+                                {t('revalidate')}
                             </Button>
-                            <Button variant='ghost' size='sm' aria-label={`${label} 키 삭제`} onClick={() => setIsRemoveOpen(true)}>
-                                삭제
+                            <Button
+                                variant='ghost'
+                                size='sm'
+                                aria-label={t('removeLabel', { provider: label })}
+                                onClick={() => setIsRemoveOpen(true)}>
+                                {t('remove')}
                             </Button>
                         </div>
                     )}
@@ -99,8 +107,8 @@ export const AiProviderCard: FC<AiProviderCardProps> = ({ provider, credential, 
             {(!credential || isReplacing) && (
                 <AiKeyForm
                     inputId={`${headingId}-api-key`}
-                    label={credential ? `새 ${label} API 키` : `${label} API 키`}
-                    submitLabel={credential ? '교체' : '등록'}
+                    label={t(credential ? 'newKeyLabel' : 'keyLabel', { provider: label })}
+                    submitLabel={credential ? t('submitReplace') : t('submitRegister')}
                     isPending={register.isPending}
                     onSubmitKey={handleSubmitKey}
                     onCancel={credential ? () => setIsReplacing(false) : undefined}
@@ -109,9 +117,9 @@ export const AiProviderCard: FC<AiProviderCardProps> = ({ provider, credential, 
             <ConfirmAction
                 open={isRemoveOpen}
                 onOpenChange={setIsRemoveOpen}
-                title={`${label} 키를 삭제할까요?`}
-                description='서버에 저장된 암호화된 키를 지우며 되살릴 수 없습니다. 공급자 콘솔의 키는 그대로이므로 필요하면 콘솔에서 직접 취소하세요.'
-                confirmLabel='삭제'
+                title={t('removeTitle', { provider: label })}
+                description={t('removeDescription')}
+                confirmLabel={t('removeConfirm')}
                 confirmDisabled={remove.isPending}
                 onConfirm={handleRemove}
             />

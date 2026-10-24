@@ -2,6 +2,7 @@
 
 import { useState, type FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
@@ -18,6 +19,7 @@ import type { PlayerProfile } from '@entities/player.type'
 export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
     const [draft, setDraft] = useState('')
 
+    const t = useTranslations('settings.rivalPanel')
     const { data, isLoading, isError, isFetching, refetch } = useRivalList(playerId)
     const save = useSaveRivals(playerId)
 
@@ -29,7 +31,7 @@ export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
                 setDraft('')
                 const missing = nextIds.filter((id) => !saved.some((rival) => rival.id === id))
                 if (missing.length > 0) {
-                    toast.warning(`해당 플레이어를 찾을 수 없습니다: ${missing.join(', ')}`)
+                    toast.warning(t('notFound', { ids: missing.join(', ') }))
                     return
                 }
                 toast.success(message)
@@ -40,16 +42,16 @@ export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
     const addRival = () => {
         const nextId = draft.trim()
         if (rows.some((rival) => rival.id === nextId)) {
-            toast.warning('이미 등록된 라이벌입니다.')
+            toast.warning(t('duplicate'))
             return
         }
-        commit([...rows.map((rival) => rival.id), nextId], '라이벌을 추가했습니다.')
+        commit([...rows.map((rival) => rival.id), nextId], t('added'))
     }
 
     const columns: DataTableColumn<PlayerProfile>[] = [
         {
             key: 'name',
-            label: '플레이어',
+            label: t('columnPlayer'),
             flex: true,
             cell: (row) => (
                 <Link href={`/players/${row.id}`} className='hover:underline'>
@@ -58,7 +60,7 @@ export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
             ),
         },
         { key: 'id', label: 'ID', width: 128, mono: true, cell: (row) => row.id },
-        { key: 'total_plays', label: '플레이', width: 96, align: 'right', cell: (row) => formatCount(row.total_plays) },
+        { key: 'total_plays', label: t('columnPlays'), width: 96, align: 'right', cell: (row) => formatCount(row.total_plays) },
         {
             key: 'action',
             label: '',
@@ -72,35 +74,33 @@ export const RivalPanel: FC<{ playerId: string }> = ({ playerId }) => {
                     onClick={() =>
                         commit(
                             rows.filter((rival) => rival.id !== row.id).map((rival) => rival.id),
-                            '라이벌을 삭제했습니다.',
+                            t('removed'),
                         )
                     }>
-                    삭제
+                    {t('remove')}
                 </Button>
             ),
         },
     ]
 
     return (
-        <PanelCard title='라이벌' contentClassName='flex flex-col gap-2'>
+        <PanelCard title={t('title')} contentClassName='flex flex-col gap-2'>
             <div className='flex items-center gap-2'>
                 <Input
-                    aria-label='추가할 라이벌 플레이어 ID'
-                    placeholder='플레이어 ID'
+                    aria-label={t('inputLabel')}
+                    placeholder={t('inputPlaceholder')}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                 />
                 <Button size='sm' disabled={draft.trim() === '' || save.isPending} onClick={addRival}>
-                    추가
+                    {t('add')}
                 </Button>
             </div>
             {isLoading && <TableSkeleton rows={3} />}
-            {!isLoading && isError && (
-                <LoadErrorState title='라이벌 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
-            )}
-            {!isLoading && !isError && rows.length === 0 && <EmptyState title='등록한 라이벌이 없습니다' />}
-            {!isLoading && !isError && rows.length > 0 && <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption='라이벌 목록' />}
-            <PanelFootnote>라이벌은 클라이언트 랭킹 조회에서 `rival_of` 필터로 쓰입니다.</PanelFootnote>
+            {!isLoading && isError && <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
+            {!isLoading && !isError && rows.length === 0 && <EmptyState title={t('emptyTitle')} />}
+            {!isLoading && !isError && rows.length > 0 && <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption={t('caption')} />}
+            <PanelFootnote>{t('footnote')}</PanelFootnote>
         </PanelCard>
     )
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { AiLimitNumberField } from '@features/ai/ai-limit-number-field'
 import { parseLimitInput } from '@features/ai/parse-limit-input'
@@ -22,6 +23,7 @@ export const AiUserSettingForm: FC<AiUserSettingFormProps> = ({ setting, credent
     const [providerDraft, setProviderDraft] = useState<string | null>(null)
     const [limitDraft, setLimitDraft] = useState<string | null>(null)
 
+    const t = useTranslations('settings.userSettingForm')
     const save = useSaveAiUserSetting()
 
     const savedProvider = credentials.find((credential) => credential.provider === setting.default_provider)?.provider ?? AUTO_PROVIDER
@@ -40,7 +42,7 @@ export const AiUserSettingForm: FC<AiUserSettingFormProps> = ({ setting, credent
                 onSuccess: () => {
                     setProviderDraft(null)
                     setLimitDraft(null)
-                    toast.success('AI 설정을 저장했습니다.')
+                    toast.success(t('saved'))
                 },
             },
         )
@@ -54,13 +56,13 @@ export const AiUserSettingForm: FC<AiUserSettingFormProps> = ({ setting, credent
                 handleSubmit()
             }}>
             <Field>
-                <FieldLabel htmlFor='ai-default-provider'>기본 공급자</FieldLabel>
+                <FieldLabel htmlFor='ai-default-provider'>{t('providerLabel')}</FieldLabel>
                 <Select value={selectedProvider} onValueChange={setProviderDraft}>
                     <SelectTrigger id='ai-default-provider' size='sm' className='w-64 max-w-full'>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value={AUTO_PROVIDER}>자동 (가장 먼저 등록한 키)</SelectItem>
+                        <SelectItem value={AUTO_PROVIDER}>{t('providerAuto')}</SelectItem>
                         {credentials.map((credential) => (
                             <SelectItem key={credential.provider} value={credential.provider}>
                                 {AI_PROVIDER_LABEL[credential.provider]}
@@ -68,20 +70,20 @@ export const AiUserSettingForm: FC<AiUserSettingFormProps> = ({ setting, credent
                         ))}
                     </SelectContent>
                 </Select>
-                <FieldDescription>AI 기능은 이 공급자의 키와 모델로 호출합니다. 등록한 키 중에서만 고를 수 있습니다.</FieldDescription>
+                <FieldDescription>{t('providerDescription')}</FieldDescription>
             </Field>
             <AiLimitNumberField
                 id='ai-monthly-token-limit'
-                label='월 토큰 상한'
+                label={t('limitLabel')}
                 value={limitText}
                 onValueChange={setLimitDraft}
-                placeholder='비워 두면 운영자 기본값'
-                description='입력 토큰과 출력 토큰의 합입니다. 비워 두면 운영자 기본값을 따르고, 값을 넣으면 그 값이 먼저 적용됩니다.'
-                error={hasLimitError ? `1 이상 ${formatCount(AI_FORM_LIMIT.MONTHLY_TOKEN_LIMIT_MAX)} 이하의 정수를 입력하세요.` : undefined}
+                placeholder={t('limitPlaceholder')}
+                description={t('limitDescription')}
+                error={hasLimitError ? t('limitError', { max: formatCount(AI_FORM_LIMIT.MONTHLY_TOKEN_LIMIT_MAX) }) : undefined}
             />
             <div>
                 <Button type='submit' size='sm' disabled={!isDirty || hasLimitError || save.isPending}>
-                    저장
+                    {t('save')}
                 </Button>
             </div>
         </form>

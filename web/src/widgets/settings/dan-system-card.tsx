@@ -2,6 +2,7 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { DanBadge } from '@features/dan/dan-badge'
 import { PanelCard } from '@features/shell/panel-card'
@@ -15,22 +16,6 @@ import type { AcquiredDan, DanDisplay, DanDisplayRequest, DanSystem } from '@ent
 const DISPLAY_AUTO = 'auto'
 const DISPLAY_HIDDEN = 'hidden'
 const DISPLAY_LABEL_PREFIX = 'label:'
-
-const ACQUIRED_COLUMNS: DataTableColumn<AcquiredDan>[] = [
-    { key: 'label', label: '단위', width: 96, cell: (row) => row.label },
-    {
-        key: 'course',
-        label: '코스',
-        flex: true,
-        cell: (row) => (
-            <Link href={`/courses/${encodeURIComponent(row.course_hash)}`} className='hover:underline'>
-                {row.course_name}
-            </Link>
-        ),
-    },
-    { key: 'course_gauge', label: '게이지', width: 112, hideBelow: 'sm', cell: (row) => row.course_gauge },
-    { key: 'acquired_at', label: '받은 날', width: 144, align: 'right', cell: (row) => formatDateTime(row.acquired_at) },
-]
 
 const selectValueOf = (display: DanDisplay) => {
     if (display.mode !== 'label') return display.mode
@@ -48,22 +33,39 @@ type DanSystemCardProps = {
 }
 
 export const DanSystemCard: FC<DanSystemCardProps> = ({ system, playerId }) => {
+    const t = useTranslations('settings.danSystemCard')
     const setDisplay = useSetDanDisplay(playerId)
 
     const handleValueChange = (value: string) =>
-        setDisplay.mutate(toDisplayRequest(system.system, value), { onSuccess: () => toast.success('표시할 단위를 바꿨습니다') })
+        setDisplay.mutate(toDisplayRequest(system.system, value), { onSuccess: () => toast.success(t('changed')) })
+
+    const acquiredColumns: DataTableColumn<AcquiredDan>[] = [
+        { key: 'label', label: t('columnDan'), width: 96, cell: (row) => row.label },
+        {
+            key: 'course',
+            label: t('columnCourse'),
+            flex: true,
+            cell: (row) => (
+                <Link href={`/courses/${encodeURIComponent(row.course_hash)}`} className='hover:underline'>
+                    {row.course_name}
+                </Link>
+            ),
+        },
+        { key: 'course_gauge', label: t('columnGauge'), width: 112, hideBelow: 'sm', cell: (row) => row.course_gauge },
+        { key: 'acquired_at', label: t('columnAcquiredAt'), width: 144, align: 'right', cell: (row) => formatDateTime(row.acquired_at) },
+    ]
 
     return (
         <PanelCard
             title={system.name}
             action={
                 <Select value={selectValueOf(system.display)} onValueChange={handleValueChange} disabled={setDisplay.isPending}>
-                    <SelectTrigger size='sm' aria-label={`${system.name} 표시 단위`} className='w-52 max-w-full'>
+                    <SelectTrigger size='sm' aria-label={t('displayLabel', { system: system.name })} className='w-52 max-w-full'>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value={DISPLAY_AUTO}>자동 (가장 높은 단위)</SelectItem>
-                        <SelectItem value={DISPLAY_HIDDEN}>숨김</SelectItem>
+                        <SelectItem value={DISPLAY_AUTO}>{t('displayAuto')}</SelectItem>
+                        <SelectItem value={DISPLAY_HIDDEN}>{t('displayHidden')}</SelectItem>
                         {system.acquired.map((acquired) => (
                             <SelectItem key={acquired.label} value={`${DISPLAY_LABEL_PREFIX}${acquired.label}`}>
                                 {acquired.label}
@@ -74,17 +76,22 @@ export const DanSystemCard: FC<DanSystemCardProps> = ({ system, playerId }) => {
             }
             contentClassName='flex flex-col gap-2'>
             <p className='flex flex-wrap items-center gap-1.5 text-xs'>
-                다른 플레이어에게 보이는 단위
+                {t('shownToOthers')}
                 {system.shown === null ? (
-                    <span className='text-muted-foreground'>없음</span>
+                    <span className='text-muted-foreground'>{t('shownNone')}</span>
                 ) : (
                     <DanBadge dan={{ system: system.system, name: system.name, label: system.shown }} />
                 )}
             </p>
             {system.acquired.length === 0 ? (
-                <PanelFootnote>획득한 단위가 없습니다.</PanelFootnote>
+                <PanelFootnote>{t('noneAcquired')}</PanelFootnote>
             ) : (
-                <DataTable columns={ACQUIRED_COLUMNS} rows={system.acquired} rowKey={(row) => row.label} caption={`${system.name} 획득 단위`} />
+                <DataTable
+                    columns={acquiredColumns}
+                    rows={system.acquired}
+                    rowKey={(row) => row.label}
+                    caption={t('caption', { system: system.name })}
+                />
             )}
         </PanelCard>
     )

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
@@ -16,16 +17,17 @@ import type { SettingBlobKey } from '@entities/setting.type'
 export const SyncBlobPanel: FC<{ playerId: string }> = ({ playerId }) => {
     const [selectedKey, setSelectedKey] = useState('')
 
+    const t = useTranslations('settings.syncBlobPanel')
     const { data, isLoading, isError, isFetching, refetch } = useSettingKeyList()
     const blob = useSettingBlob(playerId, selectedKey)
 
     const rows = data ?? []
 
     const columns: DataTableColumn<SettingBlobKey>[] = [
-        { key: 'key', label: '키', flex: true, mono: true, cell: (row) => row.key },
-        { key: 'format', label: '포맷', width: 80, cell: (row) => row.format },
-        { key: 'size', label: '크기', width: 96, align: 'right', cell: (row) => formatCount(row.size) },
-        { key: 'updated_at', label: '갱신', width: 144, align: 'right', cell: (row) => formatDateTime(row.updated_at) },
+        { key: 'key', label: t('columnKey'), flex: true, mono: true, cell: (row) => row.key },
+        { key: 'format', label: t('columnFormat'), width: 80, cell: (row) => row.format },
+        { key: 'size', label: t('columnSize'), width: 96, align: 'right', cell: (row) => formatCount(row.size) },
+        { key: 'updated_at', label: t('columnUpdatedAt'), width: 144, align: 'right', cell: (row) => formatDateTime(row.updated_at) },
         {
             key: 'action',
             label: '',
@@ -33,7 +35,7 @@ export const SyncBlobPanel: FC<{ playerId: string }> = ({ playerId }) => {
             align: 'right',
             cell: (row) => (
                 <Button variant='ghost' size='sm' onClick={() => setSelectedKey(row.key)}>
-                    보기
+                    {t('view')}
                 </Button>
             ),
         },
@@ -41,22 +43,18 @@ export const SyncBlobPanel: FC<{ playerId: string }> = ({ playerId }) => {
 
     return (
         <>
-            <PanelCard title='동기화 blob' contentClassName='flex flex-col gap-2'>
+            <PanelCard title={t('title')} contentClassName='flex flex-col gap-2'>
                 {isLoading && <TableSkeleton rows={3} />}
-                {!isLoading && isError && (
-                    <LoadErrorState title='설정 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
-                )}
-                {!isLoading && !isError && rows.length === 0 && (
-                    <EmptyState title='동기화된 설정이 없습니다' description='클라이언트에서 설정을 업로드하면 여기에 표시됩니다.' />
-                )}
+                {!isLoading && isError && <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
+                {!isLoading && !isError && rows.length === 0 && <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />}
                 {!isLoading && !isError && rows.length > 0 && (
-                    <DataTable columns={columns} rows={rows} rowKey={(row) => row.key} caption='동기화된 설정 blob 목록' />
+                    <DataTable columns={columns} rows={rows} rowKey={(row) => row.key} caption={t('caption')} />
                 )}
-                <PanelFootnote>웹에서는 읽기 전용입니다. 수정은 클라이언트가 PUT 으로 반영합니다.</PanelFootnote>
+                <PanelFootnote>{t('footnote')}</PanelFootnote>
             </PanelCard>
             {selectedKey && (
                 <PanelCard
-                    title={`${selectedKey} 내용`}
+                    title={t('contentTitle', { key: selectedKey })}
                     action={
                         <div className='flex items-center gap-2'>
                             {blob.data && (
@@ -64,18 +62,18 @@ export const SyncBlobPanel: FC<{ playerId: string }> = ({ playerId }) => {
                                     className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))}
                                     download={`${selectedKey}.${blob.data.format}`}
                                     href={`data:text/plain;charset=utf-8,${encodeURIComponent(blob.data.content)}`}>
-                                    다운로드
+                                    {t('download')}
                                 </a>
                             )}
                             <Button variant='ghost' size='sm' onClick={() => setSelectedKey('')}>
-                                닫기
+                                {t('close')}
                             </Button>
                         </div>
                     }
                     contentClassName='flex flex-col gap-2'>
                     {blob.isLoading && <TableSkeleton rows={5} />}
                     {!blob.isLoading && blob.isError && (
-                        <LoadErrorState title='설정 내용을 불러오지 못했습니다' isRetrying={blob.isFetching} onRetry={() => void blob.refetch()} />
+                        <LoadErrorState title={t('contentLoadError')} isRetrying={blob.isFetching} onRetry={() => void blob.refetch()} />
                     )}
                     {!blob.isLoading && !blob.isError && blob.data && (
                         <pre className='bg-muted max-h-96 overflow-auto p-2 font-mono text-xs whitespace-pre'>{blob.data.content}</pre>

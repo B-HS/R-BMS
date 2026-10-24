@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { AiDataNotice } from '@features/ai/ai-data-notice'
 import { AiInsightList } from '@features/ai/ai-insight-list'
 import { AiInterpretSection } from '@features/ai/ai-interpret-section'
@@ -16,97 +17,101 @@ import { AI_EVIDENCE_LABEL, AI_GREEN_DIRECTION_LABEL, AI_OFFSET_DIRECTION_LABEL 
 const MISSING = '—'
 const GRADE_LABEL = { great: 'GREAT', good: 'GOOD', bad: 'BAD' } as const
 
-const ESTIMATE_LABEL = '추정'
-
-const formatGreen = (value: { green: number; lane_ms: number; is_estimated?: boolean } | null) =>
-    value ? `GREEN ${value.green} (${value.lane_ms} ms)${value.is_estimated ? ` ${ESTIMATE_LABEL}` : ''}` : MISSING
+const formatSigned = (value: number) => `${value > 0 ? '+' : ''}${value}`
 
 export const AiJudgeHabitPanel: FC = () => {
+    const t = useTranslations('ai.judgeHabit')
     const habit = useAiJudgeHabit()
     const interpret = useInterpretAiJudgeHabit()
 
     const view = habit.data
     const ai = interpret.data ?? view?.ai ?? null
 
+    const formatGreen = (value: { green: number; lane_ms: number; is_estimated?: boolean } | null) =>
+        value ? t(value.is_estimated ? 'greenEstimated' : 'green', { green: value.green, laneMs: value.lane_ms }) : MISSING
+
     return (
-        <PanelCard title='판정 습관 진단' contentClassName='flex flex-col gap-4'>
-            {habit.isPending && <PanelSkeleton label='판정 기록 계산 중' />}
-            {habit.isError && (
-                <LoadErrorState title='판정 기록을 불러오지 못했습니다' isRetrying={habit.isFetching} onRetry={() => void habit.refetch()} />
-            )}
+        <PanelCard title={t('title')} contentClassName='flex flex-col gap-4'>
+            {habit.isPending && <PanelSkeleton label={t('loading')} />}
+            {habit.isError && <LoadErrorState title={t('loadError')} isRetrying={habit.isFetching} onRetry={() => void habit.refetch()} />}
             {view && (
                 <>
-                    <p className='text-muted-foreground text-xs'>
-                        최근 {formatCount(view.plays)}판의 점수 기록과, 그중 판별 데이터가 있는 {formatCount(view.trace_timing.plays)}판의 노트 단위
-                        기록으로 계산했습니다.
-                    </p>
+                    <p className='text-muted-foreground text-xs'>{t('intro', { plays: view.plays, tracePlays: view.trace_timing.plays })}</p>
                     <section aria-label='FAST·SLOW' className='flex flex-col gap-1 text-xs tabular-nums'>
                         <p className='text-sm'>
-                            FAST {formatCount(view.fast_slow.fast)} · SLOW {formatCount(view.fast_slow.slow)} · FAST 비율{' '}
-                            {view.fast_slow.fast_share === null ? MISSING : `${Math.round(view.fast_slow.fast_share * PERCENT_SCALE)}%`}{' '}
+                            {t('fastShare', {
+                                fast: formatCount(view.fast_slow.fast),
+                                slow: formatCount(view.fast_slow.slow),
+                                share: view.fast_slow.fast_share === null ? MISSING : `${Math.round(view.fast_slow.fast_share * PERCENT_SCALE)}%`,
+                            })}{' '}
                             <Badge variant='outline'>{AI_EVIDENCE_LABEL[view.fast_slow.grade]}</Badge>
                         </p>
                         <ul className='text-muted-foreground flex flex-wrap gap-3'>
                             {view.fast_slow.by_grade.map((row) => (
-                                <li key={row.grade}>
-                                    {GRADE_LABEL[row.grade]} 빠름 {formatCount(row.early)} / 늦음 {formatCount(row.late)}
-                                </li>
+                                <li key={row.grade}>{t('gradeRow', { grade: GRADE_LABEL[row.grade], early: row.early, late: row.late })}</li>
                             ))}
                         </ul>
                     </section>
-                    <section aria-label='판정 오프셋' className='flex flex-col gap-1 text-xs tabular-nums'>
+                    <section aria-label={t('offsetLabel')} className='flex flex-col gap-1 text-xs tabular-nums'>
                         <p className='text-sm'>
-                            평균 치우침 {view.offset.mean_offset_ms === null ? MISSING : `${view.offset.mean_offset_ms} ms`}(양수 = 빠름) ·{' '}
+                            {t('meanOffset', { mean: view.offset.mean_offset_ms === null ? MISSING : `${view.offset.mean_offset_ms} ms` })} ·{' '}
                             <Badge variant='outline'>{AI_EVIDENCE_LABEL[view.offset.grade]}</Badge>
                         </p>
                         <p>
-                            제안: {AI_OFFSET_DIRECTION_LABEL[view.offset.direction]}
-                            {view.offset.suggested_shift_ms !== null &&
-                                ` (JUDGE OFFSET ${view.offset.suggested_shift_ms > 0 ? '+' : ''}${view.offset.suggested_shift_ms} ms)`}
-                            . JUDGE OFFSET 은 노트가 보이는 위치를 옮기고 판정은 옮기지 않습니다.
+                            {view.offset.suggested_shift_ms === null
+                                ? t('offsetSuggestion', { direction: AI_OFFSET_DIRECTION_LABEL[view.offset.direction] })
+                                : t('offsetSuggestionShifted', {
+                                      direction: AI_OFFSET_DIRECTION_LABEL[view.offset.direction],
+                                      shift: formatSigned(view.offset.suggested_shift_ms),
+                                  })}
                         </p>
                         <p className='text-muted-foreground'>
-                            규칙 세대 4 이상 판 {formatCount(view.offset.plays)}판 · AUTO ADJUST 판 {formatCount(view.offset.auto_adjust_plays)}판은
-                            따로 둡니다.
+                            {t('offsetCounts', { plays: view.offset.plays, autoAdjustPlays: view.offset.auto_adjust_plays })}
                         </p>
                     </section>
-                    <section aria-label='노트 단위 오차' className='flex flex-col gap-1 text-xs tabular-nums'>
+                    <section aria-label={t('traceLabel')} className='flex flex-col gap-1 text-xs tabular-nums'>
                         <p className='text-sm'>
-                            노트 단위 평균 오차 {view.trace_timing.mean_ms === null ? MISSING : `${view.trace_timing.mean_ms} ms`}
-                            {view.trace_timing.ci_low_ms !== null &&
-                                view.trace_timing.ci_high_ms !== null &&
-                                ` (95% 구간 ${view.trace_timing.ci_low_ms} ~ ${view.trace_timing.ci_high_ms} ms)`}{' '}
+                            {view.trace_timing.ci_low_ms !== null && view.trace_timing.ci_high_ms !== null
+                                ? t('traceMeanInterval', {
+                                      mean: view.trace_timing.mean_ms === null ? MISSING : `${view.trace_timing.mean_ms} ms`,
+                                      low: view.trace_timing.ci_low_ms,
+                                      high: view.trace_timing.ci_high_ms,
+                                  })
+                                : t('traceMean', { mean: view.trace_timing.mean_ms === null ? MISSING : `${view.trace_timing.mean_ms} ms` })}{' '}
                             <Badge variant='outline'>{AI_EVIDENCE_LABEL[view.trace_timing.grade]}</Badge>
                         </p>
                         {view.trace_timing.lanes.length > 0 && (
-                            <ul aria-label='레인별 치우침' className='text-muted-foreground flex flex-wrap gap-3'>
+                            <ul aria-label={t('lanesLabel')} className='text-muted-foreground flex flex-wrap gap-3'>
                                 {view.trace_timing.lanes.map((lane) => (
                                     <li key={lane.key}>
-                                        {lane.lane} 레인 {lane.mean_ms} ms (전체보다 {lane.deviation_ms > 0 ? '+' : ''}
-                                        {lane.deviation_ms} ms)
+                                        {t('laneRow', { lane: lane.lane, mean: lane.mean_ms, deviation: formatSigned(lane.deviation_ms) })}
                                     </li>
                                 ))}
                             </ul>
                         )}
-                        <p className='text-muted-foreground'>
-                            {view.offset.source === 'trace' ? '오프셋 제안은 노트 단위 기록을 따릅니다.' : '오프셋 제안은 점수 기록을 따릅니다.'}
-                        </p>
+                        <p className='text-muted-foreground'>{t(view.offset.source === 'trace' ? 'offsetFromTrace' : 'offsetFromScores')}</p>
                     </section>
-                    <section aria-label='평균 판정 거리' className='text-xs tabular-nums'>
-                        평균 판정 거리(avgjudge): 앞쪽 {view.avgjudge.older_ms ?? MISSING} ms → 최근 {view.avgjudge.newer_ms ?? MISSING} ms{' '}
+                    <section aria-label={t('avgjudgeLabel')} className='text-xs tabular-nums'>
+                        {t('avgjudge', { older: view.avgjudge.older_ms ?? MISSING, newer: view.avgjudge.newer_ms ?? MISSING })}{' '}
                         <Badge variant='outline'>{AI_EVIDENCE_LABEL[view.avgjudge.grade]}</Badge>
                     </section>
-                    <section aria-label='녹색 숫자' className='flex flex-col gap-1 text-xs tabular-nums'>
+                    <section aria-label={t('greenLabel')} className='flex flex-col gap-1 text-xs tabular-nums'>
                         <p>
-                            최근 {formatGreen(view.green.latest)} · 가운데값 {formatGreen(view.green.median)} · CONSTANT 판{' '}
-                            {formatCount(view.green.constant_plays)}판
+                            {t('greenSummary', {
+                                latest: formatGreen(view.green.latest),
+                                median: formatGreen(view.green.median),
+                                constantPlays: view.green.constant_plays,
+                            })}
                         </p>
                         {view.green.buckets.length > 0 && (
-                            <ul aria-label='녹색 숫자 칸' className='text-muted-foreground flex flex-wrap gap-3'>
+                            <ul aria-label={t('bucketsLabel')} className='text-muted-foreground flex flex-wrap gap-3'>
                                 {view.green.buckets.map((bucket) => (
                                     <li key={bucket.key}>
-                                        {formatGreen(bucket.from)}~: {formatCount(bucket.plays)}판, FAST{' '}
-                                        {bucket.fast_share === null ? MISSING : `${Math.round(bucket.fast_share * PERCENT_SCALE)}%`}
+                                        {t('bucketRow', {
+                                            from: formatGreen(bucket.from),
+                                            plays: bucket.plays,
+                                            share: bucket.fast_share === null ? MISSING : `${Math.round(bucket.fast_share * PERCENT_SCALE)}%`,
+                                        })}
                                     </li>
                                 ))}
                             </ul>
@@ -114,7 +119,7 @@ export const AiJudgeHabitPanel: FC = () => {
                     </section>
                     {view.notice && <AiDataNotice need={view.notice.need} />}
                     <AiInterpretSection
-                        label='AI 판정 습관 해석'
+                        label={t('aiLabel')}
                         meta={ai}
                         isPending={interpret.isPending}
                         error={interpret.error}
@@ -123,15 +128,21 @@ export const AiJudgeHabitPanel: FC = () => {
                         {ai && <p className='text-sm break-keep'>{ai.output.summary}</p>}
                         {ai && (
                             <p className='text-xs break-keep'>
-                                오프셋({AI_OFFSET_DIRECTION_LABEL[ai.output.offset_direction]}): {ai.output.offset_reasoning}
+                                {t('aiOffset', {
+                                    direction: AI_OFFSET_DIRECTION_LABEL[ai.output.offset_direction],
+                                    reasoning: ai.output.offset_reasoning,
+                                })}
                             </p>
                         )}
                         {ai && (
                             <p className='text-xs break-keep'>
-                                녹색 숫자({AI_GREEN_DIRECTION_LABEL[ai.output.green_direction]}): {ai.output.green_reasoning}
+                                {t('aiGreen', {
+                                    direction: AI_GREEN_DIRECTION_LABEL[ai.output.green_direction],
+                                    reasoning: ai.output.green_reasoning,
+                                })}
                             </p>
                         )}
-                        {ai && ai.output.notes.length > 0 && <AiInsightList label='판정 메모' insights={ai.output.notes} />}
+                        {ai && ai.output.notes.length > 0 && <AiInsightList label={t('notesLabel')} insights={ai.output.notes} />}
                     </AiInterpretSection>
                 </>
             )}

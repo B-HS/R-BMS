@@ -2,6 +2,7 @@
 
 import type { FC } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@shared/ui/tabs'
 import { AI_SETTINGS_TAB, DAN_SETTINGS_TAB, SETTINGS_TAB_PARAM } from '@shared/constants/navigation'
 import { AiCredentialPanel } from '@widgets/settings/ai-credential-panel'
@@ -19,18 +20,19 @@ const DEFAULT_TAB = 'profile'
 const SETTINGS_TABS = [DEFAULT_TAB, 'tokens', 'sync', 'rivals', DAN_SETTINGS_TAB, AI_SETTINGS_TAB]
 
 export const SettingsTabs: FC<{ user: SessionUser }> = ({ user }) => {
+    const t = useTranslations('settings.settingsTabs')
     const requestedTab = useSearchParams().get(SETTINGS_TAB_PARAM)
 
     return (
         <Tabs defaultValue={SETTINGS_TABS.find((tab) => tab === requestedTab) ?? DEFAULT_TAB} className='flex flex-col gap-px'>
             <div className='border-border bg-card overflow-x-auto border-b px-3 py-2'>
                 <TabsList>
-                    <TabsTrigger value='profile'>프로필</TabsTrigger>
-                    <TabsTrigger value='tokens'>API 토큰</TabsTrigger>
-                    <TabsTrigger value='sync'>동기화 blob</TabsTrigger>
-                    <TabsTrigger value='rivals'>라이벌</TabsTrigger>
-                    <TabsTrigger value={DAN_SETTINGS_TAB}>단위</TabsTrigger>
-                    <TabsTrigger value={AI_SETTINGS_TAB}>AI 키</TabsTrigger>
+                    <TabsTrigger value='profile'>{t('profile')}</TabsTrigger>
+                    <TabsTrigger value='tokens'>{t('tokens')}</TabsTrigger>
+                    <TabsTrigger value='sync'>{t('sync')}</TabsTrigger>
+                    <TabsTrigger value='rivals'>{t('rivals')}</TabsTrigger>
+                    <TabsTrigger value={DAN_SETTINGS_TAB}>{t('dan')}</TabsTrigger>
+                    <TabsTrigger value={AI_SETTINGS_TAB}>{t('ai')}</TabsTrigger>
                 </TabsList>
             </div>
             <TabsContent value='profile' className={TAB_CONTENT_CLASS}>

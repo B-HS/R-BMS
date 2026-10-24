@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { AiChartCandidateList } from '@features/ai/ai-chart-candidate-list'
 import { AiDataNotice } from '@features/ai/ai-data-notice'
 import { AiInterpretSection } from '@features/ai/ai-interpret-section'
@@ -12,6 +13,7 @@ import { useAiGoalPlan, useCreateAiPracticeFolder, useInterpretAiGoalPlan } from
 type AiGoalPlanSectionProps = { goalId: string; symbol: string }
 
 export const AiGoalPlanSection: FC<AiGoalPlanSectionProps> = ({ goalId, symbol }) => {
+    const t = useTranslations('ai.goalPlan')
     const plan = useAiGoalPlan(goalId)
     const interpret = useInterpretAiGoalPlan()
     const createFolder = useCreateAiPracticeFolder()
@@ -22,16 +24,14 @@ export const AiGoalPlanSection: FC<AiGoalPlanSectionProps> = ({ goalId, symbol }
 
     return (
         <div className='flex flex-col gap-3 pt-2'>
-            {plan.isPending && <PanelSkeleton label='목표 계획 불러오는 중' />}
-            {plan.isError && (
-                <LoadErrorState title='목표 계획을 불러오지 못했습니다' isRetrying={plan.isFetching} onRetry={() => void plan.refetch()} />
-            )}
+            {plan.isPending && <PanelSkeleton label={t('loading')} />}
+            {plan.isError && <LoadErrorState title={t('loadError')} isRetrying={plan.isFetching} onRetry={() => void plan.refetch()} />}
             {view && (
                 <>
                     {view.notice && <AiDataNotice need={view.notice.need} />}
-                    {view.remaining.length > 0 && <AiChartCandidateList label='남은 곡(가까운 순)' symbol={symbol} candidates={view.remaining} />}
+                    {view.remaining.length > 0 && <AiChartCandidateList label={t('remainingLabel')} symbol={symbol} candidates={view.remaining} />}
                     <AiInterpretSection
-                        label='AI 목표 계획'
+                        label={t('aiLabel')}
                         meta={ai}
                         isPending={interpret.isPending}
                         error={interpret.error}
@@ -39,12 +39,10 @@ export const AiGoalPlanSection: FC<AiGoalPlanSectionProps> = ({ goalId, symbol }
                         onInterpret={() => interpret.mutate({ goalId })}>
                         {ai && <p className='text-sm break-keep'>{ai.output.summary}</p>}
                         {ai && (
-                            <ol aria-label='주차별 계획' className='flex flex-col gap-2'>
+                            <ol aria-label={t('stepsLabel')} className='flex flex-col gap-2'>
                                 {ai.output.steps.map((step) => (
                                     <li key={step.week_index} className='border-border flex flex-col gap-1 border p-2 text-xs'>
-                                        <span className='text-sm font-medium'>
-                                            {step.week_index}주차 · {step.focus}
-                                        </span>
+                                        <span className='text-sm font-medium'>{t('stepHeading', { week: step.week_index, focus: step.focus })}</span>
                                         {step.chart_md5s.length > 0 && (
                                             <span className='text-muted-foreground'>
                                                 {step.chart_md5s.map((md5) => titles.get(md5) ?? md5).join(', ')}
@@ -61,12 +59,12 @@ export const AiGoalPlanSection: FC<AiGoalPlanSectionProps> = ({ goalId, symbol }
                                                         createFolder.mutate({
                                                             source: 'goal',
                                                             goal_id: goalId,
-                                                            name_suffix: `목표 ${step.week_index}주차`,
+                                                            name_suffix: t('folderNameSuffix', { week: step.week_index }),
                                                             description: step.focus,
                                                             items: step.chart_md5s.map((md5) => ({ md5, memo: '' })),
                                                         })
                                                     }>
-                                                    이 주차를 연습 폴더로 만들기
+                                                    {t('createFolder')}
                                                 </Button>
                                             </div>
                                         )}

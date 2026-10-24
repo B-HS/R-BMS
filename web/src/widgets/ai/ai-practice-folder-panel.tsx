@@ -2,6 +2,7 @@
 
 import { useState, type FC } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { AiChartCandidateList } from '@features/ai/ai-chart-candidate-list'
 import { AiDataNotice } from '@features/ai/ai-data-notice'
 import { AiInterpretSection } from '@features/ai/ai-interpret-section'
@@ -14,11 +15,10 @@ import { formatCount } from '@shared/lib/format'
 import { useAiPracticeFolder, useCreateAiPracticeFolder, usePreviewAiPracticeFolder } from '@entities/ai.query'
 import { AI_PATTERN_TAG_LABEL, AI_SCORE_FEATURE_FORM_LIMIT, isAiPatternTag, type AiPatternTag, type AiPracticeSourceInput } from '@entities/ai.type'
 
-const SOURCE_LABEL = { recommend: '다음 도전 후보', tag: '패턴 태그' } as const
-type PanelSource = keyof typeof SOURCE_LABEL
+const SOURCES = ['recommend', 'tag'] as const
+type PanelSource = (typeof SOURCES)[number]
 
-const isPanelSource = (value: string): value is PanelSource => value in SOURCE_LABEL
-const SOURCES = Object.keys(SOURCE_LABEL).filter(isPanelSource)
+const isPanelSource = (value: string): value is PanelSource => SOURCES.some((source) => source === value)
 const TAGS = Object.keys(AI_PATTERN_TAG_LABEL).filter(isAiPatternTag)
 const DEFAULT_TAG = 'trill' satisfies AiPatternTag
 
@@ -26,6 +26,7 @@ export const AiPracticeFolderPanel: FC = () => {
     const [source, setSource] = useState<PanelSource>('recommend')
     const [tag, setTag] = useState<AiPatternTag>(DEFAULT_TAG)
 
+    const t = useTranslations('ai.practiceFolder')
     const input: AiPracticeSourceInput = source === 'tag' ? { source, tag } : { source }
     const practice = useAiPracticeFolder(input)
     const preview = usePreviewAiPracticeFolder()
@@ -42,7 +43,7 @@ export const AiPracticeFolderPanel: FC = () => {
     const isFull = view ? !view.folders.can_create : false
 
     return (
-        <PanelCard title='AI 연습 폴더' contentClassName='flex flex-col gap-4'>
+        <PanelCard title={t('title')} contentClassName='flex flex-col gap-4'>
             <div className='flex flex-wrap items-center gap-2'>
                 <Select
                     value={source}
@@ -50,13 +51,13 @@ export const AiPracticeFolderPanel: FC = () => {
                         if (isPanelSource(value)) setSource(value)
                         preview.reset()
                     }}>
-                    <SelectTrigger size='sm' className='w-40' aria-label='후보 출처'>
+                    <SelectTrigger size='sm' className='w-40' aria-label={t('sourceLabel')}>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                         {SOURCES.map((value) => (
                             <SelectItem key={value} value={value}>
-                                {SOURCE_LABEL[value]}
+                                {t(`source.${value}`)}
                             </SelectItem>
                         ))}
                     </SelectContent>
@@ -68,7 +69,7 @@ export const AiPracticeFolderPanel: FC = () => {
                             if (isAiPatternTag(value)) setTag(value)
                             preview.reset()
                         }}>
-                        <SelectTrigger size='sm' className='w-44' aria-label='연습할 패턴'>
+                        <SelectTrigger size='sm' className='w-44' aria-label={t('tagLabel')}>
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -81,25 +82,26 @@ export const AiPracticeFolderPanel: FC = () => {
                     </Select>
                 )}
             </div>
-            {practice.isPending && <PanelSkeleton label='연습 후보 계산 중' />}
-            {practice.isError && (
-                <LoadErrorState title='연습 후보를 불러오지 못했습니다' isRetrying={practice.isFetching} onRetry={() => void practice.refetch()} />
-            )}
+            {practice.isPending && <PanelSkeleton label={t('loading')} />}
+            {practice.isError && <LoadErrorState title={t('loadError')} isRetrying={practice.isFetching} onRetry={() => void practice.refetch()} />}
             {view && (
                 <>
                     <p className='text-muted-foreground text-xs'>
-                        후보 {formatCount(view.candidates.length)}곡 · 내 폴더 {formatCount(view.folders.used)}/{formatCount(view.folders.limit)}.
-                        미리보기는 폴더를 만들지 않고, 아래 만들기를 눌러야 &quot;{AI_SCORE_FEATURE_FORM_LIMIT.PRACTICE_NAME_PREFIX}&quot; 폴더가
-                        생깁니다. 게임은 다음 새로 받기에서 MY FOLDERS 에 보입니다.
+                        {t('info', {
+                            candidates: view.candidates.length,
+                            used: formatCount(view.folders.used),
+                            limit: formatCount(view.folders.limit),
+                            prefix: AI_SCORE_FEATURE_FORM_LIMIT.PRACTICE_NAME_PREFIX,
+                        })}
                     </p>
                     {view.notice && <AiDataNotice need={view.notice.need} />}
                     {isFull && (
                         <p role='alert' className='text-destructive text-xs'>
-                            폴더가 {formatCount(view.folders.limit)}개로 가득 찼습니다. 폴더를 지운 뒤 다시 시도하세요.
+                            {t('full', { limit: view.folders.limit })}
                         </p>
                     )}
                     <AiInterpretSection
-                        label='AI 연습 폴더 미리보기'
+                        label={t('aiLabel')}
                         meta={previewData}
                         isPending={preview.isPending}
                         error={preview.error}
@@ -113,7 +115,7 @@ export const AiPracticeFolderPanel: FC = () => {
                                 </p>
                                 {previewData.output.description && <p className='text-muted-foreground text-xs'>{previewData.output.description}</p>}
                                 <AiChartCandidateList
-                                    label='미리보기 곡'
+                                    label={t('previewLabel')}
                                     symbol=''
                                     candidates={items.map((item) => item.candidate)}
                                     renderExtra={(candidate) => memos.get(candidate.md5) && <p className='text-xs'>{memos.get(candidate.md5)}</p>}
@@ -131,11 +133,11 @@ export const AiPracticeFolderPanel: FC = () => {
                                                 items: items.map((item) => ({ md5: item.candidate.md5, memo: item.memo })),
                                             })
                                         }>
-                                        이 미리보기로 폴더 만들기
+                                        {t('create')}
                                     </Button>
                                     {create.data && (
                                         <Button asChild variant='link' size='sm'>
-                                            <Link href={`/folders/${create.data.folder_id}`}>만든 폴더 열기</Link>
+                                            <Link href={`/folders/${create.data.folder_id}`}>{t('openFolder')}</Link>
                                         </Button>
                                     )}
                                 </div>

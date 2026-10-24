@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { AiDataNotice } from '@features/ai/ai-data-notice'
 import { AiInterpretSection } from '@features/ai/ai-interpret-section'
 import { AiCompareTotalsTable } from '@features/ai/ai-compare-totals-table'
@@ -32,6 +33,7 @@ const signed = (value: number | null) => {
 export const AiComparePanel: FC<{ scoreId: string }> = ({ scoreId }) => {
     const [target, setTarget] = useState(BEST_TARGET)
 
+    const t = useTranslations('ai.compare')
     const query = queryOf(target)
     const compare = useAiCompare(scoreId, query)
     const interpret = useInterpretAiCompare(scoreId)
@@ -51,29 +53,26 @@ export const AiComparePanel: FC<{ scoreId: string }> = ({ scoreId }) => {
 
     return (
         <PanelCard
-            title='베스트·라이벌 비교'
+            title={t('title')}
             action={
                 <Select value={target} onValueChange={handleTargetChange}>
-                    <SelectTrigger size='sm' aria-label='비교할 판' className='w-48 max-w-full'>
+                    <SelectTrigger size='sm' aria-label={t('targetLabel')} className='w-48 max-w-full'>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value={BEST_TARGET}>내 다른 최고 판</SelectItem>
+                        <SelectItem value={BEST_TARGET}>{t('bestOption')}</SelectItem>
                         {(view?.rivals ?? []).map((rival) => (
                             <SelectItem key={rival.login_id} value={`${RIVAL_PREFIX}${rival.login_id}`}>
-                                {rival.name}
-                                {rival.allows_segments ? ' (구간 공유)' : ' (합계만)'}
+                                {t(rival.allows_segments ? 'rivalWithSegments' : 'rivalTotalsOnly', { name: rival.name })}
                             </SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
             }
             contentClassName='flex flex-col gap-4'>
-            {compare.isPending && <PanelSkeleton label='비교 계산 중' />}
-            {compare.isError && (
-                <LoadErrorState title='비교를 불러오지 못했습니다' isRetrying={compare.isFetching} onRetry={() => void compare.refetch()} />
-            )}
-            {isSwitching && <PanelSkeleton label='비교 대상 바꾸는 중' />}
+            {compare.isPending && <PanelSkeleton label={t('loading')} />}
+            {compare.isError && <LoadErrorState title={t('loadError')} isRetrying={compare.isFetching} onRetry={() => void compare.refetch()} />}
+            {isSwitching && <PanelSkeleton label={t('switching')} />}
             {view && !isSwitching && (
                 <>
                     {view.reason && (
@@ -83,24 +82,31 @@ export const AiComparePanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                     )}
                     {view.target && (
                         <p className='text-xs tabular-nums'>
-                            이 판 EX {formatCount(view.base.ex_score)} · 비교 판({view.target.who === 'rival' ? view.target.login_id : '나'}) EX{' '}
-                            {formatCount(view.target.ex_score)} · {isPartial ? '도달한 구간의 차이' : '차이'}{' '}
-                            {signed(isPartial ? reachedExDiff : view.base.ex_score - view.target.ex_score)}
+                            {t(isPartial ? 'summaryPartial' : 'summary', {
+                                baseEx: formatCount(view.base.ex_score),
+                                who: view.target.who === 'rival' ? view.target.login_id : t('self'),
+                                targetEx: formatCount(view.target.ex_score),
+                                diff: signed(isPartial ? reachedExDiff : view.base.ex_score - view.target.ex_score),
+                            })}
                         </p>
                     )}
                     {isPartial && (
                         <p role='status' className='text-muted-foreground text-xs break-keep'>
-                            {`한쪽 판이 도달하지 못한 ${formatCount(unreachedCount)}구간은 비교에서 뺐습니다.`}
+                            {t('partialNote', { count: unreachedCount })}
                         </p>
                     )}
                     {view.mode === 'segments' && (
-                        <ol aria-label='구간별 EX 차' className='flex flex-col gap-0.5 text-xs tabular-nums'>
+                        <ol aria-label={t('segmentsLabel')} className='flex flex-col gap-0.5 text-xs tabular-nums'>
                             {view.segments
                                 .filter((segment) => gapIds.has(segment.id))
                                 .map((segment) => (
                                     <li key={segment.key}>
-                                        {segment.id}: EX {signed(segment.ex_diff)} · BP {signed(segment.bp_diff)} · 누적{' '}
-                                        {signed(segment.cumulative_ex_diff)}
+                                        {t('segmentLine', {
+                                            id: segment.id,
+                                            ex: signed(segment.ex_diff),
+                                            bp: signed(segment.bp_diff),
+                                            cumulative: signed(segment.cumulative_ex_diff),
+                                        })}
                                         {segment.top_tags.length > 0 && ` · ${segment.top_tags.map((tag) => aiPatternTagLabel(tag.tag)).join(', ')}`}
                                     </li>
                                 ))}
@@ -110,7 +116,7 @@ export const AiComparePanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                     {view.notice && <AiDataNotice need={view.notice.need} />}
                     {view.mode === 'segments' && (
                         <AiInterpretSection
-                            label='AI 비교 해석'
+                            label={t('aiLabel')}
                             meta={ai}
                             isPending={interpret.isPending}
                             error={interpret.error}
@@ -118,7 +124,7 @@ export const AiComparePanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                             onInterpret={() => interpret.mutate(query)}>
                             {ai && <p className='text-sm break-keep'>{ai.output.summary}</p>}
                             {ai && (
-                                <ul aria-label='차이 설명' className='flex flex-col gap-1 text-xs break-keep'>
+                                <ul aria-label={t('gapsLabel')} className='flex flex-col gap-1 text-xs break-keep'>
                                     {ai.output.gaps.map((gap) => (
                                         <li key={gap.segment_id}>
                                             <span className='font-medium'>{gap.segment_id}</span>: {gap.explanation}

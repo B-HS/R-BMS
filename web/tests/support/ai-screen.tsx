@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { NextIntlClientProvider } from 'next-intl'
 import { toast } from 'sonner'
+import { DEFAULT_LOCALE, type Locale } from '../../src/shared/i18n/locale'
+import { MESSAGES } from '../../src/shared/i18n/messages'
 import { createQueryClient } from '../../src/shared/utils/get-query-client'
 import { mount, unmountAll } from './dom-harness'
 
@@ -32,12 +35,16 @@ export const installFetchRoutes = (routes: Record<string, FetchHandler>) => {
     return { calls, restore: () => void (globalThis.fetch = originalFetch) }
 }
 
-export const renderWithQueryClient = async (ui: ReactNode) => {
+export const renderWithQueryClient = async (ui: ReactNode, locale: Locale = DEFAULT_LOCALE) => {
     const queryClient = createQueryClient()
     const defaults = queryClient.getDefaultOptions()
     queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, retry: false } })
     clients.push(queryClient)
-    await mount(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+    await mount(
+        <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]}>
+            <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+        </NextIntlClientProvider>,
+    )
     return { queryClient }
 }
 

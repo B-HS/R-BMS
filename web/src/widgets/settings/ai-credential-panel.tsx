@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { AiProviderNotice } from '@features/ai/ai-provider-notice'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
@@ -11,6 +12,7 @@ import { useAiCredentialList, useAiUserSetting } from '@entities/ai.query'
 import { AI_PROVIDER_ORDER, selectActiveAiCredential } from '@entities/ai.type'
 
 export const AiCredentialPanel: FC = () => {
+    const t = useTranslations('settings.credentialPanel')
     const { data, isLoading, isError, isFetching, refetch } = useAiCredentialList()
     const { data: setting } = useAiUserSetting()
 
@@ -18,12 +20,10 @@ export const AiCredentialPanel: FC = () => {
     const activeProvider = selectActiveAiCredential(credentials, setting?.default_provider ?? null)?.provider
 
     return (
-        <PanelCard title='AI 키' contentClassName='flex flex-col gap-3'>
+        <PanelCard title={t('title')} contentClassName='flex flex-col gap-3'>
             <AiProviderNotice />
-            {isLoading && <TableSkeleton rows={3} label='AI 키 불러오는 중' />}
-            {!isLoading && isError && (
-                <LoadErrorState title='AI 키 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
-            )}
+            {isLoading && <TableSkeleton rows={3} label={t('loading')} />}
+            {!isLoading && isError && <LoadErrorState title={t('loadError')} isRetrying={isFetching} onRetry={() => void refetch()} />}
             {!isLoading &&
                 !isError &&
                 AI_PROVIDER_ORDER.map((provider) => (
@@ -34,7 +34,7 @@ export const AiCredentialPanel: FC = () => {
                         isActive={provider === activeProvider}
                     />
                 ))}
-            <PanelFootnote>키 등록, 다시 검증, 모델 목록 조회는 분당 횟수 제한이 있어 잠시 뒤 다시 시도해야 할 수 있습니다.</PanelFootnote>
+            <PanelFootnote>{t('footnote')}</PanelFootnote>
         </PanelCard>
     )
 }

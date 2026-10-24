@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type FC } from 'react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@shared/ui/button'
 import { Input } from '@shared/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/ui/select'
@@ -22,16 +23,15 @@ import {
 
 type DraftFilter = AiRecordQueryFilter & { id: string }
 
-const SORT_DIR_LABEL = { desc: '내림차순', asc: '오름차순' } satisfies Record<AiRecordQueryPlan['sort_dir'], string>
+const SORT_DIRS = ['desc', 'asc'] as const satisfies readonly AiRecordQueryPlan['sort_dir'][]
 
 const isField = (value: string): value is AiRecordQueryField => value in AI_RECORD_QUERY_FIELD_OPS
 const isOp = (value: string): value is AiRecordQueryOp => value in AI_RECORD_QUERY_OP_LABEL
 const isSortField = (value: string): value is AiRecordQueryPlan['sort_field'] => value in AI_RECORD_QUERY_SORT_LABEL
-const isSortDir = (value: string): value is AiRecordQueryPlan['sort_dir'] => value in SORT_DIR_LABEL
+const isSortDir = (value: string): value is AiRecordQueryPlan['sort_dir'] => SORT_DIRS.some((dir) => dir === value)
 
 const FIELDS = Object.keys(AI_RECORD_QUERY_FIELD_OPS).filter(isField)
 const SORT_FIELDS = Object.keys(AI_RECORD_QUERY_SORT_LABEL).filter(isSortField)
-const SORT_DIRS = Object.keys(SORT_DIR_LABEL).filter(isSortDir)
 const DEFAULT_FIELD = 'lamp' satisfies AiRecordQueryField
 
 const firstOp = (field: AiRecordQueryField): AiRecordQueryOp => AI_RECORD_QUERY_FIELD_OPS[field][0]
@@ -52,6 +52,7 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
     const [limitText, setLimitText] = useState(String(initialPlan.limit))
     const [submittedIds, setSubmittedIds] = useState(() => filters.map((filter) => filter.id))
 
+    const t = useTranslations('ai.recordQueryEditor')
     const issueFor = (id: string) => issues.find((issue) => submittedIds[issue.index] === id)
     const updateFilter = (id: string, change: Partial<AiRecordQueryFilter>) =>
         setFilters((current) => current.map((filter) => (filter.id === id ? { ...filter, ...change } : filter)))
@@ -77,25 +78,25 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
 
     return (
         <form
-            aria-label='해석된 조건'
+            aria-label={t('formLabel')}
             className='flex flex-col gap-3'
             noValidate
             onSubmit={(event) => {
                 event.preventDefault()
                 handleRun()
             }}>
-            {filters.length === 0 && <p className='text-muted-foreground text-xs'>조건이 없습니다. 모든 기록에서 정렬 기준대로 보입니다.</p>}
-            <ul aria-label='조건 목록' className='flex flex-col gap-2'>
+            {filters.length === 0 && <p className='text-muted-foreground text-xs'>{t('noFilters')}</p>}
+            <ul aria-label={t('listLabel')} className='flex flex-col gap-2'>
                 {filters.map((filter, index) => {
                     const issue = issueFor(filter.id)
-                    const label = `조건 ${index + 1}`
+                    const position = index + 1
                     return (
                         <li
                             key={filter.id}
-                            aria-label={label}
+                            aria-label={t('conditionLabel', { index: position })}
                             className={cn('border-border flex flex-wrap items-center gap-2 border p-2', issue && 'border-destructive')}>
                             <Select value={filter.field} onValueChange={(value) => isField(value) && changeField(filter.id, value)}>
-                                <SelectTrigger size='sm' className='w-36' aria-label={`${label} 항목`}>
+                                <SelectTrigger size='sm' className='w-36' aria-label={t('fieldLabel', { index: position })}>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -107,7 +108,7 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
                                 </SelectContent>
                             </Select>
                             <Select value={filter.op} onValueChange={(value) => isOp(value) && updateFilter(filter.id, { op: value })}>
-                                <SelectTrigger size='sm' className='w-28' aria-label={`${label} 비교`}>
+                                <SelectTrigger size='sm' className='w-28' aria-label={t('opLabel', { index: position })}>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -119,7 +120,7 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
                                 </SelectContent>
                             </Select>
                             <Input
-                                aria-label={`${label} 값`}
+                                aria-label={t('valueLabel', { index: position })}
                                 aria-invalid={Boolean(issue)}
                                 className='h-7 w-48 max-w-full'
                                 value={filter.value}
@@ -131,7 +132,7 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
                                 variant='ghost'
                                 size='xs'
                                 onClick={() => setFilters((current) => current.filter((candidate) => candidate.id !== filter.id))}>
-                                {label} 지우기
+                                {t('removeLabel', { index: position })}
                             </Button>
                             {issue && (
                                 <p role='alert' className='text-destructive w-full text-xs'>
@@ -149,10 +150,10 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
                     size='xs'
                     disabled={filters.length >= AI_RECORD_QUERY_FORM_LIMIT.MAX_FILTERS}
                     onClick={() => setFilters((current) => [...current, toDraft({ field: DEFAULT_FIELD, op: firstOp(DEFAULT_FIELD), value: '' })])}>
-                    조건 추가
+                    {t('add')}
                 </Button>
                 <Select value={sortField} onValueChange={(value) => isSortField(value) && setSortField(value)}>
-                    <SelectTrigger size='sm' className='w-28' aria-label='정렬 기준'>
+                    <SelectTrigger size='sm' className='w-28' aria-label={t('sortFieldLabel')}>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -164,31 +165,30 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
                     </SelectContent>
                 </Select>
                 <Select value={sortDir} onValueChange={(value) => isSortDir(value) && setSortDir(value)}>
-                    <SelectTrigger size='sm' className='w-28' aria-label='정렬 방향'>
+                    <SelectTrigger size='sm' className='w-28' aria-label={t('sortDirLabel')}>
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                         {SORT_DIRS.map((dir) => (
                             <SelectItem key={dir} value={dir}>
-                                {SORT_DIR_LABEL[dir]}
+                                {t(`sortDir.${dir}`)}
                             </SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
                 <Input
-                    aria-label='최대 건수'
+                    aria-label={t('limitLabel')}
                     inputMode='numeric'
                     className='h-7 w-20'
                     value={limitText}
                     onChange={(event) => setLimitText(event.target.value)}
                 />
                 <Button type='submit' size='sm' disabled={isRunning}>
-                    이 조건으로 다시 실행
+                    {t('run')}
                 </Button>
             </div>
             <p className='text-muted-foreground text-xs'>
-                다시 실행은 AI 를 부르지 않습니다. 최대 건수는 {AI_RECORD_QUERY_FORM_LIMIT.ROWS_MIN}~{AI_RECORD_QUERY_FORM_LIMIT.ROWS_MAX} 사이로
-                맞춰집니다.
+                {t('footnote', { min: AI_RECORD_QUERY_FORM_LIMIT.ROWS_MIN, max: AI_RECORD_QUERY_FORM_LIMIT.ROWS_MAX })}
             </p>
         </form>
     )
