@@ -1,6 +1,6 @@
 # rbms web — 아키텍처 설계 (W0)
 
-> 최종 갱신 2026-10-23 · 대응 커밋 5a0eacf (2026-10-23 에 §1 의 화면·경로 표, §3-2 의 마이그레이션 0012 와 `web-db` 동작, §5 의 캐시 태그, §6 의 `CRON_SECRET` 과 Cron 을 더하고 새 §15 를 썼다. 2026-10-22 에 §3-2 마이그레이션 목록에 0011 을 더했다. 나머지 절은 2026-10-20 작업 트리 기준: W3 곡별 패턴 §1-2·§1-4·§3·§4-4·§11, W2 점수 기반 AI 기능 §12, W4 판별 trace §13, W5 판별 기반 AI 기능 §14)
+> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 새 §16 다국어(next-intl, 쿠키 방식, 전 페이지 동적 렌더, 기반까지)와 §0·§5-1 의 한 줄, §5-2 의 순위 태그 설명을 더했다. 2026-10-23 에 §1 의 화면·경로 표, §3-2 의 마이그레이션 0012 와 `web-db` 동작, §5 의 캐시 태그, §6 의 `CRON_SECRET` 과 Cron 을 더하고 새 §15 를 썼다. 2026-10-22 에 §3-2 마이그레이션 목록에 0011 을 더했다. 나머지 절은 2026-10-20 작업 트리 기준: W3 곡별 패턴 §1-2·§1-4·§3·§4-4·§11, W2 점수 기반 AI 기능 §12, W4 판별 trace §13, W5 판별 기반 AI 기능 §14)
 
 > **현재 구현 기준:** W0~W2 와 웨이브 17B(웹 골격·폴더·발광 표)·20(SCRATCH AUTO 순위), S18~S19(2026-10-14~15, 서버 수리·발광 표의 다른 사이트 흔적 제거·파비콘)까지 반영했습니다. 실제 라우트는 `web/src/app/{(app),(public),api,tables}/`, 서버 경계는 `web/src/server/`가 정본입니다. 본문에 남은 "착수 시", "향후", 가정은 설계 이력으로만 읽고, 이 상태 블록과 §9를 우선합니다. **운영 배포는 2026-10-14 에 끝났습니다**(https://bms.hyuns.uk, Vercel 프로젝트 `rbms-web`, 시험 계정 삭제). 운영 DB 에는 마이그레이션 0000~0012 가 모두 적용됐고(0003·0004 는 2026-10-15, 0011 은 2026-10-22, 0012 는 2026-10-23), 2026-10-15 관찰 시 운영 웹은 `51f3a1e` 입니다(`/api/version`). 배포 설정은 §6-2, 운영 DB 작업은 §3-2 가 정본입니다. 2026-10-14 점검에서 나온 고장 12건의 해소 현황은 [2026-10-14-audit.md](./2026-10-14-audit.md) 맨 위 표입니다.
 
@@ -23,6 +23,7 @@
 | 응답 | 네이티브 경로 = raw JSON, FE 전용 `/api/fe/*` = envelope |
 | 상태 | 서버 상태 = TanStack Query v5(prefetch + HydrationBoundary) |
 | UI | Tailwind v4 `@theme`(design.md §16) + shadcn radix-nova |
+| 언어(2026-10-24) | next-intl 4.14.9, 쿠키 방식(경로 접두사 없음), 기본 한국어, 메시지 `web/messages/{ko,en,ja}/*.json`(§16) |
 
 ### 0-1. 버전 (2026-09-09 레지스트리 최신, 설치 시 재확인)
 
@@ -370,14 +371,14 @@ Route Handler (app/api/**/route.ts)
 
 `unstable_cache` 는 쓰지 않는다(Next 16 에서 `'use cache'` 로 대체됨).
 
-**제약**: `'use cache'` 안에서는 `cookies()`/`headers()`/`searchParams` 접근 불가. 따라서 개인화 데이터(내 설정 blob, 내 토큰 목록, `auth/me`)는 캐시하지 않고, 필요한 식별자는 **인자로 넘겨** 캐시 키에 포함시킨다(`getPlayerScores(playerId, limit)`).
+**제약**: `'use cache'` 안에서는 `cookies()`/`headers()`/`searchParams` 접근 불가(번역도 같다: `getTranslations`·`getLocale` 은 그 바깥에서, §16-2. 루트가 쿠키를 읽으므로 모든 페이지가 요청마다 렌더되고 캐시되는 것은 데이터뿐이다). 따라서 개인화 데이터(내 설정 blob, 내 토큰 목록, `auth/me`)는 캐시하지 않고, 필요한 식별자는 **인자로 넘겨** 캐시 키에 포함시킨다(`getPlayerScores(playerId, limit)`).
 
 ### 5-2. 태그 사전
 
 | 태그 | 내용 | cacheLife |
 |---|---|---|
 | `chart:{sha256}` | 차트 메타 | `days` |
-| `chart-ranking:{sha256}` | 차트 랭킹 상위 N | `minutes` |
+| `chart-ranking:{sha256}` | 차트 랭킹 상위 N(2026-10-24 부터 줄마다 `extra.dans` 포함: 단위를 얻거나 표시를 바꿔도 이 시간만큼 이전 값이 보인다) | `minutes` |
 | `chart-best:{sha256}` | 차트 개인 베스트(플레이어 인자 포함) | `minutes` |
 | `chart-replays:{sha256}` | 차트 리플레이 목록 | `minutes` |
 | `chart-search` | 검색 결과 | `minutes` |
@@ -789,3 +790,31 @@ DB·HTTP·시계를 모르고 같은 입력에 같은 출력을 낸다. 모든 �
 - 코스 동기화: 저장됐거나 내용이 같은 표마다 헤더의 코스로 `planSync` 를 하고 바꿀 것이 있을 때만 `applySync` 한다(내용이 같아도 매번 계획을 세워 실패한 등록을 다음 날 따라잡는다). 새로 단위 코스가 된 코스가 있으면 같은 실행에서 소급 판정(`awardForCourses`)을 한다. 코스 동기화가 던지면 표 사본은 남고 이유가 `course_sync_failed` 가 된다. 이 경로의 응답(`{ tables: [...] }`)은 표마다 outcome·이유·수(`entries`·`added`·`removed`·`releveled`)와 코스 계획·`awarded` 만 담고 `Cache-Control: private, no-store` 이다.
 - 읽기: `tableSnapshotService` 의 `loadTables` 가 비동기로 번들 insane1 과 저장된 사본을 합친다. 원격 사본은 인스턴스 메모리 캐시(`createRemoteSnapshotCache`)가 `listVersions()` 의 작은 행만 매번 읽고, 저장된 두 해시가 기억한 것과 다를 때만 그 표를 풀어 `remoteHeaderSchema`·`remoteEntriesSchema` 로 다시 검증해 새로 만든다(서버리스 인스턴스마다 한 번씩만 푼다). 레벨 순서는 헤더 `level_order` 가 없으면 항목의 레벨을 수 오름차순(모두 정수일 때) 또는 처음 나온 순서로 만든다. 번들 insane1 만 보는 호출처(차트 제목 대체, 검색, 패턴 coverage, AI)는 비동기로 바꾸지 않았다.
 - 같은 일을 사람이 숫자를 보고 하는 길: `tables-refresh-count`(받고 검증·비교만, 쓰지 않음)와 `tables-refresh-force`(`apply-large`: 급감·변경량 검사만 풀고 저장).
+
+
+## 16. 다국어(한국어·영어·일본어, 2026-10-24)
+
+결정과 근거는 [웹 다국어 ADR](../acknowledge/2026-10-24-adr-web-i18n.md), 용어는 [용어집](../reference/2026-10-24-i18n-glossary.md)이다. 이 절은 **기반(WI0, `eb5ddbb`)** 의 구조이고 문구를 메시지로 옮기는 단위(WI1 위젯 `ai`·`settings`, WI2 탐색 화면 `browse`, WI3 페이지·공용 `pages`, WI4 서버 오류 문구와 AI 결과 언어 `server`)는 같은 웨이브에서 진행 중이라 그 결과는 각 커밋과 `web/messages/` 를 본다.
+
+### 16-1. 구조
+
+| 항목 | 값 |
+| --- | --- |
+| 라이브러리 | next-intl 4.14.9(`web/package.json` 에 정확 고정, 게시 2026-10-02, 사용자 승인). 간접 의존성도 게시 14일 이상으로 맞췄다(`bun add --minimum-release-age=1209600`) |
+| 방식 | 쿠키, 경로 접두사 없음. `createNextIntlPlugin('./src/shared/i18n/request.ts')`(`next.config.ts`), `getRequestConfig` 가 `cookies()` 와 `headers()` 를 읽는다. URL·라우트 맵(§1)과 캐시 태그(§5)는 그대로다 |
+| 언어 결정 | 올바른 `NEXT_LOCALE` 쿠키 → `Accept-Language`(q 값 순서, 주 부분만: `en-US` 는 `en`, `q=0` 과 잘못된 q 값은 제외) → 기본 `ko`. 첫 방문에는 쿠키를 심지 않고 요청마다 헤더로 정하므로 `proxy.ts` 를 고치지 않았다. 쿠키·헤더가 없는 봇과 지원 밖 언어는 `ko` (`web/src/shared/i18n/locale.ts`) |
+| 메시지 | `web/messages/{ko,en,ja}/{common,ai,settings,browse,pages,server}.json`. 네임스페이스는 이 여섯으로 고정(새로 만들려면 `MESSAGE_NAMESPACES` 와 `messages.ts` 의 import 를 함께 고친다). 최상위 키가 네임스페이스이고 `useTranslations('browse.xxx')`(클라이언트) / `await getTranslations('pages.xxx')`(서버)로 부른다 |
+| 타입·검사 | 한국어가 원본이고 en·ja 는 `Record<Locale, Messages>` 라 키가 빠지면 `tsc` 가 막는다(`next-intl.d.ts`). `tests/lib/i18n-messages.test.ts`: 세 언어의 키 집합·ICU 자리표 `{name}` 일치, 빈 문자열 금지. `i18n-locale.test.ts`: 언어 결정 |
+| 루트 레이아웃 | `<html lang={await getLocale()}>`, `NextIntlClientProvider` 로 감싼다. `export const instant = false` |
+| 언어 선택 위젯 | `widgets/locale-switcher/locale-switcher.tsx`: 사이드바 바닥의 아이콘 버튼 + 라디오 메뉴. 고르면 쿠키(`Path=/`, 1년, `SameSite=Lax`)를 쓰고 `router.refresh()`. 언어 이름은 그 언어로(`한국어`, `English`, `日本語`). 화면에 붙이는 일(`app-shell.tsx` 바닥 `SidebarMenu` 에 `ShellThemeControl` 옆으로, 격자 2열에서 3열)은 WI2 몫이라 기반 단위는 붙이지 않았다 |
+
+### 16-2. 캐시와 렌더(메인 결정)
+
+- 루트 레이아웃이 쿠키를 읽으면 Next 16 에서 앱 전체가 정적 prerender 에서 빠지고 Cache Components 에서는 그 아래 모든 segment 가 blocking 이 된다. 실제로 `bun run build` 가 `/guide` 에서 `blocking-prerender-dynamic` 오류로 멈춰 오류가 제안한 대로 `instant = false` 를 넣었다. 그 결과 기존 부분 정적(◐) 페이지 전부와 정적(○)이던 `/guide`·`/login`·`/signup` 이 모두 요청마다 렌더(ƒ)이고, 정적으로 남은 것은 `robots`·`sitemap`·아이콘뿐이다(빌드 78 페이지).
+- **데이터 캐시(§5)는 그대로**다. `read-cache.ts` 를 바꾸지 않았고 `'use cache'` 함수들은 locale 인자도 쿠키 읽기도 없다. 규칙: `'use cache'` 함수 안에서 `getTranslations`·`getLocale`·`cookies()` 를 부르지 않는다. 캐시된 데이터는 언어 없이 받고 번역은 그 바깥 컴포넌트에서 한다(§5-1 의 개인화 데이터 제약과 같은 이유).
+- 정적 셸을 되찾으려면 next-intl `localePrefix: 'never'` 와 proxy 내부 rewrite, `app/[locale]` 로 라우트 이동, `next/root-params` 가 필요하다(`src/app/**` 전체를 옮기는 별도 단위, 미확인 목록 26번).
+- `timeZone` 은 정하지 않았다(서버 런타임 시간대). 날짜를 `useFormatter` 로 쓰기 시작하면 정해야 한다.
+
+### 16-3. 아직 언어를 따르지 않는 곳
+
+루트 `metadata` 의 `SITE_DESCRIPTION` 과 `openGraph.locale: 'ko_KR'`(`shared/constants/site.ts`), `global-error.tsx` 의 `lang='ko'` 와 한국어 문구(루트 레이아웃 밖이라 provider 가 없다), 그리고 메시지로 옮기지 않은 문구 전부는 WI1~WI4 의 몫이다. API 오류 응답의 형식은 바꾸지 않고 웹 화면이 오류 코드로 번역한다. AI 결과 문구의 언어는 서버에서 `getLocale()` 로 받아 프롬프트 언어 인자로 넘겨 UI 언어를 따른다(WI4).

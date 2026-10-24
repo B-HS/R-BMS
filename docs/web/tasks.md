@@ -1,6 +1,6 @@
 # rbms web — 구현 작업 분할 (W1 / W2) 과 웹 남은 일
 
-> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리
+> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 "남은 일" 7번 웹 다국어를 더했다. 나머지는 2026-10-19 기준)
 
 > **역사 작업 계획 + 현재 남은 일:** W1/W2의 체크 항목은 2026-09-09에 완료됐고, 웨이브 17B~20 과 S18·S19(2026-10-14~15)는 아래에 이어서 적었습니다. 새 세션이 이어서 할 웹 일은 맨 아래 "남은 일" 절이 정본입니다. 현재 구현 상태와 미구현 경계는 [../backend/endpoint-tasks.md](../backend/endpoint-tasks.md), 실제 라우트는 `web/src/app/api/`가 정본입니다. 운영 배포(Phase R)는 2026-10-14 에 끝났습니다.
 
@@ -319,5 +319,6 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 4. 웹 2차(사용자가 "나중에" 로 둔 것): 발광 표 한 곡 한 행 보기, 카드 높이 선택, 폴더 끌어 옮기기, 2,000곡 가상화, 표 RSC 자료 축소(`level`·`url_diff` 중복), OG 이미지, 홈 대시보드 재구성
 5. 클라이언트 쪽(웹 문서 밖이지만 서버와 짝): 게임 안 IR 순위 패널의 SCRATCH AUTO 포함 토글(서버는 `include_scratch_auto` 를 이미 받는다. 웹 화면의 기본이 켬으로 바뀐 뒤에도 클라이언트 패널은 파라미터를 싣지 않아 일반 판만의 목록이다)
 6. `chart.notes` 복구 SQL 은 돌리지 않았다(2026-10-15 `chart-notes-count`: 복구 대상 0). 표시값이 어긋난 차트가 생기면 [architecture.md](./architecture.md) 3-2 의 `chart-notes-repair` 절차
+7. 웹 다국어(2026-10-24, [ADR](../acknowledge/2026-10-24-adr-web-i18n.md), [architecture.md](./architecture.md) §16): 기반(next-intl, 쿠키, 메시지 여섯 네임스페이스, 언어 선택 위젯)은 끝났다. 문구를 메시지로 옮기는 단위(WI1~WI4)의 결과와 남은 곳(루트 `metadata` 의 설명·`openGraph.locale`, `global-error.tsx`, `timeZone`)을 확인하고, 위젯이 셸에 붙었는지 본다. 정적 셸을 잃은 영향(테스트 부채 3.124)과 정적 셸을 되찾는 `app/[locale]` 이동은 사용자 판단(미확인 목록 26번)
 
 해소된 것(이전 목록): 계약 교차 테스트(e9aebae), 없는 상세 주소의 200(S19, 운영 404 확인 2026-10-15), 서버 컴포넌트 자기 URL fetch(S19), 가입·로그인 실패 원인 구분·운영 필수 환경 변수(S19), 넓힌 판정 판의 최고 기록·순위 제외와 SCRATCH AUTO 램프 `LightAssistEasy`(2026-10-14 사용자 확인, S18 결정 6).

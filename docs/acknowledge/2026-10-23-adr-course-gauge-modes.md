@@ -1,7 +1,7 @@
 # ADR: 코스 게이지 설정 COURSE GAUGE (LR2 기본 · BEATORAJA · IIDX)
 
 > 최종 갱신 2026-10-23 · 대응 커밋 5a0eacf
-> 상태: 유효(결정 21 은 사용자 확인 2026-10-23. IIDX 수치의 세부와 모드별 대응은 메인 판단이며 사용자 미확인) · 결정일 2026-10-23 · 결정자 사용자(결정 21), 세부 메인(사용자 "나머지도 추천대로") · 커밋 9e39262(IIDX 게이지 표·`GutsEdge`·`CourseGaugeMode`. 웨이브 1 전체가 섞여 들어간 커밋이다: [feedback](../feedback/2026-10-23-stage-check-before-commit.md)), 9f8dfbc(설정 행), c4fcdfa(코스 진행 통합), 47e8f70(코스 시작 때의 규칙 고정)
+> 상태: 유효(결정 21 은 사용자 확인 2026-10-23. IIDX 수치의 세부와 모드별 대응은 메인 판단이고 사용자 확인 2026-10-24(미확인 16 지금대로)) · 결정일 2026-10-23 · 결정자 사용자(결정 21), 세부 메인(사용자 "나머지도 추천대로") · 커밋 9e39262(IIDX 게이지 표·`GutsEdge`·`CourseGaugeMode`. 웨이브 1 전체가 섞여 들어간 커밋이다: [feedback](../feedback/2026-10-23-stage-check-before-commit.md)), 9f8dfbc(설정 행), c4fcdfa(코스 진행 통합), 47e8f70(코스 시작 때의 규칙 고정)
 > 관계: 시작 슬롯·이월·LN 제약은 [코스 시작 슬롯과 LN 제약](2026-10-23-adr-course-stage-start-and-ln.md), 제출 본문의 게이지 필드는 [코스 제출 게이지](2026-10-23-adr-course-submission-gauge.md).
 
 ## 배경
@@ -72,7 +72,7 @@
 ## 영향과 관련 파일
 
 - 판정 의미가 바뀌는 곳: BEATORAJA 에서 발광·Stella 코스가 LR2 가 아니라 7키 CLASS 로 돈다. 제약 없는 사용자 코스도 LR2 표다(지금 R-BMS 에서도 바뀜). IIDX 의 내부 단위·반올림은 알 수 없어 실제 IIDX 와 다를 수 있다.
-- 사용자 미확인(메인 판단): "30% 이하" 경계와 빈 POOR 절반, EXHARD 이상을 EX-DAN 으로 대응, 5·9·24키에도 같은 IIDX 수치, 연습 패널에 IIDX 노출, 결과 화면 GAUGE RULE 행, 막대 배지는 선언된 제약 그대로.
+- 사용자 확인 2026-10-24(지금대로, 메인 판단): "30% 이하" 경계와 빈 POOR 절반, EXHARD 이상을 EX-DAN 으로 대응, 5·9·24키에도 같은 IIDX 수치, 연습 패널에 IIDX 노출, 결과 화면 GAUGE RULE 행, 막대 배지는 선언된 제약 그대로.
 - 확인하지 못한 사실: LR2 본체의 시작값·실패선(iidx.org 는 LR2oraja 가 32% 시작·2% 실패라고 적었으나 다른 출처로 확인되지 않음), IIDX 의 내부 반올림.
 - 코드: `crates/rbms-judge/src/{gauge_tables,gauge,data}.rs`, `crates/rbms-judge/data/gauge.ron`("IIDX" 키), `crates/rbms-config/src/{judge,schema,settings}.rs`, `apps/rbms-player/src/{course_ui,app_play,lib,practice}.rs`, `apps/rbms-player/src/stage/{settings/catalog,course_result}.rs`.
 - 시험: `gauge_tables::tests::{the_iidx_dan_gauges_pin_their_published_values, only_the_iidx_dan_gauge_softens_at_or_below_its_band, the_iidx_set_tops_out_at_exclass, every_course_gauge_of_every_set_starts_full}`, `gauge::tests::an_iidx_dan_gauge_halves_damage_at_thirty_exactly`, `course_ui::tests::the_course_gauge_setting_outranks_a_gauge_constraint`, `the_gauge_constraints_are_shown_but_do_not_pick_the_table`, `settings::tests::the_course_gauge_row_cycles_lr2_beatoraja_iidx`.

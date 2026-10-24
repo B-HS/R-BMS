@@ -1,6 +1,6 @@
 # 스킨 가이드
 
-최종 갱신 2026-10-23 · 대응 커밋 76e026a. 기본 팩은 70개 파일, 2,240,694 B 다(76e026a 에서 다시 셌다. 2026-10-22 의 2,240,618 B 에서 `lua/props.lua`·`lua/select/main.lua` 에 헤더 선언 `rbms_extensions` 를 더해 76 B 늘었다. 2026-10-15 의 65개, 1,772,662 B 에서 `font/Inter-Bold.ttf`, `lua/play/colors.lua`, `lua/select/{panel,inform,words}.lua` 다섯 파일이 늘었다). 반영한 변경: 2026-10-23 헤더 확장 키 `rbms_extensions`(정수. 1.4절)와 선곡 패널 키 재배정의 opt-in(1.3절 E3, 3.4.5절, 6절), 라이브러리에 없는 곡 막대와 표의 COURSE 폴더·묶음 막대가 스킨에 보이는 값(1.3절), SCRATCH AUTO 노트 색이 PLAY 설정 SCRATCH AUTO COLOR 로 정해짐(1.4절, 6절), 2026-10-22 헤더 확장 키 `color`·`tint`·`long_tint` 와 `skin_config.color`, 확장 이벤트·옵션 id 대역 21000~(새 1.4절, 4.1절), 기본 스킨의 플레이 색 행(새 3.4.4절), 선곡 옵션 패널과 램프 등급 표시(새 3.4.5절), 굵은 글꼴(2.7절, 3.2절), SKIN 메뉴의 색 행(2.2절), 내보내기·적용의 색(2.8절). 그 앞의 S18·S19 는 스킨 문서·기본 팩·Lua 환경을 바꾸지 않았다(테스트 빌드가 Lua 의 프레임 시계를 멈추는 `SkinLua::hold_frame_clock` 은 출하 동작과 무관하다: `architecture.md` "Testing and the lint gate"). 반영한 웨이브(모두 커밋됨): 웨이브 16(스코어 그래프의 TARGET 범례가 실제로 쓰는 목표의 이름을 쓴다: 3.4.1절. 선곡 패널의 점수 칸은 램프만 있는 기록이면 `-`: 6절), 웨이브 18(SCRATCH AUTO 가 치는 레인의 노트를 엔진이 초록으로 그린다: 6절), 웨이브 15(앱이 덧그리는 UI 와 내장 화면의 무채색 팔레트, 값을 못박지 않는 `theme.ron` 템플릿: 3.4.3절, 6절), 웨이브 14(기본 스킨의 모노톤 팔레트와 색 옵션 넷, 온전한 폭발 고리, 발치의 LIFT 수치: 3.4절·3.4.3절. 조절한 팩의 내보내기·가져오기와 같은 옵션을 모든 화면에 적용: 2.8절), 웨이브 13(기본 스킨의 판정선을 필드 맨 아래로: 3.4.1·3.4.2절. 노트 필드를 판정 오프셋만큼 앞서 그림: 1.2절)
+최종 갱신 2026-10-24 · 대응 커밋 66b9e63. 기본 팩은 80개 파일, 2,319,760 B 다(66b9e63 에서 다시 셌다. 2026-10-23 의 70개, 2,240,694 B 에서 `lua/i18n.lua` 와 `lua/i18n/*.lua` 일곱, 선곡 `lua/select/{radar,records}.lua` 가 늘었고 `image/select.png` 가 바뀌었다. 그 앞 76e026a 기준: 2026-10-22 의 2,240,618 B 에서 `lua/props.lua`·`lua/select/main.lua` 에 헤더 선언 `rbms_extensions` 를 더해 76 B 늘었다. 2026-10-15 의 65개, 1,772,662 B 에서 `font/Inter-Bold.ttf`, `lua/play/colors.lua`, `lua/select/{panel,inform,words}.lua` 다섯 파일이 늘었다). 반영한 변경: 2026-10-24 확장 id 를 정수·Float·Rate·텍스트·참조 이미지 공간으로 넓히고 확장 불린을 `op` 에 직접 쓸 수 있게 된 것(1.4절), `songlist` 확장 키 `rank`·`thumb`(1.4절), 선곡 화면의 새 구성과 UI 언어 `t(key)`(새 3.4.6절·3.4.7절, 3.6절), 선곡의 순위 슬롯·종류별 노트 수·주 BPM 연결(1.3절 E8, 6절), 2026-10-23 헤더 확장 키 `rbms_extensions`(정수. 1.4절)와 선곡 패널 키 재배정의 opt-in(1.3절 E3, 3.4.5절, 6절), 라이브러리에 없는 곡 막대와 표의 COURSE 폴더·묶음 막대가 스킨에 보이는 값(1.3절), SCRATCH AUTO 노트 색이 PLAY 설정 SCRATCH AUTO COLOR 로 정해짐(1.4절, 6절), 2026-10-22 헤더 확장 키 `color`·`tint`·`long_tint` 와 `skin_config.color`, 확장 이벤트·옵션 id 대역 21000~(새 1.4절, 4.1절), 기본 스킨의 플레이 색 행(새 3.4.4절), 선곡 옵션 패널과 램프 등급 표시(새 3.4.5절), 굵은 글꼴(2.7절, 3.2절), SKIN 메뉴의 색 행(2.2절), 내보내기·적용의 색(2.8절). 그 앞의 S18·S19 는 스킨 문서·기본 팩·Lua 환경을 바꾸지 않았다(테스트 빌드가 Lua 의 프레임 시계를 멈추는 `SkinLua::hold_frame_clock` 은 출하 동작과 무관하다: `architecture.md` "Testing and the lint gate"). 반영한 웨이브(모두 커밋됨): 웨이브 16(스코어 그래프의 TARGET 범례가 실제로 쓰는 목표의 이름을 쓴다: 3.4.1절. 선곡 패널의 점수 칸은 램프만 있는 기록이면 `-`: 6절), 웨이브 18(SCRATCH AUTO 가 치는 레인의 노트를 엔진이 초록으로 그린다: 6절), 웨이브 15(앱이 덧그리는 UI 와 내장 화면의 무채색 팔레트, 값을 못박지 않는 `theme.ron` 템플릿: 3.4.3절, 6절), 웨이브 14(기본 스킨의 모노톤 팔레트와 색 옵션 넷, 온전한 폭발 고리, 발치의 LIFT 수치: 3.4절·3.4.3절. 조절한 팩의 내보내기·가져오기와 같은 옵션을 모든 화면에 적용: 2.8절), 웨이브 13(기본 스킨의 판정선을 필드 맨 아래로: 3.4.1·3.4.2절. 노트 필드를 판정 오프셋만큼 앞서 그림: 1.2절)
 
 R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로 그린다. 문서가 없거나 읽히지 않는 화면은 내장 화면이 그린다. 기본으로 설치되는 자작 스킨 `rbms-default` 가 첫 실행부터 선곡 · 결정 · 플레이 · 결과를 그리며, beatoraja 용으로 만든 외부 Lua 스킨(`.luaskin`)도 수정 없이 읽는다. 이 문서의 독자는 스킨을 쓰는 사용자와 스킨을 만드는 사람이다.
 
@@ -61,7 +61,7 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | E5 | 스킨 폰트에 없는 글자(한글, 일본어 등)는 앱의 다국어 폰트로 그린다. beatoraja 는 사각형으로 그린다 | |
 | E6 | 기본 창 1280x720. SETTINGS 의 DISPLAY 묶음에 RESOLUTION(1280x720, 1600x900, 1920x1080, 2560x1440, 3840x2160)과 WINDOW MODE(WINDOWED, BORDERLESS)가 있다. 16:9 가 아니면 레터박스. BORDERLESS 는 항상 비율을 맞추고, 일반 창은 LETTERBOX 설정을 따른다. LETTERBOX 기본값은 켬이다 | 설정 판 3 이하의 파일은 읽을 때 LETTERBOX 를 한 번 켠다(그 판은 고르지 않은 기본값도 꺼짐으로 적었다. 원본은 `settings.ron.v3.bak`). 판 4 부터는 적힌 값을 따른다. 계정 동기화로 내려받은 이전 판 설정에도 같은 규칙을 쓴다 |
 | E7 | 그리기와 타이밍은 beatoraja 체크아웃(HEAD `8320241d`) 그대로다. 입력 결함만 원작 의도로 고쳤다(luajava `Input.Keys` 의 UP 19, DOWN 20, LEFT 21, RIGHT 22) | |
-| E8 | 스킨의 IR 타이머 172~174 와 관련 옵션은 실제 IR 상태를 답한다. 랭킹 목록 값(380~399 등)의 스킨 연결은 후속이다 | §6 |
+| E8 | 스킨의 IR 타이머 172~174 와 관련 옵션은 실제 IR 상태를 답한다. 랭킹 목록 값(정수 380~399, 이미지 인덱스 380~399, 텍스트 120~129, Rate 8)은 선곡에서도 값을 낸다(2026-10-24. Rate 8 은 읽기와 쓰기. 총원과 램프 분포는 받은 쪽 줄 수라 100줄 단위의 하한값이다) | §6 |
 | E9 | 9키는 기본 스킨에 문서가 있다. ModernChic 같은 9키 문서가 없는 팩에서는 9키만 내장 필드다 | |
 | E10 | GPU 표면을 sRGB 가 아닌 포맷으로 골라 색을 바이트 그대로 통과시킨다 | 실제 창의 내장 화면이 이전보다 어둡고 대비가 강하다. 테마 색 재조정 여부는 미결(§6) |
 
@@ -96,23 +96,49 @@ beatoraja 에 없는 것이다. beatoraja 는 모르는 키를 무시하므로, 
 | `long_tint`(note) | note 정의의 목록 | 같은 모양. 롱노트(머리·몸통·끝, CN, HCN)에 곱한다. 비워 두면 `tint` 가 롱노트에도 닿는다 | `NoteSet.long_tint`, `long_tint_of` |
 | `skin_config.color` | Lua 본체 패스의 전역 표 | 색 행 이름 → `{ r, g, b, a, custom }`. 값은 저장값이고 없으면 행의 `def`, `custom` 은 플레이어가 저장한 값인지 여부다. 로드 시점의 값이고 실행 중 갱신되지 않는다. 헤더 패스에서는 `skin_config == nil` 이고, 색 행이 없는 문서에서는 빈 표다. beatoraja 에서도 도는 스킨은 `(skin_config.color or {})` 로 읽는다 | `rbms_skin::lua::SkinConfigColor` |
 | `rbms_extensions` | 문서 최상위 정수(JSON 은 `"rbms_extensions": 1`, Lua 는 헤더 표의 `rbms_extensions = 1`. 헤더 패스의 값이 이긴다) | 1 이상이면 "이 스킨은 R-BMS 확장 id(이벤트 21000~21099, 불린 21100~21199)와 그에 딸린 선곡 패널 키 재배정을 안다"는 뜻이다. 없거나 0 이면 모른다. 선곡 패널의 키 표만 가른다: 선언이 있으면 재배정 표, 없으면 원본 표(`docs/play-options.md` 12.2절). 확장 id 자체는 선언과 상관없이 모든 스킨에 답한다. 읽는 곳이 선곡뿐이라 기본 스킨은 `select.luaskin` 의 헤더에만 싣는다(`lua/props.lua` 의 `props.rbms_extensions = 1` 을 `lua/select/main.lua` 의 `screen.header()` 가 보낸다). beatoraja 는 두 형식 모두 모르는 키를 버리므로 겸용 스킨에 넣어도 안전하다. 정수가 아닌 값을 JSON 에 쓰면 문서가 거절될 수 있다 | `SkinDef.rbms_extensions`, `SkinDef::knows_rbms_extensions`, 상수 `RBMS_EXTENSIONS_PANEL_KEYS` |
+| `rank`(songlist) | `songlist` 객체의 목록 | 곡 막대 왼쪽의 DJ LEVEL 배지 8개(F, E, D, C, B, A, AA, AAA 순서의 `dst`, 각 항목의 `id` 는 일반 `image` id). 막대 왼쪽 위 모서리 기준 상대 좌표이고 램프처럼 마지막에 놓인 자리에 그린다. **보조 판을 뺀** 최고 기록이 있는 곡 막대에만 그린다(폴더·코스·없는 곡·기록 없는 곡은 그리지 않는다). 키가 없으면 그리지 않는다 | `SongList.rank`, `SongBar.rank`, 로더 `SongListTracks.rank` |
+| `thumb`(songlist) | `songlist` 객체의 `dst` 하나 | 곡 막대의 썸네일(스테이지 그림, 없으면 배너의 가운데 정사각을 128x128 로 줄인 것). `id` 는 아무것도 가리키지 않으므로 임의 문자열이다. 막대 기준 상대 좌표, 그림 전체를 소스로 `stretch` 대로 맞추고 색·알파는 `dst` 의 것을 쓴다. 곡 막대에만 붙고 첫 프레임에는 없다가 읽은 뒤 나타난다. 그리기 순서는 램프, 썸네일, 등급, 레벨이다. 두 키가 없는 외부 스킨은 그리기와 Lua 호출 순서가 전과 같다 | `SongList.thumb`, `SongBars.thumbs` |
 
 노트에 곱하지 않는 것: 지뢰, 처리된 노트 표시, HCN 이 풀려 깎이는 동안의 몸통, SCRATCH AUTO 가 치는 레인(엔진이 단색으로 칠한다. 색은 스킨이 아니라 PLAY 설정 SCRATCH AUTO COLOR 이고 저장값이 없으면 `#30E050`. 알파가 불투명도이며 어느 스킨에서나 같다. 이 노트에는 색 행도 `tint` 도 닿지 않는다. play-options.md 10.5절). 색은 `SkinColor`(RGBA 각 8비트)이고 16진 읽기·쓰기(`from_hex`, `to_hex`)와 곱(`tinted`)이 `crates/rbms-skin/src/dst.rs` 에 있다. 저장소는 `SkinCustomisation.colors`(색 id → `SkinColor`, `crates/rbms-config/src/schema.rs`)이고 `OffsetSource::color(id)` 가 프레임마다 읽는다. 앱의 `ScreenHost::color` 가 `DocumentOffsets::color` 에 위임하므로(`skin_host/mod.rs`, `skin_screen.rs`) 저장한 색은 문서를 다시 읽지 않고 다음 프레임에 곱해진다. 이 위임을 빠뜨리면 컴파일 오류 없이 색이 안 먹는다(`OffsetSource::color` 의 기본이 `None`이라서).
 
-R-BMS 가 답하는 확장 이벤트·옵션 id 는 beatoraja 가 선언한 번호 위에 따로 둔 두 대역이다. 원본 선언 최대(옵션 3035, 이벤트 388)와 원본이 스킨 몫으로 남긴 대역(옵션 900~999, 이벤트 1000~1999, 타이머 10000~19999) 위이고, 2026-10-09 에 철거한 옛 사설 id 20001~20316 은 되살리지 않았다. 대역 안에서 아래 표에 없는 번호는 옵션으로 읽히지 않고 이벤트로 실행되지 않는다. 단일 목록은 `apps/rbms-player/src/skin_host/extension.rs` 다.
+R-BMS 가 답하는 확장 id 는 beatoraja 가 선언한 번호 위에 따로 둔 대역이다. 2026-10-24 부터 이벤트·불린에 더해 정수·Float·Rate·텍스트·참조 이미지 공간도 연다(결정과 정본 배정표: [확장 id 공간 ADR](./acknowledge/2026-10-24-adr-rbms-extension-id-spaces.md). [2026-10-22 확장 id ADR](./acknowledge/2026-10-22-adr-rbms-extension-ids.md)의 일부를 대체한다). 이벤트는 21000~21099, 불린은 21100~21199, 정수·Float·Rate·텍스트·참조 이미지는 21000~21199 를 각 공간 안에서 쓴다. 공간끼리 번호가 겹쳐도 되지만 **Float 와 Rate 는 한 공간처럼 다뤄** 같은 번호를 두 공간에 주지 않는다(Lua `float_number` 와 호스트가 Float 에 없으면 Rate 를 함께 읽는다). 원본 선언 최대(옵션 3035, 이벤트 388)와 원본이 스킨 몫으로 남긴 대역(옵션 900~999, 이벤트 1000~1999, 타이머 10000~19999) 위이고, 2026-10-09 에 철거한 옛 사설 id 20001~20316 은 되살리지 않았다. 대역 안에서 아래 표에 없는 번호나 값을 아직 답하지 않는 번호는 그 종류의 부재 값이다(불린 꺼짐, 이벤트 무시, 정수 `INTEGER_ABSENT`(-2147483648), 실수 `FLOAT_ABSENT`, 텍스트 빈 문자열. 이미지 세트의 `value` 는 `ref` 로 돌아가지 않고 숨긴다). 단일 목록은 `apps/rbms-player/src/skin_host/extension.rs`(상수는 `rbms_skin::property::extension`), 기본 스킨의 이름표는 `lua/props.lua` 의 `props.extension`·`extension_event`·`extension_number`·`extension_float`·`extension_rate`·`extension_text`·`extension_image` 다.
+
+이벤트와 불린:
 
 | 번호 | 종류 | 뜻 |
 | --- | --- | --- |
 | 이벤트 21000 | 실행 | SCRATCH AUTO 켬·끔. 어떤 인자로 실행해도 한 번에 한 번 뒤집는다 |
 | 이벤트 21001 | 실행 | KEEP GREEN NUMBER 켬·끔 |
+| 이벤트 21002 | 실행(선곡) | 랭킹 모드 열기·닫기 |
+| 이벤트 21003~21006 | 예약 | 리플레이 슬롯 1~4 의 배치로 플레이(처리하지 않는다) |
+| 이벤트 21010~21014 | 실행(선곡) | 같은 곡의 형제 차트 슬롯 1~5(`#DIFFICULTY` 1~5)로 커서 이동. 빈 슬롯·코스 탭·폴더 막대 위에서는 무시 |
 | 옵션 21100, 21101 | 읽기(선곡) | SCRATCH AUTO 켜짐, KEEP GREEN NUMBER 켜짐 |
 | 옵션 21102~21104 | 읽기(선곡) | LANE COVER, LIFT, HIDDEN+ 켜짐(원본의 이벤트·이미지 인덱스 330~332 와 같은 값) |
+| 옵션 21105 | 읽기(선곡) | 랭킹 모드가 열려 있음 |
 | 옵션 21110 + k | 읽기(선곡) | 커서 아래 곡의 최고 램프의 어시스트 등급이 k. 최고 기록이 없는 곡·폴더·코스는 다섯 모두 꺼짐 |
+| 옵션 21115~21119 | 읽기(선곡) | 형제 차트 슬롯 1~5 에 현재 목록의 차트가 있음. 커서가 차트가 아니거나 코스 탭이면 모두 꺼짐 |
 | 옵션 21120 + k | 읽기(결과) | 이번 판의 등급이 k(코스 결과는 0) |
 | 옵션 21130 + k | 읽기(결과) | 이번 판 이전의 최고 기록(이미지 인덱스 371 과 같은 LN 모드 기준)의 등급이 k. 처음 친 곡은 다섯 모두 꺼짐 |
 | 옵션 21140 + i | 읽기(선곡) | 키 인덱스 i(0~8: 건반 1~7과 턴테이블 두 방향)에 닿는 레인이 없다. 5키·10키에서 i = 5, 6 이 켜진다 |
+| 옵션 21150~21152 | 읽기(모든 화면) | 해석된 UI 언어가 영어·한국어·일본어(`21150 + Language::id()`, 하나만 켜짐). 21153~21159 는 예약(항상 꺼짐) |
 
-등급 k 는 0 등급 없음, 1 ASSIST EASY, 2 ASSIST CLEAR, 3 ASSIST HARD, 4 ASSIST EXHARD(`rbms_judge::AssistGrade::id`) 이고 k = 0 은 LIGHT ASSIST 램프의 미등급일 때와 다른 모든 램프일 때 켜지므로 램프 id(선곡 이미지 인덱스 370, 결과 370·371)와 함께 읽는다. 옵션은 `draw`·`value`·`text` 같은 함수 필드에서 `main_state.option(id)` 로만 읽는다. 로더는 `op = {id}` 목록을 원본이 선언한 id 로 제한해 확장 id 를 버리므로 `op` 에는 쓰지 못한다. 음수 id 는 부정이고, 답하지 않는 화면에서는 꺼짐이다. 원본 스킨은 이 번호를 읽지 않는다.
+정수·Float·Rate·텍스트·참조 이미지(값은 커서가 150 ms 머문 뒤 생기고 폴더·코스 막대, 코스 탭, 읽을 수 없는 파일, 스킨 없는 내장 선곡에서는 부재):
+
+| 공간과 번호 | 뜻 |
+| --- | --- |
+| 정수 21000~21015 | 커서 곡의 레인별 노트 수(모드의 레인 순서: 5키 6레인(스크래치 5), 7키 8레인(7), 10키 12레인(5·11), 14키 16레인(7·15). 9키·24키·모드에 없는 레인은 부재) |
+| Rate 21000~21015 | 레인 노트 수 / 가장 많은 레인(0~1, 노트가 없으면 0) |
+| 정수·Float 21020~21025 | NOTES RADAR 표시값 0~200(정수는 버림). 순서 NOTES, PEAK, SCRATCH, SOF-LAN, CHARGE, CHORD. 9키·24키는 부재 |
+| 정수 21030~21034 | 형제 차트 슬롯 1~5 의 레벨(빈 슬롯은 부재) |
+| 정수 21040~21050, 21051 | 열린 폴더에서 디스크에 있는 차트를 램프 id 0~10 별로 센 수, 그 합 |
+| Rate 21040~21050 | 램프별 수 / 합(합이 0 이면 0) |
+| 정수 21060~21083 | 내 기록 줄 r(0 = BEST, 1~5 = 최근 판)의 EX(21060 + r), 램프 id(21066 + r), MISS(21072 + r, 도달하지 못한 노트 포함), DJ LEVEL 인덱스(21078 + r, 0 = F ~ 7 = AAA). 판이 없는 줄은 부재 |
+| 텍스트 21000~21005 | 내 기록 줄 r 의 날짜(로컬 시각 `YYYY-MM-DD HH:MM`, 없으면 빈 문자열) |
+| 참조 이미지 21020 | destination id `"-21020"` 으로 놓는 NOTES RADAR 다각형(흰 불투명 256x256. 스킨의 색·알파가 입힌다. 값이 없으면 그리지 않는다) |
+
+원본 id 를 새로 답하는 것(확장 id 가 아니다): 선곡의 순위 슬롯(정수 380~399, 이미지 인덱스 380~399, 텍스트 120~129, Rate 8), 종류별 노트 수 350~353, 주 BPM 92, 선곡 `judgegraph` type 0 과 `bpmgraph`.
+
+등급 k 는 0 등급 없음, 1 ASSIST EASY, 2 ASSIST CLEAR, 3 ASSIST HARD, 4 ASSIST EXHARD(`rbms_judge::AssistGrade::id`) 이고 k = 0 은 LIGHT ASSIST 램프의 미등급일 때와 다른 모든 램프일 때 켜지므로 램프 id(선곡 이미지 인덱스 370, 결과 370·371)와 함께 읽는다. 옵션은 함수 필드(`draw`·`value`·`text`)에서 `main_state.option(id)` 로 읽거나 `op = { id }` 에 직접 쓴다(음수 id 는 부정). 2026-10-24 전에는 로더가 `op` 의 정수를 원본이 선언한 id 로 제한해 확장 id 를 쓰면 그 객체가 스킨 자체 옵션으로 분류돼 지워졌고, 지금은 `is_builtin_option` 이 확장 불린(21100~21199)도 내장으로 본다. 답하지 않는 화면과 헤더 읽기 단계(`main_state` 가 비어 있다)에서는 꺼짐이다. 선곡 상태가 비어 있는 첫 프레임에는 음수 확장 `op` 가 거짓이다. 원본 스킨은 이 번호를 읽지 않는다. 외부 스킨이 같은 번호를 자기 용도로 쓰면 R-BMS 에서는 이 표의 뜻으로 읽힌다.
 
 ## 2. 스킨 팩 쓰기
 
@@ -373,15 +399,15 @@ SKIN 메뉴에서 조절한 팩을 폴더 하나로 내보내 다른 컴퓨터�
 | --- | --- |
 | 저장소 | `assets/skins/rbms-default/` |
 | 설치 폴더 | `<설정 폴더>/skin/rbms-default/`. `skin.folder` 설정과 무관하게 항상 이 위치다 |
-| 바이너리 | 빌드 스크립트 `apps/rbms-player/build.rs` 가 저장소 폴더를 걸어 만든 표를 싣는다. 70개 파일, 2,240,694 B(76e026a 실측, 폴더 안 파일 크기의 합. 문서 9, `lua/` 31, `image/` 5, `font/` 3, `sound/` 22. 2026-10-15 의 65개, 1,772,662 B 에서 굵은 글꼴 420,428 B 와 Lua 모듈 네 개 등이 늘었다). 폰트 `font/Inter-Regular.ttf` 는 렌더러의 `BUNDLED_FONT` 를 가리켜 한 벌만 실린다(두 파일이 달라지면 빌드 실패). 릴리스 바이너리 크기는 65개 파일일 때 +317,760 B(macOS arm64 실측)였고 70개 파일의 값은 재지 않았다 |
+| 바이너리 | 빌드 스크립트 `apps/rbms-player/build.rs` 가 저장소 폴더를 걸어 만든 표를 싣는다. 80개 파일, 2,319,760 B(66b9e63 실측, `tools/` 를 뺀 폴더 안 파일 크기의 합. 문서 9, `lua/` 41, `image/` 5, `font/` 3, `sound/` 22. 2026-10-23 의 70개, 2,240,694 B 에서 `lua/` 가 열 개(i18n 여덟, `select/radar.lua`, `select/records.lua`) 늘고 `image/select.png` 가 바뀌었다. 2026-10-15 의 65개, 1,772,662 B 에서 굵은 글꼴 420,428 B 와 Lua 모듈 네 개 등이 늘었다). 폰트 `font/Inter-Regular.ttf` 는 렌더러의 `BUNDLED_FONT` 를 가리켜 한 벌만 실린다(두 파일이 달라지면 빌드 실패). 릴리스 바이너리 크기는 65개 파일일 때 +317,760 B(macOS arm64 실측)였고 80개 파일의 값도 재지 않았다 |
 
 ### 3.2 구조
 
 | 경로 | 내용 |
 | --- | --- |
 | `decide.luaskin`, `select.luaskin`, `play5`, `play7`, `play9`, `play10`, `play14` `.luaskin`, `result.luaskin`, `courseresult.luaskin` | 화면 문서 9개. 한 줄짜리 진입 파일이다(`return require("lua.<화면>.main").build(...)`) |
-| `lua/` | 공통 모듈 `theme.lua`(색, 격자, 이름표, 선곡 패널 색 `theme.panel`, 램프 등급 색), `props.lua`(속성 id 이름표와 확장 id `props.extension`), `ui.lua`(조립기), `motion.lua`(키프레임 프리셋), `parts.lua`(조합 부품), 화면 모듈 `lua/<화면>/`(플레이의 색 행은 `lua/play/colors.lua`, 선곡의 옵션 패널은 `lua/select/{sheet,panel,words,inform}.lua`), 생성된 시트 좌표표 `lua/atlas/` |
-| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 120,807 B. `play.png` 는 1024x570 그대로이고 순백 노트 묶음 다섯 장이 늘었다(3.4.4절) |
+| `lua/` | 공통 모듈 `theme.lua`(색, 격자, 이름표, 선곡 패널 색 `theme.panel`, 램프 등급 색), `props.lua`(속성 id 이름표와 확장 id `props.extension` 외 여섯 표), `i18n.lua`(UI 언어 `t(key)`, 3.4.7절), `ui.lua`(조립기), `motion.lua`(키프레임 프리셋), `parts.lua`(조합 부품), 화면 모듈 `lua/<화면>/`(플레이의 색 행은 `lua/play/colors.lua`, 선곡의 옵션 패널은 `lua/select/{sheet,panel,words,inform}.lua`, 선곡의 정보창은 `lua/select/{info,radar,records}.lua`, 번역 영역 표는 `lua/i18n/*.lua`), 생성된 시트 좌표표 `lua/atlas/` |
+| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 123,264 B(2026-10-24 등급 배지 8조각을 구운 `select.png` 포함). `play.png` 는 1024x570 그대로이고 순백 노트 묶음 다섯 장이 늘었다(3.4.4절) |
 | `font/` | `Inter-Regular.ttf`, `Inter-Bold.ttf`(420,428 B. Inter 4.1 공식 배포의 `extras/ttf/Inter-Bold.ttf`, 무수정, 굵기 700 정적 글꼴), `Inter-OFL.txt`. 같은 저자·같은 OFL 1.1 이라 `Inter-OFL.txt` 한 벌이 두 글꼴을 덮고 `THIRD-PARTY-NOTICES.md` 3절에 Bold 문장을 더했다 |
 | `sound/` | 시스템 사운드 22개 `.wav`. 스킨의 `sound/…` 와 시스템 사운드 폴더가 같은 설치본이다 |
 | `tools/` | 이미지와 사운드 생성 스크립트. 설치본에는 들어가지 않는다 |
@@ -549,7 +575,41 @@ DP 는 친 쪽 필드에만 뜬다. 엔진 오프셋 Judge offset(판정 글자�
 
 비용(`skin-dump`): 패널 이전(7459bf7)의 선곡 문서는 release 200프레임에서 로드 7.0 ms, destination 503, 함수 61, 프레임 평균 0.024 ms(p99 0.043 ms)였고, 패널을 그린 뒤(0c450db)는 로드 24.8 ms, destination 1611, 함수 171, 프레임 평균 0.047 ms(p99 0.060 ms, 최대 0.078 ms)였다. 패널 수리(`3f058f4`) 뒤의 strict 덤프(debug 120프레임)는 destination 1677, 함수 203, 프레임 평균 0.230 ms, 최대 0.292 ms, 경고·함수 실패·예산 초과 0 이다(release 와 debug 의 값은 비교하지 않는다). 출발 타이머(31~33)의 destination 은 `op` 가 없어 패널이 닫혀 있어도 `draw` 함수가 매 프레임 불린다.
 
-한계: 한 프레임에 옵션 둘이 바뀌면 INFORMATION 은 감시 순서상 마지막 것만 보인다. 문구(INFORMATION 안내, 게이지·GAS·알고리즘 설명)는 영어 대문자로 새로 썼다. **미확인**: 사용자가 문구를 검토하지 않았다. 외부 스킨에서 키 재배정이 적용되는 문제는 `docs/play-options.md` 12.7절.
+한계: 한 프레임에 옵션 둘이 바뀌면 INFORMATION 은 감시 순서상 마지막 것만 보인다. 문구(INFORMATION 안내, 게이지·GAS·알고리즘 설명)는 영어 대문자로 새로 썼고 2026-10-24 부터 `lua/i18n/select_other.lua` 의 세 언어 표에서 온다. **미확인**: 사용자가 문구를 검토하지 않았다(번역은 용어집의 초안). 외부 스킨에서 키 재배정이 적용되는 문제는 `docs/play-options.md` 12.7절.
+
+#### 3.4.6 선곡 화면(IIDX 식, 2026-10-24)
+
+사용자 화면의 설명은 [play-options.md](./play-options.md) 17절, 결정은 [선곡 IIDX 식 ADR](./acknowledge/2026-10-24-adr-select-iidx-layout.md)다. 이 절은 스킨 쪽(모듈, 토큰, 읽는 값)이다. 바탕·면·글자는 모노톤 그대로이고 강조색은 등급 배지·램프 띠·SCORE TARGETS 메달·레이더 칠하기에만 쓴다(2026-10-12 모노톤 결정의 부분 변경).
+
+| 모듈 | 내용 |
+| --- | --- |
+| `lua/select/list.lua` | 곡 막대 안(등급 배지 `rank` 8개, 램프 띠, 레벨 `num32`, 제목, 썸네일 `thumb`), 선택 막대 돌출(`selected.left` 1104, 가운데 칸 16px), 스크롤 막대의 램프 누적(Rate 21040~21050, 합 정수 21051), 목록 위의 위치 경로(`STRING_DIRECTORY`) |
+| `lua/select/controls.lua` | 머리(PLAY STYLE 칩, FREE PLAY·COURSE 칩, 시각 칩, 검색 상자), 바닥(키 이름 상자 안내, RANKING 단추: 이벤트 21002, 켜짐은 `op = { 21105 }`) |
+| `lua/select/info.lua` | 곡 머리, CHART DATA(난이도 탭·레인 막대·밀도 그래프), MY SCORE, SCORE TARGETS, CLEAR RATE, 폴더·코스 정보 |
+| `lua/select/radar.lua` | NOTES RADAR: 회전 사각형 9개(`ui.lua` 의 `angle`)로 격자, 참조 이미지 `"-21020"` 다각형, 축 라벨 6색, 값, 가장 큰 축의 별 |
+| `lua/select/records.lua` | MY RECORDS 6줄, 그리고 랭킹 모드(불린 21105)에서 같은 자리의 IR RANKING 6줄(텍스트 120~129, 정수 380~399, 이미지 인덱스 390~399) |
+| `lua/theme.lua` | 토큰: `theme.rank`·`rank_ink`(f~aaa), `rank_key[0..7]`(F~AAA 순)·`rank_last`, `medal`·`medal_ink`·`medal_order`, `radar`, `ranking`, `select_layout`(좌표 상수) |
+
+- 등급 인덱스: `theme.rank_key[0..7]` 은 F 에서 AAA 순서(DJ LEVEL 인덱스와 같다)이고 기존 `theme.rank_name` 은 AAA 가 1번이다. 어느 표인지 구분해 쓴다.
+- 레이더 그림은 256 정사각을 화면에서 144 로 줄여 놓는다(반지름 69.75, `theme.radar`). 색은 `theme.radar.fill`(244, 236, 72)과 `fill_alpha` 176.
+- 시트: 등급 배지 8조각(`rank_f`~`rank_aaa`, 48x28, Inter Bold)이 `image/select.png` 에 구워져 있고 `tools/sections/select.py` 의 `rank_badge` 가 만든다. `select.png`·`lua/atlas/select.lua` 가 `theme.lua` 의 `rank`·`rank_ink` 에 의존하므로 바꾸면 `generate-images.py --check` 로 확인한다.
+- `apps/rbms-cli/scenarios/select.json` 이 위 모듈이 읽는 새 id 값(정수 21000~21083, Float 21020~21025, Rate 21000~21015·21040~21050, 텍스트 21000~21005, 불린 21105·21115~21119, 순위 슬롯 380~395)을 갖는다. 난이도 옵션 150~155 는 `rbms-cli` 시험이 "첫 난이도만 켜짐"을 요구해 넣지 않는다. 언어 불린은 `base.json` 에 있다.
+- 비용(`skin-dump`, debug 120프레임, 선곡 문서): 2026-10-22 패널 수리 뒤 destination 1677, 함수 203, 프레임 평균 0.230 ms. W4 전(HEAD) destination 2116, 함수 344, 0.489 ms. 번역 뒤 영어 destination 2115, 함수 413, 0.625 ms(한국어 0.648 ms, 일본어 0.707 ms). 경고·함수 실패·예산 초과 0 이다(release 와 debug 의 값은 비교하지 않는다).
+
+#### 3.4.7 UI 언어(`lua/i18n`, 2026-10-24)
+
+결정은 [UI 다국어 ADR](./acknowledge/2026-10-24-adr-ui-language.md), 용어는 [용어집](./reference/2026-10-24-i18n-glossary.md).
+
+| 항목 | 내용 |
+| --- | --- |
+| 언어 읽기 | 불린 21150~21152(1.4절). `i18n.language()` 가 `"en"`·`"ko"`·`"ja"` 를 돌려준다. 헤더 읽기 단계(`main_state` 가 비어 있다)이거나 켜진 언어가 없거나 그 언어 글자가 없으면 영어다 |
+| `t(key)` | `local i18n = require("lua.i18n")` 뒤 `text = i18n.t("키")`. 함수 필드를 돌려주고 호출될 때마다 언어를 읽으므로 언어를 바꾸면 다음 프레임에 바뀐다. 정적 `constantText` 는 문서를 다시 읽을 때만 바뀌므로 번역 문구는 이렇게 함수 필드로 쓴다. 없는 키는 문서를 만들 때 `unknown i18n key: <키>` 로 실패한다(오타가 빈 칸이 아니라 로드 실패로 드러난다) |
+| 템플릿 | `i18n.template(key)` 는 `{0}` 부터 채우는 문장(세 언어가 같은 자리표 집합을 가져야 한다), `i18n.fill(template, ...)`, 한 줄 목록은 `i18n.join(parts)`(일본어는 공백 없이) |
+| 영역 표 | `lua/i18n/{common,select_bar,select_info,select_other,play,result,decide}.lua` 가 `return { 키 = { en = "...", ko = "...", ja = "..." } }` 를 돌려준다. 키는 영역 전체에서 유일하고 접두사(`common_`, `bar_`, `info_`, `side_`, `sheet_`, `words_`, `result_`, `decide_`, `play_`)로 나눈다. 같은 키가 두 영역에 있으면 `lua.i18n` 을 불러오는 순간 `i18n key defined in two areas` 로 실패한다. 지금 키는 234개 |
+| 검사 | `crates/rbms-skin/tests/default_pack.rs`: 키 유일, 세 언어 모두 비어 있지 않음, 같은 항목의 자리표 집합 일치, 템플릿·`join` 의 언어별 동작, 언어 변경을 따름 |
+| 번역하지 않는 것 | 판정·게이지·램프·옵션·점수 이름, 키 이름, BPM, TOTAL, MS, 코스 제약 배지, 패널 제목과 레이더 축 이름은 원어. 스킨 메뉴의 헤더 옵션 이름(약 160개)은 영어 |
+| 영어 불변 | 번역 전후 결정·결과·코스 결과·플레이 캡처 106장이 바이트 단위로 같고 영어 원문은 이전 Lua 와 글자 하나 다르지 않다(조립 문장과 앞 공백만 예외) |
+| 시나리오 | `skin-dump` 시나리오 `base.json` 이 불린 21150(영어)을 켜 둔다. 한국어·일본어로 돌리려면 시나리오에서 21150~21152 를 바꿔 쓴다(2026-10-24 세 언어 모두 문서 9개 load ok, warn 0, pcall 0, fn fail 0, over 0, 팩 unchanged) |
 
 ### 3.5 이미지와 사운드를 다시 만드는 법
 
@@ -571,7 +631,7 @@ DP 는 친 쪽 필드에만 뜬다. 엔진 오프셋 Judge offset(판정 글자�
 | 기본 스킨 원본 고치기 | 저장소의 `assets/skins/rbms-default/` 를 고친다. 색은 `lua/theme.lua`(테마 두 벌 `theme.mono`·`theme.slate`, 강조색 `theme.accent`, 노트 `theme.note`, 의미색. 화면 모듈은 색 표를 참조로만 쥐고 `theme.apply` 가 본체 패스에서 값을 정한다: 설계서 4.1절), 좌표는 화면 모듈, 시트는 `tools/sections/<구역>.py`. 다음 빌드가 새 표를 싣는다 |
 | 고친 뒤 확인 | `cargo run -p rbms-cli -- skin-dump assets/skins/rbms-default --strict --frames 120`(§5) |
 
-원칙은 설계서 §1, §3, §4 를 따른다. 좌표는 1920x1080 설계 좌표 `(x, top, w, h)` 이고, 글자는 영어이며, 금지 API(luajava, 파일 쓰기, `os.date`, `math.random`)를 쓰지 않는다. 문서마다 헤더와 본체를 한 모듈의 `build` 가 만들고, 모듈 최상위에서는 `skin_config` 와 `main_state` 를 부르지 않는다(헤더 전용 읽기에서 `main_state` 가 빈 테이블이기 때문). 공통 모듈의 API 는 설계서 §4 에 있다. 이 팩은 자작이며 ModernChic 의 Lua, 이미지, 폰트, 사운드를 한 줄도 복사하지 않았다(D1).
+원칙은 설계서 §1, §3, §4 를 따른다. 좌표는 1920x1080 설계 좌표 `(x, top, w, h)` 이고, 글자는 `t(key)` 로 `lua/i18n/` 의 세 언어 표에 두며(3.4.7절. 스킨 메뉴의 헤더 옵션 이름만 영어), 금지 API(luajava, 파일 쓰기, `os.date`, `math.random`)를 쓰지 않는다. 문서마다 헤더와 본체를 한 모듈의 `build` 가 만들고, 모듈 최상위에서는 `skin_config` 와 `main_state` 를 부르지 않는다(헤더 전용 읽기에서 `main_state` 가 빈 테이블이기 때문). 공통 모듈의 API 는 설계서 §4 에 있다. 이 팩은 자작이며 ModernChic 의 Lua, 이미지, 폰트, 사운드를 한 줄도 복사하지 않았다(D1).
 
 ## 4. Lua 환경
 
@@ -666,6 +726,8 @@ cargo run -p rbms-cli -- skin-dump <팩 폴더 또는 문서> [옵션]
 cargo run -p rbms-cli -- skin-dump assets/skins/rbms-default --strict --frames 120
 ```
 
+언어별로 돌려 보려면 시나리오의 불린 21150~21152 를 바꿔 `--scenario` 로 준다(내장 `base.json` 은 영어, 3.4.7절).
+
 ModernChic 은 키 설정 문서(`keyconfig`)만 원본 결함(`Decide/lua/require/textproperty.lua:37`)으로 본문이 실패한다. `--allow-failure` 로 그 문서를 지정해 게이트로 쓴다.
 
 ### 5.2 캡처 하니스와 환경 변수
@@ -694,12 +756,12 @@ RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> \
 | 구분 | 한계 | 사정 |
 | --- | --- | --- |
 | 엔진 | `customTimers`, `customEvents` 는 로드만 되고 평가되지 않는다. id 로 가리킨 커스텀 타이머를 쓰는 destination 은 그려지지 않는다. destination 의 `timer` 에 Lua 함수를 직접 주면 그려진다 | 사양 웨이브 9. ModernChic 에서는 빈 테이블 |
-| 엔진 | IR 랭킹 목록·라이벌 값(380~399 등)은 스킨에 연결되지 않았다. IR 상태 타이머(172~174)와 옵션(51 등)은 실제 값이다. IR 서버가 설정된 환경에서는 option 51 이 참이 되어 ModernChic 이 IR 메뉴를 구성에 넣는데 그 구성의 캡처는 찍지 못했다 | 웨이브 9 |
-| 선곡 | 종류별 노트 수(350~353), 밀도(360~365), 주 BPM(92)은 빈칸이다 | songdb 열 추가와 전체 재스캔이 필요해 별도 작업(D9) |
+| 엔진 | 선곡의 IR 순위 슬롯(정수 380~399, 이미지 인덱스 380~399, 텍스트 120~129, Rate 8)은 값을 낸다(2026-10-24). 총원과 램프 분포는 받은 쪽(100줄 단위)의 하한값이다. 실제 ModernChic 랭킹 탭으로 그려 본 확인은 없다. IR 상태 타이머(172~174)와 옵션(51 등)은 실제 값이다. IR 서버가 설정된 환경에서는 option 51 이 참이 되어 ModernChic 이 IR 메뉴를 구성에 넣는데 그 구성의 캡처는 찍지 못했다 | 웨이브 9, 2026-10-24 |
+| 선곡 | 종류별 노트 수(350~353)와 주 BPM(92)은 커서가 150 ms 머문 차트를 분석 작업자가 파싱한 뒤 값을 낸다(2026-10-24. 곡 DB 열이 아니라 분석 결과이고 같은 분석이 `judgegraph` type 0 과 `bpmgraph` 도 그린다). 밀도(360~365)는 전부터 채워졌다(이 줄의 이전 서술이 낡았다). 스킨 없는 내장 선곡, 폴더·코스 막대, 코스 탭에서는 값이 없다 | 3.4.6절, play-options.md 17.3절 |
 | 선곡 | 표 이름·표 레벨(text 1001~1003, op 1008)은 선곡에서 빈칸이다. 결정 화면에서는 채워진다 | 미지원 |
 | 선곡 | 옵션 패널의 키 재배정(패널 2 의 3·5·6·7번 키와 턴테이블, 패널 1 의 4·6번 키, 패널 3 의 턴테이블)은 스킨이 헤더 `rbms_extensions` 를 선언했을 때만 적용된다(2026-10-23). 외부 스킨(ModernChic 등)은 선언이 없어 원본 키 표를 쓰므로 JUDGE AREA·MARK NOTE·BPM GUIDE·NO MINE 칸은 아무것도 바꾸지 않는다. 사용자가 고쳐 둔 기본 팩의 `lua/select/main.lua` 사본(설치 관리자가 덮지 않는다)에는 선언이 없어 기본 스킨의 패널 그림과 키가 어긋난다 | `docs/play-options.md` 12.7절. 외부 팩으로 키를 눌러 본 확인은 하지 못했다(`RBMS_SKIN_PACK` 이 있을 때만 도는 시험, 실기 점검 Q8·X1) |
-| 선곡 | 기본 스킨의 옵션 패널은 한 프레임에 옵션 둘이 바뀌면 INFORMATION 이 마지막 것만 보인다. 문구는 영어 대문자로 새로 썼고 사용자 검토 전이다. 화살표는 굵은 `<` `>` 글자, 턴테이블은 사각 상자로 그렸다 | 3.4.5절 |
-| 선곡 | 앱이 스킨 위에 덧그리는 것과 스킨의 정합: IR 랭킹 패널이 정보 영역 오른쪽 124px 을 덮지 못한다, 옵션 오버레이가 반투명이라 뒤가 비친다, 토스트가 목록 아래쪽 막대를 덮는다 | 스킨으로 고칠 수 없는 앱 단위 작업 |
+| 선곡 | 기본 스킨의 옵션 패널은 한 프레임에 옵션 둘이 바뀌면 INFORMATION 이 마지막 것만 보인다. 문구는 영어 대문자로 새로 썼고(세 언어 표로 옮겼다) 사용자 검토 전이다. 화살표는 굵은 `<` `>` 글자, 턴테이블은 사각 상자로 그렸다 | 3.4.5절 |
+| 선곡 | 앱이 스킨 위에 덧그리는 것과 스킨의 정합: IR 랭킹 패널이 정보 영역 오른쪽 124px 을 덮지 못한다, 옵션 오버레이가 반투명이라 뒤가 비친다, 토스트가 목록 아래쪽 막대를 덮는다, 랭킹 모드에서는 앱 오버레이가 기본 스킨의 정보창 자리(x 972 까지)를 덮어 IR RANKING 6줄이 대부분 가려진다 | 스킨으로 고칠 수 없는 앱 단위 작업. 테스트 부채 3.122 |
 | 선곡 | 판정 알고리즘이 Score 일 때 QUICK SETTINGS 의 해당 행이 움직이지 않고 `SCORE (SET IN SETTINGS)` 로 알린다 | 번호 체계가 beatoraja 와 같다 |
 | 플레이 | 미스 레이어 분리, BACKBMP·배너, 키별 판정 이미지 인덱스, bgaExpand 설정, 오토플레이 중 숫자키 배속, PMS 의 박자 확대는 원천 데이터가 없어 빠졌다 | |
 | 플레이 | 곡(BMS)의 BGA 동영상은 그리지 않는다. 스킨의 동영상 source 만 디코드한다 | 같은 디코더로 후속(웨이브 9) |
@@ -713,7 +775,8 @@ RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> \
 | 설정 | 판 3 이하의 설정 파일에서 일부러 꺼 둔 LETTERBOX 도 업데이트 뒤 한 번 켜진다 | 그 판은 고른 값과 기본값을 구별해 적지 않았다. 다시 끄면 유지된다 |
 | 선곡 | 곡 검색어를 치는 중에는 마우스로 다른 곳을 눌러도 입력이 끝나지 않는다(beatoraja 는 확정한다). 키를 누르고 있어도 글자가 반복되지 않는다 | Enter 로 확정, Esc 로 취소 |
 | 곡 정보 | 짧은 한글만 든 EUC-KR 차트 일부(모든 바이트가 반각 가나 범위인 경우)와 Shift_JIS 파일에 다른 인코딩 한 줄이 섞인 차트는 반각 가나로 보일 수 있다 | 인코딩은 파일 전체에 한 번 판정하고 동점은 Shift_JIS 다(`crates/rbms-parser/src/encoding.rs`) |
-| 확인 | 한글·일본어 제목의 폭, 기준선, 축소는 캡처로 확인하지 못했다(하니스에는 번들 Inter 하나뿐이고 실제 앱은 시스템 글꼴을 쓴다) | 수동 점검 항목에 포함 |
+| 확인 | 한글·일본어 제목과 번역 문구의 폭, 기준선, 축소는 캡처로 확인하지 못했다(하니스에는 번들 Inter 하나뿐이고 실제 앱은 시스템 글꼴을 쓴다) | 수동 점검 항목에 포함(QA 3.23, 테스트 부채 3.112) |
+| 번역 | 스킨 메뉴의 헤더 옵션 이름(약 160개)은 헤더 읽기 단계에서 `main_state` 가 비어 있어 영어다. 선곡 상태가 비어 있는 첫 프레임에는 음수 확장 `op` 가 거짓이다. 선곡 Lua 프레임 평균이 0.23 ms 에서 영어 0.63 ms(한국어 0.65, 일본어 0.71)로 늘었다(예산 초과 0) | 3.4.7절, [UI 다국어 ADR](./acknowledge/2026-10-24-adr-ui-language.md) |
 | 글자 | 스킨의 글꼴 항목(`font`)에는 굵기 칸이 없어 굵은 글자는 굵은 TTF 를 따로 선언해야 한다(2.7절). 스킨 글자는 글리프 위치의 서브픽셀 빈과 SHRINK 줄의 가로 배율 래스터가 없고 감마·대비 보정도 없다 | `docs/quality-assurance/2026-10-14-test-debt.md` 3.87 |
 | 확인 | 실제 GPU 창에서의 첫 실행, 마우스 조작, 소리, 1280x720 창은 사람이 확인해야 한다 | `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` |
 | 확인 | Windows 와 Linux 에서의 결과는 푸시 뒤 CI 로 확인한다 | `docs/ci-release.md` |

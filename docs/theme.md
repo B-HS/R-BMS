@@ -1,6 +1,6 @@
 # UI Theme (`theme.ron`)
 
-Last updated 2026-10-22 · matches 47a7f9c (`theme.ron` and `Theme` did not change; the default skin pack's own `theme.lua` gained the tokens listed under "The default skin pack's own tokens")
+Last updated 2026-10-24 · matches 66b9e63 (`theme.ron` and `Theme` did not change; the default skin pack's own `theme.lua` gained the tokens listed under "The default skin pack's own tokens", on 2026-10-22 for the option panels and on 2026-10-24 for the select screen)
 
 rbms separates three kinds of look-and-feel:
 
@@ -171,6 +171,22 @@ Everything not listed keeps its default — so this themes the highlights withou
 | `theme.font.bold` | `{ id = "inter-bold", path = "font/Inter-Bold.ttf" }` | the bold face the panels write names and chosen values in. A document declares it in its font list only when a bold line is built (`Builder:font_id` in `lua/ui.lua`), so the font lists of the other screens did not change |
 
 The grade colours are a table of their own and not four more entries of `theme.lamp` because `tools/sprites.py` reads `theme.lamp` in order to draw the lamp strip: four more entries made it 15 cells instead of 11 and `generate-images.py --check` reported the select sheet as different. A skin that reads the grade of a lamp does so through the extension options of [`skin.md`](skin.md) §1.4.
+
+### Select-screen tokens (2026-10-24)
+
+The select screen of the default pack became IIDX-like ([`skin.md`](skin.md) §3.4.6, decision in [the ADR](acknowledge/2026-10-24-adr-select-iidx-layout.md)). It is a partial change of the 2026-10-12 monotone decision: grounds, surfaces, lines and text stay achromatic, and colour is allowed in four places only, the DJ LEVEL badge of a song bar, the lamp strip (its existing colours), the SCORE TARGETS medals and the filled polygon and axis labels of NOTES RADAR. No existing token changed its value. The values are the ones in `assets/skins/rbms-default/lua/theme.lua` at 66b9e63.
+
+| Token | Value | Role |
+|---|---|---|
+| `theme.rank` `.f` `.e` `.d` `.c` `.b` `.a` `.aa` `.aaa` | (56, 56, 56), (68, 68, 68), (80, 80, 80), (94, 94, 94), (110, 110, 110), (176, 112, 72), (192, 198, 208), (242, 201, 76) | fill of the badge for DJ LEVEL F to AAA: grey steps for F to B, copper A, silver AA, gold AAA |
+| `theme.rank_ink` (same keys) | (242, 242, 242) for F to B, (26, 16, 6) A, (26, 28, 32) AA, (38, 28, 8) AAA | the letter written on that fill; every pair has a contrast of at least 4.5 to 1 |
+| `theme.rank_key[0..7]`, `theme.rank_last` | `f` to `aaa`, 7 | the index of a DJ LEVEL (0 is F, 7 is AAA) to the key above. The older `theme.rank_name` lists AAA first, so the two orders are opposite |
+| `theme.medal`, `.medal_ink`, `.medal_order` | gold, silver and bronze are `theme.rank.aaa`, `.aa`, `.a` | the SCORE TARGETS medals for AAA, AA and A; the same three values as the course trophies (`TROPHY_COLORS`, checked by script) |
+| `theme.radar` | `fill` (244, 236, 72), `fill_alpha` 176, `star`, `axis` (six label colours, order in `axis_order`), `area`, `side` 144, `radius`, `center` | the NOTES RADAR polygon (the destination's colour and alpha tint the white reference image `-21020`; the fill was matched to the polygon measured in a reference screenshot, (169, 173, 66)), the star on the largest axis and the axis label colours. The grid lines take `theme.color.text` and `theme.color.muted`, so they follow the Mono and Slate themes |
+| `theme.ranking` | `you` = `theme.color.accent`, `you_face` = `theme.color.raised`, `rival` = `theme.color.sub` | the player's own line and a rival's line in the IR ranking of the song select. Ranking is not one of the four places that may carry colour, so these point at existing tokens |
+| `theme.select_layout` | coordinates | named layout values of the select screen (`head`, `cover`, `chart_data`, `score`, `records`, `targets`, `bar`). `bar.selected.left` is 1104 on the 1920 wide screen (the plan's 1096 would have touched the CHART DATA panel) and `targets` runs the full width under the record panels |
+
+The lamp strip needed no new colour (`theme.lamp` and `theme.clear[id].color` are reused for the strip on a bar and for the lamp totals of a scroll bar). The tokens are read by `lua/select/{list,controls,info,radar,records}.lua`; the sheet pieces of the badges are baked from `theme.rank` and `theme.rank_ink` by `tools/sections/select.py`, so changing either needs `generate-images.py` run again.
 
 ## Web front-end boundary
 

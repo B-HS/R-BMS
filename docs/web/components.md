@@ -1,6 +1,6 @@
 # rbms web — 컴포넌트 / 디자인 토큰 매핑 (W0)
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9
+> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 새 §10 언어 선택 위젯을 더했다. 나머지는 2026-10-15 기준)
 
 > **구현 상태:** 이 문서는 W0 설계 기준입니다. W1/W2 UI 통합은 완료됐고, 현재 컴포넌트와 경로는 `web/src/{shared,entities,features,widgets,app}`가 정본입니다. 네이티브 `theme.ron` 편집·동기화는 웹 기능이 아니며 [../theme.md](../theme.md)의 경계를 따릅니다.
 
@@ -241,3 +241,13 @@ design.md §7-4의 랜드마크·텍스트 이중 인코딩은 현재 컴포넌�
 - 같은 정보를 한 화면에 두 번 두지 않는다(17B-2 리뷰: 발광 표의 "내 진행" `h2` 와 "표 주소 복사" 가 둘씩이었음). 데스크톱 사이드바는 "표 정보"(갱신·곡·레벨 수)와 복사, 본문은 진행, 모바일 머리의 복사는 `md:hidden`. 출처 표기는 2026-10-15 에 지웠다(ea34002).
 - 라이트 테마의 작은 회색 글자는 `text-muted-foreground` 로 4.5:1 을 넘는다(토큰 `oklch(0.48 0 0)`). 새 회색 단계를 만들지 않는다.
 - 행 전체를 누르게 할 때는 제목 링크에 `after:absolute after:inset-0` 과 행의 `relative` 를 쓴다(`ScoreRow`, `FolderListItem`, `TableSnapshotCard`). 홈 "최근 활동" 행도 이미 이 방식이라 행 오른쪽 끝을 눌러도 링크가 받는다(17B-2 에서 `elementFromPoint` 로 확인).
+
+
+## 10. 언어 선택 위젯(2026-10-24)
+
+| 이름 | 경로 | 용도 |
+|---|---|---|
+| `LocaleSwitcher` | `widgets/locale-switcher/locale-switcher.tsx` | 사이드바 바닥의 아이콘 버튼과 라디오 메뉴. 고르면 `NEXT_LOCALE` 쿠키(`Path=/`, 1년, `SameSite=Lax`)를 쓰고 `router.refresh()`. 언어 이름은 그 언어 자신으로(`한국어`, `English`, `日本語`) |
+
+- 이 문서를 쓴 시점에 위젯은 만들어져 있지만 화면에 붙이지 않았다. 셸 단위(WI2)가 `widgets/shell/app-shell.tsx` 바닥 `SidebarMenu` 에 `ShellThemeControl` 옆으로 붙이고 그 격자를 `grid-cols-[auto_minmax(0,1fr)]` 에서 `auto_auto_minmax(0,1fr)` 로 바꾼다.
+- 구조·결정은 [architecture.md](./architecture.md) §16, [웹 다국어 ADR](../acknowledge/2026-10-24-adr-web-i18n.md).

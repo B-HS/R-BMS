@@ -1,7 +1,7 @@
 # ADR: R-BMS 확장 id 대역 (이벤트 21000~21099, 불린 21100~21199)
 
 > 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
-> 상태: 유효(사용자 확인 2026-10-23: "1-11 추천대로") · 결정일 2026-10-22 · 결정자 메인(사용자 지시 "끝까지 다 구현해놔"에 따라 추천안 채택, 사용자 미확인) · 커밋 7746932(대역과 첫 id), 3f058f4(닿지 않는 키 id)
+> 상태: 일부 대체됨("21002~21099 미사용", "`op` 에는 쓰지 못한다", 정수·Float·Rate·텍스트·참조 이미지에 확장 id 가 없다는 전제 → [확장 id 공간 ADR](2026-10-24-adr-rbms-extension-id-spaces.md)). 나머지는 유효(사용자 확인 2026-10-23: "1-11 추천대로") · 결정일 2026-10-22 · 결정자 메인(사용자 지시 "끝까지 다 구현해놔"에 따라 추천안 채택, 사용자 미확인) · 커밋 7746932(대역과 첫 id), 3f058f4(닿지 않는 키 id)
 > 대체하는 결정: [2026-10-09-lua-skin-compat-decisions.md](2026-10-09-lua-skin-compat-decisions.md) 의 "사설 id 철거"(이전 결정과의 관계 절)와 그 뒤 "호스트는 원본이 선언한 id 만 답한다"는 운영 규칙을 일부 바꾼다. 폐기한 옛 사설 id 20001~20316 은 되살리지 않는다.
 
 ## 배경
@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | 21000 | `RBMS_EVENT_SCRATCH_AUTO` | SCRATCH AUTO 켬끔(`play.scratch_auto`) |
 | 21001 | `RBMS_EVENT_KEEP_GREEN_NUMBER` | KEEP GREEN NUMBER 켬끔(`play.keep_green_number`) |
-| 21002~21099 | - | 미사용 |
+| 21002~21099 | - | 미사용(대체됨: [확장 id 공간 ADR](2026-10-24-adr-rbms-extension-id-spaces.md)) |
 
 ### 3) 불린(옵션) id 표
 
@@ -55,7 +55,7 @@
 
 ### 4) 스킨이 읽고 실행하는 방법
 
-- 불린은 `main_state.option(id)` 로 함수 필드(`draw`, `value`, `text`)에서만 읽는다. 로더는 `op = {id}` 목록을 원본이 선언한 id 로 제한해 확장 id 를 버리므로(`crates/rbms-skin/src/loader/track.rs:156-158` `is_builtin_option`) `op` 에는 쓰지 못한다. `main_state.option` 은 원본 선언 확인 없이 호스트에 묻는다(`crates/rbms-skin/src/lua/main_state.rs:851-853`). 음수 id 는 부정으로 읽고, 이 불린에 답하지 않는 화면에서는 꺼짐이다.
+- 불린은 `main_state.option(id)` 로 함수 필드(`draw`, `value`, `text`)에서만 읽는다. 로더는 `op = {id}` 목록을 원본이 선언한 id 로 제한해 확장 id 를 버리므로(`crates/rbms-skin/src/loader/track.rs:156-158` `is_builtin_option`) `op` 에는 쓰지 못한다. `main_state.option` 은 원본 선언 확인 없이 호스트에 묻는다(`crates/rbms-skin/src/lua/main_state.rs:851-853`). 음수 id 는 부정으로 읽고, 이 불린에 답하지 않는 화면에서는 꺼짐이다. (대체됨: `op` 목록에 확장 불린을 직접 쓰는 길은 2026-10-24 로더 수리로 열렸다. [확장 id 공간 ADR](2026-10-24-adr-rbms-extension-id-spaces.md))
 - 이벤트는 `main_state.event_exec(id)` 나 버튼의 `act` 로 실행한다. 이벤트 공간은 원본 선언에 대한 게이트가 없어(`reference_implements(NameSpace::Event, _)` 가 항상 참, `crates/rbms-skin/src/property/names.rs:363-366`) 라우트 표에 줄을 더하면 된다.
 - 기본 스킨은 `assets/skins/rbms-default/lua/props.lua` 의 `props.extension` 표에 불린 id 의 이름을 둔다. 기본 스킨은 이벤트 21000·21001 을 쓰지 않는다. 패널 키는 Rust 키 표의 경로로 같은 설정을 바꾼다.
 - 새 id 를 더할 때는 `extension.rs` 에 상수와 대역 확인 테스트 목록(`every_id_is_in_its_band_and_no_two_are_the_same`)을 고치고 `skin_host/mod.rs` 의 라우트를 등록한다.

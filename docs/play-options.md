@@ -1,7 +1,7 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-23 · 대응 커밋 76e026a. 반영한 변경: 2026-10-23 노트를 친 판의 Esc 는 결과 화면(코스 도중은 FAILED 코스 결과까지. 10.2절의 도중 포기 행, 10.6절 5번), SCRATCH AUTO COLOR 행과 색 접이(2절, 7.2절, 10.5절 끝), COURSE GAUGE 설정과 코스 시작 게이지·9칸 이월·ln/cn/hcn 제약·제출 게이지(새 10.14절, 10.13절 4번), 선곡 패널 키의 스킨 opt-in(12.2절, 12.7절), 없는 곡 보이기·다운로드 폴더·다운로드 모달(새 13절), 연습 패널의 GAUGE CATEGORY 에 IIDX(9.1절), 2026-10-22 선곡 옵션 패널 1~3 의 새 배치와 켬·끔 토글, F1 오버레이 홀드 키(새 12절, 2절 표의 "바꾸는 곳" 칸), 램프 등급과 코스 스테이지의 게이지(새 10.13절, 10.1·10.2·10.6·10.12절의 해당 칸), PLAY 메뉴의 색 행 접이(7.2·7.3·7.4절), 2026-10-20 과거 판 trace 소급(웹 AI 기능 W6, 10.12절의 소급·소급 실행·설정·테스트·남은 것 행, 10.1절의 `play_trace` 행), 2026-10-20 판별 trace(웹 AI 기능 W4 클라이언트, 10.1절의 `play_trace`·`ir_sync`·`pending-runs` 행, 10.9절의 trace 행, 새 10.12절), 2026-10-19 기록 목표의 진행 중 값이 그 기록 판의 노트별 판정을 따름(11.7절, 8절의 점수 차 행), 2026-10-19 노트를 하나도 치지 않은 판은 Esc·앱 종료로 남기지 않음(10.2절의 도중 포기·앱 종료 행), 2026-10-15 S19 의 입력 시각과 KEY·PAD DEBOUNCE(3.4절), 기록 정의(규칙 세대 4: avgjudge·BP·코스 스테이지 콤보·풀콤·TOTAL 어시스트, Esc 판은 모두 저장과 코스 도중 Esc: 10.2절의 FAILED·TOTAL·Esc 행, 새 10.11절), 0.1.4 의 기록 동기화와 Esc 포기 판 저장(10.1·10.2·10.4·10.8절과 새 10.9절, 커밋 `5f4a9a2`), 저장 스레드와 리플레이 보존(10.10절), 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
-> 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절), 선곡의 옵션 패널 1~3(12절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
+> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63. 반영한 변경: 2026-10-24 UI 언어 LANGUAGE(새 15절), 선곡의 랭킹 모드와 설정 RANKING KEYS(새 16절), IIDX 식 기본 스킨 선곡 화면(새 17절), 리플레이의 배치로 치기(새 10.15절), 코스 막대 위에서 연습 키가 코스를 시작(9절, 13.3절의 모달 문구 언어), 2026-10-23 노트를 친 판의 Esc 는 결과 화면(코스 도중은 FAILED 코스 결과까지. 10.2절의 도중 포기 행, 10.6절 5번), SCRATCH AUTO COLOR 행과 색 접이(2절, 7.2절, 10.5절 끝), COURSE GAUGE 설정과 코스 시작 게이지·9칸 이월·ln/cn/hcn 제약·제출 게이지(새 10.14절, 10.13절 4번), 선곡 패널 키의 스킨 opt-in(12.2절, 12.7절), 없는 곡 보이기·다운로드 폴더·다운로드 모달(새 13절), 연습 패널의 GAUGE CATEGORY 에 IIDX(9.1절), 2026-10-22 선곡 옵션 패널 1~3 의 새 배치와 켬·끔 토글, F1 오버레이 홀드 키(새 12절, 2절 표의 "바꾸는 곳" 칸), 램프 등급과 코스 스테이지의 게이지(새 10.13절, 10.1·10.2·10.6·10.12절의 해당 칸), PLAY 메뉴의 색 행 접이(7.2·7.3·7.4절), 2026-10-20 과거 판 trace 소급(웹 AI 기능 W6, 10.12절의 소급·소급 실행·설정·테스트·남은 것 행, 10.1절의 `play_trace` 행), 2026-10-20 판별 trace(웹 AI 기능 W4 클라이언트, 10.1절의 `play_trace`·`ir_sync`·`pending-runs` 행, 10.9절의 trace 행, 새 10.12절), 2026-10-19 기록 목표의 진행 중 값이 그 기록 판의 노트별 판정을 따름(11.7절, 8절의 점수 차 행), 2026-10-19 노트를 하나도 치지 않은 판은 Esc·앱 종료로 남기지 않음(10.2절의 도중 포기·앱 종료 행), 2026-10-15 S19 의 입력 시각과 KEY·PAD DEBOUNCE(3.4절), 기록 정의(규칙 세대 4: avgjudge·BP·코스 스테이지 콤보·풀콤·TOTAL 어시스트, Esc 판은 모두 저장과 코스 도중 Esc: 10.2절의 FAILED·TOTAL·Esc 행, 새 10.11절), 0.1.4 의 기록 동기화와 Esc 포기 판 저장(10.1·10.2·10.4·10.8절과 새 10.9절, 커밋 `5f4a9a2`), 저장 스레드와 리플레이 보존(10.10절), 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
+> 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절), 선곡의 옵션 패널 1~3(12절), 언어(15절), 랭킹 모드(16절), 선곡 화면의 새 구성(17절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
 ## 1. 용어
@@ -391,6 +391,8 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 
 선곡에서 연습 키(기본 `F4`)로 연다. 차트를 플레이와 같은 길로 읽은 뒤 뜨는 내장 화면이고, 구간 플레이는 이 화면 위에 열렸다가 이 화면으로 돌아온다. 스킨이 그리는 플레이 화면 위에 겹쳐 뜨는 경로는 없다(스킨의 연습 상태 옵션 1080 은 항상 꺼져 있다). 포인터 좌표는 다른 내장 화면과 같은 통로(창 좌표 → 1280x720 논리 좌표, 레터박스 포함)를 탄다.
 
+**코스 막대 위에서는 연습 키가 연습 패널이 아니라 코스를 시작한다**(2026-10-24, 사용자 결정 21, 원본 `MusicSelector.java:265-270` 에서 코스 막대의 PRACTICE 는 PLAY 로 바뀌어 코스를 읽는 것과 같다). 코스 탭의 코스 막대와 표 안 `COURSE` 폴더의 코스 막대가 같다. 내장 브라우저의 `F4`, 스킨 키 표의 연습 키, 스킨의 `practice` 버튼이 모두 `start_practice` 한 곳을 거쳐 코스 막대면 `select_enter` 로 시작하므로 세 길이 같다. 부수 효과: 내장 브라우저의 코스 탭에서 `F4` 가 뒤에 숨은 곡 목록의 차트를 연습하던 동작이 코스 시작으로 바뀌었다(원본과 같아짐, 미확인 목록 23번). AUTOPLAY·REPLAY 키의 코스 동작은 그대로다. 시험은 이 분기를 끈 상태에서 실패하는 것을 확인했다.
+
 웨이브 12 에서 숫자 행 여섯을 PLAY 메뉴와 같은 방식(7.3절)으로 바꿨다: 슬라이더, 직접 입력, 가장 잔 단위의 ← →. 원본 `PracticeConfiguration` 의 굵은 걸음(TOTAL 5, 재생 속도 5%, 터보 키의 2.5초·25)은 없어졌다. 값의 범위와 값 사이의 제약은 원본 그대로다.
 
 ### 9.1 행
@@ -709,6 +711,23 @@ SCRATCH AUTO 로 클리어한 판의 램프는 클리어한 게이지에 따라 
 10. 구현: `crates/rbms-judge/src/{gauge_tables,gauge,data}.rs`·`data/gauge.ron`("IIDX" 키), `crates/rbms-config/src/{judge,schema,settings}.rs`, `apps/rbms-player/src/{course_ui,app_play,app_result,lib,practice,course_ir}.rs`, `apps/rbms-player/src/stage/{settings/catalog,course_result}.rs`, `crates/rbms-play/src/{lib,session}.rs`, `crates/rbms-course/src/run.rs`. 시험: `gauge_tables::tests::{the_iidx_dan_gauges_pin_their_published_values, only_the_iidx_dan_gauge_softens_at_or_below_its_band, the_iidx_set_tops_out_at_exclass}`, `course_ui::tests::{the_course_gauge_setting_outranks_a_gauge_constraint, a_hard_player_starts_a_course_on_exclass, a_later_stage_starts_on_every_gauge_the_stage_before_left, the_long_note_constraints_each_force_their_flavour}`, `record_tests::course_gauge::{an_ln_course_plays_long_notes_whatever_the_ln_mode_setting, the_next_stage_starts_on_every_gauge_the_last_one_left}`.
 11. 확인하지 못한 것: IIDX 의 내부 단위·반올림(실제 IIDX 와 다를 수 있다), LR2 본체의 시작값·실패선, 차트 자체의 `#LNMODE` 가 LN 종류를 고정한 곡이 LN 제약 코스에 있을 때 서버가 단위를 인정하는지(GENOSIDE·Stella 곡의 `#LNMODE` 사용 여부).
 
+### 10.15 리플레이의 배치로 치기(PLAY THIS LAYOUT, 2026-10-24)
+
+리플레이를 보다가, 또는 선곡의 기록에서, 그 리플레이의 **배치(RANDOM 계열 옵션과 시드)** 를 빌려 내가 새 판을 친다(사용자 요청 "리플레이를 볼때 해당 리플레이의 배치를 활용하여 나도 플레이하는 모드"). 두 사람이 동시에 치는 배틀이 아니다. 결정과 근거는 [배치 플레이 ADR](./acknowledge/2026-10-24-adr-layout-play.md).
+
+| 항목 | 내용 |
+| --- | --- |
+| 진입 | (1) 리플레이를 보는 중 키 `J`(키 설정 Replay 그룹의 `ReplayPlayLayout`, 기본 `J`, 키 설정에서 바꾼다. 보는 중인 판 자리에 새 판이 로딩된다). (2) 선곡의 기록 모달: 리플레이가 있는 기록에만 PLAY REPLAY 와 CLOSE 사이에 PLAY THIS LAYOUT 단추(키 `J`, 마우스). (3) IR 랭킹 패널과 랭킹 모드(16절): 줄에서 `J` 로 그 줄의 리플레이를 내려받아 시작. 파란 건반을 쥐고 REPLAY 를 누르는 길은 없다 |
+| 빌리는 것 | 옵션(RANDOM 계열)과 시드만. 게이지·SCRATCH AUTO·LN MODE·판정 설정은 내 것이다. 판이 도는 동안 설정의 RANDOM 만 빌린 값이고 판 도중 저장돼도 내 값이 저장된다 |
+| 거절 | 코스·연습·오토플레이(출하 기본값이 AUTOPLAY 켬이다)는 `only a run played by hand ... can borrow one`. 다른 차트(md5 대소문자 무시). 모르는 옵션이거나 CONVERGE. 시드가 0 이고 OFF 가 아님. 이 기기 기록이 아닌 리플레이가 OFF 로 보임(서버가 CONVERGE·옵션 없음을 OFF 로 바꿔 보내므로 배치를 알 수 없다. `--replay` 로 연 기록 없는 로컬 파일도 같다). 거절은 화면을 그대로 두고 경고 알림만 낸다. OFF 와 DP 는 허용 |
+| 기록 | 일반 판과 같이 저장·전송한다(표지 없음). 점수·최고 기록 의미는 바뀌지 않는다 |
+| 유지와 버림 | 같은 배치 재시도(파란 건반 + START, R·7번 키, 실패 직후 SELECT)에서는 유지, 선곡·다음 곡·다른 배치·시드 없는 재시도(5번 키, 내장 R)에서는 버리고 내 RANDOM 으로 돌아간다 |
+| 고스트 | 로컬 리플레이에서 빌린 판은 이번 판의 TARGET 이 그 리플레이(이름 `REPLAY <기록 시각>`)가 된다. 결과 화면의 TARGET 도 같다. 설정의 TARGET 행은 건드리지 않는다. 다시 판정할 수 없으면(FRAME 시계 리플레이, 노트 수·EX 불일치) 비례 페이스로 물러나고 콘솔에 이유를 남긴다. 서버 리플레이는 고스트가 없다 |
+| 알림 | 빌릴 때 Info `layout of <출처> (<옵션>)`. 노트 위치가 LN 처리에 따라 달라지는 옵션(S-RANDOM·H-RANDOM·ALL-SCRATCH)을 정의 안 된 LN 이 있는 차트에서 빌리면 LN MODE 와 상관없이 경고만 낸다 |
+| 구현·시험 | `apps/rbms-player/src/{borrowed_layout,app_play,app_result,ghost,target}.rs`, `stage/play/mod.rs`, `stage/select/layout_play.rs`, 키 `keyconfig.rs`. 배치 순열 골든은 `crates/rbms-chart/src/shuffle.rs` 의 시험 모듈(옵션 8개 x 7K·14K·9K) |
+
+알려진 위험: LOADING 에서 Esc 로 취소하면 다음 `load` 까지 설정 화면에 빌린 RANDOM 이 보일 수 있다. 실창에서 `J` 키를 눌러 본 확인은 없다(QA 3.23, 테스트 부채 3.119).
+
 ## 11. 목표 점수(TARGET, TARGET FALLBACK, TARGET RATE)
 
 > 웨이브 16(2026-10-14) 추가. "TARGET 을 LOCAL BEST 로 두어도 AAA 를 목표로 점수가 계산된다"는 보고를 점검하고, 목표가 없을 때 무엇으로 물러날지를 고르게 한 것이다.
@@ -953,7 +972,7 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 
 ### 13.3 안내 모달
 
-- 없는 곡 막대에서 재생·오토·연습·리플레이 이벤트나 Enter 가 모달을 연다(원본은 모드와 상관없이 다운로드 사이트를 연다). 모달은 키(컨트롤러 키 포함)와 마우스를 먼저 받고, 열 때 디스크와 네트워크를 읽지 않는다. 모달 문구는 영어다(앱 UI 전체가 영어).
+- 없는 곡 막대에서 재생·오토·연습·리플레이 이벤트나 Enter 가 모달을 연다(원본은 모드와 상관없이 다운로드 사이트를 연다). 모달은 키(컨트롤러 키 포함)와 마우스를 먼저 받고, 열 때 디스크와 네트워크를 읽지 않는다. 모달 문구는 UI 언어를 따른다(15절, `text/select/download_modal.rs`).
 - 제목 `NOT IN THE LIBRARY`, 안내 두 줄: 표의 DL 은 차트 파일만(차분)이고 소리·그림은 곡 URL 에서 따로 받아 같은 폴더에 두어야 한다. 곡 제목·아티스트·`표 이름 레벨 제목`도 보인다. 키 안내 `LEFT RIGHT CHOOSE   ENTER PRESS   ESC CLOSE`.
 - 버튼 줄: `GET CHART`(링크가 직접 zip 이고 다른 받기가 없을 때만 켜짐. 받는 중에는 `CANCEL`), `OPEN SONG URL`, `OPEN CHART URL`(각각 브라우저에 넘겨도 되는 주소일 때만 켜짐), `CLOSE`. 꺼진 버튼은 흐리게 그리고 커서가 건너뛴다. 받는 중 줄은 `DOWNLOADING 1.2 MB / 3.4 MB`(크기를 모르면 받은 양만), `EXTRACTING`, `SCANNING`, 끝나면 결과 문구, 다른 곡을 받는 중이면 `ANOTHER DOWNLOAD IS RUNNING`. 예·아니오 확인창이 아니라 이 버튼 줄이 "받겠느냐"는 물음이다.
 
@@ -986,3 +1005,89 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 - 설정 NETWORK > DISCORD > DISCORD STATUS(기본 켬). 켜져 있으면 Discord 데스크톱 앱 프로필에 "R-BMS" 하는 중이 보이고, 선곡·곡 플레이(곡 제목, `7K ANOTHER 12` 꼴, 오토플레이·리플레이·연습 표시)·코스(`n/m · 코스 이름`)·결과에 따라 줄이 바뀌며 경과 시간이 붙는다. 끄면 표시를 지우고 연결도 하지 않는다. 프로필을 볼 수 있는 사람은 곡 제목을 본다.
 - Discord 가 꺼져 있으면 조용히 기다렸다가 다시 붙는다(0.5초부터 60초까지). 앱을 끄면 표시를 지운다. 플레이 중에는 게임 스레드가 새 표시를 보내지 않고, Discord 스레드가 이미 받아들여진 표시를 20초마다 다시 보낼 뿐이다.
 - 근거와 세부: [Discord ADR](acknowledge/2026-10-23-adr-discord-rich-presence.md), 설계 `docs/plan/2026-10-23-discord-presence.md`.
+
+
+## 15. 언어(LANGUAGE, 2026-10-24)
+
+앱의 글이 쓰이는 언어를 영어·한국어·일본어에서 고른다. 구조와 결정은 [UI 다국어 ADR](./acknowledge/2026-10-24-adr-ui-language.md), 용어는 [용어집](./reference/2026-10-24-i18n-glossary.md).
+
+| 항목 | 내용 |
+| --- | --- |
+| 설정 | SETTINGS > DISPLAY 탭 맨 위 LANGUAGE 행. 값 `AUTO`·`ENGLISH`·`한국어`·`日本語`(언어 이름은 그 언어로). 저장은 `display.language` 의 `AUTO`·`ENGLISH`·`KOREAN`·`JAPANESE`(없으면 AUTO). 계정 설정 묶음과 함께 동기화된다 |
+| AUTO | 환경변수 `RBMS_LANGUAGE`(`en`·`ko`·`ja`. 설정이 AUTO 일 때만) → OS 로캘의 첫 선호 언어 → 영어. 로캘은 언어 부분만 본다(`ko-KR`·`ja_JP.UTF-8` 은 그 언어, `en-KR` 은 영어). 지원 밖(`zh-TW`, `fr`, 빈 값, `C`)은 영어. 환경변수가 세 언어 어디에도 닿지 않으면 건너뛰고 OS 로캘이 정한다. 환경변수와 OS 로캘은 AUTO 를 처음 정할 때 한 번 읽는다 |
+| 적용 시점 | 값을 바꾼 같은 프레임에 모든 화면이 따른다. 설정 화면은 목록을 다시 만들고 선곡의 장면 캐시와 폴더 이름도 다시 만든다. 기본 스킨은 다음 프레임에 바뀐다(확장 불린 21150~21152 와 `t(key)`, [skin.md](./skin.md) 1.4절) |
+| 번역되는 것 | 설정(탭·행 이름·설명·값 일부·확인 문장), 선곡(가이드, 필터, 장면, 기록 모달, 랭킹 오버레이, 다운로드 모달, 폴더 이름), 결과·HUD, PLAY·SKIN 메뉴, 표·폴더·코스·연습·키 편집기·로딩, 알림(사용자가 한 일의 결과), 기본 스킨의 고정 문구(키 234개) |
+| 원어로 두는 것 | 게임 용어(판정·게이지·램프·옵션·점수 이름, 키 이름, BPM, TOTAL), 설정 값(`ON`·`OFF`·`AUTO`·`DEFAULT`, 모드·게이지·알고리즘 이름. 설정 화면이 영어 정본으로 비교한다), 패널 제목(CHART DATA, MY SCORE, NOTES RADAR 등)과 레이더 축 이름 |
+| 번역하지 않는 것 | 곡 제목·아티스트·표·폴더 이름 같은 데이터, 외부 스킨의 글자, 스킨 메뉴의 옵션 이름(헤더 읽기 단계라 영어), 서버가 주는 오류 문구(한국어 그대로), Discord 상태 문구(영어), CLI·stderr 로그와 진단성 알림, 표본 데이터 |
+| 한국어·일본어 글꼴 | 번들 Inter 에 없어 시스템 글꼴 폴백이다. 캡처 하니스는 번들 글꼴만 써서 CJK 모양을 볼 수 없다(글자 폭·줄 높이는 실창 점검, QA 3.23) |
+| 알려진 한계 | 같은 화면에 영어가 섞여 남는 곳이 있다(스킨 메뉴 상단 탭 이름, 표 화면의 `MY FOLDERS` 행 라벨 등. ADR 의 영향 절). 한국어는 사용자 검수 전, 일본어는 원어민 감수 전이다 |
+
+개발에서 언어를 고정하려면 `RBMS_LANGUAGE` 를 쓴다([development.md](./development.md)). 시험은 영어를 명시하므로 호스트 언어와 무관하다.
+
+## 16. 랭킹 모드(RANKING KEYS, 2026-10-24)
+
+선곡에서 곡의 IR 순위를 건반으로 열어 본다(사용자 요청 "2, 4, 6 셋중 하나 누르면 해당 곡의 랭킹들을 볼수있어짐"). 결정과 근거는 [랭킹 모드 ADR](./acknowledge/2026-10-24-adr-ranking-mode.md). 설정 RANKING KEYS(SELECT 탭 SONG LIST 구역, 기본 켬)가 켜져 있고, 차트 막대 위이며, 서버가 설정돼 있고, 패널·모달·검색이 없을 때 쓴다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 열기 | 파란 건반을 300 ms(`SCRATCH_REPEAT_DELAY`) 이상 누른다. 7키 2·4·6, 5키·10키 2·4, DP 양쪽, 9키 버튼 2·8, 24키 없음. 키보드는 `S`·`D`(6번 `F` 는 즐겨찾기 그대로). 목록 역할이 없는 키(7키 컨트롤러 6번, 9키 2·8번)는 누르는 즉시 열린다. 짧게 누르면 뗄 때 전과 같다(폴더 닫기, 최상위에서는 정렬). 내장 선곡의 9키는 버튼 2 만 랭킹 키다 |
+| 모드 안 | 턴테이블·위아래·휠은 줄 이동. 흰 건반·Enter 는 그 줄의 리플레이 재생, `J` 는 그 줄의 배치로 치기(10.15절). SELECT 는 내 줄로, START 는 다음 쪽(100줄씩), `Q`·`E` 는 프로필 전환 |
+| 닫기 | 파란 건반 짧게, `Esc`, `I`, 왼쪽 |
+| 자동 받기 | Songs 탭의 차트에 5초 머물면 패널이 닫혀 있어도 순위를 받는다(외부 스킨의 순위 슬롯을 위해). 열려 있으면 150 ms 뒤, 열면 즉시 |
+| 설정을 끄면 | 키로 여닫는 것만 꺼진다. `I` 키, 스킨 이벤트 21002, 모드 안 조작은 그대로 작동한다 |
+| 줄 | 순위 · 이름과 단위 배지(최대 2개) · DJ LEVEL · EX · 램프(등급 포함) · 날짜 · REP. 내 줄은 밝은 레일과 옅은 바탕, 라이벌 줄은 어두운 레일. 머리는 `IR RANKING`, `YOU #r`, 곡 제목과 키 안내. 쪽 안내 줄: 더 받을 쪽이 있으면 `TOP n SHOWN, MORE ON THE NEXT PAGE`, 내 순위가 있는 쪽을 따로 받았으면 `YOUR PAGE, FROM RANK n` |
+| 데이터 | 100줄 쪽, 보드 10분(`RANKING_READY_LIFETIME`) 뒤 만료, 점수가 받아들여지면 그 곡만 무효화, 실패는 30초 뒤 다시. 순위는 서버의 `rank`(램프 → 어시스트 등급 → EX → BP) 그대로다. 줄의 단위 배지는 웹 `GET /api/charts/{hash}/ranking` 의 `extra.dans` 에서 온다([api-spec.md](./backend/api-spec.md) 4절) |
+| 외부 스킨 | 순위 슬롯 값(정수 380~389 EX·390~399 순위, 이미지 인덱스 380~389 종류·390~399 램프, 텍스트 120~129 이름, Rate 8 읽기·쓰기)이 선곡에서 값을 낸다. Rate 8 에 쓰면 목록이 스크롤되고 오프셋은 곡이 바뀌면 0 이다 |
+| 기본 스킨 | 랭킹 모드(불린 21105)에서 MY RECORDS 자리가 IR RANKING 6줄이 된다. 그러나 앱 오버레이가 정보창 자리를 덮어 대부분 가려진다(미확인 목록 25번, 테스트 부채 3.122) |
+| 구현·시험 | `apps/rbms-player/src/stage/select/{ranking_mode,ranking_scroll,mod,skinned,events,overlay}.rs`, `ir_ranking.rs`, `app_ranking.rs`, `ir_ranking_view.rs`, `skin_host/{ir,select,select/bridge,writers}.rs`. 시험은 가짜 시계의 상태 기계와 가짜 채널을 쓴다 |
+
+알려진 위험: 300 ms 길게 누름과 "뗄 때" 동작의 손맛은 실기로 보지 않았다. 서버가 있으면 차트에 5초 머물 때마다 순위 요청이 간다.
+
+## 17. 선곡 화면의 새 구성(기본 스킨, 2026-10-24)
+
+기본 스킨의 선곡이 IIDX 식으로 바뀌었다(사용자 요청 "곡선택부분에 보면 곡 + 왼쪽에 스코어도 들어가있는데 이것도 구현하도록하고 ... iidx와 비슷하게"). 결정은 [선곡 IIDX 식 ADR](./acknowledge/2026-10-24-adr-select-iidx-layout.md), 스킨 쪽 설명은 [skin.md](./skin.md) 3.4.6절. 바탕·면·글자는 모노톤 그대로이고 강조색은 등급 배지, 램프 띠, SCORE TARGETS 메달, 레이더 칠하기에만 쓴다. 이 절의 값은 전부 커서가 있는 곡에서 온다.
+
+### 17.1 곡 막대
+
+| 칸 | 내용 |
+| --- | --- |
+| 등급 배지 | 왼쪽 첫 칸에 그 곡의 DJ LEVEL(F ~ AAA). **보조 판을 뺀** 최고 기록 기준이라 정보창의 RANK 와 같다. 기록 없는 곡·폴더·코스·없는 곡에는 없다. 내장 선곡의 행 DJ LEVEL 도 같은 기준으로 바뀌었다(보조 판으로만 최고인 곡은 낮아지거나 사라진다. 미확인 목록 21번) |
+| 램프 띠 | 배지 오른쪽 8px 띠(기존 램프 색) |
+| 레벨 | 크게(32 크기 숫자) |
+| 제목 | 레벨 오른쪽. 폴더·표 막대는 더 오른쪽에서 시작한다 |
+| 썸네일 | 오른쪽 끝 64x64. 스테이지 그림(없으면 배너)의 가운데 정사각을 128x128 로 줄인 것. 첫 프레임에는 없다가 작업자가 읽은 뒤 나타난다. 커서 위 11·아래 12 막대만 읽고 최근 48장을 둔다 |
+| 선택 막대 | 가운데 칸이 16px 왼쪽으로 돌출하고 테두리와 띠가 붙는다 |
+| 스크롤 막대 | 트랙이 열린 폴더의 램프 분포(램프별 차트 수)를 누적해 칠한다(아래 MAX, 위 NO PLAY) |
+
+### 17.2 정보창
+
+| 패널 | 내용 |
+| --- | --- |
+| 곡 머리와 그림 | 제목·부제·아티스트(전과 같다), 256 정사각 곡 그림(그림 숨김이면 비움) |
+| CHART DATA | 난이도 탭 5칸(같은 폴더·제목·모드의 `#DIFFICULTY` 1~5, 클릭하면 그 차트로 이동. 현재 목록에 있는 차트만), NOTES·LEVEL·BPM, 밀도 그래프, 레인 막대(5·7키는 스크래치 왼쪽, 10·14키는 두 줄), LENGTH·TOTAL·KEYS·JUDGE |
+| NOTES RADAR | 6각형(NOTES·PEAK·SCRATCH·SOF-LAN·CHARGE·CHORD, 표시값 0~200, 가장 큰 축에 별). 9키·24키는 `-`. 값의 정의와 한계는 17.4절 |
+| MY SCORE | SCORE, MISS COUNT, 등급, 램프 이름, 다음 등급까지의 차이, F~AAA 진행 막대, MAX COMBO·PLAY COUNT·CLEAR COUNT·RATE, 판정 5행 |
+| SCORE TARGETS | AAA·AA·A 의 필요 EX(`ceil(TOTAL NOTES x 2 x k/9)`, k = 8·7·6)를 금·은·동으로, 달성하면 메달 면 |
+| CLEAR RATE | CLEAR COUNT / PLAY COUNT(소수 1자리) |
+| MY RECORDS | BEST 1줄 + 최근 5판(최신순, 보조 판 포함, 읽기 한도 1000판), 줄마다 램프·DJ LEVEL·EX·MISS(도달하지 못한 노트 포함)·날짜(앞 10글자). BEST 는 기록을 깰 수 있는 판이 없으면 비어 있다. 랭킹 모드에서는 IR RANKING 6줄(16절) |
+| 폴더·코스 | 폴더·코스 막대의 정보는 전과 같다 |
+
+머리에는 PLAY STYLE 칩(SP·DP·9KEYS), FREE PLAY 또는 COURSE 칩, 시각 칩, 줄인 검색 상자와 정렬·모드·LN MODE 단추가 있고, 목록 위에 열린 폴더의 경로가 보인다. 바닥은 키 이름 상자 안내(ENTER·ESC·UP DOWN·H)와 REPLAY·AUTOPLAY·PRACTICE·RANKING·FAVORITE 단추다. RANKING 단추는 랭킹 모드를 여닫는다(이벤트 21002, 켜짐 불린 21105).
+
+### 17.3 분석 값이 생기는 때
+
+레이더·레인·밀도 그래프·종류별 노트 수·주 BPM 은 커서가 150 ms 머문 차트를 **분석 작업자 스레드**가 파싱해 낸다(프레임 스레드는 파싱하지 않는다). 레이더는 곡 DB 의 `song_radar` 에 현재 버전 행이 있으면 즉시 나오고 없으면 작업자가 재서 저장한다. 커서가 움직이는 중, 폴더·코스 막대 위, 코스 탭, 읽을 수 없는 파일(드라이브가 빠짐)에서는 값이 없고 기본 스킨은 그리지 않는다. 스킨 없는 내장 선곡 화면은 이 분석을 쓰지 않는다.
+
+### 17.4 NOTES RADAR 의 정의와 한계
+
+- 누름 이벤트(일반 노트와 롱노트 머리, 꼬리와 지뢰는 아님)를 센다. 그래서 LN MODE 와 상관없이 같은 값이다.
+- NOTES(초당), PEAK(4초 창의 최대), SCRATCH(스크래치 레인 초당)는 공개 구간표(IIDX 의 역공학 자료, 원문과 12칸씩 대조)로 0~200 에 대응한다. SOF-LAN(속도 변화 뒤 노트의 가중 합)·CHARGE(롱노트 점수)·CHORD(동시 누름 가중 합)는 가설 정의와 이 라이브러리의 분포로 정한 임시 스케일(13.0·3.0·300.0)이다. **IIDX 의 값과 수십 % 달라도 이상하지 않다.**
+- 5·7키는 SP 구간, 10·14키는 DP 구간, 9키·24키는 없다. `rbms-cli` 의 차트 요약이 원시값과 표시값을 출력한다(`radar ver`, `radar raw`, `radar disp`).
+- 곡 DB 의 새 표 `song_radar` 는 스캔이 새·바뀐 차트에만 쓴다. 기존 곡은 커서가 머물 때 채워진다. 전체 재스캔은 강제하지 않는다.
+- 구현·시험: `crates/rbms-chart/src/radar.rs`, `crates/rbms-library/src/songdb/`, `crates/rbms-render/src/skin_render/graphs/radar.rs`, `apps/rbms-player/src/stage/select/{analysis,browse_facts,thumbs}.rs`, `skin_host/{chart,select/browse}.rs`, 기본 스킨 `lua/select/{list,controls,info,radar,records}.lua`. 결정과 정의는 [NOTES RADAR ADR](./acknowledge/2026-10-24-adr-notes-radar.md).
+
+### 17.5 외부 스킨과 내장 선곡
+
+- 막대 확장 키(`rank`·`thumb`)는 기본 스킨만 쓴다. 외부 스킨은 키가 없어 그리기와 호출 순서가 전과 같다.
+- 선곡에서 원본 id 350~353·92·`judgegraph`·`bpmgraph`·순위 슬롯이 값을 내서 외부 스킨이 보는 선곡이 바뀐다(원본과 같아짐).
+- 내장(스킨 없는) 선곡 렌더러는 그대로다(배지·썸네일·육각형 없음). 단 행의 DJ LEVEL 은 보조 판 제외 기준으로 바뀌었다.

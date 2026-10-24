@@ -1,6 +1,6 @@
 # CJK(일본어) 폰트 지원 — 아이디에이션
 
-> 최종 갱신 2026-10-15 · 대응 커밋 ea698a9. 2026-05 의 아이디에이션과 결정 기록이다. 결정(cosmic-text, 소형 Inter 번들 + 시스템 폰트 폴백)은 구현됐고, 지금 동작의 정본은 `crates/rbms-render/src/font.rs` 와 [crates.md](./crates.md) rbms-render 의 "Font engine" 이다. 아래 "대상 / 당시 상태"의 5×7 비트맵, `PlaySettings.font_path`, `TextEngine` 같은 이름은 그때의 것이고 지금 코드에는 없다: 글꼴 경로는 `Config.display.font_path`(SETTINGS 의 DISPLAY 묶음 FONT 행, `--font`), 엔진은 thread-local `ENGINE` 의 `TextContext`, 크기는 `px_for(scale) = round(scale*8.5).max(8)` 이다. "남은 후속"의 P3 중 run-length 병합(`merge_runs`), 보로우 키 캐시(`family→px→text→Laid`), 폭 맞춤 말줄임(`fit_text`), 글리프 아틀라스(`glyph_atlas.rs`)는 들어갔고, P4 웹폰트는 없다.
+> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63(맨 끝에 2026-10-24 절을 더했다: 한국어·일본어 UI 번역과 글꼴. 위의 서술은 2026-10-15 의 것이다). 2026-05 의 아이디에이션과 결정 기록이다. 결정(cosmic-text, 소형 Inter 번들 + 시스템 폰트 폴백)은 구현됐고, 지금 동작의 정본은 `crates/rbms-render/src/font.rs` 와 [crates.md](./crates.md) rbms-render 의 "Font engine" 이다. 아래 "대상 / 당시 상태"의 5×7 비트맵, `PlaySettings.font_path`, `TextEngine` 같은 이름은 그때의 것이고 지금 코드에는 없다: 글꼴 경로는 `Config.display.font_path`(SETTINGS 의 DISPLAY 묶음 FONT 행, `--font`), 엔진은 thread-local `ENGINE` 의 `TextContext`, 크기는 `px_for(scale) = round(scale*8.5).max(8)` 이다. "남은 후속"의 P3 중 run-length 병합(`merge_runs`), 보로우 키 캐시(`family→px→text→Laid`), 폭 맞춤 말줄임(`fit_text`), 글리프 아틀라스(`glyph_atlas.rs`)는 들어갔고, P4 웹폰트는 없다.
 
 ## 대상 / 당시 상태(2026-05)
 - `crates/rbms-render/src/font.rs`: 하드코딩된 **5×7 ASCII 비트맵**(`glyph(c)->[u8;7]`). 비ASCII는 `[0;7]`=공백.
@@ -82,3 +82,14 @@
 ## 남은 후속 (P3 / P4)
 - **P3 폴리시**: 픽셀당 quad → 행 run-length 병합으로 quad 절감, `(text,px)` 캐시키 매 호출 `to_string` 할당 제거(보로우 키), 패널 폭 말줄임(cosmic 폭제한), 그림자/아웃라인, `px_for` 계수·세로 정렬 미세조정(인앱 레이아웃 보고 튜닝).
 - **P4 웹폰트**: URL→bytes→`load_font`(+캐시, 난이도표 fetch와 동형).
+
+## 2026-10-24 — 한국어·일본어 UI 번역과 글꼴
+
+앱의 글이 영어·한국어·일본어로 쓰이게 됐다([UI 다국어 ADR](acknowledge/2026-10-24-adr-ui-language.md), 사용자 요청 "다국어 지원 (한글, 영어, 일본어)"). **글꼴 결정은 바뀌지 않았다**: 번들 Inter(라틴) + 시스템 글꼴 폴백(A1)이고 한글·일본어 글자는 OS 가 가진 글꼴로 그린다. 서브셋 글꼴을 번들할지는 조사 보고서의 질문 7 에서 "실창 점검 뒤 필요하면"으로 미뤘다(후속, 아직 없다).
+
+| 항목 | 내용 |
+| --- | --- |
+| 캡처 하니스 | 번들 Inter 만 쓰므로 한글·일본어를 그리지 못한다(빈 네모). 시험은 한국어·일본어로 그린 영역이 영어와 다르게 칠해지는지와 카탈로그의 문자열만 본다(`rbms_render::text::testing::{drawn_in, differs_within}`). 한국어·일본어 픽셀 골든은 만들 수 없다 |
+| 구현 단위가 본 것 | 렌더 크레이트 번역 단위는 임시 예제(지금은 지움)로 macOS 시스템 글꼴 폴백에서 선곡·결과·HUD 를 세 언어로 찍어 잘림·겹침이 없음을 눈으로 봤다. 설정 번역 단위는 macOS 시스템 글꼴로 실측해 일본어 설명문이 패널 6줄을 넘는 두 곳을 줄였고, 일본어 PLAY MENU·SKIN MENU 단추가 키 이름이 `BACKSLASH` 일 때만 1px 넘치는 것을 확인했다. 메뉴 번역 단위는 CJK 폭을 영어의 약 1.0배 이하(도움말은 약 1.1배)로 추정해 긴 일본어 도움말 여섯을 줄였다(추정) |
+| 보지 못한 것 | Windows 의 시스템 글꼴 폴백에서의 폭과 줄 높이, Retina·배율 125/150% 의 소형 한글·일본어 가독성, 실제 앱 창에서의 모양. 모두 사람이 실창에서 봐야 한다(QA 3.23, 테스트 부채 3.112) |
+| 문제가 나오면 | 글자가 비거나(두부) 줄 높이가 어긋나면 서브셋 글꼴 번들(`crates/rbms-render/src/font.rs` 의 번들 글꼴과 `Inter-OFL.txt` 처럼 OFL 글꼴, 새 단위)을 후속으로 검토한다 |

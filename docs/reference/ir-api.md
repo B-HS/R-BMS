@@ -1,6 +1,6 @@
 # rbms IR-superset API 계약 — `rbms-ir` 클라이언트 정본
 
-> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (2026-10-22 에 `ScoreRecord.assist_grade` 만 더했다. 나머지는 2026-10-15 기준)
+> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 차트 순위의 쪽 받기와 줄의 `extra.dans`·`extra.replay_id` 를 더했다. 2026-10-22 에 `ScoreRecord.assist_grade` 를 더했다. 나머지는 2026-10-15 기준)
 
 > **상태:** 현재 IR 계약과 구현된 경계의 정본입니다. 서버는 https://bms.hyuns.uk 에 배포됐고(2026-10-14) 클라이언트 기본 서버 주소가 이 주소입니다. 아래 JSON의 해시·시간·커밋 값은 **형식 예시**이며 현재 배포 식별자가 아닙니다. 알려진 클라이언트 갭은 본문에서 보존하고, 실제 수동 다중 IR/서버 QA는 [roadmap](../roadmap.md)의 미실시 항목입니다. 필드 규칙이 코드와 다르면 서버 zod 스키마(`web/src/server/dto/`)와 `crates/rbms-ir/src/dto/` 가 맞습니다.
 
@@ -57,6 +57,8 @@
 `include_scratch_auto` 를 빼면(클라이언트는 싣지 않는다) 일반 판 최고만의 기본 목록이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. 곡 선택의 IR RANKING 패널은 기본 목록을 쓴다.
 
 미등록 차트의 ranking/replays 는 404 가 아니라 **빈 배열**, best 는 **`null`** 이다.
+
+차트 순위의 쪽 받기와 줄의 `extra`(2026-10-24, 클라이언트 쪽): 클라이언트는 `chart_ranking_page(limit = 100, page)` 로 100줄씩 받고(서버가 이 메서드를 지원하지 않으면 `chart_ranking(100)` 으로 물러나며 이때 더 받을 쪽은 없다), 내 순위가 받은 구간 밖이면 그 쪽을 한 번 더 받는다. 받은 보드는 10분 뒤 만료되고 점수 제출이 받아들여지면 그 곡만 무효화되며 실패는 30초 뒤 다시 받는다. 줄의 리플레이 id 는 별도의 `chart_replays` 호출 없이 줄의 `extra.replay_id` 에서 읽는다. `extra.dans`(`[{ system, name, label }]`)는 그 줄 플레이어가 남에게 보이기로 한 단위이고 옛 서버에는 없다(없으면 빈 목록으로 읽고, 깨진 항목은 건너뛴다). 읽는 도우미는 `crates/rbms-ir/src/dto/score.rs` 의 `replay_id()`·`is_scratch_auto()`·`dans()`(`DisplayedDan`)이다. 서버 쪽 계약은 [backend/api-spec.md](../backend/api-spec.md) 4절, 결정은 [랭킹 모드 ADR](../acknowledge/2026-10-24-adr-ranking-mode.md).
 
 ### 비인증 제출은 player id 가 반드시 `guest` 여야 한다
 
