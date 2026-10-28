@@ -97,6 +97,7 @@ impl WhileTyping {
             | Shortcut::ReloadTables => WhileTyping::UnderTheBox,
             Shortcut::Filter
             | Shortcut::Practice
+            | Shortcut::LayoutPick
             | Shortcut::Records
             | Shortcut::Ranking
             | Shortcut::Settings

@@ -20,6 +20,7 @@ pub(crate) mod course_result;
 pub(crate) mod decide;
 pub(crate) mod folders;
 pub(crate) mod keyconfig;
+pub(crate) mod layout_pick;
 pub(crate) mod loading;
 pub(crate) mod play;
 pub(crate) mod play_menu;
@@ -51,6 +52,7 @@ pub(crate) use course_result::CourseResultState;
 pub(crate) use decide::DecideState;
 pub(crate) use folders::FoldersState;
 pub(crate) use keyconfig::KeyConfigState;
+pub(crate) use layout_pick::LayoutPickState;
 pub(crate) use loading::{KeysoundLoad, LoadingState};
 pub(crate) use play::PlayState;
 pub(crate) use play_menu::PlayMenuState;
@@ -81,6 +83,7 @@ pub(crate) enum Stage {
     Result(ResultState),
     CourseResult(Box<CourseResultState>),
     Practice(Box<PracticeState>),
+    LayoutPick(Box<LayoutPickState>),
 }
 
 /// Which screen a stage is, without its state. Used where only the identity matters — the soak
@@ -101,6 +104,7 @@ pub(crate) enum StageId {
     Result,
     CourseResult,
     Practice,
+    LayoutPick,
 }
 
 /// What a screen hands back to [`crate::App`] after an update, a key or a click.
@@ -216,12 +220,13 @@ impl StageId {
             StageId::Result => "Result",
             StageId::CourseResult => "CourseResult",
             StageId::Practice => "Practice",
+            StageId::LayoutPick => "LayoutPick",
         }
     }
 
     /// Every screen, for the tests that have to cover all of them.
     #[cfg(test)]
-    pub(crate) const ALL: [StageId; 13] = [
+    pub(crate) const ALL: [StageId; 14] = [
         StageId::Select,
         StageId::Settings,
         StageId::SkinMenu,
@@ -235,6 +240,7 @@ impl StageId {
         StageId::Result,
         StageId::CourseResult,
         StageId::Practice,
+        StageId::LayoutPick,
     ];
 }
 
@@ -254,6 +260,7 @@ impl Stage {
             Stage::Result(_) => StageId::Result,
             Stage::CourseResult(_) => StageId::CourseResult,
             Stage::Practice(_) => StageId::Practice,
+            Stage::LayoutPick(_) => StageId::LayoutPick,
         }
     }
 
@@ -273,6 +280,7 @@ impl Stage {
             Stage::Result(s) => s,
             Stage::CourseResult(s) => s.as_mut(),
             Stage::Practice(s) => s.as_mut(),
+            Stage::LayoutPick(s) => s.as_mut(),
         }
     }
 
@@ -291,6 +299,7 @@ impl Stage {
             Stage::Result(s) => s,
             Stage::CourseResult(s) => s.as_ref(),
             Stage::Practice(s) => s.as_ref(),
+            Stage::LayoutPick(s) => s.as_ref(),
         }
     }
 

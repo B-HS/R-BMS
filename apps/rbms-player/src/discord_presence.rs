@@ -248,7 +248,7 @@ fn run_kind(play: &crate::stage::PlayState, shared: &AppShared) -> RunKind {
 pub(crate) fn view_of<'a>(stage: &'a Stage, shared: &'a AppShared) -> PresenceView<'a> {
     let (screen, part_of_course) = match stage {
         Stage::Select(_) | Stage::Folders(_) | Stage::Tables(_) => (Screen::Browsing, false),
-        Stage::Settings(_) | Stage::KeyConfig(_) | Stage::SkinMenu(_) | Stage::PlayMenu(_) => (Screen::Menus, false),
+        Stage::Settings(_) | Stage::KeyConfig(_) | Stage::SkinMenu(_) | Stage::PlayMenu(_) | Stage::LayoutPick(_) => (Screen::Menus, false),
         Stage::Loading(loading) => match loading.task() {
             LoadingTask::Scan { .. } => (Screen::Scanning, false),
             LoadingTask::Song(index) => {

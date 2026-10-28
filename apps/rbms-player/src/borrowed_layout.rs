@@ -264,7 +264,7 @@ impl AppShared {
 
     /// Whether a run started now would be one the player plays by hand on its own: no course stage,
     /// no practice slice and not a run that plays itself.
-    fn plays_by_hand(&self) -> bool {
+    pub(crate) fn plays_by_hand(&self) -> bool {
         self.course_run.is_none() && !self.practice_requested && !self.run_plays_itself()
     }
 

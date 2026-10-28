@@ -11,6 +11,7 @@ use winit::keyboard::KeyCode;
 use crate::gamepad::PadConfig;
 use crate::text::layout_play::LayoutPlayText;
 use crate::text::menus::key_editor::{ControlLabelText, LaneLabelText, ShortcutGroupText, ShortcutLabelText};
+use crate::text::menus::layout_pick::LayoutPickText;
 use crate::text::notices::NoticeText;
 
 /// Parse a key token (the vocabulary used in the keyconfig file and `--keys`) into a `KeyCode`.
@@ -736,6 +737,9 @@ pub enum Shortcut {
     Ranking,
     /// Fetch every registered difficulty table again, beside the browser.
     ReloadTables,
+    /// Open the screen that lays the chart under the cursor out as the player writes it, and plays it
+    /// so as RANDOM with the seed that gives that layout.
+    LayoutPick,
     OptionsPin,
     OptionsHold,
     Settings,
@@ -765,7 +769,7 @@ pub enum Shortcut {
 
 impl Shortcut {
     /// Every shortcut, group by group, in the order the key editor and the key guide list them.
-    pub const ALL: [Shortcut; 32] = [
+    pub const ALL: [Shortcut; 33] = [
         Shortcut::Search,
         Shortcut::Filter,
         Shortcut::Sort,
@@ -774,6 +778,7 @@ impl Shortcut {
         Shortcut::Records,
         Shortcut::Ranking,
         Shortcut::ReloadTables,
+        Shortcut::LayoutPick,
         Shortcut::OptionsPin,
         Shortcut::OptionsHold,
         Shortcut::Settings,
@@ -810,6 +815,7 @@ impl Shortcut {
             | Shortcut::Records
             | Shortcut::Ranking
             | Shortcut::ReloadTables
+            | Shortcut::LayoutPick
             | Shortcut::OptionsPin
             | Shortcut::OptionsHold => ShortcutGroup::Browser,
             Shortcut::Settings | Shortcut::SkinMenu | Shortcut::PlayMenu | Shortcut::KeyConfig | Shortcut::Folders | Shortcut::Tables => ShortcutGroup::Screens,
@@ -872,6 +878,7 @@ impl Shortcut {
             Shortcut::ReplayForward => ShortcutLabelText::ReplayForward,
             Shortcut::ReplayBack => ShortcutLabelText::ReplayBack,
             Shortcut::ReplayPlayLayout => return LayoutPlayText::ShortcutLabel.get(language()),
+            Shortcut::LayoutPick => return LayoutPickText::ShortcutLabel.get(language()),
         };
         text.get(language())
     }
@@ -887,6 +894,7 @@ impl Shortcut {
             Shortcut::Records => "records",
             Shortcut::Ranking => "ranking",
             Shortcut::ReloadTables => "reload_tables",
+            Shortcut::LayoutPick => "layout_pick",
             Shortcut::OptionsPin => "options_pin",
             Shortcut::OptionsHold => "options_hold",
             Shortcut::Settings => "settings",
@@ -919,7 +927,8 @@ impl Shortcut {
     /// any of them could be changed. The reload ships on a function key the browser read nothing
     /// from, next to the one the key editor is on. The key that plays a watched replay's layout
     /// ships on one no shipped layout plays a lane on and no control or other key of a replay under
-    /// analysis is read from.
+    /// analysis is read from. The key to LAYOUT PICK ships on a letter no shipped layout plays a lane
+    /// on and nothing else of the browser is read from.
     pub fn default_key(self) -> KeyCode {
         match self {
             Shortcut::Search => KeyCode::Slash,
@@ -930,6 +939,7 @@ impl Shortcut {
             Shortcut::Records => KeyCode::KeyR,
             Shortcut::Ranking => KeyCode::KeyI,
             Shortcut::ReloadTables => KeyCode::F6,
+            Shortcut::LayoutPick => KeyCode::KeyY,
             Shortcut::OptionsPin => crate::app_options::TOGGLE_KEY,
             Shortcut::OptionsHold => crate::app_options::HOLD_KEY,
             Shortcut::Settings => KeyCode::Tab,

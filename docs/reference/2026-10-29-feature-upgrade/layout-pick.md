@@ -1,9 +1,9 @@
 # 배치 지정 플레이(LAYOUT PICK) 구현 전 조사
 
-> 최종 갱신 2026-10-29 · 대응 커밋 c1dc988
+> 최종 갱신 2026-10-29 · 대응 작업 U1
 > 범위: 시작 전에 사용자가 레인 순열(예: 7키 `3517246`)을 직접 정하고, 그 배치를 적용한 노트 미리보기를 본 뒤 그 배치로 플레이한다.
 > 사용자 결정(전제): (a) 이 판은 RANDOM 판으로 저장한다. 그 배치를 내는 RANDOM 시드를 역탐색해 옵션 RANDOM + 그 시드로 기록한다. 서버·웹·리플레이 형식은 바꾸지 않는다. (b) 미리보기는 그 배치를 적용한 실제 노트를 레인에 그려 스크롤(구간 이동)하고 레인 번호 순서를 보인다.
-> 읽기 전용 조사. 시드 측정은 scratch 의 독립 Rust 프로그램(아래 1.4)으로 했고, 그 복제 코드가 저장소의 배치 골든 3개와 같은 값을 냈다.
+> 1~6절은 구현 전 읽기 전용 조사(대응 커밋 c1dc988)다. 시드 측정은 scratch 의 독립 Rust 프로그램(아래 1.4)으로 했고, 그 복제 코드가 저장소의 배치 골든 3개와 같은 값을 냈다. 구현 결과는 7절.
 
 ## 0. 핵심 요약
 
@@ -259,3 +259,18 @@ scratch 프로그램(저장소 밖)에 `Rng`, `fisher_yates`, 쪽별 시드 식�
 4. DP 한쪽만 지정 허용: **허용(추천: 14K 탐색 비용을 SP 수준으로)** / 양쪽 필수.
 5. 10K 불가능 쌍: **거절 + 이유(추천)** / 가장 가까운 가능 쌍 제안.
 6. 지정 배치 문자열 기억: **세션 동안 모드별로 기억해 다음에 채움(추천, 설정 파일 변경 없음)** / 설정 파일에 저장(`#[serde(default)]` 필드 추가) / 기억 안 함.
+
+## 7. 구현 결과(U1)
+
+결정은 설계 문서 D1·D4·D6·M1~M4 를 따랐다. 위 6절 2번은 기본 키 `Y`, 4번은 양쪽 필수(M3), 5번은 거절.
+
+| 항목 | 위치 | 내용 |
+| --- | --- | --- |
+| 시드 역탐색 | `crates/rbms-chart/src/shuffle.rs` `random_seed_for(mode, wanted, limit, cancel)`, `random_seed_limit(mode)` | 1 부터 오름차순. 쪽마다 스택 배열로 Fisher-Yates 를 끝 자리부터 그려 첫 틀린 자리에서 버린다. 둘째 쪽은 첫 쪽이 맞을 때만 그린다(`side_rng(seed, side)` = 시드 `seed+side` 의 첫 쪽). 맞으면 `lane_permutation` 으로 한 번 더 확인한다. 상한 `RANDOM_SEED_LIMIT_SINGLE` 2^23, `_TEN_KEY` 2^21, `_FOURTEEN_KEY` 2^29, 결과는 0 아님·2^53 미만. 취소는 65,536 시드마다(첫 시드 포함) 본다. 오류 `SeedSearchError::{UnsupportedMode, NotALayout, Unreachable, Cancelled}` |
+| 실측(릴리스, Apple Silicon) | - | 14K 시드당 약 4.6 ns: 시드 83,818,986 의 쌍 0.38 초, 10,933,418 의 쌍 0.05 초. 최악 4.7억이면 약 2.2 초로 추정 |
+| 배치 문자열 | 같은 파일 `permutation_of_layout`, `layout_of_permutation`, `parse_layout_row`, `layout_row_text`, `is_layout_row`, 공개된 `side_key_lanes`, `apply_lane_permutation` | 2.2절 규칙 그대로. 조사 보고서의 예시 시드(7K 4761·24088·1048·2272·14563, 5K 225·39, 9K 590,676)가 시험에서 그대로 나왔다 |
+| 10K 불가능 쌍 예 | 시험 `a_ten_key_pair_random_never_gives_is_unreachable` | `12345` / `51234`(도달 가능한 쌍 12,600 개 재확인) |
+| 화면 | `apps/rbms-player/src/stage/layout_pick.rs`, `Stage::LayoutPick`, `StageId::LayoutPick` | 선곡 위에 열리는 내장 화면. 차트 읽기(`decode_chart` + LN MODE 해석)와 시드 탐색은 각자 이름 있는 스레드. 배치가 바뀌면 이전 탐색을 취소하고 다시 찾는다 |
+| 단축키 | `Shortcut::LayoutPick`, 설정 이름 `layout_pick`, 기본 `Y`, 그룹 Browser, 패드 지정 가능 | 차트 막대에서만 연다. 폴더·코스·없는 차트는 알림 `NotOnAChart` 만. 검색 중에는 `WhileTyping::Opens` |
+| 기억 | `AppShared.picked_layouts`(`PickedLayouts`, 모드 이름별) | 화면을 나갈 때(시작 포함) 저장, 설정 파일에는 쓰지 않음 |
+| 시작 | `LayoutPickState::start` → `AppShared::borrow_layout(LayoutRequest { random_label: "RANDOM", seed, source: "지정한 배치 3517246" })` | `Open` 을 `To` 로 바꿔 이 화면 자리에 판이 선다. `plays_by_hand` 를 `pub(crate)` 로 열었다 |

@@ -47,9 +47,10 @@ use crate::skin_host::select::{BrowserLent, CourseShown};
 use crate::skin_screen::SelectDraw;
 use crate::stage::result::SkinStatus;
 use crate::stage::{
-    Canvas, FoldersState, FrameCtx, KeyConfigState, KeyInput, PlayMenuState, SettingsState, SkinMenuState, Stage, StageHandler, TablesState, Transition,
-    is_left_press,
+    Canvas, FoldersState, FrameCtx, KeyConfigState, KeyInput, LayoutPickState, PlayMenuState, SettingsState, SkinMenuState, Stage, StageHandler, TablesState,
+    Transition, is_left_press,
 };
+use crate::text::menus::layout_pick::LayoutPickText;
 use crate::text::notices::{installed, installed_with};
 use crate::text::select::notices::SelectNoticeText;
 use crate::textedit::ImeEdit;
@@ -617,6 +618,18 @@ impl SelectState {
         Transition::Open(shared.decided_song_stage(index))
     }
 
+    /// Open LAYOUT PICK over the browser on the chart under the cursor. Anything else under it -- a
+    /// folder, a course, a chart the library does not have -- has no chart to lay out, and is only
+    /// told so.
+    fn open_layout_pick(&mut self, shared: &mut AppShared) -> Transition {
+        let Some(index) = shared.focused_song_index() else {
+            notify_text(Level::Info, LayoutPickText::NotOnAChart, &[]);
+            return Transition::Stay;
+        };
+        self.record_modal = None;
+        Transition::Open(Stage::LayoutPick(Box::new(LayoutPickState::open(shared, index))))
+    }
+
     /// Rebuild the row list through the filter panel, and remember what it was built from so the
     /// browser can tell when something behind its back has changed either.
     fn rebuild(&mut self, shared: &mut AppShared) {
@@ -1117,6 +1130,7 @@ impl SelectState {
             Shortcut::Sort => self.cycle_sort(shared),
             Shortcut::RefSort => self.sort_event(shared, true),
             Shortcut::Practice => return self.start_practice(shared),
+            Shortcut::LayoutPick => return self.open_layout_pick(shared),
             Shortcut::Favourite | Shortcut::RefFavourite => shared.toggle_focused_favorite(),
             Shortcut::Records => self.open_record_modal(shared),
             Shortcut::Ranking => self.toggle_ranking_panel(shared),

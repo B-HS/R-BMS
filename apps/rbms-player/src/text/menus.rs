@@ -9,6 +9,7 @@ pub(crate) mod course;
 pub(crate) mod folders;
 pub(crate) mod ir_outcome;
 pub(crate) mod key_editor;
+pub(crate) mod layout_pick;
 pub(crate) mod loading;
 pub(crate) mod play_menu;
 pub(crate) mod practice;

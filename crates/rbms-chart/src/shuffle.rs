@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use rbms_model::{Mode, Model, NoteKind};
 
 /// Note lane-shuffle option, applied to the chart at load. Deterministic given a seed so a
@@ -94,10 +96,19 @@ impl Rng {
     }
 }
 
+/// Multiplier a lane shuffle spreads the seed of one player side with: the 64-bit golden ratio.
+const SIDE_SEED_MULTIPLIER: u64 = 0x9E3779B97F4A7C15;
+
+/// The generator a whole-chart lane shuffle draws one player side's lanes from. Side `side` of seed
+/// `seed` starts where side 0 of seed `seed + side` does, which [`random_seed_for`] leans on.
+fn side_rng(seed: u64, side: usize) -> Rng {
+    Rng::new(seed.wrapping_add(side as u64).wrapping_mul(SIDE_SEED_MULTIPLIER))
+}
+
 /// Non-scratch lanes belonging to one player side. For SP (player==1) side 0 covers every key
 /// lane; for DP each side covers only its own half, so a shuffle never crosses the P1<->P2
 /// boundary (that crossing is a separate FLIP option in the reference implementation, not implemented here).
-fn side_key_lanes(mode: Mode, side: usize) -> Vec<usize> {
+pub fn side_key_lanes(mode: Mode, side: usize) -> Vec<usize> {
     let players = (mode.player as usize).max(1);
     let per_side = mode.key / players;
     let start = side * per_side;
@@ -121,7 +132,7 @@ pub fn lane_permutation(option: NoteOption, mode: Mode, seed: u64) -> Vec<usize>
         if m == 0 {
             continue;
         }
-        let mut rng = Rng::new(seed.wrapping_add(side as u64).wrapping_mul(0x9E3779B97F4A7C15));
+        let mut rng = side_rng(seed, side);
         let target: Vec<usize> = match option {
             NoteOption::Mirror => lanes.iter().rev().copied().collect(),
             NoteOption::Rotate => (0..m).map(|i| lanes[(i + 1) % m]).collect(),
@@ -178,6 +189,195 @@ fn apply_perm(model: &mut Model, perm: &[usize]) {
             remap_lanes(&mut tl.hidden, |l| perm[l]);
         }
     }
+}
+
+/// Lay `model`'s notes out by the whole-chart lane permutation `perm` (`perm[old_lane] = new_lane`),
+/// as [`apply`] lays them out by a permutation it draws itself. [`apply`] on RANDOM with a seed
+/// [`random_seed_for`] found for `perm` lays the chart out exactly so.
+pub fn apply_lane_permutation(model: &mut Model, perm: &[usize]) {
+    apply_perm(model, perm);
+}
+
+/// The most player sides a mode may have for [`random_seed_for`] to search it.
+const SEARCHED_SIDES_MAX: usize = 2;
+
+/// The most key lanes one side may have for [`random_seed_for`] to search it: a nine-key side. A
+/// side of more keys has far more layouts than there are seeds below 2^53 (24-key has 24!), so most
+/// of its layouts cannot be reached at all.
+const SEARCHED_SIDE_KEYS_MAX: usize = 9;
+
+/// How many seeds a one-side mode (5-, 7- and 9-key) is searched through. Every layout of those
+/// first comes from a seed at or below 4,775,533 (measured, see
+/// `docs/reference/2026-10-29-feature-upgrade/layout-pick.md`), so the search never runs out on one.
+pub const RANDOM_SEED_LIMIT_SINGLE: u64 = 1 << 23;
+
+/// How many seeds a ten-key chart is searched through. Every pair of sides RANDOM gives first comes
+/// from a seed at or below 1,250,411; an eighth of the pairs comes from no seed, and those are told
+/// apart from the rest once the search has been through these.
+pub const RANDOM_SEED_LIMIT_TEN_KEY: u64 = 1 << 21;
+
+/// How many seeds a fourteen-key chart is searched through. Every pair of sides first comes from a
+/// seed at or below 468,482,176.
+pub const RANDOM_SEED_LIMIT_FOURTEEN_KEY: u64 = 1 << 29;
+
+/// The first seed a score server no longer keeps whole (2^53). A found seed is always below it.
+const SEED_CEILING: u64 = 1 << 53;
+
+/// How many seeds go by between two looks at the cancel flag.
+const CANCEL_CHECK_SEEDS: u64 = 1 << 16;
+
+/// The base the digits of a picked layout's row are written in.
+const LAYOUT_DIGIT_RADIX: u32 = 10;
+
+/// Why [`random_seed_for`] answered no seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeedSearchError {
+    /// The mode is not searched: it has more sides, or more key lanes to a side, than a seed can be
+    /// found for (24-key).
+    UnsupportedMode,
+    /// What was asked for is not shaped as a layout RANDOM gives: not every lane once, a scratch lane
+    /// moved, or a lane carried to the other side.
+    NotALayout,
+    /// No seed up to the limit lays the lanes out so. On ten-key this is a layout RANDOM never gives.
+    Unreachable,
+    /// The cancel flag was raised before a seed was found.
+    Cancelled,
+}
+
+/// How many seeds [`random_seed_for`] searches a chart of `mode` through, or `None` for a mode it
+/// does not search.
+pub fn random_seed_limit(mode: Mode) -> Option<u64> {
+    if mode == Mode::BEAT_14K {
+        Some(RANDOM_SEED_LIMIT_FOURTEEN_KEY)
+    } else if mode == Mode::BEAT_10K {
+        Some(RANDOM_SEED_LIMIT_TEN_KEY)
+    } else if [Mode::BEAT_5K, Mode::BEAT_7K, Mode::POPN_9K].contains(&mode) {
+        Some(RANDOM_SEED_LIMIT_SINGLE)
+    } else {
+        None
+    }
+}
+
+/// The first seed, counting up from 1 and no further than `limit`, that RANDOM lays a chart of
+/// `mode` out from as `wanted` (`perm[old_lane] = new_lane`, the form [`lane_permutation`] answers
+/// in). The search stops when `cancel` is raised.
+///
+/// A seed is answered only once [`lane_permutation`] has laid it out as `wanted`, so it is the very
+/// layout a run started on RANDOM with it plays. It is never zero and always below 2^53.
+///
+/// Each seed's sides are drawn on the stack, and a side is given up at the first lane that comes out
+/// wrong. The second side of a seed is drawn only when the first came out right, so a two-side
+/// chart costs about what a one-side chart does per seed.
+pub fn random_seed_for(mode: Mode, wanted: &[usize], limit: u64, cancel: &AtomicBool) -> Result<u64, SeedSearchError> {
+    let sides = (mode.player as usize).max(1);
+    let lanes: Vec<Vec<usize>> = (0..sides).map(|side| side_key_lanes(mode, side)).collect();
+    if sides > SEARCHED_SIDES_MAX || lanes.iter().any(|side| side.len() > SEARCHED_SIDE_KEYS_MAX) {
+        return Err(SeedSearchError::UnsupportedMode);
+    }
+    let targets = side_targets(mode, &lanes, wanted).ok_or(SeedSearchError::NotALayout)?;
+    for seed in 1..=limit.min(SEED_CEILING - 1) {
+        if seed % CANCEL_CHECK_SEEDS == 1 && cancel.load(Ordering::Relaxed) {
+            return Err(SeedSearchError::Cancelled);
+        }
+        let drawn_alike = targets.iter().enumerate().all(|(side, target)| side_comes_out_as(seed, side, target));
+        if drawn_alike && lane_permutation(NoteOption::Random, mode, seed) == wanted {
+            return Ok(seed);
+        }
+    }
+    Err(SeedSearchError::Unreachable)
+}
+
+/// `wanted` as the order each side's shuffle has to leave its key lanes in: for each key lane of a
+/// side, the place among the side's key lanes of the lane it is carried to. `None` when `wanted` is
+/// not shaped as a layout RANDOM gives.
+fn side_targets(mode: Mode, lanes: &[Vec<usize>], wanted: &[usize]) -> Option<Vec<Vec<usize>>> {
+    if wanted.len() != mode.key || (0..mode.key).any(|lane| mode.is_scratch(lane) && wanted[lane] != lane) {
+        return None;
+    }
+    lanes
+        .iter()
+        .map(|side| {
+            let target: Vec<usize> = side.iter().map(|lane| side.iter().position(|to| *to == wanted[*lane])).collect::<Option<_>>()?;
+            let mut taken = vec![false; side.len()];
+            target.iter().all(|place| !std::mem::replace(&mut taken[*place], true)).then_some(target)
+        })
+        .collect()
+}
+
+/// Whether side `side` of `seed` leaves its key lanes in `target`'s order. It is drawn as
+/// [`fisher_yates`] draws it, on the stack, and given up at the first place that is wrong: every
+/// place from the last down is final once it has been drawn.
+fn side_comes_out_as(seed: u64, side: usize, target: &[usize]) -> bool {
+    let mut rng = side_rng(seed, side);
+    let mut places = [0usize; SEARCHED_SIDE_KEYS_MAX];
+    let order = &mut places[..target.len()];
+    for (place, slot) in order.iter_mut().enumerate() {
+        *slot = place;
+    }
+    for place in (1..order.len()).rev() {
+        order.swap(place, rng.below(place + 1));
+        if order[place] != target[place] {
+            return false;
+        }
+    }
+    order.first() == target.first()
+}
+
+/// Whether `row` names each of `keys` key lanes, counted from 1, exactly once.
+pub fn is_layout_row(row: &[u8], keys: usize) -> bool {
+    row.len() == keys && (1..=keys).all(|number| row.iter().filter(|n| usize::from(**n) == number).count() == 1)
+}
+
+/// The whole-chart lane permutation a picked layout stands for.
+///
+/// `layout` holds a row for each player side. A row's `i`-th number is the key lane, counted from 1
+/// within its side, whose notes are played on the side's `i`-th key lane from the left: the way the
+/// reference writes a lane order, so `1234567` is OFF and `7654321` MIRROR. The scratch lanes stay
+/// where they are. `None` when a row is not every key lane of its side exactly once.
+pub fn permutation_of_layout(mode: Mode, layout: &[Vec<u8>]) -> Option<Vec<usize>> {
+    if layout.len() != (mode.player as usize).max(1) {
+        return None;
+    }
+    let mut perm: Vec<usize> = (0..mode.key).collect();
+    for (side, row) in layout.iter().enumerate() {
+        let lanes = side_key_lanes(mode, side);
+        if !is_layout_row(row, lanes.len()) {
+            return None;
+        }
+        for (place, number) in row.iter().enumerate() {
+            perm[lanes[usize::from(*number) - 1]] = lanes[place];
+        }
+    }
+    Some(perm)
+}
+
+/// The picked layout a whole-chart lane permutation stands for, a row a side: what
+/// [`permutation_of_layout`] reads, the other way round. `None` when `perm` does not keep every key
+/// lane of a side on that side.
+pub fn layout_of_permutation(mode: Mode, perm: &[usize]) -> Option<Vec<Vec<u8>>> {
+    if perm.len() != mode.key {
+        return None;
+    }
+    (0..(mode.player as usize).max(1))
+        .map(|side| {
+            let lanes = side_key_lanes(mode, side);
+            let row: Vec<u8> =
+                lanes.iter().map(|to| lanes.iter().position(|from| perm[*from] == *to).and_then(|from| u8::try_from(from + 1).ok())).collect::<Option<_>>()?;
+            is_layout_row(&row, lanes.len()).then_some(row)
+        })
+        .collect()
+}
+
+/// A row of a picked layout read from its digits (`3517246`), or `None` when they are not each of
+/// `keys` key lanes once.
+pub fn parse_layout_row(text: &str, keys: usize) -> Option<Vec<u8>> {
+    let row: Vec<u8> = text.chars().map(|c| c.to_digit(LAYOUT_DIGIT_RADIX).and_then(|digit| u8::try_from(digit).ok())).collect::<Option<_>>()?;
+    is_layout_row(&row, keys).then_some(row)
+}
+
+/// A row of a picked layout written as its digits.
+pub fn layout_row_text(row: &[u8]) -> String {
+    row.iter().map(u8::to_string).collect()
 }
 
 /// S-RANDOM: a fresh random lane mapping each row, but a lane holding an open long note is
@@ -894,5 +1094,167 @@ mod tests {
                 assert_eq!(Some(laid_out(&m).as_str()), golden, "{} {option:?}", mode.name);
             }
         }
+    }
+
+    /// How many layouts a five-key side has: 5!.
+    const FIVE_KEY_LAYOUTS: usize = 120;
+
+    /// A picked layout of `mode` written a row a side, as the lane permutation it stands for.
+    fn picked(mode: Mode, rows: &[&str]) -> Vec<usize> {
+        let keys = side_key_lanes(mode, 0).len();
+        let layout: Vec<Vec<u8>> = rows.iter().map(|row| parse_layout_row(row, keys).expect("a layout row")).collect();
+        permutation_of_layout(mode, &layout).expect("a layout")
+    }
+
+    /// The first seed RANDOM lays `wanted` out from, searched as far as the mode is.
+    fn seed_of(mode: Mode, wanted: &[usize]) -> Result<u64, SeedSearchError> {
+        random_seed_for(mode, wanted, random_seed_limit(mode).expect("a searched mode"), &AtomicBool::new(false))
+    }
+
+    /// A layout is written the way the reference writes a lane order: the `i`-th digit is the lane
+    /// whose notes land on the `i`-th lane from the left. OFF and MIRROR read as themselves, and
+    /// RANDOM's layout from the golden seed is the one the golden chart shows.
+    #[test]
+    fn a_layout_row_names_the_lane_each_place_plays() {
+        assert_eq!(picked(Mode::BEAT_7K, &["1234567"]), lane_permutation(NoteOption::Off, Mode::BEAT_7K, 0));
+        assert_eq!(picked(Mode::BEAT_7K, &["7654321"]), lane_permutation(NoteOption::Mirror, Mode::BEAT_7K, 0));
+        assert_eq!(picked(Mode::BEAT_7K, &["3517246"]), vec![2, 4, 0, 5, 1, 6, 3, 7]);
+        let golden = lane_permutation(NoteOption::Random, Mode::BEAT_7K, GOLDEN_SEED);
+        assert_eq!(layout_of_permutation(Mode::BEAT_7K, &golden).map(|rows| layout_row_text(&rows[0])), Some("5347216".to_string()));
+        assert_eq!(picked(Mode::BEAT_14K, &["7654321", "7654321"]), lane_permutation(NoteOption::Mirror, Mode::BEAT_14K, 0));
+        assert_eq!(picked(Mode::BEAT_14K, &["1234567", "2134567"]), vec![0, 1, 2, 3, 4, 5, 6, 7, 9, 8, 10, 11, 12, 13, 14, 15]);
+    }
+
+    /// A row has to be every key lane of its side once: too short, too long, a lane twice, a zero or
+    /// a lane past the side, and anything but a digit, are not a layout.
+    #[test]
+    fn a_layout_row_is_every_lane_of_its_side_once() {
+        for text in ["123456", "12345678", "1234566", "0123456", "1234568", "12a4567", ""] {
+            assert_eq!(parse_layout_row(text, 7), None, "{text:?}");
+        }
+        assert_eq!(parse_layout_row("987654321", 9), Some(vec![9, 8, 7, 6, 5, 4, 3, 2, 1]));
+        assert_eq!(permutation_of_layout(Mode::BEAT_14K, &[vec![1, 2, 3, 4, 5, 6, 7]]), None, "a fourteen-key layout has two rows");
+        assert_eq!(permutation_of_layout(Mode::BEAT_7K, &[vec![1, 1, 3, 4, 5, 6, 7]]), None);
+    }
+
+    /// Reading a layout and writing it again gives it back, on every searched mode.
+    #[test]
+    fn a_layout_survives_the_round_trip_through_its_permutation() {
+        for (mode, rows) in [
+            (Mode::BEAT_5K, vec!["35142"]),
+            (Mode::BEAT_7K, vec!["3517246"]),
+            (Mode::POPN_9K, vec!["987654321"]),
+            (Mode::BEAT_10K, vec!["21543", "35142"]),
+            (Mode::BEAT_14K, vec!["3517246", "7123456"]),
+        ] {
+            let back = layout_of_permutation(mode, &picked(mode, &rows)).expect("a layout");
+            assert_eq!(back.iter().map(|row| layout_row_text(row)).collect::<Vec<_>>(), rows, "{}", mode.name);
+        }
+    }
+
+    /// The seeds the survey measured for some seven-, five- and nine-key layouts are the ones found,
+    /// and each lays the layout out exactly.
+    #[test]
+    fn the_seed_found_for_a_layout_is_the_first_that_lays_it_out() {
+        let known = [
+            (Mode::BEAT_7K, "3517246", 4761),
+            (Mode::BEAT_7K, "1234567", 24_088),
+            (Mode::BEAT_7K, "7654321", 1048),
+            (Mode::BEAT_7K, "7123456", 2272),
+            (Mode::BEAT_7K, "2345671", 14_563),
+            (Mode::BEAT_5K, "12345", 225),
+            (Mode::BEAT_5K, "54321", 39),
+            (Mode::POPN_9K, "987654321", 590_676),
+        ];
+        for (mode, row, seed) in known {
+            let wanted = picked(mode, &[row]);
+            assert_eq!(seed_of(mode, &wanted), Ok(seed), "{} {row}", mode.name);
+            assert_eq!(lane_permutation(NoteOption::Random, mode, seed), wanted, "{} {row}", mode.name);
+            assert!((1..seed).all(|earlier| lane_permutation(NoteOption::Random, mode, earlier) != wanted), "{} {row} came out earlier", mode.name);
+        }
+    }
+
+    /// Every five-key layout is found, inside the limit, by a seed that lays it out.
+    #[test]
+    fn every_five_key_layout_has_a_seed() {
+        let mode = Mode::BEAT_5K;
+        let mut found = std::collections::HashSet::new();
+        for seed in 1..=RANDOM_SEED_LIMIT_SINGLE {
+            if found.insert(lane_permutation(NoteOption::Random, mode, seed)) && found.len() == FIVE_KEY_LAYOUTS {
+                break;
+            }
+        }
+        assert_eq!(found.len(), FIVE_KEY_LAYOUTS);
+        for wanted in found {
+            let seed = seed_of(mode, &wanted).expect("a seed");
+            assert_eq!(lane_permutation(NoteOption::Random, mode, seed), wanted);
+        }
+    }
+
+    /// A two-side layout is found as the pair it is: the seed lays both sides out, and it is no later
+    /// than a seed known to give the pair.
+    #[test]
+    fn a_two_side_layout_is_found_side_by_side() {
+        for mode in [Mode::BEAT_14K, Mode::BEAT_10K] {
+            for known in [1, 2, 37, 1000, 123_457] {
+                let wanted = lane_permutation(NoteOption::Random, mode, known);
+                let seed = seed_of(mode, &wanted).expect("a seed");
+                assert!(seed <= known, "{} {known}: {seed}", mode.name);
+                assert_eq!(lane_permutation(NoteOption::Random, mode, seed), wanted, "{} {known}", mode.name);
+            }
+        }
+    }
+
+    /// An eighth of the ten-key pairs comes from no seed, and is reported as such; the search for one
+    /// goes through every seed of the limit.
+    #[test]
+    fn a_ten_key_pair_random_never_gives_is_unreachable() {
+        let wanted = picked(Mode::BEAT_10K, &["12345", "51234"]);
+        assert_eq!(seed_of(Mode::BEAT_10K, &wanted), Err(SeedSearchError::Unreachable));
+        let either_side_alone = [picked(Mode::BEAT_10K, &["12345", "12345"]), picked(Mode::BEAT_10K, &["51234", "51234"])];
+        for wanted in either_side_alone {
+            assert!(seed_of(Mode::BEAT_10K, &wanted).is_ok());
+        }
+    }
+
+    /// Twenty-four keys are not searched, and what is not shaped as a layout is not looked for.
+    #[test]
+    fn a_search_is_refused_what_it_cannot_find() {
+        let never = AtomicBool::new(false);
+        let identity: Vec<usize> = (0..Mode::KEYBOARD_24K.key).collect();
+        assert_eq!(random_seed_limit(Mode::KEYBOARD_24K), None);
+        assert_eq!(random_seed_for(Mode::KEYBOARD_24K, &identity, RANDOM_SEED_LIMIT_SINGLE, &never), Err(SeedSearchError::UnsupportedMode));
+        let mut scratch_moved = picked(Mode::BEAT_7K, &["1234567"]);
+        scratch_moved.swap(0, 7);
+        let crossing = {
+            let mut perm = picked(Mode::BEAT_14K, &["1234567", "1234567"]);
+            perm.swap(0, 8);
+            perm
+        };
+        assert_eq!(random_seed_for(Mode::BEAT_7K, &scratch_moved, RANDOM_SEED_LIMIT_SINGLE, &never), Err(SeedSearchError::NotALayout));
+        assert_eq!(random_seed_for(Mode::BEAT_14K, &crossing, RANDOM_SEED_LIMIT_FOURTEEN_KEY, &never), Err(SeedSearchError::NotALayout));
+        assert_eq!(random_seed_for(Mode::BEAT_7K, &[0, 0, 2, 3, 4, 5, 6, 7], RANDOM_SEED_LIMIT_SINGLE, &never), Err(SeedSearchError::NotALayout));
+        assert_eq!(random_seed_for(Mode::BEAT_7K, &[0, 1, 2], RANDOM_SEED_LIMIT_SINGLE, &never), Err(SeedSearchError::NotALayout));
+    }
+
+    /// A raised cancel flag stops the search, and a limit short of the seed leaves it unfound.
+    #[test]
+    fn a_search_stops_when_cancelled_or_out_of_seeds() {
+        let wanted = picked(Mode::BEAT_7K, &["1234567"]);
+        assert_eq!(random_seed_for(Mode::BEAT_7K, &wanted, RANDOM_SEED_LIMIT_SINGLE, &AtomicBool::new(true)), Err(SeedSearchError::Cancelled));
+        assert_eq!(random_seed_for(Mode::BEAT_7K, &wanted, 24_087, &AtomicBool::new(false)), Err(SeedSearchError::Unreachable));
+    }
+
+    /// A chart laid out by a picked layout is the chart RANDOM lays out from the seed found for it.
+    #[test]
+    fn a_picked_layout_lays_the_chart_out_as_its_seed_does() {
+        let (mode, chart) = GOLDEN_CHARTS[0];
+        let wanted = picked(mode, &["3517246"]);
+        let seed = seed_of(mode, &wanted).expect("a seed");
+        let mut by_seed = to_model(&parse(chart), mode);
+        apply(&mut by_seed, NoteOption::Random, seed);
+        let mut by_layout = to_model(&parse(chart), mode);
+        apply_lane_permutation(&mut by_layout, &wanted);
+        assert_eq!(laid_out(&by_layout), laid_out(&by_seed));
     }
 }

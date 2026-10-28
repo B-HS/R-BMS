@@ -1015,6 +1015,38 @@ fn the_layout_play_key_ships_on_a_free_key_and_an_earlier_file_reads_as_it_did()
     assert_eq!(taken.shortcut_on(ShortcutScreen::Replay, shipped), Some(Shortcut::ReplayBack));
 }
 
+/// The key to LAYOUT PICK is a shortcut of the browser. It ships on a key no shipped layout of any
+/// mode plays a lane on, no control is read from and no other shortcut of the browser ships on, and a
+/// key config written before it existed reads as it did: the key is the new one's unless the player
+/// had put another shortcut of the browser there, which keeps it.
+#[test]
+fn the_layout_pick_key_ships_on_a_free_key_and_an_earlier_file_reads_as_it_did() {
+    let shipped = Shortcut::LayoutPick.default_key();
+    assert_eq!((shipped, Shortcut::LayoutPick.config_key()), (KeyCode::KeyY, "layout_pick"));
+    assert_eq!((Shortcut::LayoutPick.group(), Shortcut::LayoutPick.screen()), (crate::keyconfig::ShortcutGroup::Browser, ShortcutScreen::Browser));
+    assert!(Shortcut::LayoutPick.takes_a_pad(), "a controller can be given it");
+    let fresh = KeyConfig::default();
+    for &mode in Mode::ALL {
+        let lanes = default_keys_for_mode(mode).into_iter().chain(default_reverse_keys_for_mode(mode));
+        assert!(lanes.into_iter().all(|(lane_key, _)| lane_key != shipped), "{} plays a lane on it", mode.name);
+        assert!(collisions(&fresh, mode).is_empty(), "{}", mode.name);
+    }
+    assert!(ControlAction::ALL.into_iter().all(|action| fresh.control_key(action) != Some(shipped)), "a control is read from it");
+    assert!(
+        Shortcut::ALL
+            .into_iter()
+            .filter(|other| *other != Shortcut::LayoutPick)
+            .all(|other| other.default_key() != shipped || other.screen() != ShortcutScreen::Browser)
+    );
+    assert_eq!(fresh.shortcut_on(ShortcutScreen::Browser, shipped), Some(Shortcut::LayoutPick));
+
+    let taken: KeyConfig = ron::from_str(&format!(r#"(shortcuts: {{"folders": "{}"}})"#, key_name(shipped))).expect("the file parses");
+    assert_eq!(taken.shortcut_key(Shortcut::LayoutPick), None, "it took a key the player had given another shortcut of the browser");
+    assert_eq!(taken.shortcut_on(ShortcutScreen::Browser, shipped), Some(Shortcut::Folders));
+    let written = ron::ser::to_string(&fresh).expect("the key config is written");
+    assert!(!written.contains("layout_pick"), "a key nobody moved was written to the file: {written}");
+}
+
 /// The shortcuts and the controls are stored under names that do not change with what the rows are
 /// called on screen, each name is used once, and the ten controls an older pad block names keep the
 /// names it knows them by.

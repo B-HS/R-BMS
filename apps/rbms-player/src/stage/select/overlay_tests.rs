@@ -446,6 +446,7 @@ fn check_shortcut(browser: &mut Browser, shortcut: Shortcut, code: KeyCode) {
             browser.key(code);
             assert!(browser.app.shared.favorites.contains(FIRST_CHART_MD5), "{shortcut:?}");
         }
+        Shortcut::LayoutPick => assert!(matches!(browser.key(code), Transition::Open(Stage::LayoutPick(_))), "{shortcut:?}"),
         Shortcut::SkinMenu => assert!(matches!(browser.key(code), Transition::Open(Stage::SkinMenu(_))), "{shortcut:?}"),
         Shortcut::PlayMenu => assert!(matches!(browser.key(code), Transition::Open(Stage::PlayMenu(_))), "{shortcut:?}"),
         Shortcut::KeyConfig | Shortcut::RefKeyConfig => assert!(matches!(browser.key(code), Transition::Open(Stage::KeyConfig(_))), "{shortcut:?}"),

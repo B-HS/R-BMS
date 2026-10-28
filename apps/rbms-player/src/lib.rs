@@ -817,6 +817,9 @@ struct AppShared {
     /// The layout borrowed from a replay that the runs of its chart are laid out with, while it is
     /// held ([`AppShared::borrow_layout`]).
     borrowed_layout: Option<borrowed_layout::Borrowing>,
+    /// The layout last written on LAYOUT PICK for each mode, held while the app runs and written to
+    /// no file.
+    picked_layouts: stage::layout_pick::PickedLayouts,
     gpu: Option<Gpu>,
     /// The one output stream for the whole app lifetime. Opened lazily on the first frame (or the
     /// first chart/preview load) and kept across Play, Result and Select; stage changes clear the
@@ -1159,6 +1162,7 @@ impl App {
                 course_settings_backup: None,
                 own_play_options: None,
                 borrowed_layout: None,
+                picked_layouts: stage::layout_pick::PickedLayouts::default(),
                 kc_edit_mode: MODE,
                 gpu: None,
                 audio: None,
