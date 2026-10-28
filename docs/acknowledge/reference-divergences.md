@@ -435,3 +435,14 @@
 | 서버 리플레이의 배치 | CONVERGE 와 옵션 없음을 서버가 OFF 로 바꿔 내려 이 기기 기록이 아닌 OFF 리플레이는 `ArrangementUnknown` 으로 거절한다. 서버 리플레이는 고스트가 없다 | 해당 없음 | 배치를 알 수 없다. 서버 리플레이 판정 설정(S1)과 마이그레이션 0013 은 하지 않았다 |
 | 배치 플레이에서 LN 에 따른 배치 차이 | 노트 기반 옵션(S-RANDOM·H-RANDOM·ALL-SCRATCH)과 정의 안 된 LN 이 있으면 LN MODE 와 상관없이 경고만 낸다 | 해당 없음 | 요청 본문에 LN MODE 가 없어 판별할 수 없다. 실측하지 않았다(테스트 부채 3.119) |
 | NOTES RADAR 의 값 | IIDX 의 실제 레이더와 수십 % 다를 수 있다 | 해당 없음 | 공개 구간표 + 가설 세 축 + 이 라이브러리 분포로 정한 스케일. 대조 자료가 없다(테스트 부채 3.115·3.116) |
+
+## 배치 지정·재생 속도·선곡 음량·글자 넘침 (2026-10-29)
+
+> 사용자 결정 D1~D6 과 메인 추천 M1~M11([설계](../plan/2026-10-29-feature-upgrade.md)). 결정과 근거: [배치 지정](2026-10-29-adr-layout-pick.md), [재생 속도](2026-10-29-adr-playback-rate-unrecorded.md), [선곡 음량](2026-10-29-adr-select-volume-master.md), [정보창과 overflow 3](2026-10-29-adr-select-info-overflow.md).
+
+| 항목 | 전 | 원본 | 지금 |
+|---|---|---|---|
+| 배치를 직접 정해 치기 | 없음 | 없음 | 선곡 `Y` 의 LAYOUT PICK. 그 배치를 내는 RANDOM 시드를 찾아 RANDOM + 시드 판으로 기록한다(10키의 1/8 쌍과 24키는 만들 수 없어 거절) |
+| 일반 판의 재생 속도 | 없음(연습 FREQUENCY 만) | 연습의 FREQ 만 | 일반 판에 50~200%. 100% 가 아닌 판은 기록·리플레이·전송을 하지 않는다(사용자 결정 D2). 판정 창은 실시간 길이, 녹색 숫자는 실시간 기준 |
+| rate 17·숫자 57 | `audio.system`(효과음 버스) | `AudioConfig.systemvolume`(원본은 미리듣기도 이 값으로 튼다) | `audio.master`. 미리듣기를 Bg·Key 버스로 옮기면서 원본 뜻을 따르면 MASTER 슬라이더가 미리듣기에 닿지 않았다. 효과음 음량은 SETTINGS 의 SYSTEM VOL |
+| 텍스트 overflow | 0·1·2 | 0 OVERFLOW·1 SHRINK·2 TRUNCATE | 이 플레이어 전용 3(하한 0.75 까지 가로 축소 뒤 넘치면 잘라 말줄임표). 0~2 는 그대로 |

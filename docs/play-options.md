@@ -1,7 +1,7 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63. 반영한 변경: 2026-10-24 UI 언어 LANGUAGE(새 15절), 선곡의 랭킹 모드와 설정 RANKING KEYS(새 16절), IIDX 식 기본 스킨 선곡 화면(새 17절), 리플레이의 배치로 치기(새 10.15절), 코스 막대 위에서 연습 키가 코스를 시작(9절, 13.3절의 모달 문구 언어), 2026-10-23 노트를 친 판의 Esc 는 결과 화면(코스 도중은 FAILED 코스 결과까지. 10.2절의 도중 포기 행, 10.6절 5번), SCRATCH AUTO COLOR 행과 색 접이(2절, 7.2절, 10.5절 끝), COURSE GAUGE 설정과 코스 시작 게이지·9칸 이월·ln/cn/hcn 제약·제출 게이지(새 10.14절, 10.13절 4번), 선곡 패널 키의 스킨 opt-in(12.2절, 12.7절), 없는 곡 보이기·다운로드 폴더·다운로드 모달(새 13절), 연습 패널의 GAUGE CATEGORY 에 IIDX(9.1절), 2026-10-22 선곡 옵션 패널 1~3 의 새 배치와 켬·끔 토글, F1 오버레이 홀드 키(새 12절, 2절 표의 "바꾸는 곳" 칸), 램프 등급과 코스 스테이지의 게이지(새 10.13절, 10.1·10.2·10.6·10.12절의 해당 칸), PLAY 메뉴의 색 행 접이(7.2·7.3·7.4절), 2026-10-20 과거 판 trace 소급(웹 AI 기능 W6, 10.12절의 소급·소급 실행·설정·테스트·남은 것 행, 10.1절의 `play_trace` 행), 2026-10-20 판별 trace(웹 AI 기능 W4 클라이언트, 10.1절의 `play_trace`·`ir_sync`·`pending-runs` 행, 10.9절의 trace 행, 새 10.12절), 2026-10-19 기록 목표의 진행 중 값이 그 기록 판의 노트별 판정을 따름(11.7절, 8절의 점수 차 행), 2026-10-19 노트를 하나도 치지 않은 판은 Esc·앱 종료로 남기지 않음(10.2절의 도중 포기·앱 종료 행), 2026-10-15 S19 의 입력 시각과 KEY·PAD DEBOUNCE(3.4절), 기록 정의(규칙 세대 4: avgjudge·BP·코스 스테이지 콤보·풀콤·TOTAL 어시스트, Esc 판은 모두 저장과 코스 도중 Esc: 10.2절의 FAILED·TOTAL·Esc 행, 새 10.11절), 0.1.4 의 기록 동기화와 Esc 포기 판 저장(10.1·10.2·10.4·10.8절과 새 10.9절, 커밋 `5f4a9a2`), 저장 스레드와 리플레이 보존(10.10절), 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
-> 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절), 선곡의 옵션 패널 1~3(12절), 언어(15절), 랭킹 모드(16절), 선곡 화면의 새 구성(17절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
+> 최종 갱신 2026-10-29 · 대응 커밋 `cf8afe5`·`435839e`·`c38a7ea`·`9f1b484`(웨이브 1). 반영한 변경: 2026-10-29 선곡에서 배치를 써서 미리 보고 치는 LAYOUT PICK(새 10.16절, 5.1절의 키 행), 플레이 배속 PLAYBACK RATE(새 18절, 2절 표의 새 행, 7.2·7.4·7.5절의 새 행, 9.3절의 연습 수리, 10.2절의 판의 종류 새 행), 선곡 정보창의 새 배치와 NPS 평균·최고, 글자 넘침 overflow 3(17.2절), 선곡 음량 슬라이더가 진짜 마스터를 움직이고 미리듣기 키음이 Key 버스로 울리는 것(새 17.6절), 2026-10-24 UI 언어 LANGUAGE(새 15절), 선곡의 랭킹 모드와 설정 RANKING KEYS(새 16절), IIDX 식 기본 스킨 선곡 화면(새 17절), 리플레이의 배치로 치기(새 10.15절), 코스 막대 위에서 연습 키가 코스를 시작(9절, 13.3절의 모달 문구 언어), 2026-10-23 노트를 친 판의 Esc 는 결과 화면(코스 도중은 FAILED 코스 결과까지. 10.2절의 도중 포기 행, 10.6절 5번), SCRATCH AUTO COLOR 행과 색 접이(2절, 7.2절, 10.5절 끝), COURSE GAUGE 설정과 코스 시작 게이지·9칸 이월·ln/cn/hcn 제약·제출 게이지(새 10.14절, 10.13절 4번), 선곡 패널 키의 스킨 opt-in(12.2절, 12.7절), 없는 곡 보이기·다운로드 폴더·다운로드 모달(새 13절), 연습 패널의 GAUGE CATEGORY 에 IIDX(9.1절), 2026-10-22 선곡 옵션 패널 1~3 의 새 배치와 켬·끔 토글, F1 오버레이 홀드 키(새 12절, 2절 표의 "바꾸는 곳" 칸), 램프 등급과 코스 스테이지의 게이지(새 10.13절, 10.1·10.2·10.6·10.12절의 해당 칸), PLAY 메뉴의 색 행 접이(7.2·7.3·7.4절), 2026-10-20 과거 판 trace 소급(웹 AI 기능 W6, 10.12절의 소급·소급 실행·설정·테스트·남은 것 행, 10.1절의 `play_trace` 행), 2026-10-20 판별 trace(웹 AI 기능 W4 클라이언트, 10.1절의 `play_trace`·`ir_sync`·`pending-runs` 행, 10.9절의 trace 행, 새 10.12절), 2026-10-19 기록 목표의 진행 중 값이 그 기록 판의 노트별 판정을 따름(11.7절, 8절의 점수 차 행), 2026-10-19 노트를 하나도 치지 않은 판은 Esc·앱 종료로 남기지 않음(10.2절의 도중 포기·앱 종료 행), 2026-10-15 S19 의 입력 시각과 KEY·PAD DEBOUNCE(3.4절), 기록 정의(규칙 세대 4: avgjudge·BP·코스 스테이지 콤보·풀콤·TOTAL 어시스트, Esc 판은 모두 저장과 코스 도중 Esc: 10.2절의 FAILED·TOTAL·Esc 행, 새 10.11절), 0.1.4 의 기록 동기화와 Esc 포기 판 저장(10.1·10.2·10.4·10.8절과 새 10.9절, 커밋 `5f4a9a2`), 저장 스레드와 리플레이 보존(10.10절), 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
+> 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절), 선곡의 옵션 패널 1~3(12절), 언어(15절), 랭킹 모드(16절), 선곡 화면의 새 구성과 음량(17절), 선곡의 배치 지정(10.16절), 플레이 배속(18절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
 ## 1. 용어
@@ -28,6 +28,7 @@
 | JUDGE OFFSET | 판정 오프셋 | -200~+200 ms, PLAY 메뉴의 행은 1 ms 씩(Shift 10 ms) | 0 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 5·7번 키(±1 ms), 플레이 중 `9`(-1 ms)/`0`(+1 ms. 누르고 있으면 반복, 5.3절) | `PlayerConfig.judgetiming`(`LaneRenderer.java:300-301`) | 뜻과 부호는 같다. 범위만 좁다(원본 -500~+500 ms). 원본은 플레이 중에 바꾸는 키가 없다 |
 | AUTO ADJUST | 칠 때마다 JUDGE OFFSET 을 조금씩 움직인다 | 켬 / 끔 | 끔 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 3번 키, 플레이 중 AUTO ADJUST ON/OFF 키(출하 시 미지정) | `PlayerConfig.notesDisplayTimingAutoAdjust`(`JudgeManager.java:697-703`) | 없음(식과 부호가 같다) |
 | SCRATCH AUTO COLOR | SCRATCH AUTO 가 대신 치는 턴테이블 노트를 칠하는 색. 알파가 불투명도다 | RGBA(`#RRGGBBAA`), 채널 R·G·B·A 각 0~255 | 저장값 없음(출하 `#30E050FF`, 불투명 초록) | PLAY 메뉴 > CHART(7.2절) | 없음(R-BMS 확장. 원본은 상수 색) | 어느 스킨에서나(외부 스킨 포함)·스킨 없는 내장 필드에서도 같은 값이 이긴다. 스킨의 색 행(Scratch Note·Scratch LN)은 이 노트에 닿지 않는다. 롱노트 몸통은 사용자 알파 x 0xA0/255 라 머리와 구분된다. 저장값이 없으면 화소가 전과 같다 |
+| PLAYBACK RATE | 차트를 재생하는 속도. 소리의 음높이도 함께 바뀐다. 100% 가 아닌 판은 저장·리플레이·전송되지 않는다 | 50~200%(차트 자신의 속도에 대한 비율), 한 칸 1%, PLAY 메뉴의 Shift 는 10% | 100 | PLAY 메뉴 > CHART(LEGACY NOTE 바로 아래), F1 오버레이의 마지막 행. 플레이 중 키는 없다(18절) | 없음(원본의 일반 플레이에는 배속이 없고 연습의 FREQUENCY 만 있다. 연습 FREQUENCY 의 범위와 같다) | 차트를 재배치하지 않고 시계를 늘린다. 판정 창은 실시간 길이이고 BPM·녹색 숫자는 실시간 기준이다. 코스와 리플레이 감상은 설정과 무관하게 100%, 연습은 자기 FREQUENCY. 사용자 결정(2026-10-29)으로 100% 가 아닌 판은 기록을 남기지 않는다(10.2절, 18절) |
 
 ## 3. 판정 오프셋과 자동 보정(JUDGE OFFSET, AUTO ADJUST)
 
@@ -120,7 +121,7 @@ JUDGE OFFSET 은 노트 필드를 그리는 시각에만 더해진다. 원본이
 | 항목 | 내용 |
 | --- | --- |
 | 키 설정 화면을 여는 길 | 선곡에서 `F5`, Settings 의 `KEY CONFIG >` 단추 또는 `F5`, 스킨 브라우저의 숫자 `6` |
-| 사용자 지정 범위 | 레인과 스크래치 역방향, 플레이 조작 20종, 선곡 단축키 10종(난이도표 다시 받기 `F6` 포함), 화면 여는 키 6종(PLAY 메뉴 `F8` 포함), 스킨 브라우저 숫자 키 8종, 결과 2종, 리플레이 분석 5종. 키보드와 컨트롤러 둘 다(옵션 오버레이 두 키와 상세 패널 홀드 키는 키보드 전용) |
+| 사용자 지정 범위 | 레인과 스크래치 역방향, 플레이 조작 20종, 선곡 단축키 11종(난이도표 다시 받기 `F6`, 배치 지정 `Y` 포함), 화면 여는 키 6종(PLAY 메뉴 `F8` 포함), 스킨 브라우저 숫자 키 8종, 결과 2종, 리플레이 분석 6종(배치로 치기 `J` 포함). 키보드와 컨트롤러 둘 다(옵션 오버레이 두 키와 상세 패널 홀드 키는 키보드 전용) |
 | 고정 키 | `Esc`, `Enter`, 화살표, `H`(키 안내)와 각 메뉴 안의 키 |
 | 레인 커버 조작 | `RIGHT` = 더 가림(LANE COVER DOWN), `LEFT` = 덜 가림(LANE COVER UP), `BACKSLASH` = 켬·끔. 커버가 꺼져 있을 때 값을 바꾸면 발치의 COVER 수치가 1.5초 동안 뜬다 |
 | 미세 단계 | FINE STEP 키를 누르고 있는 동안 지정 키의 가림막은 미세 단계로, 유지 중인 녹색 숫자는 ±1 로 움직인다. 키를 주지 않았으면 레인으로 쓰지 않는 Shift 가 그 역할을 한다(7키 기본 배치에서는 오른쪽 Shift). START + 턴테이블의 걸음에는 관여하지 않는다(5.2절) |
@@ -128,6 +129,7 @@ JUDGE OFFSET 은 노트 필드를 그리는 시각에만 더해진다. 원본이
 | 스크래치 역방향 | 스크래치 레인마다 반대 방향 키가 하나 더 있다. 출하 키는 왼쪽 턴테이블 `LCTRL`, 10·14키의 오른쪽 턴테이블 `RCTRL`(5.4절). 선곡에서는 PREVIOUS BAR, 플레이에서는 스크래치의 반대 방향이고 START 와 함께 누르면 가림막을 올린다(5.2절) |
 | 지금 설정된 키 보기 | 선곡에서 `H`. 플레이 조작은 IN PLAY, START·SELECT 조합은 IN PLAY, HELD TOGETHER 묶음에 지금 지정된 키로 나온다. 그 묶음의 첫 줄(`LSHIFT LCTRL  THE TURNTABLE: DOWN / UP`)이 아래 줄들의 TURNTABLE 이 키보드의 어느 두 키이고 각각 가림막을 어느 쪽으로 움직이는지 알려 준다 |
 | 난이도표 다시 받기 | 선곡에서 `F6`(RELOAD DIFFICULTY TABLES, 설정 파일 키 `reload_tables`, 키 설정 화면에서 바꿀 수 있고 패드에도 줄 수 있다). 등록한 표를 전부 다시 받는다. 검색어를 치는 중에는 듣지 않는다. 표 하나만 받으려면 Tables 화면(`T`)에서 `R`, 전부는 `A`. 저장과 다시 받기의 규칙은 `README.md` 의 Difficulty tables 절 |
+| 배치 지정 | 선곡에서 `Y`(LAYOUT PICK, 설정 파일 키 `layout_pick`, 키 설정 화면의 Browser 그룹에서 바꿀 수 있고 패드에도 줄 수 있다). 커서가 차트 막대일 때만 열린다. 검색어를 치는 중에 누르면 검색을 끝내고 연다. `Y` 는 출하 레인 키·플레이 조작 키·다른 선곡 단축키 어디에도 쓰이지 않는다. 이미 `Y` 를 다른 선곡 단축키에 둔 키 설정 파일에서는 LAYOUT PICK 이 키 없이 남는다. 화면은 10.16절 |
 | 저장 | `~/.config/rbms/keyconfig.ron`. 이전 파일은 그대로 읽히고 없는 항목은 기본 키로 채워진다. 단, 파일에 없는 단축키의 기본 키를 같은 화면의 다른 단축키가 파일에서 이미 쓰고 있으면 그 단축키는 미지정으로 읽힌다(사용자가 고른 키가 이긴다. 예: FOLDERS 를 `F8` 로 옮겨 둔 파일에서 PLAY MENU 는 키 없음으로 나오고 키 설정 화면에서 새로 지정한다). 나중에 출하 키가 생긴 것(판정 오프셋 두 키, 스크래치 역방향 키)의 규칙은 5.3절과 5.4절 |
 
 ### 5.2 플레이 중 START·SELECT 조합
@@ -263,6 +265,7 @@ START + 턴테이블의 세부
 | CHART | RANDOM, GAUGE, TARGET, TARGET FALLBACK, ESCAPE | 항목 이름. TARGET 은 점수를 이름으로 삼는 목표(LOCAL BEST·IR BEST·RIVAL)일 때 `LOCAL BEST > AAA` 처럼 점수가 없을 때 쓰는 것을 뒤에 붙인다(11절) | 한 항목 |
 | CHART | TARGET RATE | `85%` | 1% / 10%. 범위 1~100%. RATE CUSTOM 목표가 요구하는 몫(11절) |
 | CHART | LEGACY NOTE, AUTOPLAY, SCRATCH AUTO, AUTO REPLAY | `ON` / `OFF` | 뒤집기 |
+| CHART | PLAYBACK RATE | `100%`. 목록에서 RANDOM, GAUGE, LEGACY NOTE 다음이다 | 1% / 10%. 범위 50~200%. 0 키로 100%. 정보 패널의 설명은 "차트를 재생하는 속도로, 음높이도 함께 바뀝니다. 100%가 아닌 플레이는 저장·리플레이·전송되지 않습니다."(`RowDescriptionText::PlaybackRate`, 세 언어). 뜻은 18절 |
 | CHART | SCRATCH AUTO COLOR | 색 견본 사각형과 값. 저장한 색이 있으면 `#RRGGBBAA`, 없으면 `DEFAULT`(출하 `#30E050FF`). SCRATCH AUTO 가 꺼져 있어도 늘 보인다 | 색 행(SKIN 묶음)과 같다: ← → 로 프리셋 16색(알파 유지), Enter 로 16진 `RRGGBB`·`RRGGBBAA`, 0 키로 저장값 지움 |
 | CHART | 접이 `SCRATCH AUTO CHANNELS` | `HIDDEN` / `SHOWN`: 접힘 여부(든 행 4) | 접이 `COLOR CHANNELS` 와 같이 편다. 펴면 R, G, B, A 네 행(각 0~255, 한 칸 1, Shift 10)이 나오고 0 키는 그 채널만 출하 초록의 값으로 되돌린다. 닫힌 채로 열린다 |
 | SKIN | 접이 `COLOR` | `HIDDEN (17)` / `SHOWN (17)`: 접힘 여부와 든 행 수(기본 스킨 7키) | Enter·← →·클릭으로 펴고 접는다. 그 문서가 `color` 로 선언한 색 행이 한 행씩 바로 아래에 나온다(기본 스킨 5·7·10·14키 17행, 9키 22행. 목록은 3.4.4절). 선언한 색이 없는 문서에는 접이가 없다. 닫힌 채로 열린다 |
@@ -346,7 +349,7 @@ START + 턴테이블의 세부
 | TARGET, TARGET FALLBACK, TARGET RATE | 점수 그래프의 타깃 막대와 `TARGET +n`, 그 막대의 이름표. 기록·IR·라이벌 없이 예시 차트의 노트 수만으로 정한 타깃이다. 그래서 LOCAL BEST·IR BEST·RIVAL 은 TARGET FALLBACK 으로 물러난 값이고, 이름표도 물러난 목표의 이름이다(웨이브 16 전에는 MAX 로 물러났다) |
 | AUTOPLAY | 스킨의 AUTOPLAY 표지. 예시 손(적어 둔 입력)은 그대로다 |
 | LEGACY NOTE | 롱노트가 일반 노트로 그려진다 |
-| RANDOM, HI-SPEED FIX, HI-SPEED STEP, COVER FINE STEP, SCRATCH AUTO, SCRATCH AUTO COLOR, AUTO REPLAY, ESCAPE | 보이지 않는다(SCRATCH AUTO COLOR 는 행의 색 견본 사각형으로 확인한다). 예시 차트의 배치와 손은 바꾸지 않고(RANDOM), 예시 차트가 한 템포라 기준 BPM 이 어느 것이든 같으며(HI-SPEED FIX), 나머지는 화면에 그릴 것이 없는 값이다 |
+| RANDOM, HI-SPEED FIX, HI-SPEED STEP, COVER FINE STEP, SCRATCH AUTO, SCRATCH AUTO COLOR, AUTO REPLAY, ESCAPE, PLAYBACK RATE | 보이지 않는다(SCRATCH AUTO COLOR 는 행의 색 견본 사각형으로 확인한다. PLAYBACK RATE 는 스킨 미리보기에서 확장 불린 21106 이 꺼져 있어 표지가 없다). 예시 차트의 배치와 손은 바꾸지 않고(RANDOM), 예시 차트가 한 템포라 기준 BPM 이 어느 것이든 같으며(HI-SPEED FIX), 나머지는 화면에 그릴 것이 없는 값이다 |
 
 ### 7.5 SETTINGS 에 남은 것과 옮긴 것
 
@@ -360,6 +363,7 @@ START + 턴테이블의 세부
 | TARGET | SETTINGS > JUDGE | PLAY 메뉴 > CHART |
 | SCRATCH AUTO | SETTINGS > INPUT | PLAY 메뉴 > CHART |
 | SCRATCH AUTO COLOR, SCRATCH AUTO CHANNELS(접이) | 없음(2026-10-23 새 행) | PLAY 메뉴 > CHART(SCRATCH AUTO 바로 아래) |
+| PLAYBACK RATE | 없음(2026-10-29 새 행) | PLAY 메뉴 > CHART(LEGACY NOTE 바로 아래)와 F1 오버레이의 마지막 행. SETTINGS 에는 없다(18절) |
 | COURSE GAUGE | 없음(2026-10-23 새 행) | SETTINGS > JUDGE(GAUGE 구역의 GAUGE SET 바로 뒤. 10.14절) |
 | MISSING CHARTS, DOWNLOAD FOLDER | 없음(2026-10-23 새 행) | SETTINGS > SELECT(MISSING CHARTS 는 SONG LIST 구역, DOWNLOAD FOLDER 는 DOWNLOADS 구역. 13절) |
 | 5KEYS LAYOUT | SETTINGS > PLAY | SETTINGS > DISPLAY(내장 필드만 읽는 행. WHITE NUMBER, JUDGE TEXT Y 아래) |
@@ -368,7 +372,7 @@ START + 턴테이블의 세부
 | SCRATCH SIDE, KEY CONFIG | SETTINGS > INPUT | 그대로. SETTINGS 의 SCRATCH SIDE 는 내장 필드의 값이고(스킨이 그리는 동안 행 옆에 `SKIN OPTION COMES FIRST` 표지가 붙는다), 스킨이 그리는 화면의 스크래치 쪽은 PLAY 메뉴 LANE 묶음의 스킨 옵션 SCRATCH SIDE 다. 이름이 같은 두 행은 다른 값이다 |
 | DISPLAY 의 나머지, NETWORK, AUDIO, SELECT | — | 그대로 |
 
-SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(PLAY 탭과 GAUGE 탭은 없어졌다). 플레이 직전의 빠른 옵션(F1 오버레이)과 선곡의 옵션 패널 1~3(12절. 2026-10-22 에 키 배치가 바뀌었다)은 SETTINGS 와 같은 값을 고친다. `rbms-cli config` 덤프는 PLAY 메뉴의 묶음을 `[PLAY SPEED]`, `[PLAY LANE]`, `[PLAY JUDGE]`, `[PLAY CHART]` 로 적는다. PAD DEBOUNCE 는 값이 settings.ron 이 아니라 `keyconfig.ron` 에 있으므로 숫자 대신 `(in keyconfig.ron)` 으로 적는다.
+SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(PLAY 탭과 GAUGE 탭은 없어졌다). 플레이 직전의 빠른 옵션(F1 오버레이. 2026-10-29 부터 열두 행이고 마지막이 PLAYBACK RATE)과 선곡의 옵션 패널 1~3(12절. 2026-10-22 에 키 배치가 바뀌었다)은 SETTINGS 와 같은 값을 고친다. `rbms-cli config` 덤프는 PLAY 메뉴의 묶음을 `[PLAY SPEED]`, `[PLAY LANE]`, `[PLAY JUDGE]`, `[PLAY CHART]` 로 적는다. PAD DEBOUNCE 는 값이 settings.ron 이 아니라 `keyconfig.ron` 에 있으므로 숫자 대신 `(in keyconfig.ron)` 으로 적는다.
 
 ## 8. 판정 표시(기본 스킨)
 
@@ -446,6 +450,8 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | 플레이에 반영 | 구간을 시작하는 순간의 값으로 구간을 자른다(`PracticePanel::start` → `PracticeSession`: 구간 시작·끝, 게이지와 시작량, 판정 폭, 재생 속도, TOTAL, 배치). 돌고 있는 구간에는 반영되지 않고 다음 시작부터다. 반영 경로는 전과 같다 |
 | 기록 | 연습은 기록·IR 전송을 하지 않는다(전과 같다) |
 | 재생 속도와 판정 | FREQUENCY 는 소리·그리기를 그 속도로 돌리지만 판정은 플레이어의 실제 시간으로 한다. 판정 창(PGREAT~空POOR)·롱노트 마진·후보 범위·놓친 노트 경계·HCN 틱(200 ms)이 재생 속도와 상관없이 같은 실제 시간 폭이고, FAST/SLOW 의 ms 값·자동 오프셋 조정·타이밍 통계도 실제 시간이다(`PlaySession::set_playback_rate`). 원본이 차트를 재배치하고(`BMSModelUtils.changeFrequency`) 같은 창으로 판정하는 것과 같다. 전에는 50% 에서 실제 30 ms 늦은 입력이 PGREAT, 200% 에서 10 ms 늦은 입력이 GREAT 였다 |
+| 표시와 시계(2026-10-29) | 구간의 시계는 일반 판의 PLAYBACK RATE(18절)와 같은 `PracticeClock` 이다. 그래서 FREQUENCY 판에서도 스킨과 내장 HUD 의 BPM(현재·MAIN·MIN·MAX), 이동 시간, 녹색·흰색 숫자, KEEP GREEN NUMBER 의 기준 템포가 실시간 기준(BPM x 배율)이 되었다. 같은 HI-SPEED 에서 200% 면 노트가 실제로 두 배 빨리 내려오고 KEEP GREEN NUMBER 가 켜져 있으면 하이스피드가 절반이 되어 녹색 숫자가 유지된다. 전에는 차트 BPM 기준이었다(동작 변화, 사용자 확인 전). AUTO ADJUST 는 그대로 판정 오프셋을 바꾼다 |
+| 고친 결함 둘(2026-10-29) | (1) 판정 그래프의 현재 위치 커서가 이미 차트 시각인 PLAY 타이머에 배율을 다시 곱해 FREQUENCY 만큼 어긋나던 것을 없앴다(`PlayCursor.speed` 삭제. 원본은 PLAY 타이머가 실시간이라 곱한다). (2) 리듬 타이머가 배율을 몰라 마디 안에서 박이 어긋나던 것을 고쳤다(`play_speed_percent` 가 분석 모드가 아니면 시계 배율을 돌려줘 원본의 `bpm * freq` 와 같게 한다) |
 | 게이지가 비었을 때 | 구간은 끝까지 판정한다(게이지 잠금). GAUGE AUTO SHIFT 가 NONE 이면 연습에서만 CONTINUE 로 친다(`PracticeSession::gauge_shift`). 다른 GAUGE AUTO SHIFT 는 설정대로다. 원본은 연습 패널로 돌아간다(`BMSPlayer.java:735-737`). 전에는 HARD 이상 게이지가 비는 순간 판정이 멈춘 채 구간이 흘렀다 |
 
 ## 10. 기록 저장(어떤 판이 무엇을 남기나)
@@ -469,7 +475,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 
 ### 10.2 판의 종류별로 남는 것
 
-"사람이 친 판"은 오토플레이도 리플레이 보기도 연습도 아닌 판이다. 사람이 친 판은 어떤 설정이든 기록 목록의 행·날짜 통계·리플레이(AUTO REPLAY 켬)를 남기고 점수 서버로 간다(주 서버가 기본 서버(`SERVER URL`)면 로그인했을 때, 주 서버가 IR 프로필이면 언제나. 보내지 않은 판은 `ir_submitted` 만 0 이고 나머지는 같다. 기본 서버가 설정돼 있어도 로그인하지 않았으면 보내지 않으므로 0 이다(`AppShared::sends_to_primary_ir_server`). 0.1.4 부터는 로그인하면(시작할 때 로그인 상태였으면 세션이 확인된 뒤) 서버가 아직 받지 않은 지난 판을 모두 보낸다: 10.9절의 기록 동기화).
+"사람이 친 판"은 오토플레이도 리플레이 보기도 연습도 아닌 판이다. 2026-10-29 부터 PLAYBACK RATE 가 100% 가 아닌 판도 뺀다(사용자 결정. 아래 표의 해당 행과 18절). 사람이 친 판은 어떤 설정이든 기록 목록의 행·날짜 통계·리플레이(AUTO REPLAY 켬)를 남기고 점수 서버로 간다(주 서버가 기본 서버(`SERVER URL`)면 로그인했을 때, 주 서버가 IR 프로필이면 언제나. 보내지 않은 판은 `ir_submitted` 만 0 이고 나머지는 같다. 기본 서버가 설정돼 있어도 로그인하지 않았으면 보내지 않으므로 0 이다(`AppShared::sends_to_primary_ir_server`). 0.1.4 부터는 로그인하면(시작할 때 로그인 상태였으면 세션이 확인된 뒤) 서버가 아직 받지 않은 지난 판을 모두 보낸다: 10.9절의 기록 동기화).
 
 | 판 | 기록 목록의 행·날짜 통계 | 최고 기록(EX·판정·콤보·BP) | 램프·플레이 횟수 | 리플레이(AUTO REPLAY 켬) | 점수 서버 | 원본과 다른 점 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -485,6 +491,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | AUTOPLAY | 남지 않는다 | - | - | - | 보내지 않는다 | 없음(`MusicResult.updateScoreDatabase` 가 PLAY 모드만 적는다). 사람이 친 판이 아니다 |
 | 리플레이 재생 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 재생하는 동안 SCRATCH AUTO·GAUGE·RANDOM 은 리플레이에 적힌 값으로 돌고 끝나면 플레이어의 값으로 돌아온다(웨이브 16) |
 | 연습 구간 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 사람이 쳤지만 구간만 잘라 친 판이라 한 판의 기록이 아니다 |
+| 재생 속도가 100% 가 아닌 판(PLAYBACK RATE, 2026-10-29) | 남지 않는다 | - | - | 저장하지 않는다(AUTO REPLAY 를 켜도) | 보내지 않는다. 기록 동기화도 보내지 않는다. 결과 화면의 IR 줄은 `IR: SKIPPED (playback rate / 재생 속도 변경 / 再生速度変更)` | 원본에는 일반 플레이의 배속이 없다. 사용자 결정(D2)으로 "사람이 친 판은 모두 저장·전송"(2026-10-14)의 예외다. 로컬 DB(`scorelog`·`score`·`player_stat`·`play_submission`·`play_trace`), `pending-runs` 파일, 리플레이 파일, 서버 제출, 기록 동기화가 모두 없다. 끝까지 친 판, 도중 포기(Esc), 앱 종료, 실패 화면에서 곧장 다시 하기가 모두 같다(`PlayState::keeps_no_record` 를 `record_run`·`keep_run_cut_short_by_quitting`·`record_retried_run` 이 쓴다). 연습과 달리 결과 화면은 보이고 NEW RECORD 가 없다(`updates_score` 거짓). 코스와 리플레이 감상은 설정과 무관하게 100% 라 이 행에 해당하지 않는다 |
 | 도중 포기(Esc) | 사람이 친 판이면 판정한 노트 수와 상관없이 남는다(사용자 결정 2026-10-15). 단 노트를 하나도 치지 않은 판, 곧 PG·GR·GD·BD 가 모두 0 이고 쥔 롱노트가 없는 판은 지나간 노트의 POOR 나 빈 POOR 가 있어도 아무것도 남기지 않고 곧장 선곡으로 간다(사용자 결정 2026-10-19, `PlayState::has_judged_nothing`). 일반 LN 머리를 쥔 채 나간 판은 친 판이라 남는다. **노트를 하나라도 친 판의 Esc 는 로그인과 상관없이 결과 화면으로 간다**(사용자 결정 2026-10-23, [ADR](./acknowledge/2026-10-23-adr-escape-shows-the-result.md)). 닫힘 연출 없이 곧장 가고, PlayStop 소리는 Esc 를 누른 자리에서 울리며 곡 소리는 끊는다(`app_result::enter_result_of_a_left_run`). 남은 노트(아직 판정하지 않은 노트와 롱노트의 끝)는 모두 늦은 POOR(見逃し)로 세고 램프는 FAILED 다(`PlaySummary::left_unfinished`). 그래서 PG~POOR 합이 차트의 노트 수와 같고, 결과 화면의 판정 수·기록 목록 행·전송 본문·스킨 결과 화면이 읽는 기록(`run_records.last()`)이 모두 이 한 값을 쓴다. 결과 화면 그래프의 게이지 이력은 나간 자리부터 끝까지 0 으로 채운다(`PlaySession::left_record`. 게이지 사망으로 끝난 판은 사망 시각부터). 결과 화면의 판정 분포 그래프와 스킨의 초별 판정 표는 "판정된 입력" 기준이라 남은 노트의 POOR 를 넣지 않는다(끝까지 친 판에서도 같은 기존 의미). 노트를 다 처리한 뒤의 Esc(판정할 노트가 처음부터 없는 차트도 여기다. 10.5절), 그리고 이미 실패·끝으로 닫히는 중인 판의 Esc(ESCAPE 가 길게 누르기일 때 누르는 도중 게이지가 바닥나 길게 누르기가 닫히는 중에 끝나는 경우도 같다)는 원래부터 결과 화면으로 가고 위 규칙대로 남는다: 닫히는 판은 장면이 센 대로 남고 남은 노트를 見逃し POOR 로 더하지 않는다. 코스 도중의 Esc 는 그 스테이지에 남은 노트가 없으면 위처럼 결과로 가고 코스가 이어진다. 남은 노트가 있고 그 스테이지에서 노트를 하나라도 쳤으면 그 스테이지를 FAILED 로 접어 FAILED 코스 결과 화면까지 간다(스테이지 기록은 결과 화면의 전송이, 코스 기록은 `finish_course` 가 한 번만 남기고 보낸다). 그 스테이지에서 노트를 하나도 치지 않았으면 그 스테이지는 더하지 않고 코스가 그 자리에서 끝난다: 친 스테이지가 있으면 그 스테이지들로 FAILED 코스 기록을 남겨 보내고(`app_result::abandon_course`) 코스 결과 화면 없이 선곡으로 가며, 첫 스테이지였으면 코스 기록도 없다. 오토플레이·리플레이 보기·연습의 Esc 는 결과 화면 없이 선곡으로 간다 | EX 가 더 높으면 갱신(FAILED 판과 같다) | FAILED, 횟수 +1 | 나간 시점까지의 입력으로 저장 | 결과 화면의 전송 경로 하나로 보낸다(별도의 "화면 없는 전송"은 이 갈래에서 없앴다). 로그인했으면 보내고, 서버가 없거나 로그인하지 않았으면 결과 화면의 전송이 건너뜀(`IrStatus::Off`)이 되며 DB 에는 늘 남아 다음 로그인 때 기록 동기화가 보낸다. IR 프로필로의 전송은 다른 판과 같다. 알림 `run left mid-song kept as FAILED`·`course left part-way kept as FAILED` 는 없어졌다(결과 화면이 판이 남았음을 보인다) | 원본(`BMSPlayer.stopPlay`)도 남은 노트가 있으면 FAILED 로 바꿔 점수 데이터가 있을 때 결과 화면으로 간다(`BMSPlayer.java:693-742`)는 점은 같다. 다른 점: 원본은 닫힘 연출을 거치고 남은 노트를 판정 수에 넣지 않고 BP 에만 더한다(`BMSPlayer.java:909`). 여기서는 연출 없이 곧장 가고 남은 노트를 見逃し POOR 로 센다(사용자 결정 2026-10-14). 결과 화면의 다시 하기(R, N, 파란 건반 + START)를 허용한다(원본 결과 화면도 받는다). 리플레이를 재생하면 남은 노트가 지나가 見逃し POOR 가 되므로 판정 수는 기록과 같지만, 재생은 곡 끝까지 가고 게이지는 기록과 다르게 끝날 수 있다(쉬운 게이지면 클리어로 끝날 수도 있다). 알려진 한계다. Esc 직후 곡 소리가 실제로 멈추는지와 PlayStop 이 한 번만 나는지는 오디오 장치가 없는 헤드리스 테스트가 보지 못해 실기 점검 항목이다 |
 | 플레이 중 앱 종료(창 닫기·Cmd+Q·메뉴 Quit·Dock 종료) | Esc 의 저장 규칙과 같고 결과 화면은 거치지 않는다(사용자 결정 2026-10-15 "서버로 저장되지 않는 기록은 없다", S19 2차 REC2-2): 사람이 친 판은 남은 노트가 있으면 남은 노트를 見逃し POOR 로 센 FAILED 판, 끝났거나 닫히는 판은 결과 화면이 남겼을 그대로 남는다. 남은 노트가 있어도 노트를 하나도 치지 않은 판은 Esc 처럼 남기지 않는다(사용자 결정 2026-10-19, `keep_run_cut_short_by_quitting`). 코스 도중이면 그 스테이지를 접고 코스를 남긴다(마지막 스테이지였거나 실패한 스테이지면 그대로, 아니면 FAILED 코스. 노트를 하나도 치지 않은 스테이지는 접지 않고 그 앞 스테이지까지의 FAILED 코스만 남긴다). 코스의 스테이지 사이(LOADING·결정 화면)에서 끄면 친 스테이지까지의 FAILED 코스가 남는다. 이벤트 루프의 `exiting` 에서 저장 스레드를 기다리기 전에 남기므로(`App::keep_what_quitting_cuts_short`, `app_result::keep_run_cut_short_by_quitting`) 리플레이까지 디스크에 놓인다. 플레이 화면에서 끄면 Esc 와 같이 판을 남기기 전에 설정도 저장한다(남기지 않는 오토플레이·연습도 같다): 그 판에서 키로 바꾼 하이스피드·커버·리프트·히든과 AUTO ADJUST 가 옮긴 판정 오프셋이 다음 실행에 남는다(S19 3차 R3-REC-1). 플레이 화면이 아닌 곳에서 끌 때는 설정을 쓰지 않는다. 이 빌드가 읽지 못한 설정 파일(더 새 빌드가 쓴 파일 등)을 기본값으로 덮지 않기 위해서다(`run` 의 "leaving the file alone"). 메시지 `run cut short by quitting kept; it is sent on the next start` | Esc 판과 같다 | Esc 판과 같다 | 저장 | 끄는 중에는 보내지 않는다(기록 동기화도 코스 전송도 시작하지 않는다). 다음 실행의 기록 동기화가 판과 코스를 보낸다. IR 프로필로는 보내지 않는다(테스트 부채 3.66) | 원본은 창을 닫으면 설정만 저장하고 진행 중인 판을 저장하지 않는다(`MainController.dispose`, `MainController.java:590-612`). 강제 종료(kill -9·정전·크래시)는 여전히 남지 않는다 |
 | 코스 스테이지 사이에서 나감(다음 스테이지의 LOADING 에서 Esc, 결정 화면에서 나감, 스테이지 차트를 못 읽음, 라이브러리에 없음) | 코스가 그 자리에서 끝난다(S19 2차 REC2-1). 친 스테이지가 있으면 그 스테이지들로 FAILED 코스 기록을 남겨 보내고(`app_result::abandon_course`, 메시지 `course ended before its last stage kept as FAILED`), 서 있던 스테이지는 치지 않았으므로 아무것도 더하지 않는다. 친 스테이지가 없으면(1스테이지의 결정 화면) 남기지 않는다. 코스 제약으로 바뀐 설정은 플레이어의 값으로 돌아간다. 전에는 코스가 끝나지 않아 다음에 고른 단일 곡이 그 코스의 다음 스테이지로 접히고 엉뚱한 곡이 든 코스 기록이 보내졌다 | - | - | - | 코스는 곧장 보낸다(코스 결과 화면의 전송과 같다) | 없음(코스 도중 포기를 FAILED 코스로 남기는 것은 결정 9 다) |
@@ -727,6 +734,29 @@ SCRATCH AUTO 로 클리어한 판의 램프는 클리어한 게이지에 따라 
 | 구현·시험 | `apps/rbms-player/src/{borrowed_layout,app_play,app_result,ghost,target}.rs`, `stage/play/mod.rs`, `stage/select/layout_play.rs`, 키 `keyconfig.rs`. 배치 순열 골든은 `crates/rbms-chart/src/shuffle.rs` 의 시험 모듈(옵션 8개 x 7K·14K·9K) |
 
 알려진 위험: LOADING 에서 Esc 로 취소하면 다음 `load` 까지 설정 화면에 빌린 RANDOM 이 보일 수 있다. 실창에서 `J` 키를 눌러 본 확인은 없다(QA 3.23, 테스트 부채 3.119).
+
+### 10.16 LAYOUT PICK 배치 지정(2026-10-29)
+
+선곡에서 차트의 레인 배치를 직접 써 넣고, 그 배치를 적용한 실제 노트를 미리 본 뒤, 그 배치로 친다(사용자 요청 "시작 전에 배치를 내가 정하고 미리보기를 하고 그 배치대로 플레이 가능한 기능"). 계속 RANDOM 을 뽑다 보면 나올 배치를 편하게 얻는 기능이라 기록은 RANDOM 판이다. 결정과 근거는 [LAYOUT PICK ADR](./acknowledge/2026-10-29-adr-layout-pick.md).
+
+| 항목 | 내용 |
+| --- | --- |
+| 여는 키 | 선곡에서 `Y`(키 설정의 Browser 그룹 LAYOUT PICK / 배치 지정 / 配置指定, 설정 파일 키 `layout_pick`, 패드 지정 가능). 커서가 차트 막대일 때만 열린다. 폴더·코스·라이브러리에 없는 차트에서는 열리지 않고 알림만 낸다. 검색어를 치는 중에 누르면 검색을 끝내고 연다. 선곡 위에 열리는 독립 화면이라 옵션 오버레이가 위에 열리지 않는다 |
+| 문자열 규칙 | i 번째 숫자는 그 쪽의 왼쪽 i 번째 건반에 오는 원래 레인 번호이고 쪽마다 1부터 센다(beatoraja 의 lane order 표시와 같다). `1234567` 은 OFF 모양, `7654321` 은 MIRROR 모양이다. 스크래치는 고정이라 문자열에 넣지 않는다. DP 는 1P·2P 두 줄이며 둘 다 지정한다(기본은 둘 다 순서대로). 9키는 9자리다. 5키·7키·9키·10키·14키를 지원하고 24키는 지원하지 않는다 |
+| 입력 | 숫자 1~9(넘패드 포함)는 현재 쪽의 다음 자리에 들어간다. 그 차트 모드의 레인 키는 그 레인이 속한 쪽의 그 쪽 번호로 들어가고 현재 쪽도 그쪽으로 바뀐다(패드 레인도 같다. 마지막에 로드한 모드가 차트 모드와 같을 때만 받는다). 남은 자리는 쓰지 않은 번호를 오름차순으로 채우므로 키 하나를 칠 때마다 배치 전체가 완성된 상태가 된다. 다 채운 줄에 다시 치면 그 번호로 새로 시작한다. 이미 넣은 번호나 범위 밖 번호는 거절하고 2초 알린다. `Backspace` 는 한 자리, `Delete` 는 그 쪽 입력 전부를 지우고 `0` 은 순서대로(OFF 모양) 채운다. `Tab`(패드 SELECT)은 쪽을 바꾼다 |
+| 미리보기 | 배치를 적용한 실제 노트를 내장 플레이필드로 그린다. 한 화면에 네 마디(하이스피드 0.25)가 보이고 마디 시작은 마디선이다. 각 레인 아래에 그 레인에 오는 원래 레인 번호를 쓰고, 입력한 칸은 밝게 자동으로 채운 칸은 흐리게 보인다. 오른쪽 아래에 `마디 n / 전체`. SCRATCH AUTO 가 켜져 있으면 턴테이블 노트는 초록이다. 시드를 찾기 전에도 입력한 배치로 바로 그린다 |
+| 미리보기 조작 | `↑` 다음 마디, `↓` 이전 마디, `PageUp`/`PageDown` 네 마디, `Home`/`End` 처음/끝. 스크래치 정방향 키는 다음 마디, 역방향 키는 이전 마디. 휠은 한 줄에 한 마디(사용자 쪽으로 굴리면 앞, 곧 이전 마디) |
+| 시작 | `Enter`, 키보드 START(기본 `A`), 패드 START. 판은 RANDOM + 역탐색한 시드로 시작한다. 시드는 1부터 오름차순의 첫 시드라 같은 배치는 늘 같은 시드다(예: 7키 `3517246` 은 4761). 이 화면 자리에 판이 서고 아래의 선곡은 그대로다 |
+| 시드를 찾는 동안 | 차트 읽기와 시드 탐색은 각자 이름 있는 스레드에서 돈다. 배치를 바꾸면 진행 중인 탐색을 취소하고 다시 찾는다. 상태줄에 `RANDOM 시드를 찾는 중`, 찾으면 `RANDOM 시드 n로 플레이`. 시드는 5키·7키·9키 2^23, 10키 2^21, 14키 2^29 까지 찾는다(전부 측정한 최댓값을 넘는다). 릴리스 14키 최악은 약 2.2초로 추정하며 디버그 빌드는 수십 초일 수 있다 |
+| 시작 거절(화면 문구, 세 언어) | 순서대로: AUTOPLAY 사용 중(미리보기는 된다. 출하 기본값이 AUTOPLAY 켬이다), 차트를 읽는 중 또는 읽기 실패, 라이브러리를 스캔한 뒤 차트 파일이 바뀜(md5 나 모드가 실제 파일과 다름), 24키, 10키에서 RANDOM 으로 만들 수 없는 쌍(예: `12345` / `51234`. 14,400쌍 중 1,800쌍), 시드를 아직 못 찾음. 그 밖의 거절은 `borrow_layout` 이 낸 것이 화면에 그대로 보인다(코스·연습은 `NotFreePlay`) |
+| 기록 | 일반 RANDOM 판과 같이 저장·전송한다(표지 없음). 기록 행·점수 제출 본문·저장 리플레이의 옵션과 시드가 RANDOM + 찾은 시드이므로 로컬 DB, 리플레이, IR 이 모두 RANDOM + 그 시드로 남고 서버·웹·리플레이 형식은 바뀌지 않았다. 시작 알림 문구는 `지정한 배치 3517246의 배치 (RANDOM)` 꼴이다(기존 배치 빌리기의 알림 문구를 쓴다) |
+| 유지와 버림 | 배치 빌리기(10.15절)의 규칙 그대로다. 같은 배치 재시도(파란 건반 + START, R·7번 키, 실패 직후 SELECT)에서는 유지하고 선곡으로 돌아오면 버려 내 RANDOM 으로 돌아간다 |
+| 기억 | 앱이 켜져 있는 동안 모드별로 마지막에 쓴 배치를 기억하고 다음에 열 때 그 배치로 채워 연다. 화면을 나갈 때(시작 포함) 저장한다. 설정 파일에는 쓰지 않으므로 앱을 다시 켜면 기본(순서대로)이다 |
+| 구현·시험 | `crates/rbms-chart/src/shuffle.rs`(`random_seed_for`, `random_seed_limit`, `permutation_of_layout`, `layout_of_permutation`, `parse_layout_row`, `layout_row_text`, `is_layout_row`, `apply_lane_permutation`), `apps/rbms-player/src/stage/layout_pick.rs`(화면. `Stage::LayoutPick`, `AppShared.picked_layouts`), `text/menus/layout_pick.rs`(세 언어 문구), `stage/select/mod.rs`(`open_layout_pick`), `keyconfig.rs`(`Shortcut::LayoutPick`). 시험은 `shuffle.rs` 의 시드 역탐색 시험들(보고서의 알려진 시드, 5키 전 순열, 14키·10키 쌍, 불가능 쌍, 취소·상한)과 `stage/layout_pick/tests.rs`, `keyconfig_tests.rs` 의 `the_layout_pick_key_ships_on_a_free_key_and_an_earlier_file_reads_as_it_did` |
+
+원본과 다른 점: 원본(beatoraja)에는 이 화면이 없다. 문자열 표기만 원본의 lane order 표시와 같다.
+
+알려진 위험: 실창에서 화면을 본 적이 없다(헤더 글줄 위치, 필드와 레인 번호 위치, 일본어·한국어 안내 줄이 1280 폭을 넘는지. QA 3.25 V1~V5, 테스트 부채 3.130~3.132). 시작 알림 문구가 어색하다. 미리보기 배치를 바꿀 때마다 차트 모델을 복제하는 비용을 대형 차트에서 재지 않았다. 선곡 BGM·미리듣기가 이 화면에 들어오고 나갈 때의 동작을 확인하지 않았다(PLAY 메뉴처럼 Open 으로 열리는 다른 화면과 같을 것으로 본다). BMS 파일은 늘 14키로 판별되어 10키는 bmson 차트에서만 나온다.
 
 ## 11. 목표 점수(TARGET, TARGET FALLBACK, TARGET RATE)
 
@@ -1063,14 +1093,18 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 
 | 패널 | 내용 |
 | --- | --- |
-| 곡 머리와 그림 | 제목·부제·아티스트(전과 같다), 256 정사각 곡 그림(그림 숨김이면 비움) |
-| CHART DATA | 난이도 탭 5칸(같은 폴더·제목·모드의 `#DIFFICULTY` 1~5, 클릭하면 그 차트로 이동. 현재 목록에 있는 차트만), NOTES·LEVEL·BPM, 밀도 그래프, 레인 막대(5·7키는 스크래치 왼쪽, 10·14키는 두 줄), LENGTH·TOTAL·KEYS·JUDGE |
-| NOTES RADAR | 6각형(NOTES·PEAK·SCRATCH·SOF-LAN·CHARGE·CHORD, 표시값 0~200, 가장 큰 축에 별). 9키·24키는 `-`. 값의 정의와 한계는 17.4절 |
-| MY SCORE | SCORE, MISS COUNT, 등급, 램프 이름, 다음 등급까지의 차이, F~AAA 진행 막대, MAX COMBO·PLAY COUNT·CLEAR COUNT·RATE, 판정 5행 |
-| SCORE TARGETS | AAA·AA·A 의 필요 EX(`ceil(TOTAL NOTES x 2 x k/9)`, k = 8·7·6)를 금·은·동으로, 달성하면 메달 면 |
+| 곡 머리와 그림 | 장르·제목·부제·아티스트 네 줄은 글 열(x 104~896, 폭 792)에 왼쪽 맞춤이고 모두 overflow 3(아래 "글자가 넘칠 때"). 오른쪽 열(x 928~1096, 폭 168)에 LEVEL(라벨과 난이도 색의 큰 숫자)과 BPM(라벨과 `150` 또는 `120 - 180` 꼴의 글자)이 오른쪽 맞춤으로 선다. 코스 막대에서는 제목 자리에 `COURSE` 가 보인다. 256 정사각 곡 그림(그림 숨김이면 비움) |
+| CHART DATA | 난이도 탭 5칸(같은 폴더·제목·모드의 `#DIFFICULTY` 1~5, 클릭하면 그 차트로 이동. 현재 목록에 있는 차트만). 왼쪽 블록: 첫 줄 NOTES·NPS AVG·NPS MAX(칸 폭 120, 칸 사이 16, 값은 24 크기)와 그 아래 밀도 그래프(400 x 152). 오른쪽 블록: 2x2 LENGTH·TOTAL / KEYS·JUDGE(칸 폭 144)와 그 아래 레인 막대(312 x 92. 5·7키는 스크래치 왼쪽, 10·14키는 두 줄). LEVEL·BPM 은 곡 머리로 옮겼다. NPS 의 정의는 아래 "NPS 평균·최고" |
+| NOTES RADAR | 6각형(NOTES·PEAK·SCRATCH·SOF-LAN·CHARGE·CHORD, 표시값 0~200, 가장 큰 축에 별). 그림 한 변 160(반지름 77.5), 중심은 영역 위에서 144 아래. 위쪽 라벨과 옆 라벨이 13px 이상 떨어진다. 9키·24키는 `-`. 값의 정의와 한계는 17.4절 |
+| MY SCORE | 첫 줄 EX SCORE(큰 숫자, 폭 144)·MISS COUNT(폭 96)·등급 배지(폭 128 x 높이 56), 사이 16. 램프 이름, 다음 등급까지의 차이, F~AAA 진행 막대, 통계 넷은 2x2 라벨-값 쌍(MAX COMBO·RATE / PLAY COUNT·CLEAR COUNT. 쌍 폭 184, 쌍 사이 32), 판정 5행 |
+| SCORE TARGETS | AAA·AA·A 의 필요 EX(`ceil(TOTAL NOTES x 2 x k/9)`, k = 8·7·6)를 금·은·동으로, 달성하면 메달 면. 칸 피치 200(칩 52, 필요 EX 상자 74, 차이 상자 52)이라 5자리 필요 EX 와 4자리 차이(`+2243`)가 칩과 이웃 칸을 덮지 않는다 |
 | CLEAR RATE | CLEAR COUNT / PLAY COUNT(소수 1자리) |
-| MY RECORDS | BEST 1줄 + 최근 5판(최신순, 보조 판 포함, 읽기 한도 1000판), 줄마다 램프·DJ LEVEL·EX·MISS(도달하지 못한 노트 포함)·날짜(앞 10글자). BEST 는 기록을 깰 수 있는 판이 없으면 비어 있다. 랭킹 모드에서는 IR RANKING 6줄(16절) |
+| MY RECORDS | BEST 1줄 + 최근 5판(최신순, 보조 판 포함, 읽기 한도 1000판), 줄마다 램프·DJ LEVEL·EX·MISS(도달하지 못한 노트 포함)·날짜(앞 10글자). BEST 는 기록을 깰 수 있는 판이 없으면 비어 있다. 랭킹 모드에서는 IR RANKING 6줄(16절). MISS 는 4자리 칸이라 10000 이상이면 아래 4자리만 보인다(기존 한계) |
 | 폴더·코스 | 폴더·코스 막대의 정보는 전과 같다 |
+
+**NPS 평균·최고(2026-10-29)**: beatoraja 의 선곡 밀도 값을 그대로 쓴다. 평균은 정수 id 364(정수부)와 365(소수 두 자리), 최고는 360과 361 이고 `NPS AVG`(한국어 `NPS 평균`, 일본어 `NPS 平均`), `NPS MAX`(`NPS 최대`, `NPS 最大`)로 보인다. 차트를 1초 칸으로 나눠 세는데 일반 노트와 롱노트 머리는 시작한 초에 1, 롱노트 몸통은 걸친 초마다 1, 지뢰는 세지 않는다. 최고는 가장 바쁜 1초의 수이고, 평균은 `전체 노트 수 / 초 칸 수 / 4`(정수 나눗셈) 이상인 활동 초의 평균이다. 그래서 LN 이 많은 차트는 엄밀한 초당 누름 수보다 크고, 조용한 초는 평균에서 빠진다. 소수 두 자리는 반올림이 아니라 버림이다. 값이 없으면(커서가 움직이는 중, 폴더·코스 막대) 그리지 않고, 평균과 최고가 모두 0.00 이면 `-` 를 보인다(노트가 없거나 마지막 노트가 24시간 이상 뒤라 초 칸 표를 만들지 않는 차트. 곡 DB 의 `song_detail` 값이고 새 확장 id 는 없다). 구현: `crates/rbms-chart/src/lib.rs` 의 `note_density`, `apps/rbms-player/src/skin_host/chart.rs`, 기본 스킨 `lua/select/info.lua` 의 `density`. 값이 속한 id 는 [skin.md](./skin.md) 3.4.6절.
+
+**글자가 넘칠 때(overflow 3, 2026-10-29)**: 정보창과 목록 막대의 긴 글(곡 머리 네 줄, 막대 제목, 패널 제목, 레이더 축 이름, 폴더 램프 이름, 코스와 기록의 이름·머리)은 엔진의 새 overflow 값 3(`SHRINK_CUT`)으로 그린다. 줄이 폭을 넘으면 가로로 줄이되 원래 폭의 0.75 까지만 줄이고, 그보다 줄여야 하면 앞쪽 글자만 남기고 `…` 를 붙인다. 이전에는 하한 없는 축소(overflow 1)라 아주 긴 제목이 납작해졌다. 대가로 아주 긴 제목의 뒷부분은 이제 보이지 않는다. EX SCORE·MAX COMBO 같은 영어 상수 라벨은 용어집대로 원어를 유지하며 번역하지 않는다. 한국어·일본어는 한 글자가 글자 크기만큼의 폭이라 라틴보다 일찍 말줄임이 나온다(곡 머리 글 열이 792 로 줄었다). 캡처 하니스는 CJK 를 그리지 못해 실창 확인이 필요하다(QA 3.25 V10). 엔진 값의 정의는 [skin.md](./skin.md) 1.4절.
 
 머리에는 PLAY STYLE 칩(SP·DP·9KEYS), FREE PLAY 또는 COURSE 칩, 시각 칩, 줄인 검색 상자와 정렬·모드·LN MODE 단추가 있고, 목록 위에 열린 폴더의 경로가 보인다. 바닥은 키 이름 상자 안내(ENTER·ESC·UP DOWN·H)와 REPLAY·AUTOPLAY·PRACTICE·RANKING·FAVORITE 단추다. RANKING 단추는 랭킹 모드를 여닫는다(이벤트 21002, 켜짐 불린 21105).
 
@@ -1091,3 +1125,43 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 - 막대 확장 키(`rank`·`thumb`)는 기본 스킨만 쓴다. 외부 스킨은 키가 없어 그리기와 호출 순서가 전과 같다.
 - 선곡에서 원본 id 350~353·92·`judgegraph`·`bpmgraph`·순위 슬롯이 값을 내서 외부 스킨이 보는 선곡이 바뀐다(원본과 같아짐).
 - 내장(스킨 없는) 선곡 렌더러는 그대로다(배지·썸네일·육각형 없음). 단 행의 DJ LEVEL 은 보조 판 제외 기준으로 바뀌었다.
+
+### 17.6 선곡의 음량 슬라이더(기본 스킨, 2026-10-29)
+
+기본 스킨 선곡의 사이드 메뉴(스피커 아이콘)에는 VOLUME 슬라이더 셋이 있다. 사용자 보고 "사운드 조절 (곡선택화면)이 제대로 먹히긴하나 ? 안먹는 느낌인데"의 원인은 슬라이더가 움직이는 버스와 선곡에서 들리는 소리가 타는 버스가 어긋난 것이었다(MASTER 가 시스템 버스를 움직여 미리듣기에 닿지 않았다). 결정과 근거는 [선곡 음량 ADR](./acknowledge/2026-10-29-adr-select-volume-master.md).
+
+| 슬라이더(스킨 ID) | 움직이는 값 | 선곡에서 영향받는 소리 |
+| --- | --- | --- |
+| MASTER(rate 17, 숫자 57) | `audio.master`. SETTINGS > AUDIO > MASTER VOL 과 같은 값(기본 100%) | 모든 소리: 미리듣기(`#PREVIEW` 클립과 자동 재생 모두), 시스템 효과음, 선곡 음악 |
+| KEY(rate 18, 숫자 58) | `audio.key`(KEY VOL, 기본 50%) | 자동 재생 미리듣기(`#PREVIEW` 가 없는 차트)의 노트 키음. `#PREVIEW` 클립은 섞인 녹음이라 닿지 않는다 |
+| BGM(rate 19, 숫자 59) | `audio.bg`(BGM VOL, 기본 50%) | `#PREVIEW` 클립과 자동 재생 미리듣기의 BGM |
+
+- 드래그한 값은 그 프레임 끝에 소리에 반영되고 버튼을 뗄 때 설정 파일에 한 번 쓴다. 값 곡선은 선형 이득이다(바꾸지 않았다).
+- 미리듣기: 자동 재생 미리듣기는 각 소리를 플레이와 같은 버스로 울린다(노트 키음은 Key 버스, 배경음은 Bg 버스. `play_sink::bus_for`). 미리듣기 페이드는 두 버스에 같은 레벨을 곱하고 미리듣기가 끝나면 설정값으로 되돌린다. 시스템 버스는 인터페이스 소리의 것이라 건드리지 않는다.
+- 레퍼런스와 다른 점: beatoraja 의 rate 17 / 숫자 57 은 `AudioConfig.systemvolume` 이고 선곡 미리듣기가 그 음량으로 나온다. 마스터 음량이 따로 없다. R-BMS 에서는 이 두 id 가 마스터를 움직이고 보인다. 이 id 를 쓰는 외부 beatoraja 스킨도 마스터를 보인다. 시스템(효과음) 음량은 SETTINGS > AUDIO > SYSTEM VOL 과 Lua `main_state.set_volume_sys` 로만 바꾸고, Lua `volume_sys`·`volume_key`·`volume_bg` 의 뜻은 시스템·키·배경 그대로다. 그래서 `volume_sys` 로 자기 슬라이더를 만든 스킨은 같은 스킨 안에서 마스터와 다른 값을 보일 수 있다.
+- 업데이트 뒤 보이는 변화: 이전의 MASTER 슬라이더(= `audio.system`)를 내려 효과음을 줄이던 사용자는 슬라이더가 `audio.master`(기본 100%)를 보이는 것을 본다. 저장된 `audio.system` 값은 그대로 남는다. 효과음 음량은 SETTINGS 의 SYSTEM VOL 로 바꾼다.
+- 남은 것: 미리듣기 페이드(약 200 ms) 중에 슬라이더를 끌면 Key·Bg 가 한 프레임 동안 전체 값으로 돌아갔다가 페이드가 다시 맞춘다(엔진의 3 ms 슬루로 희미한 튐이 들릴 수 있다. 테스트 부채 3.139). KEY 는 `#PREVIEW` 클립이 있는 차트에서 아무 효과가 없다. 믹서 시험은 이득 사슬만 증명하므로 실제 체감은 출력 장치로 본다(QA 3.25 V12).
+- 구현·시험: `apps/rbms-player/src/skin_host/{writers,system}.rs`(`VolumeTarget`, `rate_volume`, `Volumes::of_audio`), `skin_screen.rs`·`skin_screen/preview.rs`, `stage/select/preview.rs`(`preview_bus_gains`, `autoplay_preview_schedule`, `put_buses_at`). 시험은 같은 파일들의 `writers/tests.rs`·`system/tests.rs`·`skin_host/tests.rs`·`skin_screen/{tests,typing_tests}.rs`와 `preview.rs` 의 `the_master_key_and_bgm_sliders_each_turn_a_preview_down`(실제 믹서에 마스터·버스 이득을 넣어 잰다).
+
+## 18. 재생 속도(PLAYBACK RATE, 2026-10-29)
+
+차트를 100% 가 아닌 속도로 재생해 치는 기능이다(사용자 요청 "플레이 배속기능 (100퍼가 기본이고 1퍼씩 조절해서 줄이거나 높이거나 하는 기능)"). 재생 속도 자체를 바꾸므로 소리의 음높이도 함께 바뀐다. **100% 가 아닌 판은 기록을 남기지 않는다**(사용자 결정). 결정과 근거는 [PLAYBACK RATE ADR](./acknowledge/2026-10-29-adr-playback-rate-unrecorded.md).
+
+| 항목 | 내용 |
+| --- | --- |
+| 값 | `play.playback_percent`(설정 파일 `settings.ron` 의 `play` 묶음). 50~200 의 정수 %, 기본 100. 범위 밖 값과 이전 설정 파일은 읽을 때 범위로 자르거나 100 으로 읽는다. 상수는 `PLAYBACK_RATE_MIN_PERCENT`(50)·`MAX`(200)·`STEP`(1)·`UNCHANGED`(100)이고 연습의 FREQUENCY 범위와 같은 상수를 가리킨다 |
+| 바꾸는 곳 | PLAY 메뉴 CHART 묶음의 PLAYBACK RATE 행(7.2절. ← → 1%, Shift 10%, 0 키 100%, 슬라이더와 직접 입력은 7.3절 그대로), F1 오버레이의 마지막 행(열두 번째. ← → 1%). 플레이 중에 바꾸는 키는 없다. 판을 시작할 때의 값이 그 판의 배율이다 |
+| 소리 | 배율을 목소리마다 피치로 곱한다(오디오는 미리 디코딩한 PCM 을 소수 보폭으로 선형 보간해 읽는다). 믹서와 디코더는 바꾸지 않았다. 보폭이 1 을 넘는 200% 근처에서는 선형 보간의 에일리어싱이 생길 수 있고 연습의 200% 와 같은 수준이다(실창에서 듣지 않았다) |
+| 판정 | 판정 창(PGREAT~空POOR)·롱노트 마진·HCN 틱(200 ms)·FAST/SLOW 의 ms 값·판정 오프셋·자동 오프셋 조정·타이밍 통계가 모두 실제 시간(플레이어의 시간) 길이다. 입력은 오디오 시각을 차트 시각으로 바꿔 세션에 넣는다. 연습 FREQUENCY 와 같은 경로다(9.3절). 200% 에서 PGREAT 창은 실제 ±20 ms 다 |
+| 표시 | 스킨과 내장 화면의 BPM(현재·MAIN·MIN·MAX), 이동 시간, 녹색·흰색 숫자, KEEP GREEN NUMBER 의 기준 템포가 실시간 기준(BPM x 배율)이다. 같은 HI-SPEED 에서 200% 면 노트가 실제로 두 배 빨리 내려오고, KEEP GREEN NUMBER 가 켜져 있으면 하이스피드가 절반이 되어 녹색 숫자가 유지된다. AUTO ADJUST 는 그대로 동작하고 판정 오프셋 설정을 바꾼다. 남은 시간(스킨 숫자 163·164)은 차트 시간 그대로다. 곡 BGA 는 차트 시각을 따르고 스킨 동영상과 장면 타이머는 실시간이다 |
+| 코스와 리플레이 | 코스와 리플레이 감상은 설정과 무관하게 100% 다(`AppShared::run_playback_percent`). 코스는 스테이지마다 기록을 남기고, 리플레이는 100% 로 기록된 판이라 다른 배율로 재생하면 판정이 달라지기 때문이다. 코스를 시작할 때 설정이 100 이 아니면 알림 `a course is played at 100%: PLAYBACK RATE n% is set aside until it ends`(세 언어)를 띄운다. 오토플레이는 배율을 따른다(어차피 기록이 없다) |
+| 연습 | 연습 구간은 자기 FREQUENCY 만 쓰고 전역 배율을 무시한다(두 배율이 곱해지지 않는다). 연습 FREQUENCY 판에도 위 "표시"가 적용된다(동작 변화. 9.3절) |
+| 기록 | 100% 가 아닌 판은 로컬 DB·리플레이·trace·보류 판·서버 전송·기록 동기화가 모두 없다. 끝까지 친 판, 도중 포기, 앱 종료, 실패 화면에서 곧장 다시 하기가 같다. 사유는 `playback rate`(`practice::PLAYBACK_RATE_BLOCK_REASON`). 10.2절의 해당 행 |
+| 결과 화면 | 결과 화면은 보인다(연습과 다름). NEW RECORD 가 없고(`updates_score` 거짓이라 스킨의 ENABLE_SAVE_SCORE 도 꺼진다) 어시스트 줄 자리에 노란 줄 `PLAYBACK RATE n%: NOT SAVED, NOT SENT` / `재생 속도 n%: 저장·전송 안 됨` / `再生速度n%: 保存・送信なし`, IR 줄은 `IR: SKIPPED (playback rate / 재생 속도 변경 / 再生速度変更)`. R 다시 하기는 같은 배율로 다시 시작하지만 `updates_score` 가 거짓이라 배치 시드를 잇지 않는다(넓힌 판정과 같은 규칙). 파란 건반 + START 는 판의 종류를 가리지 않아 같은 배치로 다시 한다(10.7절) |
+| 스킨 | 확장 불린 21106 `RBMS_OPTION_PLAYBACK_RATE_CHANGED`(배율이 100 이 아님)와 정수 21084 `RBMS_NUMBER_PLAYBACK_PERCENT`(그 배율 %, 꺼짐이면 100)를 답한다. 결과 화면은 끝난 판의 배율, 플레이 화면은 진행 중인 판의 시계 배율(연습 FREQUENCY 포함), 선곡과 그 밖의 화면은 설정값을 답하고 스킨 미리보기는 꺼짐이다([skin.md](./skin.md) 1.4절). 기본 스킨은 플레이 화면 머리 오른쪽에 노란 `RATE n%`, 결과 화면의 판정 줄에 `SCORE NOT SAVED` 대신 노란 `NOT SAVED (RATE n%)`, 선곡 정보창의 CHART DATA 머리 줄(난이도 탭 왼쪽)에 차트 막대 위에서 노란 `RATE n%` 를 그린다(3.4.8절) |
+| 구현 | 설정 `crates/rbms-config/src/{schema,settings}.rs`(`PlayOptions.playback_percent`, `SettingId::PlaybackRate`), 시계 `apps/rbms-player/src/stage/play/mod.rs`(`whole_run_clock`, `set_playback_rate`, `changed_playback_percent`, `keeps_no_record`)와 `practice.rs`(`PracticeClock::heard_bpm`·`heard_length`), 배율의 출처 `app_play.rs`(`run_playback_percent`, `PendingChart.playback_percent`), 기록 차단 `app_result.rs`·`lib.rs`(`updates_score`, `ir_submission_block_reason`), 결과 화면 `stage/result.rs`, 스킨 `skin_host/{extension,options,play,result}.rs` |
+| 시험 | `app_result/record_tests/playback_rate.rs`(결과 화면·IR SKIPPED·DB 행·리플레이 파일·전송·동기화가 없음, 도중 포기, 실패 뒤 다시 하기, 코스와 리플레이 감상은 100%, 연습은 자기 FREQUENCY), `stage/play/timing_tests.rs`(200% 에서 판정 창이 실시간 길이, 판정 오프셋이 차트 시간으로는 2배), `stage/play/hold_tests.rs`(녹색 숫자 유지, NOWBPM 2배), `stage/play_menu/tests.rs`·`tests/numbers.rs`·`app_options.rs`(행의 걸음), `stage/result/tests.rs`, `skin_host/{options,result}/tests.rs`, `rbms-config` 의 `the_playback_rate_reads_from_older_files_and_stays_in_its_range` |
+
+원본과 다른 점: 원본(beatoraja)에는 일반 플레이의 배속이 없고 연습에만 FREQUENCY 가 있다. 원본의 연습은 차트를 다시 배치하지만(`BMSModelUtils.changeFrequency`) 여기서는 차트를 그대로 두고 시계를 늘리므로 리플레이·고스트·기록의 차트 시각이 그대로다. 녹색 숫자의 실시간 기준은 원본의 `changeFrequency` 가 BPM 을 곱한다는 전제로 맞췄고 이 전제는 원본 소스로 확인하지 못했다.
+
+알려진 위험: 배속 소리의 음질, 플레이·결과 화면 노란 표지의 위치와 겹침(좁은 레이아웃, 긴 제목), F1 오버레이가 열두 행으로 커진 것은 실창에서 보지 않았다(QA 3.25 V6~V9, 테스트 부채 3.133~3.135). 설정 동기화(SYNC SETTINGS)로 다른 기기의 배율이 내려올 수 있으므로 선곡 표지와 F1·PLAY 메뉴로 현재 배율을 확인할 수 있다. 연습 FREQUENCY 판의 표시가 바뀐 것은 사용자 확인이 필요하다.

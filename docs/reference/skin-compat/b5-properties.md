@@ -268,7 +268,7 @@ R-BMS 열: `구현(플/선/결/결정/키)` = 해당 화면의 `SkinStateSource:
 | 47 | NUMBER_FOLDER_HYPER | folder_level_hyper | 공통 | 96과 동일 | - | 등록만(SongSelect) |  |
 | 48 | NUMBER_FOLDER_ANOTHER | folder_level_another | 공통 | 96과 동일 | - | 등록만(SongSelect) |  |
 | 49 | NUMBER_FOLDER_INSANE | folder_level_insane | 공통 | 96과 동일 | - | 등록만(SongSelect) |  |
-| 57 | NUMBER_MASTER_VOLUME | volume_system | 공통 | (int)(AudioConfig.systemvolume*100) | - | 등록만(PlayerConfig) |  |
+| 57 | NUMBER_MASTER_VOLUME | volume_system | 공통 | (int)(AudioConfig.systemvolume*100) | - | 등록만(PlayerConfig) | R-BMS 는 2026-10-29 부터 `audio.master` 에 묶는다(reference-divergences 2026-10-29 절) |
 | 58 | NUMBER_KEY_VOLUME | volume_key | 공통 | (int)(keyvolume*100) | - | 등록만(PlayerConfig) |  |
 | 59 | NUMBER_BGM_VOLUME | volume_background | 공통 | (int)(bgvolume*100) | - | 등록만(PlayerConfig) |  |
 | 71 | NUMBER_SCORE | score | 플레이,결과,기타 | 결과=newScore.exscore, 그 외 ScoreDataProperty.getNowEXScore() (scoreData null이면 MIN_VALUE) | - | 구현(플,결) | 6회 [Root,Select] (script2,other2,ref2) |
@@ -868,7 +868,7 @@ R-BMS 열: `구현(플/선/결/결정/키)` = 해당 화면의 `SkinStateSource:
 | 6 | RATE_MUSIC_PROGRESS,SLIDER_MUSIC_PROGRESS | music_progress | 플레이 | TIMER_PLAY 켜짐이면 min(nowTime(PLAY)/BMSPlayer.getPlaytime(),1), 아니면 0 | - | 구현(플) **불일치: R-BMS=song_ms/duration_ms; beatoraja=nowTime(PLAY)/BMSPlayer.getPlaytime(). 분모 정의 동일한지 미확인** | SLIDER 3회 [Play] (type3) |
 | 7 | RATE_SKINSELECT_POSITION,SLIDER_SKINSELECT_POSITION | skinselect_position | 스킨설정 | SkinConfiguration.getSkinSelectPosition() | 있음: setSkinSelectPosition | 등록만(SkinCustomize) | SLIDER 1회 [skinselect] (type1) |
 | 8 | RATE_RANKING_POSITION | ranking_position | 선곡,결과 | MusicSelector/AbstractResult.getRankingPosition() | 있음: setRankingPosition | 등록만(InternetRanking) | SLIDER 1회 [Result] (type1) |
-| 17 | RATE_MASTERVOLUME,SLIDER_MASTER_VOLUME | mastervolume | 공통 | AudioConfig.systemvolume (0..1) | 있음: setSystemvolume | 등록만(PlayerConfig) | SLIDER 2회 [Select] (type2) |
+| 17 | RATE_MASTERVOLUME,SLIDER_MASTER_VOLUME | mastervolume | 공통 | AudioConfig.systemvolume (0..1) | 있음: setSystemvolume | 등록만(PlayerConfig) | SLIDER 2회 [Select] (type2) R-BMS 는 2026-10-29 부터 `audio.master` 에 묶는다(reference-divergences 2026-10-29 절) |
 | 18 | RATE_KEYVOLUME,SLIDER_KEY_VOLUME | keyvolume | 공통 | AudioConfig.keyvolume | 있음: setKeyvolume | 등록만(PlayerConfig) | SLIDER 2회 [Select] (type2) |
 | 19 | RATE_BGMVOLUME,SLIDER_BGM_VOLUME | bgmvolume | 공통 | AudioConfig.bgvolume | 있음: setBgvolume | 등록만(PlayerConfig) | SLIDER 2회 [Select] (type2) |
 | 20 | SLIDER_PRACTICE_POSITION | practice_position | 플레이 | BMSPlayer.getPracticeConfiguration().getItemScrollPosition() | 있음: setItemScrollPosition | 없음 |  |
