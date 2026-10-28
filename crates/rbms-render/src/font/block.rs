@@ -66,6 +66,17 @@ const SMALL_FIT_LIMIT_PX: f32 = 2.0;
 /// The glyph every font keeps for a character it does not have.
 const NOTDEF_GLYPH: u16 = 0;
 
+/// The smallest share of its natural width that [`BlockFit::ShrinkCut`] squeezes a line to. A line
+/// that would have to go below it is cut and ended with an ellipsis instead, so a long title stays
+/// at a size that can be read.
+pub const SHRINK_CUT_FLOOR: f32 = 0.75;
+
+/// What a line cut by [`BlockFit::ShrinkCut`] ends with.
+const ELLIPSIS: &str = "\u{2026}";
+
+/// What stands in for [`ELLIPSIS`] when neither the font nor any font behind it draws it.
+const ELLIPSIS_FALLBACK: &str = "...";
+
 /// The features that merge or swap glyphs by context. The reference maps one character to one
 /// glyph, so a line laid out to match it must as well.
 const CONTEXTUAL_FEATURES: [FeatureTag; 4] =
@@ -103,6 +114,19 @@ pub enum BlockFit {
     Truncate,
     /// The line is broken into as many as it takes.
     Wrap,
+    /// A line too long is squeezed sideways as [`BlockFit::Shrink`] does, but only down to
+    /// [`SHRINK_CUT_FLOOR`] of its width. One that would go further is cut to the glyphs that fit
+    /// there, with an ellipsis after them, and squeezed to the width. The reference has no such
+    /// rule: this is an extension of this player, written as `overflow = 3`.
+    ShrinkCut,
+}
+
+impl BlockFit {
+    /// Whether a line wider than its width is squeezed sideways to it: [`BlockFit::Shrink`], and
+    /// [`BlockFit::ShrinkCut`] for as far as it squeezes.
+    pub(crate) fn squeezes(self) -> bool {
+        matches!(self, Self::Shrink | Self::ShrinkCut)
+    }
 }
 
 /// A block of text to compose.
@@ -433,6 +457,40 @@ impl TextContext {
         line
     }
 
+    /// The glyphs a cut line ends with: the ellipsis, or three full stops where no font draws it.
+    fn ellipsis(&mut self, face: &Face, em_px: f32) -> Vec<LayoutGlyph> {
+        let shaped = |text: &mut Self, ending: &str| text.shape_block(face, ending, em_px, None).into_iter().flatten().collect::<Vec<_>>();
+        let ellipsis = shaped(self, ELLIPSIS);
+        if !ellipsis.is_empty() && ellipsis.iter().all(|glyph| glyph.glyph_id != NOTDEF_GLYPH) {
+            return ellipsis;
+        }
+        shaped(self, ELLIPSIS_FALLBACK)
+    }
+
+    /// Cuts `whole`, the line `glyphs` were placed as, to as many leading glyphs as leave room for
+    /// an ellipsis in `reach` and ends it with one. Spaces left at the cut are dropped so the
+    /// ellipsis follows a letter. `size` is the em the glyphs were drawn at and how much larger that
+    /// is than the font was generated.
+    fn cut_with_ellipsis(&mut self, face: &Face, glyphs: &[LayoutGlyph], whole: &Line, size: (f32, f32), reach: f32) -> Line {
+        let (em_px, scale) = size;
+        let ending = self.ellipsis(face, em_px);
+        let mut spare = BLOCK_MAX_PIXELS;
+        let ending_width = self.place_line(&ending, em_px, scale, &mut spare).glyphs.last().map_or(0.0, |last| last.end);
+        let mut kept = whole.glyphs.iter().take_while(|glyph| glyph.end + ending_width <= reach).count();
+        loop {
+            while kept > 0 && whole.glyphs[kept - 1].image.is_none() {
+                kept -= 1;
+            }
+            let joined: Vec<LayoutGlyph> = glyphs[..kept].iter().chain(&ending).cloned().collect();
+            let mut spare = BLOCK_MAX_PIXELS;
+            let line = self.place_line(&joined, em_px, scale, &mut spare);
+            if kept == 0 || line.width <= reach {
+                return line;
+            }
+            kept -= 1;
+        }
+    }
+
     /// Lays `spec` out and composes it, or `None` when nothing of it would be drawn: an empty
     /// string, a size or a width that is not a number, a size past [`BLOCK_MAX_EM`], a font with no
     /// capital to hang a line from, or a block that was squeezed or cut down to nothing.
@@ -458,8 +516,17 @@ impl TextContext {
             lines[cut].truncate(spec.width);
         }
 
+        if spec.fit == BlockFit::ShrinkCut {
+            let reach = spec.width.max(0.0) / SHRINK_CUT_FLOOR;
+            for (line, glyphs) in lines.iter_mut().zip(&shaped) {
+                if line.width > reach {
+                    *line = self.cut_with_ellipsis(&face, glyphs, line, (spec.em_px, scale), reach);
+                }
+            }
+        }
+
         let widest = lines.iter().map(|line| line.width).fold(0.0, f32::max);
-        let squeeze = if spec.fit == BlockFit::Shrink && widest > spec.width { spec.width / widest } else { 1.0 };
+        let squeeze = if spec.fit.squeezes() && widest > spec.width { spec.width / widest } else { 1.0 };
         if squeeze <= 0.0 {
             return None;
         }
@@ -541,7 +608,7 @@ impl TextContext {
         };
         let mut room = BLOCK_MAX_PIXELS;
         let line = self.place_line(glyphs, spec.em_px, scale, &mut room);
-        let squeeze = if spec.fit == BlockFit::Shrink && line.width > spec.width { spec.width / line.width } else { 1.0 };
+        let squeeze = if spec.fit.squeezes() && line.width > spec.width { spec.width / line.width } else { 1.0 };
 
         let byte = spec.text.char_indices().nth(chars).map_or(spec.text.len(), |(at, _)| at);
         let pen = glyphs

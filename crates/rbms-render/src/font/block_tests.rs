@@ -5,7 +5,9 @@
 
 use cosmic_text::{Placement, SwashImage};
 
-use super::block::{BLOCK_MAX_DIM, BLOCK_MAX_EM, BLOCK_MAX_PIXELS, BlockAlign, BlockFit, BlockSpec, TextBlock, block_extent, small_letter_fit, takes_room};
+use super::block::{
+    BLOCK_MAX_DIM, BLOCK_MAX_EM, BLOCK_MAX_PIXELS, BlockAlign, BlockFit, BlockSpec, SHRINK_CUT_FLOOR, TextBlock, block_extent, small_letter_fit, takes_room,
+};
 use super::{BUNDLED_FONT, Face, TextContext};
 use crate::{BYTES_PER_PIXEL, UNLIMITED_TEXTURE_SIZE};
 
@@ -137,9 +139,68 @@ fn a_line_too_long_runs_on_is_squeezed_or_is_cut() {
 fn a_line_that_fits_is_left_alone_by_every_overflow_rule() {
     let (mut text, family) = engine();
     let plain = text.compose_block(&spec("FITS", &family)).expect("the word composes");
-    for fit in [BlockFit::Shrink, BlockFit::Truncate, BlockFit::Wrap] {
+    for fit in [BlockFit::Shrink, BlockFit::ShrinkCut, BlockFit::Truncate, BlockFit::Wrap] {
         assert_eq!(text.compose_block(&BlockSpec { fit, ..spec("FITS", &family) }).as_ref(), Some(&plain), "{fit:?} changes nothing in a line that fits");
     }
+}
+
+/// A width a squeeze of [`SQUEEZED_SHARE`] brings the long test line into.
+const SQUEEZED_SHARE: f32 = 0.9;
+
+/// The block `text` composes to when the long test line is set in `width` under `fit`.
+fn long_line_fitted(text: &mut TextContext, family: &str, width: f32, fit: BlockFit, align: BlockAlign) -> TextBlock {
+    text.compose_block(&BlockSpec { width, fit, align, ..spec(LONG_LINE, family) }).expect("the long line composes")
+}
+
+#[test]
+fn shrink_cut_squeezes_a_line_that_is_not_much_too_long_exactly_as_shrink_does() {
+    let (mut text, family) = engine();
+    let natural = long_line_fitted(&mut text, &family, ROOMY, BlockFit::Overflow, BlockAlign::Left).layout_width;
+    let width = natural * SQUEEZED_SHARE;
+
+    let shrunk = long_line_fitted(&mut text, &family, width, BlockFit::Shrink, BlockAlign::Left);
+    let shrunk_or_cut = long_line_fitted(&mut text, &family, width, BlockFit::ShrinkCut, BlockAlign::Left);
+    assert_eq!(shrunk_or_cut, shrunk, "down to the floor the two rules are the same line, with nothing cut and no ellipsis");
+    assert!((shrunk_or_cut.layout_width - width).abs() < 0.01, "and the line fills its width: {}", shrunk_or_cut.layout_width);
+}
+
+#[test]
+fn shrink_cut_cuts_a_line_that_would_go_below_the_floor_and_ends_it_with_an_ellipsis() {
+    let (mut text, family) = engine();
+    let cut = long_line_fitted(&mut text, &family, NARROW, BlockFit::ShrinkCut, BlockAlign::Left);
+    let overflow = long_line_fitted(&mut text, &family, NARROW, BlockFit::Overflow, BlockAlign::Left);
+
+    assert!(cut.width < overflow.width, "the line is shorter than it was: {} against {}", cut.width, overflow.width);
+    assert!(cut.layout_width <= NARROW + PIXEL, "it fits the width: {}", cut.layout_width);
+    assert!(cut.drawn_width >= cut.width as f32 * SHRINK_CUT_FLOOR - PIXEL, "it is squeezed no further than the floor: {} of {}", cut.drawn_width, cut.width);
+    assert!(cut.drawn_width < cut.width as f32, "and it is squeezed some, because what was kept filled the room the floor leaves");
+    assert!((cut.layout_width - NARROW).abs() <= PIXEL * 2.0, "to the width: {}", cut.layout_width);
+
+    let ending = '\u{2026}';
+    let with_ellipsis: Vec<TextBlock> =
+        LONG_LINE.char_indices().filter_map(|(end, _)| text.compose_block(&spec(&format!("{}{ending}", &LONG_LINE[..end].trim_end()), &family))).collect();
+    assert!(with_ellipsis.iter().any(|prefix| prefix.rgba == cut.rgba), "what is left is the start of the line with an ellipsis put in place of the rest");
+    let plain_stops: Vec<TextBlock> =
+        LONG_LINE.char_indices().filter_map(|(end, _)| text.compose_block(&spec(&format!("{}...", &LONG_LINE[..end]), &family))).collect();
+    assert!(!plain_stops.iter().any(|prefix| prefix.rgba == cut.rgba), "the ellipsis is the font's own character, not three stops");
+}
+
+#[test]
+fn shrink_cut_keeps_its_alignment_and_the_floor_when_it_cuts() {
+    let (mut text, family) = engine();
+    for align in [BlockAlign::Left, BlockAlign::Center, BlockAlign::Right] {
+        let block = long_line_fitted(&mut text, &family, NARROW, BlockFit::ShrinkCut, align);
+        assert!(block.left.abs() <= PIXEL * 2.0, "{align:?}: a cut line fills the whole width, so it starts where the width does: {}", block.left);
+        assert!((block.left + block.drawn_width - NARROW).abs() <= PIXEL * 2.0, "{align:?}: and ends where it ends");
+    }
+}
+
+#[test]
+fn shrink_cut_leaves_a_line_with_room_to_spare_at_its_natural_size() {
+    let (mut text, family) = engine();
+    let natural = long_line_fitted(&mut text, &family, ROOMY, BlockFit::Overflow, BlockAlign::Left);
+    let roomy = long_line_fitted(&mut text, &family, natural.layout_width * 3.0, BlockFit::ShrinkCut, BlockAlign::Left);
+    assert_eq!(roomy, natural, "a line with room to spare is not squeezed or cut");
 }
 
 #[test]

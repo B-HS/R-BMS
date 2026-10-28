@@ -16,7 +16,7 @@ use cosmic_text::{
 use crate::glyph_atlas::{GlyphAtlas, GlyphAtlasBinding, glyph_bitmap, packed_rgb};
 use crate::{BYTES_PER_PIXEL, BlendMode, Color, QuadParams, Rect, Renderer};
 
-pub use block::{BLOCK_MAX_DIM, BLOCK_MAX_EM, BLOCK_MAX_PIXELS, BlockAlign, BlockFit, BlockSpec, TextBlock};
+pub use block::{BLOCK_MAX_DIM, BLOCK_MAX_EM, BLOCK_MAX_PIXELS, BlockAlign, BlockFit, BlockSpec, SHRINK_CUT_FLOOR, TextBlock};
 pub(crate) use block::{CAP_CHARS, CLEAR_PIXEL, block_extent, slack};
 
 /// Bundled default UI font (Inter, SIL OFL 1.1). cosmic-text falls back to installed system

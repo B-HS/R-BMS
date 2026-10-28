@@ -20,8 +20,8 @@ local LAYOUT = {
     value_sprite = "num18",
     value_digits = 3,
     line_gap = 6,
-    side_label_lift = 41,
-    side_label_drop = 12,
+    side_label_lift = 33,
+    side_label_drop = 16,
     center_split = 4,
     star_side = 16,
 }
@@ -110,12 +110,13 @@ local function label_block(index)
     local x, top = vertex(index)
     local area = theme.radar.area
     local gap = theme.radar.label_gap
+    local gap_below = theme.radar.label_gap_below
     local cap = theme.cap_height(LAYOUT.label_size)
     if index == 1 then
         return { kind = "centered", x = x, top = top - gap - cap }
     end
     if index == 4 then
-        return { kind = "centered", x = x, top = top + gap }
+        return { kind = "centered", x = x, top = top + gap_below }
     end
     local lifted = (index == 2 or index == 6)
     local block_top = lifted and top - LAYOUT.side_label_lift or top + LAYOUT.side_label_drop
@@ -129,7 +130,7 @@ local function axis_label(s, index, key, color, when)
     local block = label_block(index)
     local area = theme.radar.area
     local size = LAYOUT.label_size
-    local spec = { value = i18n.t(AXIS_LABEL_KEYS[key]), size = size, overflow = props.text_overflow.OVERFLOW }
+    local spec = { value = i18n.t(AXIS_LABEL_KEYS[key]), size = size, overflow = props.text_overflow.SHRINK_CUT }
     local number = { sprite = LAYOUT.value_sprite, ref = value_ref(index), digit = LAYOUT.value_digits }
     local labelled = ui.merge(when, { color = color })
     local valued = kit.arriving(ui.merge(when, { color = theme.color.text }))
@@ -159,7 +160,7 @@ function radar.build(s, main_state)
     local area = theme.radar.area
     local on = { op = { ON_CHART } }
     s:rect({ x = area.x, top = area.top, w = area.width, h = theme.grid.rule }, theme.color.line, on)
-    local title = { value = i18n.t("info_notes_radar"), size = theme.type.caption }
+    local title = { value = i18n.t("info_notes_radar"), size = theme.type.caption, overflow = props.text_overflow.SHRINK_CUT }
     s:text(title, { x = area.x, top = area.top + LAYOUT.title_drop, w = area.width }, { color = theme.color.sub, op = { ON_CHART } })
 
     local shown = { op = { ON_CHART }, draw = present(main_state) }

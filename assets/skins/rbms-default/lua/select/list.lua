@@ -122,7 +122,7 @@ local function titles(s)
     local labelled_right = label_column_left(s) - TITLE.label_gap
     local placed = {}
     for index, kind in ipairs(TITLE_KINDS) do
-        s:define_text({ id = kind.id, size = TITLE.size, overflow = props.text_overflow.SHRINK })
+        s:define_text({ id = kind.id, size = TITLE.size, overflow = props.text_overflow.SHRINK_CUT })
         local x = kind.chart and TITLE.chart_x or TITLE.plain_x
         local right = (kind.chart or kind.labelled) and labelled_right or TITLE.plain_right
         placed[index] = s:dst(kind.id, { x = x, top = top, w = right - x, h = TITLE.size }, { color = kind.color }, parent)

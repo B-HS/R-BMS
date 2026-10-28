@@ -298,6 +298,10 @@ props.number = {
     FOLDER_TOTALSONGS = 300,
     FOLDER_NOPLAY = 320,
     FOLDER_MAX = 330,
+    DENSITY_PEAK = 360,
+    DENSITY_PEAK_AFTERDOT = 361,
+    DENSITY_AVERAGE = 364,
+    DENSITY_AVERAGE_AFTERDOT = 365,
     SONGGAUGE_TOTAL = 368,
     AVERAGE_TIMING = 374,
     AVERAGE_TIMING_AFTERDOT = 375,
@@ -466,6 +470,7 @@ props.text_overflow = {
     OVERFLOW = 0,
     SHRINK = 1,
     TRUNCATE = 2,
+    SHRINK_CUT = 3,
 }
 
 props.number_align = {

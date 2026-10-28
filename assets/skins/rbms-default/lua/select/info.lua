@@ -16,19 +16,26 @@ local ON_FOLDER = props.option.FOLDERBAR
 local ON_COURSE = props.option.GRADEBAR
 local UNPLAYED = props.option.BAR_NOT_PLAYED
 local NOTHING = "-"
+local FIT = props.text_overflow.SHRINK_CUT
 
 local REGION = { x = 64, width = 1032 }
 
-local HEAD = { top = 136, height = 200, bar_width = 8, text_gap = 32 }
-local HEAD_LINES = {
-    { ref = props.text.GENRE, top = 154, size = theme.type.label, color = theme.color.sub },
-    { ref = props.text.TITLE, top = 188, size = theme.type.title, color = theme.color.text },
-    { ref = props.text.SUBTITLE, top = 262, size = theme.type.label, color = theme.color.sub },
-    { ref = props.text.FULLARTIST, top = 294, size = theme.type.body, color = theme.color.text },
-}
-local HEAD_COURSE = { top = 188, size = theme.type.title, label = i18n.t("common_course") }
-
 local LAYOUT = theme.select_layout
+local SONG = LAYOUT.song
+local FACTS = LAYOUT.facts
+local VIEW = LAYOUT.chart_view
+local ROWS = LAYOUT.score_rows
+local CELLS = LAYOUT.target_cells
+
+local HEAD_LINES = {
+    { ref = props.text.GENRE, top = SONG.lines.genre, size = theme.type.label, color = theme.color.sub },
+    { ref = props.text.TITLE, top = SONG.lines.title, size = theme.type.title, color = theme.color.text },
+    { ref = props.text.SUBTITLE, top = SONG.lines.subtitle, size = theme.type.label, color = theme.color.sub },
+    { ref = props.text.FULLARTIST, top = SONG.lines.artist, size = theme.type.body, color = theme.color.text },
+}
+local HEAD_COURSE = { top = SONG.lines.title, size = theme.type.title, label = i18n.t("common_course") }
+local HEAD_META = { label_size = theme.type.caption, bpm = "BPM" }
+
 local SECTION = { title_drop = 12 }
 local EX_PER_NOTE = 2
 local RANK_STEPS = 9
@@ -52,47 +59,23 @@ local CLEAR_OPTIONS = {
 
 local CHART = {
     tabs = { width = 64, gap = 4, top_drop = 8, height = 32, band = 3, sprite = "num24", digits = 3, fill_share = 0.35 },
-    facts = { top_drop = 48, drop = 48, sprite = "num32", notes_digits = 5, level_digits = 3 },
-    fact_columns = { notes = { x = 0, width = 120 }, level = { x = 136, width = 96 }, bpm = { x = 248, width = 152 } },
-    small = {
-        x = 432,
-        top_drop = 48,
-        drop = 40,
-        gap = 8,
-        size = theme.type.label,
-        sprite = "num24",
-        total_digits = 4,
-        columns = {
-            { id = "length", label = i18n.t("common_length"), width = 72 },
-            { id = "total", label = "TOTAL", width = 64 },
-            { id = "keys", label = i18n.t("common_keys"), width = 80 },
-            { id = "judge", label = i18n.t("common_judge"), width = 96 },
-        },
-    },
-    graph = { top_drop = 112, width = 400, height = 136 },
-    lanes = { x = 432, top_drop = 112, width = 312, height = 136, slots = 8, bar_width = 23, sprite = "num18", digits = 4, number_gap = 6, inset = 6 },
+    lanes = { slots = 8, bar_width = 23, sprite = "num18", digits = 4, number_gap = 6, inset = 6 },
 }
 
 local SCORE = {
-    first_row = 40,
-    columns = { ex = { x = 0, width = 120 }, miss = { x = 128, width = 120 } },
-    drop = 48,
-    sprite = "num44",
+    big_sprite = "num44",
+    small_sprite = "num32",
     digits = 5,
-    badge = { width = 120, height = 48 },
-    lamp_top = 100,
-    progress = { top = 128, height = 8, label_drop = 12, tick = 2, first_tick = 2 },
-    stats = { top = 168, drop = 38, gap = 8, widths = { 104, 104, 112, 80 }, sprite = "num24", digits = 5 },
-    judges = { top = 218, drop = 34, width = 80, sprite = "num18", digits = 5 },
+    progress = { height = 8, label_drop = 12, tick = 2, first_tick = 2 },
+    pairs = { sprite = "num24", digits = 5 },
+    judges = { sprite = "num18", digits = 5 },
 }
 
 local TARGETS = {
     steps = { 8, 7, 6 },
-    cell = { width = 176, chip_width = 56, chip_height = 28, number_x = 64, number_width = 48, diff_x = 116, diff_width = 48 },
     gutter = 32,
     sprite = "num24",
     digits = 5,
-    rate = { x = 560, width = 184 },
     title_drop = 8,
     content_drop = 28,
 }
@@ -135,45 +118,8 @@ local CONSTRAINTS = {
 local CONSTRAINT_JOINT = "   /   "
 local NO_CONSTRAINT = i18n.t("common_none")
 
-local function head(s)
-    local bar = { x = REGION.x, top = HEAD.top, w = HEAD.bar_width, h = HEAD.height }
-    s:rect(bar, theme.color.line)
-    parts.difficulty_rect(s, bar, { op = { ON_CHART } })
-    s:rect(bar, theme.color.accent, { op = { ON_FOLDER } })
-    s:rect(bar, theme.color.accent, { op = { ON_COURSE } })
-
-    local x = REGION.x + HEAD.bar_width + HEAD.text_gap
-    local width = REGION.x + REGION.width - x
-    for _, line in ipairs(HEAD_LINES) do
-        local spec = { ref = line.ref, size = line.size, overflow = props.text_overflow.SHRINK }
-        s:text(spec, { x = x, top = line.top, w = width }, kit.sliding({ color = line.color }))
-    end
-    local course_title = { x = x, top = HEAD_COURSE.top, w = width }
-    s:text({ text = HEAD_COURSE.label, size = HEAD_COURSE.size }, course_title, kit.sliding({ color = theme.color.text, op = { ON_COURSE } }))
-end
-
-local function stage(s)
-    local cover = LAYOUT.cover
-    local box = { x = cover.x, top = cover.top, w = cover.side, h = cover.side }
-    local shown = { OPTION.STAGE_SHOW, ON_CHART }
-    parts.panel(s, box, { op = shown })
-    local arriving = motion.fade_in(0, STAGE.fade, { op = shown, timer = props.timer.SONGBAR_CHANGE, stretch = props.stretch.FIT_INNER })
-    s:reference(props.image.STAGEFILE, box, arriving)
-    local size = theme.type.caption
-    local unpictured = { op = { OPTION.STAGE_SHOW, ON_CHART, props.option.NO_STAGEFILE }, timer = props.timer.SONGBAR_CHANGE, color = theme.color.muted }
-    local label = { x = box.x, top = theme.centered_top(box, size), w = box.w }
-    s:text({ text = parts.stage_image.missing, size = size, align = "center" }, label, motion.fade_in(STAGE.missing_at, STAGE.fade, unpictured))
-end
-
-local function section(s, area, key, title_drop)
-    local on = { op = { ON_CHART } }
-    s:rect({ x = area.x, top = area.top, w = area.width, h = theme.grid.rule }, theme.color.line, on)
-    local title = { value = i18n.t(key), size = theme.type.caption }
-    s:text(title, { x = area.x, top = area.top + (title_drop or SECTION.title_drop), w = area.width }, { color = theme.color.sub, op = { ON_CHART } })
-end
-
 local function caption(s, label, box, opts)
-    local spec = { text = label, size = theme.type.caption, overflow = props.text_overflow.SHRINK, align = box.align }
+    local spec = { text = label, size = theme.type.caption, overflow = FIT, align = box.align }
     s:text(spec, box, ui.merge({ color = theme.color.muted, op = { ON_CHART } }, opts))
 end
 
@@ -189,6 +135,64 @@ local function bpm_range(main_state)
         end
         return string.format("%d - %d", low, high)
     end
+end
+
+local function head_meta(s, main_state)
+    local box = { x = REGION.x + REGION.width - SONG.meta_width, w = SONG.meta_width, align = "right" }
+    local genre, title, subtitle, artist = table.unpack(HEAD_LINES)
+    local function label_top(line)
+        return line.top + theme.cap_height(line.size) - theme.cap_height(HEAD_META.label_size)
+    end
+
+    caption(s, i18n.t("common_level"), ui.merge(box, { top = label_top(genre) }))
+    local level = { sprite = SONG.level_sprite, ref = props.number.PLAYLEVEL, digit = SONG.level_digits, align = "right", saturate = true }
+    local baseline = title.top + theme.cap_height(title.size)
+    parts.by_difficulty(function(_, op, color)
+        s:number(level, { x = box.x, baseline = baseline, w = box.w }, kit.arriving({ color = color, op = { ON_CHART, op } }))
+    end)
+
+    caption(s, HEAD_META.bpm, ui.merge(box, { top = label_top(subtitle) }))
+    local bpm = { value = bpm_range(main_state), size = artist.size, align = "right", overflow = FIT }
+    s:text(bpm, { x = box.x, top = artist.top, w = box.w }, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
+end
+
+local function head(s, main_state)
+    local bar = { x = REGION.x, top = SONG.top, w = SONG.bar_width, h = SONG.height }
+    s:rect(bar, theme.color.line)
+    parts.difficulty_rect(s, bar, { op = { ON_CHART } })
+    s:rect(bar, theme.color.accent, { op = { ON_FOLDER } })
+    s:rect(bar, theme.color.accent, { op = { ON_COURSE } })
+
+    local x = REGION.x + SONG.bar_width + SONG.text_gap
+    local right = REGION.x + REGION.width
+    local width = right - SONG.meta_width - SONG.meta_gap - x
+    for _, line in ipairs(HEAD_LINES) do
+        local spec = { ref = line.ref, size = line.size, overflow = FIT }
+        s:text(spec, { x = x, top = line.top, w = width }, kit.sliding({ color = line.color }))
+    end
+    local course_title = { x = x, top = HEAD_COURSE.top, w = right - x }
+    s:text({ text = HEAD_COURSE.label, size = HEAD_COURSE.size, overflow = FIT }, course_title, kit.sliding({ color = theme.color.text, op = { ON_COURSE } }))
+    head_meta(s, main_state)
+end
+
+local function stage(s)
+    local cover = LAYOUT.cover
+    local box = { x = cover.x, top = cover.top, w = cover.side, h = cover.side }
+    local shown = { OPTION.STAGE_SHOW, ON_CHART }
+    parts.panel(s, box, { op = shown })
+    local arriving = motion.fade_in(0, STAGE.fade, { op = shown, timer = props.timer.SONGBAR_CHANGE, stretch = props.stretch.FIT_INNER })
+    s:reference(props.image.STAGEFILE, box, arriving)
+    local size = theme.type.caption
+    local unpictured = { op = { OPTION.STAGE_SHOW, ON_CHART, props.option.NO_STAGEFILE }, timer = props.timer.SONGBAR_CHANGE, color = theme.color.muted }
+    local label = { x = box.x, top = theme.centered_top(box, size), w = box.w }
+    s:text({ text = parts.stage_image.missing, size = size, align = "center", overflow = FIT }, label, motion.fade_in(STAGE.missing_at, STAGE.fade, unpictured))
+end
+
+local function section(s, area, key, title_drop)
+    local on = { op = { ON_CHART } }
+    s:rect({ x = area.x, top = area.top, w = area.width, h = theme.grid.rule }, theme.color.line, on)
+    local title = { value = i18n.t(key), size = theme.type.caption, overflow = FIT }
+    s:text(title, { x = area.x, top = area.top + (title_drop or SECTION.title_drop), w = area.width }, { color = theme.color.sub, op = { ON_CHART } })
 end
 
 local function chart_length(main_state)
@@ -223,60 +227,51 @@ local function tabs(s)
     end
 end
 
-local function facts(s, main_state)
-    local area = LAYOUT.chart_data
-    local fact = CHART.facts
-    local columns = CHART.fact_columns
-    local top = area.top + fact.top_drop
-    local baseline = top + fact.drop
-    local function place(column, label)
-        local box = { x = area.x + column.x, top = top, w = column.width }
-        caption(s, label, box)
-        return { x = box.x, baseline = baseline, w = box.w }
+local function density(main_state, whole_ref, rest_ref)
+    return function()
+        local whole = main_state.number(whole_ref)
+        local rest = main_state.number(rest_ref)
+        if not (ui.has_value(whole) and ui.has_value(rest)) then
+            return ""
+        end
+        if whole == 0 and rest == 0 then
+            return NOTHING
+        end
+        return string.format("%d.%02d", whole, rest)
     end
-
-    local notes = { sprite = fact.sprite, ref = props.number.TOTALNOTES, digit = fact.notes_digits, saturate = true }
-    s:number(notes, place(columns.notes, i18n.t("common_notes")), kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
-
-    local level_at = place(columns.level, i18n.t("common_level"))
-    local level = { sprite = fact.sprite, ref = props.number.PLAYLEVEL, digit = fact.level_digits, saturate = true }
-    parts.by_difficulty(function(_, op, color)
-        s:number(level, level_at, kit.arriving({ color = color, op = { ON_CHART, op } }))
-    end)
-
-    local bpm_at = place(columns.bpm, "BPM")
-    local size = theme.type.body
-    local bpm = { value = bpm_range(main_state), size = size, overflow = props.text_overflow.SHRINK }
-    s:text(bpm, { x = bpm_at.x, top = theme.text_top(baseline, size), w = bpm_at.w }, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
 end
 
-local function small_facts(s, main_state)
+local function facts(s, main_state)
     local area = LAYOUT.chart_data
-    local small = CHART.small
-    local size = small.size
-    local top = area.top + small.top_drop
-    local baseline = top + small.drop
-    local x = area.x + small.x
+    local size = theme.type.label
     local cells = {}
-    for _, column in ipairs(small.columns) do
-        local box = { x = x, top = top, w = column.width - small.gap }
-        caption(s, column.label, box)
-        cells[column.id] = { x = box.x, top = theme.text_top(baseline, size), w = box.w, baseline = baseline }
-        x = x + column.width
+    local function place(id, label)
+        local cell = FACTS.cells[id]
+        local top = area.top + FACTS.label_drop + cell.row * FACTS.row_pitch
+        local baseline = top + FACTS.value_drop
+        caption(s, label, { x = area.x + cell.x, top = top, w = cell.width })
+        cells[id] = { x = area.x + cell.x, top = theme.text_top(baseline, size), w = cell.width, baseline = baseline }
+        return cells[id]
     end
-    local word = { size = size, overflow = props.text_overflow.SHRINK }
+    local word = { size = size, overflow = FIT }
     local shown = kit.arriving({ color = theme.color.text, op = { ON_CHART } })
 
-    s:text(ui.merge(word, { value = chart_length(main_state) }), cells.length, shown)
-    local total = { sprite = small.sprite, ref = props.number.SONGGAUGE_TOTAL, digit = small.total_digits, saturate = true }
-    s:number(total, cells.total, shown)
-    parts.key_mode_text(s, word, cells.keys, shown)
-    parts.judge_rank_text(s, word, cells.judge, shown)
+    local notes = { sprite = FACTS.sprite, ref = props.number.TOTALNOTES, digit = FACTS.notes_digits, saturate = true }
+    s:number(notes, place("notes", i18n.t("common_notes")), shown)
+    s:text(ui.merge(word, { value = density(main_state, props.number.DENSITY_AVERAGE, props.number.DENSITY_AVERAGE_AFTERDOT) }), place("average", i18n.t("info_nps_average")), shown)
+    s:text(ui.merge(word, { value = density(main_state, props.number.DENSITY_PEAK, props.number.DENSITY_PEAK_AFTERDOT) }), place("peak", i18n.t("info_nps_peak")), shown)
+
+    s:text(ui.merge(word, { value = chart_length(main_state) }), place("length", i18n.t("common_length")), shown)
+    local total = { sprite = FACTS.sprite, ref = props.number.SONGGAUGE_TOTAL, digit = FACTS.total_digits, saturate = true }
+    s:number(total, place("total", "TOTAL"), shown)
+    parts.key_mode_text(s, word, place("keys", i18n.t("common_keys")), shown)
+    parts.judge_rank_text(s, word, place("judge", i18n.t("common_judge")), shown)
 end
 
 local function graph(s)
     local area = LAYOUT.chart_data
-    local box = { x = area.x, top = area.top + CHART.graph.top_drop, w = CHART.graph.width, h = CHART.graph.height }
+    local spec = VIEW.graph
+    local box = { x = area.x + spec.x, top = area.top + spec.top_drop, w = spec.width, h = spec.height }
     local on = { op = { ON_CHART } }
     parts.panel(s, box, on)
     s:object("judgegraph", { type = props.judge_graph.NOTES, backTexOff = props.back_texture.OFF }, box, kit.arriving(on))
@@ -310,7 +305,7 @@ end
 
 local function lanes(s)
     local area = LAYOUT.chart_data
-    local spec = CHART.lanes
+    local spec = ui.merge(CHART.lanes, VIEW.lanes)
     local panel = { x = area.x + spec.x, top = area.top + spec.top_drop, w = spec.width, h = spec.height }
     parts.panel(s, panel, { op = { ON_CHART } })
     local pitch = spec.width / spec.slots
@@ -343,7 +338,6 @@ local function chart_data(s, main_state)
     section(s, LAYOUT.chart_data, "info_chart_data")
     tabs(s)
     facts(s, main_state)
-    small_facts(s, main_state)
     graph(s)
     lanes(s)
 end
@@ -406,24 +400,26 @@ end
 
 local function score_numbers(s, when)
     local area = LAYOUT.score
-    local top = area.top + SCORE.first_row
-    local baseline = top + SCORE.drop
-    local size = theme.type.heading
-    local function cell(column, label, ref)
-        local box = { x = area.x + column.x, top = top, w = column.width }
-        caption(s, label, box)
-        local spec = { sprite = SCORE.sprite, ref = ref, digit = SCORE.digits, saturate = true }
-        s:number(spec, { x = box.x, baseline = baseline }, kit.arriving(ui.merge({ color = theme.color.text }, when.shown)))
-        dash(s, size, { x = box.x, top = theme.text_top(baseline, size), w = box.w }, when)
+    local top = area.top + ROWS.label_drop
+    local baseline = area.top + ROWS.baseline_drop
+    local columns = {
+        { label = "EX SCORE", ref = props.number.SCORE, sprite = SCORE.big_sprite, width = ROWS.ex_width, size = theme.type.heading },
+        { label = "MISS COUNT", ref = props.number.MISSCOUNT, sprite = SCORE.small_sprite, width = ROWS.miss_width, size = theme.type.body },
+    }
+    local x = area.x
+    for _, column in ipairs(columns) do
+        local box = { x = x, top = top, w = column.width }
+        caption(s, column.label, box)
+        local spec = { sprite = column.sprite, ref = column.ref, digit = SCORE.digits, saturate = true }
+        s:number(spec, { x = x, baseline = baseline }, kit.arriving(ui.merge({ color = theme.color.text }, when.shown)))
+        dash(s, column.size, { x = x, top = theme.text_top(baseline, column.size), w = column.width }, when)
+        x = x + column.width + LAYOUT.gap
     end
-    cell(SCORE.columns.ex, "EX SCORE", props.number.SCORE)
-    cell(SCORE.columns.miss, "MISS COUNT", props.number.MISSCOUNT)
 end
 
 local function rank_badge(s, when)
     local area = LAYOUT.score
-    local badge = SCORE.badge
-    local box = { x = area.x + area.width - badge.width, top = area.top + SCORE.first_row, w = badge.width, h = badge.height }
+    local box = { x = area.x + area.width - ROWS.badge_width, top = area.top + ROWS.label_drop, w = ROWS.badge_width, h = ROWS.badge_height }
     local size = theme.type.heading
     local text_box = { x = box.x, top = theme.centered_top(box, size), w = box.w }
     for level = 0, theme.rank_last do
@@ -440,9 +436,9 @@ end
 local function clear(s)
     local area = LAYOUT.score
     local size = theme.type.label
-    local box = { x = area.x, top = area.top + SCORE.lamp_top, w = area.width - SCORE.badge.width }
+    local box = { x = area.x, top = area.top + ROWS.lamp_drop, w = area.width - ROWS.badge_width - LAYOUT.gap }
     local function place(name, color, op, graded)
-        local spec = { text = name, size = size, overflow = props.text_overflow.SHRINK }
+        local spec = { text = name, size = size, overflow = FIT }
         s:text(spec, box, kit.arriving({ color = color, op = { ON_CHART, op, table.unpack(graded or {}) } }))
     end
     for index = 0, theme.clear_last do
@@ -460,15 +456,15 @@ end
 local function next_rank_text(s, main_state, when)
     local area = LAYOUT.score
     local size = theme.type.label
-    local box = { x = area.x + area.width - SCORE.badge.width, top = area.top + SCORE.lamp_top, w = SCORE.badge.width }
-    local spec = { value = next_rank(main_state), size = size, align = "right", overflow = props.text_overflow.SHRINK }
+    local box = { x = area.x + area.width - ROWS.badge_width, top = area.top + ROWS.lamp_drop, w = ROWS.badge_width }
+    local spec = { value = next_rank(main_state), size = size, align = "right", overflow = FIT }
     s:text(spec, box, kit.arriving(ui.merge({ color = theme.color.sub }, when.shown)))
 end
 
 local function progress(s, when)
     local area = LAYOUT.score
     local bar = SCORE.progress
-    local track = { x = area.x, top = area.top + bar.top, w = area.width, h = bar.height }
+    local track = { x = area.x, top = area.top + ROWS.progress_drop, w = area.width, h = bar.height }
     s:rect(track, theme.color.panel, { op = { ON_CHART } })
     local filled = motion.grow_right(0, theme.time.slide, { color = theme.color.sub, op = { ON_CHART }, draw = when.shown.draw, timer = props.timer.SONGBAR_CHANGE })
     s:object("graph", kit.meter(s, props.rate.SCORE_RATE), track, filled)
@@ -488,44 +484,39 @@ end
 
 local function stats(s, main_state, when)
     local area = LAYOUT.score
-    local row = SCORE.stats
-    local top = area.top + row.top
-    local baseline = top + row.drop
+    local row = ROWS.pairs
     local size = theme.type.label
-    local function place(index, label)
-        local x = area.x
-        for column = 1, index do
-            x = x + row.widths[column]
-        end
-        local box = { x = x, top = top, w = row.widths[index + 1] - row.gap }
-        caption(s, label, box)
-        return { x = box.x, baseline = baseline, top = theme.text_top(baseline, size), w = box.w }
+    local function place(column, line, label)
+        local x = area.x + column * (row.width + row.gap)
+        local baseline = area.top + row.baseline_drop[line]
+        caption(s, label, { x = x, top = theme.text_top(baseline, theme.type.caption), w = row.width })
+        return { x = x, baseline = baseline, top = theme.text_top(baseline, size), w = row.width }
     end
-    local function count(index, label, ref, shown)
-        local at = place(index, label)
-        local spec = { sprite = row.sprite, ref = ref, digit = row.digits, saturate = true }
+    local function count(column, line, label, ref, shown)
+        local at = place(column, line, label)
+        local spec = { sprite = SCORE.pairs.sprite, ref = ref, digit = SCORE.pairs.digits, saturate = true, align = "right" }
         s:number(spec, at, kit.arriving(ui.merge({ color = theme.color.text }, shown.shown)))
-        dash(s, size, at, shown)
+        dash(s, size, at, shown, "right")
     end
-    count(0, "MAX COMBO", props.number.MAXCOMBO, when)
-    count(1, i18n.t("info_play_count"), props.number.PLAYCOUNT, COUNT_SHOWN)
-    count(2, i18n.t("info_clear_count"), props.number.CLEARCOUNT, COUNT_SHOWN)
-    local rate_at = place(3, i18n.t("common_rate"))
-    local spec = { value = score_rate(main_state), size = size, overflow = props.text_overflow.SHRINK }
+    count(0, 1, "MAX COMBO", props.number.MAXCOMBO, when)
+    local rate_at = place(0, 2, i18n.t("common_rate"))
+    local spec = { value = score_rate(main_state), size = size, align = "right", overflow = FIT }
     s:text(spec, rate_at, kit.arriving(ui.merge({ color = theme.color.text }, when.shown)))
-    dash(s, size, rate_at, when)
+    dash(s, size, rate_at, when, "right")
+    count(1, 1, i18n.t("info_play_count"), props.number.PLAYCOUNT, COUNT_SHOWN)
+    count(1, 2, i18n.t("info_clear_count"), props.number.CLEARCOUNT, COUNT_SHOWN)
 end
 
 local function judges(s, when)
     local area = LAYOUT.score
-    local row = SCORE.judges
-    local top = area.top + row.top
-    local baseline = top + row.drop
+    local row = ROWS.judges
+    local top = area.top + row.top_drop
+    local baseline = top + row.baseline_rise
     local size = theme.type.caption
     for index, judge in ipairs(parts.judges) do
         local box = { x = area.x + (index - 1) * row.width, top = top, w = row.width, align = "center" }
         caption(s, judge.name, box, { color = judge.color })
-        local spec = { sprite = row.sprite, ref = judge.count[1], digit = row.digits, saturate = true, align = "center" }
+        local spec = { sprite = SCORE.judges.sprite, ref = judge.count[1], digit = SCORE.judges.digits, saturate = true, align = "center" }
         local at = { x = box.x, baseline = baseline, w = box.w }
         s:number(spec, at, kit.arriving(ui.merge({ color = theme.color.text }, when.shown)))
         dash(s, size, { x = box.x, top = theme.text_top(baseline, size), w = box.w }, when, "center")
@@ -592,15 +583,14 @@ end
 
 local function targets(s, main_state)
     local area = LAYOUT.targets
-    local spec = TARGETS.cell
-    local title_area = { x = area.x, top = area.top, width = TARGETS.rate.x - TARGETS.gutter }
+    local title_area = { x = area.x, top = area.top, width = CELLS.rate_x - TARGETS.gutter }
     section(s, title_area, "info_score_targets", TARGETS.title_drop)
     local top = area.top + TARGETS.content_drop
     local size = theme.type.caption
     for index, step in ipairs(TARGETS.steps) do
         local medal = theme.medal_order[index]
-        local x = area.x + (index - 1) * spec.width
-        local chip = { x = x, top = top, w = spec.chip_width, h = spec.chip_height }
+        local x = area.x + (index - 1) * CELLS.pitch
+        local chip = { x = x, top = top, w = CELLS.chip_width, h = CELLS.chip_height }
         local text_box = { x = chip.x, top = theme.centered_top(chip, size), w = chip.w }
         local name = { text = rank_label(theme.rank_last - (index - 1)), size = size, weight = "bold", align = "center" }
         local reached = { op = { ON_CHART }, draw = target_reached(main_state, step, true) }
@@ -613,26 +603,26 @@ local function targets(s, main_state)
         local sprite = s:sprite(TARGETS.sprite)
         local baseline = chip.top + (chip.h + sprite.cell_h - sprite.pad * 2) / 2
         local needed = { sprite = TARGETS.sprite, value = target_number(main_state, step), digit = TARGETS.digits, align = "right" }
-        s:number(needed, { x = x + spec.number_x, baseline = baseline, w = spec.number_width }, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
-        local gap = { value = target_gap(main_state, step), size = size, align = "right", overflow = props.text_overflow.SHRINK }
-        local gap_box = { x = x + spec.diff_x, top = theme.text_top(baseline, size), w = spec.diff_width }
+        s:number(needed, { x = x + CELLS.number_x, baseline = baseline, w = CELLS.number_width }, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
+        local gap = { value = target_gap(main_state, step), size = size, align = "right", overflow = FIT }
+        local gap_box = { x = x + CELLS.diff_x, top = theme.text_top(baseline, size), w = CELLS.diff_width }
         s:text(gap, gap_box, kit.arriving({ color = theme.color.sub, op = { ON_CHART } }))
     end
 
-    local rate_area = { x = area.x + TARGETS.rate.x, top = area.top, width = TARGETS.rate.width }
+    local rate_area = { x = area.x + CELLS.rate_x, top = area.top, width = area.width - CELLS.rate_x }
     section(s, rate_area, "info_clear_rate", TARGETS.title_drop)
     local value_size = theme.type.label
-    local value_box = { x = rate_area.x, top = top + (spec.chip_height - theme.cap_height(value_size)) / 2, w = rate_area.width }
-    local value = { value = clear_rate(main_state), size = value_size, align = "right", overflow = props.text_overflow.SHRINK }
+    local value_box = { x = rate_area.x, top = top + (CELLS.chip_height - theme.cap_height(value_size)) / 2, w = rate_area.width }
+    local value = { value = clear_rate(main_state), size = value_size, align = "right", overflow = FIT }
     s:text(value, value_box, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
 end
 
 local function folder(s)
     local on = { op = { ON_FOLDER } }
-    parts.caption(s, i18n.t("common_charts"), { x = REGION.x, top = FOLDER.top, w = REGION.width }, on)
+    caption(s, i18n.t("common_charts"), { x = REGION.x, top = FOLDER.top, w = REGION.width }, on)
     local total = { sprite = FOLDER.count_sprite, ref = props.number.FOLDER_TOTALSONGS, digit = FOLDER.digits, saturate = true }
     s:number(total, { x = REGION.x, baseline = FOLDER.count_baseline }, kit.arriving({ color = theme.color.text, op = { ON_FOLDER } }))
-    parts.caption(s, i18n.t("common_clear_lamps"), { x = REGION.x, top = FOLDER.lamps_top, w = REGION.width }, on)
+    caption(s, i18n.t("common_clear_lamps"), { x = REGION.x, top = FOLDER.lamps_top, w = REGION.width }, on)
     for index = 1, theme.clear_last + 1 do
         local lamp = theme.clear[theme.clear_last + 1 - index]
         local column = math.floor((index - 1) / FOLDER.per_column)
@@ -642,7 +632,7 @@ local function folder(s)
         local text_top = theme.centered_top(row, FOLDER.size)
         s:rect({ x = x, top = top, w = FOLDER.chip_width, h = FOLDER.row_height }, lamp.color, on)
         local name = { x = x + FOLDER.name_x, top = text_top, w = FOLDER.width - FOLDER.name_x }
-        s:text({ text = lamp.name, size = FOLDER.size }, name, { color = theme.color.sub, op = { ON_FOLDER } })
+        s:text({ text = lamp.name, size = FOLDER.size, overflow = FIT }, name, { color = theme.color.sub, op = { ON_FOLDER } })
         local ref = props.number.FOLDER_MAX - (index - 1)
         local count = { sprite = FOLDER.sprite, ref = ref, digit = FOLDER.digits, saturate = true, align = "right" }
         s:number(count, { x = x, top = text_top, w = FOLDER.width }, kit.arriving({ color = theme.color.text, op = { ON_FOLDER } }))
@@ -666,20 +656,20 @@ end
 
 local function course(s, main_state)
     local on = { op = { ON_COURSE } }
-    parts.caption(s, i18n.t("common_stages"), { x = REGION.x, top = COURSE.top, w = REGION.width }, on)
+    caption(s, i18n.t("common_stages"), { x = REGION.x, top = COURSE.top, w = REGION.width }, on)
     for stage_index = 1, COURSE.stages do
-        local spec = { ref = props.text.COURSE1_TITLE + stage_index - 1, size = theme.type.body, overflow = props.text_overflow.SHRINK }
+        local spec = { ref = props.text.COURSE1_TITLE + stage_index - 1, size = theme.type.body, overflow = FIT }
         local box = { x = REGION.x, top = COURSE.first_row + (stage_index - 1) * COURSE.pitch, w = REGION.width }
         s:text(spec, box, kit.sliding({ color = theme.color.text, op = { ON_COURSE } }))
     end
-    parts.caption(s, i18n.t("info_constraints"), { x = REGION.x, top = COURSE.constraints_top, w = REGION.width }, on)
-    local spec = { value = constraints(main_state), size = theme.type.label, overflow = props.text_overflow.SHRINK }
+    caption(s, i18n.t("info_constraints"), { x = REGION.x, top = COURSE.constraints_top, w = REGION.width }, on)
+    local spec = { value = constraints(main_state), size = theme.type.label, overflow = FIT }
     local box = { x = REGION.x, top = COURSE.constraints_value_top, w = REGION.width }
     s:text(spec, box, kit.arriving({ color = theme.color.sub, op = { ON_COURSE } }))
 end
 
 function info.build(s, main_state)
-    head(s)
+    head(s, main_state)
     stage(s)
     chart_data(s, main_state)
     my_score(s, main_state)

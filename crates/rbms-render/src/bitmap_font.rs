@@ -659,8 +659,9 @@ impl BitmapFont {
     /// character is drawn with (`GlyphLayout.setText`). A character `resolve` answers nothing for
     /// takes no room.
     ///
-    /// [`BlockFit::Shrink`] is laid out like [`BlockFit::Overflow`] here: squeezing is a second
-    /// layout at a narrower scale, which [`BitmapFont::layout_fitted`] does.
+    /// [`BlockFit::Shrink`] and [`BlockFit::ShrinkCut`] are laid out like [`BlockFit::Overflow`]
+    /// here: squeezing is a second layout at a narrower scale, which [`BitmapFont::layout_fitted`]
+    /// does. A bitmap font's line is squeezed to the width whatever its length, never cut.
     pub fn layout(&self, text: &str, resolve: &mut dyn FnMut(char) -> Option<Piece>, target: f32, align: BlockAlign, fit: BlockFit, scale: (f32, f32)) -> Laid {
         let scaled = Scaled { x: scale.0, pad_left: self.padding.left * scale.1, pad_right: self.padding.right * scale.1 };
         let cut = fit == BlockFit::Truncate;
@@ -723,7 +724,7 @@ impl BitmapFont {
         Laid { runs, width }
     }
 
-    /// Lays `text` out at `scale` and, for [`BlockFit::Shrink`], lays it out again squeezed
+    /// Lays `text` out at `scale` and, for [`BlockFit::Shrink`] and [`BlockFit::ShrinkCut`], lays it out again squeezed
     /// sideways when its longest line is wider than `target` (`SkinTextBitmap.updateLayout`).
     /// Answers the layout and the horizontal scale it was made at.
     pub fn layout_fitted(
@@ -736,7 +737,7 @@ impl BitmapFont {
         scale: f32,
     ) -> (Laid, f32) {
         let laid = self.layout(text, resolve, target, align, fit, (scale, scale));
-        if fit != BlockFit::Shrink || laid.width <= target {
+        if !fit.squeezes() || laid.width <= target {
             return (laid, scale);
         }
         let squeezed = scale * target / laid.width;

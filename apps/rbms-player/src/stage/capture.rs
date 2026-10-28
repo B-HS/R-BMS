@@ -79,6 +79,7 @@
 
 mod by_hand;
 mod gate;
+mod long_text;
 mod panels;
 mod play_parts;
 mod play_rows;

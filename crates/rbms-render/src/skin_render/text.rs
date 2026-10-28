@@ -82,6 +82,11 @@ const TEXT_OVERFLOW_SHRINK: i32 = 1;
 /// Every other value lets it run on.
 const TEXT_OVERFLOW_TRUNCATE: i32 = 2;
 
+/// A text object's `overflow` value that squeezes a line only down to [`crate::font::SHRINK_CUT_FLOOR`] of its
+/// width and cuts what is left with an ellipsis. The reference has no such value and reads it as
+/// `OVERFLOW_OVERFLOW`; it is this player's own.
+const TEXT_OVERFLOW_SHRINK_CUT: i32 = 3;
+
 /// How much of a text's brightness its shadow keeps (`SkinTextFont.draw`: `color.r / 2`).
 const SHADOW_DIVISOR: u8 = 2;
 
@@ -235,6 +240,7 @@ impl TextBody {
             _ if self.wrapping => BlockFit::Wrap,
             TEXT_OVERFLOW_SHRINK => BlockFit::Shrink,
             TEXT_OVERFLOW_TRUNCATE => BlockFit::Truncate,
+            TEXT_OVERFLOW_SHRINK_CUT => BlockFit::ShrinkCut,
             _ => BlockFit::Overflow,
         }
     }

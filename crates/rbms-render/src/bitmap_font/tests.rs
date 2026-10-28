@@ -357,6 +357,18 @@ fn shrinking_squeezes_a_long_line_to_exactly_its_width() {
 }
 
 #[test]
+fn shrinking_and_cutting_squeezes_a_bitmap_line_the_way_shrinking_does() {
+    let font = fixture();
+    let target = 2.0 * ADVANCE_A;
+    let fitted = |fit| font.layout_fitted("AAAA", &mut |ch| font.piece(ch), target, BlockAlign::Left, fit, 1.0);
+
+    let (shrunk, shrunk_scale) = fitted(BlockFit::Shrink);
+    let (cut, cut_scale) = fitted(BlockFit::ShrinkCut);
+    assert_eq!((cut_scale, cut.width), (shrunk_scale, shrunk.width), "a bitmap font's line is squeezed to the width and never cut");
+    assert_eq!(pens(&cut.runs[0]), pens(&shrunk.runs[0]));
+}
+
+#[test]
 fn cutting_keeps_the_glyphs_whose_advance_ends_inside_and_ends_the_line_at_ink() {
     let font = fixture();
     let cut = |target: f32| laid(&font, "AAAA", target, BlockAlign::Left, BlockFit::Truncate);

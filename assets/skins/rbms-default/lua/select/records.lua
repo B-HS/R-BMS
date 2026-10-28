@@ -109,12 +109,12 @@ local function record_row(s, main_state, row)
     local label_box = cell(row, LAYOUT.label)
     local label_size = theme.type.caption
     if row == BEST_ROW then
-        local best = { value = i18n.t("info_records_best"), size = label_size, overflow = props.text_overflow.SHRINK }
+        local best = { value = i18n.t("info_records_best"), size = label_size, overflow = props.text_overflow.SHRINK_CUT }
         centered_text(s, best, label_box, kit.arriving({ color = theme.color.text, op = LISTING_OPS, draw = holds_row(main_state, row) }))
         local dash = { text = NOTHING, size = label_size }
         centered_text(s, dash, label_box, { color = theme.color.muted, op = LISTING_OPS, draw = holds_no_best(main_state) })
     else
-        local date = { value = date_of(main_state, row), size = label_size, overflow = props.text_overflow.SHRINK }
+        local date = { value = date_of(main_state, row), size = label_size, overflow = props.text_overflow.SHRINK_CUT }
         centered_text(s, date, label_box, kit.arriving(ui.merge(on, { color = theme.color.sub })))
     end
 
@@ -159,7 +159,7 @@ local function ranking_row(s, main_state, row)
     local place = { sprite = LAYOUT.place.sprite, ref = IR_RANKING.place_first + row, digit = LAYOUT.place.digits, align = "right" }
     centered_number(s, place, cell(row, LAYOUT.place), kit.arriving(ui.merge(on, { color = theme.color.sub })))
 
-    local name = { ref = IR_RANKING.name_first + row, size = LAYOUT.name.size, overflow = props.text_overflow.SHRINK }
+    local name = { ref = IR_RANKING.name_first + row, size = LAYOUT.name.size, overflow = props.text_overflow.SHRINK_CUT }
     local name_box = cell(row, LAYOUT.name)
     centered_text(s, name, name_box, kit.arriving({ color = theme.ranking.you, op = RANKING_OPS, draw = you }))
     centered_text(s, name, name_box, kit.arriving({ color = theme.ranking.rival, op = RANKING_OPS, draw = player_is(main_state, row, PLAYER_RIVAL) }))
@@ -171,7 +171,7 @@ end
 
 local function heading(s, key, column, ops)
     local box = { x = AREA.x + column.x, top = AREA.top + LAYOUT.title_drop, w = column.width }
-    local spec = { value = i18n.t(key), size = theme.type.caption, align = "right", overflow = props.text_overflow.SHRINK }
+    local spec = { value = i18n.t(key), size = theme.type.caption, align = "right", overflow = props.text_overflow.SHRINK_CUT }
     s:text(spec, box, { color = theme.color.muted, op = ops })
 end
 
@@ -179,8 +179,9 @@ function records.build(s, main_state)
     local on = { op = { ON_CHART } }
     s:rect({ x = AREA.x, top = AREA.top, w = AREA.width, h = theme.grid.rule }, theme.color.line, on)
     local title_box = { x = AREA.x, top = AREA.top + LAYOUT.title_drop, w = AREA.width }
-    s:text({ value = i18n.t("info_my_records"), size = theme.type.caption }, title_box, { color = theme.color.sub, op = LISTING_OPS })
-    s:text({ value = i18n.t("info_ir_ranking"), size = theme.type.caption }, title_box, { color = theme.color.sub, op = RANKING_OPS })
+    local title = { size = theme.type.caption, overflow = props.text_overflow.SHRINK_CUT }
+    s:text(ui.merge(title, { value = i18n.t("info_my_records") }), title_box, { color = theme.color.sub, op = LISTING_OPS })
+    s:text(ui.merge(title, { value = i18n.t("info_ir_ranking") }), title_box, { color = theme.color.sub, op = RANKING_OPS })
     heading(s, "info_records_ex_score", LAYOUT.ex, LISTING_OPS)
     heading(s, "info_records_miss", LAYOUT.miss, LISTING_OPS)
     heading(s, "info_records_ex_score", LAYOUT.ranking_ex, RANKING_OPS)

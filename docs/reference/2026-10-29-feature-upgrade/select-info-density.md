@@ -1,8 +1,8 @@
 # 선곡 정보창 정돈과 밀도(NPS) 표시 — 구현 전 조사
 
-> 최종 갱신 2026-10-29 · 대응 커밋 c1dc988
+> 최종 갱신 2026-10-29 · 대응 작업 U3 (조사 기준 커밋 c1dc988)
 > 범위: (A) 기본 스킨 선곡 정보창이 "중구난방이고 text overflow 가 보여 보기 힘들다"는 지적의 현황, (B) 선곡 화면에 밀도(notes per second) 표시 추가.
-> 읽기 전용 조사다. 코드는 바꾸지 않았다. 캡처 한 벌을 실제로 찍었다(3.3절).
+> 1~5절은 구현 전 조사다(좌표·문제 목록은 구현 전 값이다). 구현 결과와 바뀐 좌표는 6절에 있다.
 
 ---
 
@@ -261,3 +261,39 @@ RBMS_SKIN_CAPTURE_DIR=/private/tmp/claude-501/select-capture \
 4. 선곡의 `TOTALNOTES`(74)가 LN MODE(LN/CN/HCN) 선택에 따라 바뀌는지. 스캔은 LN 종류가 미정인 롱노트를 일반 LN 으로 센다는 주석(`crates/rbms-model/src/lib.rs:173-175`)만 확인했다.
 5. 사용자가 본 "text overflow" 가 정확히 어느 문자열인지(곡 머리·목록 막대·통계 라벨 중). 지적 문구만으로는 특정할 수 없어 1.3·2.1절에 후보를 모두 적었다.
 6. 실제 라이브러리(긴 제목, 5000노트 이상) 로 그린 선곡 화면. 조사 범위에서 사용자 데이터에 접근하지 않았다.
+
+---
+
+## 6. 구현 결과 (U3, 2026-10-29)
+
+### 6.1 엔진: overflow 3 (`SHRINK_CUT`)
+
+- `crates/rbms-render/src/font/block.rs`: `BlockFit::ShrinkCut`, 하한 상수 `SHRINK_CUT_FLOOR = 0.75`, 말줄임 `ELLIPSIS`(U+2026)·`ELLIPSIS_FALLBACK`("..."), `compose_block` 의 자르기 분기와 `cut_with_ellipsis`·`ellipsis`, `BlockFit::squeezes()`(Shrink 와 ShrinkCut). `caret_x` 는 `squeezes()` 를 쓴다(자른 줄의 캐럿은 자르기 전 줄 기준).
+- 동작: 줄이 폭을 넘으면 `폭 / 가장 긴 줄` 만큼 가로로 줄인다. 그 비율이 0.75 보다 작아야 하면(줄이 `폭 / 0.75` 를 넘으면) 앞쪽 글리프만 남겨 말줄임표를 붙이고 그 줄을 폭에 맞게 줄인다(0.75 이상). 끝의 공백 글리프는 말줄임표 앞에서 뗀다. 글꼴에 U+2026 이 없고 대체 글꼴도 못 그리면 "..." 를 쓴다. 번들 Inter 는 U+2026 을 갖고 있다(시험이 확인: 미확인 3 해소).
+- `crates/rbms-render/src/skin_render/text.rs`: `TEXT_OVERFLOW_SHRINK_CUT = 3` 을 `BlockFit::ShrinkCut` 으로. 0·1·2·줄바꿈 우선순위·기존 골든은 그대로다. 비트맵 글꼴(`bitmap_font.rs` 의 `layout_fitted`)은 SHRINK 와 같게 줄이기만 하고 자르지 않는다.
+- 시험: `font/block_tests.rs` 의 `shrink_cut_*` 네 개(줄이기만, 자르기+말줄임표, 정렬 유지, 여유 있는 줄), `a_line_that_fits_is_left_alone_by_every_overflow_rule` 에 ShrinkCut 추가, `skin_render/text/tests.rs` 의 `overflow_three_squeezes_to_the_floor_then_cuts_with_an_ellipsis_and_zero_to_two_are_unchanged`, `bitmap_font/tests.rs` 의 `shrinking_and_cutting_squeezes_a_bitmap_line_the_way_shrinking_does`.
+- 미시험(테스트 부채 후보): 글꼴이 U+2026 을 못 그릴 때 "..." 로 바뀌는 경로(번들 글꼴만 있어 재현할 글꼴이 없다), 줄바꿈 문자가 든 글의 줄별 자르기.
+
+### 6.2 기본 스킨 선곡 정보창
+
+좌표의 단일 출처는 `lua/theme.lua` 의 `theme.select_layout`(`song`, `facts`, `chart_view`, `score_rows`, `target_cells`, 레이더는 `theme.radar`)이고 `info.lua` 는 그 값을 읽는다. 공통 규칙: 칸 사이 간격은 16 이상(`select_layout.gap`), 라벨(caption 18 muted)은 값 위에 두고 같은 줄의 값은 같은 baseline, 긴 글(곡 머리 네 줄, 목록 막대 제목, 패널 제목, 레이더 축, 램프 이름, 코스 제목, 기록 이름·머리)은 모두 overflow 3.
+
+| 영역 | 바뀐 점 |
+| --- | --- |
+| 곡 머리 | 글 열을 폭 792(x 104~896)로 줄이고 오른쪽 폭 168(x 928~1096)에 LEVEL(라벨 + `num64` 난이도 색)과 BPM(라벨 + body 32)을 오른쪽 맞춤으로 옮겼다. 라벨 baseline 은 장르 줄·부제 줄에, 값 baseline 은 제목 줄·아티스트 줄에 맞춘다. 사실 칸의 LEVEL·BPM 은 CHART DATA 에서 뺐다(ADR 메인 결정 3 의 "BPM 은 CHART DATA 에만"을 바꾼다) |
+| CHART DATA | 사실 칸 7개를 두 블록으로: 왼쪽(x 352, 칸 폭 120, 간격 16) 첫 줄 NOTES·NPS AVG·NPS MAX, 그 아래 밀도 그래프(352, 456, 400x152). 오른쪽(x 784, 칸 폭 144) 2x2 LENGTH·TOTAL / KEYS·JUDGE, 그 아래 레인 막대(784, 516, 312x92). 값은 모두 24 크기(`num24` 또는 label 24)이고 첫 줄 baseline 440, 둘째 줄 496. 그래프 바닥은 곡 그림 바닥(608)과 같다 |
+| NPS | `props.number.DENSITY_AVERAGE`(364)·`_AFTERDOT`(365), `DENSITY_PEAK`(360)·`_AFTERDOT`(361). `%d.%02d`, 둘 중 하나라도 부재면 그리지 않고 둘 다 0 이면 `-`. 라벨 `info_nps_average`(NPS AVG / NPS 평균 / NPS 平均)·`info_nps_peak`(NPS MAX / NPS 최대 / NPS 最大) |
+| MY SCORE | EX SCORE(`num44`, 폭 144)·MISS COUNT(`num32`, 폭 96)·등급 배지(폭 128, 높이 56) 사이 16, 라벨-값 사이 11. 5자리 EX·MISS 가 겹치지 않는다. 통계 넷은 4칸 한 줄에서 2x2 쌍(왼쪽 라벨, 오른쪽 맞춤 값, 쌍 폭 184, 쌍 사이 32): MAX COMBO·RATE / PLAY COUNT·CLEAR COUNT. 판정 5칸은 그대로 |
+| 레이더 | 그림 한 변 144 -> 160(반지름 77.5), 중심 아래로 8, 위쪽 옆 라벨 lift 41 -> 33, 아래쪽 옆 라벨 drop 12 -> 16, 아래 라벨 간격 8 -> 18. 위 라벨과 옆 라벨이 2px 안에 붙던 것이 13px 떨어진다 |
+| SCORE TARGETS | 칸 피치 176 -> 200(칩 52, 필요 EX 상자 74 오른쪽 맞춤, 차이 상자 52 오른쪽 맞춤), CLEAR RATE 는 x 984 폭 112. 5자리 필요 EX 와 4자리 차이(`+2243`)가 칩·이웃 칸을 덮지 않는다 |
+| 목록 막대 | 제목 텍스트 11종 overflow 1 -> 3 |
+
+### 6.3 캡처와 시험
+
+- 캡처 명령은 3.3절 그대로. 새 캡처 `the_default_packs_info_window_is_captured_with_texts_and_numbers_longer_than_its_boxes`(`apps/rbms-player/src/stage/capture/long_text.rs`)는 긴 제목·부제·아티스트·장르, 긴 막대 제목, 6272 노트 차트에 EX 12000·MISS 12345 인 기록을 둔 라이브러리로 `long-text-1300ms`·`long-text-3000ms` 를 저장한다(`RBMS_SKIN_CAPTURE_DIR` 가 있을 때만).
+- 스킨 덤프 시나리오 `apps/rbms-cli/scenarios/select.json` 에 360~365(밀도), 368(TOTAL), 1163·1164(길이)를 더했다.
+
+### 6.4 남은 것
+
+- MY RECORDS 의 MISS 는 `num18` 4자리 칸(폭 48)이라 MISS 가 10000 이상이면 아래 4자리만 보인다(기존 한계, 이번에 손대지 않음).
+- CJK 글꼴 캡처 하니스 한계(5절 미확인 1·2)는 그대로다. 한국어·일본어 UI 에서의 길이는 실창으로 봐야 한다.

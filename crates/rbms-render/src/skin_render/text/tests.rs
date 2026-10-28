@@ -214,6 +214,54 @@ fn overflow_lets_a_long_line_run_on_squeezes_it_or_cuts_it() {
 }
 
 #[test]
+fn overflow_three_squeezes_to_the_floor_then_cuts_with_an_ellipsis_and_zero_to_two_are_unchanged() {
+    let (mut text, families) = engine();
+    let host = MapHost::new();
+    let fitted = |text: &mut TextContext, line: &str, room: f32, overflow: i32, align: i32| {
+        let object = constant(line, &families, room, |def| {
+            def.overflow = overflow;
+            def.align = align;
+        });
+        ink(&shot(text, &object, &host)).expect("the line has ink")
+    };
+    let (anchor, room) = (ANCHOR_X as i32, NARROW as i32);
+    let natural = fitted(&mut text, LONG_LINE, ROOMY * 4.0, 0, 0);
+    let natural_width = (natural.2 - natural.0) as f32;
+
+    let slightly_long = natural_width * 0.9;
+    let squeezed = fitted(&mut text, LONG_LINE, slightly_long, 3, 0);
+    let shrunk = fitted(&mut text, LONG_LINE, slightly_long, 1, 0);
+    assert_eq!(squeezed, shrunk, "a line within reach of the floor is squeezed exactly as overflow 1 does");
+    assert!((squeezed.2 - squeezed.0 - slightly_long as i32).abs() <= PIXEL, "to the destination: {squeezed:?}");
+    assert_eq!((squeezed.1, squeezed.3), (natural.1, natural.3), "sideways only");
+
+    let cut = fitted(&mut text, LONG_LINE, NARROW, 3, 0);
+    assert!(
+        (cut.0 - anchor).abs() <= PIXEL && (cut.2 - (anchor + room)).abs() <= 2 * PIXEL,
+        "a line past the floor is cut and then fills the destination: {cut:?}"
+    );
+    assert!(cut.2 - cut.0 <= room + PIXEL, "and never runs past it");
+    let squeeze_floor = fitted(&mut text, LONG_LINE, NARROW, 1, 0);
+    assert_eq!(squeeze_floor.2 - squeeze_floor.0, cut.2 - cut.0, "the same width as a squeezed line");
+    let letter_height = |bounds: (i32, i32, i32, i32)| bounds.3 - bounds.1;
+    assert_eq!(letter_height(cut), letter_height(natural), "at the height it was given");
+
+    let cut_right = fitted(&mut text, LONG_LINE, NARROW, 3, 2);
+    assert!(
+        (cut_right.2 - anchor).abs() <= 2 * PIXEL && (cut_right.0 - (anchor - room)).abs() <= 2 * PIXEL,
+        "a right-aligned cut line ends on x: {cut_right:?}"
+    );
+
+    let untouched = fitted(&mut text, "SHORT", ROOMY, 3, 0);
+    assert_eq!(untouched, fitted(&mut text, "SHORT", ROOMY, 0, 0), "a line that fits is drawn as it is");
+
+    let truncated = fitted(&mut text, LONG_LINE, NARROW, 2, 0);
+    assert!(truncated.2 - truncated.0 <= room, "overflow 2 still stops inside the destination with nothing after it: {truncated:?}");
+    let overflowing = fitted(&mut text, LONG_LINE, NARROW, 4, 0);
+    assert_eq!(overflowing, fitted(&mut text, LONG_LINE, NARROW, 0, 0), "a value no one has given a meaning to runs on, as it did");
+}
+
+#[test]
 fn wrapping_breaks_a_long_line_and_wins_over_overflow() {
     let (mut text, families) = engine();
     let host = MapHost::new();
