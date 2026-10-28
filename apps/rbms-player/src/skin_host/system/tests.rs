@@ -131,14 +131,22 @@ fn the_total_play_time_is_not_answered_because_the_scores_do_not_keep_it() {
 
 #[test]
 fn the_volumes_are_read_as_a_share_a_percent_and_a_bus() {
-    let volumes = Volumes { system: 0.5, key: 0.25, background: 1.0 };
+    let volumes = Volumes { master: 0.75, system: 0.5, key: 0.25, background: 1.0 };
     let state = SystemState { volumes: Some(volumes), ..SystemState::default() };
 
-    assert_eq!(state.volume(VolumeBus::System), Some(0.5));
+    assert_eq!(state.volume(VolumeBus::System), Some(0.5), "main_state.volume_sys is still the system volume");
     assert_eq!(state.volume(VolumeBus::Key), Some(0.25));
     assert_eq!(state.volume(VolumeBus::Background), Some(1.0));
-    assert_eq!([NUMBER_MASTER_VOLUME, NUMBER_KEY_VOLUME, NUMBER_BGM_VOLUME].map(|id| state.integer(id)), [Some(50), Some(25), Some(100)]);
-    assert_eq!([RATE_MASTERVOLUME, RATE_KEYVOLUME, RATE_BGMVOLUME].map(|id| state.rate(id)), [Some(0.5), Some(0.25), Some(1.0)]);
+    assert_eq!(
+        [NUMBER_MASTER_VOLUME, NUMBER_KEY_VOLUME, NUMBER_BGM_VOLUME].map(|id| state.integer(id)),
+        [Some(75), Some(25), Some(100)],
+        "number 57 shows the master volume, not the system volume"
+    );
+    assert_eq!(
+        [RATE_MASTERVOLUME, RATE_KEYVOLUME, RATE_BGMVOLUME].map(|id| state.rate(id)),
+        [Some(0.75), Some(0.25), Some(1.0)],
+        "rate 17 is the master volume, not the system volume"
+    );
 
     let unknown = SystemState::default();
     assert_eq!(unknown.volume(VolumeBus::System), None);
@@ -148,7 +156,7 @@ fn the_volumes_are_read_as_a_share_a_percent_and_a_bus() {
 
 #[test]
 fn a_volume_percent_is_cut_and_not_rounded() {
-    let state = SystemState { volumes: Some(Volumes { system: 0.999, key: 0.0, background: 0.0 }), ..SystemState::default() };
+    let state = SystemState { volumes: Some(Volumes { master: 0.999, system: 0.0, key: 0.0, background: 0.0 }), ..SystemState::default() };
 
     assert_eq!(state.integer(NUMBER_MASTER_VOLUME), Some(99));
 }
@@ -203,7 +211,7 @@ fn ids_of_other_clusters_are_not_answered() {
         player_name: Some("guest"),
         version: Some("v"),
         history: Some(&records),
-        volumes: Some(Volumes { system: 1.0, key: 1.0, background: 1.0 }),
+        volumes: Some(Volumes { master: 1.0, system: 1.0, key: 1.0, background: 1.0 }),
         course: Some(CourseStage { index: 0, count: 2 }),
         language: Some(Language::Korean),
     };

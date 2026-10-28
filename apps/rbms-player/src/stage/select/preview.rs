@@ -25,6 +25,14 @@
 //! - A focus that is not a chart, a library with previews switched off, and a chart whose preview
 //!   cannot be played all leave the music up.
 //! - The music keeps running under a preview; it is not restarted when the preview goes.
+//!
+//! # Which volumes a preview answers to
+//!
+//! The master volume scales everything. A `#PREVIEW` clip is one mixed recording and sounds on the
+//! background bus. An autoplay pass sounds each of the chart's events on the bus it has in play: the
+//! accompaniment on the background bus and the keysound of each note on the key bus
+//! ([`crate::play_sink::bus_for`]), so the three sliders of the default skin's volume tab (master,
+//! key, BGM) all turn a preview down.
 #![allow(clippy::wildcard_imports)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,19 +41,22 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 #[cfg(test)]
 use rbms_config::DEFAULT_PREVIEW_FADE_MS;
 
+use rbms_play::PlaySource;
+
 use crate::app_play::schedule_position_us;
+use crate::play_sink::bus_for;
 use crate::stage::select::SelectState;
 use crate::*;
 
 /// Where the preview's level is on its way in or out.
 ///
 /// A voice's gain is fixed when the sound is booked, so a clip already playing cannot be faded by
-/// changing it. The background bus can be, and while the browser is up the preview is the only
-/// thing on that bus — so the fade is a ramp on the bus, put back where the settings file has it as
-/// soon as the preview is gone.
+/// changing it. The buses can be, and while the browser is up the preview is the only thing on the
+/// background and key buses — so the fade is a ramp on both, put back where the settings file has
+/// them as soon as the preview is gone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Fade {
-    /// Nothing is sounding and the background bus is the settings file's to set.
+    /// Nothing is sounding and the background and key buses are the settings file's to set.
     Idle,
     In,
     Out,
@@ -62,10 +73,11 @@ pub(super) struct PreviewState {
     /// File-preview loop: the clip length and when the next repeat is booked for.
     loop_us: i64,
     next_us: i64,
-    /// Autoplay-preview keysound timeline `(at_us, wav)` for the focused chart when it defines no
+    /// Autoplay-preview timeline `(at_us, wav, source)` for the focused chart when it defines no
     /// `#PREVIEW` file — extracted once from a throwaway autoplay `Player`, then replayed against
-    /// the engine clock and looped. Empty in file-preview mode.
-    sched: Vec<(i64, u32)>,
+    /// the engine clock and looped, each sound on the bus its source has in play. Empty in
+    /// file-preview mode.
+    sched: Vec<(i64, u32, PlaySource)>,
     cursor: usize,
     anchor: i64,
     start_us: i64,
@@ -116,6 +128,35 @@ fn fade_level(fade: Fade, elapsed: Duration, span: Duration) -> f32 {
 /// Whether the select music is turned down: while a preview is sounding and not on its way out.
 fn select_bgm_is_held(fade: Fade) -> bool {
     fade == Fade::In
+}
+
+/// The level at which the preview's buses are the settings file's own gains.
+const PREVIEW_FULL_LEVEL: f32 = 1.0;
+
+/// How far past the chart's last event the autoplay pass runs, so a keysound booked there is caught.
+const AUTOPLAY_PASS_TAIL_US: i64 = 1_000_000;
+
+/// The gains the buses a preview sounds on are to be at while it is at `level`: the settings file's
+/// gain for each, scaled by the level. The master gain is not here; it scales the buses' sum and is
+/// the settings file's to set.
+fn preview_bus_gains(audio: &rbms_config::AudioOptions, level: f32) -> [(Bus, f32); 2] {
+    [(bus_for(PlaySource::Key), audio.key * level), (bus_for(PlaySource::Bgm), audio.bg * level)]
+}
+
+/// Every event the chart plays by itself, time-sorted, as an autoplay pass over it gives them: when,
+/// which keysound, and where it came from. A throwaway `Player` is run to the end and its judging is
+/// discarded.
+fn autoplay_preview_schedule(model: rbms_model::Model) -> Vec<(i64, u32, PlaySource)> {
+    let mut sched = Vec::new();
+    let mut p = Player::new(model, true);
+    let end = p.last_time_us() + AUTOPLAY_PASS_TAIL_US;
+    p.update(end, |ev| {
+        if ev.wav >= 0 {
+            sched.push((ev.at_us, ev.wav as u32, ev.source));
+        }
+    });
+    sched.sort_by_key(|s| s.0);
+    sched
 }
 
 impl SelectState {
@@ -170,9 +211,9 @@ impl SelectState {
         self.preview.fade_at = now;
     }
 
-    /// Move the fade on by one frame: push the preview's level onto the background bus, and once a
-    /// fade-out has run its course tear the preview down — which is what lets the chart the focus
-    /// has moved to become the one that plays.
+    /// Move the fade on by one frame: push the preview's level onto the background and key buses, and
+    /// once a fade-out has run its course tear the preview down — which is what lets the chart the
+    /// focus has moved to become the one that plays.
     fn pump_fade(&mut self, shared: &mut AppShared, now: Instant) {
         if self.preview.fade == Fade::Idle {
             return;
@@ -184,19 +225,22 @@ impl SelectState {
             return;
         }
         let level = fade_level(self.preview.fade, elapsed, span);
-        let bg = shared.config.audio.bg;
+        SelectState::put_buses_at(shared, level);
+    }
+
+    /// Put the buses a preview sounds on at `level` of the settings file's gains.
+    fn put_buses_at(shared: &mut AppShared, level: f32) {
         if let Some(audio) = shared.audio.as_mut() {
-            audio.set_bus_gain(Bus::Bg, bg * level);
+            for (bus, gain) in preview_bus_gains(&shared.config.audio, level) {
+                audio.set_bus_gain(bus, gain);
+            }
         }
     }
 
-    /// Put the background bus back where the settings file has it, which is what a preview that is
-    /// no longer sounding owes every other screen.
+    /// Put the background and key buses back where the settings file has them, which is what a
+    /// preview that is no longer sounding owes every other screen.
     fn release_bus(shared: &mut AppShared) {
-        let bg = shared.config.audio.bg;
-        if let Some(audio) = shared.audio.as_mut() {
-            audio.set_bus_gain(Bus::Bg, bg);
-        }
+        SelectState::put_buses_at(shared, PREVIEW_FULL_LEVEL);
     }
 
     /// Drive the song-select hover preview once the focus settles (debounced so fast scrolling
@@ -290,8 +334,8 @@ impl SelectState {
             let volume = shared.config.library.preview_volume;
             if let Some(eng) = shared.audio.as_mut() {
                 while self.preview.cursor < self.preview.sched.len() && self.preview.sched[self.preview.cursor].0 <= song {
-                    let (at, wav) = self.preview.sched[self.preview.cursor];
-                    eng.play_on(Bus::Bg, SelectState::preview_sample_id(wav), volume, KEYSOUND_PAN, KEYSOUND_PITCH, at + self.preview.anchor);
+                    let (at, wav, source) = self.preview.sched[self.preview.cursor];
+                    eng.play_on(bus_for(source), SelectState::preview_sample_id(wav), volume, KEYSOUND_PAN, KEYSOUND_PITCH, at + self.preview.anchor);
                     self.preview.cursor += 1;
                 }
             }
@@ -450,17 +494,7 @@ impl SelectState {
                 return;
             }
             let jobs = keysound_jobs(&model.wavmap, &dir);
-            let mut sched: Vec<(i64, u32)> = Vec::new();
-            {
-                let mut p = Player::new(model, true);
-                let end = p.last_time_us() + 1_000_000;
-                p.update(end, |ev| {
-                    if ev.wav >= 0 {
-                        sched.push((ev.at_us, ev.wav as u32));
-                    }
-                });
-            }
-            sched.sort_by_key(|s| s.0);
+            let sched = autoplay_preview_schedule(model);
             if sched.is_empty() || cancel.load(Ordering::Relaxed) {
                 return;
             }
@@ -480,8 +514,8 @@ impl SelectState {
 
     /// Stop and clear the active preview playback: signal any in-flight autoplay-preview load to stop
     /// (parse + decode workers check this cancel flag), release the preview namespace so its samples
-    /// and ringing voices go away, hand the background bus back to the settings file, and clear all
-    /// playback state. Leaves `target` so the debounce state stays owned by the caller.
+    /// and ringing voices go away, hand the background and key buses back to the settings file, and
+    /// clear all playback state. Leaves `target` so the debounce state stays owned by the caller.
     pub(super) fn reset_preview_playback(&mut self, shared: &mut AppShared) {
         self.preview.cancel.store(true, Ordering::Relaxed);
         SelectState::clear_preview_audio(shared);
@@ -564,6 +598,96 @@ mod tests {
             steps,
             [BgmStep::Start, BgmStep::Idle, BgmStep::Level(0.0), BgmStep::Idle, BgmStep::Level(1.0), BgmStep::Idle, BgmStep::Idle, BgmStep::Level(0.0)]
         );
+    }
+
+    const SAMPLE_RATE_HZ: u32 = 48_000;
+    const MIXER_VOICES: usize = 8;
+    const SAMPLE_FRAMES: usize = 24_000;
+    const SETTLED_FRAMES: usize = 12_000;
+    const SAMPLE_LEVEL: f32 = 0.5;
+    const OUTPUT_CHANNELS: usize = 2;
+    const SILENT: f32 = 0.0;
+
+    /// The BMS of a chart with one accompaniment sound and one note, both on lane 1 of the first measure.
+    const ONE_BGM_AND_ONE_NOTE: &str = "#PLAYER 1\n#BPM 120\n#WAV01 bgm.wav\n#WAV02 note.wav\n#00101:01\n#00111:02\n";
+
+    /// What a preview sounding on `bus` at `gain` comes out as at the end of the mixer, with the master
+    /// gain the settings hold: the same chain the engine runs, which is the bus gain, the master gain and
+    /// the sound itself.
+    fn heard_on(audio: &rbms_config::AudioOptions, bus: Bus, gain: f32) -> f32 {
+        use std::sync::Arc;
+        let mut mixer = rbms_audio::Mixer::new(SAMPLE_RATE_HZ, OUTPUT_CHANNELS as u16, MIXER_VOICES);
+        mixer.apply(rbms_audio::Command::MasterGain(audio.master));
+        mixer.apply(rbms_audio::Command::BusGain { bus, gain });
+        let sample = Arc::new(rbms_audio::SampleData { pcm: vec![SAMPLE_LEVEL; SAMPLE_FRAMES].into(), channels: 1, rate: SAMPLE_RATE_HZ });
+        mixer.apply(rbms_audio::Command::Play { sample, gain: 1.0, pan: -1.0, pitch: 1.0, key: 0, at_frame: 0, bus });
+        let mut out = vec![0.0f32; SETTLED_FRAMES * OUTPUT_CHANNELS];
+        mixer.mix(&mut out);
+        out[out.len() - OUTPUT_CHANNELS]
+    }
+
+    /// Both buses a preview sounds on are faded together and neither is the system bus, which belongs
+    /// to the sounds of the interface.
+    #[test]
+    fn a_fade_is_put_on_the_key_and_the_background_bus_alike() {
+        let mut audio = rbms_config::AudioOptions::default();
+        (audio.key, audio.bg, audio.system) = (0.4, 0.6, 0.8);
+
+        assert_eq!(preview_bus_gains(&audio, 0.5), [(Bus::Key, 0.2), (Bus::Bg, 0.3)], "half way through a fade each bus is at half its gain");
+        assert_eq!(preview_bus_gains(&audio, 0.0), [(Bus::Key, 0.0), (Bus::Bg, 0.0)], "the start of a fade-in is silent on both");
+        assert_eq!(
+            preview_bus_gains(&audio, PREVIEW_FULL_LEVEL),
+            [(Bus::Key, audio.key), (Bus::Bg, audio.bg)],
+            "releasing the buses hands both back at the settings file's gains"
+        );
+    }
+
+    /// An autoplay preview sounds the chart's accompaniment on the background bus and the keysound of its
+    /// notes on the key bus, as play does, so the KEY slider is heard in the browser as well as BGM.
+    #[test]
+    fn an_autoplay_preview_keeps_the_source_of_each_event_and_sounds_it_on_that_bus() {
+        let src = rbms_parser::parse_with(ONE_BGM_AND_ONE_NOTE.as_bytes(), Default::default());
+        let sched = autoplay_preview_schedule(rbms_chart::to_model(&src, Mode::BEAT_7K));
+
+        let buses = sched.iter().map(|&(_, wav, source)| (wav, bus_for(source))).collect::<Vec<_>>();
+        assert_eq!(buses.len(), 2, "one accompaniment sound and one note: {buses:?}");
+        assert!(buses.contains(&(1, Bus::Bg)), "the accompaniment is not on the background bus: {buses:?}");
+        assert!(buses.contains(&(2, Bus::Key)), "the note's keysound is not on the key bus: {buses:?}");
+    }
+
+    /// What dragging the MASTER slider to nothing did to a preview before it wrote the master volume:
+    /// it set the system volume, and a preview, which sounds on no system bus, stayed as loud as it was.
+    /// Now it is silent on both of its buses, and the other two sliders each silence their own bus only.
+    #[test]
+    fn the_master_key_and_bgm_sliders_each_turn_a_preview_down() {
+        use crate::skin_host::writers::{VolumeTarget, rate_volume, set_volume};
+        use rbms_skin::property::VolumeBus;
+        use rbms_skin::property::generated::{RATE_BGMVOLUME, RATE_KEYVOLUME, RATE_MASTERVOLUME};
+
+        let defaults = rbms_config::AudioOptions::default();
+        for (bus, gain) in preview_bus_gains(&defaults, PREVIEW_FULL_LEVEL) {
+            assert!(heard_on(&defaults, bus, gain) > SILENT, "the fixture's preview is not audible on {bus:?}");
+        }
+
+        let heard_with_slider_at_nothing = |rate: i32| {
+            let mut audio = defaults.clone();
+            let target = rate_volume(rate).expect("a volume rate");
+            assert!(set_volume(&mut audio, target, 0.0));
+            preview_bus_gains(&audio, PREVIEW_FULL_LEVEL).map(|(bus, gain)| (bus, heard_on(&audio, bus, gain)))
+        };
+        assert_eq!(rate_volume(RATE_MASTERVOLUME), Some(VolumeTarget::Master));
+        assert_eq!(rate_volume(RATE_KEYVOLUME), Some(VolumeTarget::Bus(VolumeBus::Key)));
+        assert_eq!(rate_volume(RATE_BGMVOLUME), Some(VolumeTarget::Bus(VolumeBus::Background)));
+
+        for (bus, level) in heard_with_slider_at_nothing(RATE_MASTERVOLUME) {
+            assert_eq!(level, SILENT, "the master slider at nothing left the preview audible on {bus:?}");
+        }
+        for (bus, level) in heard_with_slider_at_nothing(RATE_KEYVOLUME) {
+            assert_eq!(level == SILENT, bus == Bus::Key, "the key slider at nothing must silence the key bus and only it ({bus:?} -> {level})");
+        }
+        for (bus, level) in heard_with_slider_at_nothing(RATE_BGMVOLUME) {
+            assert_eq!(level == SILENT, bus == Bus::Bg, "the BGM slider at nothing must silence the background bus and only it ({bus:?} -> {level})");
+        }
     }
 
     #[test]

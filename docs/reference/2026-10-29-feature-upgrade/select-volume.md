@@ -1,8 +1,8 @@
 # 선곡 화면 음량 조절이 "안 먹는 느낌" — 원인 조사
 
-최종 갱신 2026-10-29 · 대응 커밋 c1dc988
+최종 갱신 2026-10-29 · 대응 작업 U4 (조사 기준 커밋 c1dc988)
 
-사용자 보고: "사운드 조절(곡선택화면)이 제대로 먹히긴 하나? 안 먹는 느낌". 읽기 전용 조사이며 코드는 고치지 않았다.
+사용자 보고: "사운드 조절(곡선택화면)이 제대로 먹히긴 하나? 안 먹는 느낌". 0~5절은 수정 전에 한 읽기 전용 조사이고, 6절이 U4 에서 고친 결과다. 0~5절의 표와 줄 번호는 수정 전 코드 기준이라 6절 이후에는 맞지 않는 곳이 있다.
 
 ## 0. 결론 요약
 
@@ -151,3 +151,22 @@ SETTINGS 화면도 같은 `apply_audio_gains` 로 즉시 반영한다(`apps/rbms
 - 사용자가 SOUND FOLDER 를 3초 이상인 `select` 가 든 묶음으로 바꿨는지. 바꿨다면 MASTER 는 선곡 음악에는 들리지만, 미리듣기 중에는 선곡 음악이 0 으로 내려가 있다(`preview.rs:116-119`, `syssound.rs:498`).
 - `apps/rbms-cli/src/skin_dump/scenario.rs` 덤프의 골든 파일이 있는지와 숫자 57 변경의 영향.
 - IR 설정 동기화(`apps/rbms-player/src/ir_sync.rs:60-76`)는 음량을 기기 로컬로 두지 않는다. 다른 기기의 설정을 내려받으면 음량이 덮어써질 수 있는데, 이것이 체감에 영향을 줬는지는 확인하지 않았다(받는 시점이 선곡 중인지 미확인).
+
+## 6. U4 구현 결과
+
+결정 M11 대로 대안 A(rate 17·NUMBER 57 을 진짜 마스터로 재결합)와 원인 2 의 수정안을 함께 반영했다.
+
+| 슬라이더 | 수정 후 | 선곡에서 들리는 소리 |
+| --- | --- | --- |
+| MASTER (rate 17, 숫자 57) | `audio.master` | 미리듣기(클립·자동 재생 모두)와 시스템 효과음, 선곡 음악 전부 |
+| KEY (rate 18, 숫자 58) | `audio.key` | 자동 재생 미리듣기의 키음. `#PREVIEW` 클립은 섞인 음원이라 해당 없음 |
+| BGM (rate 19, 숫자 59) | `audio.bg` | `#PREVIEW` 클립과 자동 재생 미리듣기의 BGM |
+
+- 쓰기: `skin_host/writers.rs` 의 `VolumeTarget { Master, Bus(VolumeBus) }`. `rate_volume(17) = Master`, 18·19 는 기존 버스. 값 범위 보정은 마스터가 `DEFAULT_MASTER_VOLUME`, 버스가 `DEFAULT_BUS_VOLUME` 을 NaN 대체값으로 쓴다. 움직였으면 기존대로 `apply_audio_gains()`(마스터 이득 포함)와 설정 저장 표시. `VolumeBus` 와 Lua `volume_sys`·`set_volume_sys` 는 그대로(시스템 버스).
+- 읽기: `skin_host/system.rs` 의 `Volumes` 에 `master` 필드를 더하고 `Volumes::of_audio(&AudioOptions)` 로 두 공급처(`skin_screen.rs`, `skin_screen/preview.rs`)를 하나로 모았다. 숫자 57 과 rate 17 은 `master`, `main_state.volume_sys` 는 `system` 을 읽는다.
+- 미리듣기: `stage/select/preview.rs` 의 일정을 `(at_us, wav, source)` 로 바꿔 `PlayEvent.source` 를 보존하고 `play_sink::bus_for` 로 버스를 고른다(키음 Key, BGM Bg). 페이드(`pump_fade`)와 `release_bus` 는 `preview_bus_gains` 한 곳에서 Key·Bg 두 버스에 같은 레벨을 곱하거나 설정값으로 되돌린다. 자동 재생 일정 추출은 `autoplay_preview_schedule` 로 분리했다.
+- 기본 스킨 라벨(`select_other.lua` 의 MASTER/마스터/マスター, KEY/키음/キー音, BGM)은 새 동작과 맞아 바꾸지 않았다. SETTINGS 의 MASTER VOL 과 같은 값을 보인다.
+- 선형 이득 곡선은 유지했다(원인 4).
+- 시험: `writers/tests.rs`(rate 17 -> Master, 마스터 단독 보정, 슬라이더 쓰기가 `audio.master` 만 움직임), `system/tests.rs`·`skin_host/tests.rs`(숫자 57·rate 17 이 마스터, `volume_sys` 는 시스템), `skin_screen/tests.rs`·`typing_tests.rs`(슬라이더가 `audio.master` 에 쓰고 파일에 저장), `stage/select/preview.rs`(페이드가 두 버스에 걸림, 자동 재생 일정이 출처를 보존하고 키음은 Key, 마스터·KEY·BGM 슬라이더 각각이 실제 믹서에서 미리듣기를 줄임).
+- 재현: `the_master_key_and_bgm_sliders_each_turn_a_preview_down` 은 믹서에 마스터·버스 이득을 넣어 미리듣기가 끝에서 얼마로 나오는지 잰다. rate 17 을 예전처럼 시스템 값에 쓰게 되돌리면 "MASTER 를 0 으로 해도 미리듣기가 0.25 로 그대로"라며 실패하는 것을 확인했다.
+- 남은 것: 원인 5(페이드 중 슬라이더를 끌면 한 프레임 동안 두 버스가 전체 값으로 튐)는 고치지 않았다. 페이드가 도는 200 ms 안에서만 생긴다. 실제 소리 체감은 출력 장치가 있는 실기 확인이 필요하다.

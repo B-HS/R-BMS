@@ -1651,7 +1651,7 @@ impl AppShared {
             player_name: Some(&self.config.network.player_id),
             version: Some(SKIN_VERSION),
             history: Some(self.scores.records()),
-            volumes: Some(Volumes { system: audio.system, key: audio.key, background: audio.bg }),
+            volumes: Some(Volumes::of_audio(audio)),
             course: self.course_run.as_ref().map(|run| CourseStage { index: run.index, count: run.course.stage_count() }),
             language: Some(rbms_render::text::language()),
         }

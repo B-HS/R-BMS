@@ -203,7 +203,7 @@ const ROOT_ESC_CONFIRM: Duration = Duration::from_secs(1);
 /// and begins playback.
 enum PreviewMsg {
     Clip(rbms_audio::DecodedAudio),
-    Schedule { sched: Vec<(i64, u32)>, start_us: i64, end_us: i64 },
+    Schedule { sched: Vec<(i64, u32, rbms_play::PlaySource)>, start_us: i64, end_us: i64 },
     Keysound(u32, rbms_audio::DecodedAudio),
 }
 

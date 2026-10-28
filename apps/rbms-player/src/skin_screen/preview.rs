@@ -173,7 +173,7 @@ impl AppShared {
             player_name: Some(SAMPLE_PLAYER_NAME),
             version: Some(SKIN_VERSION),
             history: Some(&[]),
-            volumes: Some(Volumes { system: audio.system, key: audio.key, background: audio.bg }),
+            volumes: Some(Volumes::of_audio(audio)),
             course,
             language: Some(rbms_render::text::language()),
         }

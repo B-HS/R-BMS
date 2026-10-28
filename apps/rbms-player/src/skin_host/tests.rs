@@ -196,7 +196,7 @@ fn every_id_routed_to_a_filled_cluster_is_answered_by_it() {
         player_name: Some("guest"),
         version: Some("R-BMS"),
         history: Some(&records),
-        volumes: Some(Volumes { system: 0.5, key: 0.5, background: 0.5 }),
+        volumes: Some(Volumes { master: 0.5, system: 0.5, key: 0.5, background: 0.5 }),
         course: Some(CourseStage { index: 0, count: 2 }),
         language: Some(Language::English),
     };
@@ -284,14 +284,16 @@ fn the_machine_clusters_answer_through_the_host_and_negation_applies_to_them() {
     let mut host = ScreenHost::new(NOW_US, &timers);
     host.system = SystemState {
         player_name: Some("guest"),
-        volumes: Some(Volumes { system: 0.5, key: 1.0, background: 0.0 }),
+        volumes: Some(Volumes { master: 0.75, system: 0.5, key: 1.0, background: 0.0 }),
         course: Some(CourseStage { index: 1, count: 3 }),
         ..SystemState::default()
     };
     host.loading = LoadingState { screen: LoadingScreen::Preload, progress: 0.25 };
 
     assert_eq!(host.text(STRING_PLAYER), "guest");
-    assert_eq!(host.integer(NUMBER_MASTER_VOLUME), 50);
+    assert_eq!(host.integer(NUMBER_MASTER_VOLUME), 75, "number 57 is the master volume");
+    assert_eq!(host.rate(RATE_MASTERVOLUME), Some(0.75), "and so is rate 17");
+    assert_eq!(host.volume(VolumeBus::System), 0.5, "while main_state.volume_sys is the system volume");
     assert_eq!(host.volume(VolumeBus::Key), 1.0);
     assert_eq!(host.rate(RATE_BGMVOLUME), Some(0.0));
     assert_eq!(host.float(RATE_KEYVOLUME), 1.0, "a float read falls back to the rate of the same id");

@@ -29,13 +29,15 @@ fn app(tag: &str) -> crate::App {
     crate::App::new(String::new(), crate::Config::default(), crate::LaunchOptions::default(), home.join("settings.ron"))
 }
 
+const SYSTEM: VolumeTarget = VolumeTarget::Bus(VolumeBus::System);
+
 #[test]
 fn only_the_three_volume_rates_set_a_volume() {
-    assert_eq!(rate_bus(RATE_MASTERVOLUME), Some(VolumeBus::System));
-    assert_eq!(rate_bus(RATE_KEYVOLUME), Some(VolumeBus::Key));
-    assert_eq!(rate_bus(RATE_BGMVOLUME), Some(VolumeBus::Background));
+    assert_eq!(rate_volume(RATE_MASTERVOLUME), Some(VolumeTarget::Master), "rate 17 is the master volume here, where the reference has the system volume");
+    assert_eq!(rate_volume(RATE_KEYVOLUME), Some(VolumeTarget::Bus(VolumeBus::Key)));
+    assert_eq!(rate_volume(RATE_BGMVOLUME), Some(VolumeTarget::Bus(VolumeBus::Background)));
     for other in [RATE_MUSICSELECT_POSITION, RATE_RANKING_POSITION, 0, 7, 20, 110] {
-        assert_eq!(rate_bus(other), None, "rate {other} is no volume");
+        assert_eq!(rate_volume(other), None, "rate {other} is no volume");
     }
 }
 
@@ -44,22 +46,40 @@ fn a_volume_is_set_on_its_own_bus_and_held_to_the_range_a_volume_row_can_produce
     let mut audio = AudioOptions::default();
     let master = audio.master;
 
-    assert!(set_volume(&mut audio, VolumeBus::System, 0.25));
+    assert!(set_volume(&mut audio, SYSTEM, 0.25));
     assert_eq!((audio.system, audio.key, audio.bg), (0.25, DEFAULT_BUS_VOLUME, DEFAULT_BUS_VOLUME), "only the bus asked for moves");
-    assert!(set_volume(&mut audio, VolumeBus::Key, 0.75));
-    assert!(set_volume(&mut audio, VolumeBus::Background, 0.1));
+    assert!(set_volume(&mut audio, VolumeTarget::Bus(VolumeBus::Key), 0.75));
+    assert!(set_volume(&mut audio, VolumeTarget::Bus(VolumeBus::Background), 0.1));
     assert_eq!((audio.system, audio.key, audio.bg), (0.25, 0.75, 0.1));
-    assert_eq!(audio.master, master, "the master gain of the engine is no skin's volume");
+    assert_eq!(audio.master, master, "a bus's volume is not the master gain");
 
-    assert!(!set_volume(&mut audio, VolumeBus::System, 0.25), "writing the volume it already has moves nothing");
-    assert!(set_volume(&mut audio, VolumeBus::System, 7.5));
+    assert!(!set_volume(&mut audio, SYSTEM, 0.25), "writing the volume it already has moves nothing");
+    assert!(set_volume(&mut audio, SYSTEM, 7.5));
     assert_eq!(audio.system, 1.0, "past the loudest is the loudest");
-    assert!(set_volume(&mut audio, VolumeBus::System, -3.0));
+    assert!(set_volume(&mut audio, SYSTEM, -3.0));
     assert_eq!(audio.system, 0.0, "below the quietest is the quietest");
-    assert!(set_volume(&mut audio, VolumeBus::System, f32::NAN));
+    assert!(set_volume(&mut audio, SYSTEM, f32::NAN));
     assert_eq!(audio.system, DEFAULT_BUS_VOLUME, "a value that is not a number is the default, as in the reference's validation");
-    assert!(set_volume(&mut audio, VolumeBus::System, f32::INFINITY));
+    assert!(set_volume(&mut audio, SYSTEM, f32::INFINITY));
     assert_eq!(audio.system, 1.0);
+}
+
+#[test]
+fn the_master_volume_is_set_alone_and_held_to_the_range_with_its_own_default() {
+    let mut audio = AudioOptions::default();
+    let buses = (audio.system, audio.key, audio.bg);
+
+    assert!(set_volume(&mut audio, VolumeTarget::Master, 0.0));
+    assert_eq!(audio.master, 0.0);
+    assert_eq!((audio.system, audio.key, audio.bg), buses, "the master moves no bus");
+
+    assert!(!set_volume(&mut audio, VolumeTarget::Master, 0.0), "writing the volume it already has moves nothing");
+    assert!(set_volume(&mut audio, VolumeTarget::Master, 7.5));
+    assert_eq!(audio.master, 1.0, "past the loudest is the loudest");
+    assert!(set_volume(&mut audio, VolumeTarget::Master, -3.0));
+    assert_eq!(audio.master, 0.0, "below the quietest is the quietest");
+    assert!(set_volume(&mut audio, VolumeTarget::Master, f32::NAN));
+    assert_eq!(audio.master, DEFAULT_MASTER_VOLUME, "a master that is not a number is the master default, not a bus's");
 }
 
 #[test]
@@ -75,7 +95,7 @@ fn a_volume_request_is_carried_out_at_once_and_any_other_request_is_left_alone()
     assert_eq!(app.shared.config.audio.bg, 1.0, "main_state.set_volume_bg sets it too, held to the range");
     assert!(settings_untouched(&mut app));
 
-    let current = app.shared.config.audio.system;
+    let current = app.shared.config.audio.master;
     assert!(carry_out(&mut app.shared, &ClusterRequest::WriteRate { id: RATE_MASTERVOLUME, value: current }));
     assert!(!settings_untouched(&mut app), "a write that moves nothing asks for nothing to be saved");
 
@@ -89,6 +109,26 @@ fn a_volume_request_is_carried_out_at_once_and_any_other_request_is_left_alone()
     }
     assert_eq!(app.shared.config.audio.key, 0.3);
     assert!(!settings_untouched(&mut app));
+}
+
+/// The slider labelled MASTER used to write the system volume, which the song browser's preview does
+/// not sound on: with it at nothing the preview was as loud as ever. It writes the master volume now,
+/// which scales every bus, and the system volume is left to `main_state.set_volume_sys`.
+#[test]
+fn the_master_slider_writes_the_master_volume_and_leaves_the_system_volume_alone() {
+    let mut app = app("master");
+    let before = app.shared.config.audio.clone();
+    let settings_dirty = |app: &mut crate::App| app.shared.take_skin_settings_dirty();
+
+    assert!(carry_out(&mut app.shared, &ClusterRequest::WriteRate { id: RATE_MASTERVOLUME, value: 0.0 }));
+    let audio = &app.shared.config.audio;
+    assert_eq!(audio.master, 0.0, "the slider moved the master volume");
+    assert_eq!((audio.system, audio.key, audio.bg), (before.system, before.key, before.bg), "and no bus");
+    assert!(settings_dirty(&mut app), "and asked for the settings to be written");
+
+    assert!(carry_out(&mut app.shared, &ClusterRequest::SetVolume { bus: VolumeBus::System, value: 0.2 }));
+    let audio = &app.shared.config.audio;
+    assert_eq!((audio.master, audio.system), (0.0, 0.2), "main_state.set_volume_sys sets the system volume and not the master");
 }
 
 #[test]

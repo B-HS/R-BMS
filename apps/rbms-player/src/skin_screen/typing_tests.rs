@@ -16,7 +16,7 @@ const PANEL_SHEET: &str = "panel.png";
 const PANEL_EDGE: u32 = 8;
 const FACE_FILE: &str = "face.ttf";
 
-/// The rate the skin's volume slider writes, which is the system volume.
+/// The rate the skin's volume slider writes, which is the master volume.
 const VOLUME_RATE: i32 = RATE_MASTERVOLUME;
 
 /// The share of the volume slider's travel a press a quarter of the way along it writes.
@@ -337,13 +337,13 @@ fn a_volume_slider_sets_the_volume_and_the_settings_are_written_when_the_button_
     let (mut app, mut pixels) = app_with_typing_skin("volume");
     let settings = app.shared.settings_path.clone();
     assert!(!settings.exists());
-    let before = app.shared.config.audio.system;
+    let before = app.shared.config.audio.master;
     assert_ne!(before, VOLUME_QUARTER, "the test needs a volume to move");
 
     app.shared.mouse_held.on_button(MouseButton::Left, true);
     assert!(app.shared.skin_pointer(over_volume_quarter(), LEFT_PRESS));
     whole_frame(&mut app, &mut pixels);
-    assert_eq!(app.shared.config.audio.system, VOLUME_QUARTER, "the system volume went to the share the slider was pressed at");
+    assert_eq!(app.shared.config.audio.master, VOLUME_QUARTER, "the master volume went to the share the slider was pressed at");
     assert!(app.shared.skin_requests().is_empty(), "the volume was carried out, not left waiting");
     assert!(!settings.exists(), "the settings were written in the middle of a drag");
 
@@ -351,5 +351,5 @@ fn a_volume_slider_sets_the_volume_and_the_settings_are_written_when_the_button_
     whole_frame(&mut app, &mut pixels);
     assert!(settings.exists(), "the settings were not written once the button was let go");
     let saved = rbms_config::load(&settings).expect("the settings read back").config;
-    assert_eq!(saved.audio.system, VOLUME_QUARTER);
+    assert_eq!(saved.audio.master, VOLUME_QUARTER);
 }

@@ -8,6 +8,12 @@
 //! ([`RBMS_OPTION_LANGUAGE_FIRST`] on); strings 2 and 1010; and what `main_state` asks of the machine
 //! itself: the three volumes.
 //!
+//! Number 57 and rate 17 show the master volume here, where the reference shows the system volume
+//! (`FloatPropertyFactory`'s `systemvolume`): the reference has no master volume, and its song
+//! browser plays the preview at the system volume, so there that slider is the one that turns the
+//! preview down. Here the preview is on the background and key buses, so the slider that reaches it
+//! is the master. `main_state.volume_sys` is still the system volume.
+//!
 //! A value is read as `IntegerPropertyFactory` and `FloatPropertyFactory` read it from the main
 //! controller, the player's data and the audio configuration. What the player has no source for is
 //! left `None` and is not answered: the total play time (numbers 17-19) is one, for the player
@@ -17,6 +23,7 @@
 
 use std::borrow::Cow;
 
+use rbms_config::AudioOptions;
 use rbms_judge::clear_type_from_id;
 use rbms_model::Language;
 use rbms_skin::lua::LocalTime;
@@ -75,9 +82,11 @@ impl PlayerTotals {
     }
 }
 
-/// The three volumes, each from nothing to one.
+/// The volumes, each from nothing to one.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Volumes {
+    /// Everything the player sounds (number 57 and rate 17).
+    pub master: f32,
     /// System and skin sounds (`volume_sys`).
     pub system: f32,
     pub key: f32,
@@ -85,6 +94,11 @@ pub struct Volumes {
 }
 
 impl Volumes {
+    /// The volumes the audio settings hold.
+    pub fn of_audio(audio: &AudioOptions) -> Volumes {
+        Volumes { master: audio.master, system: audio.system, key: audio.key, background: audio.bg }
+    }
+
     fn of(&self, bus: VolumeBus) -> f32 {
         match bus {
             VolumeBus::System => self.system,
@@ -144,8 +158,8 @@ impl SystemState<'_> {
         Some(i32::try_from(modulus.map_or(units, |modulus| units % modulus)).unwrap_or(i32::MAX))
     }
 
-    fn volume_percent(&self, bus: VolumeBus) -> Option<i32> {
-        self.volumes.map(|volumes| (volumes.of(bus) * VOLUME_PERCENT_SCALE) as i32)
+    fn volume_percent(&self, share: fn(&Volumes) -> f32) -> Option<i32> {
+        self.volumes.map(|volumes| (share(&volumes) * VOLUME_PERCENT_SCALE) as i32)
     }
 }
 
@@ -188,16 +202,16 @@ impl ClusterState for SystemState<'_> {
                 self.totals().map(|totals| SystemState::count(totals.judgements[kind]))
             }
             NUMBER_TOTALPLAYNOTES => self.totals().map(|totals| SystemState::count(totals.played_notes())),
-            NUMBER_MASTER_VOLUME => self.volume_percent(VolumeBus::System),
-            NUMBER_KEY_VOLUME => self.volume_percent(VolumeBus::Key),
-            NUMBER_BGM_VOLUME => self.volume_percent(VolumeBus::Background),
+            NUMBER_MASTER_VOLUME => self.volume_percent(|volumes| volumes.master),
+            NUMBER_KEY_VOLUME => self.volume_percent(|volumes| volumes.key),
+            NUMBER_BGM_VOLUME => self.volume_percent(|volumes| volumes.background),
             _ => None,
         }
     }
 
     fn rate(&self, id: i32) -> Option<f32> {
         match id {
-            RATE_MASTERVOLUME => self.volume(VolumeBus::System),
+            RATE_MASTERVOLUME => self.volumes.map(|volumes| volumes.master),
             RATE_KEYVOLUME => self.volume(VolumeBus::Key),
             RATE_BGMVOLUME => self.volume(VolumeBus::Background),
             _ => None,
