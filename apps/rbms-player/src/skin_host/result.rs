@@ -33,7 +33,12 @@ use std::cmp::Ordering;
 use rbms_skin::property::INTEGER_ABSENT;
 use rbms_skin::property::generated::*;
 
-use super::extension::{RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, assist_grade_asked};
+use rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT;
+
+use super::extension::{
+    RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_PLAYBACK_RATE_CHANGED, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST,
+    assist_grade_asked,
+};
 use super::score::whole;
 use super::{ClusterState, INDEX_CLEAR, INDEX_TARGET_CLEAR};
 use snapshot::{FinishedRun, REPLAY_SLOT_COUNT, ReplaySlot};
@@ -142,6 +147,7 @@ impl ClusterState for ResultState<'_> {
             OPTION_GAUGE_GROOVE => gauge < FIRST_HARD_GAUGE,
             OPTION_GAUGE_HARD => gauge >= FIRST_HARD_GAUGE,
             OPTION_GAUGE_EX => EX_RATE_GAUGES.contains(&gauge),
+            RBMS_OPTION_PLAYBACK_RATE_CHANGED => run.changed_playback_percent.is_some(),
             _ => return None,
         })
     }
@@ -155,6 +161,7 @@ impl ClusterState for ResultState<'_> {
         let duration = timing.avg_duration_us;
         Some(match id {
             NUMBER_MISSCOUNT | NUMBER_MISSCOUNT2 => new_miss,
+            RBMS_NUMBER_PLAYBACK_PERCENT => run.changed_playback_percent.unwrap_or(PLAYBACK_RATE_UNCHANGED_PERCENT),
             NUMBER_TARGET_MAXCOMBO if old.max_combo > 0 => whole(old.max_combo),
             NUMBER_DIFF_MAXCOMBO if old.max_combo > 0 => whole(new.max_combo) - whole(old.max_combo),
             NUMBER_TARGET_MAXCOMBO | NUMBER_DIFF_MAXCOMBO => INTEGER_ABSENT,

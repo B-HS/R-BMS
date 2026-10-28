@@ -624,7 +624,7 @@ fn mark_at(pixels: &HeadlessCanvas, (x, color): (u32, Color)) -> bool {
 /// How a fixture run stands when the test has nothing to say of it: reported under the normal
 /// lamp, on a chart never played, against no target.
 fn standing(replay_saved: bool) -> RunStanding {
-    RunStanding { replay_saved, lamp: ClearType::Normal, previous: PreviousScore::default(), target: None }
+    RunStanding { replay_saved, lamp: ClearType::Normal, previous: PreviousScore::default(), target: None, unsaved_playback_percent: None }
 }
 
 /// A replay of the played chart, as the one a run was started from.
@@ -983,6 +983,32 @@ fn only_a_run_played_with_an_assist_on_is_told_what_it_did() {
     app.shared.replay = Some(watched_replay());
     assert_eq!(ResultRun::of(&session, &app.shared, standing(false)).assist_note, None, "a replay that was watched");
 }
+
+/// A run played at another PLAYBACK RATE is told, in place of any assist, that nothing of it was kept
+/// or sent and at what rate; it sets no best, and a skin is told the rate. A run the engine played at
+/// it is told nothing, being no record anyway.
+#[test]
+fn a_run_at_another_playback_rate_is_told_it_was_not_kept_and_sets_no_best() {
+    let mut app = app_with_result_skin("rate-note", SKIN);
+    app.shared.config.play.scratch_auto = true;
+    let session = finished_session_with(TURNTABLE_CHART, true);
+    let faster = RunStanding { unsaved_playback_percent: Some(FASTER_PERCENT), ..standing(false) };
+    let run = ResultRun::of(&session, &app.shared, faster.clone());
+    assert_eq!(run.playback_note.as_deref(), Some("PLAYBACK RATE 115%: NOT SAVED, NOT SENT"));
+    assert_eq!(run.assist_note, None, "the SCRATCH AUTO note says the run was kept, which it was not");
+    assert!(!run.updates_score && !run.snapshot.updates_score, "a run at another rate set a best");
+    assert_eq!(run.snapshot.changed_playback_percent, Some(FASTER_PERCENT));
+    {
+        let _korean = crate::text::settings::InstalledLanguage::new(rbms_model::Language::Korean);
+        let run = ResultRun::of(&session, &app.shared, faster.clone());
+        assert_eq!(run.playback_note.as_deref(), Some("재생 속도 115%: 저장·전송 안 됨"));
+    }
+    app.shared.config.play.autoplay = true;
+    assert_eq!(ResultRun::of(&session, &app.shared, faster).playback_note, None, "a run the engine played");
+}
+
+/// A PLAYBACK RATE other than the chart's own.
+const FASTER_PERCENT: i32 = 115;
 
 /// The line is the screen's own, drawn over a skin with the submission lines and under them: on
 /// the first line while no score server has anything to say, and on the second once one has.

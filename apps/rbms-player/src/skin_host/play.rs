@@ -32,8 +32,10 @@
 //! (The reference answers zero for the durations on a screen other than the play screen; here a
 //! screen that has no play frame has no answer.)
 
+use rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT;
 use rbms_skin::property::generated::*;
 
+use super::extension::{RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_PLAYBACK_RATE_CHANGED};
 use super::{ClusterState, INDEX_TIMING_AUTO_ADJUST};
 
 pub mod shown;
@@ -238,6 +240,7 @@ impl ClusterState for PlayState<'_> {
             OPTION_LIFT1_ON => live.lanes.lift_on,
             OPTION_HIDDEN1_ON => live.lanes.hidden_on,
             OPTION_CONSTANT => live.lanes.constant_on,
+            RBMS_OPTION_PLAYBACK_RATE_CHANGED => live.changed_playback_percent.is_some(),
             _ => return None,
         })
     }
@@ -267,6 +270,7 @@ impl ClusterState for PlayState<'_> {
             VALUE_JUDGE_1P_DURATION => side_timing(SIDE_1P),
             VALUE_JUDGE_2P_DURATION => side_timing(SIDE_2P),
             VALUE_JUDGE_3P_DURATION => side_timing(SIDE_3P),
+            RBMS_NUMBER_PLAYBACK_PERCENT => live.changed_playback_percent.unwrap_or(PLAYBACK_RATE_UNCHANGED_PERCENT),
             _ => return None,
         })
     }

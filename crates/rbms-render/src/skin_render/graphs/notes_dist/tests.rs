@@ -136,7 +136,7 @@ fn the_chips_are_revealed_in_proportion_to_the_scene_time_until_the_delay() {
 fn the_cursor_marks_the_range_and_the_position_with_integer_arithmetic() {
     let seconds = 12;
     let mut cursor = Pixmap::new(seconds * PITCH, 20 * PITCH);
-    let marks = PlayCursor { start_ms: Some(2_000), end_ms: Some(8_000), speed: None };
+    let marks = PlayCursor { start_ms: Some(2_000), end_ms: Some(8_000) };
     paint_cursor(&mut cursor, seconds, marks, Some(3_000));
 
     assert_eq!(cursor.pixel(10, 50), START_CURSOR, "two seconds of twelve is a sixth of sixty pixels in");
@@ -150,19 +150,18 @@ fn the_cursor_marks_the_range_and_the_position_with_integer_arithmetic() {
     assert_eq!(cursor.pixel(15, 0), NONE, "and no position paints no mark");
 }
 
+/// The playing position is the play timer's, which is already in the chart's time at any rate: three
+/// seconds into the chart is three seconds of twelve across, however fast the run is played.
 #[test]
-fn a_practice_speed_scales_the_playing_position_and_a_negative_mark_is_none() {
+fn the_playing_position_is_chart_time_and_a_negative_mark_is_none() {
     let seconds = 12;
     let mut cursor = Pixmap::new(seconds * PITCH, 20 * PITCH);
-    let marks = PlayCursor { start_ms: Some(-1), end_ms: Some(-5), speed: Some(2.0) };
+    let marks = PlayCursor { start_ms: Some(-1), end_ms: Some(-5) };
     paint_cursor(&mut cursor, seconds, marks, Some(3_000));
 
-    assert_eq!(cursor.pixel(30, 5), NOW_CURSOR, "three seconds at double speed is six seconds in");
-    assert_eq!(cursor.pixel(15, 5), NONE);
+    assert_eq!(cursor.pixel(15, 5), NOW_CURSOR, "three seconds of twelve, with no rate laid over it");
+    assert_eq!(cursor.pixel(30, 5), NONE);
     assert_eq!((0..cursor.size().0).filter(|x| cursor.pixel(*x, 5) != NONE).count(), 3, "and the negative marks drew nothing");
-
-    paint_cursor(&mut cursor, seconds, PlayCursor { speed: Some(0.0), ..marks }, Some(3_000));
-    assert_eq!(cursor.pixel(15, 5), NOW_CURSOR, "a speed of zero is no speed at all");
 }
 
 #[test]

@@ -400,5 +400,39 @@ fn a_file_written_before_the_discord_row_reads_with_it_on() {
     assert!(!stepped.network.discord_status);
     assert_eq!(display_value(&stepped, SettingId::DiscordStatus), "OFF");
     assert_eq!(SETTING_COUNT, SettingId::ALL.len());
-    assert_eq!(SettingId::ALL.last(), Some(&SettingId::DiscordStatus), "the row is added at the end of the list");
+    assert_eq!(SettingId::from_row_index(SettingId::DiscordStatus.row_index() + 1), Some(SettingId::PlaybackRate), "the row was added at the end of the list");
+}
+
+/// PLAYBACK RATE reads from a file from before it as the chart's own speed, is written out and read
+/// back, is held to 50% to 200% however a file or a step states it, and is a row of the play menu's
+/// CHART group that moves one percent a step.
+#[test]
+fn the_playback_rate_reads_from_older_files_and_stays_in_its_range() {
+    let older: Config = ron::from_str(r#"(schema_version: 6, play: (hispeed: 3.0))"#).expect("a file without the rate parses");
+    assert_eq!(older.play.playback_percent, PLAYBACK_RATE_UNCHANGED_PERCENT, "a file from before the row plays at the chart's own speed");
+    assert_eq!(Config::default().play.playback_percent, PLAYBACK_RATE_UNCHANGED_PERCENT);
+
+    let mut faster = Config::default();
+    faster.play.playback_percent = 115;
+    let text = ron_of(&faster);
+    assert!(text.contains("playback_percent: 115"), "the rate is written out");
+    let back: Config = ron::from_str(&text).expect("a config round-trips");
+    assert_eq!(back.play.playback_percent, 115);
+
+    for (stated, read) in
+        [(0, PLAYBACK_RATE_MIN_PERCENT), (49, PLAYBACK_RATE_MIN_PERCENT), (201, PLAYBACK_RATE_MAX_PERCENT), (-3, PLAYBACK_RATE_MIN_PERCENT), (77, 77)]
+    {
+        let mut config = Config::default();
+        config.play.playback_percent = stated;
+        config.sanitise();
+        assert_eq!(config.play.playback_percent, read, "a stated rate of {stated}");
+    }
+
+    let mut stepped = Config::default();
+    assert_eq!(display_value(&stepped, SettingId::PlaybackRate), "100%");
+    assert_eq!(adjust(&mut stepped, SettingId::PlaybackRate, 1), AdjustOutcome::Changed);
+    assert_eq!(display_value(&stepped, SettingId::PlaybackRate), "101%");
+    stepped.play.playback_percent = PLAYBACK_RATE_MAX_PERCENT;
+    assert_eq!(adjust(&mut stepped, SettingId::PlaybackRate, 1), AdjustOutcome::Unchanged, "the row stops at its top");
+    assert_eq!(descriptor(SettingId::PlaybackRate).tab, SettingTab::PlayChart);
 }

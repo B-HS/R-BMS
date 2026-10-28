@@ -54,6 +54,10 @@ pub(crate) const PRACTICE_FILE: &str = "practice.ron";
 /// run out of the records, and this is the wording the result screen shows for it.
 pub(crate) const PRACTICE_BLOCK_REASON: &str = "practice";
 
+/// What [`crate::ir_submission_block_reason`] reports for a run played at another PLAYBACK RATE than
+/// the chart's own: it is neither stored nor sent (the player's decision of 2026-10-29).
+pub(crate) const PLAYBACK_RATE_BLOCK_REASON: &str = "playback rate";
+
 /// Milliseconds per second, the unit the reference edits and displays practice times in.
 const MS_PER_SECOND: i32 = 1_000;
 /// Microseconds per millisecond: the property is authored in ms, the play clock runs in us.
@@ -102,10 +106,11 @@ const TOTAL_FROM_CHART: f64 = 0.0;
 /// past this the row is typed into.
 const TOTAL_SLIDER_MAX: i64 = 1_000;
 
-/// FREQUENCY bounds (`:605-611`).
-const FREQ_MIN: i32 = 50;
-const FREQ_MAX: i32 = 200;
-const FREQ_UNMODIFIED: i32 = 100;
+/// FREQUENCY bounds (`:605-611`), which are the PLAYBACK RATE row's too: a slice and a whole run
+/// are played at a rate the one clock below keeps.
+const FREQ_MIN: i32 = rbms_config::PLAYBACK_RATE_MIN_PERCENT;
+const FREQ_MAX: i32 = rbms_config::PLAYBACK_RATE_MAX_PERCENT;
+const FREQ_UNMODIFIED: i32 = rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT;
 
 /// Whether a practice run may end because the gauge emptied. It may not: the point of practising a
 /// slice is to reach its end.
@@ -556,6 +561,21 @@ impl PracticeClock {
     pub(crate) fn pitch(self, pitch: f32) -> f32 {
         pitch * self.freq_percent as f32 / FREQ_UNMODIFIED as f32
     }
+
+    /// The rate the chart is played at, in percent of its own speed.
+    pub(crate) fn freq_percent(self) -> i32 {
+        self.freq_percent
+    }
+
+    /// A tempo of the chart, in beats per minute, as the player hears it at this rate.
+    pub(crate) fn heard_bpm(self, chart_bpm: f64) -> f64 {
+        chart_bpm * f64::from(self.freq_percent) / f64::from(FREQ_UNMODIFIED)
+    }
+
+    /// A length of the chart's time, in any unit, as long as it lasts for the player at this rate.
+    pub(crate) fn heard_length(self, chart_length: f64) -> f64 {
+        chart_length * f64::from(FREQ_UNMODIFIED) / f64::from(self.freq_percent)
+    }
 }
 
 fn scale_time_us(value: i64, numerator: i64, denominator: i64) -> i64 {
@@ -765,6 +785,13 @@ pub(crate) fn practice_block_reason(practice: bool) -> Option<&'static str> {
         true => Some(PRACTICE_BLOCK_REASON),
         false => None,
     }
+}
+
+/// Why a run may not be recorded or submitted, when it was played at `playback_percent` of the
+/// chart's speed and that is not the chart's own (the player's decision of 2026-10-29). `None` for a
+/// run at the chart's own speed, so the caller can chain it with the other reasons.
+pub(crate) fn playback_rate_block_reason(playback_percent: i32) -> Option<&'static str> {
+    (playback_percent != FREQ_UNMODIFIED).then_some(PLAYBACK_RATE_BLOCK_REASON)
 }
 
 /// The practice properties of every chart that has one, keyed by chart md5.

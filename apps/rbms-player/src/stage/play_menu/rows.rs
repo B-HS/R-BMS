@@ -45,6 +45,7 @@ use crate::stage::preview_menu::{ONE_STEP, RowLook, SHIFT_STEPS};
 use crate::stage::skin_menu::skin_row_help;
 use crate::text::menus::play_menu::PlayMenuText;
 use crate::text::menus::skin_menu::SkinMenuText;
+use crate::text::settings::descriptions::RowDescriptionText;
 use crate::text::settings::shown_value;
 
 /// The group the rows that are no setting are listed under.
@@ -337,6 +338,7 @@ pub(super) fn help(play: &PlayOptions, row: Row, kind: Option<SkinRowKind>) -> &
         Row::PreviewBpm => PlayMenuText::PreviewBpmHelp.get(language()),
         Row::Setting(SettingId::HiSpeed) if play.keep_green_number => PlayMenuText::HispeedWorkedOutHelp.get(language()),
         Row::Setting(SettingId::GreenNumber) if !play.keep_green_number => PlayMenuText::GreenNumberWorkedOutHelp.get(language()),
+        Row::Setting(SettingId::PlaybackRate) => RowDescriptionText::PlaybackRate.get(language()),
         Row::Setting(id) => descriptor(id).help,
         Row::Skin(_) => match kind {
             Some(kind @ (SkinRowKind::Offset(_) | SkinRowKind::Opacity | SkinRowKind::Color | SkinRowKind::ColorChannel(_))) => skin_row_help(kind),
@@ -434,6 +436,7 @@ pub(super) fn reset_setting(config: &mut Config, id: SettingId) -> bool {
         SettingId::TargetRate => put(&mut config.judge.target_rate_percent, shipped.judge.target_rate_percent),
         SettingId::Autoplay => put(&mut config.play.autoplay, shipped.play.autoplay),
         SettingId::ScratchAuto => put(&mut config.play.scratch_auto, shipped.play.scratch_auto),
+        SettingId::PlaybackRate => put(&mut config.play.playback_percent, shipped.play.playback_percent),
         SettingId::AutoReplay => put(&mut config.play.auto_replay, shipped.play.auto_replay),
         SettingId::PlayEscapeMode => put(&mut config.play.play_escape, shipped.play.play_escape),
         _ => false,

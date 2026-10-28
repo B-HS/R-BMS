@@ -114,6 +114,11 @@ rbms_model::translations! {
             "다시 시작하기 전에 실패한 플레이를 보관했습니다",
             "やり直す前に、失敗したプレーを保管しました",
         ),
+        CoursePlaysAtTheChartsOwnSpeed => (
+            "a course is played at 100%: PLAYBACK RATE {0}% is set aside until it ends",
+            "코스는 100%로 플레이합니다. 재생 속도 {0}%는 코스가 끝날 때까지 적용하지 않습니다",
+            "コースは100%でプレーします。再生速度{0}%はコースが終わるまで適用しません",
+        ),
         CourseSent => (
             "course sent",
             "코스를 전송했습니다",
@@ -856,6 +861,7 @@ mod tests {
             (NoticeText::AbandonedCourseKept, vec![], "course ended before its last stage kept as FAILED"),
             (NoticeText::QuitRunKept, vec![], "run cut short by quitting kept; it is sent on the next start"),
             (NoticeText::RetriedRunKept, vec![], "failed run kept before starting again"),
+            (NoticeText::CoursePlaysAtTheChartsOwnSpeed, vec![&115], "a course is played at 100%: PLAYBACK RATE 115% is set aside until it ends"),
             (NoticeText::CourseSent, vec![], "course sent"),
             (NoticeText::CourseNotKeptScoreDatabaseClosed, vec![], "course not kept: score database not open"),
             (NoticeText::CourseStageNotInTheLibrary, vec![&"Stage"], "course stage not in the library: Stage"),

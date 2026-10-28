@@ -114,6 +114,7 @@ rbms_model::translations! {
         RankingKeys => ("RANKING KEYS", "랭킹 키", "ランキングキー"),
         DownloadFolder => ("DOWNLOAD FOLDER", "다운로드 폴더", "ダウンロードフォルダ"),
         DiscordStatus => ("DISCORD STATUS", "DISCORD 상태", "DISCORDステータス"),
+        PlaybackRate => ("PLAYBACK RATE", "재생 속도", "再生速度"),
     }
 }
 
@@ -221,6 +222,7 @@ impl RowLabelText {
             SettingId::RankingKeys => RowLabelText::RankingKeys,
             SettingId::DownloadFolder => RowLabelText::DownloadFolder,
             SettingId::DiscordStatus => RowLabelText::DiscordStatus,
+            SettingId::PlaybackRate => RowLabelText::PlaybackRate,
         }
     }
 }

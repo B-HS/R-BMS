@@ -60,6 +60,7 @@ rbms_model::translations! {
         ReplayPlayback => ("replay playback", "리플레이 재생", "リプレイ再生"),
         Practice => ("practice", "연습", "練習"),
         NotSignedIn => ("not logged in", "로그인하지 않음", "未ログイン"),
+        PlaybackRate => ("playback rate", "재생 속도 변경", "再生速度変更"),
     }
 }
 
@@ -81,6 +82,12 @@ rbms_model::translations! {
             "OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE",
             "자체 TOTAL: 전송·보관됨, 최고 스코어 없음",
             "独自TOTAL: 送信・保管済み、ベストスコアなし",
+        ),
+        /// A run played at another PLAYBACK RATE than the chart's own, at the rate in percent: nothing of it is kept.
+        PlaybackRate => (
+            "PLAYBACK RATE {0}%: NOT SAVED, NOT SENT",
+            "재생 속도 {0}%: 저장·전송 안 됨",
+            "再生速度{0}%: 保存・送信なし",
         ),
     }
 }

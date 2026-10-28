@@ -80,10 +80,11 @@ const LANE_ROWS: [SettingId; 7] = [
     SettingId::LaneCoverFineStep,
 ];
 const JUDGE_ROWS: [SettingId; 2] = [SettingId::JudgeOffset, SettingId::AutoCal];
-const CHART_ROWS: [SettingId; 10] = [
+const CHART_ROWS: [SettingId; 11] = [
     SettingId::Random,
     SettingId::Gauge,
     SettingId::LegacyNote,
+    SettingId::PlaybackRate,
     SettingId::Target,
     SettingId::TargetFallback,
     SettingId::TargetRate,
@@ -398,6 +399,7 @@ fn the_list_is_the_tempo_row_and_the_four_groups_under_their_names() {
             "RANDOM",
             "GAUGE",
             "LEGACY NOTE",
+            "PLAYBACK RATE",
             "TARGET",
             "TARGET FALLBACK",
             "TARGET RATE",
@@ -413,6 +415,37 @@ fn the_list_is_the_tempo_row_and_the_four_groups_under_their_names() {
         assert_eq!(menu.line(*row).look == RowLook::Heading, row.is_heading(), "{row:?}");
     }
 }
+
+/// PLAYBACK RATE is a row of the CHART group under LEGACY NOTE: a key moves it a percent and Shift
+/// ten, it stops at 50%, the default key puts the chart's own speed back, and what it says under the
+/// preview is that a run at another rate keeps nothing, in the language the menu is drawn in.
+#[test]
+fn the_playback_rate_row_steps_a_percent_ten_with_shift_and_the_default_key_puts_100_back() {
+    let mut menu = Menu::over(bare_app("playback-rate"));
+    let legacy = menu.at(Row::Setting(SettingId::LegacyNote));
+    assert_eq!(menu.state.rows[legacy + 1], Row::Setting(SettingId::PlaybackRate), "the rate does not follow LEGACY NOTE");
+    assert_eq!(menu.line(Row::Setting(SettingId::PlaybackRate)).label, "PLAYBACK RATE");
+    assert_eq!(menu.value(SettingId::PlaybackRate), "100%", "the chart's own speed");
+
+    menu.focus_setting(SettingId::PlaybackRate);
+    menu.shifted(KeyCode::ArrowRight);
+    menu.key(KeyCode::ArrowRight);
+    assert_eq!(menu.value(SettingId::PlaybackRate), "111%", "ten up and one up");
+    assert_eq!(menu.app.shared.config.play.playback_percent, 111, "the menu writes the setting the run reads");
+    menu.key(KeyCode::Digit0);
+    assert_eq!(menu.value(SettingId::PlaybackRate), "100%", "the default key did not put the chart's own speed back");
+    for _ in 0..PAST_THE_SLOWEST_RATE {
+        menu.shifted(KeyCode::ArrowLeft);
+    }
+    assert_eq!(menu.value(SettingId::PlaybackRate), "50%", "the row stops at its slowest");
+
+    let said = help(&menu.app.shared.config.play, Row::Setting(SettingId::PlaybackRate), None);
+    assert_eq!(said, crate::text::settings::descriptions::RowDescriptionText::PlaybackRate.get(language()));
+    assert!(said.contains("not saved, replayed or sent"), "{said}");
+}
+
+/// How many wide steps down take the PLAYBACK RATE row from the chart's own speed past its slowest.
+const PAST_THE_SLOWEST_RATE: usize = 6;
 
 /// Every row the settings table gives the play menu is listed once, a row nothing acts on yet is
 /// not, and no row of another screen's is.
@@ -895,6 +928,7 @@ fn shift_moves_a_number_ten_steps_at_a_time_and_nothing_else() {
             SettingId::Hidden,
             SettingId::LaneCoverFineStep,
             SettingId::JudgeOffset,
+            SettingId::PlaybackRate,
             SettingId::TargetRate
         ]
     );
@@ -928,6 +962,9 @@ fn shift_moves_a_number_ten_steps_at_a_time_and_nothing_else() {
     menu.focus_setting(SettingId::JudgeOffset);
     menu.shifted(KeyCode::ArrowRight);
     assert_eq!(menu.value(SettingId::JudgeOffset), "+10 MS");
+    menu.focus_setting(SettingId::PlaybackRate);
+    menu.shifted(KeyCode::ArrowRight);
+    assert_eq!(menu.value(SettingId::PlaybackRate), "110%");
     menu.focus_setting(SettingId::TargetRate);
     menu.shifted(KeyCode::ArrowRight);
     assert_eq!(menu.value(SettingId::TargetRate), "95%");

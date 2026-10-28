@@ -31,6 +31,7 @@ local VERDICT = {
     course = { cleared = i18n.t("result_course_cleared"), failed = i18n.t("result_course_failed") },
 }
 local STAGE_COUNT = { one = i18n.template("result_stage_one"), many = i18n.template("result_stage_many") }
+local PLAYBACK = { changed = props.extension.PLAYBACK_RATE_CHANGED, percent = props.extension_number.PLAYBACK_PERCENT, unsaved = i18n.template("result_not_saved_at_rate") }
 
 local FOOTER = { hint_top = 1022, hint_fade = 200 }
 local HINT_GAP = "        "
@@ -58,7 +59,7 @@ function result.header(course)
     }
 end
 
-local function verdict(s, left, text_x, course)
+local function verdict(s, main_state, left, text_x, course)
     local order = layout.order.head
     local area = layout.head()
     local words = course and VERDICT.course or VERDICT.chart
@@ -79,8 +80,16 @@ local function verdict(s, left, text_x, course)
         parts.difficulty_rect(s, bar, motion.grow_down(0, HEAD.grow))
     end
     local notice = { x = text_x, top = area.top + HEAD.notice_drop, w = box.w }
-    local unsaved = layout.appear(order, { op = { props.option.DISABLE_SAVE_SCORE }, color = theme.color.muted })
+    local unsaved = layout.appear(order, { op = { props.option.DISABLE_SAVE_SCORE, -PLAYBACK.changed }, color = theme.color.muted })
     s:text({ text = i18n.t("result_not_saved"), size = theme.type.caption, align = "right" }, notice, unsaved)
+    local at_rate = {
+        value = function()
+            return PLAYBACK.unsaved(main_state.number(PLAYBACK.percent))
+        end,
+        size = theme.type.caption,
+        align = "right",
+    }
+    s:text(at_rate, notice, layout.appear(order, { op = { PLAYBACK.changed }, color = theme.tone.yellow }))
 end
 
 local function keys(s, left, baseline)
@@ -140,7 +149,7 @@ local function head(s, main_state, course)
     local area = layout.head()
     local text_x = left.x + HEAD.bar_width + HEAD.text_gap
     local baseline = area.top + HEAD.baseline_drop
-    verdict(s, left, text_x, course)
+    verdict(s, main_state, left, text_x, course)
     local subtitled = not course and main_state.text(props.text.SUBTITLE) ~= ""
     local title_top = area.top + (subtitled and HEAD.title_drop.subtitled or HEAD.title_drop.alone)
     local title = { ref = props.text.TITLE, size = theme.type.title, overflow = props.text_overflow.SHRINK }

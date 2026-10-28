@@ -275,6 +275,9 @@ fn course_start_gauge(set: rbms_judge::gauge_tables::GaugeSetId, start: rbms_jud
 /// FAILED course, and the settings it narrowed are put back before they are taken as the player's
 /// own.
 ///
+/// A course is played at the chart's own speed whatever PLAYBACK RATE says, so that every stage is
+/// kept ([`AppShared::run_playback_percent`]); a player who has another rate set is told so here.
+///
 /// The course opens on the course gauge the GAUGE setting maps to, read off the table the COURSE
 /// GAUGE setting picks for a seven-key chart: the first chart's mode is not known until it loads,
 /// and every table's course gauges open at the same value.
@@ -292,6 +295,9 @@ fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
     let start = set.course_gauge_for(shared.config.play.gauge);
     shared.course_overrides = Some(overrides);
     shared.course_run = Some(rbms_course::CourseRun::new(entry.course.clone(), course_start_gauge(set, start)));
+    if shared.config.play.playback_percent != rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT {
+        notify_text(Level::Info, NoticeText::CoursePlaysAtTheChartsOwnSpeed, &[&shared.config.play.playback_percent]);
+    }
     load_course_stage(shared)
 }
 
@@ -334,20 +340,21 @@ fn end_course(shared: &mut AppShared) -> Transition {
 
 /// Why this run's score must not be sent to the IR, or `None` when it may be submitted: only a run
 /// the player did not play by hand -- an autoplay, a replay being watched or a practice slice -- is
-/// held back (`MusicResult.java:82` sends only a PLAY).
+/// held back (`MusicResult.java:82` sends only a PLAY), and a run played at another PLAYBACK RATE
+/// than the chart's own (`changed_rate`, the player's decision of 2026-10-29).
 ///
 /// Every run the player played is sent, assisted or not (the player's decision of 2026-10-14: "no
 /// record goes unsaved"). The reference sends none that cleared its `score` flag; here the assist
 /// travels with the submission instead ([`assist_flags`], `options.scratch_auto`) and what the
 /// server makes of it is the server's.
-fn ir_submission_block_reason(autoplay: bool, replay: bool, practice: bool) -> Option<&'static str> {
+fn ir_submission_block_reason(autoplay: bool, replay: bool, practice: bool, changed_rate: Option<i32>) -> Option<&'static str> {
     if autoplay {
         return Some("autoplay");
     }
     if replay {
         return Some("replay playback");
     }
-    crate::practice::practice_block_reason(practice)
+    crate::practice::practice_block_reason(practice).or_else(|| changed_rate.and_then(crate::practice::playback_rate_block_reason))
 }
 
 /// Whether this run may update the stored bests (EX / judgements / combo / BP): a run the player
@@ -355,8 +362,8 @@ fn ir_submission_block_reason(autoplay: bool, replay: bool, practice: bool) -> O
 /// (`BMSPlayer.java:208-214` clears the `score` flag for it, `ScoreData.java:548,566,572,578` gate
 /// the bests on that flag). A SCRATCH AUTO run sets bests like any other: its turntable notes are
 /// not in the chart it was judged on, so it is scored out of the notes it was played on.
-fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, practice: bool) -> bool {
-    ir_submission_block_reason(autoplay, replay, practice).is_none() && !custom_judge
+fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, practice: bool, changed_rate: Option<i32>) -> bool {
+    ir_submission_block_reason(autoplay, replay, practice, changed_rate).is_none() && !custom_judge
 }
 
 /// The TOTAL a run is judged on in place of the chart's: the one a replay being watched recorded, or

@@ -21,7 +21,7 @@ use crate::{Color, Rect};
 const SELECT_CANVAS_WIDTH: f32 = 1280.0;
 const SELECT_CANVAS_HEIGHT: f32 = 720.0;
 
-pub const OPTIONS_ROW_COUNT: usize = 11;
+pub const OPTIONS_ROW_COUNT: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OptionsLayout {

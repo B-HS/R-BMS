@@ -239,14 +239,20 @@ fn green_number_floating_tracks_bpm_scroll_and_cover() {
     assert!((green_number_for(false, 120.0, 1.0, 1.0, 0.4) - 1200.0).abs() < 1e-3);
 }
 
+/// A PLAYBACK RATE other than the chart's own.
+const CHANGED_RATE: i32 = 115;
+
 /// Every run the player played by hand is sent, assisted or not (the player's decision of
-/// 2026-10-14); only a run nobody played is held back.
+/// 2026-10-14); only a run nobody played is held back, and a run played at another PLAYBACK RATE
+/// than the chart's own (the player's decision of 2026-10-29).
 #[test]
-fn ir_submission_is_held_back_only_for_a_run_nobody_played() {
-    assert_eq!(ir_submission_block_reason(false, false, false), None);
-    assert_eq!(ir_submission_block_reason(true, false, false), Some("autoplay"));
-    assert_eq!(ir_submission_block_reason(false, true, false), Some("replay playback"));
-    assert_eq!(ir_submission_block_reason(false, false, true), Some("practice"));
+fn ir_submission_is_held_back_only_for_a_run_nobody_played_or_one_at_another_rate() {
+    assert_eq!(ir_submission_block_reason(false, false, false, None), None);
+    assert_eq!(ir_submission_block_reason(true, false, false, None), Some("autoplay"));
+    assert_eq!(ir_submission_block_reason(false, true, false, None), Some("replay playback"));
+    assert_eq!(ir_submission_block_reason(false, false, true, None), Some("practice"));
+    assert_eq!(ir_submission_block_reason(false, false, false, Some(CHANGED_RATE)), Some("playback rate"));
+    assert_eq!(ir_submission_block_reason(true, false, false, Some(CHANGED_RATE)), Some("autoplay"), "a run nobody played says so first");
 }
 
 /// A run that sets bests is always one that is sent; a widened judge is sent and sets none, and
@@ -257,12 +263,14 @@ fn updates_score_is_a_run_that_is_sent_and_not_judged_wider() {
         for &replay in &[false, true] {
             for &custom_judge in &[false, true] {
                 for &practice in &[false, true] {
-                    let sent = ir_submission_block_reason(autoplay, replay, practice).is_none();
-                    assert_eq!(
-                        updates_score(autoplay, replay, custom_judge, practice),
-                        sent && !custom_judge,
-                        "autoplay={autoplay} replay={replay} custom_judge={custom_judge} practice={practice}"
-                    );
+                    for changed_rate in [None, Some(CHANGED_RATE)] {
+                        let sent = ir_submission_block_reason(autoplay, replay, practice, changed_rate).is_none();
+                        assert_eq!(
+                            updates_score(autoplay, replay, custom_judge, practice, changed_rate),
+                            sent && !custom_judge,
+                            "autoplay={autoplay} replay={replay} custom_judge={custom_judge} practice={practice} changed_rate={changed_rate:?}"
+                        );
+                    }
                 }
             }
         }
@@ -271,11 +279,12 @@ fn updates_score_is_a_run_that_is_sent_and_not_judged_wider() {
 
 #[test]
 fn updates_score_for_every_run_by_hand_but_a_widened_judge() {
-    assert!(updates_score(false, false, false, false));
-    assert!(!updates_score(false, false, true, false), "a widened judge window does not");
-    assert!(!updates_score(true, false, false, false));
-    assert!(!updates_score(false, true, false, false));
-    assert!(!updates_score(false, false, false, true), "a practice slice does not");
+    assert!(updates_score(false, false, false, false, None));
+    assert!(!updates_score(false, false, true, false, None), "a widened judge window does not");
+    assert!(!updates_score(true, false, false, false, None));
+    assert!(!updates_score(false, true, false, false, None));
+    assert!(!updates_score(false, false, false, true, None), "a practice slice does not");
+    assert!(!updates_score(false, false, false, false, Some(CHANGED_RATE)), "a run at another rate does not");
 }
 
 /// The exact table decision 12 states, over every judge width and long-note margin the rows can

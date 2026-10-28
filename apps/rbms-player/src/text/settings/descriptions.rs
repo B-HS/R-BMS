@@ -286,6 +286,11 @@ rbms_model::translations! {
             "Discordのプロフィールに、プレー中のゲームとしてR-BMSを表示し、曲、モードと難易度、コース、プレー時間も表示されます。\
              プロフィールを見られる全員に見えます。このコンピューターにDiscordデスクトップアプリが必要です。"
         ),
+        PlaybackRate => (
+            "How fast the chart is played, its pitch going with it. A run at anything but 100% is not saved, replayed or sent.",
+            "차트를 재생하는 속도로, 음높이도 함께 바뀝니다. 100%가 아닌 플레이는 저장·리플레이·전송되지 않습니다.",
+            "譜面を再生する速度で、音の高さも一緒に変わります。100%以外のプレーは保存・リプレイ・送信されません。"
+        ),
         MasterVolume => (
             "The volume of everything the player sounds, applied after the three below are mixed.",
             "플레이어가 내는 모든 소리의 볼륨으로, 아래 세 가지를 섞은 뒤에 적용됩니다.",

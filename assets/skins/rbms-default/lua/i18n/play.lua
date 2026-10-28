@@ -7,4 +7,5 @@ return {
     play_score_graph = { en = "SCORE GRAPH", ko = "스코어 그래프", ja = "スコアグラフ" },
     play_loading = { en = "LOADING", ko = "로딩", ja = "読み込み中" },
     play_ready = { en = "READY", ko = "준비", ja = "準備" },
+    play_playback_rate = { en = "RATE {0}%", ko = "재생 속도 {0}%", ja = "再生速度{0}%" },
 }

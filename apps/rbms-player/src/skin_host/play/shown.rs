@@ -189,6 +189,10 @@ pub struct PlayLive {
     pub played: PlayedOptions,
     /// How much of the chart and its sounds has loaded, from nothing (0) to everything (1).
     pub load_progress: f32,
+    /// The rate the run is played at, in percent of the chart's own speed, when that is not the
+    /// chart's own speed: its PLAYBACK RATE, or a practice slice's FREQUENCY. The tempos and travel
+    /// times of [`PlayLive::scroll`] are already the ones the player hears at it.
+    pub changed_playback_percent: Option<i32>,
 }
 
 /// The play screen's frame, as the host reads it.

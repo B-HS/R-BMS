@@ -1,6 +1,6 @@
 # 플레이 배속(재생 속도) 조사
 
-> 최종 갱신 2026-10-29 · 대응 커밋 c1dc988
+> 최종 갱신 2026-10-29 · 대응 작업 U2 (구현 결과는 맨 끝 6절. 1~5절은 구현 전 조사 그대로이며 줄 번호는 c1dc988 기준)
 > 대상: 요구사항 5 "플레이 배속(100% 기본, 1% 단위로 줄이거나 높이기)". 사용자 결정: 50%~200%, 1% 단위, 재생 속도 자체를 바꿔 피치도 함께 변함(beatoraja `FrequencyType.FREQUENCY`), 새 의존성 없음, **100% 가 아닌 판은 로컬 저장·서버 전송·리플레이 저장을 모두 하지 않는다**(기존 "사람이 친 판은 전부 저장·전송" 정책, [ADR](../../acknowledge/2026-10-14-adr-save-and-send-every-played-run.md)의 명시적 예외).
 > 읽기 전용 조사다. 소스는 고치지 않았다. 실행한 검증: `cargo test -p rbms-judge --locked --lib a_slice_played_at_another_frequency` 1건 통과(아래 1.4).
 
@@ -239,3 +239,17 @@ beatoraja 의 방식(저장소 밖 원본 소스 `~/development/beatoraja` 에�
 6. `PlaySession::play_time_ms` 의 계산식(곡 끝과 배율의 관계를 계산으로만 판단).
 7. `apps/rbms-player/src/timing.rs` 의 내용(시계 관련 코드가 `app_play.rs` 에 있음을 grep 으로만 확인).
 8. 앱(`rbms-player`) 범위의 연습 FREQUENCY 시험(`timing_tests.rs`, `practice/tests.rs`)은 이번에 돌리지 않았다.
+
+## 6. 구현 결과 (U2, 2026-10-29)
+
+| 항목 | 구현 | 위치 |
+| --- | --- | --- |
+| 설정 | `PlayOptions.playback_percent`(기본 100), 범위 상수 `PLAYBACK_RATE_MIN_PERCENT`(50)·`PLAYBACK_RATE_MAX_PERCENT`(200)·`PLAYBACK_RATE_STEP_PERCENT`(1)·`PLAYBACK_RATE_UNCHANGED_PERCENT`(100), `sanitise` 가 자름. 연습의 `FREQ_MIN/MAX/UNMODIFIED` 는 이 상수를 가리킨다 | `crates/rbms-config/src/schema.rs`, `apps/rbms-player/src/practice.rs` |
+| 행 | `SettingId::PlaybackRate`(목록 끝, `SETTING_COUNT` 100), PLAY 메뉴 CHART 묶음 LEGACY NOTE 아래, F1 오버레이 마지막 행(`OPTIONS_ROW_COUNT` 12) | `settings.rs`, `stage/play_menu/rows.rs`, `app_options.rs`, `crates/rbms-render/src/theme.rs` |
+| 시계 | 권장안 A. `PlayState.whole_run_clock`(연습이 아닐 때의 `PracticeClock`), `set_playback_rate` 가 시계와 세션 배율을 함께 건다. 값은 `PendingChart.playback_percent` 로 실려 `into_play` 에서 걸린다. 코스·리플레이 감상은 `AppShared::run_playback_percent` 가 100 으로 강제 | `stage/play/mod.rs`, `app_play.rs` |
+| 표시 | 스킨 `Scroll` 의 네 BPM·`region_ms`, 내장 녹색·흰 숫자, KEEP GREEN NUMBER 기준 템포를 실시간 기준으로(`PracticeClock::heard_bpm`, `heard_length`). 연습 FREQUENCY 에도 같은 식이 적용된다 | `stage/play/mod.rs` |
+| 기록 차단 | `PlayState::keeps_no_record`(연습 또는 배속) 를 `record_run`·`keep_run_cut_short_by_quitting`·`record_retried_run` 이 쓴다. 서버 사유 `"playback rate"`(`ir_submission_block_reason` 넷째 인자). 결과 화면은 배속 판에 보인다 | `app_result.rs`, `lib.rs` |
+| 결과 화면 | `RunStanding.unsaved_playback_percent` → `ResultRun.playback_note`("PLAYBACK RATE n%: NOT SAVED, NOT SENT", 어시스트 줄 대신), `updates_score` false, 스냅샷 `changed_playback_percent` | `stage/result.rs`, `skin_host/result/snapshot.rs`, `text/menus/ir_outcome.rs` |
+| 결함 후보 A | 실제 결함. PLAY 타이머가 이미 차트 시각이라 배율을 곱하면 이중 배율. `PlayCursor.speed` 필드를 없앴다 | `crates/rbms-render/src/skin_render/graphs/notes_dist.rs` |
+| 결함 후보 B | 실제 결함. `play_speed_percent` 가 분석 모드가 아니면 시계의 배율을 돌려준다 | `stage/play/mod.rs` |
+| 스킨 id | 불린 21106 `RBMS_OPTION_PLAYBACK_RATE_CHANGED`, 정수 21084 `RBMS_NUMBER_PLAYBACK_PERCENT`. Result → Play → Options 순으로 답한다(선곡은 설정값) | `skin_host/extension.rs`, `mod.rs` |

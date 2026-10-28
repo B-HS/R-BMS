@@ -434,26 +434,30 @@ fn on_the_play_screen_the_judgements_are_compared_with_the_screen_only_every_750
     assert_eq!(rig.judge(1, 1), rgb(0x0088ff), "but it is after");
 }
 
+/// How long the run had played when the play timer test below first draws, in microseconds: far
+/// enough that the cursor crosses a pixel inside the fifty milliseconds it waits between paints.
+const PLAYED_BEFORE_THE_FIRST_DRAW_US: i64 = 1_090_000;
+
 #[test]
 fn the_play_screen_draws_the_range_and_the_position_and_moves_them_every_50_ms() {
     let mut rig = Rig::new("dist-cursor", r#"{ "id": "judge-graph", "type": 1 }"#, r#"{ "id": "bpm-graph" }"#);
     let rows: [[u32; 6]; SECONDS] = quiet();
-    rig.timers.set_on(timer_id::PLAY, 0);
-    let cursor = PlayCursor { start_ms: Some(2_000), end_ms: Some(8_000), speed: Some(8.0) };
+    rig.timers.set_on(timer_id::PLAY, -PLAYED_BEFORE_THE_FIRST_DRAW_US);
+    let cursor = PlayCursor { start_ms: Some(2_000), end_ms: Some(8_000) };
     let live = |rows| playing(rows, cursor);
 
     rig.draw(live(&rows), 100);
     assert_eq!(rig.judge(10, 20), Color::rgb(128, 255, 128), "the start of the range, two seconds of twelve across");
     assert_eq!(rig.judge(40, 20), Color::rgb(255, 128, 128), "and its end");
-    assert_eq!(rig.judge(4, 20), WHITE, "the run is 100 ms in, eight times over");
+    assert_eq!(rig.judge(5, 20), WHITE, "the run is 1190 ms in, just short of six pixels of sixty");
     assert_eq!(rig.judge(8, 20), Color::BLACK);
 
     rig.draw(live(&rows), 140);
-    assert_eq!(rig.judge(4, 20), WHITE, "forty milliseconds later the cursor has not moved");
+    assert_eq!(rig.judge(5, 20), WHITE, "forty milliseconds later the cursor has not moved");
     assert_eq!(rig.judge(8, 20), Color::BLACK);
     rig.draw(live(&rows), 160);
-    assert_eq!(rig.judge(8, 20), WHITE, "and after fifty it has");
-    assert_eq!(rig.judge(4, 20), Color::BLACK);
+    assert_eq!(rig.judge(8, 20), WHITE, "and after fifty it has, across the sixth pixel");
+    assert_eq!(rig.judge(5, 20), Color::BLACK);
 
     let shorter: [[u32; 6]; 6] = [[0; 6]; 6];
     rig.draw(live(&shorter), 170);

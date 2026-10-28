@@ -198,12 +198,16 @@ mod tests {
         }
     }
 
+    /// A PLAYBACK RATE other than the chart's own, for the reason a run at it is not sent.
+    const CHANGED_RATE: i32 = 115;
+
     #[test]
     fn every_reason_the_program_gives_for_not_sending_a_run_is_written_in_every_language() {
         let given = [
-            crate::ir_submission_block_reason(true, false, false),
-            crate::ir_submission_block_reason(false, true, false),
-            crate::ir_submission_block_reason(false, false, true),
+            crate::ir_submission_block_reason(true, false, false, None),
+            crate::ir_submission_block_reason(false, true, false, None),
+            crate::ir_submission_block_reason(false, false, true, None),
+            crate::ir_submission_block_reason(false, false, false, Some(CHANGED_RATE)),
             Some(crate::app_ranking::NOT_SIGNED_IN),
         ];
         for reason in given.into_iter().flatten() {

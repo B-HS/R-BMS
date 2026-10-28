@@ -249,6 +249,16 @@ pub const TARGET_RATE_STEP_PERCENT: i32 = 1;
 /// The share the RATE CUSTOM target asks for until the player chooses one: a little under RATE AAA.
 pub const TARGET_RATE_DEFAULT_PERCENT: i32 = 85;
 
+/// Slowest and fastest the PLAYBACK RATE row plays a chart at, in percent of its own speed.
+pub const PLAYBACK_RATE_MIN_PERCENT: i32 = 50;
+pub const PLAYBACK_RATE_MAX_PERCENT: i32 = 200;
+
+/// One left/right step on the PLAYBACK RATE row.
+pub const PLAYBACK_RATE_STEP_PERCENT: i32 = 1;
+
+/// The chart's own speed: what a fresh install plays at, and the only rate a run is recorded at.
+pub const PLAYBACK_RATE_UNCHANGED_PERCENT: i32 = 100;
+
 /// TOTAL value that means "use the chart's own", and the floor of the TOTAL row.
 pub const TOTAL_FROM_CHART: f64 = 0.0;
 
@@ -523,6 +533,7 @@ impl Config {
         self.play.hidden = self.play.hidden.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
         self.play.lanecover_step_fine = self.play.lanecover_step_fine.clamp(LANE_SHADE_FINE_STEP_MIN, LANE_SHADE_FINE_STEP_MAX);
         self.play.total_override = self.play.total_override.max(TOTAL_FROM_CHART);
+        self.play.playback_percent = self.play.playback_percent.clamp(PLAYBACK_RATE_MIN_PERCENT, PLAYBACK_RATE_MAX_PERCENT);
         self.display.judge_text_y = self.display.judge_text_y.clamp(JUDGE_TEXT_Y_MIN, JUDGE_TEXT_Y_MAX);
         self.library.preview_volume = self.library.preview_volume.clamp(PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_MAX);
         self.library.preview_fade_ms = self.library.preview_fade_ms.clamp(PREVIEW_FADE_MIN_MS, PREVIEW_FADE_MAX_MS);
@@ -593,6 +604,11 @@ pub struct PlayOptions {
     /// reads up then. 0 plays every change.
     pub key_debounce_ms: u32,
     pub total_override: f64,
+    /// PLAYBACK RATE: how fast a chart played by hand or by the game is played, in percent of its own
+    /// speed, the pitch going with it. A run at anything but [`PLAYBACK_RATE_UNCHANGED_PERCENT`] is
+    /// neither stored, replayed nor sent. A course and a replay being watched play at the chart's
+    /// own speed whatever this says, and a practice slice at its own FREQUENCY.
+    pub playback_percent: i32,
     pub auto_replay: bool,
     /// What an Escape during a run has to be before it abandons the run.
     #[serde(with = "crate::options::play_escape_token")]
@@ -625,6 +641,7 @@ impl Default for PlayOptions {
             scratch_auto_color: None,
             key_debounce_ms: DEFAULT_KEY_DEBOUNCE_MS,
             total_override: TOTAL_FROM_CHART,
+            playback_percent: PLAYBACK_RATE_UNCHANGED_PERCENT,
             auto_replay: true,
             play_escape: PlayEscape::default(),
         }

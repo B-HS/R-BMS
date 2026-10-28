@@ -150,6 +150,8 @@ pub(crate) struct PendingChart {
     session: PlaySession,
     lntype: i32,
     ln_mode_key: String,
+    /// The rate the run is played at, in percent of the chart's own speed ([`AppShared::run_playback_percent`]).
+    playback_percent: i32,
 }
 
 impl PendingChart {
@@ -160,7 +162,9 @@ impl PendingChart {
 
     /// Turn the parsed chart into the screen that plays it, now that its images are in.
     pub(crate) fn into_play(self, bga: std::collections::HashMap<i32, crate::DecodedImage>) -> PlayState {
-        PlayState::new(self.session, bga, self.lntype, self.ln_mode_key)
+        let mut play = PlayState::new(self.session, bga, self.lntype, self.ln_mode_key);
+        play.set_playback_rate(self.playback_percent);
+        play
     }
 }
 
@@ -622,7 +626,19 @@ impl AppShared {
         };
         let mut session = PlaySession::new(model, options);
         session.set_judge_setup(judge_setup);
-        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds, ghost, overview })
+        let playback_percent = self.run_playback_percent();
+        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key, playback_percent }, bga, keysounds, ghost, overview })
+    }
+
+    /// The rate the run about to be played is played at, in percent of the chart's own speed: the
+    /// PLAYBACK RATE setting, except that a replay being watched and a course play at the chart's own
+    /// speed. A replay was recorded at it, and a course keeps a record of every stage. A practice
+    /// slice builds its own run at its own FREQUENCY and does not read this.
+    pub(crate) fn run_playback_percent(&self) -> i32 {
+        if self.replay.is_some() || self.course_run.is_some() {
+            return rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT;
+        }
+        self.config.play.playback_percent
     }
 
     /// How the chart of `mode` about to be loaded is judged, and, when it is a course stage played
@@ -1224,7 +1240,12 @@ pub(crate) fn pending_chart_for_tests() -> PendingChart {
     let src = rbms_parser::parse_with(b"#PLAYER 1\n#TITLE pending\n#BPM 120\n", Default::default());
     let mode = rbms_chart::detect_mode(&src, "pending.bms");
     let model = to_model(&src, mode);
-    PendingChart { session: PlaySession::new(model, SessionOptions::default()), lntype: 0, ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string() }
+    PendingChart {
+        session: PlaySession::new(model, SessionOptions::default()),
+        lntype: 0,
+        ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string(),
+        playback_percent: rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT,
+    }
 }
 
 /// The chart in `bytes`, parsed the way [`AppShared::load`] parses one and with nothing left to
@@ -1236,7 +1257,12 @@ pub(crate) fn loaded_chart_for_tests(bytes: &[u8], name: &str) -> LoadedChart {
     let overview = ChartOverview::of_model(&decoded.model);
     let session = PlaySession::new(decoded.model, SessionOptions::default());
     LoadedChart {
-        chart: PendingChart { session, lntype: 0, ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string() },
+        chart: PendingChart {
+            session,
+            lntype: 0,
+            ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string(),
+            playback_percent: rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT,
+        },
         bga: None,
         keysounds: None,
         ghost: None,

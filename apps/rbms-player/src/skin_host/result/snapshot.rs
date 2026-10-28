@@ -167,6 +167,9 @@ pub struct ResultInput {
     pub course_clear: Option<u8>,
     /// Whether the run counts towards the stored bests (`PlayerResource.isUpdateScore`).
     pub updates_score: bool,
+    /// The rate the run was played at, in percent of the chart's own speed, when that was not the
+    /// chart's own speed (PLAYBACK RATE). Nothing of such a run is kept.
+    pub changed_playback_percent: Option<i32>,
 }
 
 impl Default for ResultInput {
@@ -185,6 +188,7 @@ impl Default for ResultInput {
             course_titles: Vec::new(),
             course_clear: None,
             updates_score: true,
+            changed_playback_percent: None,
         }
     }
 }
@@ -222,6 +226,8 @@ pub struct ResultSnapshot {
     pub course_titles: Vec<String>,
     pub course_clear: Option<u8>,
     pub updates_score: bool,
+    /// The rate the run was played at when it was not the chart's own ([`ResultInput::changed_playback_percent`]).
+    pub changed_playback_percent: Option<i32>,
 }
 
 impl ResultSnapshot {
@@ -247,6 +253,7 @@ impl ResultSnapshot {
             course_titles: input.course_titles,
             course_clear: input.course_clear,
             updates_score: input.updates_score,
+            changed_playback_percent: input.changed_playback_percent,
         }
     }
 

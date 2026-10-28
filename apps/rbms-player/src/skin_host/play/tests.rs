@@ -74,6 +74,7 @@ fn live() -> PlayLive {
         long_note_mode: 1,
         played: PlayedOptions { random: 2, random_2p: 3, double_option: 1, custom_judge: true, bpm_guide: true, ..PlayedOptions::default() },
         load_progress: 1.0,
+        changed_playback_percent: None,
     }
 }
 

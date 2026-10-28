@@ -51,13 +51,16 @@
 use std::borrow::Cow;
 
 use rbms_chart::shuffle::NoteOption;
-use rbms_config::{Config, FixHiSpeed, ScoreTarget, green_of_duration};
+use rbms_config::{Config, FixHiSpeed, PLAYBACK_RATE_UNCHANGED_PERCENT, ScoreTarget, green_of_duration};
 use rbms_judge::JudgeAlgorithm;
 use rbms_judge::gauge::{GaugeIndex, GaugeKind};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 
-use super::extension::{RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_KEEP_GREEN_NUMBER_ON, RBMS_OPTION_LANE_COVER_ON, RBMS_OPTION_LIFT_ON, RBMS_OPTION_SCRATCH_AUTO_ON};
+use super::extension::{
+    RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_KEEP_GREEN_NUMBER_ON, RBMS_OPTION_LANE_COVER_ON, RBMS_OPTION_LIFT_ON,
+    RBMS_OPTION_PLAYBACK_RATE_CHANGED, RBMS_OPTION_SCRATCH_AUTO_ON,
+};
 use super::result::snapshot::FinishedRun;
 use super::{
     ClusterState, INDEX_CONSTANT, INDEX_GUIDE_SOUND, INDEX_TARGET_OPTION_FIRST, INDEX_TARGET_OPTION_LAST, INDEX_TIMING_AUTO_ADJUST, STRING_TARGET_NAME,
@@ -163,6 +166,8 @@ pub struct SettingsView {
     /// chart to chart (KEEP GREEN NUMBER), which the reference has no id for.
     pub scratch_auto: bool,
     pub keep_green_number: bool,
+    /// The PLAYBACK RATE setting, in percent of a chart's own speed.
+    pub playback_percent: i32,
     /// The target the player chose.
     pub target: ScoreTarget,
     /// The share, in percent, that the RATE CUSTOM target asks for.
@@ -210,6 +215,7 @@ impl SettingsView {
             guide_se: config.audio.guide_se,
             scratch_auto: play.scratch_auto,
             keep_green_number: play.keep_green_number,
+            playback_percent: play.playback_percent,
             target: judge.target,
             target_rate_percent: judge.target_rate_percent,
             target_stand_in: None,
@@ -334,6 +340,7 @@ impl SettingsView {
             RBMS_OPTION_LANE_COVER_ON => self.lane_cover,
             RBMS_OPTION_LIFT_ON => self.lift,
             RBMS_OPTION_HIDDEN_ON => self.hidden,
+            RBMS_OPTION_PLAYBACK_RATE_CHANGED => self.playback_percent != PLAYBACK_RATE_UNCHANGED_PERCENT,
             _ => return None,
         })
     }
@@ -351,6 +358,7 @@ impl SettingsView {
             NUMBER_HISPEED_AFTERDOT => hispeed(|speed| (speed * HISPEED_LR2_SCALE) as i32 % HISPEED_LR2_SCALE as i32),
             NUMBER_DURATION => duration.unwrap_or(INTEGER_ABSENT),
             NUMBER_DURATION_GREEN => duration.map_or(INTEGER_ABSENT, green_of_duration),
+            RBMS_NUMBER_PLAYBACK_PERCENT => self.playback_percent,
             _ => return None,
         })
     }

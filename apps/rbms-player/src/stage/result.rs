@@ -624,6 +624,9 @@ pub(crate) struct RunStanding {
     pub(crate) previous: PreviousScore,
     /// What the run was paced against, when it was paced against anything.
     pub(crate) target: Option<TargetView>,
+    /// The PLAYBACK RATE the run was played at, in percent, when it was not the chart's own speed and
+    /// nothing of the run was kept for it ([`crate::stage::play::PlayState::changed_playback_percent`]).
+    pub(crate) unsaved_playback_percent: Option<i32>,
 }
 
 /// Everything the screen keeps about the run beyond the built-in summary, in the shapes a skin's
@@ -644,6 +647,9 @@ pub(crate) struct ResultRun {
     updates_score: bool,
     /// What the screen says of a run the player played with an assist on, which set no best score.
     assist_note: Option<&'static str>,
+    /// What the screen says of a run played at another PLAYBACK RATE than the chart's own, which was
+    /// neither kept nor sent. It stands in for the assist note, which says what was kept.
+    playback_note: Option<String>,
     /// What became of the run's own replay.
     replay: ReplaySlot,
     /// The window of each judgement in milliseconds, late bound then early, best first.
@@ -670,7 +676,7 @@ impl ResultRun {
     /// Called once the run's record is kept in [`AppShared::run_records`]; a caller that kept none
     /// has the record taken from the session here.
     pub(crate) fn of(session: &PlaySession, shared: &AppShared, standing: RunStanding) -> ResultRun {
-        let RunStanding { replay_saved, lamp, previous, target } = standing;
+        let RunStanding { replay_saved, lamp, previous, target, unsaved_playback_percent } = standing;
         let taken;
         let record = match shared.run_records.last() {
             Some(kept) => kept,
@@ -691,13 +697,14 @@ impl ResultRun {
         let custom_judge = is_custom_judge(&setup);
         let own_total = crate::overrides_total(crate::run_total_override(&shared.config, shared.replay.as_ref()));
         let scratch_auto = crate::app_result::scratch_auto_played(session);
-        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge || own_total, false);
+        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge || own_total, false, unsaved_playback_percent);
         let snapshot = ResultSnapshot::of(ResultInput {
             previous,
             target,
             options: PlayedOptions { random: random_option_index(shared.config.play.random), custom_judge, ..PlayedOptions::default() },
             favorite_chart: Some(shared.favorites.contains(&chart.md5)),
             updates_score,
+            changed_playback_percent: unsaved_playback_percent,
             ..ResultInput::from_record(record, shared.mode, lamp)
         });
         let played_by_hand = !shared.run_plays_itself() && shared.replay.is_none();
@@ -705,7 +712,8 @@ impl ResultRun {
             stagefile,
             seed: session.seed(),
             updates_score,
-            assist_note: assist_note(custom_judge, own_total, scratch_auto).filter(|_| played_by_hand),
+            assist_note: assist_note(custom_judge, own_total, scratch_auto).filter(|_| played_by_hand && unsaved_playback_percent.is_none()),
+            playback_note: unsaved_playback_percent.filter(|_| played_by_hand).map(playback_note),
             replay: match (replay_saved, stored) {
                 (true, _) => ReplaySlot::Saved,
                 (false, true) => ReplaySlot::Exists,
@@ -725,6 +733,7 @@ impl ResultRun {
             seed: 0,
             updates_score: false,
             assist_note: None,
+            playback_note: None,
             replay: ReplaySlot::Missing,
             judge_area: [[0; 2]; TIMING_JUDGE_AREAS],
             gauges: rbms_judge::gauge::GaugeIndex::ALL.map(|index| record.gauge_log.of(index).to_vec()).to_vec(),
@@ -842,6 +851,12 @@ const WIDENED_JUDGE_NOTE: &str = "WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCOR
 /// judge is (the player's decision of 2026-10-15): kept and sent, an assist lamp, no best score.
 #[cfg(test)]
 const OWN_TOTAL_NOTE: &str = "OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE";
+
+/// What the screen says of a run played at `percent` of the chart's own speed: that nothing of it was
+/// kept or sent (the player's decision of 2026-10-29), in a line no longer than a submission line.
+fn playback_note(percent: i32) -> String {
+    AssistNoteText::PlaybackRate.fill(language(), &[&percent])
+}
 
 /// Which of them an assisted run is told, or `None` for a run with no assist on. With more than one
 /// on it is the stronger assist, which is the one the lamp is demoted by (`BMSPlayer.java:866`).
@@ -1100,8 +1115,8 @@ impl ResultState {
     /// to say of one; the built-in screen has always said that it is off.
     fn notice_lines(&self, shared: &AppShared, over_skin: bool) -> Vec<(String, IrLineKind)> {
         let mut lines = if over_skin && shared.ir_status == IrStatus::Off { Vec::new() } else { shared.ir_status.lines() };
-        if let Some(note) = self.run.as_ref().and_then(|run| run.assist_note) {
-            lines.push((note.to_owned(), IrLineKind::Warn));
+        if let Some(note) = self.run.as_ref().and_then(|run| run.playback_note.clone().or_else(|| run.assist_note.map(str::to_owned))) {
+            lines.push((note, IrLineKind::Warn));
         }
         lines
     }
@@ -1141,6 +1156,19 @@ impl ResultState {
     #[cfg(test)]
     pub(crate) fn notices(&self, shared: &AppShared) -> Vec<String> {
         self.notice_lines(shared, true).into_iter().map(|(text, _)| text).collect()
+    }
+
+    /// Whether this screen's run counted towards the stored bests, and the rate it tells a skin the
+    /// run was played at when that was not the chart's own, for the tests that check a run at another
+    /// PLAYBACK RATE sets no best.
+    #[cfg(test)]
+    pub(crate) fn updates_score(&self) -> bool {
+        self.run.as_ref().is_some_and(|run| run.updates_score && run.snapshot.updates_score)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reported_playback_percent(&self) -> Option<i32> {
+        self.run.as_ref().and_then(|run| run.snapshot.changed_playback_percent)
     }
 
     /// Put a run's measurements on the view, for the snapshots that check they are drawn.

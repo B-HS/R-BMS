@@ -143,16 +143,16 @@ const POPN_EARLY_LATE_COLORS: [u32; EARLY_LATE_BUCKETS] = [0x555555, 0xff5eb0, 0
 /// Where a play screen's cursor stands.
 ///
 /// A frame that carries one is a play screen's, which is what makes the graph draw the cursor and
-/// look for the run's judgements as they change.
+/// look for the run's judgements as they change. Where the run is comes from the play timer, which
+/// runs in the chart's own time whatever rate the chart is played at, as the two marks are; the
+/// reference scales its position by the practice frequency because its play timer runs in the
+/// player's time (`SkinNoteDistributionGraph.java:217-218`).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PlayCursor {
     /// Where a practice range starts, in milliseconds into the chart.
     pub start_ms: Option<i32>,
     /// Where a practice range ends, in milliseconds into the chart.
     pub end_ms: Option<i32>,
-    /// The speed a practice run is played at, as a multiple of the chart's own. The playing
-    /// position is scaled by it when it is above zero.
-    pub speed: Option<f32>,
 }
 
 /// How a chart's notes are spread, which is what a judgement graph plots.
@@ -417,8 +417,7 @@ fn paint_cursor(cursor: &mut Pixmap, seconds: usize, marks: PlayCursor, played_m
         mark(end.wrapping_mul(width) / span, END_CURSOR);
     }
     if let Some(played) = played_ms {
-        let scaled = marks.speed.filter(|speed| *speed > 0.0).map_or(played as f32, |speed| played as f32 * speed);
-        mark((scaled * width as f32 / span as f32) as i32, NOW_CURSOR);
+        mark((played as f32 * width as f32 / span as f32) as i32, NOW_CURSOR);
     }
 }
 

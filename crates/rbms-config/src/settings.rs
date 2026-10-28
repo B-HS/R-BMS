@@ -36,9 +36,9 @@ use crate::schema::{
     JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_STEP_MS, JUDGE_RATE_MAX_PERCENT, JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, JUDGE_TEXT_Y_MAX,
     JUDGE_TEXT_Y_MIN, JUDGE_TEXT_Y_STEP, KEY_DEBOUNCE_MAX_MS, KEY_DEBOUNCE_MIN_MS, KEY_DEBOUNCE_STEP_MS, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN,
     LANE_SHADE_FINE_STEP_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, LN_MARGIN_STEP_PERCENT,
-    PAD_DEBOUNCE_MAX_MS, PAD_DEBOUNCE_MIN_MS, PAD_DEBOUNCE_STEP_MS, PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX,
-    PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TARGET_RATE_MAX_PERCENT, TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART,
-    TOTAL_STEP, skin_screen_label,
+    PAD_DEBOUNCE_MAX_MS, PAD_DEBOUNCE_MIN_MS, PAD_DEBOUNCE_STEP_MS, PLAYBACK_RATE_MAX_PERCENT, PLAYBACK_RATE_MIN_PERCENT, PLAYBACK_RATE_STEP_PERCENT,
+    PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX, PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS,
+    TARGET_RATE_MAX_PERCENT, TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
 use crate::speed::{GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, duration_of_green, duration_stepped_by_green, green_of_duration};
@@ -272,10 +272,11 @@ pub enum SettingId {
     RankingKeys,
     DownloadFolder,
     DiscordStatus,
+    PlaybackRate,
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 99;
+pub const SETTING_COUNT: usize = 100;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -379,6 +380,7 @@ impl SettingId {
         SettingId::RankingKeys,
         SettingId::DownloadFolder,
         SettingId::DiscordStatus,
+        SettingId::PlaybackRate,
     ];
 
     /// Position of the row in the whole settings list, which is also its index in [`SettingId::ALL`].
@@ -644,6 +646,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     ),
     row(SettingId::Gauge, SettingTab::PlayChart, "GAUGE", SettingKind::Cycle { values: GAUGE_LABELS }, "Which gauge the run is cleared on"),
     row(SettingId::LegacyNote, SettingTab::PlayChart, "LEGACY NOTE", SettingKind::Toggle, "Draw long notes as plain notes"),
+    row(
+        SettingId::PlaybackRate,
+        SettingTab::PlayChart,
+        "PLAYBACK RATE",
+        SettingKind::IntRange { min: PLAYBACK_RATE_MIN_PERCENT, max: PLAYBACK_RATE_MAX_PERCENT, step: PLAYBACK_RATE_STEP_PERCENT, unit: PERCENT_UNIT },
+        "How fast the chart is played, its pitch going with it; a run at anything but 100% is not saved, replayed or sent",
+    ),
     row(
         SettingId::Target,
         SettingTab::PlayChart,
@@ -1116,6 +1125,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::Target => config.judge.target.label().to_string(),
         SettingId::TargetFallback => config.judge.target_fallback.label().to_string(),
         SettingId::TargetRate => format!("{}{}", config.judge.target_rate_percent, unit_of(id)),
+        SettingId::PlaybackRate => format!("{}{}", config.play.playback_percent, unit_of(id)),
         SettingId::Total => {
             if config.play.total_override > TOTAL_FROM_CHART {
                 format!("{}", config.play.total_override.round() as i32)
@@ -1328,6 +1338,10 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::TargetRate => {
             let next = (config.judge.target_rate_percent + delta * TARGET_RATE_STEP_PERCENT).clamp(TARGET_RATE_MIN_PERCENT, TARGET_RATE_MAX_PERCENT);
             store(&mut config.judge.target_rate_percent, next)
+        }
+        SettingId::PlaybackRate => {
+            let next = (config.play.playback_percent + delta * PLAYBACK_RATE_STEP_PERCENT).clamp(PLAYBACK_RATE_MIN_PERCENT, PLAYBACK_RATE_MAX_PERCENT);
+            store(&mut config.play.playback_percent, next)
         }
         SettingId::Total => {
             let next = (config.play.total_override + f64::from(delta) * TOTAL_STEP).clamp(TOTAL_FROM_CHART, TOTAL_MAX);
@@ -1557,6 +1571,7 @@ pub fn number_spec(id: SettingId) -> Option<NumberSpec> {
         | SettingId::JudgeWidthScratchGood => NumberSpec::whole(i64::from(JUDGE_RATE_MIN_PERCENT), i64::from(JUDGE_RATE_MAX_PERCENT), PERCENT_UNIT),
         SettingId::LongNoteMargin => NumberSpec::whole(i64::from(LN_MARGIN_MIN_PERCENT), i64::from(LN_MARGIN_MAX_PERCENT), PERCENT_UNIT),
         SettingId::TargetRate => NumberSpec::whole(i64::from(TARGET_RATE_MIN_PERCENT), i64::from(TARGET_RATE_MAX_PERCENT), PERCENT_UNIT),
+        SettingId::PlaybackRate => NumberSpec::whole(i64::from(PLAYBACK_RATE_MIN_PERCENT), i64::from(PLAYBACK_RATE_MAX_PERCENT), PERCENT_UNIT),
         SettingId::Total => NumberSpec::whole(counted(TOTAL_FROM_CHART, 1), TOTAL_ROW_MAX, NO_UNIT),
         SettingId::JudgeTextY => NumberSpec::whole(
             counted(f64::from(JUDGE_TEXT_Y_MIN), PERCENT_STEPS_PER_ONE),
@@ -1600,6 +1615,7 @@ pub fn number_steps(config: &Config, id: SettingId) -> Option<i64> {
         SettingId::JudgeOffset => i64::from(config.judge.offset_ms),
         SettingId::LongNoteMargin => i64::from(config.judge.longnote_margin_rate),
         SettingId::TargetRate => i64::from(config.judge.target_rate_percent),
+        SettingId::PlaybackRate => i64::from(config.play.playback_percent),
         SettingId::Total => counted(config.play.total_override, 1),
         SettingId::JudgeTextY => counted(f64::from(config.display.judge_text_y), PERCENT_STEPS_PER_ONE),
         SettingId::PreviewVolume => counted(f64::from(config.library.preview_volume), PERCENT_STEPS_PER_ONE),
@@ -1643,6 +1659,7 @@ pub fn set_number_steps(config: &mut Config, id: SettingId, steps: i64) -> Adjus
         SettingId::JudgeOffset => store(&mut config.judge.offset_ms, whole),
         SettingId::LongNoteMargin => store(&mut config.judge.longnote_margin_rate, whole),
         SettingId::TargetRate => store(&mut config.judge.target_rate_percent, whole),
+        SettingId::PlaybackRate => store(&mut config.play.playback_percent, whole),
         SettingId::Total => store(&mut config.play.total_override, steps as f64),
         SettingId::JudgeTextY => store(&mut config.display.judge_text_y, share_of(steps, PERCENT_STEPS_PER_ONE)),
         SettingId::PreviewVolume => store(&mut config.library.preview_volume, share_of(steps, PERCENT_STEPS_PER_ONE)),
@@ -1894,6 +1911,7 @@ mod tests {
             SettingId::GreenNumber => f64::from(green_of_duration(config.play.duration_ms)),
             SettingId::LongNoteMargin => f64::from(config.judge.longnote_margin_rate),
             SettingId::TargetRate => f64::from(config.judge.target_rate_percent),
+            SettingId::PlaybackRate => f64::from(config.play.playback_percent),
             _ if judge_width_slot(id).is_some() => f64::from(judge_width(config, id).unwrap_or_default()),
             SettingId::AudioPolyphony => config.audio.polyphony as f64,
             SettingId::Lift => f64::from(config.play.lift),
@@ -2320,6 +2338,7 @@ mod tests {
                 SettingId::Random,
                 SettingId::Gauge,
                 SettingId::LegacyNote,
+                SettingId::PlaybackRate,
                 SettingId::Target,
                 SettingId::TargetFallback,
                 SettingId::TargetRate,
@@ -2427,7 +2446,7 @@ mod tests {
 
     /// Every row that holds a number, with the smallest change it can hold as it is shown and the
     /// two ends of the row as they are shown.
-    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 26] = [
+    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 27] = [
         (SettingId::GreenNumber, "1", "1", "6000"),
         (SettingId::HiSpeed, "0.01", "0.01", "20.00"),
         (SettingId::HiSpeedStep, "0.01", "0.01", "1.00"),
@@ -2444,6 +2463,7 @@ mod tests {
         (SettingId::JudgeWidthScratchGood, "1%", "50%", "200%"),
         (SettingId::LongNoteMargin, "1%", "50%", "200%"),
         (SettingId::TargetRate, "1%", "1%", "100%"),
+        (SettingId::PlaybackRate, "1%", "50%", "200%"),
         (SettingId::Total, "1", "0", "5000"),
         (SettingId::JudgeTextY, "1%", "0%", "100%"),
         (SettingId::PreviewVolume, "1%", "0%", "100%"),

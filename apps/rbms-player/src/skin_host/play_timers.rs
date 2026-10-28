@@ -464,7 +464,10 @@ pub struct PlayingFrame {
     /// The tempo at that time (`LaneRenderer.getNowBPM`).
     pub bpm: f64,
     /// How fast the chart is running against the scene clock, in percent
-    /// (`BMSPlayer.getPlaySpeed`): a hundred as written, nought while it stands still.
+    /// (`BMSPlayer.getPlaySpeed`): a hundred as written, nought while it stands still. A run played
+    /// at another rate than the chart's own (a practice slice's FREQUENCY, PLAYBACK RATE) runs at
+    /// that rate, which is what the reference's retimed chart comes to: its tempo is the chart's
+    /// times the rate (`BMSPlayer.java:554-568`), and the rhythm timer beats at it.
     pub play_speed: i32,
     /// Whether the gauge is full (`Gauge.isMax`).
     pub gauge_max: bool,

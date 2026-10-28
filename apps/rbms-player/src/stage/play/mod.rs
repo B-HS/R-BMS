@@ -264,6 +264,9 @@ pub(crate) struct PlayState {
     /// The practice slice this run is, when it is one. The run ends at the slice's end time rather
     /// than at the last note, and an emptied gauge does not stop it ([`PlayState::set_practice`]).
     pub(crate) practice: Option<crate::practice::PracticeSession>,
+    /// The clock of a run that is not a practice slice: the chart from its beginning, at the PLAYBACK
+    /// RATE the run was started at ([`PlayState::set_playback_rate`]).
+    whole_run_clock: crate::practice::PracticeClock,
     /// The states a skin's play screen runs through, when a skin draws this run. `None` is the run
     /// as it is without a skin: it starts the moment the screen is up and ends the moment it is
     /// over.
@@ -351,6 +354,7 @@ impl PlayState {
             best_ghost: None,
             target_ghost: None,
             practice: None,
+            whole_run_clock: crate::practice::PracticeClock::normal(),
             scene: None,
             loads: None,
             feed: None,
@@ -414,8 +418,31 @@ impl PlayState {
         self.practice = Some(practice);
     }
 
+    /// Play this run at `percent` of the chart's own speed, its sounds pitched with it, and judge it
+    /// in the player's own time as a practice slice at that FREQUENCY is judged. A run at anything
+    /// but the chart's own speed keeps no record ([`PlayState::keeps_no_record`]). A practice slice
+    /// plays at its own FREQUENCY whatever this says. Call it before the first frame.
+    pub(crate) fn set_playback_rate(&mut self, percent: i32) {
+        self.whole_run_clock = crate::practice::PracticeClock::new(0, percent);
+        self.session.set_playback_rate(self.whole_run_clock.freq_percent());
+    }
+
+    /// The rate a run that is not a practice slice is played at, in percent of the chart's own
+    /// speed, when that is not the chart's own speed.
+    pub(crate) fn changed_playback_percent(&self) -> Option<i32> {
+        let percent = self.whole_run_clock.freq_percent();
+        crate::practice::playback_rate_block_reason(percent).filter(|_| self.practice.is_none()).map(|_| percent)
+    }
+
+    /// Whether nothing of this run is kept: no history row, replay, trace or submission. A practice
+    /// slice keeps nothing, and neither does a run played at another rate than the chart's own (the
+    /// player's decision of 2026-10-29). Only the practice slice also goes without a result screen.
+    pub(crate) fn keeps_no_record(&self) -> bool {
+        self.practice.is_some() || self.changed_playback_percent().is_some()
+    }
+
     fn practice_clock(&self) -> crate::practice::PracticeClock {
-        self.practice.as_ref().map(crate::practice::PracticeClock::from_session).unwrap_or_else(crate::practice::PracticeClock::normal)
+        self.practice.as_ref().map_or(self.whole_run_clock, crate::practice::PracticeClock::from_session)
     }
 
     /// Early hits of this run, split into the keys and the turntable.
@@ -531,13 +558,15 @@ impl PlayState {
         }
     }
 
-    /// The tempo this run's green number is held at ([`BpmStats::held`]), or `None` for a run that
-    /// holds none: the KEEP GREEN NUMBER row is off, or the course in progress locks the speed.
+    /// The tempo this run's green number is held at ([`BpmStats::held`]), as the player hears it at
+    /// the rate the run is played at, so the travel time held is one of the player's own time; or
+    /// `None` for a run that holds none: the KEEP GREEN NUMBER row is off, or the course in progress
+    /// locks the speed.
     fn held_tempo(&self, shared: &AppShared) -> Option<f64> {
         if shared.course_locks_speed() {
             return None;
         }
-        self.bpm.held(&shared.config.play)
+        self.bpm.held(&shared.config.play).map(|bpm| self.practice_clock().heard_bpm(bpm))
     }
 
     /// Put the scroll speed where the held green number wants it for this chart and the lane as it
@@ -1065,6 +1094,7 @@ impl PlayState {
     /// What only this screen knows of the frame, for the host's play clusters.
     fn live(&self, shared: &AppShared, feed: &SkinFeed, frame: DocumentFrame) -> PlayLive {
         let play = &shared.config.play;
+        let clock = self.practice_clock();
         let settings = SettingsView::of_config(&shared.config);
         let standing = self.standing(shared);
         PlayLive {
@@ -1086,12 +1116,13 @@ impl PlayState {
                 fix_hispeed: settings.chart.map_or(0, |chart| chart.fix_hispeed),
             },
             scroll: Scroll {
-                now_bpm: frame.bpm,
-                main_bpm: self.bpm.main,
-                min_bpm: self.bpm.min,
-                max_bpm: self.bpm.max,
-                region_ms: travel_region_ms(frame.travel.0, frame.hispeed as f32, frame.travel.1),
+                now_bpm: clock.heard_bpm(frame.bpm),
+                main_bpm: clock.heard_bpm(self.bpm.main),
+                min_bpm: clock.heard_bpm(self.bpm.min),
+                max_bpm: clock.heard_bpm(self.bpm.max),
+                region_ms: travel_region_ms(clock.heard_bpm(frame.travel.0), frame.hispeed as f32, frame.travel.1),
             },
+            changed_playback_percent: crate::practice::playback_rate_block_reason(clock.freq_percent()).map(|_| clock.freq_percent()),
             clock: PlayClock::of(&shared.skin_timers, standing.now_us),
             judge_timing_ms: shared.config.judge.offset_ms,
             judge_timing_auto: shared.config.judge.auto_offset,
@@ -1103,18 +1134,15 @@ impl PlayState {
         }
     }
 
-    /// Where the judgement graph's cursor runs: the whole chart, or the slice a practice run plays
-    /// at the speed it plays it.
+    /// Where the judgement graph's cursor runs: the whole chart, or the slice a practice run plays.
+    /// The graph reads where the run is off the play timer, which already runs in the chart's time
+    /// whatever rate it is played at, so no rate is handed to it.
     fn play_cursor(&self) -> PlayCursor {
         let Some(practice) = &self.practice else {
             return PlayCursor::default();
         };
         let millis = |time_us: i64| i32::try_from(whole_ms(time_us)).ok();
-        PlayCursor {
-            start_ms: millis(practice.start_us),
-            end_ms: millis(practice.end_us),
-            speed: Some(practice.freq_percent as f32 / FULL_SPEED_PERCENT as f32),
-        }
+        PlayCursor { start_ms: millis(practice.start_us), end_ms: millis(practice.end_us) }
     }
 
     /// The gauge the run is on, with the limits of every gauge it could be on, for the gauge object.
@@ -1367,11 +1395,12 @@ impl PlayState {
         self.attach_ghosts();
     }
 
-    /// How fast the chart is running against the scene clock, in percent: full speed, or whatever a
-    /// replay under analysis is being played at, which is nought while it is paused.
+    /// How fast the chart is running against the scene clock, in percent: the rate the run is played
+    /// at (a practice slice's FREQUENCY, or the PLAYBACK RATE), or whatever a replay under analysis
+    /// is being played at, which is nought while it is paused.
     fn play_speed_percent(&self) -> i32 {
         if !self.session.analysis_manual() {
-            return FULL_SPEED_PERCENT as i32;
+            return self.practice_clock().freq_percent();
         }
         if self.session.analysis_paused() { 0 } else { (self.session.analysis_rate() * FULL_SPEED_PERCENT) as i32 }
     }
@@ -1697,9 +1726,10 @@ impl StageHandler for PlayState {
             Some(bpm) => (bpm, 1.0),
             None => (segment_bpm, scroll),
         };
-        let green = green_number_for(constant, bpm, hispeed, shown_scroll, cover);
+        let clock = self.practice_clock();
+        let green = clock.heard_length(green_number_for(constant, bpm, hispeed, shown_scroll, cover));
         let white = match ctx.shared.config.display.show_white_number {
-            true => (green_number_for(constant, bpm, hispeed, shown_scroll, 0.0) - green).max(0.0),
+            true => (clock.heard_length(green_number_for(constant, bpm, hispeed, shown_scroll, 0.0)) - green).max(0.0),
             false => 0.0,
         };
         let best_ex = ctx.shared.scores.best_ex_for_md5_in_ln_mode(&play.model().md5, &self.ln_mode_key);

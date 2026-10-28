@@ -6,6 +6,7 @@ return {
     result_course_cleared = { en = "COURSE CLEARED", ko = "코스 클리어", ja = "コースクリア" },
     result_course_failed = { en = "COURSE FAILED", ko = "코스 실패", ja = "コース失敗" },
     result_not_saved = { en = "SCORE NOT SAVED", ko = "스코어 저장 안 됨", ja = "スコア未保存" },
+    result_not_saved_at_rate = { en = "NOT SAVED (RATE {0}%)", ko = "저장 안 됨 (재생 속도 {0}%)", ja = "未保存（再生速度{0}%）" },
     result_stage_one = { en = "{0} STAGE", ko = "스테이지 {0}개", ja = "{0}ステージ" },
     result_stage_many = { en = "{0} STAGES", ko = "스테이지 {0}개", ja = "{0}ステージ" },
     result_hint_chart = {

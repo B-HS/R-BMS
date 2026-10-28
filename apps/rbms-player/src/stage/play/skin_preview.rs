@@ -762,6 +762,7 @@ impl PlaySample {
             long_note_mode: settings.played.long_note_mode,
             played: settings.played,
             load_progress: LOADED,
+            changed_playback_percent: None,
         };
         let shown = PlayShown::of(&self.session, &live);
         let (lift, lanecover, hidden) =

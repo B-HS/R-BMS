@@ -11,10 +11,11 @@ use rbms_config::{
     DEFAULT_HISPEED, GREEN_NUMBER_FINE_STEP, GREEN_NUMBER_STEP, HISPEED_MAX, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, duration_of_green, green_of_duration,
 };
 use rbms_play::{NullSink, SessionOptions};
-use rbms_skin::property::generated::{NUMBER_DURATION, NUMBER_DURATION_GREEN, NUMBER_JUDGETIMING, NUMBER_LANECOVER1, NUMBER_LIFT1};
+use rbms_skin::property::generated::{NUMBER_DURATION, NUMBER_DURATION_GREEN, NUMBER_JUDGETIMING, NUMBER_LANECOVER1, NUMBER_LIFT1, NUMBER_NOWBPM};
 
 use super::*;
 use crate::skin_host::ClusterState;
+use crate::skin_host::extension::{RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_PLAYBACK_RATE_CHANGED};
 use crate::stage::KeyInput;
 use crate::{App, Config, LaunchOptions};
 
@@ -541,4 +542,55 @@ fn a_run_that_reaches_its_result_saves_its_offset_and_a_replay_judged_where_it_w
         let reproduced = again.session.summary();
         assert_eq!((reproduced.counts, reproduced.fast, reproduced.early), (summary.counts, summary.fast, summary.early), "watched at {watched_at_us} us");
     }
+}
+
+/// The PLAYBACK RATE of a run played at double speed, in percent.
+const DOUBLE_SPEED_PERCENT: i32 = 200;
+
+/// How far apart two speeds may be and still be the one speed, for the rounding of the travel time.
+const SPEED_ROUNDING: f64 = 0.01;
+
+/// A run at another PLAYBACK RATE holds the green number in the player's own time: at double speed
+/// the chart goes by twice as fast, so KEEP GREEN NUMBER halves the scroll speed and the number on
+/// show is the one the settings hold; the tempo a skin is shown is the one the player hears. The two
+/// ids of the rate are answered on the play screen.
+#[test]
+fn a_run_at_another_playback_rate_holds_the_green_number_in_the_players_own_time() {
+    let mut app = app_on("rate-green", holding());
+    let held = green_of_duration(app.shared.config.play.duration_ms);
+    let mut full = run_at(SLOW_BPM);
+    enter(&mut full, &mut app);
+    let full_speed = hispeed(&app);
+    assert!((green(&mut full, &app) - held).abs() <= GREEN_ROUNDING);
+
+    let mut doubled = run_at(SLOW_BPM);
+    doubled.set_playback_rate(DOUBLE_SPEED_PERCENT);
+    enter(&mut doubled, &mut app);
+    assert!((hispeed(&app) * 2.0 - full_speed).abs() < SPEED_ROUNDING, "the speed at double rate is {} against {full_speed}", hispeed(&app));
+    let on_show = green(&mut doubled, &app);
+    assert!((on_show - held).abs() <= GREEN_ROUNDING, "the green number at double rate is {on_show}, not the {held} held");
+    assert_eq!(number(&mut doubled, &app, NUMBER_NOWBPM), 2 * SLOW_BPM as i32, "the tempo the player hears");
+
+    let frame = shown(&mut doubled, &app);
+    let host = crate::skin_host::play::PlayState::of(&frame);
+    assert_eq!(host.boolean(RBMS_OPTION_PLAYBACK_RATE_CHANGED), Some(true));
+    assert_eq!(host.integer(RBMS_NUMBER_PLAYBACK_PERCENT), Some(DOUBLE_SPEED_PERCENT));
+    let frame = shown(&mut full, &app);
+    let host = crate::skin_host::play::PlayState::of(&frame);
+    assert_eq!((host.boolean(RBMS_OPTION_PLAYBACK_RATE_CHANGED), host.integer(RBMS_NUMBER_PLAYBACK_PERCENT)), (Some(false), Some(100)));
+}
+
+/// Without KEEP GREEN NUMBER the speed stays where the player set it, and the green number on show
+/// is the travel time the player sees: half as long at double speed.
+#[test]
+fn a_run_at_another_playback_rate_shows_the_green_number_of_the_players_own_time() {
+    let mut app = app_on("rate-green-free", Config::default());
+    let mut full = run_at(SLOW_BPM);
+    enter(&mut full, &mut app);
+    let at_full = green(&mut full, &app);
+    let mut doubled = run_at(SLOW_BPM);
+    doubled.set_playback_rate(DOUBLE_SPEED_PERCENT);
+    enter(&mut doubled, &mut app);
+    assert_eq!(hispeed(&app), DEFAULT_HISPEED, "the speed did not move");
+    assert!((green(&mut doubled, &app) * 2 - at_full).abs() <= 2 * GREEN_ROUNDING, "the green number at double rate against {at_full}");
 }

@@ -10,6 +10,7 @@ local info = {}
 local EX_PER_NOTE = 2
 local SIGN_PLACES = 1
 local STAGE_NUMBER = i18n.template("common_stage_number")
+local PLAYBACK = { changed = props.extension.PLAYBACK_RATE_CHANGED, percent = props.extension_number.PLAYBACK_PERCENT, label = i18n.template("play_playback_rate") }
 
 local function stage_label(number)
     return function()
@@ -158,6 +159,14 @@ local function head(s, view, main_state)
         local label = { text = stage.label, size = narrow and HEAD.line or HEAD.stage, align = "right" }
         s:text(label, stage_box, { op = { stage.op }, color = theme.color.accent })
     end
+    local rate = {
+        value = function()
+            return PLAYBACK.label(main_state.number(PLAYBACK.percent))
+        end,
+        size = narrow and HEAD.line or HEAD.stage,
+        align = "right",
+    }
+    s:text(rate, stage_box, { op = { PLAYBACK.changed }, color = theme.tone.yellow })
 
     local level = { sprite = "num18", ref = props.number.PLAYLEVEL, known = main_state.number(props.number.PLAYLEVEL) }
     parts.by_difficulty(function(index, op, color, name)

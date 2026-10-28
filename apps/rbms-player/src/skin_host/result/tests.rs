@@ -522,3 +522,20 @@ fn a_host_with_no_snapshot_falls_through_as_before() {
     assert_eq!(host.image_index(INDEX_CLEAR), IMAGE_INDEX_ABSENT);
     assert_eq!(host.boolean(OPTION_RESULT_CLEAR), None);
 }
+
+/// The rate a run at another PLAYBACK RATE was played at is told to a skin of the result screen, and
+/// that it was not the chart's own; a run at the chart's own speed reads off and a hundred. Both ids
+/// are routed here first, so the result screen's answer wins over the browser settings it keeps.
+#[test]
+fn the_rate_of_a_run_at_another_playback_rate_is_told_to_a_skin() {
+    use crate::skin_host::extension::{RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_PLAYBACK_RATE_CHANGED};
+    let faster = snapshot_of(ResultInput { changed_playback_percent: Some(115), updates_score: false, ..improved() });
+    let state = on_screen(&faster);
+    assert_eq!((state.boolean(RBMS_OPTION_PLAYBACK_RATE_CHANGED), state.integer(RBMS_NUMBER_PLAYBACK_PERCENT)), (Some(true), Some(115)));
+    let own_speed = snapshot_of(improved());
+    let state = on_screen(&own_speed);
+    assert_eq!((state.boolean(RBMS_OPTION_PLAYBACK_RATE_CHANGED), state.integer(RBMS_NUMBER_PLAYBACK_PERCENT)), (Some(false), Some(100)));
+    for (space, id) in [(IdSpace::Boolean, RBMS_OPTION_PLAYBACK_RATE_CHANGED), (IdSpace::Integer, RBMS_NUMBER_PLAYBACK_PERCENT)] {
+        assert_eq!(crate::skin_host::clusters_of(space, id).next(), Some(Cluster::Result), "{space:?} {id} is asked of another cluster first");
+    }
+}

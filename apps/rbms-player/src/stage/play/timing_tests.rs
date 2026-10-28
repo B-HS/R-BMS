@@ -48,6 +48,11 @@ const FIRST_LANE: usize = 0;
 /// The judgements of a run, in the order the engine counts them.
 const PERFECT: usize = 0;
 
+/// The PLAYBACK RATE of a run played at double speed, in percent, and how much more of the chart
+/// goes by in a length of the player's time at it.
+const DOUBLE_SPEED_PERCENT: i32 = 200;
+const DOUBLE_SPEED_FACTOR: i64 = 2;
+
 /// The speed of a practice slice played at half speed, in percent, and how much of the chart goes
 /// by in a length of the player's time at it.
 const HALF_SPEED_PERCENT: i32 = 50;
@@ -203,4 +208,49 @@ fn a_practice_slice_at_another_speed_is_ahead_by_the_same_length_of_the_players_
     state.set_practice(panel.start());
     assert_eq!(state.field_lead_us(&app.shared), whole / HALF_SPEED_DIVISOR);
     assert_eq!(state.drawn_chart_us(&app.shared), i64::from(PRACTICE_START_MS) * MICROS_PER_MILLI + whole / HALF_SPEED_DIVISOR, "from where the slice begins");
+}
+
+/// A run at another PLAYBACK RATE is judged in the player's own time (the reference's practice
+/// FREQUENCY, `BMSPlayer.java:554-568`): at double speed the note comes at half its time of the song
+/// clock, and the window a press of it is a PGREAT in is as long as it is at the chart's own speed,
+/// not half as long. The judge offset is a length of the player's time too.
+#[test]
+fn a_run_at_another_playback_rate_is_judged_in_the_players_own_time() {
+    let mut app = app_on("timing-rate", offset_config(100));
+    let note_us = note_times(&run_for(&app))[0];
+    let heard_us = note_us / DOUBLE_SPEED_FACTOR;
+    let perfect: Vec<i64> = walk(heard_us)
+        .filter(|pressed_us| {
+            let mut state = run_for(&app);
+            state.set_playback_rate(DOUBLE_SPEED_PERCENT);
+            press(&mut state, &mut app, *pressed_us);
+            state.session.judge().counts[PERFECT] == 1
+        })
+        .collect();
+    let window = (*perfect.first().expect("some press is a PGREAT"), *perfect.last().expect("some press is a PGREAT"));
+    assert_eq!(window, (heard_us - PERFECT_WINDOW_US, heard_us + PERFECT_WINDOW_US), "the PGREAT window of the player's own time");
+
+    let mut state = run_for(&app);
+    let whole = state.field_lead_us(&app.shared);
+    state.set_playback_rate(DOUBLE_SPEED_PERCENT);
+    assert_eq!(state.session.judge().playback_rate(), DOUBLE_SPEED_PERCENT, "the judge is told the rate");
+    assert_eq!(state.field_lead_us(&app.shared), whole * DOUBLE_SPEED_FACTOR, "the offset is twice as much of the chart");
+    assert_eq!(state.changed_playback_percent(), Some(DOUBLE_SPEED_PERCENT));
+    assert_eq!(state.play_speed_percent(), DOUBLE_SPEED_PERCENT, "a skin's rhythm timer runs at the tempo the player hears");
+}
+
+/// A practice slice judges and draws at its own FREQUENCY whatever PLAYBACK RATE the run was set to.
+#[test]
+fn a_practice_slice_plays_at_its_own_frequency_over_the_playback_rate() {
+    let app = app_on("timing-rate-practice", offset_config(100));
+    let mut state = run_for(&app);
+    let whole = state.field_lead_us(&app.shared);
+    state.set_playback_rate(DOUBLE_SPEED_PERCENT);
+    let mut panel = crate::practice::PracticePanel::new("md5".to_string(), Mode::BEAT_7K, PRACTISED_CHART_MS, None, PRACTISED_TOTAL);
+    panel.property.freq = HALF_SPEED_PERCENT;
+    state.set_practice(panel.start());
+    assert_eq!(state.field_lead_us(&app.shared), whole / HALF_SPEED_DIVISOR);
+    assert_eq!(state.session.judge().playback_rate(), HALF_SPEED_PERCENT);
+    assert_eq!(state.play_speed_percent(), HALF_SPEED_PERCENT);
+    assert_eq!(state.changed_playback_percent(), None, "a slice is no run at another PLAYBACK RATE");
 }

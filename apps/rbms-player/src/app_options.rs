@@ -47,6 +47,7 @@ const OPTION_ROWS: [SettingId; rbms_render::theme::OPTIONS_ROW_COUNT] = [
     SettingId::ScratchAuto,
     SettingId::Autoplay,
     SettingId::Target,
+    SettingId::PlaybackRate,
 ];
 
 /// One step to the right on a row.
@@ -461,6 +462,21 @@ mod tests {
         let after = app.shared.config.play.hispeed;
         assert!(after > before, "the row did not move: {before} to {after}");
         assert_eq!(display_value(&app.shared.config, SettingId::HiSpeed), format!("{after:.2}"), "the panel and the settings screen read the same field");
+    }
+
+    /// PLAYBACK RATE is the panel's last row, the one way the built-in browser has to it: a step to
+    /// the right plays the next chart a percent faster.
+    #[test]
+    fn the_panel_moves_the_playback_rate_a_percent_a_step() {
+        let mut app = app();
+        offer(&mut app, press(TOGGLE_KEY));
+        let place = OPTION_ROWS.iter().position(|id| *id == SettingId::PlaybackRate).expect("the panel shows the playback rate");
+        assert_eq!(place, OPTION_ROWS.len() - 1, "the rate is not the last row");
+        offer(&mut app, press(KeyCode::ArrowUp));
+        assert_eq!(app.shared.options.row(), SettingId::PlaybackRate);
+        offer(&mut app, press(KeyCode::ArrowRight));
+        assert_eq!(app.shared.config.play.playback_percent, rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT + rbms_config::PLAYBACK_RATE_STEP_PERCENT);
+        assert_eq!(display_value(&app.shared.config, SettingId::PlaybackRate), "101%");
     }
 
     /// Every row the panel shows has to be a row the settings screen has, or the two would be

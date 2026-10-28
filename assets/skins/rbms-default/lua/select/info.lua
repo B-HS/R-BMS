@@ -334,8 +334,27 @@ local function lanes(s)
     end
 end
 
+local function playback_rate(s, main_state)
+    local area = LAYOUT.chart_data
+    local tab = CHART.tabs
+    local slots = props.option.DIFFICULTY_LAST - props.option.DIFFICULTY_FIRST
+    local tabs_left = area.x + area.width - slots * tab.width - (slots - 1) * tab.gap
+    local label = i18n.template("play_playback_rate")
+    local rate = {
+        value = function()
+            return label(main_state.number(props.extension_number.PLAYBACK_PERCENT))
+        end,
+        size = theme.type.caption,
+        align = "right",
+        overflow = FIT,
+    }
+    local box = { x = area.x, top = area.top + SECTION.title_drop, w = tabs_left - tab.gap - area.x }
+    s:text(rate, box, { color = theme.tone.yellow, op = { ON_CHART, props.extension.PLAYBACK_RATE_CHANGED } })
+end
+
 local function chart_data(s, main_state)
     section(s, LAYOUT.chart_data, "info_chart_data")
+    playback_rate(s, main_state)
     tabs(s)
     facts(s, main_state)
     graph(s)

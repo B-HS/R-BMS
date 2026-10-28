@@ -351,3 +351,16 @@ fn the_browser_answers_this_players_own_options_of_its_switches() {
     let snapshot = snapshot(PlayedOptions::default(), true);
     assert_eq!(ids.map(|id| on_screen(&snapshot).boolean(id)), [None; 5], "a result screen answered the live settings");
 }
+
+/// The song browser tells a skin the PLAYBACK RATE setting: whether it is not the chart's own speed,
+/// and the rate in percent.
+#[test]
+fn the_browser_tells_a_skin_the_playback_rate_setting() {
+    use crate::skin_host::extension::{RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_PLAYBACK_RATE_CHANGED};
+    let shipped = settings(&Config::default());
+    assert_eq!((shipped.boolean(RBMS_OPTION_PLAYBACK_RATE_CHANGED), shipped.integer(RBMS_NUMBER_PLAYBACK_PERCENT)), (Some(false), Some(100)));
+    let mut config = Config::default();
+    config.play.playback_percent = 85;
+    let slower = settings(&config);
+    assert_eq!((slower.boolean(RBMS_OPTION_PLAYBACK_RATE_CHANGED), slower.integer(RBMS_NUMBER_PLAYBACK_PERCENT)), (Some(true), Some(85)));
+}

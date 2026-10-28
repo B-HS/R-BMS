@@ -99,6 +99,13 @@ pub const RBMS_OPTION_HIDDEN_ON: i32 = 21_104;
 /// On while the song browser's ranking mode is open.
 pub const RBMS_OPTION_RANKING_MODE_ON: i32 = 21_105;
 
+/// On while the chart is played at another rate than its own: on the play screen while the run in
+/// progress is (its PLAYBACK RATE, or a practice slice's FREQUENCY), on the result screen while the
+/// run it reports was, and on the song browser while the PLAYBACK RATE setting is not 100%. A course
+/// and a replay being watched play at the chart's own speed, so it is off for them whatever the
+/// setting says.
+pub const RBMS_OPTION_PLAYBACK_RATE_CHANGED: i32 = 21_106;
+
 /// How many grades an assist grade option of each run below names: none, then ASSIST EASY to ASSIST
 /// EXHARD ([`AssistGrade::id`]).
 pub const ASSIST_GRADE_OPTIONS: i32 = AssistGrade::COUNT as i32;
@@ -208,6 +215,10 @@ pub const RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST: i32 = 21_078;
 /// The last number of the four runs of record rows.
 pub const RBMS_NUMBER_MY_RECORD_LAST: i32 = run_last(RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST, MY_RECORD_ROWS);
 
+/// The rate [`RBMS_OPTION_PLAYBACK_RATE_CHANGED`] is about, in whole percent of the chart's own speed:
+/// 100 where the option is off.
+pub const RBMS_NUMBER_PLAYBACK_PERCENT: i32 = 21_084;
+
 /// The first of the six NOTES RADAR values of the chart under the cursor as shown, 0 to 200, in the
 /// order of [`RBMS_NUMBER_NOTES_RADAR_FIRST`].
 pub const RBMS_FLOAT_NOTES_RADAR_FIRST: i32 = 21_020;
@@ -272,13 +283,14 @@ mod tests {
     ];
 
     /// Every option this player keeps for itself, as runs of ids.
-    const OPTION_RUNS: [(i32, i32); 12] = [
+    const OPTION_RUNS: [(i32, i32); 13] = [
         (RBMS_OPTION_SCRATCH_AUTO_ON, RBMS_OPTION_SCRATCH_AUTO_ON),
         (RBMS_OPTION_KEEP_GREEN_NUMBER_ON, RBMS_OPTION_KEEP_GREEN_NUMBER_ON),
         (RBMS_OPTION_LANE_COVER_ON, RBMS_OPTION_LANE_COVER_ON),
         (RBMS_OPTION_LIFT_ON, RBMS_OPTION_LIFT_ON),
         (RBMS_OPTION_HIDDEN_ON, RBMS_OPTION_HIDDEN_ON),
         (RBMS_OPTION_RANKING_MODE_ON, RBMS_OPTION_RANKING_MODE_ON),
+        (RBMS_OPTION_PLAYBACK_RATE_CHANGED, RBMS_OPTION_PLAYBACK_RATE_CHANGED),
         (RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_options_last(RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST)),
         (RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_OPTION_SIBLING_CHART_LAST),
         (RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST, assist_grade_options_last(RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST)),
@@ -288,13 +300,14 @@ mod tests {
     ];
 
     /// Every number this player keeps for itself, as runs of ids.
-    const NUMBER_RUNS: [(i32, i32); 6] = [
+    const NUMBER_RUNS: [(i32, i32); 7] = [
         (RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST),
         (RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST),
         (RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_NUMBER_SIBLING_CHART_LEVEL_LAST),
         (RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_FOLDER_LAMP_COUNT_LAST),
         (RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_CHART_COUNT),
         (RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAST),
+        (RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_NUMBER_PLAYBACK_PERCENT),
     ];
 
     /// Every float this player keeps for itself, as runs of ids.
