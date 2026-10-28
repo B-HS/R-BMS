@@ -16,17 +16,17 @@ R-BMS reimplements the play loop of a GPL-3.0 reference implementation (beatoraj
 
 ## Features
 
-- **Play** — 5K / 7K / 9K (pop'n) / 10K / 14K, LN / CN / HCN, mines, BGA, MIRROR / RANDOM / S-RANDOM and friends, hi-speed with green number and KEEP GREEN NUMBER, lane cover, lift, HIDDEN+, SCRATCH AUTO
+- **Play** — 5K / 7K / 9K (pop'n) / 10K / 14K, LN / CN / HCN, mines, BGA, MIRROR / RANDOM / S-RANDOM and friends, hi-speed with green number and KEEP GREEN NUMBER, lane cover, lift, HIDDEN+, SCRATCH AUTO, playback rate 50–200% (runs off 100% are not recorded)
 - **Judgment** — reference windows per mode, `#RANK` / `#DEFEXRANK`, FAST / SLOW, judge offset with AUTO ADJUST, LR2-style key and pad debounce
 - **Gauges and lamps** — ASSIST EASY to HAZARD with TOTAL scaling, clear lamps with ASSIST grades for SCRATCH AUTO clears, DJ LEVEL and EX score
 - **Difficulty tables** — the 発狂BMS難易度表 built in, Stella and Satellite fetched from their origin, nested folders, charts you don't own shown dimmed with a link to their download
 - **Courses** — GENOSIDE 2018 dan courses (SP and DP) built in, table courses, a course gauge you choose (LR2 / beatoraja / IIDX), dans awarded on the website
-- **Song select** — an IIDX-style list with grade badges and thumbnails, NOTES RADAR (NOTES, PEAK, SCRATCH, SOF-LAN, CHARGE, CHORD), your best and last five runs, score targets, and the IR ranking of a chart opened by holding a blue key
+- **Song select** — an IIDX-style list with grade badges and thumbnails, notes per second (average and peak), NOTES RADAR (NOTES, PEAK, SCRATCH, SOF-LAN, CHARGE, CHORD), your best and last five runs, score targets, and the IR ranking of a chart opened by holding a blue key
 - **Skins** — a monochrome default skin for every screen, beatoraja `.luaskin` and JSON skins unmodified, a live SKIN menu with colours, opacities and offsets, export of an adjusted pack
 - **Languages** — the whole player in English, Korean and Japanese, picked from your system or in Settings
 - **Online** — sign in, every run you play by hand kept and sent, rankings, rivals, ghosts, replays, settings sync, folders made on the site, AI reports
 - **Discord** — shows R-BMS, the chart and the course you are on in your Discord status (can be turned off)
-- **Replays and practice** — every run replayable with its seed and options, play a replay's lane layout yourself with it as your ghost, analysis with seek and per-note timing, a practice panel for slices
+- **Replays and practice** — every run replayable with its seed and options, play a replay's lane layout yourself with it as your ghost, pick a lane layout by hand and preview its notes before playing it (kept as a RANDOM run), analysis with seek and per-note timing, a practice panel for slices
 
 ![R-BMS — the default play skin](docs/assets/screenshot-play.jpg)
 
@@ -51,6 +51,7 @@ Press `H` on the song select for every key as it is set right now. All keys are 
 | START (`A`) / SELECT (`W`) held | Option panels | With the turntable or keys: lane cover, lift, hi-speed |
 | Blue key held (keys 2 4 6, `S` `D` on the keyboard) | IR ranking of the chart | — |
 | `J` | Play the layout of a record or ranking row | Watching a replay: play its layout |
+| `Y` | Pick a lane layout, preview it and play it | — |
 | `Tab` | Settings (LANGUAGE is the first row of DISPLAY) | — |
 | `F8` / `F12` / `F5` | Play menu / skin menu / key config | — |
 | `O` / `T` / `R` / `/` | Song folders / difficulty tables / records / search | — |
