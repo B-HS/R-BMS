@@ -33,8 +33,8 @@
 
 - [x] P1. 조사 — 세 요청의 근거 파일·데이터·결정 지점
 - [x] P2. 구현 — U1 발광표 삭제(표 사본·제외 목록·고정 수치 시험·purge SQL), U2 일별 플레이 시간(API·캐시·그래프·표·모드 전환), U3 최근 활동 SCRATCH AUTO 포함
-- [ ] P3. 통합 게이트·문서(api-spec, web architecture·components, ADR, QA)·커밋·푸시·CI
-- [ ] P4. 운영 반영 — chart-purge-count 로 지울 행 수 확인 → 사용자 확인 → 사용자 `!` chart-purge-delete
+- [x] P3. 통합 게이트·문서(api-spec, web architecture·components, ADR, QA)·커밋·푸시·CI — 커밋 `28085a7`·`8af1a39`·`f737c4d`·`9a2febb`, web run 41332344406 통과, ci run 41332344383 3 OS 통과
+- [ ] P4. 운영 반영 — chart-purge-count 로 지울 행 수 확인 → 사용자 확인 → 사용자 `!` chart-purge-delete (count run 41332390599: chart 1, score 57, chart_best 1, replay 57, play_trace 57, play_analysis 57, submission_audit 57, chart_pattern 1, 표·코스·폴더·AI 0, 플레이어 1명. 사용자 확인 대기)
 
 진행 기록(2026-11-02):
 
