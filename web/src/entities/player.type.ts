@@ -22,3 +22,15 @@ export type PlayerStats = {
     lamps: { clear: ClearLamp; assist_grade: AssistGrade; count: number }[]
     scratch_auto_charts: number
 }
+
+export type PlayerPlayDay = {
+    date: string
+    plays: number
+    play_ms: number
+}
+
+export type PlayerPlayDays = {
+    days: PlayerPlayDay[]
+    total_plays: number
+    total_ms: number
+}

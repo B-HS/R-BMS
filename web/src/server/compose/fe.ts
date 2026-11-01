@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, like, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, like, lt, or, sql } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { apiToken, chart, chartBest, score } from '@server/db/schema'
@@ -198,6 +198,23 @@ export const composeFe = (
                     .where(and(eq(chartBest.userId, userId), chartBestScope(db, true)))
                     .groupBy(chartBest.clear, chartBest.assistGrade, chartBest.scratchAuto)
                 return rows.map((row) => ({ clear: row.clear, assistGrade: row.assistGrade, scratchAuto: row.scratchAuto, count: row.value }))
+            },
+
+            listPlayerPlayedAts: async ({ userId, from, to }) => {
+                const [rows, [previous]] = await Promise.all([
+                    db
+                        .select({ playedAt: score.playedAt })
+                        .from(score)
+                        .where(and(eq(score.userId, userId), gte(score.playedAt, from), lt(score.playedAt, to)))
+                        .orderBy(asc(score.playedAt)),
+                    db
+                        .select({ playedAt: score.playedAt })
+                        .from(score)
+                        .where(and(eq(score.userId, userId), lt(score.playedAt, from)))
+                        .orderBy(desc(score.playedAt))
+                        .limit(1),
+                ])
+                return { playedAts: rows.map((row) => row.playedAt), previousPlayedAt: previous?.playedAt ?? null }
             },
 
             summarise: async () => {

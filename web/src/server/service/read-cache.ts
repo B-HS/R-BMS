@@ -16,6 +16,7 @@ export const CACHE_TAG = {
     playerScores: (loginId: string) => `player-scores:${loginId}`,
     playerRecent: (loginId: string) => `player-recent:${loginId}`,
     playerStats: (loginId: string) => `player-stats:${loginId}`,
+    playerPlayDays: (loginId: string) => `player-play-days:${loginId}`,
     activityRecent: () => 'activity-recent',
     statsSummary: () => 'stats-summary',
     leaderboardPlayers: () => 'leaderboard-players',
@@ -85,6 +86,7 @@ export const revalidateOnScoreSubmit = (params: { sha256: string; md5: string | 
     revalidateTag(CACHE_TAG.playerScores(params.loginId), CACHE_PROFILE.player)
     revalidateTag(CACHE_TAG.playerRecent(params.loginId), CACHE_PROFILE.player)
     revalidateTag(CACHE_TAG.playerStats(params.loginId), CACHE_PROFILE.player)
+    revalidateTag(CACHE_TAG.playerPlayDays(params.loginId), CACHE_PROFILE.player)
 }
 
 export const revalidateOnChartUpsert = (params: { sha256: string; md5: string | null }) => {
@@ -292,4 +294,11 @@ export const getPlayerStatsCached = async (params: { loginId: string; userId: st
     cacheTag(CACHE_TAG.playerStats(params.loginId))
     const totalPlays = await compose().countPlayerScores(params.userId)
     return compose().feService.playerStats({ userId: params.userId, totalPlays })
+}
+
+export const getPlayerPlayDaysCached = async (params: { loginId: string; userId: string; todayStart: number }) => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG.playerPlayDays(params.loginId))
+    return compose().feService.playerPlayDays({ userId: params.userId, todayStart: params.todayStart })
 }

@@ -85,6 +85,20 @@
             "clearRate": "클리어 비율",
             "clearRateHint": "플레이한 차트 기준",
             "clearedLabel": "클리어한 차트"
+        },
+        "playDays": {
+            "title": "일별 플레이 시간",
+            "modeLabel": "통계 보기 방식",
+            "loading": "일별 플레이 시간 불러오는 중",
+            "loadError": "일별 플레이 시간을 불러오지 못했습니다.",
+            "empty": "최근 {days, number}일 동안 기록이 없습니다.",
+            "chartLabel": "최근 {days, number}일 일별 플레이 시간 그래프",
+            "barLabel": "{date} · 추정 {time}",
+            "total": "최근 {days, number}일 합계 {time}",
+            "columnDate": "날짜",
+            "columnPlays": "판 수",
+            "columnTime": "추정 시간",
+            "note": "판과 판 사이 간격으로 추정한 시간입니다 (한국 시간 기준)."
         }
     },
     "replay": {

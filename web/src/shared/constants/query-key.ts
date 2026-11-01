@@ -18,6 +18,7 @@ export const QUERY_KEY = {
         SCORES: (playerId: string, params: Record<string, unknown>) => ['player', 'scores', playerId, params],
         RECENT: (playerId: string, params: Record<string, unknown>) => ['player', 'recent', playerId, params],
         STATS: (playerId: string) => ['player', 'stats', playerId],
+        PLAY_DAYS: (playerId: string) => ['player', 'play-days', playerId],
         RIVALS: (playerId: string) => ['player', 'rivals', playerId],
     },
     SCORE: {

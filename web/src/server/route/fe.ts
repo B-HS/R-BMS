@@ -19,6 +19,7 @@ import {
     readChartLeaderboard,
     readChartSearch,
     readPlayerLeaderboard,
+    readPlayerPlayDays,
     readPlayerRecent,
     readPlayerStats,
     readRecentActivity,
@@ -69,6 +70,12 @@ export const createFePlayerStatsRoute = () =>
     withPublicRead(async (_request: Request, context: PlayerContext) => {
         const { playerId } = await context.params
         return envelope(await readPlayerStats(playerId))
+    })
+
+export const createFePlayerPlayDaysRoute = () =>
+    withPublicRead(async (_request: Request, context: PlayerContext) => {
+        const { playerId } = await context.params
+        return envelope(await readPlayerPlayDays(playerId))
     })
 
 export const createFeStatsSummaryRoute = () => withPublicRead(async () => envelope(await readStatsSummary()))

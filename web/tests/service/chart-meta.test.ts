@@ -177,6 +177,7 @@ describe('표 제목으로 읽을 때 보강', () => {
             listPlayerRecent: async () => ({ rows: [], total: 0 }),
             listPlayerLeaderboard: async () => ({ rows: [], total: 0 }),
             countLampsByUser: async () => [],
+            listPlayerPlayedAts: async () => ({ playedAts: [], previousPlayedAt: null }),
             summarise: async () => ({ charts: 0, players: 0, scores: 0 }),
             listTokens: async () => [],
             deleteToken: async () => false,

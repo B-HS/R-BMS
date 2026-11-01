@@ -8,6 +8,7 @@ import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { parseQueryObject } from '@server/lib/parse-request'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
+import { kstDayStartOf } from '@server/service/domain/fe/player-play-days'
 import {
     getChartMetaCached,
     getChartRankingCached,
@@ -17,6 +18,7 @@ import {
     getCourseMetaCached,
     getCourseRankingCached,
     getPlayerLeaderboardCached,
+    getPlayerPlayDaysCached,
     getPlayerProfileCached,
     getPlayerRecentCached,
     getPlayerStatsCached,
@@ -99,6 +101,14 @@ export const readPlayerRecent = async (playerId: string, query: PlayerRecentQuer
 }
 
 export const readPlayerStats = async (playerId: string) => getPlayerStatsCached({ loginId: playerId, userId: await requireUserId(playerId) })
+
+/**
+ * The KST day the request lands on is part of the cache key, so the cached window moves on at midnight instead of at the cache lifetime.
+ */
+export const readPlayerPlayDays = async (playerId: string) => {
+    const userId = await requireUserId(playerId)
+    return getPlayerPlayDaysCached({ loginId: playerId, userId, todayStart: kstDayStartOf(Date.now()) })
+}
 
 export const readPlayerRivals = async (playerId: string) => {
     const rivals = await getRivalsCached(playerId)

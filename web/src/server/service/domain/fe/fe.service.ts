@@ -1,5 +1,6 @@
 import { MIN_CLEAR_LAMP_ID, clearLampFromId, type AssistGrade } from '@server/dto/common'
 import { fillBlankText, toChartMeta, type ChartRow, type TableTextLookup } from '@server/service/domain/chart/chart.service'
+import { playDaysWindowOf, summarisePlayDays } from '@server/service/domain/fe/player-play-days'
 import { toPlayerProfile, type PlayerRow } from '@server/service/domain/player/player.service'
 import type { DisplayedDan } from '@server/dto/dan'
 import type { ChartSearchQuery, PlayerLeaderboardQuery } from '@server/dto/fe'
@@ -44,6 +45,7 @@ export type FeServiceDb = {
     listPlayerRecent: (params: { userId: string; page: number; limit: number }) => Promise<{ rows: ActivityRow[]; total: number }>
     listPlayerLeaderboard: (query: PlayerLeaderboardQuery) => Promise<{ rows: LeaderboardRow[]; total: number }>
     countLampsByUser: (userId: string) => Promise<LampCountRow[]>
+    listPlayerPlayedAts: (params: { userId: string; from: number; to: number }) => Promise<{ playedAts: number[]; previousPlayedAt: number | null }>
     summarise: () => Promise<{ charts: number; players: number; scores: number }>
     listTokens: (userId: string) => Promise<TokenRow[]>
     deleteToken: (params: { userId: string; tokenId: string }) => Promise<boolean>
@@ -119,6 +121,12 @@ export const createFeService = (deps: FeServiceDeps) => ({
             lamps: toLampDistribution(lamps),
             scratch_auto_charts: lamps.filter((row) => row.scratchAuto).reduce((sum, row) => sum + row.count, 0),
         }
+    },
+
+    playerPlayDays: async (params: { userId: string; todayStart: number }) => {
+        const { from, to } = playDaysWindowOf(params.todayStart)
+        const { playedAts, previousPlayedAt } = await deps.db.listPlayerPlayedAts({ userId: params.userId, from, to })
+        return summarisePlayDays({ playedAts, previousPlayedAt, todayStart: params.todayStart })
     },
 
     summary: async () => {

@@ -85,6 +85,20 @@
             "clearRate": "クリア率",
             "clearRateHint": "プレーした譜面が基準",
             "clearedLabel": "クリアした譜面"
+        },
+        "playDays": {
+            "title": "日別プレー時間",
+            "modeLabel": "統計の表示方法",
+            "loading": "日別プレー時間を読み込み中",
+            "loadError": "日別プレー時間を読み込めませんでした。",
+            "empty": "直近{days, number}日間の記録がありません。",
+            "chartLabel": "直近{days, number}日間の日別プレー時間グラフ",
+            "barLabel": "{date} · 推定{time}",
+            "total": "直近{days, number}日間の合計 {time}",
+            "columnDate": "日付",
+            "columnPlays": "プレー数",
+            "columnTime": "推定時間",
+            "note": "プレーとプレーの間隔から推定した時間です（韓国時間基準）。"
         }
     },
     "replay": {

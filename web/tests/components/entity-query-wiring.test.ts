@@ -5,7 +5,8 @@ import { clientBuildListQueryOptions } from '../../src/entities/build.query'
 import { tableListQueryOptions } from '../../src/entities/table.query'
 import { courseRankingQueryOptions } from '../../src/entities/course.query'
 import { chartLeaderboardQueryOptions } from '../../src/entities/chart.query'
-import { playerRecentQueryOptions } from '../../src/entities/player.query'
+import { playerPlayDaysQueryOptions, playerRecentQueryOptions } from '../../src/entities/player.query'
+import { QUERY_KEY } from '../../src/shared/constants/query-key'
 
 const originalFetch = globalThis.fetch
 
@@ -66,6 +67,18 @@ describe('entities 쿼리가 실제 라우트 응답 형태를 따른다', () =>
         expect(playerRecentQueryOptions('alice', { page: 1, limit: 20 }).queryKey).not.toEqual(
             playerRecentQueryOptions('alice', { page: 2, limit: 20 }).queryKey,
         )
+    })
+
+    test('일별 플레이 시간은 플레이어 아이디를 인코딩한 경로로 요청하고 봉투를 벗겨서 돌려준다', async () => {
+        const calls = capture('{"success":true,"data":{"days":[{"date":"2026-11-02","plays":3,"play_ms":420000}],"total_plays":3,"total_ms":420000}}')
+        const result = await run<{ days: { date: string; play_ms: number }[]; total_ms: number }>(playerPlayDaysQueryOptions('al ice'))
+        expect(calls[0]).toEndWith('/api/fe/players/al%20ice/play-days')
+        expect([result.days[0].date, result.days[0].play_ms, result.total_ms]).toEqual(['2026-11-02', 420_000, 420_000])
+    })
+
+    test('일별 플레이 시간 쿼리 키는 플레이어마다 다르고 플레이어 전체 키 아래에 있다', () => {
+        expect(playerPlayDaysQueryOptions('alice').queryKey).not.toEqual(playerPlayDaysQueryOptions('bob').queryKey)
+        expect(playerPlayDaysQueryOptions('alice').queryKey[0]).toBe(QUERY_KEY.PLAYER.ALL[0])
     })
 
     test('SCRATCH AUTO 포함 여부가 다르면 차트 순위 쿼리 키가 다르다', () => {

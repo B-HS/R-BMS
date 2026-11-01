@@ -85,6 +85,20 @@
             "clearRate": "Clear rate",
             "clearRateHint": "Based on played charts",
             "clearedLabel": "Cleared charts"
+        },
+        "playDays": {
+            "title": "Daily play time",
+            "modeLabel": "Statistics view",
+            "loading": "Loading daily play time",
+            "loadError": "Could not load daily play time.",
+            "empty": "No plays in the last {days, plural, one {# day} other {# days}}.",
+            "chartLabel": "Daily play time over the last {days, plural, one {# day} other {# days}}",
+            "barLabel": "{date} · estimated {time}",
+            "total": "Total over the last {days, plural, one {# day} other {# days}}: {time}",
+            "columnDate": "Date",
+            "columnPlays": "Plays",
+            "columnTime": "Estimated time",
+            "note": "Estimated from the gaps between plays (Korea Standard Time)."
         }
     },
     "replay": {

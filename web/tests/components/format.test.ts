@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { formatChartTitle, formatCount, formatDateTime, formatHash, formatPercent } from '../../src/shared/lib/format'
+import { formatChartTitle, formatCount, formatDateTime, formatHash, formatHoursMinutes, formatPercent } from '../../src/shared/lib/format'
 
 describe('formatDateTime 은 실행 타임존과 무관하게 같은 문자열을 만든다', () => {
     test('UTC 2025-09-04 15:33:20 은 KST 로 하루 넘겨 표시된다', () => {
@@ -22,6 +22,15 @@ describe('format 유틸', () => {
 
     test('formatHash 는 8자로 잘라 말줄임표를 붙인다', () => {
         expect(formatHash('b1946ac92492d2347c6235b4d2611184')).toBe('b1946ac9…')
+    })
+
+    test('formatHoursMinutes 는 밀리초를 분 단위로 반올림해 시:분으로 쓴다', () => {
+        expect(formatHoursMinutes(0)).toBe('0:00')
+        expect(formatHoursMinutes(2 * 60_000)).toBe('0:02')
+        expect(formatHoursMinutes(29_999)).toBe('0:00')
+        expect(formatHoursMinutes(30_000)).toBe('0:01')
+        expect(formatHoursMinutes(65 * 60_000)).toBe('1:05')
+        expect(formatHoursMinutes(125 * 60 * 60_000 + 7 * 60_000)).toBe('125:07')
     })
 
     test('formatPercent 는 분모 0 을 0.00% 로 처리한다', () => {

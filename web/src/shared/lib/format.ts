@@ -26,6 +26,15 @@ export const formatDateTime = (epochMs: number) => {
 export const formatPercent = (numerator: number, denominator: number) =>
     denominator === 0 ? '0.00%' : `${((numerator / denominator) * 100).toFixed(2)}%`
 
+const MINUTE_MS = 60_000
+const MINUTES_PER_HOUR = 60
+const MINUTE_DIGITS = 2
+
+export const formatHoursMinutes = (ms: number) => {
+    const totalMinutes = Math.round(ms / MINUTE_MS)
+    return `${Math.floor(totalMinutes / MINUTES_PER_HOUR)}:${String(totalMinutes % MINUTES_PER_HOUR).padStart(MINUTE_DIGITS, '0')}`
+}
+
 const EX_SCORE_PER_NOTE = 2
 
 export const getMaxExScore = (totalNotes: number) => totalNotes * EX_SCORE_PER_NOTE
