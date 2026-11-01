@@ -19,7 +19,7 @@
             "empty": "아직 올라온 기록이 없습니다.",
             "guideButton": "가이드 보기",
             "listLabel": "최근 제출 목록",
-            "note": "순위에 반영되는 제출만 표시됩니다. SCRATCH AUTO 판은 이 목록에 나오지 않고, 차트·코스 순위에서 볼 수 있습니다."
+            "note": "순위에 반영되는 제출만 표시됩니다. A-SCR 은 SCRATCH AUTO 로 친 기록입니다."
         },
         "stats": {
             "title": "서버 현황",

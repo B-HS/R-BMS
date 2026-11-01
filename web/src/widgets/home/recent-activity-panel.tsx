@@ -45,6 +45,7 @@ export const RecentActivityPanel: FC = () => {
                             exScore={row.ex_score}
                             minBp={row.minbp}
                             playedAt={row.played_at}
+                            isScratchAuto={row.scratch_auto}
                         />
                     ))}
                 </ul>

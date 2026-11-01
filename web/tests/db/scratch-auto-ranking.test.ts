@@ -192,11 +192,15 @@ describe.skipIf(!hasDatabase)('SCRATCH AUTO 순위 (임시 MySQL)', () => {
         expect([daveStats.lamps, daveStats.scratch_auto_charts]).toEqual([[{ clear: 'Easy', assist_grade: 0, count: 1 }], 0])
     })
 
-    test('홈 최근 활동은 SCRATCH AUTO 판을 빼고 플레이어 플레이 기록은 표시와 함께 넣는다', async () => {
+    test('홈 최근 활동과 플레이어 플레이 기록은 SCRATCH AUTO 판을 표시와 함께 넣는다', async () => {
         const recent = await compose().feService.recentActivity(100)
         expect(recent.filter((row) => row.chart.sha256 === CHART_SHA).map((row) => [row.player.id, row.scratch_auto])).toEqual([
+            ['alice', true],
+            ['dave', true],
             ['dave', false],
+            ['carol', true],
             ['bob', false],
+            ['alice', true],
             ['alice', false],
         ])
         const aliceRecent = await compose().feService.playerRecent({ userId: userId('alice'), page: 1, limit: 10 })

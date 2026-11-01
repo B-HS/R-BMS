@@ -19,7 +19,7 @@
             "empty": "No records have been submitted yet.",
             "guideButton": "View the guide",
             "listLabel": "Recent submissions",
-            "note": "Only submissions that count toward rankings are shown. SCRATCH AUTO plays do not appear in this list; you can see them in the chart and course rankings."
+            "note": "Only submissions that count toward rankings are shown. A-SCR marks plays made with SCRATCH AUTO."
         },
         "stats": {
             "title": "Server status",

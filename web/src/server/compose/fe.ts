@@ -145,7 +145,7 @@ export const composeFe = (
                     .from(score)
                     .innerJoin(user, eq(user.id, score.userId))
                     .leftJoin(chart, eq(chart.sha256, score.chartSha256))
-                    .where(and(eq(score.ranked, true), eq(score.scratchAuto, false)))
+                    .where(eq(score.ranked, true))
                     .orderBy(desc(score.playedAt))
                     .limit(limit)
                 return rows.map(toActivityRow)
