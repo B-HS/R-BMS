@@ -20,7 +20,7 @@ const EXIT_CODE = { SAME: 0, DIFFERENT: 1, FAILED: 2 } as const
 const HEADER_FIELDS_DROPPED = ['original_url'] as const
 const ENTRY_FIELDS_EMPTIED = ['comment'] as const
 const ENTRY_FIELDS_KEPT = ['url', 'url_diff', 'name_diff'] as const
-const ENTRY_MD5_REMOVED: readonly string[] = ['f8b3b8ca5b5c5f7be1352b7aae723bee']
+const ENTRY_MD5_REMOVED: readonly string[] = ['f8b3b8ca5b5c5f7be1352b7aae723bee', '4c2a85efe95c8ee2121effaa4627a0cf']
 const WEB_ADDRESS_PATTERN = /\s*[/／]?\s*(?:https?:\/\/|www\.)\S*/gi
 
 type Fetched = {

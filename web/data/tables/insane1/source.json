@@ -46,10 +46,10 @@
   },
   "snapshot": {
     "header_file_sha256": "c5beb338f827bcd5feff1504989486fd2f99f2dcedf6c3d3799dedb544d31ad5",
-    "data_file_sha256": "fd87c00a607b89b2564f60bd93364d9def5875c5614e10a33c2ff5c0b6b85572",
-    "entries": 1034,
+    "data_file_sha256": "afdb520ce15343394848add244c47a78d9e2e08e9252c90a21a82456b75a31e9",
+    "entries": 1033,
     "levels": 26,
-    "entries_with_valid_md5": 1034
+    "entries_with_valid_md5": 1033
   },
   "method": {
     "command": "bun scripts/snapshot-table.ts https://darksabun.club/table/archive/insane1/ data/tables/insane1",
@@ -59,7 +59,7 @@
       "header.json: original_url is dropped",
       "data.json: one entry per line, entry order and key order kept; comment is emptied and web addresses are removed from the text fields other than the download links (url, url_diff, name_diff), which are kept as they are",
       "the page html is not stored: Cloudflare injects a per-request script, so its hash changes on every request",
-      "data.json: entries whose md5 is f8b3b8ca5b5c5f7be1352b7aae723bee are left out (removed at the site owner's request)"
+      "data.json: entries whose md5 is f8b3b8ca5b5c5f7be1352b7aae723bee, 4c2a85efe95c8ee2121effaa4627a0cf are left out (removed at the site owner's request)"
     ]
   }
 }
