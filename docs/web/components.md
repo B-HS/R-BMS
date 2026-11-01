@@ -1,6 +1,6 @@
 # rbms web — 컴포넌트 / 디자인 토큰 매핑 (W0)
 
-> 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 새 §10 언어 선택 위젯을 더했다. 나머지는 2026-10-15 기준)
+> 최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 에 새 §11 플레이어 통계 모드 전환과 일별 플레이 시간 컴포넌트를 더했다. 이전: 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 새 §10 언어 선택 위젯을 더했다. 나머지는 2026-10-15 기준))
 
 > **구현 상태:** 이 문서는 W0 설계 기준입니다. W1/W2 UI 통합은 완료됐고, 현재 컴포넌트와 경로는 `web/src/{shared,entities,features,widgets,app}`가 정본입니다. 네이티브 `theme.ron` 편집·동기화는 웹 기능이 아니며 [../theme.md](../theme.md)의 경계를 따릅니다.
 
@@ -251,3 +251,17 @@ design.md §7-4의 랜드마크·텍스트 이중 인코딩은 현재 컴포넌�
 
 - 이 문서를 쓴 시점에 위젯은 만들어져 있지만 화면에 붙이지 않았다. 셸 단위(WI2)가 `widgets/shell/app-shell.tsx` 바닥 `SidebarMenu` 에 `ShellThemeControl` 옆으로 붙이고 그 격자를 `grid-cols-[auto_minmax(0,1fr)]` 에서 `auto_auto_minmax(0,1fr)` 로 바꾼다.
 - 구조·결정은 [architecture.md](./architecture.md) §16, [웹 다국어 ADR](../acknowledge/2026-10-24-adr-web-i18n.md).
+
+## 11. 플레이어 통계의 모드 전환과 일별 플레이 시간(2026-11-02)
+
+| 이름 | 경로 | 용도 |
+|---|---|---|
+| `PlayerStatsPanel` | `widgets/player/player-stats-panel.tsx` | 통계 타일 아래 `DashboardPanel` 에 모드 전환을 둔다. 상태 `mode`(`PLAYER_STATS_MODE`: `lamp` \| `play-days`, 기본 `lamp`)를 `useState` 로 들고, `DashboardPanel` 의 `actions` 슬롯에 `ToggleGroup`(`type='single'`, `variant='outline'`, 버튼 둘: 램프 분포 / 일별 플레이 시간, `aria-label` = `browse.player.playDays.modeLabel`)을 꽂는다. 패널 제목은 모드를 따른다 |
+| `PlayerPlayDays` | `widgets/player/player-play-days.tsx` | 일별 모드의 본문(비즈니스 로직 허용 층). `usePlayerPlayDays(playerId)` 로 `GET /api/fe/players/[id]/play-days` 를 읽고 `DashboardPanelLoading`·`-Error`(다시 시도)·`-Empty`(`total_plays` 0)를 가른 뒤 `PlayDayChart`, 합계 줄, `PlayDayTable`, 추정 안내 문장을 쌓는다. **일별 모드를 고른 뒤에만 마운트**되므로 모드를 고르기 전에는 요청이 나가지 않는다 |
+| `PlayDayChart` | `features/stats/play-day-chart.tsx` | 하루 한 줄(`ul`/`li`) 막대 30개. 높이는 가장 바쁜 날 대비 비율(최소 2%, 판 없는 날은 높이 0 이라 열은 유지), 막대마다 `role='img'` + `aria-label`·`title`(`barLabel`: 날짜 · 추정 시간), 아래에 첫날·마지막 날 날짜. 색은 `bg-primary`, 높이 `h-28`, 차트 라이브러리 없음(CSS 막대). props 는 `days`(`{ date, playMs, label }`)와 `listLabel` |
+| `PlayDayTable` | `features/stats/play-day-table.tsx` | 날짜 / 판 수 / 추정 시간 표(`@shared/ui/table`). 숫자 칸은 `tabular-nums` 우측 정렬, 시간은 `formatHoursMinutes`(`시:분`, `@shared/lib/format`). 위젯이 판 있는 날만 최근 순으로 넘긴다 |
+
+- 두 `features` 컴포넌트는 데이터를 직접 읽지 않고 props 로만 받는다(비즈니스 로직 없음). 조회·상태 분기·번역은 `PlayerPlayDays` 위젯이 한다.
+- 문구는 `web/messages/{ko,en,ja}/browse.json` 의 `browse.player.playDays`(`title`, `modeLabel`, `loading`, `loadError`, `empty`, `chartLabel`, `barLabel`, `total`, `columnDate`, `columnPlays`, `columnTime`, `note`). 시간은 서버가 주는 추정값이라 화면에 `note` 로 "판과 판 사이 간격으로 추정한 시간입니다 (한국 시간 기준)." 를 항상 적는다.
+- 데이터 계약과 추정 규칙은 [../backend/api-spec.md](../backend/api-spec.md) §12, 캐시는 [architecture.md](./architecture.md) §5, 결정은 [일별 플레이 시간 ADR](../acknowledge/2026-11-02-adr-daily-play-time.md).
+- 홈 "최근 활동"(`widgets/home/recent-activity-panel.tsx`)은 `ScoreRow` 에 `isScratchAuto={row.scratch_auto}` 를 넘겨 `ScratchAutoBadge`(A-SCR)를 붙인다. `ranked` 인 SCRATCH AUTO 판도 목록에 오며 어시스트 등급 램프 이름은 `ScoreRow` 가 이미 `assistGrade` 로 그린다([홈 최근 활동 ADR](../acknowledge/2026-11-02-adr-home-activity-scratch-auto.md)).

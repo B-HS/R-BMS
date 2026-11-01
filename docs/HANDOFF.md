@@ -122,6 +122,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 2. 테스트 부채 3.112~3.129(`docs/quality-assurance/2026-10-14-test-debt.md`): CJK 하니스 골든 없음, 레이더 3축 스케일·IIDX 대조, 썸네일·분석·형제 탐색 프레임 비용, 랭킹 모드에서 앱 오버레이가 정보창 IR RANKING 을 덮음, 순위 응답 크기, 서버 리플레이 고스트(보류), 0013 이전 판 추정, 플레이어 순위 배지 2개 제한.
 3. 웹 정적 셸을 되찾을지(`app/[locale]` 이동, `acknowledge/2026-10-24-adr-web-i18n.md`).
 4. 곡 미러 보류 해제 여부와 이전 세션 TODO(이전 스냅샷 8절 3·4).
+5. (2026-11-02 추가) 운영 `chart-purge-count` 확인 뒤 사용자 `!` 로 `chart-purge-delete` 실행(발광 표에서 뺀 PopCoRian -EX- 의 운영 기록, [ADR](acknowledge/2026-11-02-adr-popcorian-ex-removed.md)). 그 밖의 2026-11-02 작업 상태는 [PROCESS.md](PROCESS.md) 맨 위 체크리스트.
 
 ## 9. 문서 지도
 

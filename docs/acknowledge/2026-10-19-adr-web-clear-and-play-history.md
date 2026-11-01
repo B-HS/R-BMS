@@ -1,7 +1,7 @@
 # ADR: 웹의 클리어 기준, SCRATCH AUTO 포함 기본 켬, 플레이 기록 페이지
 
-> 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리
-> 상태: 유효 · 결정일 2026-10-19 · 결정자 사용자(지시 3건). 이 ADR 의 2) 는 [2026-10-14-adr-scratch-auto-ranking-toggle.md](2026-10-14-adr-scratch-auto-ranking-toggle.md) 의 "화면 기본은 끔"을 바꾼다.
+> 최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 에 2) 의 홈 최근 활동 문장이 대체됐다는 표시를 더했다. 이전: 최종 갱신 2026-10-19 · 대응 커밋 e2c829f 이후 작업 트리)
+> 상태: 유효(2절의 홈 최근 활동 문장은 2026-11-02 에 대체됨) · 결정일 2026-10-19 · 결정자 사용자(지시 3건). 이 ADR 의 2) 는 [2026-10-14-adr-scratch-auto-ranking-toggle.md](2026-10-14-adr-scratch-auto-ranking-toggle.md) 의 "화면 기본은 끔"을 바꾼다.
 
 ## 배경
 
@@ -22,7 +22,7 @@
 - 화면: 차트 순위·코스 순위·플레이어 리더보드의 "SCRATCH AUTO 포함" 스위치는 켠 채로 시작한다. 주소 파라미터 `include_scratch_auto` 는 없으면 켬, `false` 면 끔, `true` 는 켬이다. 스위치를 끄면 `include_scratch_auto=false` 를 주소에 쓰고, 켜면 파라미터를 지운다(`web/src/shared/lib/search-params.ts` 의 `readBooleanParam(params, key, fallback)`·`writeBooleanParam(value, fallback)`, `web/src/shared/lib/scratch-auto-param.ts`, 기본값 상수 `DEFAULT_INCLUDE_SCRATCH_AUTO` 는 `web/src/shared/constants/scratch-auto.ts`).
 - 서버 프리페치와 클라이언트 쿼리 키가 같은 캐시를 가리키도록 하드코딩된 `include_scratch_auto: false` 를 기본값 상수로 바꿨다: 발광 표 곡 상세 창의 "차트 순위" 버튼(`web/src/widgets/table/table-chart-details.tsx`)과 차트 페이지 메타데이터(`web/src/app/(app)/charts/[hash]/page.tsx`).
 - 서버 API(`includeScratchAutoSchema`, `/api/charts/{hash}/ranking`·`/best`, `/api/courses/{hash}/ranking`·`/best`, `/api/fe/...`)의 기본값은 끔 그대로다. 근거: Rust 클라이언트(`crates/rbms-ir/src/http.rs` 의 `/charts/{md5}/ranking?limit=..`, `/charts/{md5}/best?player=..`, `/courses/{hash}/ranking?limit=..`)는 `include_scratch_auto` 를 싣지 않고 서버의 기본 목록에 기댄다([reference/ir-api.md](../reference/ir-api.md) 는 "클라이언트는 싣지 않는다"고 적는다). API 기본을 켬으로 바꾸면 곡 선택의 IR RANKING 패널·결과 화면의 순위·내 최고 기록이 배포된 클라이언트에서 몰래 바뀐다. `web/tests/components/scratch-auto-param.test.ts` 가 API 기본이 끔인 것을 못 박는다.
-- 홈의 "최근 활동"은 SCRATCH AUTO 판을 계속 뺀다(이 지시의 범위 밖, 문구만 "차트·코스 순위에서 볼 수 있습니다" 로 고쳤다). 가이드(`web/src/widgets/guide/guide-sections.ts`)와 순위 각주 문구도 새 기본에 맞췄다.
+- 홈의 "최근 활동"은 SCRATCH AUTO 판을 계속 뺀다(이 지시의 범위 밖, 문구만 "차트·코스 순위에서 볼 수 있습니다" 로 고쳤다). **대체됨(2026-11-02): 홈 최근 활동은 이제 SCRATCH AUTO 판도 A-SCR 표지와 함께 싣는다. [2026-11-02-adr-home-activity-scratch-auto.md](2026-11-02-adr-home-activity-scratch-auto.md).** 가이드(`web/src/widgets/guide/guide-sections.ts`)와 순위 각주 문구도 새 기본에 맞췄다.
 
 ### 3) 플레이 기록: 모든 판을 페이지로
 

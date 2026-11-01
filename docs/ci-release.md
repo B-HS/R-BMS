@@ -1,6 +1,6 @@
 # CI / 릴리스 (GitHub Actions)
 
-최종 갱신 2026-10-24 · 대응 커밋 76e026a(web-db 새 동작 여덟 개와 표 Cron 추가, 2026-10-23 운영 실행 기록. v0.1.7 행은 d438294. 2026-10-24 에 6.1·6.2절의 `dan-recompute` 출력 숫자 설명과 0013 기록만 더했다)
+최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 에 발광 표 제외 목록이 두 곡이 되고 `chart-purge-*` 가 두 md5 를 대상으로 넓어졌다. 이전: 최종 갱신 2026-10-24 · 대응 커밋 76e026a(web-db 새 동작 여덟 개와 표 Cron 추가, 2026-10-23 운영 실행 기록. v0.1.7 행은 d438294. 2026-10-24 에 6.1·6.2절의 `dan-recompute` 출력 숫자 설명과 0013 기록만 더했다))
 
 > 이 문서는 워크플로 구현, 릴리스 절차와 이력, 현재 배포 경계를 설명합니다. 워크플로가 존재한다는 사실은 산출물이 지금 사용 가능하다는 보증이 아닙니다. 게시된 릴리스는 `v0.1.4` 하나입니다(`gh release view v0.1.4` 의 `publishedAt` 이 2026-10-15T07:27:28Z, 대응 커밋 ea698a9 의 3분 뒤). `v0.1.0`·`v0.1.3` 은 게시하지 않은 draft 로 남아 있습니다(2.3절).
 >
@@ -200,8 +200,8 @@
 | `admin-seed-count` | `admin-seed.count.sql`: 마이그레이션 0006 의 관리자 지정이 바꿀 행을 셉니다(읽기 전용) |
 | `assist-grade-backfill-count` | `assist-grade.count.sql`: 낡은 `chart_best.assist_grade` 행을 셉니다 |
 | `assist-grade-backfill` | 세기 → `assist-grade.backfill.sql`(낡은 등급을 그 판의 값으로 다시 계산. 마이그레이션 0011 이 한 것과 같고 되풀이해도 안전) → 다시 세기 |
-| `chart-purge-count` | `bun scripts/run-sql.ts chart-purge.count.sql`: 사이트 주인의 요청으로 지운 차트 하나(md5 가 SQL 에 고정)의 행을 표별로 셉니다([ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)) |
-| `chart-purge-delete` | 세기 → `chart-purge.delete.sql`(한 트랜잭션, 그 차트의 점수·최고 기록·리플레이·trace·패턴·표 행·폴더 항목·AI 결과를 지우고 `chart` 행은 코스 정의가 쓰지 않을 때만 지움) → 다시 세기 |
+| `chart-purge-count` | `bun scripts/run-sql.ts chart-purge.count.sql`: 사이트 주인의 요청으로 지운 차트 둘(md5 두 개가 SQL 에 고정)의 행을 표별로 셉니다([ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md), [PopCoRian -EX- ADR](acknowledge/2026-11-02-adr-popcorian-ex-removed.md)) |
+| `chart-purge-delete` | 세기 → `chart-purge.delete.sql`(한 트랜잭션, 그 차트들의 점수·최고 기록·리플레이·trace·패턴·표 행·폴더 항목·AI 결과를 지우고 `chart` 행은 코스 정의가 쓰지 않을 때만 지움) → 다시 세기. PopCoRian -EX- 의 운영 삭제는 2026-11-02 현재 실행 전이다(count → 사용자 확인 → 사용자 `!` delete) |
 | `courses-seed-count` | `bun scripts/seed-courses.ts count`: `web/data/courses/genoside-2018/courses.json` 을 읽어 코스 등록 계획을 묶음별 숫자(inserted·changed·unchanged·deactivated·danCourses·newDanCourses)로만 냅니다. 쓰지 않습니다 |
 | `courses-seed` | 세기 → `seed-courses.ts apply`(코스 정의·출처·묶음·단위 코스를 한 묶음씩 트랜잭션으로 등록) → 남은 계획을 다시 세어 바뀔 것이 0 이 아니면 실패 |
 | `tables-refresh-count` | `bun scripts/refresh-tables.ts count`: 러너가 Stella·Satellite 의 `header.json`·`score.json` 을 받아 검증하고 저장된 사본과 비교만 합니다(쓰지 않음). 표마다 outcome·reason·`entries`·`added`·`removed`·`releveled` 한 줄 |
@@ -223,12 +223,12 @@
 | `db-migration-status.ts` | 마이그레이션 파일(`drizzle/meta/_journal.json`)과 DB 의 `__drizzle_migrations` 를 비교해 파일별 적용 여부, 새 테이블 존재, 결과를 출력(접속 정보는 출력하지 않음). 종료 코드 0 = 최신, 1 = 할 일(대기 마이그레이션 또는 기준선 필요), 2 = 접속 실패. `--baseline-sql` 은 `push` 로 만든 DB 를 기준선으로 채택하는 SQL 을 출력 | `bun run db:status`, `web-db` |
 | `run-sql.ts` | `web/scripts/` 아래의 `.sql` 파일 하나를 여러 문장으로 실행하고 SELECT 는 행 수와 열 이름(`target`·`row_count` 개수 표만 내용까지), 그 밖의 문장은 영향 행 수를 출력. 그 밖의 경로는 거절(종료 코드 2) | `web-db` 의 cleanup·chart-notes·admin-seed·assist-grade·chart-purge 동작 |
 | `cleanup-test-accounts.count.sql`, `cleanup-test-accounts.delete.sql` | 시험 계정 다섯 개와 딸린 자료를 세고 지움. `session`·`account`·`api_token`·`user_folder`·`user_folder_item` 은 `user` 삭제 시 외래 키가 연쇄 삭제하고, `score.user_id` 는 `set null` 이라 SQL 이 `score` 를 직접 지움 | `web-db` |
-| `chart-purge.count.sql`, `chart-purge.delete.sql` | 사이트 주인의 요청으로 발광 표 사본에서 뺀 차트 하나의 운영 행을 세고 지움(md5 가 SQL 에 고정, `chart_pattern` 으로 얻은 sha256 까지 따라가 점수·리플레이·trace·AI 결과를 지움). 지워진 뒤에는 개수 표가 전부 0 | `web-db` ([ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)) |
+| `chart-purge.count.sql`, `chart-purge.delete.sql` | 사이트 주인의 요청으로 발광 표 사본에서 뺀 차트 둘(SABOTHER, 2026-11-02 부터 PopCoRian -EX- 도)의 운영 행을 세고 지움(두 md5 가 SQL 에 고정, 한쪽이 이미 0행이어도 다시 돌려 무해, `chart_pattern` 으로 얻은 sha256 까지 따라가 점수·리플레이·trace·AI 결과를 지움). 지워진 뒤에는 개수 표가 전부 0 | `web-db` ([ADR](acknowledge/2026-10-23-adr-chart-removed-at-owner-request.md)) |
 | `seed-courses.ts` | `bun scripts/seed-courses.ts <count\|apply>`: `web/data/courses/genoside-2018/courses.json` 을 Zod 로 읽고 `course_hash` 를 TS 규칙(`courseHashOf`)으로 다시 계산해 파일 값과 다르면 중단한 뒤 `composeCourseCatalog` 로 계획(`count`) 또는 등록(`apply`)한다. 출력은 묶음별 숫자뿐이다(Actions 로그가 공개). 종료 코드 0 = 성공, 1 = 실패 또는 등록 뒤 남은 변경, 2 = 사용법 오류 | `web-db` 의 `courses-seed*` |
 | `refresh-tables.ts` | `bun scripts/refresh-tables.ts <count\|apply-large>`: Cron 이 하는 표 갱신(`tableRefreshService.refreshAll`)을 러너에서 한다. `count` 는 `dryRun`(쓰지 않음), `apply-large` 는 급감·변경량 검사만 건너뛰고 저장(형식 검사는 그대로). 출력은 표 id·outcome·reason 코드·수뿐이다. 받지 못한 표(`failed`)가 있으면 종료 코드 1, `apply-large` 는 거절(`rejected`)도 1 | `web-db` 의 `tables-refresh*` |
 | `dan-recompute.ts` | `bun scripts/dan-recompute.ts <count\|apply>`: 모든 `dan_course` 의 저장된 판을 다시 판정(`awardForCourses`)해 `danCourses`·`scanned`·`eligible`·`awarded`(정식)와 `eligibleAssisted`·`awardedAssisted`(A-단위)·`assistedLegacy`(0013 이전 판의 추정으로 A-단위 대상이 된 판) 숫자를 낸다(6.1절) | `web-db` 의 `dan-recompute*` |
 | `lib/script-db.ts` | 위 세 스크립트의 DB 접속: 환경 변수에서 접속 주소를 풀어 `mysql2` 풀과 drizzle 을 만들고 세션의 잠금 대기 시간을 정한다. `server-only` 를 가져오는 `@server/db`·`compose/index.ts` 를 쓰지 않으려고 따로 둔 파일이며 접속 값은 출력하지 않는다 | 스크립트 |
-| `snapshot-table.ts` | `bun scripts/snapshot-table.ts <표 주소> <출력 폴더> [--check]`: 난이도표 원본에서 `header.json`·`data.json`·`source.json` 을 받아 저장하거나(발광 표는 `web/data/tables/insane1/`) `--check` 로 저장본과 일치를 봄(종료 코드 0 = 같음, 1 = 다름, 2 = 실패). 저장할 때 정규화한다: `header.json` 에서 `original_url` 을 빼고, `data.json` 에서 곡마다 `comment` 를 비우며 `url`·`url_diff`·`name_diff`(곡 내려받는 곳) 말고 다른 글자 칸의 웹 주소를 뗀다([표 페이지 ADR](acknowledge/2026-10-14-adr-table-page-no-source-notice.md), dd5518e). 사이트 주인의 요청으로 뺀 차트의 md5 한 개는 `data.json` 을 만들 때 항목에서 빠지고(`ENTRY_MD5_REMOVED`, 발광 표는 1,034곡) `source.json` 의 `method` 에 적힌다. 스냅샷을 다시 만들 수 있게 `source.json` 에는 원본 주소·HTTP 기록이 남는다(웹이 서빙하지 않음. 지울지는 사용자 결정 전) | 수동 |
+| `snapshot-table.ts` | `bun scripts/snapshot-table.ts <표 주소> <출력 폴더> [--check]`: 난이도표 원본에서 `header.json`·`data.json`·`source.json` 을 받아 저장하거나(발광 표는 `web/data/tables/insane1/`) `--check` 로 저장본과 일치를 봄(종료 코드 0 = 같음, 1 = 다름, 2 = 실패). 저장할 때 정규화한다: `header.json` 에서 `original_url` 을 빼고, `data.json` 에서 곡마다 `comment` 를 비우며 `url`·`url_diff`·`name_diff`(곡 내려받는 곳) 말고 다른 글자 칸의 웹 주소를 뗀다([표 페이지 ADR](acknowledge/2026-10-14-adr-table-page-no-source-notice.md), dd5518e). 사이트 주인의 요청으로 뺀 차트의 md5 두 개(SABOTHER, PopCoRian -EX-)는 `data.json` 을 만들 때 항목에서 빠지고(`ENTRY_MD5_REMOVED`, 발광 표는 1,033곡) `source.json` 의 `method` 에 적힌다. 스냅샷을 다시 만들 수 있게 `source.json` 에는 원본 주소·HTTP 기록이 남는다(웹이 서빙하지 않음. 지울지는 사용자 결정 전) | 수동 |
 
 ## 7. KNOWN ISSUE (코드가 문서가 말하는 것과 다르게 동작하는 곳)
 

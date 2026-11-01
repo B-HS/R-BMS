@@ -1,6 +1,6 @@
 # R-BMS — PROCESS (작업 체크리스트와 상태)
 
-최종 갱신 2026-10-29 · 대응 커밋 `9f1b484`
+최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 발광표·일별 플레이 시간·최근 활동 체크리스트의 P2 완료와 진행 기록. 이전: 최종 갱신 2026-10-29 · 대응 커밋 `9f1b484`)
 
 이 문서는 체크리스트와 현재 상태만 둔다. 끝난 구간의 세부 결과, 웨이브 기록, 사용자 결정 원문은 `docs/history/` 로 옮긴다(ai-process 2.1). 옛 0~9절과 Phase 0~7 로드맵도 같은 곳에 있다(아래 "아카이브").
 
@@ -24,6 +24,24 @@
 - 클라이언트 `v0.1.4` 는 2026-10-15 07:27 UTC 에 게시됐다(release run 38696475211, 버전 커밋 `87eacd0`). `v0.1.3`·`v0.1.0` draft 는 게시하지 않고 남겨 뒀다. 릴리스 이력은 [ci-release.md](ci-release.md) 2.3절.
 - 웹 운영 배포는 `51f3a1e`(`/api/version` 으로 확인, 이후 커밋은 `web/` 를 바꾸지 않음). 운영 DB 마이그레이션은 0000~0013 적용(0012 는 2026-10-23 run 39909099575, 0013 은 2026-10-24 run 40074383695. `web/drizzle/`, 실행은 `web-db.yml`. 이 줄의 웹 배포 `51f3a1e` 는 2026-10-15 관찰값).
 - 2026-10-19 "웹 기록 표시와 구동기 Esc·목표 보완" 완료, 클라이언트 `v0.1.5` 는 draft 로 그대로 둔다(2026-10-23 결정 7). 열린 확인 사항은 [HANDOFF.md](HANDOFF.md) 6절, 남은 일은 8절.
+
+## 체크리스트 — 발광표 곡 삭제·일별 플레이 시간·최근 활동 어시스트 (2026-11-02)
+
+사용자 요청 원문(2026-11-02): "1. 웹에서, 발광표 10에 popcorian -EX- 의 난이도를 표에서 지워버려 2. 웹에서, 또 다른 분석 그래프로 하루하루 몇시간했는지 볼 수 있는 그래프 및 표도 보이게 해줘 (모드로 변경해서 보이게하면 되겠지) 3. 최근활동에도 어시스트 관련 활동이 보이게해놔".
+
+결정(2026-11-02 사용자 답): 1 workflow 사용(HANDOFF 5절: Workflow 도구만, Fable·Haiku 금지, Opus high·Sonnet xhigh 상한). 2 발광표 삭제 범위 = 표 사본 + 운영 기록까지(SABOTHER 선례 `a6e7ffe`, 운영 삭제는 개수 확인 뒤 사용자 `!`). 3 일별 플레이 시간은 플레이어 페이지 통계 패널의 모드 전환(램프 분포 / 일별 시간). 4 시간은 판 간격 추정(앞 판 끝에서 10분 안이면 그 간격, 넘으면 2분), 한국 시간 자정 기준, 최근 30일, 서버에 저장된 모든 판(코스 포함), 화면에 "추정" 표기. 5 홈 최근 활동은 SCRATCH AUTO 판도 A-SCR 표지와 함께 보임(순위 반영 판만이라는 원칙은 유지). 조사 [reference/2026-11-02-web-three-requests/](reference/2026-11-02-web-three-requests/README.md)(wf_db20f1ba-f79).
+
+- [x] P1. 조사 — 세 요청의 근거 파일·데이터·결정 지점
+- [x] P2. 구현 — U1 발광표 삭제(표 사본·제외 목록·고정 수치 시험·purge SQL), U2 일별 플레이 시간(API·캐시·그래프·표·모드 전환), U3 최근 활동 SCRATCH AUTO 포함
+- [ ] P3. 통합 게이트·문서(api-spec, web architecture·components, ADR, QA)·커밋·푸시·CI
+- [ ] P4. 운영 반영 — chart-purge-count 로 지울 행 수 확인 → 사용자 확인 → 사용자 `!` chart-purge-delete
+
+진행 기록(2026-11-02):
+
+- P2 구현: 워크플로 wf_b8383633-1c2. U1 발광표 삭제 `28085a7`(표 사본 1,033곡·★10 63곡, `ENTRY_MD5_REMOVED` 두 md5, `chart-purge.{count,delete}.sql` 두 md5 일반화, 웹·Rust 고정 수치 시험), U2 일별 플레이 시간 `8af1a39`(`GET /api/fe/players/[playerId]/play-days`, `player-play-days:{loginId}` 태그, 모드 전환 `PlayerStatsPanel`, `PlayDayChart`·`PlayDayTable`·`PlayerPlayDays`), U3 홈 최근 활동 `f737c4d`(`ranked` 판 전부, A-SCR 표지).
+- P3 문서(이 작업): api-spec §7.1·§12, ci-release §6, web architecture §1·§5(코스 제출 무효화 서술을 코드에 맞춰 고침), web components §11, ADR 3건(`2026-11-02-adr-popcorian-ex-removed.md`, `-daily-play-time.md`, `-home-activity-scratch-auto.md`)과 acknowledge 색인, QA 3.26(T1~T6)과 테스트 부채 3.141~3.144, 조사 4문서의 구현 결과 절. 아직 남은 것: 문서 커밋·푸시·CI 확인(P3 의 [ ] 유지).
+- 게이트(D): 웹 `bun test` 2,004 통과·0 실패(200 건너뜀, DB 통합), `typecheck`·`lint`·`format:check`·`build` 통과, `cargo test -p rbms-table` 93 통과, `rbms-player` `tablesrc::seed` 7 통과, `cargo fmt` 통과. 실행하지 못한 것: `tests/db/scratch-auto-ranking.test.ts` 의 바뀐 기대값(임시 MySQL 필요), play-days Drizzle 쿼리의 창 경계 DB 시험, 브라우저 실화면, 일본어 문구 원어민 감수(테스트 부채 3.141~3.144, QA 3.26).
+- P4 는 그대로: 운영 `chart-purge-delete` 는 사용자 `!` 실행 전이다.
 
 ## 체크리스트 — 배치 지정·선곡 정보창·밀도·음량·배속 (2026-10-29)
 

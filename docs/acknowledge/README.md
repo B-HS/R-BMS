@@ -1,6 +1,6 @@
 # docs/acknowledge — 결정 기록 색인
 
-> 최종 갱신 2026-10-29 · 대응 커밋 `cf8afe5`·`435839e`·`c38a7ea`·`9f1b484`(웨이브 1)(2026-10-29 절과 미확인 30~33번을 더했다)
+> 최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 절과 ADR 세 건을 더했다. 이전: 최종 갱신 2026-10-29 · 대응 커밋 `cf8afe5`·`435839e`·`c38a7ea`·`9f1b484`(웨이브 1)(2026-10-29 절과 미확인 30~33번을 더했다))
 
 사용자 결정, 합의, 전제를 둔다. 2026-10-14 부터 새 결정은 결정 1건 = 파일 1개의 ADR(`YYYY-MM-DD-adr-<슬러그>.md`, 머리: `최종 갱신 · 대응 커밋` 과 `상태 · 결정일 · 결정자 · 커밋`, 절: 배경 / 결정 / 이유 / 기각된 대안 / 영향과 관련 파일 / 날짜와 사용자 원문)로 쓴다. 그 전의 파일은 여러 결정을 한 파일의 표로 묶는다. 결정이 바뀌면 옛 파일의 결정 문장은 고치지 않고, 바뀐 행 끝에 "대체됨: <새 파일>" 을 더하고 그 파일의 상태 줄과 이 색인의 상태를 함께 바꾼다.
 
@@ -49,7 +49,7 @@
 | [2026-10-15-adr-wgpu-metal-main-thread.md](2026-10-15-adr-wgpu-metal-main-thread.md) | THR2-1: present 스레드의 wgpu Metal 획득이 AppKit 메인 스레드 API 를 읽는 위반은 구조를 유지하고 알려진 위험으로, 상류 gfx-rs/wgpu#10627 을 기다린다 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-accidental-sync-records-kept.md](2026-10-15-adr-accidental-sync-records-kept.md) | 감사 에이전트의 실수로 운영 서버에 간 판 49개(리플레이 43 대기)는 지우지 않고 둔다. 재발 방지는 scratch HOME 규칙과 `--help`·`--version` 처리 | 2026-10-15 | 유효 |
 | [2026-10-15-adr-bga-resident-texture-cap.md](2026-10-15-adr-bga-resident-texture-cap.md) | BGA 상주 텍스처 상한 `RESIDENT_BYTES` 256 MiB 유지(메모리보다 플레이 프레임 p99) | 2026-10-15 | 유효 |
-| [2026-10-19-adr-web-clear-and-play-history.md](2026-10-19-adr-web-clear-and-play-history.md) | 웹: 클리어 = NO PLAY·FAILED 가 아닌 모든 램프(ASSIST·L-ASSIST 포함, `MIN_CLEAR_LAMP_ID`), 화면의 SCRATCH AUTO 포함 토글은 기본 켬(서버 API 기본은 끔 그대로: Rust 클라이언트가 파라미터를 싣지 않음), 플레이어 페이지 "플레이 기록"을 `?page=` 로 나눠 전체 판을 보임(`GET /api/fe/players/{id}/recent?page&limit`) | 2026-10-19 | 유효 |
+| [2026-10-19-adr-web-clear-and-play-history.md](2026-10-19-adr-web-clear-and-play-history.md) | 웹: 클리어 = NO PLAY·FAILED 가 아닌 모든 램프(ASSIST·L-ASSIST 포함, `MIN_CLEAR_LAMP_ID`), 화면의 SCRATCH AUTO 포함 토글은 기본 켬(서버 API 기본은 끔 그대로: Rust 클라이언트가 파라미터를 싣지 않음), 플레이어 페이지 "플레이 기록"을 `?page=` 로 나눠 전체 판을 보임(`GET /api/fe/players/{id}/recent?page&limit`) | 2026-10-19 | 유효(홈 최근 활동의 SCRATCH AUTO 제외는 대체됨: [2026-11-02-adr-home-activity-scratch-auto.md](2026-11-02-adr-home-activity-scratch-auto.md)) |
 | [2026-10-19-adr-record-target-follows-its-run.md](2026-10-19-adr-record-target-follows-its-run.md) | 구동기: LOCAL BEST·이 기기에서 친 IR BEST 목표와 스킨 BEST 칸의 진행 중 값은 그 기록 판의 리플레이를 다시 판정한 노트별 판정(원본 passnotes 기준)을 따르고, 얻지 못하면(리플레이 없음, 다른 차트·노트 수·PG/GR, 옛 FRAME 시계 리플레이, 연습) 선형 비례로 물러남. 결과 화면의 값은 그대로. 조사: [record-target-pace.md](../reference/record-target-pace.md) | 2026-10-19 | 유효(요청과 물러남 규칙만 사용자 확인. 나머지 여섯 질문은 아래 미확인 목록 7번) |
 
 ## 2026-10-22 세션의 ADR
@@ -83,7 +83,7 @@
 | [2026-10-23-adr-dan-auto-award.md](2026-10-23-adr-dan-auto-award.md) | 서버가 코스 기록으로 단위를 자동 판정해 `user_dan` 에 준다(체계 넷: GENOSIDE SP·DP, Stella, Satellite). 조건: 게이지가 남은 채 클리어, 코스의 미러·랜덤·LN 제약, 어시스트·SCRATCH AUTO·순위 밖 판 제외, 스테이지 정보가 있는 판만, 처음 얻은 판만 남김. 마이페이지 `단위` 탭에서 표시 단위를 고르고 프로필·순위에 배지 | 2026-10-23 | 일부 대체됨: 어시스트 판의 거절(인정 조건 3절 1~3번), `user_dan` 의 기본 키, 표시 모드 → [A-단위 ADR](2026-10-24-adr-assisted-dan.md). 나머지는 유효(결정 19·20 은 사용자 결정, 인정 조건의 세부는 메인 결정이고 사용자 확인 2026-10-24: 게이지 모드 무관 인정 J-11, 소급 범위 등 J-13) |
 | [2026-10-23-adr-table-daily-refresh.md](2026-10-23-adr-table-daily-refresh.md) | Vercel Cron(`0 15 * * *` = UTC 15:00 = KST 0:00)이 Stella·Satellite 원본을 받아 검증(첫 사본 500곡 이상, 90% 이상 유지, 변경 25% 이하)하고 운영 DB `table_snapshot` 에 저장한다. 큰 변경은 `tables-refresh-count` → `tables-refresh-force` 로 사람이 받아들인다. 표 header 의 코스를 카탈로그에 등록하고 새 단위 코스는 소급 판정한다. 표 페이지에 출처 표기 | 2026-10-23 | 유효(코드 반영. 결정 13 은 사용자 결정, 검증 상수·저장 방식·큰 변경 수용 경로는 메인 결정이고 사용자 확인 2026-10-24. `tables-refresh-force` 로 첫 저장은 됐다(run 39946847395). `CRON_SECRET` 등록과 Cron 경로의 첫 실행은 확인 못 함) |
 | [2026-10-23-adr-song-mirror-prep.md](2026-10-23-adr-song-mirror-prep.md) | 곡 미러는 업로드하지 않고 준비만 한다. `rbms-cli mirror-pack` 이 곡 폴더를 표 md5 로 골라 결정적 zip 과 매니페스트를 저장소 밖에 만들고(네트워크 없음), R2 업로드·서버·클라이언트 버튼은 설계만 있다. 권리 조사 기록과 사용자 질문 8개를 마지막에 보고한다 | 2026-10-23 | 유효(결정 17 은 사용자 결정, 도구의 세부와 설계 선택 D-1~D-10 은 메인 결정이고 사용자 확인 2026-10-24. 곡 미러 자체는 보류: 2026-10-24 "19번은 그럼 보류") |
-| [2026-10-23-adr-chart-removed-at-owner-request.md](2026-10-23-adr-chart-removed-at-owner-request.md) | 架空ユリカゴ　 [SABOTHER] 를 웹의 표 사본과 운영 DB 에서 모두 지운다(발광 표 1,035 → 1,034곡, 운영 행 삭제 run 39927201095). 사용자 PC 의 로컬 기록과 v0.1.7 에 내장된 표에는 남는다 | 2026-10-23 | 유효(사용자 요청) |
+| [2026-10-23-adr-chart-removed-at-owner-request.md](2026-10-23-adr-chart-removed-at-owner-request.md) | 架空ユリカゴ　 [SABOTHER] 를 웹의 표 사본과 운영 DB 에서 모두 지운다(발광 표 1,035 → 1,034곡, 운영 행 삭제 run 39927201095). 사용자 PC 의 로컬 기록과 v0.1.7 에 내장된 표에는 남는다 | 2026-10-23 | 유효(사용자 요청. 2026-11-02 에 두 번째 곡이 같은 장치로 더해짐: [PopCoRian -EX- ADR](2026-11-02-adr-popcorian-ex-removed.md)) |
 | [2026-10-23-adr-discord-rich-presence.md](2026-10-23-adr-discord-rich-presence.md) | Discord Rich Presence(로컬 IPC, 새 크레이트 없음, 전용 스레드, 설정 DISCORD STATUS 기본 켬, Art Asset `rbms`, Portal 은 메인이 설정) | 2026-10-23 | 유효(2~4·M1~M11 사용자 확인 2026-10-24) |
 
 ## 2026-10-24 세션의 ADR
@@ -111,6 +111,16 @@
 | [2026-10-29-adr-playback-rate-unrecorded.md](2026-10-29-adr-playback-rate-unrecorded.md) | PLAYBACK RATE: 재생 속도 자체를 바꿔 피치도 변함(50~200%, 1%), 100% 가 아닌 판은 로컬·리플레이·서버·동기화에 아무것도 남기지 않음("사람이 친 판은 모두 저장"의 사용자 명시 예외), 코스와 리플레이는 100% 강제, 연습 경로의 결함 둘 수리, 결과 화면 표지, 확장 불린 21106·정수 21084 | 2026-10-29 | 유효(D2·D3 은 사용자 확인 2026-10-29. M5~M9 와 연습 표시의 동작 변화는 미확인 31). [사람이 친 판은 모두 저장 ADR](2026-10-14-adr-save-and-send-every-played-run.md)의 예외 하나를 더함 |
 | [2026-10-29-adr-select-volume-master.md](2026-10-29-adr-select-volume-master.md) | 기본 스킨 선곡의 MASTER 슬라이더(rate 17, 숫자 57)가 `audio.master` 를 움직임(원본은 시스템 음량), 자동 재생 미리듣기의 키음은 Key 버스·BGM 은 Bg 버스, 선형 이득 유지 | 2026-10-29 | 유효(M11 은 메인 추천, 미확인 32) |
 | [2026-10-29-adr-select-info-overflow.md](2026-10-29-adr-select-info-overflow.md) | 엔진의 새 텍스트 overflow 값 3(SHRINK_CUT: 하한 0.75 까지 축소 뒤 `…`), 선곡 정보창 재배치(곡 머리 오른쪽에 LEVEL·BPM), NPS 평균·최고는 beatoraja 밀도 id 364/365·360/361 그대로 | 2026-10-29 | 유효(D5 는 사용자 확인 2026-10-29. M10 과 재배치는 미확인 33). [선곡 IIDX 식 ADR](2026-10-24-adr-select-iidx-layout.md)의 메인 결정 3 중 BPM 문장을 되돌림 |
+
+## 2026-11-02 세션의 ADR
+
+사용자 요청 셋(발광 표 PopCoRian -EX- 삭제, 플레이어 일별 플레이 시간, 홈 최근 활동의 어시스트)에 사용자가 범위를 답했다. 조사는 [reference/2026-11-02-web-three-requests/](../reference/2026-11-02-web-three-requests/README.md) 이다.
+
+| 파일 | 한 줄 요약 | 결정일 | 상태 |
+| --- | --- | --- | --- |
+| [2026-11-02-adr-popcorian-ex-removed.md](2026-11-02-adr-popcorian-ex-removed.md) | 발광 표 ★10 PopCoRian -EX- 를 표 사본(1,034 → 1,033곡, ★10 63곡)과 운영 기록에서 지운다. `ENTRY_MD5_REMOVED` 가 두 md5 를 빼고 `chart-purge` SQL 이 두 md5 를 대상으로 넓어졌다. 운영 삭제는 개수 확인 뒤 사용자 `!` 실행(실행 전) | 2026-11-02 | 유효(사용자 요청. 운영 삭제 실행 전) |
+| [2026-11-02-adr-daily-play-time.md](2026-11-02-adr-daily-play-time.md) | 플레이어 페이지 통계 패널의 모드 전환으로 일별 플레이 시간(KST 30일 그래프와 표)을 보인다. 서버에 판 길이가 없어 판 끝 시각의 간격으로 추정(10분 이하면 그 간격, 아니면 2분), 모든 `score` 판, 새 공개 API `GET /api/fe/players/{id}/play-days`. 클라이언트 실측은 보류 | 2026-11-02 | 유효(사용자 결정. 추정 상수는 체감 검증 전) |
+| [2026-11-02-adr-home-activity-scratch-auto.md](2026-11-02-adr-home-activity-scratch-auto.md) | 홈 최근 활동이 `ranked` 인 판을 SCRATCH AUTO 판까지 싣고 A-SCR 표지를 붙인다. `ranked=false` 판은 계속 숨김. [2026-10-19 웹 ADR](2026-10-19-adr-web-clear-and-play-history.md) 의 "홈은 SCRATCH AUTO 를 뺀다" 를 대체 | 2026-11-02 | 유효(사용자 결정) |
 
 ## 그 전의 결정 파일
 

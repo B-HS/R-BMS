@@ -1,6 +1,6 @@
 # rbms web — 아키텍처 설계 (W0)
 
-> 최종 갱신 2026-10-24 · 대응 커밋 0a73e87 (2026-10-24 에 어시스트 클리어를 A-단위로 따로 기록하도록 §15-3 을 고치고 §3-2 에 마이그레이션 0013 을 더했다(운영 적용 2026-10-24 migrate run 40074383695, status run 40074421795 최신). §1 의 단위 API 두 줄과 프로필·순위의 `dans` 모양도 바뀌었다. 같은 날 새 §16 다국어(next-intl, 쿠키 방식, 전 페이지 동적 렌더, 기반까지)와 §0·§5-1 의 한 줄, §5-2 의 순위 태그 설명을 더했다. 2026-10-23 에 §1 의 화면·경로 표, §3-2 의 마이그레이션 0012 와 `web-db` 동작, §5 의 캐시 태그, §6 의 `CRON_SECRET` 과 Cron 을 더하고 새 §15 를 썼다. 2026-10-22 에 §3-2 마이그레이션 목록에 0011 을 더했다. 나머지 절은 2026-10-20 작업 트리 기준: W3 곡별 패턴 §1-2·§1-4·§3·§4-4·§11, W2 점수 기반 AI 기능 §12, W4 판별 trace §13, W5 판별 기반 AI 기능 §14)
+> 최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 에 §1-1 의 홈·플레이어 행, §1-3 의 활동 피드 행과 `play-days` 행, §5-2·§5-3 의 `player-play-days` 태그를 더했고 코스 제출의 무효화 서술을 코드(`revalidateOnCourseSubmit`)에 맞췄다. `/records` 의 표 곡 수도 1,033 으로 고쳤다. 이전: 최종 갱신 2026-10-24 · 대응 커밋 0a73e87 (2026-10-24 에 어시스트 클리어를 A-단위로 따로 기록하도록 §15-3 을 고치고 §3-2 에 마이그레이션 0013 을 더했다(운영 적용 2026-10-24 migrate run 40074383695, status run 40074421795 최신). §1 의 단위 API 두 줄과 프로필·순위의 `dans` 모양도 바뀌었다. 같은 날 새 §16 다국어(next-intl, 쿠키 방식, 전 페이지 동적 렌더, 기반까지)와 §0·§5-1 의 한 줄, §5-2 의 순위 태그 설명을 더했다. 2026-10-23 에 §1 의 화면·경로 표, §3-2 의 마이그레이션 0012 와 `web-db` 동작, §5 의 캐시 태그, §6 의 `CRON_SECRET` 과 Cron 을 더하고 새 §15 를 썼다. 2026-10-22 에 §3-2 마이그레이션 목록에 0011 을 더했다. 나머지 절은 2026-10-20 작업 트리 기준: W3 곡별 패턴 §1-2·§1-4·§3·§4-4·§11, W2 점수 기반 AI 기능 §12, W4 판별 trace §13, W5 판별 기반 AI 기능 §14))
 
 > **현재 구현 기준:** W0~W2 와 웨이브 17B(웹 골격·폴더·발광 표)·20(SCRATCH AUTO 순위), S18~S19(2026-10-14~15, 서버 수리·발광 표의 다른 사이트 흔적 제거·파비콘)까지 반영했습니다. 실제 라우트는 `web/src/app/{(app),(public),api,tables}/`, 서버 경계는 `web/src/server/`가 정본입니다. 본문에 남은 "착수 시", "향후", 가정은 설계 이력으로만 읽고, 이 상태 블록과 §9를 우선합니다. **운영 배포는 2026-10-14 에 끝났습니다**(https://bms.hyuns.uk, Vercel 프로젝트 `rbms-web`, 시험 계정 삭제). 운영 DB 에는 마이그레이션 0000~0012 가 모두 적용됐고(0003·0004 는 2026-10-15, 0011 은 2026-10-22, 0012 는 2026-10-23. 0013 `assisted_dan` 은 파일만 커밋됐고 운영에는 아직 적용하지 않았다: 아래 §3-2), 2026-10-15 관찰 시 운영 웹은 `51f3a1e` 입니다(`/api/version`). 배포 설정은 §6-2, 운영 DB 작업은 §3-2 가 정본입니다. 2026-10-14 점검에서 나온 고장 12건의 해소 현황은 [2026-10-14-audit.md](./2026-10-14-audit.md) 맨 위 표입니다.
 
@@ -44,10 +44,10 @@
 | `(public)` | `/login` | 로그인 | **B**(radius 6px, 그림자 있음, 배경 1단) | 무인증 |
 | `(public)` | `/signup` | 가입 | B | 무인증 |
 | `(public)` | `/guide` | 클라 연동 가이드(`--server` 설정법·토큰 발급) | B | 무인증 |
-| `(app)` | `/` | 홈 대시보드(서버 통계 + 최근 제출 피드) | **A**(radius 0, 3열 셸) | 공개 읽기 |
+| `(app)` | `/` | 홈 대시보드(서버 통계 + 최근 제출 피드: `ranked` 인 판은 SCRATCH AUTO 판도 A-SCR 표지와 함께 싣는다, 2026-11-02) | **A**(radius 0, 3열 셸) | 공개 읽기 |
 | `(app)` | `/search` | 차트 검색 | A | 공개 읽기 |
 | `(app)` | `/charts/[hash]` | 차트 리더보드(랭킹·메타·내 기록) | A | 공개 읽기 |
-| `(app)` | `/players/[id]` | 플레이어 프로필(통계·플레이 기록(전체 판, `?page=` 페이지)·라이벌) | A | 공개 읽기 |
+| `(app)` | `/players/[id]` | 플레이어 프로필(통계(램프 분포 / 일별 플레이 시간 모드 전환, 2026-11-02)·플레이 기록(전체 판, `?page=` 페이지)·라이벌) | A | 공개 읽기 |
 | `(app)` | `/leaderboards` | 종합 플레이어 랭킹 | A | 공개 읽기 |
 | `(app)` | `/tables` · `/tables/[id]` | 번들 표 카드 + IR 난이도표 | A | 공개 읽기 |
 | `(app)` | `/tables/insane1` | 発狂BMS難易度表 사본(카드 격자, 내 램프, `bmstable` 메타 = `/tables/insane1/header.json`, noindex). 2026-10-14 웨이브 17B-2(711b518). 이 페이지의 주소 `https://bms.hyuns.uk/tables/insane1` 가 R-BMS 의 기본 등록 표 주소다 | A | 공개 읽기(로그인 시 내 기록) |
@@ -126,10 +126,11 @@
 |---|---|---|---|---|
 | GET | `/api/fe/charts/search` | 차트 검색(q·mode·level·sort·page·limit) | 없음 | `chart-search`(+쿼리 인자) |
 | GET | `/api/fe/charts/[hash]/leaderboard` | 리더보드(랭킹 + 차트 메타 조인 + player_name·replay_id). `include_scratch_auto=true` 면 SCRATCH AUTO 판 포함 목록(API 기본은 `false`, 화면 기본은 켬: 아래 SCRATCH AUTO 절) | 없음 | `chart-ranking:{sha}` |
-| GET | `/api/fe/activity/recent` | 전체 최근 제출 피드(ranked 이고 SCRATCH AUTO 가 아닌 판) | 없음 | `activity-recent` |
+| GET | `/api/fe/activity/recent` | 전체 최근 제출 피드(`ranked` 인 판 전부. SCRATCH AUTO 판도 싣고 항목의 `scratch_auto` 로 홈이 A-SCR 표지를 붙인다(2026-11-02, 그 전에는 SCRATCH AUTO 판을 뺐다). `ranked=false` 판은 계속 싣지 않는다) | 없음 | `activity-recent` |
 | GET | `/api/fe/leaderboards/players` | 종합 플레이어 랭킹. `include_scratch_auto=true` 면 SCRATCH AUTO 판까지 센다 | 없음 | `leaderboard-players` |
 | GET | `/api/fe/players/[playerId]/recent` | 플레이어의 모든 판을 `played_at`·점수 id 내림차순으로(차트 조인). `page`(기본 1)·`limit`(기본 20, 최대 100), 응답은 `{ success, data, pagination: { page, limit, total, totalPages } }`. 화면 제목은 "플레이 기록" | 없음 | `player-recent:{id}`(모든 페이지가 같은 태그) |
 | GET | `/api/fe/players/[playerId]/stats` | 플레이어 통계(램프 분포·레벨별 EX·플레이수) | 없음 | `player-stats:{id}` |
+| GET | `/api/fe/players/[playerId]/play-days` | 일별 플레이 시간(2026-11-02): KST 날짜 30개(오래된 날부터) `{ days:[{ date, plays, play_ms }], total_plays, total_ms }`. 판 길이가 서버에 없어 판 끝 시각 `played_at` 의 간격으로 추정한다(앞 판 끝과 10분 이하면 그 간격, 아니면·첫 판은 2분, 판 끝 시각의 KST 날에 더함). 그 플레이어의 `score` 모든 판(ranked·SCRATCH AUTO 무관), `course_score` 는 읽지 않는다(코스 스테이지는 곡별 `score` 행으로 올라옴). 규칙은 `server/service/domain/fe/player-play-days.ts`. `'use cache'` 의 키에 KST 오늘 0시가 들어가 자정에 창이 넘어간다 | 없음 | `player-play-days:{id}` |
 | GET | `/api/fe/stats/summary` | 서버 통계(차트/플레이어/제출 수) | 없음 | `stats-summary` |
 | POST | `/api/fe/auth/login` | 웹 로그인(`{ id, password }` → 세션 쿠키만 세팅하고 `{ user: { id, login_id, name, role } }`. API 토큰은 만들지 않음. 5/min/IP, 게임용 `/api/auth/login` 과 같은 버킷) | 없음 | — |
 | POST | `/api/fe/auth/register` | 웹 가입(`{ id, email, password, name? }` → 201, 세션 쿠키만 세팅하고 `{ user }`. API 토큰은 만들지 않음. 5/min/IP, `/api/auth/register` 와 같은 버킷) | 없음 | — |
@@ -161,7 +162,7 @@
 
 표준 BMS 표 형식(루트 `src/app/tables/[tableId]/`, 봉투 없음, 무인증, `Access-Control-Allow-Origin: *`): `GET /tables/insane1/header.json`(`{ name, symbol, data_url, level_order, last_update }`, `data_url` 은 **요청 origin 의 절대 주소**)과 `GET /tables/insane1/data.json`(스냅샷 배열 그대로. `ETag` 와 304 지원, `Cache-Control: public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400`). 응답과 화면에는 다른 사이트의 주소·출처를 싣지 않는다(2026-10-14~15 사용자 지시: header 의 `original_url`·`mirror_of`, 요약 API 의 `original_url`·`source`, 곡의 `comment`, `artist` 등 글자 필드 속 웹 주소를 뺐고, 곡 내려받기 주소 `url`·`url_diff`·`name_diff` 는 남겼다. 정규화 규칙과 필드 목록의 정본은 [../backend/api-spec.md](../backend/api-spec.md) 7.1). 자료는 `web/data/tables/<id>/{header,data,source}.json` 을 **정적 import** 해서 쓰므로(`source.json` 은 스냅샷 재현 기록이고 `ETag` 해시만 읽는다) DB 도 파일 추적 설정(`outputFileTracingIncludes`)도 필요 없다(서버 번들에 실린다). 표를 더하려면 폴더를 만들고 `table-snapshot.data.ts` 의 `RAW_SNAPSHOTS` 에 한 줄을 더한다. 사람이 보는 페이지 `/tables/insane1`(`bmstable` 메타는 `/tables/insane1/header.json` 루트 상대 경로)은 웨이브 17B-2 에서 구현됐다.
 
-내 기록 조회(`/records`)는 표의 md5 전부(1,035개)를 `IN` 한 번으로 묻고, 기록이 있는 곡만 `{ md5: { clear, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } }` 로 돌려준다(최대 약 150KB). 곡마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, 화면은 SCRATCH AUTO 쪽이면 A-SCR 표지를 붙인다(웨이브 20). 표 상세는 약 307KB(gzip 전, `comment` 를 뺀 뒤)이고 공개 캐시(`s-maxage=3600`)다. `GET /api/fe/leaderboards/players` 는 `rank_points` 를 쓰지 않는다: `sort` 는 `cleared`(클리어한 차트 수, 기본)·`played`(플레이한 차트 수)·`plays`(제출 수)이고 옛 값 `rank_points`·`total_plays` 는 각각 `cleared`·`plays` 로 받는다. 항목에 `cleared_charts`·`played_charts` 가 더해진다(클리어 = `chart_best.clear >= AssistEasy`, 곧 NO PLAY 와 FAILED 가 아닌 모든 램프. 서버는 `MIN_CLEAR_LAMP_ID`, 화면은 `MIN_CLEAR_LAMP` 하나가 정의하고 `tests/dto/clear-lamps.test.ts` 가 둘의 일치를 지킨다).
+내 기록 조회(`/records`)는 표의 md5 전부(1,033개)를 `IN` 한 번으로 묻고, 기록이 있는 곡만 `{ md5: { clear, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } }` 로 돌려준다(최대 약 150KB). 곡마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, 화면은 SCRATCH AUTO 쪽이면 A-SCR 표지를 붙인다(웨이브 20). 표 상세는 약 307KB(gzip 전, `comment` 를 뺀 뒤)이고 공개 캐시(`s-maxage=3600`)다. `GET /api/fe/leaderboards/players` 는 `rank_points` 를 쓰지 않는다: `sort` 는 `cleared`(클리어한 차트 수, 기본)·`played`(플레이한 차트 수)·`plays`(제출 수)이고 옛 값 `rank_points`·`total_plays` 는 각각 `cleared`·`plays` 로 받는다. 항목에 `cleared_charts`·`played_charts` 가 더해진다(클리어 = `chart_best.clear >= AssistEasy`, 곧 NO PLAY 와 FAILED 가 아닌 모든 램프. 서버는 `MIN_CLEAR_LAMP_ID`, 화면은 `MIN_CLEAR_LAMP` 하나가 정의하고 `tests/dto/clear-lamps.test.ts` 가 둘의 일치를 지킨다).
 
 ### 1-4. 인증 방식 요약 표
 
@@ -384,7 +385,7 @@ Route Handler (app/api/**/route.ts)
 | `chart-replays:{sha256}` | 차트 리플레이 목록 | `minutes` |
 | `chart-search` | 검색 결과 | `minutes` |
 | `player:{id}` | 프로필 | `minutes` |
-| `player-scores:{id}` · `player-recent:{id}` · `player-stats:{id}` | 플레이어 기록/통계 | `minutes` |
+| `player-scores:{id}` · `player-recent:{id}` · `player-stats:{id}` · `player-play-days:{id}` | 플레이어 기록/통계(`player-play-days` 는 2026-11-02, 일별 플레이 시간) | `minutes` |
 | `player-rivals:{id}` | 라이벌 목록 | `hours` |
 | `course:{hash}` · `course-ranking:{hash}` · `course-best:{hash}` | 코스 | `minutes` / `days`(메타) |
 | `course-catalog` | 코스 카탈로그 목록과 항목(`/api/fe/courses*`, `/courses`) | `minutes` |
@@ -399,11 +400,11 @@ Route Handler (app/api/**/route.ts)
 
 | 변경 | 무효화 대상 |
 |---|---|
-| `POST /api/scores` (accepted) | `chart-ranking:{sha}` · `chart-best:{sha}` · `chart:{sha}` · `player:{userId}` · `player-scores:{userId}` · `player-recent:{userId}` · `player-stats:{userId}` · `activity-recent` · `stats-summary` · `leaderboard-players` |
+| `POST /api/scores` (accepted) | `chart-ranking:{sha}` · `chart-best:{sha}` · `chart:{sha}` · `player:{userId}` · `player-scores:{userId}` · `player-recent:{userId}` · `player-stats:{userId}` · `player-play-days:{userId}` · `activity-recent` · `stats-summary` · `leaderboard-players` |
 | `POST /api/charts` (메타 업서트) | `chart:{sha}` · `chart-search` |
 | `POST /api/charts/[hash]/replays` | `chart-replays:{sha}` · (연결 시) `score:{scoreId}` |
 | `PUT /api/players/[id]/rivals` | `player-rivals:{id}` · `player:{id}` |
-| `POST /api/courses` (결과 제출) | `course-ranking:{hash}` · `course-best:{hash}` · `player-*:{userId}` · `activity-recent` |
+| `POST /api/courses` (결과 제출) | `course-ranking:{hash}` · `course-best:{hash}` · `player-stats:{loginId}`(`revalidateOnCourseSubmit`. `activity-recent` 와 나머지 `player-*` 는 무효화하지 않는다: 코스 스테이지는 곡별 `score` 행으로 `POST /api/scores` 에 따로 올라오고 그쪽이 무효화한다. 2026-11-02 에 코드와 어긋난 옛 서술을 고침) |
 | `POST /api/courses/meta` | `course:{hash}` |
 | `POST /api/tables` | `tables` · `table:{id}` |
 | `POST /api/courses` 가 단위를 줬을 때 | `player:{loginId}` · `leaderboard-players` |
