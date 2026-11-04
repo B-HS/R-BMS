@@ -5,7 +5,7 @@ import type { ChartPatternDocument } from '@server/dto/chart-pattern'
 import { createAiTrainingPlanService, type TrainingPlanDigest } from '@server/service/domain/ai/training-plan.service'
 import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
 import { createFolderService } from '@server/service/domain/folder/folder.service'
-import { TRAINING_COOLDOWN_KEY, TRAINING_WARMUP_KEY, trainingKindsOfKey } from '@server/service/domain/training/training-constants'
+import { TRAINING_WARMUP_KEY, trainingKindsOfKey } from '@server/service/domain/training/training-constants'
 import {
     createTrainingChartService,
     type TrainingChartRow,
@@ -178,14 +178,13 @@ export const trainingProfileOf = (options: { plays?: number; weaknesses?: Weakne
         notice: null,
     })
 
-/** A plan that keeps to the digest: a warm-up, each allowed focus key twice with its first kind, then a cool-down. */
+/** A plan that keeps to the digest: a warm-up, then each allowed focus key twice with its first kind, in the middle of the range. */
 export const planFromDigest = (digest: PlanDigestKeys): AiTrainingPlanOutput => {
-    const focus = digest.allowed.keys.filter((key) => key !== TRAINING_WARMUP_KEY && key !== TRAINING_COOLDOWN_KEY)
+    const focus = digest.allowed.keys.filter((key) => key !== TRAINING_WARMUP_KEY)
     const section = (focusKey: string, kind: AiTrainingPlanOutput['sections'][number]['kind'], weight: number) => ({
         focus_key: focusKey,
         kind,
         weight,
-        target_nps: 9,
         lane_hint: 'all' as const,
         chord_size: 2,
         scratch_ratio: 0,
@@ -197,7 +196,9 @@ export const planFromDigest = (digest: PlanDigestKeys): AiTrainingPlanOutput => 
     return {
         description: '트릴과 잭을 번갈아 다지는 1분 곡',
         base_bpm: 150,
-        sections: [section(TRAINING_WARMUP_KEY, 'stream', 1), ...middle, section(TRAINING_COOLDOWN_KEY, 'rest', 1)],
+        level: 0.5,
+        shape: 'dip',
+        sections: [section(TRAINING_WARMUP_KEY, 'stream', 1), ...middle],
         advice: '처음 두 구간은 힘을 빼고 치세요.',
     }
 }

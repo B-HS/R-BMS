@@ -28,6 +28,13 @@ export type TrainingLaneHint = (typeof TRAINING_LANE_HINTS)[number]
 export const TRAINING_INTENSITIES = ['build', 'push', 'over'] as const
 export type TrainingIntensity = (typeof TRAINING_INTENSITIES)[number]
 
+/**
+ * How the density of a chart moves over its minute (plan 2026-11-04-training-difficulty M4): the four shapes the hardest minute of
+ * real charts falls into (05 9.4), flat, rising from a low start, an early dip, and a high start with a dip in the middle.
+ */
+export const TRAINING_SHAPES = ['flat', 'rising', 'dip', 'front_dip'] as const
+export type TrainingShape = (typeof TRAINING_SHAPES)[number]
+
 export const TRAINING_LIMIT = {
     CHARTS_PER_USER: 20,
     DESCRIPTION_MAX: 255,
@@ -52,19 +59,22 @@ export const TRAINING_FOLDER_DESCRIPTION = {
 } as const satisfies Record<Locale, string>
 
 /**
- * The plan a provider writes for a training chart (plan 3.3). Every property is required and none is nullable, so the provider's
- * structured output accepts it; ranges are not part of the provider schema and are enforced by `correctTrainingPlan` afterwards.
+ * The plan a provider writes for a training chart (plan 3.3, 2026-11-04-training-difficulty M3): the layout, a `level` within the
+ * intensity's range and a density `shape`; the server works out every density from them. Every property is required and none is
+ * nullable, so the provider's structured output accepts it; ranges are not part of the provider schema and are enforced by
+ * `correctTrainingPlan` afterwards.
  */
 export const aiTrainingPlanOutputSchema = z.object({
     description: z.string().trim().max(TRAINING_LIMIT.DESCRIPTION_MAX),
     base_bpm: z.number(),
+    level: z.number(),
+    shape: z.enum(TRAINING_SHAPES),
     sections: z
         .array(
             z.object({
                 focus_key: z.string(),
                 kind: z.enum(TRAINING_PATTERN_KINDS),
                 weight: z.number(),
-                target_nps: z.number(),
                 lane_hint: z.enum(TRAINING_LANE_HINTS),
                 chord_size: z.number(),
                 scratch_ratio: z.number(),
@@ -102,11 +112,14 @@ export type TrainingChartCreateInput = z.infer<typeof trainingChartCreateSchema>
 /** The public path a training chart's zip is served at (plan 5.1); the folder and training domains build their links with it. */
 export const trainingDownloadPathOf = (id: string) => `/api/training/${id}/chart.zip`
 
-/** `training_chart.request` (plan 4.1): what was asked and the provider's plan as refined, kept private to the owner. */
+/**
+ * `training_chart.request` (plan 4.1): what was asked and the provider's plan as refined, kept private to the owner. A plan stored
+ * before the plan had a level and a shape (generator 1) reads without them.
+ */
 export const trainingChartRequestSchema = z.object({
     focus_key: z.string(),
     intensity: z.enum(TRAINING_INTENSITIES),
-    plan: aiTrainingPlanOutputSchema,
+    plan: aiTrainingPlanOutputSchema.partial({ level: true, shape: true }),
     advice: z.string(),
     description: z.string(),
 })
@@ -217,6 +230,7 @@ export const trainingChartDetailSchema = trainingChartSummarySchema.omit({ plays
             to_ms: z.number().int(),
             target_nps: z.number(),
             actual_nps: z.number(),
+            actual_rps: z.number().nullable(),
             lane_hint: z.enum(TRAINING_LANE_HINTS),
             intent: z.string(),
         }),

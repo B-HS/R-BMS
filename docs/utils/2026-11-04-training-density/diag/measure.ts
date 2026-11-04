@@ -1,15 +1,21 @@
-import type { AiTrainingPlanOutput, TrainingIntensity, TrainingPatternKind } from '/Users/hyunseokbyun/development/R-BMS/web/src/server/dto/training'
-import { correctTrainingPlan, trainingBoundsOf, trainingSpecInputOf } from '/Users/hyunseokbyun/development/R-BMS/web/src/server/service/domain/training/spec'
-import { synthesizeTraining } from '/Users/hyunseokbyun/development/R-BMS/web/src/server/service/domain/training/synthesize'
-import { writeTrainingBms } from '/Users/hyunseokbyun/development/R-BMS/web/src/server/service/domain/training/bms-writer'
-import { buildTrainingPatternDocument } from '/Users/hyunseokbyun/development/R-BMS/web/src/server/service/domain/training/pattern-document'
-import { localDensitiesOf, peakNpsOf, peakRowsPerSecondOf } from '/Users/hyunseokbyun/development/R-BMS/web/src/server/service/domain/analysis/local-density'
-import type { PatternNote } from '/Users/hyunseokbyun/development/R-BMS/web/src/server/service/domain/analysis/pattern-tags'
+import {
+    TRAINING_SHAPES,
+    type AiTrainingPlanOutput,
+    type TrainingIntensity,
+    type TrainingPatternKind,
+    type TrainingShape,
+} from '../../../../web/src/server/dto/training'
+import { localDensitiesOf } from '../../../../web/src/server/service/domain/analysis/local-density'
+import type { PatternNote } from '../../../../web/src/server/service/domain/analysis/pattern-tags'
+import { writeTrainingBms } from '../../../../web/src/server/service/domain/training/bms-writer'
+import { buildTrainingPatternDocument } from '../../../../web/src/server/service/domain/training/pattern-document'
+import { correctTrainingPlan, trainingBoundsOf, trainingSpecInputOf } from '../../../../web/src/server/service/domain/training/spec'
+import { synthesizeTraining } from '../../../../web/src/server/service/domain/training/synthesize'
 
 const PROFILES = [
-    { name: 'P1', comfort: 8, limit: 10, trueLimit: 11 },
-    { name: 'P2', comfort: 12, limit: 16, trueLimit: 16 },
-    { name: 'P3', comfort: 18, limit: 24, trueLimit: 24 },
+    { name: 'P1', limit: 10 },
+    { name: 'P2', limit: 16 },
+    { name: 'P3', limit: 24 },
 ] as const
 const INTENSITIES: TrainingIntensity[] = ['build', 'push', 'over']
 const KIND_KEY: Record<Exclude<TrainingPatternKind, 'rest'>, string> = {
@@ -29,19 +35,25 @@ const KIND_KEY: Record<Exclude<TrainingPatternKind, 'rest'>, string> = {
 const KINDS = Object.keys(KIND_KEY) as (keyof typeof KIND_KEY)[]
 const SEEDS = [1, 2, 3, 4, 5]
 const BASE_BPM = Number(process.env.BASE_BPM ?? 160)
+const LEVELS = (process.env.LEVELS ?? '0,0.5,1').split(',').map(Number)
 const SCENARIO = process.env.SCENARIO ?? 'typical'
-const TARGET = process.env.TARGET ?? 'max'
+const BLOCKS = 12
 
 const KIND_NUM = ['normal', 'ln_head', 'ln_end'] as const
+const RANGE = {
+    build: [0.86, 1.05],
+    push: [0.95, 1.15],
+    over: [1.1, 1.36],
+} as const
 
-const pct = (sorted: number[], p: number) => sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)] ?? 0
+const rank = (sorted: number[], q: number) => sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)] ?? 0
 const r2 = (v: number) => Math.round(v * 100) / 100
+const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / Math.max(1, values.length)
 
-const section = (focus_key: string, kind: TrainingPatternKind, weight: number, target_nps: number) => ({
+const section = (focus_key: string, kind: TrainingPatternKind, weight: number) => ({
     focus_key,
     kind,
     weight,
-    target_nps,
     lane_hint: 'all' as const,
     chord_size: kind === 'chord_stream' || kind === 'chord_jack' ? 3 : 1,
     scratch_ratio: 0,
@@ -50,116 +62,205 @@ const section = (focus_key: string, kind: TrainingPatternKind, weight: number, t
     intent: '',
 })
 
-const planOf = (kind: keyof typeof KIND_KEY, bounds: ReturnType<typeof trainingBoundsOf>): AiTrainingPlanOutput => {
+const planOf = (kind: keyof typeof KIND_KEY, level: number, shape: TrainingShape): AiTrainingPlanOutput => {
     const key = KIND_KEY[kind]
-    const focusTarget = TARGET === 'max' ? 999 : (bounds.nps_min + bounds.nps_max) / 2
-    if (SCENARIO === 'focus')
-        return { description: '', advice: '', base_bpm: BASE_BPM, sections: [0, 1, 2].map(() => section(key, kind, 3, focusTarget)) }
+    const focus = [0, 1, 2].map(() => section(key, kind, 3))
+    const sections = SCENARIO === 'focus' ? focus : [section('warmup', 'stream', 1), ...focus]
     return {
         description: '',
         advice: '',
         base_bpm: BASE_BPM,
-        sections: [
-            section('warmup', 'stream', 2, bounds.comfort_nps),
-            section(key, kind, 3, focusTarget),
-            section(key, kind, 3, focusTarget),
-            section(key, kind, 3, focusTarget),
-            section('cooldown', 'rest', 1, 2),
-        ],
+        level,
+        shape,
+        sections,
     }
 }
 
-const measure = (profile: (typeof PROFILES)[number], intensity: TrainingIntensity, kind: keyof typeof KIND_KEY, seed: number) => {
-    const bounds = trainingBoundsOf({ comfort_nps: profile.comfort, limit_nps_ex: profile.limit, max_seen_nps: null }, intensity)
-    const plan = planOf(kind, bounds)
-    const allowed = { kinds: [], lane_hints: [], keys: [KIND_KEY[kind], 'warmup', 'cooldown'] }
-    const corrected = correctTrainingPlan(plan, { allowed: allowed as never, bounds })
+const measure = (
+    profile: (typeof PROFILES)[number],
+    intensity: TrainingIntensity,
+    kind: keyof typeof KIND_KEY,
+    shape: TrainingShape,
+    level: number,
+    seed: number,
+) => {
+    const bounds = trainingBoundsOf({ limit_nps_ex: profile.limit, max_seen_nps: null }, intensity)
+    const allowed = {
+        kinds: [],
+        lane_hints: [],
+        keys: [KIND_KEY[kind], 'warmup'],
+    }
+    const corrected = correctTrainingPlan(planOf(kind, level, shape), {
+        allowed,
+        bounds,
+    })
     const id = `tc_${'0'.repeat(31)}${seed}`
-    const input = trainingSpecInputOf({ id, userId: 'diag', createdAt: 1_790_000_000_000 + seed, intensity, plan: corrected.spec, corrections: corrected.corrections })
+    const input = trainingSpecInputOf({
+        id,
+        userId: 'diag',
+        createdAt: 1_790_000_000_000 + seed,
+        intensity,
+        plan: corrected.spec,
+        corrections: corrected.corrections,
+    })
     const { spec, notes } = synthesizeTraining(input)
     const written = writeTrainingBms(spec, notes)
-    const doc = buildTrainingPatternDocument({ spec, lines: written.lines, md5: written.md5, sha256: written.sha256 })
-    const patternNotes: PatternNote[] = doc.notes.time_us.map((timeUs, i) => ({ timeUs, lane: doc.notes.lane[i], kind: KIND_NUM[doc.notes.kind[i]] }))
-    const dens = localDensitiesOf(patternNotes)
-    const judged = patternNotes.flatMap((n, i) => (n.kind === 'ln_end' ? [] : [dens[i].nps2]))
-    const nps2 = judged.toSorted((a, b) => a - b)
-    const focus = spec.sections.filter((s) => s.focus_key === KIND_KEY[kind])
-    const focusUs = focus.reduce((sum, s) => sum + (s.to_us - s.from_us), 0)
-    const focusNotes = focus.reduce((sum, s) => sum + s.notes, 0)
-    const focusTimes = patternNotes.filter((n) => n.kind !== 'ln_end').map((n) => n.timeUs)
-    const focusRows = new Set(
-        focusTimes.filter((t) => focus.some((s) => t >= s.from_us && t < s.to_us)),
-    ).size
-    const edgeUs = spec.sections.filter((s) => s.focus_key === 'warmup' || s.focus_key === 'cooldown').reduce((sum, s) => sum + (s.to_us - s.from_us), 0)
-    const firstUs = focusTimes[0] ?? 0
-    const lastUs = focusTimes.at(-1) ?? 0
-    const nps1Max = Math.max(...patternNotes.flatMap((n, i) => (n.kind === 'ln_end' ? [] : [dens[i].nps1])))
+    const doc = buildTrainingPatternDocument({
+        spec,
+        lines: written.lines,
+        md5: written.md5,
+        sha256: written.sha256,
+    })
+    const placed: PatternNote[] = doc.notes.time_us.map((timeUs, i) => ({
+        timeUs,
+        lane: doc.notes.lane[i],
+        kind: KIND_NUM[doc.notes.kind[i]],
+    }))
+    const dens = localDensitiesOf(placed)
+    const body = spec.sections.filter((s) => s.focus_key !== 'warmup')
+    const bodyFrom = body[0].from_us
+    const bodyTo = Math.min(59_000_000, body[body.length - 1].to_us)
+    const bodyNotes = placed.flatMap((n, i) => (n.kind !== 'ln_end' && n.timeUs >= bodyFrom ? [{ t: n.timeUs, nps2: dens[i].nps2 }] : []))
+    const nps2 = bodyNotes.map((n) => n.nps2).toSorted((a, b) => a - b)
+    const blockUs = (bodyTo - bodyFrom) / BLOCKS
+    const blocks = Array.from(
+        { length: BLOCKS },
+        (_, j) => bodyNotes.filter((n) => n.t >= bodyFrom + j * blockUs && n.t < bodyFrom + (j + 1) * blockUs).length,
+    )
+    const blockMean = mean(blocks)
+    const cv = Math.sqrt(mean(blocks.map((b) => (b - blockMean) ** 2))) / blockMean
+    const p50 = rank(nps2, 0.5)
+    const p90 = rank(nps2, 0.9)
+    const max = nps2.at(-1) ?? 0
+    const ratios = body.map((s) => s.actual_nps / s.target_nps)
     return {
-        bounds,
-        target: focus[0]?.target_nps ?? 0,
-        focusActual: focusUs > 0 ? (focusNotes * 1e6) / focusUs : 0,
-        focusRowsPerSec: focusUs > 0 ? (focusRows * 1e6) / focusUs : 0,
-        focusShare: focusUs / 60e6,
-        edgeShare: edgeUs / 60e6,
-        countInUs: spec.sections[0].from_us,
-        grid: focus[0]?.grid ?? 0,
-        p50: pct(nps2, 50),
-        p90: pct(nps2, 90),
-        max: nps2.at(-1) ?? 0,
-        nps1Max,
-        peak2s: peakNpsOf(patternNotes)['2000'],
-        peakRps2s: peakRowsPerSecondOf(patternNotes),
-        avg60: doc.playable_notes / 60,
-        avgSpan: lastUs > firstUs ? (doc.playable_notes * 1e6) / (lastUs - firstUs) : 0,
-        notes: doc.playable_notes,
-        playLevel: spec.play_level,
-        total: doc.total,
-        corrections: corrected.corrections.filter((c) => c.field === 'target_nps' && c.section !== null).map((c) => `${c.from}->${c.to}`),
+        p90L: p90 / profile.limit,
+        maxP50: max / p50,
+        cv,
+        ratioMin: Math.min(...ratios),
+        ratioMax: Math.max(...ratios),
+        avgL: doc.playable_notes / 60 / profile.limit,
+        p90,
+        max,
+        p50,
+        rps: mean(body.map((s) => s.actual_rps ?? 0)),
+        level: spec.play_level,
+        bpm: spec.base_bpm,
+        mu: spec.bounds.mean_nps,
+        target: spec.bounds.p90_target,
     }
 }
 
-const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length
+type Run = ReturnType<typeof measure>
+const runs: {
+    profile: string
+    intensity: TrainingIntensity
+    kind: string
+    shape: TrainingShape
+    level: number
+    run: Run
+}[] = []
+for (const profile of PROFILES)
+    for (const intensity of INTENSITIES)
+        for (const kind of KINDS)
+            for (const shape of TRAINING_SHAPES)
+                for (const level of LEVELS)
+                    for (const seed of SEEDS)
+                        runs.push({
+                            profile: profile.name,
+                            intensity,
+                            kind,
+                            shape,
+                            level,
+                            run: measure(profile, intensity, kind, shape, level, seed),
+                        })
 
-const rows: Record<string, unknown>[] = []
-for (const profile of PROFILES) {
-    for (const intensity of INTENSITIES) {
-        for (const kind of KINDS) {
-            const runs = SEEDS.map((seed) => measure(profile, intensity, kind, seed))
-            const m = (pick: (r: (typeof runs)[number]) => number) => r2(mean(runs.map(pick)))
-            const levels = runs.map((r) => r.playLevel)
-            rows.push({
-                profile: profile.name,
-                intensity,
-                kind,
-                nps_min: runs[0].bounds.nps_min,
-                nps_max: runs[0].bounds.nps_max,
-                target: r2(runs[0].target),
-                actual: m((r) => r.focusActual),
-                act_over_target: r2(mean(runs.map((r) => r.focusActual / r.target))),
-                rows_s: m((r) => r.focusRowsPerSec),
-                grid: runs[0].grid,
-                p50: m((r) => r.p50),
-                p90: m((r) => r.p90),
-                max: m((r) => r.max),
-                nps1max: m((r) => r.nps1Max),
-                peak2s: m((r) => r.peak2s),
-                peakRps2s: m((r) => r.peakRps2s),
-                avg60: m((r) => r.avg60),
-                avgSpan: m((r) => r.avgSpan),
-                p50_L: r2(mean(runs.map((r) => r.p50)) / profile.limit),
-                p90_L: r2(mean(runs.map((r) => r.p90)) / profile.limit),
-                max_L: r2(mean(runs.map((r) => r.max)) / profile.limit),
-                act_L: r2(mean(runs.map((r) => r.focusActual)) / profile.limit),
-                act_trueL: r2(mean(runs.map((r) => r.focusActual)) / profile.trueLimit),
-                notes: m((r) => r.notes),
-                level: `${Math.min(...levels)}-${Math.max(...levels)}`,
-                total: m((r) => r.total),
-                focusShare: m((r) => r.focusShare),
-                edgeShare: m((r) => r.edgeShare),
-                countInMs: Math.round(runs[0].countInUs / 1000),
-                corr: runs[0].corrections.join(' '),
-            })
-        }
-    }
+const summarize = (label: string, picked: typeof runs) => {
+    const of = (pick: (r: Run) => number) => picked.map((entry) => pick(entry.run))
+    const lo = (pick: (r: Run) => number) => r2(Math.min(...of(pick)))
+    const hi = (pick: (r: Run) => number) => r2(Math.max(...of(pick)))
+    const av = (pick: (r: Run) => number) => r2(mean(of(pick)))
+    return `${label}\tn=${picked.length}\tp90/L ${lo((r) => r.p90L)}~${hi((r) => r.p90L)} (avg ${av((r) => r.p90L)})\tmax/p50 ${lo((r) => r.maxP50)}~${hi((r) => r.maxP50)} (avg ${av((r) => r.maxP50)})\tcv ${lo((r) => r.cv)}~${hi((r) => r.cv)} (avg ${av((r) => r.cv)})\tactual/target ${lo((r) => r.ratioMin)}~${hi((r) => r.ratioMax)}\tavg/L ${lo((r) => r.avgL)}~${hi((r) => r.avgL)} (avg ${av((r) => r.avgL)})\trps ${av((r) => r.rps)}\tbpm ${lo((r) => r.bpm)}~${hi((r) => r.bpm)}\tlevel ${lo((r) => r.level)}~${hi((r) => r.level)}`
 }
-console.log(JSON.stringify(rows))
+
+const failures = (entry: (typeof runs)[number]) => {
+    const [low, high] = RANGE[entry.intensity]
+    const isFlat = entry.shape === 'flat'
+    return [
+        entry.run.p90L < low || entry.run.p90L > high ? 'c1' : null,
+        entry.run.maxP50 < 1.25 ? 'c2max' : null,
+        entry.run.cv < (isFlat ? 0.12 : 0.15) || entry.run.cv > 0.35 ? 'c2cv' : null,
+        entry.run.ratioMin < 0.93 || entry.run.ratioMax > 1.07 ? 'c3' : null,
+        entry.intensity === 'push' && entry.run.avgL < 0.7 ? 'c4' : null,
+    ].filter((item) => item !== null)
+}
+
+const lines: string[] = []
+lines.push(`# scenario=${SCENARIO} base_bpm=${BASE_BPM} levels=${LEVELS.join(',')} seeds=${SEEDS.length}`)
+lines.push('## profile x intensity')
+for (const profile of PROFILES)
+    for (const intensity of INTENSITIES)
+        lines.push(
+            summarize(
+                `${profile.name} ${intensity}`,
+                runs.filter((e) => e.profile === profile.name && e.intensity === intensity),
+            ),
+        )
+lines.push('## intensity x level')
+for (const intensity of INTENSITIES)
+    for (const level of LEVELS)
+        lines.push(
+            summarize(
+                `${intensity} level ${level}`,
+                runs.filter((e) => e.intensity === intensity && e.level === level),
+            ),
+        )
+lines.push('## kind')
+for (const kind of KINDS)
+    lines.push(
+        summarize(
+            kind,
+            runs.filter((e) => e.kind === kind),
+        ),
+    )
+lines.push('## shape')
+for (const shape of TRAINING_SHAPES)
+    lines.push(
+        summarize(
+            shape,
+            runs.filter((e) => e.shape === shape),
+        ),
+    )
+const failed = runs.map((entry) => ({ entry, reasons: failures(entry) })).filter((item) => item.reasons.length > 0)
+lines.push(`## failures ${failed.length} / ${runs.length}`)
+const REASONS = ['c1', 'c2max', 'c2cv', 'c3', 'c4'] as const
+lines.push(`by reason: ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.reasons.includes(reason)).length}`).join(', ')}`)
+for (const intensity of INTENSITIES)
+    lines.push(
+        `by reason ${intensity} (${runs.filter((e) => e.intensity === intensity).length}): ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.entry.intensity === intensity && item.reasons.includes(reason)).length}`).join(', ')}`,
+    )
+for (const intensity of INTENSITIES)
+    for (const level of LEVELS)
+        lines.push(
+            `by reason ${intensity} level ${level}: ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.entry.intensity === intensity && item.entry.level === level && item.reasons.includes(reason)).length}`).join(', ')}`,
+        )
+for (const kind of KINDS)
+    lines.push(
+        `by reason ${kind}: ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.entry.kind === kind && item.reasons.includes(reason)).length}`).join(', ')}`,
+    )
+for (const profile of PROFILES)
+    lines.push(
+        `by reason ${profile.name}: ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.entry.profile === profile.name && item.reasons.includes(reason)).length}`).join(', ')}`,
+    )
+if (process.env.DETAIL !== '1') {
+    console.log(lines.join('\n'))
+    process.exit(0)
+}
+const groups = Map.groupBy(failed, (item) => `${item.entry.profile} ${item.entry.intensity} ${item.entry.kind} ${item.reasons.join('+')}`)
+for (const [key, items] of groups) {
+    const sample = items[0].entry.run
+    lines.push(
+        `${key}\t${items.length}\tp90/L ${r2(sample.p90L)} max/p50 ${r2(sample.maxP50)} cv ${r2(sample.cv)} ratio ${r2(sample.ratioMin)}~${r2(sample.ratioMax)} avg/L ${r2(sample.avgL)} bpm ${sample.bpm}`,
+    )
+}
+console.log(lines.join('\n'))

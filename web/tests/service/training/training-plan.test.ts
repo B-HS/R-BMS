@@ -9,6 +9,7 @@ import {
 } from '@server/service/domain/ai/training-plan.service'
 import { WEAKNESS_KEY_MAX_LENGTH } from '@server/service/domain/analysis/weakness-key'
 import { trainingBoundsOf } from '@server/service/domain/training/spec'
+import { buildProviderJsonSchema, listJsonSchemaViolations } from '@server/service/shared/ai-provider/json-schema'
 import { planFromDigest, trainingProfileOf, trainingWeaknessOf } from '../../support/training-fixture'
 
 const AI_RESULT_SUBJECT_KEY_MAX = 128
@@ -23,13 +24,13 @@ const manyWeaknesses = () => [
 ]
 
 describe('trainingPlanDigestOf', () => {
-    test('auto 는 훈련할 수 있고 표본이 low 이상인 약점 상위 8개와 warmup·cooldown 을 허용한다', () => {
+    test('auto 는 훈련할 수 있고 표본이 low 이상인 약점 상위 8개와 warmup 을 허용하고 cooldown 은 없다', () => {
         const profile = trainingProfileOf({ weaknesses: manyWeaknesses() })
         const digest = trainingPlanDigestOf(profile, [], { focus_key: 'auto', intensity: 'push' }, { frontierLevel: '★10' })
         expect(digest.weaknesses).toHaveLength(TRAINING_DIGEST_LIMIT.WEAKNESSES)
         expect(digest.weaknesses.map((item) => item.key)).not.toContain('timing:trill')
         expect(digest.weaknesses.map((item) => item.key)).not.toContain('tag:ln_head')
-        expect(digest.allowed.keys).toEqual([...digest.weaknesses.map((item) => item.key), 'warmup', 'cooldown'])
+        expect(digest.allowed.keys).toEqual([...digest.weaknesses.map((item) => item.key), 'warmup'])
         expect(digest.allowed.kinds).toContain('rest')
         expect(digest.allowed.kinds).toContain('trill')
         expect(digest.bounds).toEqual(trainingBoundsOf(profile.density, 'push'))
@@ -37,11 +38,11 @@ describe('trainingPlanDigestOf', () => {
         expect(digest.request).toEqual({ focus_key: 'auto', intensity: 'push' })
     })
 
-    test('키를 고르면 그 키와 태그를 나누는 조합만 남고 허용 키는 그 키와 warmup·cooldown 이다', () => {
+    test('키를 고르면 그 키와 태그를 나누는 조합만 남고 허용 키는 그 키와 warmup 이다', () => {
         const profile = trainingProfileOf({ weaknesses: manyWeaknesses() })
         const digest = trainingPlanDigestOf(profile, [], { focus_key: 'tag:trill', intensity: 'build' }, { frontierLevel: null })
         expect(digest.weaknesses.map((item) => item.key)).toEqual(['tag:trill', 'combo:jack+trill'])
-        expect(digest.allowed.keys).toEqual(['tag:trill', 'warmup', 'cooldown'])
+        expect(digest.allowed.keys).toEqual(['tag:trill', 'warmup'])
     })
 
     test('previous 는 최근 3곡까지만 싣는다', () => {
@@ -90,9 +91,18 @@ describe('기능 사양과 캐시 키', () => {
         )
     })
 
+    test('구성안 스키마는 공급자 공통 부분집합 안이고 구간마다 목표 NPS 없이 level·shape 만 받는다', () => {
+        const built = buildProviderJsonSchema(aiTrainingPlanOutputSchema)
+        if (!built.ok) return expect.unreachable(built.violations.join('; '))
+        expect(listJsonSchemaViolations(built.jsonSchema)).toEqual([])
+        expect(JSON.stringify(built.jsonSchema)).not.toContain('target_nps')
+        expect(JSON.stringify(built.jsonSchema)).not.toContain('null')
+        expect(built.jsonSchema).toMatchObject({ required: expect.arrayContaining(['level', 'shape', 'sections']) })
+    })
+
     test('프롬프트는 화면 언어를 쓰고 기능 이름·버전이 고정이다', () => {
         const spec = aiTrainingPlanSpecOf('ja')
-        expect(spec).toMatchObject({ feature: 'training_plan', promptVersion: 1, maxOutputTokens: 8000, effort: 'low', schemaName: 'training_plan' })
+        expect(spec).toMatchObject({ feature: 'training_plan', promptVersion: 2, maxOutputTokens: 8000, effort: 'low', schemaName: 'training_plan' })
         expect(spec.system).toContain('Japanese')
         expect(spec.system).toContain('allowed.keys')
     })

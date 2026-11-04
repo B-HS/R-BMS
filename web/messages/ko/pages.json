@@ -474,15 +474,15 @@
                 "intensity": {
                     "build": {
                         "name": "BUILD",
-                        "description": "편안한 밀도 이하에서 패턴 자체를 익히는 단계입니다."
+                        "description": "EX 한계 밀도의 90~100%(곡 본문 2초 밀도의 상위 10% 지점 기준)에서 패턴 자체를 익히는 단계입니다."
                     },
                     "push": {
                         "name": "PUSH",
-                        "description": "편안한 밀도 근처에서 EX 한계 밀도까지 밀어붙이는 단계입니다."
+                        "description": "EX 한계 밀도의 100~110%까지 밀어붙이는 기본 단계입니다. 실제 곡처럼 밀도가 오르내리고, 가장 진한 순간은 한계를 넘습니다."
                     },
                     "over": {
                         "name": "OVER",
-                        "description": "편안한 밀도에서 EX 한계의 1.15배까지 넘어서는 단계입니다."
+                        "description": "EX 한계 밀도의 115~130%로 한계를 넘어서는 단계입니다."
                     }
                 },
                 "submit": "만들기",
@@ -528,9 +528,10 @@
                 "adjacent": "인접 레인"
             },
             "strip": {
-                "hint": "띠의 폭은 구간 길이, 높이는 합성한 곡의 실제 NPS, 점선은 목표 NPS 입니다. 색은 패턴 종류를 나타냅니다.",
+                "hint": "띠의 폭은 구간 길이, 높이는 합성한 곡의 실제 NPS, 점선은 구간의 목표 NPS(밀도 곡선의 평균)입니다. 색은 패턴 종류를 나타냅니다. 동시치기는 노트마다 세므로 행/초가 손이 느끼는 속도에 더 가깝습니다.",
                 "listLabel": "구간 목록",
-                "nps": "목표 {target} / 실제 {actual} NPS"
+                "nps": "목표 {target} / 실제 {actual} NPS",
+                "rps": "{rps} 행/초"
             },
             "trend": {
                 "empty": "판별 데이터가 있는 판이 아직 없어 구간 결과를 그릴 수 없습니다.",
@@ -566,7 +567,8 @@
                     "target_nps": "목표 NPS",
                     "chord_size": "동시치기 크기",
                     "scratch_ratio": "스크래치 비율",
-                    "ln_ratio": "LN 비율"
+                    "ln_ratio": "LN 비율",
+                    "level": "강도 안 위치"
                 }
             },
             "plays": {
@@ -593,7 +595,7 @@
                 "playsLabel": "내 플레이",
                 "playsValue": "{count, number}판",
                 "best": "최고 EX {ratio}",
-                "playLevelNote": "PLAYLEVEL 은 난이도표 레벨이 아니라 구간 중 가장 높은 NPS 를 정수로 적은 값입니다.",
+                "playLevelNote": "PLAYLEVEL 은 난이도표 레벨이 아니라 곡 본문의 2초 밀도(NPS) 상위 10% 지점을 정수로 적은 값입니다.",
                 "focus": "훈련 약점",
                 "noFocus": "없음",
                 "advice": "AI 조언",

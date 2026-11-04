@@ -50,6 +50,7 @@ const section = (index: number, focusKey: string, kind: AiTrainingChartDetail['s
     to_ms: (index + 1) * 12_000,
     target_nps: 8 + index,
     actual_nps: 8.4 + index,
+    actual_rps: index === 0 ? null : 6.2 + index,
     lane_hint: laneHint,
     intent: `intent ${index}`,
 })

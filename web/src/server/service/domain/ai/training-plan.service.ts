@@ -21,11 +21,11 @@ import { PLAY_FEATURE_ANALYSIS_VERSION } from '@server/service/domain/ai/play-fe
 import { toProfileDigest } from '@server/service/domain/ai/weakness-profile.service'
 import { parseWeaknessKey } from '@server/service/domain/analysis/weakness-key'
 import { trainingBoundsOf, type TrainingAllowed } from '@server/service/domain/training/spec'
-import { TRAINING_EDGE_KEYS, trainingKindsOfKey } from '@server/service/domain/training/training-constants'
+import { TRAINING_PLAN_EDGE_KEYS, trainingKindsOfKey } from '@server/service/domain/training/training-constants'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_TRAINING_PLAN_FEATURE = 'training_plan'
-export const TRAINING_PLAN_PROMPT_VERSION = 1
+export const TRAINING_PLAN_PROMPT_VERSION = 2
 export const TRAINING_PLAN_MAX_OUTPUT_TOKENS = 8000
 export const TRAINING_PLAN_EFFORT = 'low' satisfies AiEffort
 
@@ -62,7 +62,8 @@ export const trainingPlanSubjectKey = (request: TrainingChartCreateInput) => [SU
 /**
  * The input a provider plans a training chart from (plan 3.2): the profile's window, density, weaknesses, strengths, timing,
  * contexts and hands, the frontier of the default table, the newest earlier charts, the ranges the plan is held to and what it may
- * name. With a focus key the weaknesses are cut to that key and its pairs and the allowed keys to it, the warm-up and the cool-down.
+ * name. With a focus key the weaknesses are cut to that key and its pairs and the allowed keys to it and the warm-up (a plan has no
+ * cool-down, plan 2026-11-04-training-difficulty M5).
  */
 export const trainingPlanDigestOf = (
     profile: WeaknessProfileView,
@@ -73,7 +74,7 @@ export const trainingPlanDigestOf = (
     const digest = toProfileDigest(profile)
     const focus = request.focus_key === TRAINING_AUTO_FOCUS ? null : focusWeaknessOf(profile, request.focus_key)
     const weaknesses = (focus ? focusedWeaknessesOf(profile, focus) : trainableWeaknessesOf(profile)).slice(0, TRAINING_DIGEST_LIMIT.WEAKNESSES)
-    const keys = [...(focus ? [focus.key] : weaknesses.map((item) => item.key)), ...TRAINING_EDGE_KEYS]
+    const keys = [...(focus ? [focus.key] : weaknesses.map((item) => item.key)), ...TRAINING_PLAN_EDGE_KEYS]
     const allowed = {
         kinds: [...new Set(keys.flatMap((key) => trainingKindsOfKey(key)))],
         lane_hints: TRAINING_LANE_HINTS,
@@ -118,10 +119,12 @@ export const buildTrainingPlanSystemPrompt = (language: Locale) =>
         DIGEST_IS_DATA_RULE,
         DIGEST_KEY_RULE,
         'Every section `focus_key` must be one of `allowed.keys`.',
-        "A section's `kind` must be one of the `training_kinds` of the weakness its `focus_key` names; a `warmup` or `cooldown` section is `rest` or `stream`.",
+        "A section's `kind` must be one of the `training_kinds` of the weakness its `focus_key` names; a `warmup` section is `rest` or `stream`.",
         'Give each section a `weight`: only the ratio of the weights matters, and the server fits the sections to about 60 seconds.',
-        'Keep `target_nps` within `bounds.nps_min` and `bounds.nps_max`, and `base_bpm` within `bounds.bpm_min` and `bounds.bpm_max`.',
-        'Start with a warm-up section, put sections of the focus weaknesses in the middle at least twice, and end with a cool-down section.',
+        'The server sets every density: the chart body keeps its 2-second density p90 between `bounds.p90_min` and `bounds.p90_max` (shares of the limit `bounds.limit_nps`), and `level` from 0 to 1 picks the point in that range.',
+        '`shape` is how the density moves over the minute: `flat` stays even, `rising` starts low and climbs, `dip` falls early and climbs to the end, `front_dip` starts high, falls in the middle and climbs to the end.',
+        'Keep `base_bpm` within `bounds.bpm_min` and `bounds.bpm_max`; the server raises it when the densest moments need a faster grid.',
+        'You may open with one short `warmup` section (at most `bounds.warmup_max_s` seconds); there is no cool-down, as the chart ends at its densest. Every other section trains a focus weakness, each focus at least twice.',
         `\`intent\` is one ${AI_OUTPUT_LANGUAGE_NAME[language]} line the player reads for the section; \`description\` and \`advice\` are short ${AI_OUTPUT_LANGUAGE_NAME[language]} sentences on the chart and on how to play it.`,
     ].join('\n')
 

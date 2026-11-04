@@ -1,26 +1,37 @@
 import { describe, expect, test } from 'bun:test'
-import { TRAINING_PATTERN_KINDS, type AiTrainingPlanSection, type TrainingLaneHint, type TrainingPatternKind } from '@server/dto/training'
+import {
+    TRAINING_PATTERN_KINDS,
+    TRAINING_SHAPES,
+    type AiTrainingPlanSection,
+    type TrainingLaneHint,
+    type TrainingPatternKind,
+    type TrainingShape,
+} from '@server/dto/training'
 import { toPatternInput } from '@server/service/domain/analysis/chart-features'
+import { localDensitiesOf } from '@server/service/domain/analysis/local-density'
 import { classifyPattern, type PatternTag } from '@server/service/domain/analysis/pattern-tags'
-import { writeTrainingBms, type TrainingNote } from '@server/service/domain/training/bms-writer'
+import { TRAINING_NOTE_KINDS, writeTrainingBms, type TrainingNote } from '@server/service/domain/training/bms-writer'
 import { buildTrainingPatternDocument } from '@server/service/domain/training/pattern-document'
 import { correctTrainingPlan, trainingBoundsOf, trainingSpecInputOf, type TrainingSpecInput } from '@server/service/domain/training/spec'
 import { synthesizeTraining } from '@server/service/domain/training/synthesize'
-import { TRAINING_BEAT_TICKS, TRAINING_LENGTH_US, TRAINING_MEASURE_TICKS, TRAINING_TAIL_US } from '@server/service/domain/training/training-constants'
+import { TRAINING_GRIDS, TRAINING_LENGTH_US, TRAINING_MEASURE_TICKS, TRAINING_TAIL_US } from '@server/service/domain/training/training-constants'
+
+const NOTE_KINDS = TRAINING_NOTE_KINDS
 
 const ID = `tc_${'c'.repeat(32)}`
 const SEEDS = [1, 2, 3] as const
-const BOUNDS = trainingBoundsOf({ comfort_nps: 8, limit_nps_ex: 12, max_seen_nps: 14 }, 'push')
+const BOUNDS = trainingBoundsOf({ limit_nps_ex: 12, max_seen_nps: 14 }, 'push')
 const SCRATCH = 7
 const LONG_END = 2
+const LEVEL = 0.5
+const FLOW_PARTS = 12
 
 type SectionOptions = Partial<AiTrainingPlanSection> & { kind: TrainingPatternKind }
 
-const specOf = (options: SectionOptions, seed: number, baseBpm = 160): TrainingSpecInput => {
+const specOf = (options: SectionOptions, seed: number, baseBpm = 160, shape: TrainingShape = 'flat', bounds = BOUNDS): TrainingSpecInput => {
     const sections = [0, 1, 2].map(() => ({
         focus_key: 'focus',
         weight: 1,
-        target_nps: 9,
         lane_hint: 'all' as TrainingLaneHint,
         chord_size: 2,
         scratch_ratio: 0,
@@ -30,8 +41,8 @@ const specOf = (options: SectionOptions, seed: number, baseBpm = 160): TrainingS
         ...options,
     }))
     const { spec, corrections } = correctTrainingPlan(
-        { description: '', base_bpm: baseBpm, sections, advice: '' },
-        { allowed: { kinds: [], lane_hints: [], keys: ['focus'] }, bounds: BOUNDS },
+        { description: '', base_bpm: baseBpm, level: LEVEL, shape, sections, advice: '' },
+        { allowed: { kinds: [], lane_hints: [], keys: ['focus'] }, bounds },
     )
     return { ...trainingSpecInputOf({ id: ID, userId: 'u', createdAt: 0, intensity: 'push', plan: spec, corrections }), seed }
 }
@@ -53,6 +64,34 @@ const shareOf = (chart: Chart, tag: PatternTag, lanes?: readonly number[]) => {
 }
 
 const KEYS = [0, 1, 2, 3, 4, 5, 6]
+
+const rankOf = (sorted: readonly number[], share: number) => sorted[Math.max(0, Math.ceil(share * sorted.length) - 1)] ?? 0
+
+/** The body's nps2 (the judged notes after the warm-up, as the analysis engine reads them) and the variation of its twelve parts. */
+const bodyStatsOf = (chart: Chart) => {
+    const { document, spec } = chart
+    const notes = document.notes.time_us.map((timeUs, index) => ({
+        timeUs,
+        lane: document.notes.lane[index],
+        kind: NOTE_KINDS[document.notes.kind[index]],
+    }))
+    const densities = localDensitiesOf(notes)
+    const body = spec.sections.filter((section) => section.focus_key !== 'warmup')
+    const fromUs = body[0].from_us
+    const toUs = Math.min(TRAINING_LENGTH_US - TRAINING_TAIL_US, body[body.length - 1].to_us)
+    const judged = notes.flatMap((note, index) =>
+        note.kind !== 'ln_end' && note.timeUs >= fromUs ? [{ timeUs: note.timeUs, nps2: densities[index].nps2 }] : [],
+    )
+    const sorted = judged.map((note) => note.nps2).toSorted((a, b) => a - b)
+    const partUs = (toUs - fromUs) / FLOW_PARTS
+    const parts = Array.from(
+        { length: FLOW_PARTS },
+        (_, part) => judged.filter((note) => Math.floor((note.timeUs - fromUs) / partUs) === part).length,
+    )
+    const mean = parts.reduce((sum, count) => sum + count, 0) / FLOW_PARTS
+    const variation = Math.sqrt(parts.reduce((sum, count) => sum + (count - mean) ** 2, 0) / FLOW_PARTS) / mean
+    return { p50: rankOf(sorted, 0.5), p90: rankOf(sorted, 0.9), max: sorted.at(-1) ?? 0, variation }
+}
 
 const tickOf = (note: TrainingNote) => note.measure * TRAINING_MEASURE_TICKS + (note.num * TRAINING_MEASURE_TICKS) / note.den
 
@@ -87,11 +126,17 @@ describe('합성 결과가 분류기에서 의도한 태그를 갖는다 (시드
         }
     })
 
-    test('burst 는 밀집 박에 성긴 박보다 노트가 많다', () => {
+    test('burst 는 구간마다 밀집 마디(짝수 번째)에 성긴 마디보다 노트가 두 배 넘게 많다', () => {
         for (const seed of SEEDS) {
-            const { notes } = chartOf(specOf({ kind: 'burst' }, seed))
-            const beats = Map.groupBy(notes, (note) => Math.floor(tickOf(note) / TRAINING_BEAT_TICKS) % 2)
-            expect(beats.get(0)?.length ?? 0).toBeGreaterThan((beats.get(1)?.length ?? 0) * 2)
+            const { notes, spec } = chartOf(specOf({ kind: 'burst' }, seed))
+            const offsetOf = (note: TrainingNote) => {
+                const section = spec.sections.find(
+                    (item) => note.measure >= item.measure_from && note.measure < item.measure_from + item.measure_count,
+                )
+                return section ? (note.measure - section.measure_from) % 2 : 0
+            }
+            const measures = Map.groupBy(notes, offsetOf)
+            expect(measures.get(0)?.length ?? 0).toBeGreaterThan((measures.get(1)?.length ?? 0) * 2)
         }
     })
 })
@@ -173,19 +218,79 @@ describe('합성 규칙', () => {
         }
     })
 
-    test('구간 필드를 채우고 PLAYLEVEL 은 구간 최대 실제 NPS 의 반올림이다', () => {
-        const { spec } = chartOf(specOf({ kind: 'chord_stream' }, 1))
+    test('구간 필드와 bounds 를 채우고 PLAYLEVEL 은 본문 nps2 p90 의 반올림이다', () => {
+        const chart = chartOf(specOf({ kind: 'chord_stream' }, 1))
+        const { spec, document } = chart
+        const rowTimes = new Set(document.notes.time_us.filter((_, index) => document.notes.kind[index] !== LONG_END))
         for (const section of spec.sections) {
             expect(section.to_us).toBeGreaterThan(section.from_us)
             expect(section.notes).toBeGreaterThan(0)
-            expect(section.grid).toBe(8)
+            expect((TRAINING_GRIDS as readonly number[]).includes(section.grid)).toBe(true)
             expect(section.actual_nps).toBeCloseTo((section.notes * 1_000_000) / (section.to_us - section.from_us), 1)
+            const rows = [...rowTimes].filter((time) => time >= section.from_us && time < section.to_us).length
+            expect(section.actual_rps).toBeCloseTo((rows * 1_000_000) / (section.to_us - section.from_us), 1)
+            expect(section.actual_rps ?? 0).toBeLessThan(section.actual_nps)
         }
-        expect(spec.play_level).toBe(Math.round(Math.max(...spec.sections.map((section) => section.actual_nps))))
+        expect(spec.play_level).toBe(Math.round(bodyStatsOf(chart).p90))
+        expect(spec.bounds).toMatchObject({ limit_nps: 12, level: LEVEL, p90_target: 12.6, shape: 'flat' })
+        expect(spec.bounds.mean_nps).toBeGreaterThan(0)
         expect(spec.sections[0].from_us).toBe(1_500_000)
     })
 
+    test('구간마다 실제 NPS 가 목표(밀도 곡선의 구간 평균)의 0.93~1.07 이다', () => {
+        for (const kind of TRAINING_PATTERN_KINDS.filter((item) => item !== 'rest')) {
+            for (const seed of SEEDS) {
+                for (const section of chartOf(specOf({ kind, chord_size: 3 }, seed)).spec.sections) {
+                    const ratio = section.actual_nps / section.target_nps
+                    expect(ratio, `${kind} ${seed} ${section.index}`).toBeGreaterThanOrEqual(0.93)
+                    expect(ratio, `${kind} ${seed} ${section.index}`).toBeLessThanOrEqual(1.07)
+                }
+            }
+        }
+    })
+
+    test('scratch_solo 는 밀도가 낮으면 떨어진 행에 건반을 두고, 스크래치는 여전히 독립 스크래치다', () => {
+        const low = trainingBoundsOf({ limit_nps_ex: 6, max_seen_nps: null }, 'build')
+        for (const seed of SEEDS) {
+            const chart = chartOf(specOf({ kind: 'scratch_solo' }, seed, 160, 'flat', low))
+            const keys = chart.notes.filter((note) => note.lane !== SCRATCH).length
+            expect(keys).toBeGreaterThan(0)
+            expect(keys).toBeLessThanOrEqual(chart.notes.filter((note) => note.lane === SCRATCH).length * 0.25 + 1)
+            expect(shareOf(chart, 'scratch_solo', [SCRATCH])).toBeGreaterThanOrEqual(0.9)
+        }
+    })
+})
+
+describe('밀도 흐름 (설계 2026-11-04-training-difficulty 2절)', () => {
+    test('본문 nps2 p90 은 bounds 의 목표 ±5% 안이고, max/p50 ≥ 1.25, 12구간 변동계수 0.12~0.35 이다', () => {
+        for (const shape of TRAINING_SHAPES) {
+            for (const kind of ['stream', 'chord_stream', 'trill', 'scratch_mixed', 'ln_hold'] as const) {
+                for (const seed of SEEDS) {
+                    const chart = chartOf(specOf({ kind, chord_size: 3 }, seed, 160, shape))
+                    const stats = bodyStatsOf(chart)
+                    const label = `${shape} ${kind} ${seed}`
+                    expect(stats.p90 / chart.spec.bounds.p90_target, label).toBeGreaterThanOrEqual(0.95)
+                    expect(stats.p90 / chart.spec.bounds.p90_target, label).toBeLessThanOrEqual(1.05)
+                    expect(stats.max / stats.p50, label).toBeGreaterThanOrEqual(1.25)
+                    expect(stats.variation, label).toBeGreaterThanOrEqual(0.12)
+                    expect(stats.variation, label).toBeLessThanOrEqual(0.35)
+                }
+            }
+        }
+    })
+
+    test('같은 시드·모양이면 밀도 곡선과 μ 가 같고, 모양이 다르면 구간 목표가 다르다', () => {
+        const flat = synthesizeTraining(specOf({ kind: 'stream' }, 4, 160, 'flat'))
+        expect(synthesizeTraining(specOf({ kind: 'stream' }, 4, 160, 'flat')).spec.bounds).toEqual(flat.spec.bounds)
+        const rising = synthesizeTraining(specOf({ kind: 'stream' }, 4, 160, 'rising'))
+        expect(rising.spec.sections.map((section) => section.target_nps)).not.toEqual(flat.spec.sections.map((section) => section.target_nps))
+        expect(rising.spec.sections[0].target_nps).toBeLessThan(rising.spec.sections[2].target_nps)
+    })
+})
+
+describe('합성 결과 재현', () => {
     test('합성 결과 사양을 다시 합성하면 같은 사양과 노트가 나온다', () => {
+        const ALL_KINDS = TRAINING_PATTERN_KINDS
         for (const kind of ALL_KINDS) {
             const first = synthesizeTraining(specOf({ kind }, 5))
             expect(synthesizeTraining(first.spec)).toEqual(first)

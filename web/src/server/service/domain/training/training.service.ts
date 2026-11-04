@@ -290,6 +290,7 @@ export const createTrainingChartService = (deps: TrainingChartServiceDeps) => {
                 to_ms: Math.floor(section.to_us / MICROS_PER_MILLI),
                 target_nps: section.target_nps,
                 actual_nps: section.actual_nps,
+                actual_rps: section.actual_rps ?? null,
                 lane_hint: section.lane_hint,
                 intent: section.intent,
             })),

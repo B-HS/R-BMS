@@ -158,10 +158,10 @@ describe('훈련곡 탭 - 만들기 폼', () => {
             '연타',
         ])
         await click(page.getByRole('option', { name: '트릴' }))
-        expect(page.getByText('편안한 밀도 근처에서 EX 한계 밀도까지 밀어붙이는 단계입니다.')).toBeTruthy()
+        expect(page.getByText(/EX 한계 밀도의 100~110%까지 밀어붙이는 기본 단계입니다/)).toBeTruthy()
 
         await click(page.getByRole('radio', { name: 'OVER' }))
-        expect(page.getByText('편안한 밀도에서 EX 한계의 1.15배까지 넘어서는 단계입니다.')).toBeTruthy()
+        expect(page.getByText('EX 한계 밀도의 115~130%로 한계를 넘어서는 단계입니다.')).toBeTruthy()
         await click(page.getByRole('button', { name: '만들기' }))
 
         const post = await waitFor(() => {
@@ -346,7 +346,7 @@ describe('훈련곡 상세', () => {
 
         expect(await page.findByRole('heading', { name: FIRST_TITLE })).toBeTruthy()
         expect(page.getByText(/RANDOM 계열 옵션을 끄고 치세요/)).toBeTruthy()
-        expect(page.getByText('PLAYLEVEL 은 난이도표 레벨이 아니라 구간 중 가장 높은 NPS 를 정수로 적은 값입니다.')).toBeTruthy()
+        expect(page.getByText('PLAYLEVEL 은 난이도표 레벨이 아니라 곡 본문의 2초 밀도(NPS) 상위 10% 지점을 정수로 적은 값입니다.')).toBeTruthy()
         expect(element('dl').textContent).toContain('BPM 160 · 55초 · 노트 600개')
 
         const strip = element('ol[aria-hidden="true"]')
@@ -358,7 +358,8 @@ describe('훈련곡 상세', () => {
         expect(sections[1].textContent).toContain('트릴')
         expect(sections[2].textContent).toContain('1번 레인')
         expect(sections[2].textContent).toContain('왼손 쪽')
-        expect(sections[1].textContent).toContain('목표 9.0 / 실제 9.4 NPS')
+        expect(sections[1].textContent).toContain('목표 9.0 / 실제 9.4 NPS · 7.2 행/초')
+        expect(sections[0].textContent).not.toContain('행/초')
         expect(sections[3].textContent).toContain('쿨다운')
 
         const corrections = [...element('ul[aria-label="서버가 바꾼 값 목록"]').querySelectorAll(':scope > li')].map((item) => item.textContent)

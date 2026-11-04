@@ -80,6 +80,7 @@ export const AiTrainingSectionStrip: FC<{ sections: readonly AiTrainingSection[]
                                     target: section.target_nps.toFixed(NPS_DECIMALS),
                                     actual: section.actual_nps.toFixed(NPS_DECIMALS),
                                 })}
+                                {section.actual_rps !== null && <> · {t('strip.rps', { rps: section.actual_rps.toFixed(NPS_DECIMALS) })}</>}
                             </span>
                         </p>
                         {section.intent && <p className='text-muted-foreground break-keep'>{section.intent}</p>}

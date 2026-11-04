@@ -47,12 +47,13 @@ const rowOf = (index: number, createdAt = NOW + index): TrainingChartRow => ({
         plan: {
             description: 'd',
             base_bpm: 160,
+            level: 0.5,
+            shape: 'flat',
             sections: [
                 {
                     focus_key: 'warmup',
                     kind: 'stream',
                     weight: 1,
-                    target_nps: 6,
                     lane_hint: 'all',
                     chord_size: 1,
                     scratch_ratio: 0,

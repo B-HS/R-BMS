@@ -474,15 +474,15 @@
                 "intensity": {
                     "build": {
                         "name": "BUILD",
-                        "description": "Below your comfortable density: get used to the pattern itself."
+                        "description": "90-100% of the density where your EX gives out (read at the top 10% of the chart body's 2-second density): get used to the pattern itself."
                     },
                     "push": {
                         "name": "PUSH",
-                        "description": "From near your comfortable density up to the density where your EX gives out."
+                        "description": "100-110% of the density where your EX gives out, the default. The density rises and falls like a real chart, and its densest moments go past your limit."
                     },
                     "over": {
                         "name": "OVER",
-                        "description": "From your comfortable density to 1.15 times the density where your EX gives out."
+                        "description": "115-130% of the density where your EX gives out: go past your limit."
                     }
                 },
                 "submit": "Make",
@@ -528,9 +528,10 @@
                 "adjacent": "Adjacent lanes"
             },
             "strip": {
-                "hint": "A segment's width is its length, its height is the notes per second the laid-out chart really has, and the dashed line is the target NPS. Colour shows the pattern kind.",
+                "hint": "A segment's width is its length, its height is the notes per second the laid-out chart really has, and the dashed line is the section's target NPS (the mean of the density curve over it). Colour shows the pattern kind. A chord counts each of its notes, so rows per second is nearer the speed your hands feel.",
                 "listLabel": "Sections",
-                "nps": "target {target} / actual {actual} NPS"
+                "nps": "target {target} / actual {actual} NPS",
+                "rps": "{rps} rows/s"
             },
             "trend": {
                 "empty": "No play has trace data yet, so the section results cannot be drawn.",
@@ -566,7 +567,8 @@
                     "target_nps": "target NPS",
                     "chord_size": "chord size",
                     "scratch_ratio": "scratch ratio",
-                    "ln_ratio": "LN ratio"
+                    "ln_ratio": "LN ratio",
+                    "level": "level within the range"
                 }
             },
             "plays": {
@@ -593,7 +595,7 @@
                 "playsLabel": "My plays",
                 "playsValue": "{count, plural, one {# play} other {# plays}}",
                 "best": "Best EX {ratio}",
-                "playLevelNote": "PLAYLEVEL is not a difficulty table level; it is the highest notes per second of any section, as an integer.",
+                "playLevelNote": "PLAYLEVEL is not a difficulty table level; it is the 2-second density (notes per second) the densest 10% of the chart body reach, as an integer.",
                 "focus": "Weaknesses trained",
                 "noFocus": "none",
                 "advice": "AI advice",

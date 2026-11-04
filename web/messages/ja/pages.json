@@ -474,15 +474,15 @@
                 "intensity": {
                     "build": {
                         "name": "BUILD",
-                        "description": "快適な密度以下で、パターンそのものに慣れる段階です。"
+                        "description": "EX限界密度の90〜100%(曲本体の2秒密度の上位10%地点で測ります)で、パターンそのものに慣れる段階です。"
                     },
                     "push": {
                         "name": "PUSH",
-                        "description": "快適な密度付近から、EXが保てなくなる限界の密度まで押し上げる段階です。"
+                        "description": "EX限界密度の100〜110%まで押し上げる基本の段階です。実際の曲のように密度が上下し、最も濃い瞬間は限界を超えます。"
                     },
                     "over": {
                         "name": "OVER",
-                        "description": "快適な密度から、EX限界の1.15倍まで超える段階です。"
+                        "description": "EX限界密度の115〜130%で限界を超える段階です。"
                     }
                 },
                 "submit": "作る",
@@ -528,9 +528,10 @@
                 "adjacent": "隣接レーン"
             },
             "strip": {
-                "hint": "帯の幅は区間の長さ、高さは合成した譜面の実際のNPS、点線は目標NPSです。色はパターンの種類を表します。",
+                "hint": "帯の幅は区間の長さ、高さは合成した譜面の実際のNPS、点線は区間の目標NPS(密度曲線の平均)です。色はパターンの種類を表します。同時押しはノーツごとに数えるため、行/秒のほうが手で感じる速さに近くなります。",
                 "listLabel": "区間一覧",
-                "nps": "目標 {target} / 実際 {actual} NPS"
+                "nps": "目標 {target} / 実際 {actual} NPS",
+                "rps": "{rps} 行/秒"
             },
             "trend": {
                 "empty": "判定データのあるプレーがまだないため、区間の結果を描けません。",
@@ -566,7 +567,8 @@
                     "target_nps": "目標NPS",
                     "chord_size": "同時押しの大きさ",
                     "scratch_ratio": "スクラッチの割合",
-                    "ln_ratio": "LNの割合"
+                    "ln_ratio": "LNの割合",
+                    "level": "強度内の位置"
                 }
             },
             "plays": {
@@ -593,7 +595,7 @@
                 "playsLabel": "自分のプレー",
                 "playsValue": "{count, number}回",
                 "best": "最高EX {ratio}",
-                "playLevelNote": "PLAYLEVELは難易度表のレベルではなく、区間の中で最も高いNPSを整数で表した値です。",
+                "playLevelNote": "PLAYLEVELは難易度表のレベルではなく、曲本体の2秒密度(NPS)の上位10%地点を整数で表した値です。",
                 "focus": "鍛える弱点",
                 "noFocus": "なし",
                 "advice": "AIのアドバイス",

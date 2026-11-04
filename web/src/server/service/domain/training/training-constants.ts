@@ -1,12 +1,12 @@
 import { CHART_PATTERN_SCRATCH_LANE } from '@server/dto/chart-pattern'
-import type { TrainingIntensity, TrainingLaneHint, TrainingPatternKind } from '@server/dto/training'
+import type { TrainingIntensity, TrainingLaneHint, TrainingPatternKind, TrainingShape } from '@server/dto/training'
 import type { PatternTag } from '@server/service/domain/analysis/pattern-tags'
 
 /**
  * Every fixed value of the training chart generator (plan 2026-11-04 3.5-3.10). The same spec, seed and GENERATOR_VERSION give the
  * same bytes, so a change to any value that moves a note or a byte raises GENERATOR_VERSION.
  */
-export const GENERATOR_VERSION = 1
+export const GENERATOR_VERSION = 2
 
 /** The client parser generation the pattern documents of training charts are written for (`PARSER_VERSION`, rbms-library songdb). */
 export const TRAINING_PARSER_VERSION = 5
@@ -44,16 +44,18 @@ export const TRAINING_WEIGHT_MAX = 10
 export const TRAINING_SECTION_MIN_MEASURES = 1
 
 export const TRAINING_DEFAULT_LIMIT_NPS = 12
-export const TRAINING_COMFORT_FALLBACK_RATIO = 0.7
-export const TRAINING_OVER_RATIO = 1.15
-/** The NPS range of each intensity, as shares of the player's comfort and limit density. */
+/**
+ * The range of the chart body's 2-second density p90 (`nps2`, the unit the profile's limit is measured in) each intensity holds the
+ * chart to, as shares of the player's limit L (plan 2026-11-04-training-difficulty M1, M2). The lower end is tied to L too, so no plan
+ * goes under it.
+ */
 export const TRAINING_INTENSITY_RANGE = {
-    build: { min: { of: 'comfort', ratio: 0.6 }, max: { of: 'comfort', ratio: 1 } },
-    push: { min: { of: 'comfort', ratio: 0.8 }, max: { of: 'limit', ratio: 1 } },
-    over: { min: { of: 'comfort', ratio: 1 }, max: { of: 'limit', ratio: TRAINING_OVER_RATIO } },
-} as const satisfies Record<TrainingIntensity, Record<'min' | 'max', { of: 'comfort' | 'limit'; ratio: number }>>
+    build: { min: 0.9, max: 1 },
+    push: { min: 1, max: 1.1 },
+    over: { min: 1.15, max: 1.3 },
+} as const satisfies Record<TrainingIntensity, Record<'min' | 'max', number>>
 export const TRAINING_NPS_FLOOR = 2
-export const TRAINING_NPS_CEIL = 40
+export const TRAINING_NPS_CEIL = 60
 export const TRAINING_REST_NPS_MIN = 1
 export const TRAINING_REST_NPS_MAX = 3
 /** NPS values a spec stores keep this many decimal places. */
@@ -84,14 +86,25 @@ export const TRAINING_REST_GRID = 4
 /** Rows of one run of each continuous kind. */
 export const TRAINING_RUN_ROWS = { stream: 16, trill: 8, stair: 7, jack: 4, chord_jack: 3, scratch_run: 4 } as const
 export type TrainingContinuousKind = keyof typeof TRAINING_RUN_ROWS
+/** Continuous kinds whose runs keep an empty cell between them: two trills on different pairs back to back read as neither. */
+export const TRAINING_RUN_GAP_KINDS = ['trill'] as const satisfies readonly TrainingContinuousKind[]
 
+/** `scratch_solo` turns at most this share of its scratches into keys, on rows two sixteenths or more from the rows around them. */
 export const TRAINING_SCRATCH_SOLO_KEY_SHARE = 0.25
+/** Cells a `scratch_solo` key keeps from the rows before and after it, in sixteenths: the classifier links a scratch to a key one away. */
+export const TRAINING_SCRATCH_SOLO_KEY_GAP_SIXTEENTHS = 2
 /** A row of `scratch_mixed` is a key and a scratch. */
 export const TRAINING_SCRATCH_MIXED_SHARE = 1
 /** A row of `ln_release` is a long note's head and the hit after its end. */
 export const TRAINING_LN_RELEASE_ROW_NOTES = 2
 export const TRAINING_LN_HOLD_BEATS = 2
 export const TRAINING_LN_RELEASE_BEATS = 1
+/** `ln_release` rows come a sixteenth apart at most: a hand's three keys hold a long note and take the hit after it in turns (M6). */
+export const TRAINING_LN_RELEASE_GRIDS = [4, 8, 12, 16] as const
+/** The lengths an `ln_release` long note is tried at, as shares of TRAINING_LN_RELEASE_BEATS, when the longer one does not fit. */
+export const TRAINING_LN_RELEASE_SHORTENINGS = [1, 0.5, 0.25] as const
+/** A row that found no room is carried to the next cells, at most this many rows at once. */
+export const TRAINING_ROW_DEBT_MAX = 2
 /** A scratch after its key row, and a release hit after its long note's end, follow by this many sixteenths. */
 export const TRAINING_FOLLOW_SIXTEENTHS = 1
 /** A long note an `ln_ratio` turns a hit into lasts at least this many cells and at most a beat. */
@@ -119,8 +132,10 @@ export const TRAINING_SEVEN_KEY_LANES = [5, 6] as const
 /** The key the 7-key check adds when a chart has neither. */
 export const TRAINING_SEVEN_KEY_FALLBACK_LANE = 6
 
+/** The note-weighted percentile of the body's 2-second density the intensity range holds (M1) and `#PLAYLEVEL` reads, rounded (M9). */
+export const TRAINING_BODY_PERCENTILE = 0.9
 export const TRAINING_PLAY_LEVEL_MIN = 1
-export const TRAINING_PLAY_LEVEL_MAX = 25
+export const TRAINING_PLAY_LEVEL_MAX = 60
 
 export const TRAINING_TITLE_PREFIX = 'R-BMS Training · '
 export const TRAINING_TITLE_SEPARATOR = ' · '
@@ -160,7 +175,55 @@ export const TRAINING_COUNT_WAV = { frequencyHz: 1000, durationMs: 60, decayMs: 
 
 export const TRAINING_WARMUP_KEY = 'warmup'
 export const TRAINING_COOLDOWN_KEY = 'cooldown'
+/** The keys of the sections that train no weakness: a chart of generator 1 may still have a cool-down. */
 export const TRAINING_EDGE_KEYS = [TRAINING_WARMUP_KEY, TRAINING_COOLDOWN_KEY] as const
+/** The edge keys a new plan may name (M5): one warm-up at most, and no cool-down, as real charts end at their densest. */
+export const TRAINING_PLAN_EDGE_KEYS = [TRAINING_WARMUP_KEY] as const
+/** A warm-up lasts at most this share of the chart, in whole measures (one at least). */
+export const TRAINING_WARMUP_MAX_SHARE = 0.08
+/** The warm-up's density against the body mean μ: the first tenth of a real chart runs at 0.5-0.7 of its mean (05 4.1). */
+export const TRAINING_WARMUP_DENSITY_RATIO = 0.7
+
+/**
+ * The density curve of the body (M4): one of four shapes of twelve points five seconds apart (mean 1, 05 9.4) stretched over the
+ * body, each point moved by seeded noise of this deviation whose neighbours correlate this much, then read in steps of this length
+ * between the points' centres. The variation of the curve's twelve part means is held to TRAINING_CURVE_CV: a real hardest minute
+ * varies 0.21-0.27 (05 6.1), a little less keeps the body mean near p90 / 1.31 (M1).
+ */
+export const TRAINING_SHAPE_POINTS = {
+    flat: [0.96, 0.99, 1.02, 1.03, 1.02, 1.01, 1.0, 0.96, 0.96, 0.98, 1.0, 1.06],
+    rising: [0.52, 0.63, 0.82, 0.99, 1.09, 1.12, 1.14, 1.11, 1.1, 1.14, 1.16, 1.2],
+    dip: [1.03, 0.97, 0.76, 0.62, 0.71, 0.92, 1.01, 1.09, 1.14, 1.17, 1.22, 1.35],
+    front_dip: [1.1, 1.16, 1.18, 1.04, 0.7, 0.56, 0.63, 0.89, 1.07, 1.17, 1.21, 1.3],
+} as const satisfies Record<TrainingShape, readonly number[]>
+export const TRAINING_CURVE_NOISE_SD = 0.2
+export const TRAINING_CURVE_NOISE_CORRELATION = 0.5
+/** Uniform draws summed for one standard normal draw (less half their count, variance count / 12): arithmetic only, the same on every runtime. */
+export const TRAINING_CURVE_NORMAL_DRAWS = 12
+export const TRAINING_CURVE_POINT_FLOOR = 0.3
+export const TRAINING_CURVE_CV = { min: 0.16, max: 0.19 } as const
+/** The points sampled over each part when the part means are read. */
+export const TRAINING_CURVE_PART_SAMPLES = 10
+/** The curve's peak against its note-weighted median, and the steps its top lasts (05 6.4: two seconds at the median). */
+export const TRAINING_CURVE_PEAK_RATIO = 1.45
+export const TRAINING_CURVE_PEAK_STEPS = 3
+/** The layouts tried while the body's nps2 p90 is off its target by more than the tolerance: each scales μ by target / p90 (M1). */
+export const TRAINING_MEAN_PASSES = 3
+export const TRAINING_P90_TOLERANCE = 0.02
+/**
+ * How far the layouts may move μ from the one the curve solved for, either way: past it the p90 is set by how a kind lays its rows
+ * (a sparse stream still lays its runs of sixteenths), not by μ, and moving μ further only thins the chart.
+ */
+export const TRAINING_MEAN_REFINE_RATIO = 1.25
+export const TRAINING_CURVE_STEP_US = 500_000
+/** The curve's noise is drawn from the chart seed mixed with this odd constant, apart from every section's generator. */
+export const TRAINING_CURVE_SEED_SALT = 0x85ebca6b
+/** The 2-second window the body's density percentiles are read through, as the profile's limit is (`nps2`). */
+export const TRAINING_DENSITY_WINDOW_US = 2_000_000
+/** The busiest density of a chart against its p90, which the base tempo is raised to fit on the finest grid (M7). */
+export const TRAINING_PEAK_OVER_P90 = 1.25
+/** The most of the body's time a section's grid may cut the curve at: past it the curve keeps its shape below the grid's ceiling. */
+export const TRAINING_CLIPPED_SHARE_MAX = 0.1
 
 /** The kinds that train each pattern tag (plan 3.3 `TRAINING_KINDS_OF_KEY`). Mines are never laid, so `mine_near` trains on plain streams. */
 export const TRAINING_KINDS_OF_TAG = {

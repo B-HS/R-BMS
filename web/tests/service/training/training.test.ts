@@ -144,7 +144,7 @@ describe('훈련곡 만들기', () => {
         const harness = await createReady()
         const detail = expectOk(await harness.create({ focus_key: 'tag:jack', intensity: 'over' }))
         const digest = JSON.parse(harness.anthropic.generateCalls[0]?.input ?? '{}')
-        expect(digest.allowed.keys).toEqual(['tag:jack', 'warmup', 'cooldown'])
+        expect(digest.allowed.keys).toEqual(['tag:jack', 'warmup'])
         expect(digest.weaknesses.map((item: { key: string }) => item.key)).toEqual(['tag:jack'])
         expect(detail.focus_keys).toEqual(['tag:jack'])
         expect(detail.title).toEndWith('· OVER')
@@ -155,11 +155,12 @@ describe('훈련곡 만들기', () => {
             plan: (digest) => ({
                 description: '',
                 base_bpm: 150,
+                level: 0.5,
+                shape: 'flat',
                 sections: ['tag:stair', 'tag:stair', digest.allowed.keys[0] ?? '', 'lane:1'].map((key) => ({
                     focus_key: key,
                     kind: 'stream',
                     weight: 1,
-                    target_nps: 8,
                     lane_hint: 'all',
                     chord_size: 1,
                     scratch_ratio: 0,
@@ -175,11 +176,13 @@ describe('훈련곡 만들기', () => {
         expect(harness.training.charts.size).toBe(0)
     })
 
-    test('허용 밖 키 구간은 버리고 맞지 않는 종류는 바꿔 corrections 에 남긴다', async () => {
+    test('허용 밖 키 구간·쿨다운은 버리고 맞지 않는 종류는 바꿔 corrections 에 남기며 구간마다 행/초를 보인다', async () => {
         const harness = await createReady({
             plan: () => ({
                 description: '보정 시험',
                 base_bpm: 150,
+                level: 1.4,
+                shape: 'rising',
                 sections: [
                     { focus_key: 'warmup', kind: 'stream' },
                     { focus_key: 'tag:stair', kind: 'stair' },
@@ -189,7 +192,6 @@ describe('훈련곡 만들기', () => {
                 ].map((section) => ({
                     ...section,
                     weight: 2,
-                    target_nps: 9,
                     lane_hint: 'all',
                     chord_size: 1,
                     scratch_ratio: 0,
@@ -203,7 +205,11 @@ describe('훈련곡 만들기', () => {
         const detail = expectOk(await harness.create(PUSH))
         expect(detail.corrections).toContainEqual({ section: 1, field: 'focus_key', from: 'tag:stair', to: null })
         expect(detail.corrections).toContainEqual({ section: 2, field: 'kind', from: 'jack', to: 'trill' })
-        expect(detail.sections.map((section) => section.focus_key)).toEqual(['warmup', 'tag:trill', 'tag:jack', 'cooldown'])
+        expect(detail.corrections).toContainEqual({ section: 4, field: 'focus_key', from: 'cooldown', to: null })
+        expect(detail.corrections).toContainEqual({ section: null, field: 'level', from: 1.4, to: 1 })
+        expect(detail.sections.map((section) => section.focus_key)).toEqual(['warmup', 'tag:trill', 'tag:jack'])
+        expect(detail.sections.every((section) => section.actual_rps !== null && section.actual_rps > 0)).toBe(true)
+        expect(harness.training.charts.get(detail.id)?.spec.bounds).toMatchObject({ level: 1, shape: 'rising', p90_target: 13.2 })
     })
 })
 

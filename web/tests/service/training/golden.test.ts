@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { chartPatternDocumentSchema } from '@server/dto/chart-pattern'
 import { writeTrainingBms } from '@server/service/domain/training/bms-writer'
 import { buildTrainingPatternDocument } from '@server/service/domain/training/pattern-document'
-import { trainingSpecSchema } from '@server/service/domain/training/spec'
+import { trainingSpecBoundsSchema, trainingSpecSchema } from '@server/service/domain/training/spec'
 import { synthesizeTraining } from '@server/service/domain/training/synthesize'
 import { createTrainingZip } from '@server/service/domain/training/zip'
 
@@ -20,7 +20,7 @@ const GOLDEN_NAMES = ['basic-160', 'soflan-ln', 'scratch-mix'] as const
 const ZIP_GOLDEN = 'basic-160'
 const UPDATING = process.env.RBMS_UPDATE_CONTRACT === '1'
 
-const goldenSpecSchema = z.object({ id: z.string(), spec: trainingSpecSchema })
+const goldenSpecSchema = z.object({ id: z.string(), spec: trainingSpecSchema.extend({ bounds: trainingSpecBoundsSchema }) })
 
 const pathOf = (name: string, extension: string) => join(GOLDEN_DIR, `${name}.${extension}`)
 
