@@ -1,0 +1,103 @@
+{
+    "id": "tc_22222222222222222222222222222222",
+    "spec": {
+        "generator_version": 1,
+        "seed": 3831320251,
+        "base_bpm": 176,
+        "title": "R-BMS Training · 2026-11-04 · OVER",
+        "subtitle": "[22222222]",
+        "play_level": 10,
+        "sections": [
+            {
+                "index": 0,
+                "focus_key": "tag:scratch_solo",
+                "kind": "scratch_solo",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 176,
+                "target_nps": 8,
+                "measure_from": 1,
+                "measure_count": 11,
+                "from_us": 1363636,
+                "to_us": 16363588,
+                "grid": 12,
+                "actual_nps": 7.93,
+                "notes": 119,
+                "intent": "Scratch alone."
+            },
+            {
+                "index": 1,
+                "focus_key": "tag:scratch_mixed",
+                "kind": "scratch_mixed",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 176,
+                "target_nps": 9,
+                "measure_from": 12,
+                "measure_count": 11,
+                "from_us": 16363588,
+                "to_us": 31363548,
+                "grid": 8,
+                "actual_nps": 8.93,
+                "notes": 134,
+                "intent": "Scratch with keys."
+            },
+            {
+                "index": 2,
+                "focus_key": "tag:scratch_run",
+                "kind": "scratch_run",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 176,
+                "target_nps": 9,
+                "measure_from": 23,
+                "measure_count": 10,
+                "from_us": 31363548,
+                "to_us": 44999868,
+                "grid": 16,
+                "actual_nps": 8.43,
+                "notes": 115,
+                "intent": "Scratch runs."
+            },
+            {
+                "index": 3,
+                "focus_key": "tag:dense",
+                "kind": "burst",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 176,
+                "target_nps": 10,
+                "measure_from": 33,
+                "measure_count": 10,
+                "from_us": 44999868,
+                "to_us": 58636188,
+                "grid": 24,
+                "actual_nps": 9.97,
+                "notes": 136,
+                "intent": "Bursts."
+            }
+        ],
+        "corrections": [
+            {
+                "section": 2,
+                "field": "measures",
+                "from": 11,
+                "to": 10
+            },
+            {
+                "section": 3,
+                "field": "measures",
+                "from": 11,
+                "to": 10
+            }
+        ]
+    }
+}

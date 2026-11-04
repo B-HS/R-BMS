@@ -1,0 +1,128 @@
+{
+    "id": "tc_11111111111111111111111111111111",
+    "spec": {
+        "generator_version": 1,
+        "seed": 422499019,
+        "base_bpm": 152,
+        "title": "R-BMS Training · 2026-11-04 · BUILD",
+        "subtitle": "[11111111]",
+        "play_level": 9,
+        "sections": [
+            {
+                "index": 0,
+                "focus_key": "warmup",
+                "kind": "stream",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 152,
+                "target_nps": 5,
+                "measure_from": 1,
+                "measure_count": 5,
+                "from_us": 1578944,
+                "to_us": 9473670,
+                "grid": 16,
+                "actual_nps": 5.83,
+                "notes": 46,
+                "intent": "Warm up."
+            },
+            {
+                "index": 1,
+                "focus_key": "tag:ln_hold_hit",
+                "kind": "ln_hold",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 228,
+                "target_nps": 7,
+                "measure_from": 6,
+                "measure_count": 13,
+                "from_us": 9473670,
+                "to_us": 23157787,
+                "grid": 8,
+                "actual_nps": 8.84,
+                "notes": 121,
+                "intent": "Hold with one hand, hit with the other."
+            },
+            {
+                "index": 2,
+                "focus_key": "tag:ln_release_then_hit",
+                "kind": "ln_release",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 152,
+                "target_nps": 6,
+                "measure_from": 19,
+                "measure_count": 9,
+                "from_us": 23157787,
+                "to_us": 37368283,
+                "grid": 8,
+                "actual_nps": 5.77,
+                "notes": 82,
+                "intent": "Release, then hit."
+            },
+            {
+                "index": 3,
+                "focus_key": "tag:soflan",
+                "kind": "stream",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0.2,
+                "ln_ratio": 0.3,
+                "bpm": 228,
+                "target_nps": 6,
+                "measure_from": 28,
+                "measure_count": 13,
+                "from_us": 37368283,
+                "to_us": 51052451,
+                "grid": 16,
+                "actual_nps": 6.87,
+                "notes": 94,
+                "intent": "Faster section."
+            },
+            {
+                "index": 4,
+                "focus_key": "cooldown",
+                "kind": "rest",
+                "lane_hint": "all",
+                "chord_size": 1,
+                "scratch_ratio": 0,
+                "ln_ratio": 0,
+                "bpm": 152,
+                "target_nps": 2,
+                "measure_from": 41,
+                "measure_count": 5,
+                "from_us": 51052451,
+                "to_us": 58947174,
+                "grid": 4,
+                "actual_nps": 1.9,
+                "notes": 15,
+                "intent": "Cool down."
+            }
+        ],
+        "corrections": [
+            {
+                "section": null,
+                "field": "base_bpm",
+                "from": 150,
+                "to": 152
+            },
+            {
+                "section": 1,
+                "field": "measures",
+                "from": 14,
+                "to": 13
+            },
+            {
+                "section": 3,
+                "field": "measures",
+                "from": 14,
+                "to": 13
+            }
+        ]
+    }
+}

@@ -350,3 +350,17 @@ fn a_name_that_is_a_file_and_a_folder_is_skipped_not_overwritten() {
     assert_eq!(fs::read(unpacked.into.join("x.wav")).expect("the file is as it was"), b"file first");
     assert!(unpacked.into.join("d.wav").is_dir());
 }
+
+/// The stored training chart archive the score server's generator writes (`contract/training-chart/`, checked byte for byte by
+/// `web/tests/service/training/golden.test.ts`).
+const TRAINING_ZIP: &[u8] = include_bytes!("../../../../contract/training-chart/basic-160.zip");
+const TRAINING_CHART: &[u8] = include_bytes!("../../../../contract/training-chart/basic-160.bms");
+
+#[test]
+fn a_training_chart_zip_from_the_server_is_unpacked() {
+    let unpacked = unpack("training", TRAINING_ZIP.to_vec());
+    assert_eq!(unpacked.report(), ExtractReport { written: 3, skipped: 0, charts: 1 });
+    assert_eq!(unpacked.files(), ["count.wav", "hit.wav", "rbms-training-00000000.bms"]);
+    assert_eq!(fs::read(unpacked.into.join("rbms-training-00000000.bms")).expect("the chart is there"), TRAINING_CHART);
+    assert!(is_kept_extension("wav"), "the click sounds are kept");
+}

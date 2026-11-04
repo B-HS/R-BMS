@@ -24,6 +24,8 @@ mod walk;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod training_contract_tests;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
