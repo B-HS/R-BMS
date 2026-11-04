@@ -42,9 +42,9 @@
 - [x] T3. 구현 — 분석 고도화, 훈련곡 생성·전달(서버·DB 0014·웹), 클라이언트 내 폴더 받기, 대시보드. 13단위 전부. 로컬 커밋(푸시 보류): `15400cc` U2 분석 v3, `d8359dd` U12 재계산 경로, `b64b9b1` U6 약점 프로필(wf_7fa5af25-3ad), `a778d18` U7 훈련곡 서버, `f21727c` U9 점수 기능(wf_a5582232-239), `29d5d41` U10 AI 화면(wf_0821e53d-8ab), `ca4cbc1` U11 훈련곡 화면·대시보드 8·9 패널(wf_7acd0fb6-579). 최종 게이트(ca4cbc1 + 문서): 웹 verify 2,403 통과·240 건너뜀·0 실패, format, build, DB 198 통과. Rust 는 W1 뒤 바뀌지 않아 W1 결과(7,193 통과) 재사용
 - [ ] T4. 게이트·문서(ADR 5건, QA 3.27, 테스트 부채 3.145~3.159, 조사 문서 구현 결과 절)·커밋·푸시·CI — 문서 커밋은 로컬, 푸시는 T5-1 뒤
 - [ ] T5. 운영 반영(자동 모드가 web-db `status` 읽기 action 과 release.yml 을 모두 거부해 전부 사용자 `!` 몫)
-  1. 사용자 `! gh workflow run web-db.yml --ref dev -f action=migrate` → 0014 적용(파일 `565724d` 는 이미 원격에 있음). 확인은 `! gh workflow run web-db.yml --ref dev -f action=status`
-  2. 메인이 보류 커밋 전부 푸시 → `gh run list --branch dev` 로 web·ci 확인
-  3. 사용자 `! gh workflow run web-db.yml --ref dev -f action=analysis-recompute-count` → 개수 확인 뒤 `! gh workflow run web-db.yml --ref dev -f action=analysis-recompute`(8분 상한, 남으면 반복)
+  1. (완료) 사용자 `!` migrate run 41788157636: 0014 `recorded=yes tables=3/3`, up to date
+  2. (완료) 메인이 보류 커밋 8개 푸시(`15400cc`~`647f0a8`), web run 41788285525 통과(Rust 변경 없어 ci 는 돌지 않음)
+  3. (완료) count run 41790377823(곡 특징 7,901, 판 분석 1,348) → 사용자 `!` analysis-recompute 7회(run 41790508006·41792565369·41793747144·41794800660·41799511420·41800747037·41802104520), 마지막 count 곡 특징 0·판 분석 0·skipped 0. 실측은 테스트 부채 3.149
   4. 사용자 `! gh workflow run release.yml --ref dev -f bump=patch` → draft v0.1.11. 끝나면 메인이 `git pull`·`git fetch --tags` 뒤 노트를 [history/2026-11-04-release-notes-v0.1.11-draft.md](history/2026-11-04-release-notes-v0.1.11-draft.md) 로 교체(`gh release edit v0.1.11 --notes-file ... --draft=true`). 릴리스 실행 중에는 `dev` 에 푸시하지 않는다
   - 남은 정리: 중지한 W2 worktree `.claude/worktrees/wf_cb2a4404-841-{1,2,3}`(패치는 이미 반영)
 
