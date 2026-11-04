@@ -9,6 +9,7 @@ import {
     type AiUserSettingRow,
 } from '@server/service/domain/ai/settings.service'
 import { createAiUsageService, type AiTokenTotals, type AiUsageServiceDb } from '@server/service/domain/ai/usage.service'
+import type { PlayProfileRow, ProfileFingerprintInputs, WeaknessProfileServiceDb } from '@server/service/domain/ai/weakness-profile.service'
 import { loadSecretBox } from '@server/service/shared/secret-box/secret-box'
 import { createFailureDetail } from '@server/service/shared/ai-provider/http'
 import type { AiFailureKind, AiProviderId, AiUsage } from '@server/dto/ai'
@@ -207,4 +208,24 @@ export const createAiServices = <TDbs extends AiDbs>(dbs: TDbs, { adapters, env,
 export const createMemoryAiServices = (options: AiServicesOptions) => {
     const memory = createMemoryAiDb()
     return { memory, ...createAiServices(memory, options) }
+}
+
+/**
+ * An in-memory `play_profile` whose fingerprint counts are whatever `state.inputs` holds, so a test moves the fingerprint by hand.
+ * `saves` lists the account of each profile written.
+ */
+export const createMemoryProfileDb = (inputs: Partial<ProfileFingerprintInputs> = {}) => {
+    const initial: ProfileFingerprintInputs = { analyses: 0, latestComputedAt: null, latestPlayedAt: null, trainingCharts: 0, ...inputs }
+    const state = { inputs: initial }
+    const profiles = new Map<string, PlayProfileRow>()
+    const saves: string[] = []
+    const db: WeaknessProfileServiceDb = {
+        readFingerprintInputs: async () => state.inputs,
+        findProfile: async ({ userId, windowKey }) => profiles.get(`${userId}|${windowKey}`) ?? null,
+        saveProfile: async ({ userId, windowKey, ...row }) => {
+            saves.push(userId)
+            profiles.set(`${userId}|${windowKey}`, row)
+        },
+    }
+    return { db, state, profiles, saves }
 }

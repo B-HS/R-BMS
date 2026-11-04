@@ -22,6 +22,7 @@ import {
 } from '@server/service/domain/ai/ai-digest'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import {
+    GAUGE_ADVICE_DROP_TAGS,
     GAUGE_ADVICE_OPTION_MIN_PLAYS,
     GAUGE_ADVICE_OPTION_TAGS,
     GAUGE_ADVICE_RECENT_PLAYS,
@@ -30,14 +31,16 @@ import {
 } from '@server/service/domain/ai/play-feature.constants'
 import { exRatioOf, isShownTag, playsWithMetrics } from '@server/service/domain/ai/play-digest'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
+import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
+import type { WeaknessProfileView } from '@server/dto/ai-play'
 import { GAUGE_OUTCOME, RUN_END } from '@server/service/domain/analysis/play-metrics'
 import { LAYOUT_DEPENDENT_TAGS } from '@server/service/domain/analysis/pattern-tags'
-import { aggregateTagEvidence } from '@server/service/domain/analysis/sample'
+import { EVIDENCE, aggregateTagEvidence } from '@server/service/domain/analysis/sample'
 import type { AnalyzedPlay, TraceService } from '@server/service/domain/trace/trace.service'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_GAUGE_ADVICE_FEATURE = 'gauge_advice'
-export const AI_GAUGE_ADVICE_PROMPT_VERSION = 1
+export const AI_GAUGE_ADVICE_PROMPT_VERSION = 2
 export const AI_GAUGE_ADVICE_MAX_OUTPUT_TOKENS = 6_000
 export const AI_GAUGE_ADVICE_EFFORT = 'low' satisfies AiEffort
 export const AI_GAUGE_ADVICE_SUBJECT = 'recent'
@@ -51,6 +54,7 @@ export const buildAiGaugeAdviceSystemPrompt = (language: Locale) =>
         DIGEST_IS_DATA_RULE,
         'The game logs all nine gauges during a play, so `rescues` counts plays that failed on the gauge played but that another gauge would have cleared (`rescued_by`). After an empty gauge ends a play the other gauges cannot be known; those plays are counted in `unknown_runs` and never as rescued.',
         '`options` lists each lane option with the EX ratio of its plays and the pattern tags whose residual (the tag notes\' EX ratio less the whole play\'s) moves most under it; a tag with grade other than "strong" is only a hint.',
+        '`drop_contexts` (from the player\'s weakness profile over the last 90 days) tells what the chart held where their gauge fell: the mean density in notes per second there (`drop_mean_nps`) against their notes overall (`overall_mean_nps`), and the tags found in gauge drops `lift` times as often as among all their notes; a tag with evidence other than "strong" is only a hint.',
         `Write at most ${AI_GAUGE_ADVICE_ITEMS_MAX} \`gauge_advice\` items and ${AI_GAUGE_ADVICE_ITEMS_MAX} \`option_advice\` items, each naming a gauge or an option that appears in the input and one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`reasoning\`.`,
         DIGEST_KEY_RULE,
         `All text is ${AI_OUTPUT_LANGUAGE_NAME[language]}; \`summary\` is two sentences at most.`,
@@ -76,6 +80,7 @@ export type AiGaugeAdviceServiceDb = {
 type AiGaugeAdviceServiceDeps = {
     db: AiGaugeAdviceServiceDb
     plays: Pick<TraceService, 'recentAnalyzedPlays'>
+    profile: Pick<WeaknessProfileService, 'view'>
     levelLabelOf: (md5: string) => string | null
     runner: Pick<AiFeatureRunner, 'run'>
     results: Pick<AiResultService, 'findLatest'>
@@ -157,11 +162,30 @@ export const summarizeGaugeRows = (rows: readonly { gauge: number; clear: number
         return played.length === 0 ? [] : [{ gauge, plays: played.length, cleared: played.filter((row) => isClearLampId(row.clear)).length }]
     })
 
-export const toGaugeAdviceDigest = (advice: GaugeAdvice) => ({
+const evidenceRank = (evidence: string) => (evidence === EVIDENCE.STRONG ? 0 : 1)
+
+/**
+ * What the weakness profile says of the gauge drops (plan 2026-11-04 2.6 feature 8): the mean local NPS where the gauge fell against
+ * the player's notes overall, and the GAUGE_ADVICE_DROP_TAGS gauge-drop context tags with the strongest evidence and lift.
+ */
+export const gaugeDropContextsOf = (profile: WeaknessProfileView | null) => ({
+    drop_mean_nps: profile?.gauge.drop_mean_nps ?? null,
+    overall_mean_nps: profile?.gauge.overall_mean_nps ?? null,
+    tags: (profile?.cells ?? [])
+        .filter((cell) => cell.kind === 'gauge_context' && cell.evidence !== EVIDENCE.INSUFFICIENT)
+        .toSorted((left, right) => evidenceRank(left.evidence) - evidenceRank(right.evidence) || (right.value ?? 0) - (left.value ?? 0))
+        .slice(0, GAUGE_ADVICE_DROP_TAGS)
+        .map((cell) => ({ key: cell.key, lift: cell.value, notes: cell.notes, evidence: cell.evidence })),
+})
+
+export type GaugeDropContexts = ReturnType<typeof gaugeDropContextsOf>
+
+export const toGaugeAdviceDigest = (advice: GaugeAdvice, dropContexts: GaugeDropContexts = gaugeDropContextsOf(null)) => ({
     plays: { key: 'plays', ...advice.plays },
     gauges: advice.gauges,
     rescues: advice.rescues,
     options: advice.options,
+    drop_contexts: { key: 'gauge.drops', ...dropContexts },
 })
 
 export type GaugeAdviceDigest = ReturnType<typeof toGaugeAdviceDigest>
@@ -187,12 +211,14 @@ export const refineGaugeAdviceOutput = (output: AiGaugeAdviceOutput, digest: Gau
 
 export const createAiGaugeAdviceService = (deps: AiGaugeAdviceServiceDeps) => {
     const build = async (userId: string) => {
-        const [{ plays, stale, failed }, gaugeRows] = await Promise.all([
+        const [{ plays, stale, failed }, gaugeRows, profile] = await Promise.all([
             deps.plays.recentAnalyzedPlays({ userId, limit: GAUGE_ADVICE_RECENT_PLAYS }),
             deps.db.listRecentGaugeRows({ userId, limit: GAUGE_ADVICE_RECENT_PLAYS }),
+            deps.profile.view({ userId }),
         ])
         const advice = computeGaugeAdvice(plays, deps.levelLabelOf)
-        return { advice, stale, failed, scoreRows: summarizeGaugeRows(gaugeRows), digest: toGaugeAdviceDigest(advice) }
+        const dropContexts = gaugeDropContextsOf(profile)
+        return { advice, stale, failed, dropContexts, scoreRows: summarizeGaugeRows(gaugeRows), digest: toGaugeAdviceDigest(advice, dropContexts) }
     }
 
     const noticeOf = (advice: GaugeAdvice) => (advice.plays.analyzed < PLAY_REPORT_MIN_PLAYS ? { need: 'traced_plays' } : null)
@@ -212,6 +238,7 @@ export const createAiGaugeAdviceService = (deps: AiGaugeAdviceServiceDeps) => {
                 ...built.advice,
                 plays: { ...built.advice.plays, stale: built.stale, failed: built.failed },
                 score_rows: built.scoreRows,
+                drop_contexts: built.dropContexts,
                 notice: noticeOf(built.advice),
                 ai,
             } satisfies AiGaugeAdviceView

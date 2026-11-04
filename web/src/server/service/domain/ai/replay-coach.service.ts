@@ -13,15 +13,23 @@ import {
     type AiFeatureSpec,
 } from '@server/service/domain/ai/ai-digest'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
-import { COACH_PROBLEM_SEGMENTS, PLAY_FEATURE_ANALYSIS_VERSION } from '@server/service/domain/ai/play-feature.constants'
+import {
+    COACH_PROBLEM_SEGMENTS,
+    COACH_SEGMENT_DROPS,
+    COACH_SEGMENT_PROFILE_KEYS,
+    COACH_SEGMENT_RUNS,
+    PLAY_FEATURE_ANALYSIS_VERSION,
+} from '@server/service/domain/ai/play-feature.constants'
 import { exRatioOf, isShownTag, segmentKey } from '@server/service/domain/ai/play-digest'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
+import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
+import { parseWeaknessKey } from '@server/service/domain/analysis/weakness-key'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { AnalyzedPlay, TraceService } from '@server/service/domain/trace/trace.service'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_REPLAY_COACH_FEATURE = 'replay_coach'
-export const AI_REPLAY_COACH_PROMPT_VERSION = 1
+export const AI_REPLAY_COACH_PROMPT_VERSION = 2
 export const AI_REPLAY_COACH_MAX_OUTPUT_TOKENS = 8_000
 export const AI_REPLAY_COACH_EFFORT = 'low' satisfies AiEffort
 
@@ -30,6 +38,7 @@ export const buildAiReplayCoachSystemPrompt = (language: Locale) =>
         "You coach a rhythm game (BMS, 7 keys and a scratch) player through one play, segment by segment, from the server's analysis of it.",
         DIGEST_IS_DATA_RULE,
         'The play is cut into equal time segments. `problems` are the segments where the player lost the most (BP is BAD plus POOR plus empty POOR), each with its main pattern tags, FAST/SLOW of GREAT to BAD, the gauge at the end of the segment before it and any gauge drop inside it.',
+        "A problem also gives `peak_nps`, the highest local density there in notes per second (a centred 2 second window); `runs`, the longest runs of consecutive BAD and POOR that start there with their length, the density at their first note, how many notes it took to get 10 PGREAT or GREAT in a row again (`recovery_notes`, null if never) and the tags of the 8 notes before them (`preceding_tags`); `drops`, what the chart held from 1 second before each gauge drop ending there (mean density, BP, main tags); and `profile_keys`, the player's long-term weaknesses (from their weakness profile) that share a main tag of the segment. Name a profile weakness only when it is in `profile_keys`.",
         `For each problem segment you talk about write \`segment_id\` exactly as given, one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`diagnosis\` and one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`advice\`; at most ${COACH_PROBLEM_SEGMENTS}.`,
         `Pattern tags describe the notes as the player saw them after lane options. \`next_try\` is one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence for the next attempt of this chart.`,
         DIGEST_KEY_RULE,
@@ -78,6 +87,7 @@ export type PlayScoreDb = {
 type AiReplayCoachServiceDeps = {
     db: PlayScoreDb
     plays: Pick<TraceService, 'analyzedPlayOfScore'>
+    profile: Pick<WeaknessProfileService, 'view'>
     runner: Pick<AiFeatureRunner, 'run'>
     results: Pick<AiResultService, 'findLatest'>
 }
@@ -98,13 +108,18 @@ export const toPlayView = (row: PlayScoreRow) => ({
     scratch_auto: row.scratchAuto,
 })
 
+/** The weaknesses among `weaknessKeys` that name one of the tags: the profile's long-term weaknesses a segment's tags bear on. */
+const weaknessKeysSharing = (weaknessKeys: readonly string[], tags: readonly string[]) =>
+    weaknessKeys.filter((key) => parseWeaknessKey(key)?.tags.some((tag) => tags.includes(tag)) ?? false)
+
 /**
- * Plan 5.2's deterministic part for one analysed play: every segment with its BP, combo breaks, FAST/SLOW, EX ratio, main tags and
- * the played gauge at its end; the played gauge's drops; how each gauge ended (`unknown` past an empty gauge's failure); and the
- * problem segments the AI is told about: the highest BP first (the earlier on a tie), then segments where a drop ends, at most
- * COACH_PROBLEM_SEGMENTS. Null for a play with no per-note figures (a mode other than 7-key single play).
+ * Plan 5.2's deterministic part for one analysed play: every segment with its BP, combo breaks, FAST/SLOW, EX ratio, main tags, the
+ * played gauge at its end and its highest local NPS; the played gauge's drops; the play's longest BAD/POOR runs; how each gauge ended
+ * (`unknown` past an empty gauge's failure); the problem segments the AI is told about: the highest BP first (the earlier on a tie),
+ * then segments where a drop ends, at most COACH_PROBLEM_SEGMENTS; and the player's profile weaknesses (`weaknessKeys`) a problem
+ * segment's main tags share. Null for a play with no per-note figures (a mode other than 7-key single play).
  */
-export const computeCoachAnalysis = (play: AnalyzedPlay) => {
+export const computeCoachAnalysis = (play: AnalyzedPlay, weaknessKeys: readonly string[] = []) => {
     const { metrics, gauge } = play.summary
     if (!metrics) return null
     const segments = metrics.segments.map((segment, index) => ({
@@ -121,11 +136,14 @@ export const computeCoachAnalysis = (play: AnalyzedPlay) => {
         slow: segment.slow,
         top_tags: segment.top_tags.filter((tag) => isShownTag(tag.tag)),
         gauge: gauge.segment_values[index] ?? null,
+        peak_nps: segment.peak_nps,
     }))
     const dropEndsIn = (segment: (typeof segments)[number]) => gauge.drops.some((drop) => drop.to_ms >= segment.from_ms && drop.to_ms < segment.to_ms)
     const byBp = segments.filter((segment) => segment.bp > 0).toSorted((left, right) => right.bp - left.bp)
     const withDrop = segments.filter((segment) => segment.bp === 0 && dropEndsIn(segment))
-    const problems = [...byBp, ...withDrop].slice(0, COACH_PROBLEM_SEGMENTS).map((segment) => segment.id)
+    const problemSegments = [...byBp, ...withDrop].slice(0, COACH_PROBLEM_SEGMENTS)
+    const problems = problemSegments.map((segment) => segment.id)
+    const problemTags = [...new Set(problemSegments.flatMap((segment) => segment.top_tags.map((tag) => tag.tag)))]
     return {
         run_end: play.summary.run_end,
         overall: { notes: metrics.overall.notes, ex_ratio: metrics.overall.ex_ratio },
@@ -141,6 +159,9 @@ export const computeCoachAnalysis = (play: AnalyzedPlay) => {
             }),
         },
         pattern_join: play.summary.pattern.join,
+        bp_runs: metrics.bp_runs.runs,
+        profile_keys: weaknessKeysSharing(weaknessKeys, problemTags),
+        drop_contexts: metrics.gauge_drop_contexts,
     }
 }
 
@@ -165,7 +186,9 @@ export const toCoachDigest = (row: PlayScoreRow, analysis: CoachAnalysis) => {
             const found = byId.get(id)
             if (!found) return []
             const { segment, before } = found
-            const drop = analysis.drops.find((candidate) => candidate.to_ms >= segment.from_ms && candidate.to_ms < segment.to_ms)
+            const isInSegment = (ms: number) => ms >= segment.from_ms && ms < segment.to_ms
+            const drop = analysis.drops.find((candidate) => isInSegment(candidate.to_ms))
+            const segmentTags = segment.top_tags.map((tag) => tag.tag)
             return [
                 {
                     key: segment.key,
@@ -180,6 +203,16 @@ export const toCoachDigest = (row: PlayScoreRow, analysis: CoachAnalysis) => {
                     top_tags: segment.top_tags,
                     gauge_before: before?.gauge ?? null,
                     gauge_drop: drop?.drop ?? null,
+                    peak_nps: segment.peak_nps,
+                    runs: analysis.bp_runs
+                        .filter((run) => isInSegment(run.from_ms))
+                        .slice(0, COACH_SEGMENT_RUNS)
+                        .map(({ length, start_nps, recovery_notes, preceding_tags }) => ({ length, start_nps, recovery_notes, preceding_tags })),
+                    drops: analysis.drop_contexts
+                        .filter((context) => isInSegment(context.to_ms))
+                        .slice(0, COACH_SEGMENT_DROPS)
+                        .map(({ mean_nps, bp, chart_notes, top_tags }) => ({ mean_nps, bp, chart_notes, top_tags })),
+                    profile_keys: weaknessKeysSharing(analysis.profile_keys, segmentTags).slice(0, COACH_SEGMENT_PROFILE_KEYS),
                 },
             ]
         }),
@@ -215,8 +248,13 @@ export const createAiReplayCoachService = (deps: AiReplayCoachServiceDeps) => {
     const build = async (params: { userId: string; scoreId: string }) => {
         const row = await deps.db.findOwnedPlayScore(params)
         if (!row) return null
-        const play = await deps.plays.analyzedPlayOfScore(params)
-        const analysis = play ? computeCoachAnalysis(play) : null
+        const [play, profile] = await Promise.all([deps.plays.analyzedPlayOfScore(params), deps.profile.view({ userId: params.userId })])
+        const analysis = play
+            ? computeCoachAnalysis(
+                  play,
+                  profile.weaknesses.map((item) => item.key),
+              )
+            : null
         const notice = analysis ? null : { need: play ? 'play_metrics' : 'play_trace' }
         return { row, analysis, notice, digest: analysis ? toCoachDigest(row, analysis) : null }
     }

@@ -106,6 +106,11 @@ export type TraceServiceDb = {
     listTracesBehind: (params: { versions: AnalysisVersions; after: string | null; limit: number }) => Promise<{ id: string; userId: string }[]>
     /** The account's traced plays, newest first, at most `limit`; autoplay is left out. */
     listRecentPlays: (params: { userId: string; limit: number }) => Promise<TracedPlayRow[]>
+    /**
+     * The account's traced plays played at `sinceMs` or later, newest first, at most `limit`, autoplay left out; `isTraining` tells a
+     * play of one of the account's own training charts (`training_chart.sha256` is the play's chart).
+     */
+    listPlaysInWindow: (params: { userId: string; sinceMs: number; limit: number }) => Promise<(TracedPlayRow & { isTraining: boolean })[]>
     /** The traced plays of these scores of the account. */
     listPlaysOfScores: (params: { userId: string; scoreIds: readonly string[] }) => Promise<TracedPlayRow[]>
     /** The account's traced play of one score. */
@@ -259,8 +264,8 @@ export const createTraceService = (deps: TraceServiceDeps) => {
      * PLAY_ANALYSIS_READ_RECOMPUTE_MAX of them in the given order; the others are left out and counted in `stale`. A play that cannot
      * be analysed, or was marked failed at the current versions, is left out and counted in `failed`; the rest are still answered.
      */
-    const withCurrentAnalyses = async (userId: string, rows: readonly TracedPlayRow[]) => {
-        const plays: (TracedPlayRow & { summary: TraceAnalysisSummary })[] = []
+    const withCurrentAnalyses = async <Row extends TracedPlayRow>(userId: string, rows: readonly Row[]) => {
+        const plays: (Row & { summary: TraceAnalysisSummary })[] = []
         let recomputed = 0
         let stale = 0
         let failed = 0
@@ -384,6 +389,16 @@ export const createTraceService = (deps: TraceServiceDeps) => {
         /** The account's newest analysed plays (autoplay left out), at most `limit`, and how many were left out for an old analysis (`stale`) or one that failed (`failed`). */
         recentAnalyzedPlays: async (params: { userId: string; limit: number }) =>
             withCurrentAnalyses(params.userId, await deps.db.listRecentPlays(params)),
+
+        /**
+         * The account's analysed 7-key plays (the plays with per-note figures) played at `sinceMs` or later, newest first, read from at
+         * most `limit` traced plays, each marked `isTraining` when its chart is one of the account's training charts; `stale` and
+         * `failed` count the plays left out as in `recentAnalyzedPlays`.
+         */
+        analyzedPlaysInWindow: async (params: { userId: string; sinceMs: number; limit: number }) => {
+            const { plays, stale, failed } = await withCurrentAnalyses(params.userId, await deps.db.listPlaysInWindow(params))
+            return { plays: plays.filter((play) => play.summary.metrics !== null), stale, failed }
+        },
 
         /** The analysed plays of these scores of the account, by score id. A score with no trace, or no readable one, is absent. */
         analyzedPlaysOfScores: async (params: { userId: string; scoreIds: readonly string[] }) => {

@@ -95,6 +95,7 @@ export const aiReportViewSchema = z.object({
     preferred: z.array(z.object({ key: z.string(), tag: z.string(), repeat_share: z.number(), all_share: z.number(), diff: z.number() })),
     lamps: z.object({ table: z.object({ id: z.string(), name: z.string(), symbol: z.string() }), levels: z.array(aiLevelProgressSchema) }).nullable(),
     score_rows: z.object({ plays: z.number().int(), fast: z.number().int(), slow: z.number().int() }),
+    profile_keys: z.array(z.string()).optional(),
     notice: aiDataNoticeSchema,
     ai: aiInterpretationSchema(aiReportOutputSchema).nullable(),
 })
@@ -122,6 +123,16 @@ const coachSegmentSchema = z.object({
     slow: z.number().int(),
     top_tags: z.array(tagCountSchema),
     gauge: z.number().nullable(),
+    peak_nps: z.number().optional(),
+})
+
+const bpRunViewSchema = z.object({
+    from_ms: z.number().int(),
+    to_ms: z.number().int(),
+    length: z.number().int(),
+    start_nps: z.number(),
+    recovery_notes: z.number().int().nullable(),
+    preceding_tags: z.array(tagCountSchema),
 })
 
 const playChartSchema = z.object({ sha256: z.string(), md5: z.string().nullable(), title: z.string(), artist: z.string() })
@@ -156,6 +167,20 @@ export const aiCoachViewSchema = z.object({
             drops: z.array(z.object({ key: z.string(), from_ms: z.number().int(), to_ms: z.number().int(), drop: z.number() })),
             gauge: z.object({ selected: z.enum(AI_GAUGE_NAMES).nullable(), interval_ms: z.number().int(), curves: z.array(gaugeCurveViewSchema) }),
             pattern_join: z.string(),
+            bp_runs: z.array(bpRunViewSchema).optional(),
+            profile_keys: z.array(z.string()).optional(),
+            drop_contexts: z
+                .array(
+                    z.object({
+                        from_ms: z.number().int(),
+                        to_ms: z.number().int(),
+                        chart_notes: z.number().int(),
+                        bp: z.number().int(),
+                        mean_nps: z.number(),
+                        top_tags: z.array(tagCountSchema),
+                    }),
+                )
+                .optional(),
         })
         .nullable(),
     notice: aiDataNoticeSchema,
@@ -211,6 +236,8 @@ export const aiCompareViewSchema = z.object({
             bp_diff: z.number().int().nullable(),
             cumulative_ex_diff: z.number().int().nullable(),
             top_tags: z.array(tagCountSchema),
+            peak_nps: z.number().optional(),
+            mean_err_ms: z.number().nullable().optional(),
         }),
     ),
     gap_segments: z.array(z.string()),
@@ -251,9 +278,129 @@ export const aiGaugeAdviceViewSchema = z.object({
         }),
     ),
     score_rows: z.array(z.object({ gauge: z.enum(AI_GAUGE_NAMES), plays: z.number().int(), cleared: z.number().int() })),
+    drop_contexts: z
+        .object({
+            drop_mean_nps: z.number().nullable(),
+            overall_mean_nps: z.number().nullable(),
+            tags: z.array(z.object({ key: z.string(), lift: z.number().nullable(), notes: z.number().int(), evidence: evidenceSchema })),
+        })
+        .optional(),
     notice: aiDataNoticeSchema,
     ai: aiInterpretationSchema(aiGaugeAdviceOutputSchema).nullable(),
 })
 
 export type AiGaugeAdviceOutput = z.infer<typeof aiGaugeAdviceOutputSchema>
 export type AiGaugeAdviceView = z.infer<typeof aiGaugeAdviceViewSchema>
+
+/** How much data stands behind a profile cell (plan 2026-11-04 2.5.2): `low` meets the sample conditions, `medium` and `high` more. */
+export const PROFILE_SAMPLE_LEVELS = ['high', 'medium', 'low', 'insufficient'] as const
+export type ProfileSampleLevel = (typeof PROFILE_SAMPLE_LEVELS)[number]
+/** The unit of a profile cell's value: an EX residual, milliseconds of timing, or a ratio (an EX ratio difference or a lift). */
+export const PROFILE_CELL_UNITS = ['ex_residual', 'ms', 'ratio'] as const
+export type ProfileCellUnit = (typeof PROFILE_CELL_UNITS)[number]
+/** A weakness may also be a density limit in notes per second. */
+export const PROFILE_ITEM_UNITS = [...PROFILE_CELL_UNITS, 'nps'] as const
+export type ProfileItemUnit = (typeof PROFILE_ITEM_UNITS)[number]
+export const PROFILE_LEANINGS = ['weakness', 'strength'] as const
+
+const sampleLevelSchema = z.enum(PROFILE_SAMPLE_LEVELS)
+
+const profileTimingSchema = z.object({
+    mean_ms: z.number(),
+    sd_ms: z.number(),
+    fast_mean_ms: z.number(),
+    slow_mean_ms: z.number(),
+    fast_share: z.number(),
+})
+
+export const weaknessItemSchema = z.object({
+    key: z.string(),
+    kind: z.string(),
+    label_tags: z.array(z.string()),
+    value: z.number().nullable(),
+    unit: z.enum(PROFILE_ITEM_UNITS),
+    evidence: evidenceSchema,
+    sample_level: sampleLevelSchema,
+    notes: z.number().int(),
+    charts: z.number().int(),
+    plays: z.number().int(),
+    severity: z.number(),
+    trend_delta: z.number().nullable(),
+    selectable_for_folder: z.boolean(),
+    training_kinds: z.array(z.string()),
+})
+
+export const weaknessProfileCellSchema = z.object({
+    key: z.string(),
+    kind: z.string(),
+    value: z.number().nullable(),
+    unit: z.enum(PROFILE_CELL_UNITS),
+    ex_ratio: z.number().nullable(),
+    bp_rate: z.number().nullable(),
+    timing: profileTimingSchema.nullable(),
+    notes: z.number().int(),
+    charts: z.number().int(),
+    plays: z.number().int(),
+    auto_plays: z.number().int(),
+    p_value: z.number().nullable(),
+    q_threshold: z.number().nullable(),
+    evidence: evidenceSchema,
+    leaning: z.enum(PROFILE_LEANINGS).nullable(),
+    sample_level: sampleLevelSchema,
+    trend_delta: z.number().nullable(),
+    interaction: z.number().nullable(),
+})
+
+/** `GET /api/fe/me/ai/profile` (plan 2026-11-04 2.5.6): the weakness profile of the last PROFILE_WINDOW_DAYS days. No provider is called. */
+export const weaknessProfileViewSchema = z.object({
+    profile_version: z.number().int(),
+    window: z.object({
+        from: z.number().int(),
+        to: z.number().int(),
+        days: z.number().int(),
+        plays: z.number().int(),
+        charts: z.number().int(),
+        notes: z.number().int(),
+        stale: z.number().int(),
+        auto_plays: z.number().int(),
+        training_plays: z.number().int(),
+    }),
+    density: z.object({
+        curve: z.array(
+            z.object({
+                from_nps: z.number(),
+                to_nps: z.number().nullable(),
+                notes: z.number().int(),
+                charts: z.number().int(),
+                ex_ratio: z.number(),
+                ex_fit: z.number(),
+                bp_rate: z.number(),
+                bp_fit: z.number(),
+            }),
+        ),
+        baseline_ex: z.number().nullable(),
+        comfort_nps: z.number().nullable(),
+        limit_nps_ex: z.number().nullable(),
+        limit_nps_bp: z.number().nullable(),
+        max_seen_nps: z.number().nullable(),
+        peak_seen_2s: z.number().nullable(),
+        ceiling_reached_ex: z.boolean(),
+        evidence: evidenceSchema,
+        sustained_minus_burst: z.object({ value: z.number().nullable(), evidence: evidenceSchema, sample_level: sampleLevelSchema }),
+    }),
+    cells: z.array(weaknessProfileCellSchema),
+    weaknesses: z.array(weaknessItemSchema),
+    strengths: z.array(weaknessItemSchema),
+    bp_runs: z.object({
+        longest_mean: z.number().nullable(),
+        histogram: z.record(z.string(), z.number().int()),
+        recovery_median: z.number().nullable(),
+    }),
+    gauge: z.object({ drops_per_play: z.number().nullable(), drop_mean_nps: z.number().nullable(), overall_mean_nps: z.number().nullable() }),
+    soflan: z.object({ events: z.number().int(), adjusted_share: z.number().nullable() }),
+    notice: aiDataNoticeSchema,
+})
+
+export type WeaknessItem = z.infer<typeof weaknessItemSchema>
+export type WeaknessProfileCell = z.infer<typeof weaknessProfileCellSchema>
+export type WeaknessProfileView = z.infer<typeof weaknessProfileViewSchema>

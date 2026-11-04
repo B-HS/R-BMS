@@ -588,6 +588,31 @@ export const aiJudgeHabitViewSchema = z.object({
             }),
         ),
     }),
+    tag_timing: z
+        .array(
+            z.object({
+                key: z.string(),
+                tag: z.string(),
+                notes: z.number().int(),
+                deviation_ms: z.number().nullable(),
+                mean_ms: z.number(),
+                sd_ms: z.number(),
+                fast_share: z.number(),
+            }),
+        )
+        .optional(),
+    hand_timing: z
+        .array(
+            z.object({
+                key: z.string(),
+                hand: z.string(),
+                notes: z.number().int(),
+                mean_ms: z.number(),
+                sd_ms: z.number(),
+                fast_share: z.number(),
+            }),
+        )
+        .optional(),
     notice: aiDataNoticeSchema,
     ai: aiInterpretationSchema(aiJudgeHabitOutputSchema).nullable(),
 })

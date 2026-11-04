@@ -28,12 +28,14 @@ import { GREEN_DISPLAY_FACTOR, MIN_TIMING_PLAYS } from '@server/service/domain/a
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
 import { describeGreenNumber, readTraceGreenNumber } from '@server/service/domain/analysis/play-metrics'
 import { EVIDENCE, timingEvidence, wilsonInterval } from '@server/service/domain/analysis/sample'
-import { PLAY_LANE_BIAS_TOP } from '@server/service/domain/ai/play-feature.constants'
+import { JUDGE_HABIT_TAG_TIMING_TOP, PLAY_LANE_BIAS_TOP } from '@server/service/domain/ai/play-feature.constants'
+import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
+import type { WeaknessProfileView } from '@server/dto/ai-play'
 import { WILSON_Z_95 } from '@server/service/domain/analysis/analysis-constants'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_JUDGE_HABIT_FEATURE = 'judge_habit'
-export const AI_JUDGE_HABIT_PROMPT_VERSION = 2
+export const AI_JUDGE_HABIT_PROMPT_VERSION = 3
 export const AI_JUDGE_HABIT_MAX_OUTPUT_TOKENS = 8_000
 export const AI_JUDGE_HABIT_EFFORT = 'low' satisfies AiEffort
 export const AI_JUDGE_HABIT_NOTES_MAX = 5
@@ -58,6 +60,7 @@ export const buildAiJudgeHabitSystemPrompt = (language: Locale) =>
         '`fast_slow` counts early (FAST) and late (SLOW) judgments, `offset` is the average signed timing error (positive means early) with the server suggestion (`source` says whether it rests on note-by-note traces or on score rows), `trace_timing` is the note-by-note timing of PGREAT and GREAT from traces with its 95% interval and the lanes (as played) that stray furthest from it, `avgjudge` the average distance from the note in the older and newer half of the plays, `green` the GREEN numbers the plays used.',
         `JUDGE OFFSET moves only where notes are drawn, never the judgment: say "${JUDGE_OFFSET_EFFECT_PHRASE[language]}", never that it moves the judgment. Raising it makes notes arrive earlier on screen, lowering it later.`,
         'Set `offset_direction` to the `offset.direction` given; explain it in `offset_reasoning`. When `offset.grade` is not "strong", say the evidence is not enough.',
+        "`tag_timing` (from the player's weakness profile over the last 90 days) lists pattern tags whose PGREAT to BAD timing differs from the player's own mean beyond chance: `deviation_ms` is the tag's mean error less the player's (positive means hit earlier than usual), with its mean, spread and FAST share. `hand_timing` describes each hand (keys 1-3 left, 4 shared, 5-7 right, the scratch its own). These are habits of particular patterns or hands; JUDGE OFFSET moves every note alike and cannot fix them.",
         'Write GREEN numbers as the GREEN value first with the lane time in milliseconds after it, for example "GREEN 300 (500 ms)". A green number with `is_estimated` true is worked out from the score row, not read from the skin: call it an estimate.',
         `Write at most ${AI_JUDGE_HABIT_NOTES_MAX} \`notes\`, each with the \`key\` of the digest item it rests on.`,
         DIGEST_KEY_RULE,
@@ -114,6 +117,8 @@ export type AiJudgeHabitServiceDb = {
 
 type AiJudgeHabitServiceDeps = {
     db: AiJudgeHabitServiceDb
+    /** The player's weakness profile, for the tag and hand timing; with none those lists stay empty. */
+    profile?: Pick<WeaknessProfileService, 'view'>
     runner: Pick<AiFeatureRunner, 'run'>
     results: Pick<AiResultService, 'findLatest'>
 }
@@ -317,8 +322,53 @@ export const computeJudgeHabit = (rows: readonly TimingScoreRow[]) => {
 
 export type JudgeHabit = ReturnType<typeof computeJudgeHabit>
 
-/** The habit with a `key` on each item the AI may point at. */
-export const toJudgeHabitDigest = (habit: JudgeHabit) => ({
+const TIMING_KEY_PREFIX_LENGTH = 'timing:'.length
+const HAND_KEY_PREFIX_LENGTH = 'hand:'.length
+
+/**
+ * The timing habits a weakness profile adds (plan 2026-11-04 2.6 feature 4): its strong `timing:<tag>` cells, the
+ * JUDGE_HABIT_TAG_TIMING_TOP straying furthest from the player's own mean first, and each hand's timing (descriptive, untested).
+ */
+export const profileTimingOf = (profile: WeaknessProfileView | null) => ({
+    tag_timing: (profile?.cells ?? [])
+        .filter((cell) => cell.kind === 'timing' && cell.evidence === EVIDENCE.STRONG && cell.timing !== null)
+        .toSorted((left, right) => Math.abs(right.value ?? 0) - Math.abs(left.value ?? 0))
+        .slice(0, JUDGE_HABIT_TAG_TIMING_TOP)
+        .flatMap((cell) =>
+            cell.timing
+                ? [
+                      {
+                          key: cell.key,
+                          tag: cell.key.slice(TIMING_KEY_PREFIX_LENGTH),
+                          notes: cell.notes,
+                          deviation_ms: cell.value,
+                          mean_ms: cell.timing.mean_ms,
+                          sd_ms: cell.timing.sd_ms,
+                          fast_share: cell.timing.fast_share,
+                      },
+                  ]
+                : [],
+        ),
+    hand_timing: (profile?.cells ?? []).flatMap((cell) =>
+        cell.kind === 'hand' && cell.timing
+            ? [
+                  {
+                      key: cell.key,
+                      hand: cell.key.slice(HAND_KEY_PREFIX_LENGTH),
+                      notes: cell.notes,
+                      mean_ms: cell.timing.mean_ms,
+                      sd_ms: cell.timing.sd_ms,
+                      fast_share: cell.timing.fast_share,
+                  },
+              ]
+            : [],
+    ),
+})
+
+export type ProfileTimingHabit = ReturnType<typeof profileTimingOf>
+
+/** The habit with a `key` on each item the AI may point at, and the profile's tag and hand timing. */
+export const toJudgeHabitDigest = (habit: JudgeHabit, profileTiming: ProfileTimingHabit = profileTimingOf(null)) => ({
     plays: { key: 'plays', count: habit.plays },
     fast_slow: {
         key: 'timing.fast_slow',
@@ -329,6 +379,8 @@ export const toJudgeHabitDigest = (habit: JudgeHabit) => ({
     trace_timing: { key: 'timing.trace', ...habit.trace_timing },
     avgjudge: { key: 'timing.avgjudge', ...habit.avgjudge },
     green: { key: 'green', ...habit.green },
+    tag_timing: profileTiming.tag_timing,
+    hand_timing: profileTiming.hand_timing,
 })
 
 /**
@@ -359,8 +411,13 @@ export const refineJudgeHabitOutput = (output: AiJudgeHabitOutput, params: { dig
 
 export const createAiJudgeHabitService = (deps: AiJudgeHabitServiceDeps) => {
     const build = async (userId: string) => {
-        const habit = computeJudgeHabit(await deps.db.listRecentTimingRows({ userId, limit: JUDGE_HABIT_RECENT_PLAYS }))
-        return { habit, digest: toJudgeHabitDigest(habit) }
+        const [rows, profile] = await Promise.all([
+            deps.db.listRecentTimingRows({ userId, limit: JUDGE_HABIT_RECENT_PLAYS }),
+            deps.profile ? deps.profile.view({ userId }) : null,
+        ])
+        const habit = computeJudgeHabit(rows)
+        const profileTiming = profileTimingOf(profile)
+        return { habit, profileTiming, digest: toJudgeHabitDigest(habit, profileTiming) }
     }
 
     return {
@@ -374,7 +431,12 @@ export const createAiJudgeHabitService = (deps: AiJudgeHabitServiceDeps) => {
                 subjectKey: AI_JUDGE_HABIT_SUBJECT,
                 digest: built.digest,
             })
-            return { ...built.habit, notice: built.habit.plays < MIN_TIMING_PLAYS ? { need: 'recent_plays' } : null, ai } satisfies AiJudgeHabitView
+            return {
+                ...built.habit,
+                ...built.profileTiming,
+                notice: built.habit.plays < MIN_TIMING_PLAYS ? { need: 'recent_plays' } : null,
+                ai,
+            } satisfies AiJudgeHabitView
         },
 
         /** Asks the user's AI to explain the habit; fewer than MIN_TIMING_PLAYS recent plays make no call. */

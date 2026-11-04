@@ -77,7 +77,8 @@ export type StoredAnalysisRow = Omit<TraceAnalysisRow, 'summary' | 'patternJoin'
 
 /**
  * An in-memory `play_trace`, `play_analysis`, `rival` and `play_share_setting` that behave like the compose implementation, the unique
- * score id included. `playScores` gives a traced play's score columns by score id.
+ * score id included. `playScores` gives a traced play's score columns by score id; `trainingCharts` holds `<userId>|<sha256>` of the
+ * training charts each account made.
  */
 export const createMemoryTraceDb = (scores: readonly TraceScoreRow[], loginIds: Record<string, string> = {}) => {
     const traces = new Map<string, TraceInsertRow>()
@@ -85,6 +86,7 @@ export const createMemoryTraceDb = (scores: readonly TraceScoreRow[], loginIds: 
     const playScores = new Map<string, TracedPlayScore>()
     const rivals = new Set<string>()
     const shares = new Map<string, PlayShareSettingRow>()
+    const trainingCharts = new Set<string>()
     const playOf = (row: TraceInsertRow): TracedPlayRow => {
         const analysis = analyses.get(row.id)
         return {
@@ -183,6 +185,12 @@ export const createMemoryTraceDb = (scores: readonly TraceScoreRow[], loginIds: 
                 .filter((play) => !play.score.autoplay)
                 .toSorted((a, b) => b.playedAt - a.playedAt || (a.traceId < b.traceId ? 1 : -1))
                 .slice(0, limit),
+        listPlaysInWindow: async ({ userId, sinceMs, limit }) =>
+            playsOf(userId)
+                .filter((play) => !play.score.autoplay && play.playedAt >= sinceMs)
+                .toSorted((a, b) => b.playedAt - a.playedAt || (a.traceId < b.traceId ? 1 : -1))
+                .slice(0, limit)
+                .map((play) => ({ ...play, isTraining: trainingCharts.has(`${userId}|${play.chartSha256}`) })),
         listPlaysOfScores: async ({ userId, scoreIds }) => playsOf(userId).filter((play) => scoreIds.includes(play.scoreId)),
         findPlayOfScore: async ({ userId, scoreId }) => playsOf(userId).find((play) => play.scoreId === scoreId) ?? null,
         findBestPlayOnChart: async ({ userId, chartSha256, scratchAuto, excludeScoreId }) =>
@@ -201,7 +209,7 @@ export const createMemoryTraceDb = (scores: readonly TraceScoreRow[], loginIds: 
             shares.set(row.userId, row)
         },
     }
-    return { db, traces, analyses, hooks, playScores, rivals, shares }
+    return { db, traces, analyses, hooks, playScores, rivals, shares, trainingCharts }
 }
 
 export const createMemoryTraceService = (memory: ReturnType<typeof createMemoryTraceDb>, overrides: Partial<Omit<TraceServiceDeps, 'db'>> = {}) => {

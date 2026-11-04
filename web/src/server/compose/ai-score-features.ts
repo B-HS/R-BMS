@@ -13,6 +13,7 @@ import { createAiRecommendService, type TableFeatureDeps } from '@server/service
 import type { AiResultService } from '@server/service/domain/ai/result.service'
 import type { ChartTagLoad, ProgressTable } from '@server/service/domain/ai/table-progress'
 import { createAiWeeklySummaryService, type AiWeeklySummaryServiceDb } from '@server/service/domain/ai/weekly-summary.service'
+import { createWeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
 import type { ChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
 import type { FolderService } from '@server/service/domain/folder/folder.service'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
@@ -20,6 +21,7 @@ import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-
 import { orderedLevels, type TableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import type { TraceService } from '@server/service/domain/trace/trace.service'
 import { exScoreDenominator } from '@server/compose/ai-record-query'
+import { createWeaknessProfileDb } from '@server/compose/trace'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -220,6 +222,10 @@ export const createAiJudgeHabitDb = (db: Database, traceService: Pick<TraceServi
         },
     }) satisfies AiJudgeHabitServiceDb
 
+/** The weakness profile service over the trace service's analysed plays (the only reader of the trace tables' analyses). */
+export const composeWeaknessProfile = (db: Database, traceService: Pick<TraceService, 'analyzedPlaysInWindow'>) =>
+    createWeaknessProfileService({ db: createWeaknessProfileDb(db), plays: traceService, now: () => Date.now() })
+
 /** Each chart's tag shares from its pattern features (W3); a chart with no uploaded pattern is absent, and one read from older features is marked stale. */
 export const createChartTagLoader = (chartPatternService: Pick<ChartPatternService, 'readFeaturesMany'>) => async (md5s: readonly string[]) => {
     const features = await chartPatternService.readFeaturesMany(md5s)
@@ -260,7 +266,7 @@ type ComposeAiScoreFeaturesDeps = {
     tableSnapshotService: Pick<TableSnapshotService, 'getRecords'>
     chartPatternService: Pick<ChartPatternService, 'readFeaturesMany'>
     folderService: Pick<FolderService, 'list' | 'get' | 'create' | 'replaceItems' | 'remove'>
-    traceService: Pick<TraceService, 'analyzedPlaysOfScores'>
+    traceService: Pick<TraceService, 'analyzedPlaysOfScores' | 'analyzedPlaysInWindow'>
     loadTables: () => Map<string, SnapshotTable>
 }
 
@@ -282,7 +288,11 @@ export const composeAiScoreFeatures = (db: Database, deps: ComposeAiScoreFeature
         now,
     })
     const aiWeeklySummaryService = createAiWeeklySummaryService({ ...shared, db: createAiWeeklySummaryDb(db), levelLabelOf, now })
-    const aiJudgeHabitService = createAiJudgeHabitService({ ...shared, db: createAiJudgeHabitDb(db, deps.traceService) })
+    const aiJudgeHabitService = createAiJudgeHabitService({
+        ...shared,
+        db: createAiJudgeHabitDb(db, deps.traceService),
+        profile: composeWeaknessProfile(db, deps.traceService),
+    })
 
     return { aiRecommendService, aiGoalService, aiPracticeFolderService, aiWeeklySummaryService, aiJudgeHabitService }
 }

@@ -21,7 +21,7 @@ import {
 } from '@server/service/domain/ai/ai-digest'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
 import { COMPARE_GAP_SEGMENTS, PLAY_FEATURE_ANALYSIS_VERSION } from '@server/service/domain/ai/play-feature.constants'
-import { isShownTag, segmentKey } from '@server/service/domain/ai/play-digest'
+import { isShownTag, segmentKey, usToMs } from '@server/service/domain/ai/play-digest'
 import type { PlayScoreDb, PlayScoreRow } from '@server/service/domain/ai/replay-coach.service'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
@@ -29,7 +29,7 @@ import type { AnalyzedPlay, RivalSegmentPlay, TraceService } from '@server/servi
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_PLAY_COMPARE_FEATURE = 'play_compare'
-export const AI_PLAY_COMPARE_PROMPT_VERSION = 2
+export const AI_PLAY_COMPARE_PROMPT_VERSION = 3
 export const AI_PLAY_COMPARE_MAX_OUTPUT_TOKENS = 6_000
 export const AI_PLAY_COMPARE_EFFORT = 'low' satisfies AiEffort
 
@@ -38,6 +38,7 @@ export const buildAiPlayCompareSystemPrompt = (language: Locale) =>
         'You explain where one play of a rhythm game (BMS) chart gained or lost against another play of the same chart.',
         DIGEST_IS_DATA_RULE,
         '`gaps` are the time segments with the largest differences: `ex_diff` and `bp_diff` are this play minus the other (a positive `ex_diff` means this play scored more EX there), `cumulative_ex_diff` is the difference summed up to the end of the segment, and `top_tags` are the main pattern tags of this play there.',
+        "Each gap also gives `peak_nps`, the highest local density of the segment in notes per second (a centred 2 second window, the same in both plays since the chart is the same), and `mean_err_ms`, the mean timing error of this play's PGREAT to BAD notes there in milliseconds (positive is early, null with none).",
         '`overall.ex_diff` is the sum of `ex_diff` over the `overall.compared_segments` segments both plays reached. A segment one of the plays never reached (it left or its gauge ran out first) is left out of that sum and of `gaps`; do not say anything about such segments.',
         "The other play is the player's own best or a rival who chose to share segment totals; nothing else of the rival is known. Lane options of the two plays may differ.",
         `For each gap you talk about write \`segment_id\` exactly as given and one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`explanation\`; at most ${COMPARE_GAP_SEGMENTS}. \`takeaway\` is one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence on what to practise.`,
@@ -92,7 +93,13 @@ type AiPlayCompareServiceDeps = {
 }
 
 type SegmentCounts = { id: string; chart_notes: number; notes: number; ex_score: number; bp: number }
-type BaseSegment = SegmentCounts & { from_ms: number; to_ms: number; top_tags: { tag: string; notes: number }[] }
+type BaseSegment = SegmentCounts & {
+    from_ms: number
+    to_ms: number
+    top_tags: { tag: string; notes: number }[]
+    peak_nps: number
+    mean_err_us: number | null
+}
 
 const totalsOf = (row: Pick<PublicBestRow, 'clear' | 'gauge' | 'exScore' | 'minbp' | 'pgreat' | 'great' | 'good' | 'bad' | 'poor'>) => ({
     lamp: clearLampFromId(row.clear),
@@ -120,7 +127,8 @@ const reachedSegmentCountOf = (segments: readonly SegmentCounts[]) => {
  * Lines two plays of one chart up segment by segment (plan 5.3). Lane options never move a note in time, so the same chart cut into
  * the same segments has the same judged objects in each; when any segment's count differs (another LN type, SCRATCH AUTO on one
  * side) the plays are not comparable and this is null. `ex_diff` and `bp_diff` are the base minus the other. A segment either play
- * did not reach has null differences and no part in the running total (`cumulative_ex_diff`).
+ * did not reach has null differences and no part in the running total (`cumulative_ex_diff`). Each segment keeps its highest local
+ * NPS (the chart's, so the same in both plays) and the base play's own mean timing error there.
  */
 export const compareSegments = (base: readonly BaseSegment[], other: readonly SegmentCounts[]) => {
     if (base.length !== other.length || base.some((segment, index) => segment.chart_notes !== other[index]?.chart_notes)) return null
@@ -133,6 +141,8 @@ export const compareSegments = (base: readonly BaseSegment[], other: readonly Se
             from_ms: segment.from_ms,
             to_ms: segment.to_ms,
             chart_notes: segment.chart_notes,
+            peak_nps: segment.peak_nps,
+            mean_err_ms: segment.mean_err_us === null ? null : usToMs(segment.mean_err_us),
         }
         const topTags = segment.top_tags.filter((tag) => isShownTag(tag.tag))
         if (index >= reachedByBoth) return { ...shared, ex_diff: null, bp_diff: null, cumulative_ex_diff: null, top_tags: topTags }
@@ -354,7 +364,7 @@ export const createAiPlayCompareService = (deps: AiPlayCompareServiceDeps) => {
                       },
                       gaps: segments
                           .filter((segment) => gaps.includes(segment.id))
-                          .map(({ key, id, from_ms, to_ms, ex_diff, bp_diff, cumulative_ex_diff, top_tags }) => ({
+                          .map(({ key, id, from_ms, to_ms, ex_diff, bp_diff, cumulative_ex_diff, top_tags, peak_nps, mean_err_ms }) => ({
                               key,
                               segment_id: id,
                               from_ms,
@@ -363,6 +373,8 @@ export const createAiPlayCompareService = (deps: AiPlayCompareServiceDeps) => {
                               bp_diff,
                               cumulative_ex_diff,
                               top_tags,
+                              peak_nps,
+                              mean_err_ms,
                           })),
                   }
                 : null

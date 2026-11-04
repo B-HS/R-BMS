@@ -11,6 +11,7 @@ import {
     GREEN_DISPLAY_FACTOR,
     HAND_KEYS,
     NPS_SUMMARY_DECIMALS,
+    PEAK_NPS_DECIMALS,
     SEGMENT_COUNT,
     SEGMENT_TOP_TAGS,
     SOFLAN_PHASE_MS,
@@ -253,7 +254,8 @@ const createSoflanPhaseLookup = (events: readonly { tUs: number; stopUs: number 
  * judgements overall and by tag, lane and note density; for each of SEGMENT_COUNT equal parts of the play its time span, its judged
  * objects (`chart_notes`, reached or not), the notes that took a judgement with their EX score, BP, combo breaks and FAST/SLOW (GREAT
  * to BAD) and its SEGMENT_TOP_TAGS most frequent tags; FAST/SLOW by grade and tag, the timing of PGREAT and GREAT overall and by lane,
- * and the first and last third's EX ratios. An unjudged LN end is left out. A third
+ * and the first and last third's EX ratios; each segment also keeps the highest local NPS of its judged objects (`peak_nps`) and the mean
+ * timing error of its PGREAT to BAD notes (`mean_err_us`, null with none). An unjudged LN end is left out. A third
  * with no judged note (nothing in it, or the play ended before it) has a null EX ratio and so a null `fatigue.delta`.
  *
  * Since PLAY_ANALYSIS_VERSION 3 (plan 2026-11-04 2.2) also, in forms that add up across plays (`CompactCell`, `TimingMoments`): the
@@ -290,12 +292,22 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
         slow: 0,
     }))
     const segmentTags = Array.from({ length: SEGMENT_COUNT }, () => new Map<PatternTag, number>())
+    const densities = localDensitiesOf(input.notes)
+    const segmentPeakNps = Array.from({ length: SEGMENT_COUNT }, () => 0)
     input.notes.forEach((note, index) => {
         if (!isJudgedNote(note)) return
         const at = segmentOf(note.timeUs)
         segments[at].chart_notes += 1
+        segmentPeakNps[at] = Math.max(segmentPeakNps[at], densities[index].nps2)
         for (const tag of tagLists[index]) segmentTags[at].set(tag, (segmentTags[at].get(tag) ?? 0) + 1)
     })
+    const segmentTiming = Array.from({ length: SEGMENT_COUNT }, () => ({ notes: 0, sumUs: 0 }))
+    for (const { note, grade } of judged) {
+        if (grade === 'poor') continue
+        const timing = segmentTiming[segmentOf(note.timeUs)]
+        timing.notes += 1
+        timing.sumUs += note.errUs
+    }
     let combo = 0
     for (const { note, grade } of judged) {
         const segment = segments[segmentOf(note.timeUs)]
@@ -330,7 +342,6 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
         judged.flatMap(({ note, grade, tags }) => tags.map((tag): [PatternTag, Grade, number] => [tag, grade, note.errUs])),
     )
 
-    const densities = localDensitiesOf(input.notes)
     const npsCells = new Map<number, { all: CompactCell; burst: CompactCell; sustained: CompactCell }>()
     for (const { note, grade, index } of judged) {
         const density = densities[index]
@@ -405,6 +416,8 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
         ),
         segments: segments.map((segment, index) => ({
             ...segment,
+            peak_nps: roundToDecimals(segmentPeakNps[index], PEAK_NPS_DECIMALS),
+            mean_err_us: segmentTiming[index].notes > 0 ? Math.round(segmentTiming[index].sumUs / segmentTiming[index].notes) : null,
             top_tags: [...segmentTags[index].entries()]
                 .toSorted(([leftTag, left], [rightTag, right]) => right - left || PATTERN_TAGS.indexOf(leftTag) - PATTERN_TAGS.indexOf(rightTag))
                 .slice(0, SEGMENT_TOP_TAGS)

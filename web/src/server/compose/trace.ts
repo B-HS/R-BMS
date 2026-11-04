@@ -1,13 +1,14 @@
-import { and, asc, count, countDistinct, desc, eq, gt, inArray, isNull, ne, or, sql, sum } from 'drizzle-orm'
+import { and, asc, count, countDistinct, desc, eq, gt, gte, inArray, isNull, max, ne, or, sql, sum } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
-import { playAnalysis, playShareSetting, playTrace, rival, score } from '@server/db/schema'
+import { playAnalysis, playProfile, playShareSetting, playTrace, rival, score, trainingChart } from '@server/db/schema'
 import { summarizeError } from '@server/lib/error-summary'
 import { hasMysqlErrorCode, MYSQL_ERROR_CODE } from '@server/lib/mysql-error'
 import { newId } from '@server/lib/token'
 import { withLockRetry } from '@server/lib/with-lock-retry'
 import type { ChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
 import { exScoreDenominator } from '@server/compose/ai-record-query'
+import type { WeaknessProfileServiceDb } from '@server/service/domain/ai/weakness-profile.service'
 import { ANALYSIS_FAILED_JOIN, type AnalysisVersions } from '@server/service/domain/trace/trace-analysis'
 import { createTraceService, type TracedPlayRow, type TraceServiceDb } from '@server/service/domain/trace/trace.service'
 
@@ -230,6 +231,21 @@ export const createTraceDb = (db: Database) => {
                 .limit(limit)
             return rows.map(toTracedPlayRow)
         },
+        listPlaysInWindow: async ({ userId, sinceMs, limit }) => {
+            const ownTraining = db
+                .select({ id: trainingChart.id })
+                .from(trainingChart)
+                .where(and(eq(trainingChart.userId, playTrace.userId), eq(trainingChart.sha256, playTrace.chartSha256)))
+            const rows = await db
+                .select({ ...tracedPlaySelection, isTraining: sql<number>`exists (${ownTraining})`.mapWith(Number) })
+                .from(playTrace)
+                .innerJoin(score, eq(score.id, playTrace.scoreId))
+                .leftJoin(playAnalysis, eq(playAnalysis.traceId, playTrace.id))
+                .where(and(eq(playTrace.userId, userId), gte(playTrace.playedAt, sinceMs), eq(score.autoplay, false)))
+                .orderBy(desc(playTrace.playedAt), desc(playTrace.id))
+                .limit(limit)
+            return rows.map(({ isTraining, ...row }) => ({ ...toTracedPlayRow(row), isTraining: isTraining === 1 }))
+        },
         listPlaysOfScores: async ({ userId, scoreIds }) => {
             if (scoreIds.length === 0) return []
             const rows = await selectTracedPlays().where(and(eq(playTrace.userId, userId), inArray(playTrace.scoreId, [...scoreIds])))
@@ -276,6 +292,56 @@ export const createTraceDb = (db: Database) => {
         }),
     } satisfies TraceServiceDb
 }
+
+const numberOrNull = (value: number | string | null | undefined) => (value === null || value === undefined ? null : Number(value))
+
+/**
+ * The weakness profile's cache (`play_profile`) and the fingerprint of its input: counts over the account's traced plays of the
+ * window (`play_trace_user_played_idx`) and its training charts. It lives here because only this file reads the trace tables.
+ */
+export const createWeaknessProfileDb = (db: Database) =>
+    ({
+        readFingerprintInputs: async ({ userId, sinceMs }) => {
+            const [[plays], [training]] = await Promise.all([
+                db
+                    .select({
+                        analyses: count(playAnalysis.traceId),
+                        latestComputedAt: max(playAnalysis.computedAt),
+                        latestPlayedAt: max(playTrace.playedAt),
+                    })
+                    .from(playTrace)
+                    .innerJoin(score, eq(score.id, playTrace.scoreId))
+                    .leftJoin(playAnalysis, eq(playAnalysis.traceId, playTrace.id))
+                    .where(and(eq(playTrace.userId, userId), gte(playTrace.playedAt, sinceMs), eq(score.autoplay, false))),
+                db.select({ charts: count() }).from(trainingChart).where(eq(trainingChart.userId, userId)),
+            ])
+            return {
+                analyses: plays?.analyses ?? 0,
+                latestComputedAt: numberOrNull(plays?.latestComputedAt),
+                latestPlayedAt: numberOrNull(plays?.latestPlayedAt),
+                trainingCharts: training?.charts ?? 0,
+            }
+        },
+
+        findProfile: async ({ userId, windowKey }) => {
+            const [row] = await db
+                .select({
+                    profileVersion: playProfile.profileVersion,
+                    fingerprint: playProfile.fingerprint,
+                    data: playProfile.data,
+                    computedAt: playProfile.computedAt,
+                })
+                .from(playProfile)
+                .where(and(eq(playProfile.userId, userId), eq(playProfile.windowKey, windowKey)))
+                .limit(1)
+            return row ?? null
+        },
+
+        saveProfile: withLockRetry(async (row) => {
+            const { profileVersion, fingerprint, data, computedAt } = row
+            await db.insert(playProfile).values(row).onDuplicateKeyUpdate({ set: { profileVersion, fingerprint, data, computedAt } })
+        }),
+    }) satisfies WeaknessProfileServiceDb
 
 export const composeTrace = (db: Database, deps: { chartPatternService: Pick<ChartPatternService, 'readPattern'> }) => ({
     traceService: createTraceService({

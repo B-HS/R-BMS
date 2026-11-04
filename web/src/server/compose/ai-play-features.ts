@@ -14,7 +14,7 @@ import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-
 import type { TableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import type { TraceService } from '@server/service/domain/trace/trace.service'
 import { exScoreDenominator } from '@server/compose/ai-record-query'
-import { createChartTagLoader, createLevelLabelOf, createTableLoaders } from '@server/compose/ai-score-features'
+import { composeWeaknessProfile, createChartTagLoader, createLevelLabelOf, createTableLoaders } from '@server/compose/ai-score-features'
 
 const recentScoreRows = (db: Database, userId: string, limit: number) =>
     db
@@ -132,16 +132,24 @@ export const createAiGaugeAdviceDb = (db: Database) =>
 type ComposeAiPlayFeaturesDeps = {
     aiFeatureRunner: Pick<AiFeatureRunner, 'run'>
     aiResultService: Pick<AiResultService, 'findLatest'>
-    traceService: Pick<TraceService, 'recentAnalyzedPlays' | 'analyzedPlayOfScore' | 'bestAnalyzedPlayOnChart' | 'rivalSegmentsOnChart'>
+    traceService: Pick<
+        TraceService,
+        'recentAnalyzedPlays' | 'analyzedPlayOfScore' | 'bestAnalyzedPlayOnChart' | 'rivalSegmentsOnChart' | 'analyzedPlaysInWindow'
+    >
     tableSnapshotService: Pick<TableSnapshotService, 'getRecords'>
     chartPatternService: Pick<ChartPatternService, 'readFeaturesMany'>
     loadTables: () => Map<string, SnapshotTable>
 }
 
-/** The AI features that read play analyses (W5): the player report, the replay coach, the comparison and the gauge and option advice. */
+/**
+ * The AI features that read play analyses (W5): the player report, the replay coach, the comparison, the gauge and option advice,
+ * and the weakness profile (plan 2026-11-04 2.5) the report, the coach and the advice read.
+ */
 export const composeAiPlayFeatures = (db: Database, deps: ComposeAiPlayFeaturesDeps) => {
-    const shared = { runner: deps.aiFeatureRunner, results: deps.aiResultService, plays: deps.traceService }
+    const weaknessProfileService = composeWeaknessProfile(db, deps.traceService)
+    const shared = { runner: deps.aiFeatureRunner, results: deps.aiResultService, plays: deps.traceService, profile: weaknessProfileService }
     return {
+        weaknessProfileService,
         aiPlayReportService: createAiPlayReportService({
             ...shared,
             db: createAiPlayReportDb(db),

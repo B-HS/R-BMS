@@ -2,12 +2,14 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { eq, like, sql } from 'drizzle-orm'
 import { createAiPlayCompareDb, createPlayScoreDb } from '@server/compose/ai-play-features'
 import { createAiJudgeHabitDb } from '@server/compose/ai-score-features'
-import { createTraceDb } from '@server/compose/trace'
+import { createTraceDb, createWeaknessProfileDb } from '@server/compose/trace'
 import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
-import { chart, chartBest, playAnalysis, playShareSetting, playTrace, rival, score } from '@server/db/schema'
+import { chart, chartBest, playAnalysis, playProfile, playShareSetting, playTrace, rival, score, trainingChart } from '@server/db/schema'
 import { gaugeTypeToId } from '@server/dto/common'
 import type { TraceUploadInput } from '@server/dto/trace'
+import { PROFILE_VERSION, PROFILE_WINDOW_KEY } from '@server/service/domain/ai/play-feature.constants'
+import { createWeaknessProfileService, profileWindowStartOf } from '@server/service/domain/ai/weakness-profile.service'
 import { ANALYSIS_VERSION, PLAY_ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
 import { countTraceJudgements } from '@server/service/domain/trace/trace-check'
 import { TRACE_UPLOAD_OUTCOME, createTraceService } from '@server/service/domain/trace/trace.service'
@@ -259,5 +261,103 @@ describe.skipIf(!hasDatabase)('판별 기반 AI 기능 (임시 MySQL)', () => {
         expect(rows[0].traceGreen).toEqual({ green: NORMAL.speed.end.green, greenMs: NORMAL.speed.end.green_ms })
         expect(rows[0].traceTiming?.notes).toBeGreaterThan(0)
         expect(rows[0]).toMatchObject({ greenNumber: 500 })
+    })
+
+    test('창 안 판은 그 사용자의 훈련곡과 sha256 이 같은 판에 훈련 표시를 달고, 프로필 지문은 창의 분석과 훈련곡을 센다', async () => {
+        const db = getDb()
+        const traceDb = createTraceDb(db)
+        await db.insert(trainingChart).values({
+            id: `tc_${PREFIX}`,
+            userId: OWNER,
+            md5: 'f'.repeat(32),
+            sha256: NORMAL.chart.sha256,
+            title: 'R-BMS Training',
+            playLevel: 9,
+            bpm: 160,
+            noteCount: 300,
+            lengthMs: 60_000,
+            generatorVersion: 1,
+            spec: {},
+            request: {},
+            profileSnapshot: {},
+            bms: Buffer.from('#TITLE R-BMS Training'),
+            provider: 'anthropic',
+            model: 'claude-test',
+            createdAt: NOW,
+        })
+        const owned = await traceDb.listPlaysInWindow({ userId: OWNER, sinceMs: NOW, limit: 10 })
+        expect(owned.map((row) => [row.scoreId, row.isTraining])).toEqual([
+            [TRACES.best.score_id, true],
+            [TRACES.first.score_id, true],
+        ])
+        expect((await traceDb.listPlaysInWindow({ userId: OWNER, sinceMs: NOW + 1, limit: 10 })).map((row) => row.scoreId)).toEqual([
+            TRACES.best.score_id,
+        ])
+        expect((await traceDb.listPlaysInWindow({ userId: RIVAL, sinceMs: 0, limit: 10 })).map((row) => row.isTraining)).toEqual([false])
+
+        const profileDb = createWeaknessProfileDb(db)
+        expect(await profileDb.readFingerprintInputs({ userId: OWNER, sinceMs: NOW })).toEqual({
+            analyses: 2,
+            latestComputedAt: NOW,
+            latestPlayedAt: NOW + 1,
+            trainingCharts: 1,
+        })
+        expect(await profileDb.readFingerprintInputs({ userId: OWNER, sinceMs: NOW + 10 })).toEqual({
+            analyses: 0,
+            latestComputedAt: null,
+            latestPlayedAt: null,
+            trainingCharts: 1,
+        })
+        await db.delete(trainingChart).where(eq(trainingChart.id, `tc_${PREFIX}`))
+        expect((await traceDb.listPlaysInWindow({ userId: OWNER, sinceMs: NOW, limit: 10 })).every((row) => !row.isTraining)).toBe(true)
+    })
+
+    test('프로필은 play_profile 에 사용자·창마다 한 행으로 저장·갱신되고 지문이 같으면 저장값을 읽는다', async () => {
+        const db = getDb()
+        const profileDb = createWeaknessProfileDb(db)
+        await profileDb.saveProfile({
+            userId: OWNER,
+            windowKey: PROFILE_WINDOW_KEY,
+            profileVersion: 1,
+            fingerprint: 'a'.repeat(64),
+            data: { first: true },
+            computedAt: 1,
+        })
+        await profileDb.saveProfile({
+            userId: OWNER,
+            windowKey: PROFILE_WINDOW_KEY,
+            profileVersion: 1,
+            fingerprint: 'b'.repeat(64),
+            data: { second: true },
+            computedAt: 2,
+        })
+        expect(await profileDb.findProfile({ userId: OWNER, windowKey: PROFILE_WINDOW_KEY })).toEqual({
+            profileVersion: 1,
+            fingerprint: 'b'.repeat(64),
+            data: { second: true },
+            computedAt: 2,
+        })
+        expect(await profileDb.findProfile({ userId: RIVAL, windowKey: PROFILE_WINDOW_KEY })).toBeNull()
+
+        const reads: number[] = []
+        const traces = createService()
+        const now = NOW + 86_400_000
+        const service = createWeaknessProfileService({
+            db: profileDb,
+            plays: {
+                analyzedPlaysInWindow: async (params) => {
+                    reads.push(params.sinceMs)
+                    return traces.analyzedPlaysInWindow(params)
+                },
+            },
+            now: () => now,
+        })
+        const first = await service.view({ userId: OWNER })
+        expect(first.window).toMatchObject({ plays: 2, from: profileWindowStartOf(now), stale: 0 })
+        const second = await service.current({ userId: OWNER })
+        expect([second.cached, reads.length]).toEqual([true, 1])
+        expect(second.profile).toEqual(first)
+        const [stored] = await db.select().from(playProfile).where(eq(playProfile.userId, OWNER))
+        expect(stored).toMatchObject({ windowKey: PROFILE_WINDOW_KEY, profileVersion: PROFILE_VERSION, fingerprint: second.fingerprint })
     })
 })

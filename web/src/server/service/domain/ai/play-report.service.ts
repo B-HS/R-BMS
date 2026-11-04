@@ -24,6 +24,7 @@ import {
 import { exRatioOf, fastShareOf, isShownTag, playsWithMetrics, poolGroups, usToMs } from '@server/service/domain/ai/play-digest'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
 import { FRONTIER_DIGEST_LEVELS } from '@server/service/domain/ai/score-feature.constants'
+import { toProfileDigest, type ProfileDigest, type WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
 import {
     findFrontierIndex,
     readTableProgress,
@@ -34,28 +35,32 @@ import {
 import { REPORT_RECENT_PLAYS, SP7_LANE_NAMES } from '@server/service/domain/analysis/analysis-constants'
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
 import { PATTERN_TAGS } from '@server/service/domain/analysis/pattern-tags'
-import { EVIDENCE, TAG_LEANING, aggregateTagEvidence } from '@server/service/domain/analysis/sample'
+import { aggregateTagEvidence } from '@server/service/domain/analysis/sample'
+import { parseWeaknessKey } from '@server/service/domain/analysis/weakness-key'
 import type { AnalyzedPlay, TraceService } from '@server/service/domain/trace/trace.service'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_PLAY_REPORT_FEATURE = 'play_report'
-export const AI_PLAY_REPORT_PROMPT_VERSION = 2
+export const AI_PLAY_REPORT_PROMPT_VERSION = 3
 export const AI_PLAY_REPORT_MAX_OUTPUT_TOKENS = 12_000
 export const AI_PLAY_REPORT_EFFORT = 'low' satisfies AiEffort
 export const AI_PLAY_REPORT_SUBJECT = 'recent'
 
 const TAG_KEY_PREFIX = 'tag.'
+/** The keys a report may claim a strength or weakness by: the profile's weakness keys, and the older `tag.` keys. */
+const isClaimKey = (key: string) => key.startsWith(TAG_KEY_PREFIX) || parseWeaknessKey(key) !== null
 
 export const buildAiPlayReportSystemPrompt = (language: Locale) =>
     [
         "You write a rhythm game (BMS, 7 keys and a scratch) player's report from the server's analysis of their recent plays.",
         DIGEST_IS_DATA_RULE,
-        'A tag residual is, play by play, the EX ratio of the notes with that pattern tag less the whole play\'s, so a negative residual is a pattern the player loses EX on whatever the chart. `strengths` and `weaknesses` hold only tags the evidence supports (grade "strong").',
-        `Write at most ${PLAY_REPORT_TOP_ITEMS} \`strengths\` and ${PLAY_REPORT_TOP_ITEMS} \`weaknesses\`, each pointing at a tag of the input list of the same name by its \`key\`; never call a tag that is only in \`uncertain_tags\` or \`insufficient_tags\` a strength or a weakness.`,
-        `Write at most ${PLAY_REPORT_TOP_ITEMS} \`habits\` from \`habits\` and \`lanes\`, and practice steps in \`practice_focus\` (\`key\` of the item the step trains, one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`action\`).`,
+        "The input `strengths` and `weaknesses` come from the player's weakness profile over the last 90 days: each is a cell (a pattern tag, a tag alone, a pair of tags shared by one note, a lane, a hand, the timing of a tag, a BPM band, a soflan phase, fatigue, sustained density, the density limit, or a tag that comes right before failures or gauge drops) whose difference survived a chart-clustered t test with a false discovery rate correction (grade \"strong\"). An `ex_residual` value is the cell's EX ratio less that of the same plays, so negative means the player loses EX there whatever the chart; an `ms` value is a tag's mean timing error less the player's own; a `ratio` value is an EX ratio difference (a soflan phase against the phase before it, fatigue, sustained against burst density); an `nps` value is a density limit. `sample_level` says how much data stands behind it and `trend_delta` how the last 30 days differ from the 60 before (null when unknown).",
+        `Write at most ${PLAY_REPORT_TOP_ITEMS} \`strengths\` and ${PLAY_REPORT_TOP_ITEMS} \`weaknesses\`, each pointing at an item of the input list of the same name by its \`key\`; never call a tag that is only in \`uncertain_tags\` or \`insufficient_tags\` a strength or a weakness.`,
+        '`density` gives the notes per second the player stays comfortable up to (`comfort_nps`), where their EX ratio falls clearly (`limit_nps_ex`) and where BAD and POOR pile up (`limit_nps_bp`), with the densest they met; `sustained_minus_burst` is their EX ratio in sustained density less in short bursts of the same density. `context` lists tags that come before failures (`bp_context`) or gauge drops (`gauge_context`) more often than usual by `lift`; `hands` and `timing` describe the hands and the tags whose timing strays.',
+        `Write at most ${PLAY_REPORT_TOP_ITEMS} \`habits\` from \`habits\`, \`lanes\`, \`hands\`, \`timing\` and \`context\`, and practice steps in \`practice_focus\`: each step's \`key\` must be the \`key\` of an item of \`weaknesses\`, with one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`action\`.`,
         'Every `ex_ratio` is (2 PGREAT + GREAT) / (2 notes) over the notes that took a judgement; `notes` and `plays` say how much data stands behind a figure.',
         "The habit and lane figures are signed. `mean_ms` (timing bias) is the mean timing error of PGREAT and GREAT notes in milliseconds: positive means the notes were hit early (FAST), negative means late (SLOW). `mean_delta` (fatigue) is the EX ratio of the last third of a play less that of its first third, averaged over plays: negative means the player loses accuracy late in a play. A lane `deviation` is that lane's `ex_ratio` less the player's overall EX ratio: negative means the lane is worse than the player's average. `fast_share` is the share of the lane's GREAT to BAD judgements that were early (FAST): above 0.5 mostly early, below 0.5 mostly late. A `share` is the share of the analysed plays.",
-        'Lane figures use the lanes as played after lane options, and the hands are the default assignment (scratch and keys 1-3 left, 4 shared, 5-7 right); say so when you talk about hands.',
+        'Lane figures use the lanes as played after lane options, and the hands are the default assignment (keys 1-3 left, 4 shared, 5-7 right, the scratch its own hand); say so when you talk about hands.',
         `In \`caveats\` write in ${AI_OUTPUT_LANGUAGE_NAME[language]} what the data cannot tell, always naming the tags in \`uncertain_tags\` and \`insufficient_tags\` when there are any.`,
         DIGEST_KEY_RULE,
         `All text is ${AI_OUTPUT_LANGUAGE_NAME[language]}; \`headline\` is one sentence.`,
@@ -84,6 +89,7 @@ type AiPlayReportServiceDeps = {
     loadTable: (tableId: string | undefined) => ProgressTable | null
     loadRecords: (params: { tableId: string; userId: string }) => Promise<ProgressRecords | null>
     loadChartTags: (md5s: readonly string[]) => Promise<ChartTagLoad>
+    profile: Pick<WeaknessProfileService, 'view'>
     runner: Pick<AiFeatureRunner, 'run'>
     results: Pick<AiResultService, 'findLatest'>
 }
@@ -173,13 +179,12 @@ const overallExRatioOf = (report: PlayReport) => {
 }
 
 /**
- * What the AI is given (plan 5.1): the strong strengths and weaknesses (at most PLAY_REPORT_TOP_ITEMS each), the other tags by name
- * only so they cannot be pointed at, the habits, the lanes that stray furthest from the player's own EX ratio, and the lamp levels
- * around the frontier.
+ * What the AI is given (plan 5.1, 2026-11-04 2.6 feature 1): the profile's strong weaknesses and strengths with their keys (at most
+ * PLAY_REPORT_TOP_ITEMS each), the pattern tags the profile could not call either by name only so they cannot be pointed at, the
+ * density limits, the failure and gauge-drop contexts, the hands and the straying tag timing, the habits, the lanes that stray
+ * furthest from the player's own EX ratio, and the lamp levels around the frontier.
  */
-export const toPlayReportDigest = (report: PlayReport, lamps: AiReportView['lamps']) => {
-    const strong = report.tags.filter((tag) => tag.grade === EVIDENCE.STRONG)
-    const pick = ({ key, tag, residual, ex_ratio, notes, plays }: PlayReport['tags'][number]) => ({ key, tag, residual, ex_ratio, notes, plays })
+export const toPlayReportDigest = (report: PlayReport, lamps: AiReportView['lamps'], profile: ProfileDigest) => {
     const overall = overallExRatioOf(report)
     const laneBias = report.lanes
         .map((lane) => ({ ...lane, deviation: lane.ex_ratio === null || overall === null ? 0 : roundRatio(lane.ex_ratio - overall) }))
@@ -188,18 +193,15 @@ export const toPlayReportDigest = (report: PlayReport, lamps: AiReportView['lamp
     const frontierIndex = lamps ? (findFrontierIndex(lamps.levels) ?? 0) : 0
     return {
         plays: { key: 'plays', count: report.plays.measured },
-        strengths: strong
-            .filter((tag) => tag.leaning === TAG_LEANING.STRENGTH)
-            .toSorted((left, right) => right.residual - left.residual)
-            .slice(0, PLAY_REPORT_TOP_ITEMS)
-            .map(pick),
-        weaknesses: strong
-            .filter((tag) => tag.leaning === TAG_LEANING.WEAKNESS)
-            .toSorted((left, right) => left.residual - right.residual)
-            .slice(0, PLAY_REPORT_TOP_ITEMS)
-            .map(pick),
-        uncertain_tags: report.tags.filter((tag) => tag.grade === EVIDENCE.UNCERTAIN).map((tag) => tag.tag),
-        insufficient_tags: report.tags.filter((tag) => tag.grade === EVIDENCE.INSUFFICIENT).map((tag) => tag.tag),
+        profile_window: profile.window,
+        strengths: profile.strengths.slice(0, PLAY_REPORT_TOP_ITEMS),
+        weaknesses: profile.weaknesses.slice(0, PLAY_REPORT_TOP_ITEMS),
+        uncertain_tags: profile.uncertain_tags,
+        insufficient_tags: profile.insufficient_tags,
+        density: { ...profile.density, sustained_minus_burst: profile.sustained_minus_burst },
+        context: profile.context,
+        hands: profile.hands,
+        timing: profile.timing,
         habits: [report.timing, report.fatigue, ...report.options.slice(0, 1), ...report.density.slice(-1)],
         lanes: laneBias.map(({ key, name, ex_ratio, deviation, fast_share }) => ({ key, lane: name, ex_ratio, deviation, fast_share })),
         preferred: report.preferred,
@@ -221,17 +223,17 @@ const keepInsights = (items: readonly AiInsight[], keys: ReadonlySet<string>) =>
         .map((item) => ({ ...item, title: item.title.trim(), body: item.body.trim() }))
 
 /**
- * Keeps what the digest backs. A strength or weakness that names a tag outside the strong list of its side rejects the whole answer
- * (plan 4.6: an `insufficient` tag in the weakness list fails the check); other items with an unknown key or that do not fit are
- * dropped. Caveats are required when the digest has uncertain or insufficient tags, and an answer with nothing left is rejected.
+ * Keeps what the digest backs. A strength or weakness that claims a profile key (or a `tag.` key) outside the list of its side
+ * rejects the whole answer (plan 4.6: an `insufficient` tag in the weakness list fails the check); other items with an unknown key or
+ * that do not fit are dropped, and so is a practice step whose key is not one of the digest's weaknesses. Caveats are required when
+ * the digest has uncertain or insufficient tags, and an answer with nothing left is rejected.
  */
 export const refinePlayReportOutput = (output: AiReportOutput, digest: PlayReportDigest) => {
     const keys = collectDigestKeys(digest)
-    const strengthKeys = new Set(digest.strengths.map((tag) => tag.key))
-    const weaknessKeys = new Set(digest.weaknesses.map((tag) => tag.key))
-    const isTagKey = (key: string) => key.startsWith(TAG_KEY_PREFIX)
-    if (output.strengths.some((item) => isTagKey(item.key) && !strengthKeys.has(item.key))) return null
-    if (output.weaknesses.some((item) => isTagKey(item.key) && !weaknessKeys.has(item.key))) return null
+    const strengthKeys = new Set(digest.strengths.map((item) => item.key))
+    const weaknessKeys = new Set(digest.weaknesses.map((item) => item.key))
+    if (output.strengths.some((item) => isClaimKey(item.key) && !strengthKeys.has(item.key))) return null
+    if (output.weaknesses.some((item) => isClaimKey(item.key) && !weaknessKeys.has(item.key))) return null
     const caveats = output.caveats.map((caveat) => cutText(caveat, AI_TEXT_LIMIT.REASON_MAX_CHARS)).filter((caveat) => caveat !== '')
     const hasDoubtfulTags = digest.uncertain_tags.length > 0 || digest.insufficient_tags.length > 0
     if (hasDoubtfulTags && caveats.length === 0) return null
@@ -239,7 +241,7 @@ export const refinePlayReportOutput = (output: AiReportOutput, digest: PlayRepor
     const weaknesses = keepInsights(output.weaknesses, weaknessKeys)
     const habits = keepInsights(output.habits, keys)
     const practiceFocus = output.practice_focus
-        .filter((step) => keys.has(step.key) && fitsLine(step.action, AI_TEXT_LIMIT.REASON_MAX_CHARS))
+        .filter((step) => weaknessKeys.has(step.key) && fitsLine(step.action, AI_TEXT_LIMIT.REASON_MAX_CHARS))
         .slice(0, PLAY_REPORT_TOP_ITEMS)
         .map((step) => ({ key: step.key, action: step.action.trim() }))
     if (output.headline.trim() === '' || strengths.length + weaknesses.length + habits.length === 0) return null
@@ -257,14 +259,27 @@ export const createAiPlayReportService = (deps: AiPlayReportServiceDeps) => {
     const build = async (userId: string) => {
         const { plays, stale, failed } = await deps.plays.recentAnalyzedPlays({ userId, limit: REPORT_RECENT_PLAYS })
         const md5s = [...new Set(plays.flatMap((play) => (play.summary.pattern.md5 ? [play.summary.pattern.md5] : [])))]
-        const [tagLoad, scoreRows] = await Promise.all([deps.loadChartTags(md5s), deps.db.sumRecentFastSlow({ userId, limit: REPORT_RECENT_PLAYS })])
+        const [tagLoad, scoreRows, profile] = await Promise.all([
+            deps.loadChartTags(md5s),
+            deps.db.sumRecentFastSlow({ userId, limit: REPORT_RECENT_PLAYS }),
+            deps.profile.view({ userId }),
+        ])
         const report = computePlayReport(plays, tagLoad)
         const table = deps.loadTable(undefined)
         const records = table ? await deps.loadRecords({ tableId: table.id, userId }) : null
         const lamps = table
             ? { table: { id: table.id, name: table.name, symbol: table.symbol }, levels: readTableProgress(table, records ?? {}).levels }
             : null
-        return { report, stale, failed, lamps, scoreRows, digest: toPlayReportDigest(report, lamps) }
+        const profileDigest = toProfileDigest(profile)
+        return {
+            report,
+            stale,
+            failed,
+            lamps,
+            scoreRows,
+            profileKeys: profile.weaknesses.map((item) => item.key),
+            digest: toPlayReportDigest(report, lamps, profileDigest),
+        }
     }
 
     const noticeOf = (report: PlayReport) => (report.plays.measured < PLAY_REPORT_MIN_PLAYS ? { need: 'traced_plays' } : null)
@@ -285,6 +300,7 @@ export const createAiPlayReportService = (deps: AiPlayReportServiceDeps) => {
                 plays: { ...built.report.plays, stale: built.stale, failed: built.failed },
                 lamps: built.lamps,
                 score_rows: built.scoreRows,
+                profile_keys: built.profileKeys,
                 notice: noticeOf(built.report),
                 ai,
             } satisfies AiReportView

@@ -6,13 +6,16 @@ import { createAiGaugeAdviceService } from '@server/service/domain/ai/gauge-advi
 import { createAiPlayCompareService } from '@server/service/domain/ai/play-compare.service'
 import { createAiPlayReportService } from '@server/service/domain/ai/play-report.service'
 import { createAiReplayCoachService, type PlayScoreRow } from '@server/service/domain/ai/replay-coach.service'
+import { createWeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
 import { countTraceJudgements } from '@server/service/domain/trace/trace-check'
+import { createMemoryProfileDb } from '../support/ai-memory-db'
 import { TRACE_USER_ID, createMemoryTraceDb, createMemoryTraceService, readContractTrace, scoreRowFor } from '../support/trace-fixture'
 
 const NORMAL = readContractTrace('trace-normal.json')
 const ALICE: AuthUser = { id: TRACE_USER_ID, loginId: 'alice', name: 'Alice', role: 'user' }
 const ORIGIN = 'http://localhost:3000'
 const BASE = '/api/fe/me/ai'
+const PROFILE_NOW = 1_791_970_080_000
 
 const playRow: PlayScoreRow = {
     scoreId: NORMAL.score_id,
@@ -40,8 +43,10 @@ const createRoutes = async (options: { withTrace: boolean }) => {
     const { service } = createMemoryTraceService(memory)
     if (options.withTrace) await service.upload({ input: NORMAL, pathHash: NORMAL.chart.md5, userId: TRACE_USER_ID })
     const runs: unknown[] = []
+    const weaknessProfileService = createWeaknessProfileService({ db: createMemoryProfileDb().db, plays: service, now: () => PROFILE_NOW })
     const shared = {
         plays: service,
+        profile: weaknessProfileService,
         runner: {
             run: async (input: unknown) => {
                 runs.push(input)
@@ -69,6 +74,7 @@ const createRoutes = async (options: { withTrace: boolean }) => {
             db: { ...ownScore, findPublicBest: async () => null, listRivals: async () => [], findLoginId: async () => ALICE.loginId },
         }),
         aiGaugeAdviceService: createAiGaugeAdviceService({ ...shared, db: { listRecentGaugeRows: async () => [] }, levelLabelOf: () => null }),
+        weaknessProfileService,
     }
     return {
         routes: createAiPlayFeatureRoutes(

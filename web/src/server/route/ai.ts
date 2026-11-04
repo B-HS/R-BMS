@@ -43,6 +43,7 @@ import type { AiPlayReportService } from '@server/service/domain/ai/play-report.
 import type { AiPracticeFolderService, AiPracticeSourceFailure } from '@server/service/domain/ai/practice-folder.service'
 import type { AiRecommendService } from '@server/service/domain/ai/recommend.service'
 import type { AiWeeklySummaryService } from '@server/service/domain/ai/weekly-summary.service'
+import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
 import type { AiRecordQueryService } from '@server/service/domain/ai/record-query.service'
 import type { AiReplayCoachService } from '@server/service/domain/ai/replay-coach.service'
 import type { AiSettingsService } from '@server/service/domain/ai/settings.service'
@@ -65,7 +66,7 @@ export type AiRouteDeps = {
 
 type ProviderContext = { params: Promise<{ provider: string }> }
 
-type AiHandler<TContext, TDeps = AiRouteDeps> = (request: Request, context: TContext, user: AuthUser, deps: TDeps) => Promise<Response>
+export type AiHandler<TContext, TDeps = AiRouteDeps> = (request: Request, context: TContext, user: AuthUser, deps: TDeps) => Promise<Response>
 
 const NO_CONTENT_STATUS = 204
 const AI_PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store' }
@@ -131,7 +132,7 @@ type SessionDeps = { authService: Pick<AuthService, 'resolveSessionUser'> }
 /** Unexpected errors of AI routes are logged by class and driver code only: a database error there carries ciphertext, a wrapped data key or prompt output. */
 const withSafeAiErrors = withSummarizedErrors('AI route failed')
 
-const createAiRouteWrappers = <TDeps extends SessionDeps>(resolveDeps: () => TDeps, waitForRequest: () => Promise<void>) => {
+export const createAiRouteWrappers = <TDeps extends SessionDeps>(resolveDeps: () => TDeps, waitForRequest: () => Promise<void>) => {
     const withUser = <TContext>(handler: AiHandler<TContext, TDeps>) =>
         withErrorHandling(
             withSafeAiErrors(async (request: Request, context: TContext) => {
@@ -441,6 +442,7 @@ export type AiPlayFeatureRouteDeps = SessionDeps & {
     aiReplayCoachService: Pick<AiReplayCoachService, 'view' | 'interpret'>
     aiPlayCompareService: Pick<AiPlayCompareService, 'view' | 'interpret'>
     aiGaugeAdviceService: Pick<AiGaugeAdviceService, 'view' | 'interpret'>
+    weaknessProfileService: Pick<WeaknessProfileService, 'view'>
 }
 
 type ScoreContext = { params: Promise<{ scoreId: string }> }
@@ -458,9 +460,10 @@ const requirePlay = <T>(value: T | null) => {
 }
 
 /**
- * Features 1, 2, 3, 4's trace part (through the judge-habit routes) and 8: they read the session user's own play analyses only, a
- * rival's segment totals only when that rival shares them. Each GET returns the deterministic result with the latest stored AI answer
- * and never calls a provider; each POST is the user's "AI 해석 만들기" press and calls the shared runner once (no automatic retry).
+ * Features 1, 2, 3, 4's trace part (through the judge-habit routes) and 8, and the weakness profile (plan 2026-11-04 2.5.6, GET
+ * only): they read the session user's own play analyses only, a rival's segment totals only when that rival shares them. Each GET
+ * returns the deterministic result with the latest stored AI answer and never calls a provider; each POST is the user's "AI 해석
+ * 만들기" press and calls the shared runner once (no automatic retry).
  */
 export const createAiPlayFeatureRoutes = (
     resolveDeps: () => AiPlayFeatureRouteDeps = compose,
@@ -516,6 +519,10 @@ export const createAiPlayFeatureRoutes = (
 
         gaugeAdviceInterpret: withLimited<unknown>('ai-gauge-advice-run', async (_request, _context, user, deps) =>
             ok(unwrapAiResult(await deps.aiGaugeAdviceService.interpret(user.id, await readLocale()))),
+        ),
+
+        profileView: withLimited<unknown>('ai-profile', async (_request, _context, user, deps) =>
+            ok(await deps.weaknessProfileService.view({ userId: user.id })),
         ),
     }
 }
