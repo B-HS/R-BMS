@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again / admin-seed-count: count the rows the admin seed migration (0006) would change / assist-grade-backfill-count: count the stale chart_best.assist_grade / assist-grade-backfill: reset them from their score (as migration 0011 did, safe to repeat) / chart-purge-count / chart-purge-delete: every row of the charts removed at the request of the site owner (web/scripts/chart-purge.*.sql) / courses-seed-count / courses-seed: register the bundled GENOSIDE 2018 courses (count first, then apply) / tables-refresh-count: download the Stella and Satellite tables and only check them / tables-refresh-force: save them even when the change is large (run the count first) / dan-recompute-count / dan-recompute: give the dans that stored course runs already earn'
+        description: 'status: show what is applied / migrate: apply pending migrations / cleanup-count / cleanup-delete: the test accounts / chart-notes-count / chart-notes-repair: chart.notes that disagree with the accepted plays / chart-notes-restore: undo that repair / chart-notes-drop-backup: drop its backup so it can run again / admin-seed-count: count the rows the admin seed migration (0006) would change / assist-grade-backfill-count: count the stale chart_best.assist_grade / assist-grade-backfill: reset them from their score (as migration 0011 did, safe to repeat) / chart-purge-count / chart-purge-delete: every row of the charts removed at the request of the site owner (web/scripts/chart-purge.*.sql) / courses-seed-count / courses-seed: register the bundled GENOSIDE 2018 courses (count first, then apply) / tables-refresh-count: download the Stella and Satellite tables and only check them / tables-refresh-force: save them even when the change is large (run the count first) / dan-recompute-count / dan-recompute: give the dans that stored course runs already earn / analysis-recompute-count / analysis-recompute: compute again the stale play analyses and chart features (stops after 8 minutes, run it again to go on)'
         type: choice
-        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup, admin-seed-count, assist-grade-backfill-count, assist-grade-backfill, chart-purge-count, chart-purge-delete, courses-seed-count, courses-seed, tables-refresh-count, tables-refresh-force, dan-recompute-count, dan-recompute]
+        options: [status, migrate, cleanup-count, cleanup-delete, chart-notes-count, chart-notes-repair, chart-notes-restore, chart-notes-drop-backup, admin-seed-count, assist-grade-backfill-count, assist-grade-backfill, chart-purge-count, chart-purge-delete, courses-seed-count, courses-seed, tables-refresh-count, tables-refresh-force, dan-recompute-count, dan-recompute, analysis-recompute-count, analysis-recompute]
         default: status
 
 permissions:
@@ -134,3 +134,12 @@ jobs:
       - name: Count the dans to give again
         if: inputs.action == 'dan-recompute'
         run: bun scripts/dan-recompute.ts count
+      - name: Count the analyses to compute
+        if: startsWith(inputs.action, 'analysis-recompute')
+        run: bun scripts/analysis-recompute.ts count
+      - name: Compute the analyses
+        if: inputs.action == 'analysis-recompute'
+        run: bun scripts/analysis-recompute.ts apply
+      - name: Count the analyses to compute again
+        if: inputs.action == 'analysis-recompute'
+        run: bun scripts/analysis-recompute.ts count
