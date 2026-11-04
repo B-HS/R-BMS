@@ -3,15 +3,17 @@ import { CHART_PATTERN_MAX_TIME_US } from '@server/dto/chart-pattern'
 /**
  * Every threshold of the deterministic analysis (plan 2026-10-19-web-ai-features.md 4.2-4.6, v1 draft). Changing any value
  * changes stored results, so ANALYSIS_VERSION goes up with it and stored features of a lower version are computed again.
+ * 2: chart features add sliding-window NPS, tag pairs and the main BPM band (2026-11-04).
  */
-export const ANALYSIS_VERSION = 1
+export const ANALYSIS_VERSION = 2
 
 /**
  * The generation of one play's stored analysis (`play_analysis.summary`). It goes up with ANALYSIS_VERSION and also when the summary
  * of a play changes while the pattern classification does not, so chart features are not computed again for nothing. 2: segment EX,
- * FAST/SLOW and tags, timing by lane, gauges read only up to an empty gauge's failure (2026-10-20).
+ * FAST/SLOW and tags, timing by lane, gauges read only up to an empty gauge's failure (2026-10-20). 3: sliding-window NPS cells,
+ * timing moments by tag/lane/hand, BP runs, gauge-drop contexts, tag pairs, BPM bands, soflan phases, training sections (2026-11-04).
  */
-export const PLAY_ANALYSIS_VERSION = 2
+export const PLAY_ANALYSIS_VERSION = 3
 
 /** A local sixteenth note lasts `S16_US_PER_BPM / bpm` microseconds (`measure_us(bpm) / 16`, rbms-model). */
 export const S16_US_PER_BPM = 15_000_000
@@ -98,3 +100,77 @@ export const WILSON_Z_95 = 1.959964
 
 /** Ratios stored in results keep this many decimal places. */
 export const RATIO_DECIMALS = 4
+
+/** The centred window of a note's local NPS (plan 2026-11-04 2.2.1), the one its NPS bin is read from. */
+export const LOCAL_NPS_WINDOW_US = 2_000_000
+/** The short window that tells a burst: notes far denser over it than over SUSTAIN_WINDOW_US. */
+export const BURST_WINDOW_US = 1_000_000
+/** The long window that tells sustained density. */
+export const SUSTAIN_WINDOW_US = 8_000_000
+/** A note is in a burst when its BURST_WINDOW_US NPS is at least this many times its SUSTAIN_WINDOW_US NPS. */
+export const BURST_RATIO = 1.5
+/** Sustained density needs at least this local NPS. */
+export const SUSTAIN_MIN_NPS = 6
+/** Sustained density holds when the SUSTAIN_WINDOW_US NPS is at least this share of the local NPS. */
+export const SUSTAIN_RATIO = 0.85
+
+/** The density context of a note: a short burst, sustained density, or neither. */
+export const DENSITY_CONTEXT = { BURST: 'burst', SUSTAINED: 'sustained', MIXED: 'mixed' } as const
+export type DensityContext = (typeof DENSITY_CONTEXT)[keyof typeof DENSITY_CONTEXT]
+
+/** Local NPS bins are this many notes per second wide. */
+export const NPS_BIN_WIDTH = 1
+/** Notes of this local NPS or more share the top bin. */
+export const NPS_BIN_TOP = 40
+
+/** The windows, in milliseconds, of a play's peak NPS: the most judged notes any window starting at a note holds. */
+export const PEAK_NPS_WINDOWS_MS = [500, 1000, 2000, 4000, 8000] as const
+/** The window of the peak rows per second, rows being distinct note times. */
+export const PEAK_RPS_WINDOW_MS = 2000
+/** Peak NPS values keep this many decimal places. */
+export const PEAK_NPS_DECIMALS = 2
+/** NPS values reported with a context (a run's start, a gauge drop's mean) keep this many decimal places. */
+export const NPS_SUMMARY_DECIMALS = 1
+
+/** The hand of each BEAT_7K lane for hand figures: keys 1-3 left, key 4 shared, keys 5-7 right, the scratch its own. */
+export const HAND_KEYS = ['left', 'shared', 'right', 'scratch'] as const
+export type HandKey = (typeof HAND_KEYS)[number]
+export const SP7_LANE_HAND_KEYS: readonly HandKey[] = ['left', 'left', 'left', 'shared', 'right', 'right', 'right', 'scratch']
+
+/** The lower edges of the BP run length buckets: 1, 2, 3-4, 5-9 and 10 or more. */
+export const BP_RUN_BUCKETS = [1, 2, 3, 5, 10] as const
+/** A BP run is listed when it is at least this many notes long. */
+export const BP_RUN_MIN_REPORT = 3
+/** The most BP runs listed, longest first. */
+export const BP_RUN_TOP = 8
+/** A run's notes before it count towards the failure context only when the run is at least this many notes long. */
+export const BP_RUN_CONTEXT_MIN = 2
+/** Play has recovered after a run once this many PGREAT or GREAT come in a row. */
+export const RECOVERY_STREAK = 10
+/** The judged notes before a run's first note that tell what led into it. */
+export const PRECEDING_NOTES = 8
+/** A run, a gauge drop or a section names this many of its most frequent tags. */
+export const CONTEXT_TOP_TAGS = 3
+
+/** A gauge drop's notes are read from this long before the drop starts. */
+export const GAUGE_DROP_LOOKBACK_MS = 1000
+
+/** The lower edges of the BPM bands notes are grouped by. */
+export const BPM_BAND_EDGES = [120, 150, 180, 210] as const
+/** The BPM band names, one more than BPM_BAND_EDGES: below the first edge, between each pair, and from the last edge on. */
+export const BPM_BANDS = ['<120', '120-149', '150-179', '180-209', '210+'] as const
+export type BpmBand = (typeof BPM_BANDS)[number]
+
+/** The phases around a soflan event: the notes this long before it, and after it (past its stop). */
+export const SOFLAN_PHASE_MS = 2000
+/** The settled phase after a soflan event ends this long after the event's stop. */
+export const SOFLAN_SETTLED_MS = 6000
+/** A speed setting change this soon after a soflan event counts as adjusting to it. */
+export const SOFLAN_ADJUST_WINDOW_MS = 3000
+
+/** Sustained notes of a chart follow one another when they are at most this far apart. */
+export const SUSTAIN_GAP_MAX_US = 500_000
+/** The NPS percentiles a chart's features keep. */
+export const CHART_NPS_PERCENTILES = { MEDIAN: 50, HIGH: 90 } as const
+/** A chart's features keep this many of its most frequent tag pairs. */
+export const CHART_COMBO_TOP = 10

@@ -25,6 +25,101 @@ const contractPattern = (extra: readonly FixtureNote[] = []) =>
 const analyze = (trace: TraceUploadInput, pattern: ReturnType<typeof contractPattern> | null = null) =>
     analyzeTrace({ trace, chartSha256: trace.chart.sha256, pattern })
 
+const SECOND_US = 1_000_000
+const MICROS_PER_MILLI = 1000
+const SYNTHETIC_NOTES = 60_000
+/** Plan 2026-11-04 2.4 expects 15 to 30 KB a play; a 60,000-note run with a dozen gauge drops stays under 40 KB. */
+const SUMMARY_BYTES_BUDGET = 40 * 1024
+const SIXTEENTH_US = 100_000
+const MEASURE_SIXTEENTHS = 16
+const SCRATCH = 7
+const LCG = { MULTIPLIER: 1_103_515_245, INCREMENT: 12_345, MODULUS: 2_147_483_648, SEED: 20_261_104 } as const
+const GRADE_SHARES = [
+    [0.55, 1],
+    [0.85, 2],
+    [0.93, 3],
+    [0.97, 4],
+    [1, 5],
+] as const
+const ERROR_SPREAD_US = 40_000
+const GAUGE_INTERVAL_MS = 500
+const GAUGE_DROPS = 12
+const GAUGE_DROP_SAMPLES = 4
+const GAUGE_DROP_STEP = 10
+const GAUGE_FULL = 100
+const SCROLL_EVENT_EVERY_US = 30 * SECOND_US
+const SLOW_SCROLL = 0.8
+
+type SyntheticNote = { timeUs: number; lane: number; kind: number }
+
+/** One measure of each motif at 150 BPM: a trill, a stair, triple chords, a jack, scratch with keys, and keys under a held LN. */
+const MOTIFS: readonly ((startUs: number) => SyntheticNote[])[] = [
+    (startUs) => Array.from({ length: MEASURE_SIXTEENTHS }, (_, step) => ({ timeUs: startUs + step * SIXTEENTH_US, lane: 1 + (step % 2), kind: 0 })),
+    (startUs) => Array.from({ length: MEASURE_SIXTEENTHS }, (_, step) => ({ timeUs: startUs + step * SIXTEENTH_US, lane: step % 7, kind: 0 })),
+    (startUs) =>
+        Array.from({ length: MEASURE_SIXTEENTHS / 2 }, (_, step) =>
+            [0, 2, 4].map((lane) => ({ timeUs: startUs + 2 * step * SIXTEENTH_US, lane: lane + (step % 2), kind: 0 })),
+        ).flat(),
+    (startUs) => Array.from({ length: MEASURE_SIXTEENTHS / 2 }, (_, step) => ({ timeUs: startUs + 2 * step * SIXTEENTH_US, lane: 4, kind: 0 })),
+    (startUs) =>
+        Array.from({ length: MEASURE_SIXTEENTHS }, (_, step) => ({
+            timeUs: startUs + step * SIXTEENTH_US,
+            lane: step % 2 === 0 ? SCRATCH : 3,
+            kind: 0,
+        })),
+    (startUs) => [
+        { timeUs: startUs, lane: 0, kind: 1 },
+        ...Array.from({ length: MEASURE_SIXTEENTHS - 2 }, (_, step) => ({
+            timeUs: startUs + (step + 1) * SIXTEENTH_US,
+            lane: 2 + (step % 5),
+            kind: 0,
+        })),
+        { timeUs: startUs + (MEASURE_SIXTEENTHS - 1) * SIXTEENTH_US, lane: 0, kind: 2 },
+    ],
+]
+
+/** A long run of the normal contract trace's shape whose notes cycle through MOTIFS, judged by a fixed-seed generator. */
+const syntheticTrace = (count: number): TraceUploadInput => {
+    let state: number = LCG.SEED
+    const next = () => {
+        state = (state * LCG.MULTIPLIER + LCG.INCREMENT) % LCG.MODULUS
+        return state / LCG.MODULUS
+    }
+    const notes: SyntheticNote[] = []
+    for (let measure = 0; notes.length < count; measure += 1) {
+        notes.push(...MOTIFS[measure % MOTIFS.length]((measure + 1) * MEASURE_SIXTEENTHS * SIXTEENTH_US))
+    }
+    const ordered = notes.toSorted((a, b) => a.timeUs - b.timeUs || a.lane - b.lane)
+    const gradeOf = (roll: number) => GRADE_SHARES.find(([share]) => roll < share)?.[1] ?? 1
+    const states = ordered.map((note) => (note.kind === 2 ? 0 : gradeOf(next())))
+    const lastMs = Math.ceil((ordered.at(-1)?.timeUs ?? 0) / MICROS_PER_MILLI)
+    const samples = Math.floor(lastMs / GAUGE_INTERVAL_MS) + 1
+    const dropEvery = Math.floor(samples / (GAUGE_DROPS + 1))
+    const gaugeAt = (index: number) => {
+        const intoDrop = index % dropEvery
+        return index >= dropEvery && intoDrop < GAUGE_DROP_SAMPLES ? GAUGE_FULL - (intoDrop + 1) * GAUGE_DROP_STEP : GAUGE_FULL
+    }
+    const curve = Array.from({ length: samples }, (_, index) => gaugeAt(index))
+    return {
+        ...NORMAL,
+        notes: {
+            time_us: ordered.map((note) => note.timeUs),
+            lane: ordered.map((note) => note.lane),
+            kind: ordered.map((note) => note.kind),
+            state: states,
+            err_us: states.map((grade) => (grade === 0 || grade === 5 ? 0 : Math.round((next() - 0.5) * grade * ERROR_SPREAD_US))),
+        },
+        tempo: Array.from({ length: Math.floor((lastMs * MICROS_PER_MILLI) / SCROLL_EVENT_EVERY_US) + 1 }, (_, index) => ({
+            t_us: index * SCROLL_EVENT_EVERY_US,
+            bpm: 150,
+            stop_us: 0,
+            scroll: index % 2 === 0 ? 1 : SLOW_SCROLL,
+        })),
+        gauge: { ...NORMAL.gauge, interval_ms: GAUGE_INTERVAL_MS, series: NORMAL.gauge.series.map(() => curve) },
+        play_time_ms: lastMs,
+    }
+}
+
 describe('joinPattern — trace 와 곡별 패턴의 정합(기획 3.4)', () => {
     test('패턴이 없으면 absent, sha256 이 다르면 mismatch 다', () => {
         expect(joinPattern({ trace: NORMAL, chartSha256: NORMAL.chart.sha256, pattern: null })).toBe(PATTERN_JOIN.ABSENT)
@@ -189,5 +284,56 @@ describe('analyzeTrace — play_analysis.summary', () => {
         const { summary } = analyze({ ...NORMAL, mode: 'BEAT_14K' })
         expect(summary.metrics).toBeNull()
         expect(summary.gauge.curves).toHaveLength(NORMAL.gauge.series.length)
+    })
+})
+
+describe('analyzeTrace — 판 요약 v3(2.2, 2.4)', () => {
+    test('버전은 판 요약 3, 곡별 분류 2 다', () => {
+        expect([PLAY_ANALYSIS_VERSION, ANALYSIS_VERSION]).toEqual([3, 2])
+        expect(analyze(NORMAL).summary.metrics?.analysis_version).toBe(2)
+    })
+
+    test('훈련곡 구간은 넘기지 않으면 null 이고, 넘기면 그 구간으로 나눈다', () => {
+        expect(analyze(NORMAL).summary.metrics?.training_sections).toBeNull()
+        const playEndUs = NORMAL.play_time_ms * MICROS_PER_MILLI
+        const training = [{ index: 0, kind: 'stream', focus_key: 'tag:stream', from_us: 0, to_us: playEndUs }]
+        const { summary } = analyzeTrace({ trace: NORMAL, chartSha256: NORMAL.chart.sha256, pattern: null, training })
+        expect(summary.metrics?.training_sections).toMatchObject([
+            { index: 0, kind: 'stream', focus_key: 'tag:stream', notes: summary.metrics?.overall.notes },
+        ])
+    })
+
+    test('친 게이지의 꺾임을 먼저 구해 꺾임마다 차트 문맥을 남긴다', () => {
+        const { summary } = analyze(NORMAL)
+        expect(summary.metrics?.gauge_drop_contexts.map(({ from_ms, to_ms }) => ({ from_ms, to_ms }))).toEqual(
+            summary.gauge.drops.map(({ from_ms, to_ms }) => ({ from_ms, to_ms })),
+        )
+        const series = NORMAL.gauge.series.map((values) => values.map((value, index) => (index === 10 ? value - 40 : value)))
+        const dropped = analyze({ ...NORMAL, gauge: { ...NORMAL.gauge, series } }).summary
+        expect(dropped.gauge.drops.length).toBeGreaterThan(0)
+        expect(dropped.metrics?.gauge_drop_contexts).toHaveLength(dropped.gauge.drops.length)
+    })
+
+    test('소프란 사건 뒤 3초 안에 속도 설정을 바꾼 사건 수를 센다', () => {
+        const tempo = [
+            { t_us: 0, bpm: 150, stop_us: 0, scroll: 1 },
+            { t_us: 2 * SECOND_US, bpm: 300, stop_us: 0, scroll: 1 },
+            { t_us: 6 * SECOND_US, bpm: 150, stop_us: 0, scroll: 1 },
+        ]
+        const changes = [
+            { t_ms: 4999, field: 'green' as const, value: 300 },
+            { t_ms: 9000, field: 'green' as const, value: 600 },
+        ]
+        const { summary } = analyze({ ...NORMAL, tempo, speed: { ...NORMAL.speed, changes } })
+        expect(summary.speed.soflan_adjust).toEqual({ events: 2, adjusted: 1 })
+        expect(analyze(NORMAL).summary.speed.soflan_adjust).toEqual({ events: 0, adjusted: 0 })
+    })
+
+    test('6만 노트 합성 trace 의 요약은 SUMMARY_BYTES_BUDGET 안이고 같은 입력은 같은 바이트다', () => {
+        const trace = syntheticTrace(SYNTHETIC_NOTES)
+        const bytes = JSON.stringify(analyze(trace).summary)
+        expect(trace.notes.time_us.length).toBeGreaterThanOrEqual(SYNTHETIC_NOTES)
+        expect(Buffer.byteLength(bytes)).toBeLessThanOrEqual(SUMMARY_BYTES_BUDGET)
+        expect(JSON.stringify(analyze(syntheticTrace(SYNTHETIC_NOTES)).summary)).toBe(bytes)
     })
 })

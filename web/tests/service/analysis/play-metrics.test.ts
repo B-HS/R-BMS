@@ -29,7 +29,7 @@ const played = (timeUs: number, lane: number, state: number, errUs = 0, kind: Ju
 const TRILL = [0, 1, 0, 1].map((lane, index) => played(index * S16, lane, JUDGE_STATE.PGREAT, 1500))
 
 const metricsOf = (notes: JudgedPlayNote[], emptyPoorTimesUs: number[] = []) =>
-    computePlayMetrics({ notes, tempo: [], initBpm: BPM, emptyPoorTimesUs, lengthUs: LENGTH_US })
+    computePlayMetrics({ notes, tempo: [], initBpm: BPM, emptyPoorTimesUs, lengthUs: LENGTH_US, gaugeDropsMs: [] })
 
 describe('판 하나의 지표(4.3)', () => {
     test('판정 비율과 EX 비율은 판정을 받은 노트만 세고, 판정 안 하는 LN 끝과 도달 못한 노트는 뺀다', () => {
@@ -88,7 +88,9 @@ describe('판 하나의 지표(4.3)', () => {
         expect(metrics.segments[0].top_tags).toContainEqual({ tag: 'trill', notes: 4 })
         expect(metrics.segments[0].top_tags.length).toBeLessThanOrEqual(3)
         expect(metrics.segments[10]).toMatchObject({ from_ms: 10_000, chart_notes: 1, notes: 1, ex_score: 1, slow: 1 })
-        expect(metrics.timing_by_lane).toEqual({ '1': { notes: 3, mean_us: 767 }, '2': { notes: 2, mean_us: 1500 } })
+        expect(Object.keys(metrics.timing_by_lane)).toEqual(['1', '2'])
+        expect(metrics.timing_by_lane['1']).toMatchObject({ notes: 3, mean_us: 767 })
+        expect(metrics.timing_by_lane['2']).toMatchObject({ notes: 2, mean_us: 1500 })
     })
 
     test('밀도 칸은 1초 창의 판정 노트 수를 5개 단위로 묶는다', () => {
@@ -113,6 +115,257 @@ describe('판 하나의 지표(4.3)', () => {
     test('노트가 있는데 전부 틀려 EX 가 0 인 구간은 데이터 없음이 아니라 비율 0 이다', () => {
         const metrics = metricsOf([played(SECOND, 0, JUDGE_STATE.PGREAT), played(30 * SECOND, 0, JUDGE_STATE.POOR)])
         expect(metrics.fatigue).toEqual({ first_third_ex_ratio: 1, last_third_ex_ratio: 0, delta: -1 })
+    })
+})
+
+type MetricsOptions = Partial<Omit<Parameters<typeof computePlayMetrics>[0], 'notes'>>
+
+const metricsWith = (notes: JudgedPlayNote[], options: MetricsOptions = {}) =>
+    computePlayMetrics({ notes, tempo: [], initBpm: BPM, emptyPoorTimesUs: [], lengthUs: LENGTH_US, gaugeDropsMs: [], ...options })
+
+const TENTH = 100_000
+const EMPTY_CELL = { notes: 0, ex_score: 0, bp: 0, fast: 0, slow: 0 }
+
+describe('국소 NPS 칸과 최고 밀도(2.2.1)', () => {
+    test('2초 창 NPS 의 정수 칸에 판정 받은 노트를 더하고, sustained·burst 문맥은 칸 안에 따로 둔다', () => {
+        const stream = Array.from({ length: 201 }, (_, index) =>
+            played(index * TENTH, index % 7, index === 0 ? JUDGE_STATE.GREAT : JUDGE_STATE.PGREAT, -500),
+        )
+        const metrics = metricsWith(stream.slice(0, 200), { lengthUs: 20 * SECOND })
+        expect(Object.keys(metrics.by_nps)).toEqual(['10'])
+        expect(metrics.by_nps['10']).toEqual({
+            notes: 200,
+            ex_score: 399,
+            bp: 0,
+            fast: 0,
+            slow: 1,
+            burst: EMPTY_CELL,
+            sustained: { notes: 200, ex_score: 399, bp: 0, fast: 0, slow: 1 },
+        })
+        expect(metrics.peak_nps).toEqual({ '500': 10, '1000': 10, '2000': 10, '4000': 10, '8000': 10 })
+        expect(metrics.peak_rps_2s).toBe(10)
+    })
+
+    test('짧게 몰린 노트는 burst 이고, 도달 못한 노트는 밀도에는 들지만 칸에는 들지 않는다', () => {
+        const metrics = metricsWith([
+            played(20 * SECOND, 0, JUDGE_STATE.PGREAT),
+            played(20 * SECOND, 3, JUDGE_STATE.BAD, 25_000),
+            played(20 * SECOND + TENTH, 1, JUDGE_STATE.PGREAT),
+            played(20 * SECOND + 2 * TENTH, 2, JUDGE_STATE.PGREAT),
+            played(20 * SECOND + 3 * TENTH, 4, JUDGE_STATE.NONE),
+            played(30 * SECOND, 5, JUDGE_STATE.NONE),
+        ])
+        expect(metrics.by_nps).toEqual({
+            '2': { notes: 4, ex_score: 6, bp: 1, fast: 1, slow: 0, burst: { notes: 4, ex_score: 6, bp: 1, fast: 1, slow: 0 }, sustained: EMPTY_CELL },
+        })
+        expect(metrics.peak_nps['500']).toBe(10)
+        expect(metrics.peak_rps_2s).toBe(2)
+    })
+})
+
+const CHORDS = [
+    played(SECOND, 0, JUDGE_STATE.PGREAT, 1000),
+    played(SECOND, 1, JUDGE_STATE.BAD, -20_000),
+    played(5 * SECOND, 2, JUDGE_STATE.GREAT, -3000),
+    played(5 * SECOND, 3, JUDGE_STATE.GOOD, 5000),
+    played(10 * SECOND, 4, JUDGE_STATE.POOR),
+]
+
+describe('태그·레인·손별 오차 모멘트(2.2.2, 2.2.3)', () => {
+    test('태그별 모멘트는 PGREAT~BAD 의 개수·합·제곱합(ms²)·FAST/SLOW 개수와 합이고 POOR 는 뺀다', () => {
+        const metrics = metricsWith(CHORDS)
+        expect(Object.keys(metrics.timing_by_tag)).toEqual(Object.keys(metrics.by_tag))
+        expect(metrics.timing_by_tag.chord_2).toEqual({
+            n: 4,
+            sum_us: -17_000,
+            sumsq_ms2: 435,
+            fast_n: 2,
+            fast_sum_us: 6000,
+            slow_n: 2,
+            slow_sum_us: -23_000,
+        })
+    })
+
+    test('레인 오차에는 기존 평균 옆에 PGREAT~BAD 모멘트가 붙고, 레인별 BP 는 판정 받은 노트 기준이다', () => {
+        const metrics = metricsWith(CHORDS)
+        expect(metrics.timing_by_lane).toEqual({
+            '1': { notes: 1, mean_us: 1000, moments: { n: 1, sum_us: 1000, sumsq_ms2: 1, fast_n: 1, fast_sum_us: 1000, slow_n: 0, slow_sum_us: 0 } },
+            '3': {
+                notes: 1,
+                mean_us: -3000,
+                moments: { n: 1, sum_us: -3000, sumsq_ms2: 9, fast_n: 0, fast_sum_us: 0, slow_n: 1, slow_sum_us: -3000 },
+            },
+        })
+        expect(metrics.lane_bp).toEqual({
+            '1': { notes: 1, bp: 0 },
+            '2': { notes: 1, bp: 1 },
+            '3': { notes: 1, bp: 0 },
+            '4': { notes: 1, bp: 0 },
+            '5': { notes: 1, bp: 1 },
+        })
+    })
+
+    test('손은 1~3 왼손, 4 공용, 5~7 오른손, 스크래치 따로이고 노트가 있는 손만 남는다', () => {
+        const metrics = metricsWith(CHORDS)
+        expect(metrics.by_hand).toEqual({
+            left: { notes: 3, ex_score: 3, bp: 1, fast: 0, slow: 2 },
+            shared: { notes: 1, ex_score: 0, bp: 0, fast: 1, slow: 0 },
+            right: { notes: 1, ex_score: 0, bp: 1, fast: 0, slow: 0 },
+        })
+        expect(metrics.timing_by_hand.left).toEqual({
+            n: 3,
+            sum_us: -22_000,
+            sumsq_ms2: 410,
+            fast_n: 1,
+            fast_sum_us: 1000,
+            slow_n: 2,
+            slow_sum_us: -23_000,
+        })
+        expect(metrics.timing_by_hand.right).toEqual({ n: 0, sum_us: 0, sumsq_ms2: 0, fast_n: 0, fast_sum_us: 0, slow_n: 0, slow_sum_us: 0 })
+        expect(metricsWith([played(SECOND, 7, JUDGE_STATE.GREAT, 100)]).by_hand).toEqual({
+            scratch: { notes: 1, ex_score: 1, bp: 0, fast: 1, slow: 0 },
+        })
+    })
+})
+
+describe('게이지 급락 문맥(2.2.5)', () => {
+    const notes = [
+        played(1.5 * SECOND, 6, JUDGE_STATE.PGREAT),
+        played(2 * SECOND, 0, JUDGE_STATE.BAD, -30_000),
+        played(3 * SECOND, 1, JUDGE_STATE.POOR),
+        played(3 * SECOND, 2, JUDGE_STATE.PGREAT),
+        played(4 * SECOND, 4, JUDGE_STATE.GREAT, 2000),
+        played(4.5 * SECOND, 5, JUDGE_STATE.PGREAT),
+    ]
+    const metrics = metricsWith(notes, {
+        gaugeDropsMs: [
+            { from_ms: 3000, to_ms: 4000 },
+            { from_ms: 4500, to_ms: 5000 },
+        ],
+    })
+
+    test('꺾임마다 1초 앞부터 꺾임 끝까지의 판정 노트 수·BP·평균 국소 NPS(마지막 노트에서 자른 창)·상위 태그를 남긴다', () => {
+        expect(metrics.gauge_drop_contexts).toEqual([
+            {
+                from_ms: 3000,
+                to_ms: 4000,
+                chart_notes: 4,
+                bp: 2,
+                mean_nps: 1.7,
+                top_tags: [
+                    { tag: 'dense', notes: 3 },
+                    { tag: 'chord_2', notes: 2 },
+                ],
+            },
+            { from_ms: 4500, to_ms: 5000, chart_notes: 2, bp: 0, mean_nps: 2.3, top_tags: [{ tag: 'dense', notes: 2 }] },
+        ])
+    })
+
+    test('모든 꺾임 창의 태그 합과 노트 수는 겹치는 노트를 한 번만 센다', () => {
+        expect(metrics.gauge_drop_notes).toBe(5)
+        expect(metrics.gauge_drop_tag_totals).toEqual({ chord_2: 2, dense: 4 })
+        expect(metricsWith(notes)).toMatchObject({ gauge_drop_contexts: [], gauge_drop_tag_totals: {}, gauge_drop_notes: 0 })
+    })
+
+    test('판의 태그 조합과 단독 칸도 같은 노트에서 센다', () => {
+        expect(metrics.by_combo).toEqual({ 'chord_2+dense': { notes: 2, ex_score: 2, bp: 1, fast: 0, slow: 0 } })
+        expect(metrics.by_tag_solo).toEqual({ dense: { notes: 2, ex_score: 3, bp: 0, fast: 1, slow: 0 } })
+    })
+})
+
+describe('BPM 띠와 소프란 국면(2.2.7)', () => {
+    const tempo = [
+        { tUs: 10 * SECOND, bpm: 200, stopUs: 0, scroll: 1 },
+        { tUs: 14 * SECOND, bpm: 150, stopUs: 0, scroll: 1 },
+    ]
+    const notes = [
+        played(5 * SECOND, 0, JUDGE_STATE.PGREAT),
+        played(9 * SECOND, 1, JUDGE_STATE.PGREAT),
+        played(10.5 * SECOND, 2, JUDGE_STATE.PGREAT),
+        played(13 * SECOND, 3, JUDGE_STATE.GREAT, 2000),
+        played(14.5 * SECOND, 4, JUDGE_STATE.PGREAT),
+        played(17 * SECOND, 5, JUDGE_STATE.GOOD, -4000),
+        played(21 * SECOND, 6, JUDGE_STATE.PGREAT),
+    ]
+    const metrics = metricsWith(notes, { tempo })
+
+    test('노트 시각의 BPM 으로 다섯 띠에 나눈다', () => {
+        expect(metrics.by_bpm_band).toEqual({
+            '150-179': { notes: 5, ex_score: 8, bp: 0, fast: 0, slow: 1 },
+            '180-209': { notes: 2, ex_score: 3, bp: 0, fast: 1, slow: 0 },
+        })
+        expect(Object.keys(metricsWith([played(SECOND, 0, JUDGE_STATE.PGREAT)], { initBpm: 119.5 }).by_bpm_band)).toEqual(['<120'])
+        expect(Object.keys(metricsWith([played(SECOND, 0, JUDGE_STATE.PGREAT)], { initBpm: 210 }).by_bpm_band)).toEqual(['210+'])
+    })
+
+    test('사건 앞 2초·사건부터 정지+2초·그 뒤 6초까지를 나누고, 두 사건에 걸친 노트는 가까운 사건 하나에만 든다', () => {
+        expect(metrics.soflan_phase).toEqual({
+            events: 2,
+            before: { notes: 2, ex_score: 3, bp: 0, fast: 1, slow: 0 },
+            after: { notes: 2, ex_score: 4, bp: 0, fast: 0, slow: 0 },
+            settled: { notes: 1, ex_score: 0, bp: 0, fast: 0, slow: 1 },
+        })
+    })
+
+    test('정지는 after 국면을 정지 길이만큼 늘리고, 스크롤 속도가 바뀐 점도 사건이다', () => {
+        const stopped = metricsWith([played(32.5 * SECOND, 0, JUDGE_STATE.PGREAT), played(36 * SECOND, 1, JUDGE_STATE.GREAT, 10)], {
+            tempo: [{ tUs: 30 * SECOND, bpm: BPM, stopUs: SECOND, scroll: 1 }],
+        })
+        expect(stopped.soflan_phase).toMatchObject({ events: 1, after: { notes: 1 }, settled: { notes: 1 }, before: EMPTY_CELL })
+        const scrolled = metricsWith([], {
+            tempo: [
+                { tUs: 0, bpm: BPM, stopUs: 0, scroll: 1 },
+                { tUs: 20 * SECOND, bpm: BPM, stopUs: 0, scroll: 0.5 },
+                { tUs: 25 * SECOND, bpm: BPM, stopUs: 0, scroll: 1 },
+            ],
+        })
+        expect(scrolled.soflan_phase.events).toBe(2)
+    })
+})
+
+describe('훈련곡 구간(2.2.8)', () => {
+    test('구간이 없으면 null, 있으면 구간마다 시각 범위 안 판정 객체 수·셀·모멘트를 남긴다', () => {
+        const notes = [
+            played(0.5 * SECOND, 0, JUDGE_STATE.PGREAT, 1000),
+            played(1.5 * SECOND, 1, JUDGE_STATE.GREAT, -2000),
+            played(2 * SECOND, 2, JUDGE_STATE.BAD, 30_000),
+            played(3 * SECOND, 3, JUDGE_STATE.NONE),
+        ]
+        expect(metricsWith(notes).training_sections).toBeNull()
+        const sections = [
+            { index: 0, kind: 'trill', focus_key: 'tag:trill', from_us: 0, to_us: 2 * SECOND },
+            { index: 1, kind: 'jack', focus_key: 'tag:jack', from_us: 2 * SECOND, to_us: 4 * SECOND },
+        ]
+        expect(metricsWith(notes, { trainingSections: sections }).training_sections).toEqual([
+            {
+                index: 0,
+                kind: 'trill',
+                focus_key: 'tag:trill',
+                from_ms: 0,
+                to_ms: 2000,
+                chart_notes: 2,
+                notes: 2,
+                ex_score: 3,
+                bp: 0,
+                fast: 0,
+                slow: 1,
+                moments: { n: 2, sum_us: -1000, sumsq_ms2: 5, fast_n: 1, fast_sum_us: 1000, slow_n: 1, slow_sum_us: -2000 },
+            },
+            {
+                index: 1,
+                kind: 'jack',
+                focus_key: 'tag:jack',
+                from_ms: 2000,
+                to_ms: 4000,
+                chart_notes: 2,
+                notes: 1,
+                ex_score: 0,
+                bp: 1,
+                fast: 1,
+                slow: 0,
+                moments: { n: 1, sum_us: 30_000, sumsq_ms2: 900, fast_n: 1, fast_sum_us: 30_000, slow_n: 0, slow_sum_us: 0 },
+            },
+        ])
     })
 })
 

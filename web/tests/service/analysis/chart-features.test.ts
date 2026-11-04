@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
-import { computeChartFeatures, toPatternInput } from '@server/service/domain/analysis/chart-features'
+import { computeChartFeatures, readChartFeatureExtras, toPatternInput } from '@server/service/domain/analysis/chart-features'
 import { LAYOUT_DEPENDENT_TAGS } from '@server/service/domain/analysis/pattern-tags'
 import { makePatternDocument, type FixtureNote } from '../../support/chart-pattern-fixture'
 
@@ -68,5 +68,51 @@ describe('곡별 특징(chart_pattern.features)', () => {
     test('노트가 없는 차트도 0 으로 계산된다', () => {
         const features = computeChartFeatures(makePatternDocument([]))
         expect(features).toMatchObject({ judged_notes: 0, length_ms: 0, ln_ratio: 0, density: { peak: 0, average: 0, late_average: 0 } })
+        expect(features).toMatchObject({ nps: { p50_2s: 0, p90_2s: 0, max_2s: 0, max_8s: 0, sustained_s: 0 }, combos: {}, bpm_main_band: '150-179' })
+    })
+})
+
+describe('곡별 특징 v2(2.3)', () => {
+    const TENTH = 100_000
+    const stream: FixtureNote[] = Array.from({ length: 200 }, (_, index) => [index * TENTH, index % 7, 0])
+    const sparse: FixtureNote[] = Array.from({ length: 10 }, (_, index) => [(30 + 2 * index) * SECOND, 6, 0])
+
+    test('판정 노트마다의 2초 창 NPS 분포의 중앙값·90 백분위·최대, 8초 창 최대, sustained 노트가 이어진 시간을 담는다', () => {
+        const features = computeChartFeatures(makePatternDocument([...stream, ...sparse]))
+        expect(features.analysis_version).toBe(2)
+        const lastSustainedS = 17.2
+        expect(features.nps).toEqual({ p50_2s: 10, p90_2s: 10, max_2s: 10, max_8s: 10, sustained_s: lastSustainedS })
+        expect(computeChartFeatures(makePatternDocument(sparse)).nps).toEqual({ p50_2s: 0.5, p90_2s: 0.5, max_2s: 1, max_8s: 0.75, sustained_s: 0 })
+    })
+
+    test('태그 쌍은 판의 by_combo 와 같은 정의로 노트 비율 상위 10개를 비율 큰 순으로 담는다', () => {
+        const chord = (timeUs: number): FixtureNote[] => [
+            [timeUs, 0, 0],
+            [timeUs, 3, 0],
+        ]
+        const features = computeChartFeatures(makePatternDocument([...chord(0), ...chord(SECOND), ...chord(2 * SECOND), [10 * SECOND, 5, 0]]))
+        expect(features.combos).toEqual({ 'chord_2+dense': 0.8571 })
+        const busy = computeChartFeatures(makePatternDocument([...stream, ...sparse]))
+        expect(Object.keys(busy.combos).length).toBeLessThanOrEqual(10)
+        const shares = Object.values(busy.combos)
+        expect(shares).toEqual(shares.toSorted((a, b) => b - a))
+    })
+
+    test('주 BPM 띠는 판정 노트가 가장 많은 띠이고 같으면 낮은 띠다', () => {
+        const tempo = [{ t_us: 5 * SECOND, bpm: 220, stop_us: 0, scroll: 1 }]
+        const notes = (times: number[]) => times.map((time): FixtureNote => [time * SECOND, 0, 0])
+        expect(computeChartFeatures(makePatternDocument(notes([1, 6, 7]), { tempo })).bpm_main_band).toBe('210+')
+        expect(computeChartFeatures(makePatternDocument(notes([1, 2, 6, 7]), { tempo })).bpm_main_band).toBe('150-179')
+    })
+
+    test('readChartFeatureExtras 는 v1 모양 특징(nps 없음)에 null, v2 모양에 세 값을 돌려준다', () => {
+        const current = computeChartFeatures(makePatternDocument([...stream, ...sparse]))
+        expect(readChartFeatureExtras(current)).toEqual({ nps: current.nps, combos: current.combos, bpmMainBand: current.bpm_main_band })
+        const addedKeys = new Set(['nps', 'combos', 'bpm_main_band'])
+        const version1 = { ...Object.fromEntries(Object.entries(current).filter(([key]) => !addedKeys.has(key))), analysis_version: 1 }
+        expect(version1).not.toHaveProperty('nps')
+        expect(readChartFeatureExtras(version1)).toBeNull()
+        expect(readChartFeatureExtras({ ...current, nps: { p50_2s: 'x' } })).toBeNull()
+        expect(readChartFeatureExtras(null)).toBeNull()
     })
 })

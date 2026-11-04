@@ -1,11 +1,25 @@
+import { z } from 'zod'
 import { CHART_PATTERN_NOTE_KIND, CHART_PATTERN_SCRATCH_LANE, type ChartPatternDocument } from '@server/dto/chart-pattern'
-import { ANALYSIS_VERSION, RATIO_DECIMALS } from '@server/service/domain/analysis/analysis-constants'
+import {
+    ANALYSIS_VERSION,
+    BPM_BANDS,
+    CHART_COMBO_TOP,
+    CHART_NPS_PERCENTILES,
+    DENSITY_CONTEXT,
+    NPS_SUMMARY_DECIMALS,
+    PEAK_NPS_DECIMALS,
+    RATIO_DECIMALS,
+    SUSTAIN_GAP_MAX_US,
+    type BpmBand,
+} from '@server/service/domain/analysis/analysis-constants'
+import { localDensitiesOf } from '@server/service/domain/analysis/local-density'
 import {
     LAYOUT_DEPENDENT_TAGS,
     PATTERN_NOTE_KIND,
     PATTERN_TAGS,
     classifyPattern,
     countSoflanEvents,
+    createTempoLookup,
     densityWindowCounts,
     isJudgedNote,
     type PatternInput,
@@ -13,6 +27,8 @@ import {
     type PatternNoteKind,
     type PatternTag,
 } from '@server/service/domain/analysis/pattern-tags'
+import { bpmBandOf, roundToDecimals } from '@server/service/domain/analysis/play-cells'
+import { COMBO_KEYS, comboKeysOf, comboTagsOf } from '@server/service/domain/analysis/tag-combos'
 
 const JUDGED_END_LN = new Set(['cn', 'hcn'])
 
@@ -25,6 +41,8 @@ export const roundRatio = (value: number) => {
 const ratioOf = (part: number, whole: number) => (whole > 0 ? roundRatio(part / whole) : 0)
 
 const MICROS_PER_MILLI = 1000
+const MICROS_PER_SECOND = 1_000_000
+const PERCENT = 100
 /** The late part of a chart, for the late density average: its last third of seconds. */
 const LATE_PART_DIVISOR = 3
 /** `note_density` (rbms-chart) averages only the seconds holding at least a quarter of the mean count. */
@@ -82,10 +100,73 @@ const bpmRangeOf = (input: PatternInput) => {
     return { min: roundRatio(min), max: roundRatio(max), max_to_min: roundRatio(max / min) }
 }
 
+const chartNpsSchema = z.object({ p50_2s: z.number(), p90_2s: z.number(), max_2s: z.number(), max_8s: z.number(), sustained_s: z.number() })
+export type ChartNps = z.infer<typeof chartNpsSchema>
+
+/** The chart features ANALYSIS_VERSION 2 added, the only ones read through `readChartFeatureExtras`. */
+const chartFeatureExtrasSchema = z.object({ nps: chartNpsSchema, combos: z.record(z.string(), z.number()), bpm_main_band: z.enum(BPM_BANDS) })
+
+/** The nearest-rank percentile of ascending values, the smallest value at least `percentile`% of them do not exceed. */
+const nearestRank = (sorted: readonly number[], percentile: number) => sorted[Math.max(0, Math.ceil((percentile / PERCENT) * sorted.length) - 1)] ?? 0
+
+/**
+ * The sliding-window NPS of a chart's judged notes (plan 2026-11-04 2.3, `localDensitiesOf`): the nearest-rank median and 90th
+ * percentile and the most of the notes' LOCAL_NPS_WINDOW_US NPS, the most of their SUSTAIN_WINDOW_US NPS, and the seconds sustained
+ * notes follow one another at most SUSTAIN_GAP_MAX_US apart.
+ */
+const chartNpsOf = (notes: readonly PatternNote[]) => {
+    const densities = localDensitiesOf(notes)
+    const judged = notes.flatMap((note, index) => (isJudgedNote(note) ? [{ timeUs: note.timeUs, density: densities[index] }] : []))
+    const local = judged.map(({ density }) => density.nps2).toSorted((a, b) => a - b)
+    const sustainedTimes = judged
+        .filter(({ density }) => density.context === DENSITY_CONTEXT.SUSTAINED)
+        .map(({ timeUs }) => timeUs)
+        .toSorted((a, b) => a - b)
+    const sustainedUs = sustainedTimes.reduce((sum, timeUs, index) => {
+        const gap = index > 0 ? timeUs - sustainedTimes[index - 1] : 0
+        return gap <= SUSTAIN_GAP_MAX_US ? sum + gap : sum
+    }, 0)
+    const roundNps = (value: number) => roundToDecimals(value, PEAK_NPS_DECIMALS)
+    return {
+        p50_2s: roundNps(nearestRank(local, CHART_NPS_PERCENTILES.MEDIAN)),
+        p90_2s: roundNps(nearestRank(local, CHART_NPS_PERCENTILES.HIGH)),
+        max_2s: roundNps(local.at(-1) ?? 0),
+        max_8s: roundNps(judged.reduce((peak, { density }) => Math.max(peak, density.nps8), 0)),
+        sustained_s: roundToDecimals(sustainedUs / MICROS_PER_SECOND, NPS_SUMMARY_DECIMALS),
+    } satisfies ChartNps
+}
+
+/** The shares of judged notes carrying each tag pair (the pairs of `by_combo`), the CHART_COMBO_TOP largest, COMBO_KEYS order between equals. */
+const chartCombosOf = (tagLists: readonly (readonly PatternTag[])[], judgedIndexes: readonly number[]) => {
+    const counts = new Map<string, number>()
+    for (const index of judgedIndexes) {
+        for (const key of comboKeysOf(comboTagsOf(tagLists[index]))) counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return Object.fromEntries(
+        COMBO_KEYS.flatMap((key) => (counts.has(key) ? [[key, counts.get(key) ?? 0] as const] : []))
+            .toSorted(([, left], [, right]) => right - left)
+            .slice(0, CHART_COMBO_TOP)
+            .map(([key, notes]) => [key, ratioOf(notes, judgedIndexes.length)]),
+    )
+}
+
+/** The BPM band most judged notes are played in, the lowest band between equals; a chart with none is in the band of its opening tempo. */
+const bpmMainBandOf = (input: PatternInput, judgedIndexes: readonly number[]) => {
+    const lookup = createTempoLookup(input.tempo, input.initBpm)
+    if (judgedIndexes.length === 0) return bpmBandOf(lookup.bpmAt(0))
+    const counts = new Map<BpmBand, number>()
+    for (const index of judgedIndexes) {
+        const band = bpmBandOf(lookup.bpmAt(input.notes[index].timeUs))
+        counts.set(band, (counts.get(band) ?? 0) + 1)
+    }
+    return BPM_BANDS.reduce((main, band) => ((counts.get(band) ?? 0) > (counts.get(main) ?? 0) ? band : main), BPM_BANDS[0])
+}
+
 /**
  * The per-chart features stored with a pattern (plan 4.2, `chart_pattern.features`): how many judged notes carry each tag and their
- * share, density, soflan and LN shares. The lane-reading tags describe the chart's own layout with no option (`layout: "original"`);
- * a play under RANDOM-family options sees other lanes (plan 4.5).
+ * share, density, soflan and LN shares, and (ANALYSIS_VERSION 2) the sliding-window NPS, the largest tag-pair shares and the main BPM
+ * band. The lane-reading tags describe the chart's own layout with no option (`layout: "original"`); a play under RANDOM-family
+ * options sees other lanes (plan 4.5).
  */
 export const computeChartFeatures = (document: ChartPatternDocument) => {
     const input = toPatternInput(document)
@@ -118,7 +199,21 @@ export const computeChartFeatures = (document: ChartPatternDocument) => {
         ln_ratio: ratioOf(hits.filter((note) => note.kind === PATTERN_NOTE_KIND.LN_HEAD).length, hits.length),
         scratch_ratio: ratioOf(hits.filter((note) => note.lane === CHART_PATTERN_SCRATCH_LANE).length, hits.length),
         mines: input.notes.filter((note) => note.kind === PATTERN_NOTE_KIND.MINE).length,
+        nps: chartNpsOf(input.notes),
+        combos: chartCombosOf(tagLists, judgedIndexes),
+        bpm_main_band: bpmMainBandOf(input, judgedIndexes),
     }
 }
 
 export type ChartFeatures = ReturnType<typeof computeChartFeatures>
+
+/**
+ * The features ANALYSIS_VERSION 2 added, read from stored features of any version: null when they are not there or not of their
+ * shape, as with features of version 1 kept until the chart is computed again (plan 2026-11-04 2.3). Readers of `nps`, `combos` and
+ * `bpm_main_band` go through this rather than the stored document.
+ */
+export const readChartFeatureExtras = (features: unknown) => {
+    const parsed = chartFeatureExtrasSchema.safeParse(features)
+    if (!parsed.success) return null
+    return { nps: parsed.data.nps, combos: parsed.data.combos, bpmMainBand: parsed.data.bpm_main_band }
+}

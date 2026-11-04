@@ -244,6 +244,24 @@ export const countSoflanEvents = (tempo: readonly TempoPoint[], initBpm: number)
     return { jumps, stops }
 }
 
+/**
+ * The tempo points where a soflan starts, in tempo order (plan 2026-11-04 2.2.7): a tempo jump or a long stop by the soflan rules, or
+ * a change of scroll speed (a timeline that never changed it scrolls at NEUTRAL_SCROLL), each with its time and the stop it holds.
+ */
+export const soflanEventsOf = (tempo: readonly TempoPoint[], initBpm: number) => {
+    const events: { tUs: number; stopUs: number }[] = []
+    let previousBpm = initBpm
+    let previousScroll = NEUTRAL_SCROLL
+    for (const point of tempo) {
+        const isLongStop = point.stopUs >= SOFLAN_STOP_MIN_MS * MICROS_PER_MILLI
+        if (isTempoJump(previousBpm, point.bpm) || isLongStop || point.scroll !== previousScroll)
+            events.push({ tUs: point.tUs, stopUs: point.stopUs })
+        previousBpm = point.bpm
+        previousScroll = point.scroll
+    }
+    return events
+}
+
 /** The zones joined where they overlap, ordered by start, so a time is looked up with one search. */
 const mergeZones = (zones: readonly Zone[]) => {
     const merged: Zone[] = []

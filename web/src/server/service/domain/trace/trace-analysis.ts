@@ -1,7 +1,7 @@
 import { CHART_PATTERN_MODE, CHART_PATTERN_NOTE_KIND, type ChartPatternDocument } from '@server/dto/chart-pattern'
 import { TRACE_NOTE_KIND, TRACE_NOTE_STATE, TRACE_SPEED_FIELDS, type TraceSpeedInput, type TraceUploadInput } from '@server/dto/trace'
-import { ANALYSIS_VERSION, PLAY_ANALYSIS_VERSION } from '@server/service/domain/analysis/analysis-constants'
-import { PATTERN_NOTE_KIND, type PatternNoteKind } from '@server/service/domain/analysis/pattern-tags'
+import { ANALYSIS_VERSION, PLAY_ANALYSIS_VERSION, SOFLAN_ADJUST_WINDOW_MS } from '@server/service/domain/analysis/analysis-constants'
+import { PATTERN_NOTE_KIND, soflanEventsOf, type PatternNoteKind } from '@server/service/domain/analysis/pattern-tags'
 import {
     RUN_END,
     computePlayMetrics,
@@ -12,6 +12,7 @@ import {
     type GaugeCurve,
     type GaugeRun,
     type JudgedPlayNote,
+    type TrainingSectionSpan,
 } from '@server/service/domain/analysis/play-metrics'
 import type { RandomOption } from '@server/dto/common'
 
@@ -142,9 +143,16 @@ const greenOf = (speed: TraceSpeedInput) => readTraceGreenNumber({ green: speed.
  * The stored analysis of one run (`play_analysis.summary`, plan 4.3) from its trace alone and, when there is one, its chart's
  * pattern: the per-play figures on the lanes the player saw (7-key single play only), how the run ended, every gauge's end (read only
  * up to an empty gauge's failure) with the played gauge's drops and its value at each segment's end, the green number it started and
- * ended on with the number of setting changes, and the pattern join.
+ * ended on with the number of setting changes, and the pattern join. The played gauge's drops are found first, so the per-play
+ * figures read what the chart held around them; the speed figures also count the soflan events and those followed by a setting change
+ * within SOFLAN_ADJUST_WINDOW_MS. `training` gives the sections of a training chart's run (none by default).
  */
-export const analyzeTrace = (params: { trace: TraceUploadInput; chartSha256: string; pattern: ChartPatternDocument | null }) => {
+export const analyzeTrace = (params: {
+    trace: TraceUploadInput
+    chartSha256: string
+    pattern: ChartPatternDocument | null
+    training?: readonly TrainingSectionSpan[] | null
+}) => {
     const { trace } = params
     const patternJoin = joinPattern(params)
     const runEnd = runEndOf(trace)
@@ -152,17 +160,24 @@ export const analyzeTrace = (params: { trace: TraceUploadInput; chartSha256: str
     const curves = gaugeCurvesOf(trace)
     const playedCurve = curves.at(trace.gauge.selected)
     const played = playedCurve ? { ...playedCurve, values: liveGaugeValues(playedCurve, run) } : undefined
+    const drops = played ? findGaugeDrops(played) : []
     const tempo = tempoOf(trace)
+    const initBpm = tempo.at(0)?.bpm ?? 0
     const isAnalyzedMode = trace.mode === ANALYZED_MODE
     const metrics = isAnalyzedMode
         ? computePlayMetrics({
               notes: playNotesOf(trace),
               tempo,
-              initBpm: tempo.at(0)?.bpm ?? 0,
+              initBpm,
               emptyPoorTimesUs: trace.empty_poors.time_us,
               lengthUs: trace.play_time_ms * MICROS_PER_MILLI,
+              gaugeDropsMs: drops.map((drop) => ({ from_ms: drop.from_ms, to_ms: drop.to_ms })),
+              trainingSections: params.training ?? null,
           })
         : null
+    const soflanEventsMs = soflanEventsOf(tempo, initBpm).map((event) => event.tUs / MICROS_PER_MILLI)
+    const isAdjustedAfter = (eventMs: number) =>
+        trace.speed.changes.some((change) => change.t_ms >= eventMs && change.t_ms < eventMs + SOFLAN_ADJUST_WINDOW_MS)
     const patternMd5 = patternJoin === PATTERN_JOIN.MATCHED ? (params.pattern?.md5 ?? null) : null
     const summary = {
         analysis_version: PLAY_ANALYSIS_VERSION,
@@ -178,7 +193,7 @@ export const analyzeTrace = (params: { trace: TraceUploadInput; chartSha256: str
             selected: trace.gauge.selected,
             interval_ms: trace.gauge.interval_ms,
             failed_at_ms: trace.failed_at_ms,
-            drops: played ? findGaugeDrops(played) : [],
+            drops,
             curves: summarizeGaugeCurves(curves, run),
             segment_values: metrics
                 ? segmentGaugeValues(
@@ -193,6 +208,7 @@ export const analyzeTrace = (params: { trace: TraceUploadInput; chartSha256: str
             end: greenOf(trace.speed.end),
             changes: trace.speed.changes.length,
             changed_fields: TRACE_SPEED_FIELDS.filter((field) => trace.speed.changes.some((change) => change.field === field)),
+            soflan_adjust: { events: soflanEventsMs.length, adjusted: soflanEventsMs.filter(isAdjustedAfter).length },
         },
         pattern: { join: patternJoin, md5: patternMd5 },
     }

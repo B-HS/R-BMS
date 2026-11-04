@@ -1,26 +1,61 @@
 import {
     ANALYSIS_VERSION,
+    BPM_BANDS,
+    CONTEXT_TOP_TAGS,
     DENSITY_BUCKET_TOP,
     DENSITY_BUCKET_WIDTH,
+    DENSITY_CONTEXT,
+    GAUGE_DROP_LOOKBACK_MS,
     GAUGE_DROP_MIN_RATIO,
     GAUGE_DROP_WINDOW_MS,
     GREEN_DISPLAY_FACTOR,
+    HAND_KEYS,
+    NPS_SUMMARY_DECIMALS,
     SEGMENT_COUNT,
     SEGMENT_TOP_TAGS,
+    SOFLAN_PHASE_MS,
+    SOFLAN_SETTLED_MS,
+    SP7_LANE_HAND_KEYS,
     SP7_LANE_NAMES,
     TIMING_HISTOGRAM_RANGE_MS,
 } from '@server/service/domain/analysis/analysis-constants'
+import { computeBpRuns } from '@server/service/domain/analysis/bp-runs'
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
+import { localDensitiesOf, npsBinKeyOf, npsBinOf, peakNpsOf, peakRowsPerSecondOf } from '@server/service/domain/analysis/local-density'
 import {
     PATTERN_TAGS,
     classifyPattern,
+    createTempoLookup,
     densityWindowCounts,
     densityWindowOf,
     isJudgedNote,
+    soflanEventsOf,
     type PatternInput,
     type PatternNote,
     type PatternTag,
 } from '@server/service/domain/analysis/pattern-tags'
+import {
+    EX_OF_GRADE,
+    EX_PER_GREAT,
+    EX_PER_PGREAT,
+    GRADES,
+    addToCell,
+    addToMoments,
+    bpmBandOf,
+    cellRecordOf,
+    cellsByKey,
+    countTagsOf,
+    emptyCompactCell,
+    emptyTimingMoments,
+    finishMoments,
+    momentsRecordOf,
+    roundToDecimals,
+    tagCountRecordOf,
+    topTagsOf,
+    type CompactCell,
+    type Grade,
+} from '@server/service/domain/analysis/play-cells'
+import { computeTagCombos } from '@server/service/domain/analysis/tag-combos'
 
 /** `NoteMark.state` of the judge engine: 0 not judged (not reached, or an LN end that is never judged), 1 PGREAT to 5 missed POOR. */
 export const JUDGE_STATE = { NONE: 0, PGREAT: 1, GREAT: 2, GOOD: 3, BAD: 4, POOR: 5 } as const
@@ -28,14 +63,20 @@ export const JUDGE_STATE = { NONE: 0, PGREAT: 1, GREAT: 2, GOOD: 3, BAD: 4, POOR
 /** A note of a play as the judge engine left it, on the lane the player saw. `errUs` is positive when early. */
 export type JudgedPlayNote = PatternNote & { state: number; errUs: number }
 
+/** A section of a training chart (plan 2026-11-04 2.2.8): its place in the chart's spec, its kind, its focus and its chart time span. */
+export type TrainingSectionSpan = { index: number; kind: string; focus_key: string; from_us: number; to_us: number }
+
+/** A drop of the played gauge (`findGaugeDrops`), by its span only. */
+export type GaugeDropSpan = { from_ms: number; to_ms: number }
+
 export type PlayMetricsInput = Omit<PatternInput, 'notes'> & {
     notes: readonly JudgedPlayNote[]
     emptyPoorTimesUs: readonly number[]
     lengthUs: number
+    gaugeDropsMs: readonly GaugeDropSpan[]
+    trainingSections?: readonly TrainingSectionSpan[] | null
 }
 
-const GRADES = ['pgreat', 'great', 'good', 'bad', 'poor'] as const
-type Grade = (typeof GRADES)[number]
 type TimedGrade = Exclude<Grade, 'poor'>
 
 const GRADE_OF_STATE: Partial<Record<number, Grade>> = {
@@ -46,11 +87,8 @@ const GRADE_OF_STATE: Partial<Record<number, Grade>> = {
     [JUDGE_STATE.POOR]: 'poor',
 }
 
-const EX_PER_PGREAT = 2
-const EX_PER_GREAT = 1
 const MICROS_PER_MILLI = 1000
 const PLAY_THIRDS = 3
-const EX_OF_GRADE: Record<Grade, number> = { pgreat: EX_PER_PGREAT, great: EX_PER_GREAT, good: 0, bad: 0, poor: 0 }
 
 type TallyCounts = Record<Grade, number> & { fast: Record<TimedGrade, number>; slow: Record<TimedGrade, number> }
 
@@ -130,6 +168,86 @@ const tallyGroups = <Key extends string>(entries: Iterable<[Key, Grade, number]>
     return Object.fromEntries([...groups.entries()].map(([key, tally]) => [key, finishTally(tally)]))
 }
 
+const laneNameOf = (lane: number) => SP7_LANE_NAMES[lane] ?? String(lane)
+
+/** A judged object of the chart (reached or not) as the context figures read it; `grade` is null when it took no judgement. */
+type ContextNote = { timeUs: number; tags: readonly PatternTag[]; nps2: number; grade: Grade | null }
+
+const isBreakGrade = (grade: Grade | null) => grade === 'bad' || grade === 'poor'
+
+/**
+ * What the chart held around each drop of the played gauge (plan 2026-11-04 2.2.5): over the drop's span from GAUGE_DROP_LOOKBACK_MS
+ * before it starts, the judged objects, BAD plus POOR, their mean local NPS and their most frequent tags; and over every drop's span
+ * together, each note that took a judgement counted once, the tag counts and the number of notes.
+ */
+const gaugeDropFiguresOf = (drops: readonly GaugeDropSpan[], notes: readonly ContextNote[]) => {
+    const spans = drops.map((drop) => ({
+        drop,
+        fromUs: (drop.from_ms - GAUGE_DROP_LOOKBACK_MS) * MICROS_PER_MILLI,
+        toUs: drop.to_ms * MICROS_PER_MILLI,
+    }))
+    const isInside = (note: ContextNote, span: (typeof spans)[number]) => note.timeUs >= span.fromUs && note.timeUs <= span.toUs
+    const covered = notes.filter((note) => note.grade !== null && spans.some((span) => isInside(note, span)))
+    return {
+        gauge_drop_contexts: spans.map((span) => {
+            const inside = notes.filter((note) => isInside(note, span))
+            const npsSum = inside.reduce((sum, note) => sum + note.nps2, 0)
+            return {
+                from_ms: span.drop.from_ms,
+                to_ms: span.drop.to_ms,
+                chart_notes: inside.length,
+                bp: inside.filter((note) => isBreakGrade(note.grade)).length,
+                mean_nps: inside.length > 0 ? roundToDecimals(npsSum / inside.length, NPS_SUMMARY_DECIMALS) : 0,
+                top_tags: topTagsOf(countTagsOf(inside.map((note) => note.tags)), CONTEXT_TOP_TAGS),
+            }
+        }),
+        gauge_drop_tag_totals: tagCountRecordOf(countTagsOf(covered.map((note) => note.tags))),
+        gauge_drop_notes: covered.length,
+    }
+}
+
+const SOFLAN_PHASE = { BEFORE: 'before', AFTER: 'after', SETTLED: 'settled' } as const
+
+/** The first index of ascending values greater than `value`, or the length. */
+const firstIndexAfter = (sorted: readonly number[], value: number) => {
+    let low = 0
+    let high = sorted.length
+    while (low < high) {
+        const middle = (low + high) >> 1
+        if (sorted[middle] <= value) low = middle + 1
+        else high = middle
+    }
+    return low
+}
+
+/**
+ * The phase of the nearest soflan event a time is in (plan 2026-11-04 2.2.7), null when it is in none: `before` from SOFLAN_PHASE_MS
+ * before the event up to it, `after` from the event through its stop and SOFLAN_PHASE_MS more, `settled` from there up to
+ * SOFLAN_SETTLED_MS past the stop. A time in the phases of two events belongs to the nearer one, the earlier one between equals.
+ */
+const createSoflanPhaseLookup = (events: readonly { tUs: number; stopUs: number }[]) => {
+    const sorted = events.toSorted((a, b) => a.tUs - b.tUs)
+    const times = sorted.map((event) => event.tUs)
+    const phaseUs = SOFLAN_PHASE_MS * MICROS_PER_MILLI
+    const settledUs = SOFLAN_SETTLED_MS * MICROS_PER_MILLI
+    const reachUs = sorted.reduce((longest, event) => Math.max(longest, event.stopUs), 0) + settledUs
+    return (timeUs: number) => {
+        const next = firstIndexAfter(times, timeUs)
+        let earlier: (typeof sorted)[number] | null = null
+        for (let at = next - 1; at >= 0 && sorted[at].tUs >= timeUs - reachUs; at -= 1) {
+            if (timeUs < sorted[at].tUs + sorted[at].stopUs + settledUs) {
+                earlier = sorted[at]
+                break
+            }
+        }
+        const later = next < sorted.length && sorted[next].tUs - timeUs <= phaseUs ? sorted[next] : null
+        if (earlier && (!later || timeUs - earlier.tUs <= later.tUs - timeUs)) {
+            return timeUs < earlier.tUs + earlier.stopUs + phaseUs ? SOFLAN_PHASE.AFTER : SOFLAN_PHASE.SETTLED
+        }
+        return later ? SOFLAN_PHASE.BEFORE : null
+    }
+}
+
 /**
  * The per-play figures of plan 4.3 from the notes as the judge engine left them, on the lanes the player saw (`layout: "played"`):
  * judgements overall and by tag, lane and note density; for each of SEGMENT_COUNT equal parts of the play its time span, its judged
@@ -137,12 +255,18 @@ const tallyGroups = <Key extends string>(entries: Iterable<[Key, Grade, number]>
  * to BAD) and its SEGMENT_TOP_TAGS most frequent tags; FAST/SLOW by grade and tag, the timing of PGREAT and GREAT overall and by lane,
  * and the first and last third's EX ratios. An unjudged LN end is left out. A third
  * with no judged note (nothing in it, or the play ended before it) has a null EX ratio and so a null `fatigue.delta`.
+ *
+ * Since PLAY_ANALYSIS_VERSION 3 (plan 2026-11-04 2.2) also, in forms that add up across plays (`CompactCell`, `TimingMoments`): the
+ * notes by local NPS bin with their burst and sustained parts, the peak NPS and rows per second, timing moments by tag, lane and
+ * hand, judgements by hand, BP by lane, the BAD/POOR runs, what the chart held around each gauge drop (`gaugeDropsMs`), judgements
+ * by tag pair and by a lone combo tag, by BPM band and by soflan phase, and each training chart section's (`trainingSections`, null
+ * when the chart is not one). The local NPS is read over the notes (`localDensitiesOf`), not the play's length, so it is the chart's.
  */
 export const computePlayMetrics = (input: PlayMetricsInput) => {
     const tagLists = classifyPattern(input)
     const judged = input.notes.flatMap((note, index) => {
         const grade = GRADE_OF_STATE[note.state]
-        return isJudgedNote(note) && grade ? [{ note, grade, tags: tagLists[index] }] : []
+        return isJudgedNote(note) && grade ? [{ note, grade, tags: tagLists[index], index }] : []
     })
     const lastUs = input.notes.reduce((latest, note) => Math.max(latest, note.timeUs), 0)
     const lengthUs = input.lengthUs > 0 ? input.lengthUs : lastUs + 1
@@ -206,6 +330,64 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
         judged.flatMap(({ note, grade, tags }) => tags.map((tag): [PatternTag, Grade, number] => [tag, grade, note.errUs])),
     )
 
+    const densities = localDensitiesOf(input.notes)
+    const npsCells = new Map<number, { all: CompactCell; burst: CompactCell; sustained: CompactCell }>()
+    for (const { note, grade, index } of judged) {
+        const density = densities[index]
+        const bin = npsBinOf(density.nps2)
+        const cells = npsCells.get(bin) ?? { all: emptyCompactCell(), burst: emptyCompactCell(), sustained: emptyCompactCell() }
+        npsCells.set(bin, cells)
+        addToCell(cells.all, grade, note.errUs)
+        if (density.context === DENSITY_CONTEXT.BURST) addToCell(cells.burst, grade, note.errUs)
+        if (density.context === DENSITY_CONTEXT.SUSTAINED) addToCell(cells.sustained, grade, note.errUs)
+    }
+
+    const cellNoteOf = ({ note, grade }: (typeof judged)[number]) => ({ grade, errUs: note.errUs })
+    const tagGroups = cellsByKey(judged.flatMap((entry) => entry.tags.map((tag) => [tag, cellNoteOf(entry)] as const)))
+    const laneGroups = cellsByKey(judged.map((entry) => [laneNameOf(entry.note.lane), cellNoteOf(entry)] as const))
+    const handGroups = cellsByKey(
+        judged.flatMap((entry) => {
+            const hand = SP7_LANE_HAND_KEYS.at(entry.note.lane)
+            return hand ? [[hand, cellNoteOf(entry)] as const] : []
+        }),
+    )
+    const tempoLookup = createTempoLookup(input.tempo, input.initBpm)
+    const bpmGroups = cellsByKey(judged.map((entry) => [bpmBandOf(tempoLookup.bpmAt(entry.note.timeUs)), cellNoteOf(entry)] as const))
+
+    const soflanEvents = soflanEventsOf(input.tempo, input.initBpm)
+    const soflanPhaseOf = createSoflanPhaseLookup(soflanEvents)
+    const soflanPhases = { before: emptyCompactCell(), after: emptyCompactCell(), settled: emptyCompactCell() }
+    for (const { note, grade } of judged) {
+        const phase = soflanPhaseOf(note.timeUs)
+        if (phase) addToCell(soflanPhases[phase], grade, note.errUs)
+    }
+
+    const contextNotes = input.notes.flatMap((note, index) =>
+        isJudgedNote(note)
+            ? [{ timeUs: note.timeUs, tags: tagLists[index], nps2: densities[index].nps2, grade: GRADE_OF_STATE[note.state] ?? null }]
+            : [],
+    )
+    const trainingSectionOf = (section: TrainingSectionSpan) => {
+        const isInSection = (timeUs: number) => timeUs >= section.from_us && timeUs < section.to_us
+        const cell = emptyCompactCell()
+        const moments = emptyTimingMoments()
+        for (const { note, grade } of judged) {
+            if (!isInSection(note.timeUs)) continue
+            addToCell(cell, grade, note.errUs)
+            addToMoments(moments, grade, note.errUs)
+        }
+        return {
+            index: section.index,
+            kind: section.kind,
+            focus_key: section.focus_key,
+            from_ms: Math.floor(section.from_us / MICROS_PER_MILLI),
+            to_ms: Math.floor(section.to_us / MICROS_PER_MILLI),
+            chart_notes: contextNotes.filter((note) => isInSection(note.timeUs)).length,
+            ...cell,
+            moments: finishMoments(moments),
+        }
+    }
+
     return {
         analysis_version: ANALYSIS_VERSION,
         layout: 'played' as const,
@@ -233,7 +415,11 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
         timing_by_lane: Object.fromEntries(
             [...Map.groupBy(timed, ({ note }) => SP7_LANE_NAMES[note.lane] ?? String(note.lane)).entries()].map(([lane, notes]) => [
                 lane,
-                { notes: notes.length, mean_us: Math.round(notes.reduce((sum, { note }) => sum + note.errUs, 0) / notes.length) },
+                {
+                    notes: notes.length,
+                    mean_us: Math.round(notes.reduce((sum, { note }) => sum + note.errUs, 0) / notes.length),
+                    moments: finishMoments(laneGroups.get(lane)?.moments ?? emptyTimingMoments()),
+                },
             ]),
         ),
         fatigue: {
@@ -241,6 +427,23 @@ export const computePlayMetrics = (input: PlayMetricsInput) => {
             last_third_ex_ratio: last.ex_ratio,
             delta: first.ex_ratio === null || last.ex_ratio === null ? null : roundRatio(last.ex_ratio - first.ex_ratio),
         },
+        by_nps: Object.fromEntries(
+            [...npsCells.entries()]
+                .toSorted(([left], [right]) => left - right)
+                .map(([bin, { all, burst, sustained }]) => [npsBinKeyOf(bin), { ...all, burst, sustained }]),
+        ),
+        peak_nps: peakNpsOf(input.notes),
+        peak_rps_2s: peakRowsPerSecondOf(input.notes),
+        timing_by_tag: momentsRecordOf(PATTERN_TAGS, tagGroups),
+        by_hand: cellRecordOf(HAND_KEYS, handGroups),
+        timing_by_hand: momentsRecordOf(HAND_KEYS, handGroups),
+        lane_bp: Object.fromEntries([...laneGroups.entries()].map(([lane, { cell }]) => [lane, { notes: cell.notes, bp: cell.bp }])),
+        bp_runs: computeBpRuns(judged.map(({ note, grade, tags, index }) => ({ timeUs: note.timeUs, grade, tags, nps2: densities[index].nps2 }))),
+        ...gaugeDropFiguresOf(input.gaugeDropsMs, contextNotes),
+        ...computeTagCombos(judged.map((entry) => ({ ...cellNoteOf(entry), tags: entry.tags }))),
+        by_bpm_band: cellRecordOf(BPM_BANDS, bpmGroups),
+        soflan_phase: { events: soflanEvents.length, ...soflanPhases },
+        training_sections: input.trainingSections ? input.trainingSections.map(trainingSectionOf) : null,
     }
 }
 
