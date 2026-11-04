@@ -39,7 +39,14 @@ import {
 } from '@server/service/domain/analysis/analysis-constants'
 import { PATTERN_TAGS, SCRATCH_TAGS, type PatternTag } from '@server/service/domain/analysis/pattern-tags'
 import { roundToDecimals, type TimingMoments } from '@server/service/domain/analysis/play-cells'
-import { MONOTONE, benjaminiHochberg, clusterRobustTest, isotonicRegression, type ClusterValue } from '@server/service/domain/analysis/profile-stats'
+import {
+    MONOTONE,
+    benjaminiHochberg,
+    clusterRobustTest,
+    firstCrossingOf,
+    isotonicRegression,
+    type ClusterValue,
+} from '@server/service/domain/analysis/profile-stats'
 import { EVIDENCE, TAG_LEANING, type Evidence } from '@server/service/domain/analysis/sample'
 import { COMBO_TAGS } from '@server/service/domain/analysis/tag-combos'
 import {
@@ -571,7 +578,9 @@ type FinishedCell = ReturnType<typeof finishCells>[number]
 /**
  * The density limit curve (plan 2.5.4, plays under SCRATCH AUTO left out): the local NPS cells pooled into PROFILE_NPS_BIN_WIDTH
  * bins, the bins with MIN_BIN_NOTES notes over MIN_BIN_CHARTS charts used, EX ratio fitted never rising and BP rate never falling
- * (weighted isotonic regression), against the EX ratio of the bins at or below the player's median note NPS.
+ * (weighted isotonic regression), against the EX ratio of the bins at or below the player's median note NPS. The EX and BP limits are
+ * where the fitted curve crosses its level, read by straight lines between bin middles (the top bin at its lower edge); a curve that
+ * is past the level in its first bin gives that bin's middle, one that never reaches it gives none.
  */
 const densityLimitOf = (plays: readonly MeasuredPlay[]) => {
     const bins = new Map<number, { counts: Counts; clusters: Set<string> }>()
@@ -606,8 +615,11 @@ const densityLimitOf = (plays: readonly MeasuredPlay[]) => {
     const belowNotes = sumOf(below.map((index) => weights[index]))
     const baseline = belowNotes > 0 ? sumOf(below.map((index) => exRatios[index] * weights[index])) / belowNotes : null
     const comfortIndex = baseline === null ? -1 : exFit.findLastIndex((fit) => fit >= baseline - COMFORT_EX_DROP)
-    const limitIndex = baseline === null ? -1 : exFit.findIndex((fit) => fit <= baseline - LIMIT_EX_DROP)
-    const bpLimitIndex = bpFit.findIndex((fit) => fit >= LIMIT_BP_RATE)
+    const centers = curve.map((bin) => (bin.from_nps + (bin.to_nps ?? bin.from_nps)) * HALF)
+    const pointsOf = (fits: readonly number[]) => centers.map((x, index) => ({ x, y: fits[index] }))
+    const limitEx = baseline === null ? null : firstCrossingOf(pointsOf(exFit), baseline - LIMIT_EX_DROP, MONOTONE.DECREASING)
+    const limitBp = firstCrossingOf(pointsOf(bpFit), LIMIT_BP_RATE, MONOTONE.INCREASING)
+    const limitIndex = limitEx?.index ?? -1
     const lastIndex = used.length - 1
     const allClusters = new Set(plays.map((play) => play.cluster))
     const isStrong = limitIndex > 0 && allClusters.size >= MIN_CELL_CHARTS
@@ -617,8 +629,8 @@ const densityLimitOf = (plays: readonly MeasuredPlay[]) => {
         curve,
         baseline_ex: baseline === null ? null : roundRatio(baseline),
         comfort_nps: comfortIndex < 0 ? null : (curve[comfortIndex].to_nps ?? curve[comfortIndex].from_nps),
-        limit_nps_ex: limitIndex < 0 ? null : curve[limitIndex].from_nps,
-        limit_nps_bp: bpLimitIndex < 0 ? null : curve[bpLimitIndex].from_nps,
+        limit_nps_ex: limitEx === null ? null : roundToDecimals(limitEx.x, NPS_SUMMARY_DECIMALS),
+        limit_nps_bp: limitBp === null ? null : roundToDecimals(limitBp.x, NPS_SUMMARY_DECIMALS),
         max_seen_nps: lastIndex < 0 ? null : curve[lastIndex].from_nps,
         peak_seen_2s: peaks.length > 0 ? roundToDecimals(Math.max(...peaks), PEAK_NPS_DECIMALS) : null,
         ceiling_reached_ex: limitIndex >= 0,
@@ -744,7 +756,7 @@ const buildProfile = (plays: readonly ProfilePlay[], window: ProfileWindow) => {
         olderLimit.limit_nps_ex !== null &&
         recentLimit.evidence !== EVIDENCE.INSUFFICIENT &&
         olderLimit.evidence !== EVIDENCE.INSUFFICIENT
-            ? recentLimit.limit_nps_ex - olderLimit.limit_nps_ex
+            ? roundToDecimals(recentLimit.limit_nps_ex - olderLimit.limit_nps_ex, NPS_SUMMARY_DECIMALS)
             : null
     const sustained = cells.find(({ cell }) => cell.key === WEAKNESS_KEY.density('sustained'))?.cell
     const weaknesses = [

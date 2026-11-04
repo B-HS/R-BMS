@@ -48,9 +48,11 @@ export const PLAY_DIGEST_MAX_CHARS = { REPORT: 12_000, OTHER: 6_000 } as const
 
 /**
  * The weakness profile (plan 2026-11-04 2.5). PROFILE_VERSION goes up whenever what it computes changes, so cached profiles of a
- * lower version are computed again.
+ * lower version are computed again, and the version is part of the input fingerprint. 2: the EX and BP limits are read off the fitted
+ * curve between the middles of the two bins around the crossing, not at the lower edge of the bin after it (2026-11-04 training
+ * difficulty plan M8).
  */
-export const PROFILE_VERSION = 1
+export const PROFILE_VERSION = 2
 /** The only window profiles are cached for: the last PROFILE_WINDOW_DAYS days. */
 export const PROFILE_WINDOW_KEY = 'recent90'
 export const PROFILE_WINDOW_DAYS = 90

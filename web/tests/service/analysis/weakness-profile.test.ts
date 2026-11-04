@@ -243,8 +243,8 @@ describe('약점 프로필 — 밀도 한계와 SCRATCH AUTO(기획 2.5.2, 2.5.4
         expect(profile.density).toMatchObject({
             baseline_ex: 0.8767,
             comfort_nps: 14,
-            limit_nps_ex: 16,
-            limit_nps_bp: 16,
+            limit_nps_ex: 15.9,
+            limit_nps_bp: 15.7,
             max_seen_nps: 20,
             peak_seen_2s: 21.5,
             ceiling_reached_ex: true,
@@ -258,7 +258,7 @@ describe('약점 프로필 — 밀도 한계와 SCRATCH AUTO(기획 2.5.2, 2.5.4
             [20, 22, 250, 5, 0.6, 0.16],
         ])
         expect(profile.weaknesses.find((item) => item.key === 'density:limit')).toMatchObject({
-            value: 16,
+            value: 15.9,
             unit: 'nps',
             evidence: 'strong',
             severity: 0.2767,
@@ -277,9 +277,89 @@ describe('약점 프로필 — 밀도 한계와 SCRATCH AUTO(기획 2.5.2, 2.5.4
                 },
             }),
         )
-        expect(computeWeaknessProfile(flat, WINDOW).density).toMatchObject({ limit_nps_ex: null, ceiling_reached_ex: false, evidence: 'uncertain' })
+        expect(computeWeaknessProfile(flat, WINDOW).density).toMatchObject({
+            limit_nps_ex: null,
+            limit_nps_bp: null,
+            ceiling_reached_ex: false,
+            evidence: 'uncertain',
+        })
         const twoCharts = [0, 1].map((index) => play(chartOf(index), densityMetrics()))
         expect(computeWeaknessProfile(twoCharts, WINDOW).density).toMatchObject({ curve: [], evidence: 'insufficient', limit_nps_ex: null })
+    })
+
+    const curvePlays = (bins: readonly { key: string; exScore: number; bp?: number }[], options: { playedAt?: number } = {}) =>
+        [0, 1, 2, 3, 4].map((index) =>
+            play(
+                chartOf(index),
+                {
+                    by_nps: Object.fromEntries(
+                        bins.map(({ key, exScore, bp }) => [key, { ...cell(NOTES_PER_BIN, exScore, bp ?? 0), burst: NO_CELL, sustained: NO_CELL }]),
+                    ),
+                },
+                options,
+            ),
+        )
+    const limitsOf = (bins: Parameters<typeof curvePlays>[0]) => {
+        const { limit_nps_ex, limit_nps_bp } = computeWeaknessProfile(curvePlays(bins), WINDOW).density
+        return { limit_nps_ex, limit_nps_bp }
+    }
+
+    test('한계는 맞춤 곡선이 기준선을 지나는 점을 이웃 구간 중심 사이 직선으로 읽고, 쓰지 않은 구간이 끼어도 쓴 두 중심을 잇는다', () => {
+        expect(
+            limitsOf([
+                { key: '4', exScore: 90 },
+                { key: '8', exScore: 90 },
+                { key: '12', exScore: 70 },
+            ]),
+        ).toEqual({ limit_nps_ex: 11, limit_nps_bp: null })
+        expect(
+            limitsOf([
+                { key: '4', exScore: 90 },
+                { key: '8', exScore: 90 },
+                { key: '16', exScore: 70 },
+            ]),
+        ).toEqual({ limit_nps_ex: 13, limit_nps_bp: null })
+        expect(
+            limitsOf([
+                { key: '4', exScore: 90, bp: 0 },
+                { key: '8', exScore: 90, bp: 2 },
+                { key: '12', exScore: 90, bp: 6 },
+            ]),
+        ).toEqual({ limit_nps_ex: null, limit_nps_bp: 11 })
+    })
+
+    test('마지막 구간에서 지나면 앞 구간 중심과 마지막 구간 중심 사이이고, 가장 높은 구간은 아래 끝을 중심으로 본다', () => {
+        expect(
+            limitsOf([
+                { key: '32', exScore: 90 },
+                { key: '36', exScore: 90 },
+                { key: '40+', exScore: 70 },
+            ]).limit_nps_ex,
+        ).toBe(38.5)
+    })
+
+    test('첫 구간에서 이미 BP 한계를 넘었으면 앞 이웃이 없어 첫 구간 중심이고, 떨어진 적 없는 쪽은 null 이다', () => {
+        expect(
+            limitsOf([
+                { key: '4', exScore: 90, bp: 5 },
+                { key: '8', exScore: 90, bp: 5 },
+                { key: '12', exScore: 90, bp: 5 },
+            ]),
+        ).toEqual({ limit_nps_ex: null, limit_nps_bp: 5 })
+    })
+
+    test('밀도 한계 추세는 최근과 이전 한계의 차이를 소수 한 자리로 맞춘다', () => {
+        const recent = curvePlays(DENSITY_BINS)
+        const older = curvePlays(
+            [
+                { key: '4', exScore: 90 },
+                { key: '8', exScore: 90 },
+                { key: '12', exScore: 70 },
+            ],
+            { playedAt: OLDER },
+        )
+        const profile = computeWeaknessProfile([...recent, ...older], WINDOW)
+        expect(profile.weaknesses.find((item) => item.key === 'density:limit')?.trend_delta).toBe(4.9)
     })
 
     test('SCRATCH AUTO 판만 있으면 밀도는 insufficient 이고, 섞이면 밀도·스크래치 셀은 auto 판을 빼고 세며 건반 셀은 넣는다', () => {
@@ -307,7 +387,7 @@ describe('약점 프로필 — 밀도 한계와 SCRATCH AUTO(기획 2.5.2, 2.5.4
         expect(cellOf(mixed, 'lane:S')).toMatchObject({ plays: 5, auto_plays: 3 })
         expect(cellOf(mixed, 'lane:1')).toMatchObject({ plays: 8, auto_plays: 0 })
         expect(mixed.density.curve.every((bin) => bin.notes === 250 && bin.charts === 5)).toBe(true)
-        expect(mixed.density.limit_nps_ex).toBe(16)
+        expect(mixed.density.limit_nps_ex).toBe(15.9)
         expect(mixed.window).toMatchObject({ plays: 8, auto_plays: 3 })
     })
 })

@@ -147,3 +147,22 @@ export const isotonicRegression = (values: readonly number[], weights: readonly 
     })
     return blocks.flatMap((block) => Array.from({ length: block.size }, () => sign * block.mean))
 }
+
+/** One point of a fitted curve: its position along the NPS axis and the fitted value there. */
+export type CurvePoint = { x: number; y: number }
+
+/**
+ * The first place a fitted curve reaches `level`: a `decreasing` curve once it is at or below it, an `increasing` one once it is at
+ * or above it. `index` is the first point that has reached it; `x` is where the straight line from the point before it crosses the
+ * level, or that first point's own `x` when no point comes before it (the curve is past the level from its start). `null` when the
+ * curve never reaches the level.
+ */
+export const firstCrossingOf = (points: readonly CurvePoint[], level: number, direction: Monotone) => {
+    const hasReached = (y: number) => (direction === MONOTONE.DECREASING ? y <= level : y >= level)
+    const index = points.findIndex((point) => hasReached(point.y))
+    if (index < 0) return null
+    const reached = points[index]
+    const before = points[index - 1]
+    if (!before) return { index, x: reached.x }
+    return { index, x: before.x + ((before.y - level) / (before.y - reached.y)) * (reached.x - before.x) }
+}

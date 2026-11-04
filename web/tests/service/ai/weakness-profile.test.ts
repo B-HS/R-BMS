@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
 import { weaknessProfileViewSchema } from '@server/dto/ai-play'
 import { PROFILE_MAX_PLAYS, PROFILE_VERSION, PROFILE_WINDOW_KEY } from '@server/service/domain/ai/play-feature.constants'
@@ -7,6 +8,7 @@ import {
     profileWindowStartOf,
     toProfileDigest,
 } from '@server/service/domain/ai/weakness-profile.service'
+import { CURRENT_ANALYSIS_VERSIONS } from '@server/service/domain/trace/trace-analysis'
 import { countTraceJudgements } from '@server/service/domain/trace/trace-check'
 import type { TraceService } from '@server/service/domain/trace/trace.service'
 import { createMemoryProfileDb } from '../../support/ai-memory-db'
@@ -15,6 +17,7 @@ import { TRACE_USER_ID, createMemoryTraceDb, createMemoryTraceService, readContr
 
 const NORMAL = readContractTrace('trace-normal.json')
 const DAY_MS = 86_400_000
+const ISO_DATE_LENGTH = 10
 const NOW = Date.UTC(2026, 10, 4, 15)
 const WINDOW_START = Date.UTC(2026, 7, 6)
 const INPUTS = { analyses: 12, latestComputedAt: NOW - 1000, latestPlayedAt: NOW - 2000, trainingCharts: 0 }
@@ -105,6 +108,25 @@ describe('약점 프로필 서비스 — 지문 캐시(기획 2.5.1)', () => {
         expect(profileFingerprintOf({ ...INPUTS, latestComputedAt: INPUTS.latestComputedAt + 1 }, WINDOW_START)).not.toBe(base)
         expect(base).toMatch(/^[0-9a-f]{64}$/)
         expect(profileWindowStartOf(NOW)).toBe(WINDOW_START)
+    })
+
+    test('지문은 프로필 버전을 입력에 넣어, 버전이 오르면 같은 입력도 지문이 달라져 저장된 프로필이 무효가 된다', () => {
+        const fingerprintAt = (version: number) =>
+            createHash('sha256')
+                .update(
+                    JSON.stringify([
+                        version,
+                        CURRENT_ANALYSIS_VERSIONS,
+                        new Date(WINDOW_START).toISOString().slice(0, ISO_DATE_LENGTH),
+                        INPUTS.analyses,
+                        INPUTS.latestComputedAt,
+                        INPUTS.latestPlayedAt,
+                        INPUTS.trainingCharts,
+                    ]),
+                )
+                .digest('hex')
+        expect(profileFingerprintOf(INPUTS, WINDOW_START)).toBe(fingerprintAt(PROFILE_VERSION))
+        expect(profileFingerprintOf(INPUTS, WINDOW_START)).not.toBe(fingerprintAt(PROFILE_VERSION - 1))
     })
 })
 

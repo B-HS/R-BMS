@@ -3,6 +3,7 @@ import {
     MONOTONE,
     benjaminiHochberg,
     clusterRobustTest,
+    firstCrossingOf,
     isotonicRegression,
     logGamma,
     regularizedIncompleteBeta,
@@ -90,5 +91,42 @@ describe('가중 등위회귀(PAVA)', () => {
         ).toEqual([0.925, 0.925, 0.825, 0.825, 0.6])
         expect(isotonicRegression([5, 4, 3], [2, 2, 2], MONOTONE.DECREASING)).toEqual([5, 4, 3])
         expect(isotonicRegression([], [], MONOTONE.INCREASING)).toEqual([])
+    })
+})
+
+describe('맞춤 곡선이 기준선을 처음 지나는 점', () => {
+    const FALLING = [
+        { x: 5, y: 0.9 },
+        { x: 9, y: 0.8 },
+        { x: 13, y: 0.6 },
+    ]
+
+    test('기준선이 이웃한 두 점 사이를 지나면 두 점을 잇는 직선 위의 위치를 준다', () => {
+        expect(firstCrossingOf(FALLING, 0.7, MONOTONE.DECREASING)?.index).toBe(2)
+        expect(firstCrossingOf(FALLING, 0.7, MONOTONE.DECREASING)?.x).toBeCloseTo(11, CLOSE_DIGITS)
+        expect(firstCrossingOf(FALLING, 0.85, MONOTONE.DECREASING)?.x).toBeCloseTo(7, CLOSE_DIGITS)
+        expect(firstCrossingOf(FALLING, 0.65, MONOTONE.DECREASING)?.x).toBeCloseTo(12, CLOSE_DIGITS)
+    })
+
+    test('점이 기준선에 정확히 닿으면 그 점의 위치이고, 한 점도 닿지 않으면 null 이다', () => {
+        expect(firstCrossingOf(FALLING, 0.8, MONOTONE.DECREASING)).toEqual({ index: 1, x: 9 })
+        expect(firstCrossingOf(FALLING, 0.5, MONOTONE.DECREASING)).toBeNull()
+        expect(firstCrossingOf([], 0.5, MONOTONE.DECREASING)).toBeNull()
+    })
+
+    test('첫 점이 이미 기준선을 넘었으면 앞 이웃이 없어 첫 점의 위치이다', () => {
+        expect(firstCrossingOf(FALLING, 0.95, MONOTONE.DECREASING)).toEqual({ index: 0, x: 5 })
+    })
+
+    test('증가 곡선은 기준선 이상이 된 첫 점과 그 앞 점 사이를 잇는다', () => {
+        const rising = [
+            { x: 5, y: 0 },
+            { x: 9, y: 0.04 },
+            { x: 13, y: 0.1 },
+        ]
+        expect(firstCrossingOf(rising, 0.08, MONOTONE.INCREASING)?.x).toBeCloseTo(9 + (0.04 / 0.06) * 4, CLOSE_DIGITS)
+        expect(firstCrossingOf(rising, 0.04, MONOTONE.INCREASING)).toEqual({ index: 1, x: 9 })
+        expect(firstCrossingOf(rising, 0, MONOTONE.INCREASING)).toEqual({ index: 0, x: 5 })
+        expect(firstCrossingOf(rising, 0.11, MONOTONE.INCREASING)).toBeNull()
     })
 })
