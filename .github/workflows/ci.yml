@@ -15,6 +15,8 @@ on:
       - "**"
       - "!web/**"
       - "web/data/tables/**"
+  # 푸시 이벤트가 GitHub 장애로 빠졌을 때 다시 돌리는 수동 실행(2026-11-04 장애).
+  workflow_dispatch:
 
 permissions:
   contents: read
