@@ -90,6 +90,10 @@
             "title": "Play coach",
             "metaDescription": "Review one of your plays segment by segment and compare it with another play."
         },
+        "aiTraining": {
+            "title": "Training chart",
+            "metaDescription": "See the sections and play results of one training chart made from your AI weakness analysis."
+        },
         "chart": {
             "title": "Chart",
             "fallbackTitle": "Chart {hash}",
@@ -427,6 +431,184 @@
             "trainingLink": "Training chart",
             "trainingLinkLabel": "Make a training chart for {name}",
             "timingRow": "{deviation} (±{sd} ms, FAST {fast}%)"
+        },
+        "training": {
+            "title": "Make a training chart",
+            "loading": "Loading training charts",
+            "loadError": "Could not load training charts",
+            "usage": "{used} of {limit} training charts kept",
+            "fullTitle": "Your training chart storage is full",
+            "fullDescription": "Up to {limit, number} training charts are kept and none is deleted automatically. To make a new one, delete one you no longer use from the list below first.",
+            "created": "Training chart made: {title}",
+            "removed": "Training chart deleted",
+            "optionNotice": "This chart drills a lane or a hand. Turn off RANDOM-family options when you play it; an option moves the notes to other lanes, and the chart no longer trains the hand or lane it was made for.",
+            "limitRaced": "The training chart limit was reached somewhere else first. Delete one and make it again. The AI call may already have been used.",
+            "guide": {
+                "intro": "A chart you make goes into your \"Training\" folder automatically, and the R-BMS client can download and play it right away. New charts arrive when the client fetches your folders (at start, at login, and on an F6 refresh).",
+                "steps": "How to get it: on the client's song select, open the \"Training\" folder in MY FOLDERS, find the dimmed row, and press GET CHART. You can also copy the download address and fetch it yourself."
+            },
+            "list": {
+                "title": "My training charts",
+                "label": "My training charts",
+                "emptyTitle": "No training charts yet",
+                "emptyDescription": "Pick a weakness and an intensity above to make your first one.",
+                "noFocus": "No weakness trained",
+                "made": "Made {date}",
+                "spec": "BPM {bpm} · {seconds, number} s · {notes} notes",
+                "plays": "{count, plural, one {# play} other {# plays}}",
+                "noBest": "No best EX",
+                "best": "Best EX {ratio}",
+                "copyUrl": "Copy the download address of {title}",
+                "copied": "Copied the download address",
+                "remove": "Delete {title}"
+            },
+            "form": {
+                "label": "Make a training chart",
+                "description": "Pick a weakness and the AI plans the sections; the server then lays the plan out as a one-minute 7KEYS chart. The AI is called once with your key, only when you press the button.",
+                "loading": "Loading the weakness profile",
+                "loadError": "Could not load the weakness profile",
+                "linkedKeyMissing": "The weakness in the link is not in your profile now, or no chart can be made for it, so another item was picked.",
+                "focusLabel": "Weakness to train",
+                "autoFocus": "Automatic (the server picks)",
+                "intensityLabel": "Intensity",
+                "intensity": {
+                    "build": {
+                        "name": "BUILD",
+                        "description": "Below your comfortable density: get used to the pattern itself."
+                    },
+                    "push": {
+                        "name": "PUSH",
+                        "description": "From near your comfortable density up to the density where your EX gives out."
+                    },
+                    "over": {
+                        "name": "OVER",
+                        "description": "From your comfortable density to 1.15 times the density where your EX gives out."
+                    }
+                },
+                "submit": "Make",
+                "submitting": "Making",
+                "pending": "The AI is planning the chart and the server is laying it out. This can take a few minutes, so keep this page open.",
+                "created": "Training chart made: {title}",
+                "openDetail": "View details"
+            },
+            "removal": {
+                "title": "Delete training chart: {title}",
+                "loading": "Counting what is deleted and what stays",
+                "loadError": "Could not count what a delete takes away. Open this again in a moment.",
+                "removes": "Deleted: {charts, plural, one {# training chart} other {# training charts}}, {folderItems, plural, one {# folder item} other {# folder items}} in your folders",
+                "keeps": "Kept: {scores, plural, one {# play record} other {# play records}} of this chart, {traces, plural, one {# trace} other {# traces}}, {replays, plural, one {# replay} other {# replays}}, {patterns, plural, one {# chart pattern analysis} other {# chart pattern analyses}}",
+                "keepsFiles": "Files the client has already downloaded stay too. A deleted training chart cannot be downloaded again.",
+                "confirm": "Delete"
+            },
+            "edge": {
+                "warmup": "Warm-up",
+                "cooldown": "Cool-down"
+            },
+            "kind": {
+                "stream": "Stream",
+                "chord_stream": "Chord stream",
+                "trill": "Trill",
+                "stair": "Stairs",
+                "jack": "Jack",
+                "chord_jack": "Chord jack",
+                "scratch_solo": "Scratch alone",
+                "scratch_mixed": "Mixed with scratch",
+                "scratch_run": "Scratch run",
+                "ln_hold": "Hit while holding LN",
+                "ln_release": "Hit after releasing LN",
+                "burst": "Short burst",
+                "rest": "Rest"
+            },
+            "laneHint": {
+                "all": "All lanes",
+                "left": "Left side",
+                "right": "Right side",
+                "center": "Center",
+                "wide": "Wide spread",
+                "adjacent": "Adjacent lanes"
+            },
+            "strip": {
+                "hint": "A segment's width is its length, its height is the notes per second the laid-out chart really has, and the dashed line is the target NPS. Colour shows the pattern kind.",
+                "listLabel": "Sections",
+                "nps": "target {target} / actual {actual} NPS"
+            },
+            "trend": {
+                "empty": "No play has trace data yet, so the section results cannot be drawn.",
+                "listLabel": "EX trend by section",
+                "sectionTitle": "Section {index} · {focus}",
+                "chartLabel": "EX trend of section {index}. {summary}",
+                "summary": "First {first} → last {last} ({plays, plural, one {# play} other {# plays}})",
+                "noTrend": "No play to build a trend from",
+                "noPoints": "No result for this section yet."
+            },
+            "beforeAfter": {
+                "listLabel": "Before and after by weakness",
+                "before": "Before it was made",
+                "after": "Since it was made",
+                "sample": "{notes} notes · {charts} charts",
+                "afterSample": "{plays, plural, one {# play} other {# plays}} · {notes} notes · {charts} charts",
+                "afterMissing": "Not enough plays to meet the sample conditions yet",
+                "delta": "Change {delta}",
+                "hint": "The value before is the weakness profile when the chart was made; the value since is measured again, with the same sample conditions, on the plays after it. With few plays the value swings a lot."
+            },
+            "corrections": {
+                "label": "Values the server changed",
+                "dropped": "dropped",
+                "chart": "Whole chart",
+                "section": "Section {index}",
+                "field": {
+                    "focus_key": "weakness",
+                    "kind": "pattern kind",
+                    "base_bpm": "base BPM",
+                    "bpm_ratio": "BPM ratio",
+                    "weight": "section weight",
+                    "measures": "measures",
+                    "target_nps": "target NPS",
+                    "chord_size": "chord size",
+                    "scratch_ratio": "scratch ratio",
+                    "ln_ratio": "LN ratio"
+                }
+            },
+            "plays": {
+                "label": "Plays of this training chart",
+                "noEx": "No EX",
+                "ex": "EX {ratio} ({score})",
+                "noSections": "No section results",
+                "coach": "Play coach"
+            },
+            "detail": {
+                "title": "Training chart",
+                "loading": "Loading the training chart",
+                "notFoundTitle": "Training chart not found",
+                "notFoundDescription": "It was deleted, or it is not a training chart of your account.",
+                "backToList": "Training charts",
+                "loadError": "Could not load the training chart",
+                "copyUrl": "Copy download address",
+                "copied": "Copied the download address",
+                "remove": "Delete",
+                "made": "Made",
+                "spec": "Chart",
+                "specValue": "BPM {bpm} · {seconds, number} s · {notes} notes",
+                "playLevel": "PLAYLEVEL",
+                "playsLabel": "My plays",
+                "playsValue": "{count, plural, one {# play} other {# plays}}",
+                "best": "Best EX {ratio}",
+                "playLevelNote": "PLAYLEVEL is not a difficulty table level; it is the highest notes per second of any section, as an integer.",
+                "focus": "Weaknesses trained",
+                "noFocus": "none",
+                "advice": "AI advice",
+                "getInGame": "Get it in the client: the \"Training\" folder in MY FOLDERS, the dimmed row, then GET CHART. You can also copy the download address and fetch it yourself.",
+                "sectionsTitle": "Sections",
+                "correctionsTitle": "Values the server changed in the AI's plan",
+                "correctionsHint": "When a value the AI chose is outside the allowed range or does not suit the weakness, the server fixes it and lists it here.",
+                "trendTitle": "EX trend by section",
+                "trendHint": "Plays run in order (the oldest on the left) and each section shows how its EX ratio moved. On a section that drills a lane or a hand, plays with a RANDOM-family option are drawn faint and left out of the line.",
+                "beforeAfterTitle": "Before and after",
+                "beforeAfterEmpty": "No weakness value was kept to compare with.",
+                "playsTitle": "Plays of this chart",
+                "playsEmpty": "You have not played this training chart yet.",
+                "playsShown": "Showing the latest {shown, number} plays ({total, number} in all, at most {max, number} are shown)"
+            }
         }
     },
     "folder": {
@@ -463,7 +645,9 @@
             "remove": "Remove {title}",
             "moveTop": "Move to top",
             "moveBottom": "Move to bottom",
-            "editNote": "Edit note"
+            "editNote": "Edit note",
+            "download": "Download {title}",
+            "downloadText": "Download"
         },
         "conflict": {
             "title": "This folder was edited somewhere else first",
@@ -697,6 +881,28 @@
             "groupsLabel": "Cleared courses per group",
             "groupDescription": "{group}: {cleared, number} cleared, {played, number} played, {total, number} total",
             "recentLabel": "Recent course records"
+        },
+        "weakness": {
+            "title": "Weaknesses",
+            "viewProfile": "View weakness profile",
+            "loading": "Loading the weakness profile",
+            "loadError": "Could not load the weakness profile.",
+            "empty": "No plays have been analysed yet. Play 7KEYS SP with the new client to see your weaknesses.",
+            "noWeakness": "No weakness has enough evidence yet.",
+            "listLabel": "Top weaknesses",
+            "densityTitle": "Density limit",
+            "densityCaption": "Comfortable density {comfort} · EX limit {limit}"
+        },
+        "training": {
+            "title": "Training charts",
+            "make": "Make a training chart",
+            "usage": "{used}/{limit}",
+            "loading": "Loading training charts",
+            "loadError": "Could not load training charts.",
+            "empty": "No training charts yet.",
+            "listLabel": "Recent training charts",
+            "noFocus": "No weakness trained",
+            "plays": "{count, plural, one {# play} other {# plays}}"
         },
         "week": {
             "title": "This week",

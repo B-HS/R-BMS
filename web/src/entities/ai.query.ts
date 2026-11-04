@@ -30,9 +30,22 @@ import type {
     AiGaugeAdviceView,
     AiReportView,
     AiShareSetting,
+    AiTrainingChartDetail,
+    AiTrainingChartList,
+    AiTrainingCreateInput,
+    AiTrainingRemoval,
+    AiTrainingRemoved,
     AiWeaknessProfile,
 } from '@entities/ai.type'
-import { AI_DENSITY_PARTS, AI_HAND_KEYS, AI_LANE_NAMES, AI_SOFLAN_PHASES, isAiPatternTag, splitAiWeaknessKey } from '@entities/ai.type'
+import {
+    AI_DENSITY_PARTS,
+    AI_HAND_KEYS,
+    AI_LANE_NAMES,
+    AI_SOFLAN_PHASES,
+    isAiPatternTag,
+    isAiTrainingEdgeKey,
+    splitAiWeaknessKey,
+} from '@entities/ai.type'
 
 const MODEL_LIST_STALE_TIME_MS = 300_000
 const JSON_HEADERS = { 'content-type': 'application/json' }
@@ -212,6 +225,7 @@ const AI_FEATURE_PATH = {
     GAUGE_ADVICE: '/fe/me/ai/gauge-advice',
     PROFILE: '/fe/me/ai/profile',
     SHARING: '/fe/me/traces/sharing',
+    TRAINING: '/fe/me/ai/training-charts',
 } as const
 
 const playPath = (scoreId: string, feature: 'coach' | 'compare') => `/fe/me/ai/plays/${encodeURIComponent(scoreId)}/${feature}`
@@ -285,6 +299,30 @@ export const aiProfileQueryOptions = () =>
         queryFn: () => fetchEnvelope<AiWeaknessProfile>(buildApiUrl(AI_FEATURE_PATH.PROFILE)),
     })
 
+const trainingPath = (chartId: string) => `${AI_FEATURE_PATH.TRAINING}/${encodeURIComponent(chartId)}`
+
+/** The own training charts, newest first, with the room left and whether an AI key is registered (plan 2026-11-04 7.2). */
+export const aiTrainingListQueryOptions = () =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.TRAINING_LIST,
+        queryFn: () => fetchEnvelope<AiTrainingChartList>(buildApiUrl(AI_FEATURE_PATH.TRAINING)),
+    })
+
+export const aiTrainingDetailQueryOptions = (chartId: string) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.TRAINING_DETAIL(chartId),
+        queryFn: () => fetchEnvelope<AiTrainingChartDetail>(buildApiUrl(trainingPath(chartId))),
+    })
+
+/** What deleting one chart takes away and leaves, counted by the server when it is asked. */
+export const aiTrainingRemovalQueryOptions = (chartId: string) =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.TRAINING_REMOVAL(chartId),
+        queryFn: () => fetchEnvelope<AiTrainingRemoval>(buildApiUrl(`${trainingPath(chartId)}/removal`)),
+        staleTime: 0,
+        gcTime: 0,
+    })
+
 export const aiShareSettingQueryOptions = () =>
     queryOptions({
         queryKey: QUERY_KEY.AI.SHARING,
@@ -307,6 +345,12 @@ export const useAiGaugeAdvice = () => useQuery(aiGaugeAdviceQueryOptions())
 export const useAiShareSetting = () => useQuery(aiShareSettingQueryOptions())
 
 export const useAiProfile = (enabled = true) => useQuery({ ...aiProfileQueryOptions(), enabled })
+
+export const useAiTrainingList = (enabled = true) => useQuery({ ...aiTrainingListQueryOptions(), enabled })
+
+export const useAiTrainingDetail = (chartId: string) => useQuery(aiTrainingDetailQueryOptions(chartId))
+
+export const useAiTrainingRemoval = (chartId: string, enabled: boolean) => useQuery({ ...aiTrainingRemovalQueryOptions(chartId), enabled })
 
 const isOneOf = <T extends string>(values: readonly T[], value: string | undefined): value is T => values.some((entry) => entry === value)
 const SCRATCH_LANE = AI_LANE_NAMES[AI_LANE_NAMES.length - 1]
@@ -333,6 +377,14 @@ export const useAiWeaknessLabel = () => {
         if (split.kind === 'density') return isOneOf(AI_DENSITY_PARTS, first) ? t(`weaknessKind.density.${first}`) : key
         return t('weaknessKind.fatigue')
     }
+}
+
+/** Names a section's focus key: the warm-up and the cool-down by their own words, any other key like `useAiWeaknessLabel`. */
+export const useAiTrainingFocusLabel = () => {
+    const t = useTranslations('pages.ai.training')
+    const weaknessLabel = useAiWeaknessLabel()
+
+    return (key: string) => (isAiTrainingEdgeKey(key) ? t(`edge.${key}`) : weaknessLabel(key))
 }
 
 export const useAiRecommend = (tableId: string | null) => useQuery(aiRecommendQueryOptions(tableId))
@@ -480,5 +532,48 @@ export const useArchiveAiGoal = () => {
                 queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.GOALS }),
                 queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.DIGEST_FEATURE(AI_DIGEST.GOAL_PLAN), refetchType: 'none' }),
             ]),
+    })
+}
+
+/**
+ * One press of "만들기": a single POST that asks the provider once and lays the chart out on the server, so it can take minutes. A
+ * failure (no key, the 20-chart limit, a full folder list, too few plays) is worded on the panel, so the shared error toast is
+ * skipped. The AI usage, the chart list and the folders (the chart joins the "훈련곡" folder) are read again.
+ */
+export const useCreateAiTrainingChart = () => {
+    const queryClient = useQueryClient()
+    const t = useTranslations('pages.ai.training')
+    return useMutation({
+        meta: { suppressErrorToast: true },
+        mutationFn: (input: AiTrainingCreateInput) =>
+            fetchEnvelope<AiTrainingChartDetail>(buildApiUrl(AI_FEATURE_PATH.TRAINING), {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+        onSuccess: (chart) => toast.success(t('created', { title: chart.title })),
+        onSettled: () =>
+            Promise.all([
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.USAGE }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.TRAINING }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.FOLDER.ALL }),
+            ]),
+    })
+}
+
+/** Deletes one own training chart; its folder items go with it, and the plays, traces and replays stay. */
+export const useRemoveAiTrainingChart = () => {
+    const queryClient = useQueryClient()
+    const t = useTranslations('pages.ai.training')
+    return useMutation({
+        mutationFn: (chartId: string) => fetchEnvelope<AiTrainingRemoved>(buildApiUrl(trainingPath(chartId)), { method: 'DELETE' }),
+        onSuccess: async (_, chartId) => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.TRAINING_DETAIL(chartId), refetchType: 'none' }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.TRAINING_LIST }),
+                queryClient.invalidateQueries({ queryKey: QUERY_KEY.FOLDER.ALL }),
+            ])
+            toast.success(t('removed'))
+        },
     })
 }

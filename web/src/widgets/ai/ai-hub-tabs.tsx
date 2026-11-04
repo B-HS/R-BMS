@@ -13,20 +13,20 @@ import { AiProfilePanel } from '@widgets/ai/ai-profile-panel'
 import { AiReadyGate } from '@widgets/ai/ai-ready-gate'
 import { AiRecommendPanel } from '@widgets/ai/ai-recommend-panel'
 import { AiReportPanel } from '@widgets/ai/ai-report-panel'
+import { AiTrainingPanel } from '@widgets/ai/ai-training-panel'
 import { AiWeeklyPanel } from '@widgets/ai/ai-weekly-panel'
 import { RecordQueryPanel } from '@widgets/ai/record-query-panel'
 
 const TAB_CONTENT_CLASS = 'flex flex-col gap-px'
 const DEFAULT_TAB = 'query' satisfies AiHubTab
-const PANEL_PENDING_TABS: readonly AiHubTab[] = ['training']
-const SHOWN_TABS = AI_HUB_TABS.filter((tab) => !PANEL_PENDING_TABS.includes(tab))
 
-const shownTabOf = (requested: string | null) => SHOWN_TABS.find((tab) => tab === requested) ?? DEFAULT_TAB
+const shownTabOf = (requested: string | null) => AI_HUB_TABS.find((tab) => tab === requested) ?? DEFAULT_TAB
 
 /**
  * The AI hub. The record question needs a key before it can do anything, so it sits behind the ready gate; the other features
- * show their numbers without a key and ask for one only when the user presses the AI button. A link with `tab` (and `focus`, a
- * weakness key) opens that tab on that weakness; switching tabs writes the tab back into the address without a navigation.
+ * show their numbers without a key and ask for one only when the user presses the AI button (the training chart tab blocks its
+ * make button and asks for a key itself). A link with `tab` (and `focus`, a weakness key) opens that tab on that weakness;
+ * switching tabs writes the tab back into the address without a navigation.
  */
 export const AiHubTabs: FC = () => {
     const searchParams = useSearchParams()
@@ -52,7 +52,7 @@ export const AiHubTabs: FC = () => {
         <Tabs value={tab} onValueChange={handleTabChange} className='flex flex-col gap-px'>
             <div className='border-border bg-card overflow-x-auto border-b px-3 py-2'>
                 <TabsList>
-                    {SHOWN_TABS.map((value) => (
+                    {AI_HUB_TABS.map((value) => (
                         <TabsTrigger key={value} value={value}>
                             {AI_HUB_TAB_LABEL[value]}
                         </TabsTrigger>
@@ -67,6 +67,9 @@ export const AiHubTabs: FC = () => {
             </TabsContent>
             <TabsContent value='profile' className={TAB_CONTENT_CLASS}>
                 <AiProfilePanel />
+            </TabsContent>
+            <TabsContent value='training' className={TAB_CONTENT_CLASS}>
+                <AiTrainingPanel key={focusKey ?? ''} initialFocusKey={focusKey} />
             </TabsContent>
             <TabsContent value='recommend' className={TAB_CONTENT_CLASS}>
                 <AiRecommendPanel />

@@ -131,6 +131,10 @@
         "title": "판 코치",
         "description": "내 판 하나를 구간별로 봅니다"
     },
+    "trainingDetail": {
+        "title": "훈련곡",
+        "description": "내가 만든 훈련곡 하나를 구간별로 보고 전후를 비교합니다"
+    },
     "practiceFolder": {
         "title": "AI 연습 폴더",
         "sourceLabel": "후보 출처",

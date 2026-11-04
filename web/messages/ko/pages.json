@@ -90,6 +90,10 @@
             "title": "판 코치",
             "metaDescription": "내 판 하나를 구간별로 보고 다른 판과 비교합니다."
         },
+        "aiTraining": {
+            "title": "훈련곡",
+            "metaDescription": "AI 약점 분석으로 만든 훈련곡 하나의 구간과 플레이 결과를 봅니다."
+        },
         "chart": {
             "title": "차트",
             "fallbackTitle": "차트 {hash}",
@@ -427,6 +431,184 @@
             "trainingLink": "훈련곡",
             "trainingLinkLabel": "{name} 훈련곡 만들기",
             "timingRow": "{deviation} (±{sd} ms, FAST {fast}%)"
+        },
+        "training": {
+            "title": "훈련곡 만들기",
+            "loading": "훈련곡 불러오는 중",
+            "loadError": "훈련곡을 불러오지 못했습니다",
+            "usage": "보관 중인 훈련곡 {used}곡 / 최대 {limit}곡",
+            "fullTitle": "훈련곡 보관함이 가득 찼습니다",
+            "fullDescription": "훈련곡은 {limit, number}곡까지 보관하고 자동으로 지우지 않습니다. 새로 만들려면 아래 목록에서 쓰지 않는 훈련곡을 먼저 지우세요.",
+            "created": "훈련곡을 만들었습니다: {title}",
+            "removed": "훈련곡을 지웠습니다",
+            "optionNotice": "레인·손을 집중해 훈련하는 곡입니다. RANDOM 계열 옵션을 끄고 치세요. 옵션을 켜면 화면 레인이 바뀌어 의도한 손·레인을 훈련하지 못합니다.",
+            "limitRaced": "다른 곳에서 먼저 훈련곡 보관 한도가 찼습니다. 훈련곡을 하나 지운 뒤 다시 만드세요. AI 호출은 이미 쓰였을 수 있습니다.",
+            "guide": {
+                "intro": "만든 훈련곡은 내 폴더의 \"훈련곡\" 폴더에 자동으로 들어가고, R-BMS 구동기에서 바로 받아 플레이할 수 있습니다. 구동기가 폴더를 받아 오는 때(시작, 로그인, F6 갱신)에 새 훈련곡이 내려옵니다.",
+                "steps": "받는 방법: 구동기 선곡 화면의 MY FOLDERS(내 폴더)에서 \"훈련곡\" 폴더 → 흐린 줄 → GET CHART(차트 받기). 받기 주소를 복사해 직접 받을 수도 있습니다."
+            },
+            "list": {
+                "title": "내 훈련곡",
+                "label": "내 훈련곡 목록",
+                "emptyTitle": "아직 만든 훈련곡이 없습니다",
+                "emptyDescription": "위에서 약점과 강도를 골라 첫 훈련곡을 만들어 보세요.",
+                "noFocus": "훈련 약점 없음",
+                "made": "{date} 생성",
+                "spec": "BPM {bpm} · {seconds, number}초 · 노트 {notes}개",
+                "plays": "{count, number}판 플레이",
+                "noBest": "최고 EX 없음",
+                "best": "최고 EX {ratio}",
+                "copyUrl": "{title} 받기 주소 복사",
+                "copied": "받기 주소를 복사했습니다",
+                "remove": "{title} 지우기"
+            },
+            "form": {
+                "label": "훈련곡 만들기",
+                "description": "약점을 고르면 AI 가 구간 구성안을 만들고, 서버가 그 구성안을 1분짜리 7키 곡으로 합성합니다. 누를 때만 내 키로 한 번 호출합니다.",
+                "loading": "약점 프로필 불러오는 중",
+                "loadError": "약점 프로필을 불러오지 못했습니다",
+                "linkedKeyMissing": "링크로 연 약점이 지금 프로필에 없거나 훈련곡을 만들 수 없는 약점이라 다른 항목을 골랐습니다.",
+                "focusLabel": "훈련할 약점",
+                "autoFocus": "자동(서버가 약점을 고름)",
+                "intensityLabel": "강도",
+                "intensity": {
+                    "build": {
+                        "name": "BUILD",
+                        "description": "편안한 밀도 이하에서 패턴 자체를 익히는 단계입니다."
+                    },
+                    "push": {
+                        "name": "PUSH",
+                        "description": "편안한 밀도 근처에서 EX 한계 밀도까지 밀어붙이는 단계입니다."
+                    },
+                    "over": {
+                        "name": "OVER",
+                        "description": "편안한 밀도에서 EX 한계의 1.15배까지 넘어서는 단계입니다."
+                    }
+                },
+                "submit": "만들기",
+                "submitting": "만드는 중",
+                "pending": "AI 가 구성안을 만들고 서버가 곡을 합성하는 중입니다. 몇 분까지 걸릴 수 있으니 이 화면을 닫지 마세요.",
+                "created": "훈련곡을 만들었습니다: {title}",
+                "openDetail": "상세 보기"
+            },
+            "removal": {
+                "title": "훈련곡 지우기: {title}",
+                "loading": "지워지는 것과 남는 것을 세는 중입니다",
+                "loadError": "지워지는 것을 세지 못했습니다. 잠시 뒤 다시 열어 주세요.",
+                "removes": "지워지는 것: 훈련곡 {charts, number}곡, 내 폴더의 폴더 항목 {folderItems, number}개",
+                "keeps": "남는 것: 이 훈련곡의 판 기록 {scores, number}판, 판별 데이터 {traces, number}개, 리플레이 {replays, number}개, 곡 패턴 분석 {patterns, number}개",
+                "keepsFiles": "이미 구동기로 받은 파일도 그대로 남습니다. 지운 훈련곡은 다시 받을 수 없습니다.",
+                "confirm": "지우기"
+            },
+            "edge": {
+                "warmup": "워밍업",
+                "cooldown": "쿨다운"
+            },
+            "kind": {
+                "stream": "연속 난타",
+                "chord_stream": "동시치기 난타",
+                "trill": "트릴",
+                "stair": "계단",
+                "jack": "연타",
+                "chord_jack": "동시치기 연타",
+                "scratch_solo": "단독 스크래치",
+                "scratch_mixed": "스크래치 섞임",
+                "scratch_run": "스크래치 연속",
+                "ln_hold": "LN 누른 채 치기",
+                "ln_release": "LN 뗀 뒤 치기",
+                "burst": "짧은 몰아치기",
+                "rest": "쉬는 구간"
+            },
+            "laneHint": {
+                "all": "전체 레인",
+                "left": "왼손 쪽",
+                "right": "오른손 쪽",
+                "center": "가운데",
+                "wide": "넓게",
+                "adjacent": "인접 레인"
+            },
+            "strip": {
+                "hint": "띠의 폭은 구간 길이, 높이는 합성한 곡의 실제 NPS, 점선은 목표 NPS 입니다. 색은 패턴 종류를 나타냅니다.",
+                "listLabel": "구간 목록",
+                "nps": "목표 {target} / 실제 {actual} NPS"
+            },
+            "trend": {
+                "empty": "판별 데이터가 있는 판이 아직 없어 구간 결과를 그릴 수 없습니다.",
+                "listLabel": "구간별 EX 추이",
+                "sectionTitle": "구간 {index} · {focus}",
+                "chartLabel": "구간 {index} EX 추이. {summary}",
+                "summary": "처음 {first} → 마지막 {last} ({plays, number}판)",
+                "noTrend": "추세에 쓸 판이 없습니다",
+                "noPoints": "이 구간의 결과가 아직 없습니다."
+            },
+            "beforeAfter": {
+                "listLabel": "약점별 전후 비교",
+                "before": "만들기 전",
+                "after": "만든 뒤",
+                "sample": "노트 {notes} · 차트 {charts}",
+                "afterSample": "{plays, number}판 · 노트 {notes} · 차트 {charts}",
+                "afterMissing": "표본 조건을 채우는 판이 아직 모자랍니다",
+                "delta": "차이 {delta}",
+                "hint": "만들기 전 값은 훈련곡을 만들 때의 약점 프로필 값이고, 만든 뒤 값은 그 뒤에 친 판으로 같은 표본 조건에서 다시 잰 값입니다. 판이 적으면 값이 크게 흔들립니다."
+            },
+            "corrections": {
+                "label": "서버가 바꾼 값 목록",
+                "dropped": "버림",
+                "chart": "전체",
+                "section": "구간 {index}",
+                "field": {
+                    "focus_key": "약점",
+                    "kind": "패턴 종류",
+                    "base_bpm": "기준 BPM",
+                    "bpm_ratio": "BPM 배율",
+                    "weight": "구간 무게",
+                    "measures": "마디 수",
+                    "target_nps": "목표 NPS",
+                    "chord_size": "동시치기 크기",
+                    "scratch_ratio": "스크래치 비율",
+                    "ln_ratio": "LN 비율"
+                }
+            },
+            "plays": {
+                "label": "훈련곡 판 목록",
+                "noEx": "EX 없음",
+                "ex": "EX {ratio} ({score}점)",
+                "noSections": "구간 결과 없음",
+                "coach": "판 코치"
+            },
+            "detail": {
+                "title": "훈련곡",
+                "loading": "훈련곡 불러오는 중",
+                "notFoundTitle": "훈련곡을 찾을 수 없습니다",
+                "notFoundDescription": "이미 지웠거나 내 계정의 훈련곡이 아닙니다.",
+                "backToList": "훈련곡 목록",
+                "loadError": "훈련곡을 불러오지 못했습니다",
+                "copyUrl": "받기 주소 복사",
+                "copied": "받기 주소를 복사했습니다",
+                "remove": "지우기",
+                "made": "만든 날",
+                "spec": "곡 정보",
+                "specValue": "BPM {bpm} · {seconds, number}초 · 노트 {notes}개",
+                "playLevel": "PLAYLEVEL",
+                "playsLabel": "내 플레이",
+                "playsValue": "{count, number}판",
+                "best": "최고 EX {ratio}",
+                "playLevelNote": "PLAYLEVEL 은 난이도표 레벨이 아니라 구간 중 가장 높은 NPS 를 정수로 적은 값입니다.",
+                "focus": "훈련 약점",
+                "noFocus": "없음",
+                "advice": "AI 조언",
+                "getInGame": "구동기에서 받기: MY FOLDERS(내 폴더)의 \"훈련곡\" 폴더 → 흐린 줄 → GET CHART(차트 받기). 받기 주소를 복사해 직접 받을 수도 있습니다.",
+                "sectionsTitle": "구간",
+                "correctionsTitle": "서버가 AI 구성안에서 바꾼 값",
+                "correctionsHint": "AI 가 정한 값이 허용 범위나 약점 종류에 맞지 않으면 서버가 고치고 여기에 남깁니다.",
+                "trendTitle": "구간별 EX 추이",
+                "trendHint": "판 순서대로(왼쪽이 오래된 판) 구간마다 EX 비율의 변화를 봅니다. 레인·손을 훈련하는 구간에서는 RANDOM 계열 옵션으로 친 판을 흐린 점으로 그리고 추세선에서 뺍니다.",
+                "beforeAfterTitle": "전후 비교",
+                "beforeAfterEmpty": "비교할 약점 값이 저장되어 있지 않습니다.",
+                "playsTitle": "이 훈련곡의 판",
+                "playsEmpty": "아직 이 훈련곡을 플레이하지 않았습니다.",
+                "playsShown": "최근 {shown, number}판을 보입니다(전체 {total, number}판, 최대 {max, number}판까지 표시)"
+            }
         }
     },
     "folder": {
@@ -463,7 +645,9 @@
             "remove": "{title} 빼기",
             "moveTop": "맨 위로",
             "moveBottom": "맨 아래로",
-            "editNote": "메모 고치기"
+            "editNote": "메모 고치기",
+            "download": "{title} 받기",
+            "downloadText": "받기"
         },
         "conflict": {
             "title": "다른 곳에서 먼저 고친 폴더입니다",
@@ -697,6 +881,28 @@
             "groupsLabel": "코스 묶음별 클리어",
             "groupDescription": "{group}: 클리어 {cleared, number}, 플레이 {played, number}, 전체 {total, number}",
             "recentLabel": "최근 코스 기록"
+        },
+        "weakness": {
+            "title": "약점",
+            "viewProfile": "약점 프로필 보기",
+            "loading": "약점 프로필 불러오는 중",
+            "loadError": "약점 프로필을 불러오지 못했습니다.",
+            "empty": "분석된 판이 아직 없습니다. 새 클라이언트로 7키 단일 플레이를 치면 약점이 보입니다.",
+            "noWeakness": "근거가 충분한 약점이 아직 없습니다.",
+            "listLabel": "약점 상위 목록",
+            "densityTitle": "밀도 한계",
+            "densityCaption": "편안한 밀도 {comfort} · EX 한계 {limit}"
+        },
+        "training": {
+            "title": "훈련곡",
+            "make": "훈련곡 만들기",
+            "usage": "{used}/{limit}곡",
+            "loading": "훈련곡 불러오는 중",
+            "loadError": "훈련곡을 불러오지 못했습니다.",
+            "empty": "아직 만든 훈련곡이 없습니다.",
+            "listLabel": "최근 훈련곡",
+            "noFocus": "훈련 약점 없음",
+            "plays": "{count, number}판"
         },
         "week": {
             "title": "이번 주",

@@ -46,6 +46,18 @@ import type {
     WeaknessProfileCell,
     WeaknessProfileView,
 } from '@server/dto/ai-play'
+import type {
+    TrainingBeforeAfter,
+    TrainingChartCreateInput,
+    TrainingChartDetail,
+    TrainingChartList,
+    TrainingChartSummary,
+    TrainingIntensity,
+    TrainingLaneHint,
+    TrainingPatternKind,
+    TrainingPlay,
+    TrainingRemoval,
+} from '@server/dto/training'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 import { ApiError } from '@shared/lib/fetch'
 
@@ -85,6 +97,17 @@ export type AiWeaknessProfile = WeaknessProfileView
 export type AiWeaknessItem = WeaknessItem
 export type AiWeaknessProfileCell = WeaknessProfileCell
 export type AiProfileSampleLevel = ProfileSampleLevel
+export type AiTrainingChart = TrainingChartSummary
+export type AiTrainingChartList = TrainingChartList
+export type AiTrainingChartDetail = TrainingChartDetail
+export type AiTrainingPlay = TrainingPlay
+export type AiTrainingFocusComparison = TrainingBeforeAfter
+export type AiTrainingRemoval = TrainingRemoval
+export type AiTrainingRemoved = TrainingRemoval & { removed: true }
+export type AiTrainingCreateInput = TrainingChartCreateInput
+export type AiTrainingIntensity = TrainingIntensity
+export type AiTrainingPatternKind = TrainingPatternKind
+export type AiTrainingLaneHint = TrainingLaneHint
 /** How a stored or fresh AI answer was made, without the answer itself. */
 export type AiInterpretationMeta = Omit<NonNullable<AiRecommendView['ai']>, 'output'>
 
@@ -317,6 +340,8 @@ export type AiEvidenceGrade = keyof typeof AI_EVIDENCE_LABEL
 
 export const isAiPatternTag = (tag: string): tag is AiPatternTag => tag in AI_PATTERN_TAG_LABEL
 
+export const isAiEvidenceGrade = (grade: string): grade is AiEvidenceGrade => grade in AI_EVIDENCE_LABEL
+
 export const aiPatternTagLabel = (tag: string) => (isAiPatternTag(tag) ? AI_PATTERN_TAG_LABEL[tag] : tag)
 
 /** Mirrors the server's AI_PRACTICE_LIMIT and AI_GOAL_LIMIT values the forms need (pinned by the contract test). */
@@ -499,5 +524,100 @@ export const formatAiWeaknessValue = (key: string, unit: string, value: number |
     return `${signedText(value * PERCENT_SCALE, SIGNED_DECIMALS)}%p`
 }
 
+/** A change between two profile values as the screen writes it: signed like `formatAiWeaknessValue`, and the density in notes per second signed too. */
+export const formatAiWeaknessDelta = (key: string, unit: string, delta: number | null) => {
+    if (delta === null) return '—'
+    if (unit === 'nps') return `${signedText(delta, SIGNED_DECIMALS)} NPS`
+    return formatAiWeaknessValue(key, unit, delta)
+}
+
+/** The data a failed AI call said it lacks (the server's `details.need`), or null when the failure names none. */
+export const aiDataNeedOf = (error: unknown) => {
+    const need = error instanceof ApiError ? error.details?.need : undefined
+    return typeof need === 'string' ? need : null
+}
+
 /** The coach page of one own play. */
 export const aiPlayHref = (scoreId: string) => `/ai/plays/${encodeURIComponent(scoreId)}`
+
+/** Mirrors the server's TRAINING_AUTO_FOCUS and TRAINING_INTENSITIES (pinned by the contract test): what a make request names. */
+export const AI_TRAINING_AUTO_FOCUS = 'auto'
+export const AI_TRAINING_INTENSITIES = ['build', 'push', 'over'] as const satisfies readonly AiTrainingIntensity[]
+export const AI_TRAINING_DEFAULT_INTENSITY = 'push' satisfies AiTrainingIntensity
+
+/** Mirrors the server's TRAINING_PATTERN_KINDS and TRAINING_LANE_HINTS (pinned by the contract test): what a section can lay out and lean on. */
+export const AI_TRAINING_PATTERN_KINDS = [
+    'stream',
+    'chord_stream',
+    'trill',
+    'stair',
+    'jack',
+    'chord_jack',
+    'scratch_solo',
+    'scratch_mixed',
+    'scratch_run',
+    'ln_hold',
+    'ln_release',
+    'burst',
+    'rest',
+] as const satisfies readonly AiTrainingPatternKind[]
+export const AI_TRAINING_LANE_HINTS = ['all', 'left', 'right', 'center', 'wide', 'adjacent'] as const satisfies readonly AiTrainingLaneHint[]
+
+export const isAiTrainingPatternKind = (kind: string): kind is AiTrainingPatternKind => AI_TRAINING_PATTERN_KINDS.some((known) => known === kind)
+
+/** Mirrors the server's TRAINING_EDGE_KEYS and TRAINING_PLAYS_SHOWN (pinned by the contract test): the sections that train no weakness, and the plays a detail lists. */
+export const AI_TRAINING_EDGE_KEYS = ['warmup', 'cooldown'] as const
+export const AI_TRAINING_PLAYS_SHOWN = 50
+
+/** Mirrors the server's TRAINING_CORRECTION_FIELDS (pinned by the contract test): the values the server may change from the AI's plan. */
+export const AI_TRAINING_CORRECTION_FIELDS = [
+    'focus_key',
+    'kind',
+    'base_bpm',
+    'bpm_ratio',
+    'weight',
+    'measures',
+    'target_nps',
+    'chord_size',
+    'scratch_ratio',
+    'ln_ratio',
+] as const
+
+export const isAiTrainingCorrectionField = (field: string): field is (typeof AI_TRAINING_CORRECTION_FIELDS)[number] =>
+    AI_TRAINING_CORRECTION_FIELDS.some((known) => known === field)
+
+/** Mirrors the server's training error codes the screens react to (pinned by the contract test). */
+export const AI_TRAINING_ERROR_CODE = {
+    LIMIT: 'TRAINING_CHART_LIMIT',
+    FOLDER_UNAVAILABLE: 'TRAINING_FOLDER_UNAVAILABLE',
+    NOT_FOUND: 'TRAINING_CHART_NOT_FOUND',
+} as const
+
+/** Mirrors the server's training chart id form `tc_` and 32 lower-case hex characters (pinned by the contract test). */
+export const AI_TRAINING_CHART_ID_PATTERN = /^tc_[0-9a-f]{32}$/
+
+export const isAiTrainingChartId = (value: string) => AI_TRAINING_CHART_ID_PATTERN.test(value)
+
+/** The detail page of one own training chart. */
+export const aiTrainingHref = (chartId: string) => `/ai/training/${encodeURIComponent(chartId)}`
+
+/** The `random` of a play that took no lane option (the wire value of the server's score and play rows). */
+export const AI_TRAINING_RANDOM_OFF = 'Off'
+
+const POSITIONAL_WEAKNESS_KINDS = ['lane', 'hand'] as const
+
+/** Whether a chart on this focus key leans on a lane or a hand, which a RANDOM-family option moves to another lane (plan 2026-11-04 7.1). */
+export const isAiTrainingPositionalKey = (key: string) => {
+    const kind = splitAiWeaknessKey(key)?.kind
+    return POSITIONAL_WEAKNESS_KINDS.some((positional) => positional === kind)
+}
+
+/** Whether a section is one of the two that warm up or cool down and so train no weakness. */
+export const isAiTrainingEdgeKey = (key: string): key is (typeof AI_TRAINING_EDGE_KEYS)[number] => AI_TRAINING_EDGE_KEYS.some((edge) => edge === key)
+
+/** The weaknesses a training chart can be made for: those with at least one pattern kind to lay out. */
+export const trainableAiWeaknessesOf = (weaknesses: readonly AiWeaknessItem[]) => weaknesses.filter((item) => item.training_kinds.length > 0)
+
+/** Whether the server can pick the focus itself: a trainable weakness whose sample is not too small to name. */
+export const canAiTrainingPickFocus = (weaknesses: readonly AiWeaknessItem[]) =>
+    trainableAiWeaknessesOf(weaknesses).some((item) => item.sample_level !== 'insufficient')

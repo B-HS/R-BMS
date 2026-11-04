@@ -95,6 +95,7 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
     }
 
     const levelLabelByMd5 = buildLevelLabelByMd5(tables)
+    const downloadUrlByMd5 = new Map(folder.items.map((item) => [item.md5, item.download_url]))
     const storedMd5s = new Set(base.items.map((item) => item.md5))
     const presentMd5s = new Set(draft.items.map((item) => item.md5))
     const capacity = Math.max(0, FOLDER_LIMIT.ITEMS_PER_FOLDER - draft.items.length)
@@ -350,7 +351,7 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
                                 {draft.items.map((item, index) => (
                                     <FolderChartRow
                                         key={item.md5}
-                                        item={item}
+                                        item={{ ...item, download_url: downloadUrlByMd5.get(item.md5) }}
                                         position={index + 1}
                                         levelLabel={levelLabelByMd5.get(item.md5)}
                                         isNew={!storedMd5s.has(item.md5)}

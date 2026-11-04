@@ -137,6 +137,7 @@ export type TrainingProfileSnapshot = z.infer<typeof trainingProfileSnapshotSche
 /** One training chart in the owner's list (plan 7.2 `TrainingChartSummary`); `download_url` is built on the request's origin. */
 export const trainingChartSummarySchema = z.object({
     id: z.string(),
+    sha256: z.string(),
     title: z.string(),
     created_at: z.number().int(),
     focus_keys: z.array(z.string()),

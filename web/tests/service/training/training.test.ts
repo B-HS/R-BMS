@@ -259,6 +259,7 @@ describe('목록·상세·지우기', () => {
         expect(trainingChartListSchema.safeParse(list).success).toBe(true)
         expect(list).toMatchObject({ used: 1, limit: 20, can_create: true, needs_key: false })
         expect(list.charts.map((chart) => chart.id)).toEqual([made.id])
+        expect(list.charts.map((chart) => chart.sha256)).toEqual([harness.training.charts.get(made.id)?.sha256 ?? ''])
         expect(await harness.service.list({ userId: TRAINING_OTHER_USER, origin: TRAINING_ORIGIN })).toMatchObject({
             charts: [],
             used: 0,

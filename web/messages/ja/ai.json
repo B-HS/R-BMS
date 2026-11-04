@@ -131,6 +131,10 @@
         "title": "プレーコーチ",
         "description": "自分のプレー1つを区間ごとに見ます"
     },
+    "trainingDetail": {
+        "title": "トレーニング譜面",
+        "description": "自分が作ったトレーニング譜面1件を区間ごとに見て、前後を比較します"
+    },
     "practiceFolder": {
         "title": "AI練習フォルダ",
         "sourceLabel": "候補の出どころ",

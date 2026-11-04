@@ -212,6 +212,7 @@ export const createTrainingChartService = (deps: TrainingChartServiceDeps) => {
     const summaryOf = (row: TrainingChartRow, stats: TrainingPlayStats | undefined, origin: string) =>
         ({
             id: row.id,
+            sha256: row.sha256,
             title: row.title,
             created_at: row.createdAt,
             focus_keys: trainingFocusKeysOf(row.spec),

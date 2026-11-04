@@ -90,6 +90,10 @@
             "title": "プレーコーチ",
             "metaDescription": "自分のプレーを区間ごとに見て、別のプレーと比較します。"
         },
+        "aiTraining": {
+            "title": "トレーニング譜面",
+            "metaDescription": "AIの弱点分析で作ったトレーニング譜面1件の区間とプレー結果を見ます。"
+        },
         "chart": {
             "title": "譜面",
             "fallbackTitle": "譜面 {hash}",
@@ -427,6 +431,184 @@
             "trainingLink": "トレーニング譜面",
             "trainingLinkLabel": "{name} のトレーニング譜面を作る",
             "timingRow": "{deviation}(±{sd} ms、FAST {fast}%)"
+        },
+        "training": {
+            "title": "トレーニング譜面を作る",
+            "loading": "トレーニング譜面を読み込み中",
+            "loadError": "トレーニング譜面を読み込めませんでした",
+            "usage": "保管中のトレーニング譜面 {used}件 / 最大{limit}件",
+            "fullTitle": "トレーニング譜面の保管数が上限に達しました",
+            "fullDescription": "トレーニング譜面は{limit, number}件まで保管し、自動では削除しません。新しく作るには、下の一覧から使わないものを先に削除してください。",
+            "created": "トレーニング譜面を作成しました：{title}",
+            "removed": "トレーニング譜面を削除しました",
+            "optionNotice": "レーン・手を集中して鍛える譜面です。RANDOM系オプションをオフにしてプレーしてください。オプションを使うと画面上のレーンが入れ替わり、意図した手・レーンを鍛えられません。",
+            "limitRaced": "別の場所で先にトレーニング譜面の保管上限に達しました。1件削除してからもう一度作ってください。AI呼び出しはすでに使われた可能性があります。",
+            "guide": {
+                "intro": "作成した譜面は自分のフォルダの「トレーニング」フォルダに自動で入り、R-BMSクライアントからそのままダウンロードしてプレーできます。クライアントがフォルダを取得するとき（起動時、ログイン時、F6での更新時）に新しい譜面が届きます。",
+                "steps": "入手方法：選曲画面のMY FOLDERS（自分のフォルダ）の「トレーニング」フォルダ → 薄く表示された行 → GET CHART（譜面を取得）。ダウンロードURLをコピーして自分で取得することもできます。"
+            },
+            "list": {
+                "title": "自分のトレーニング譜面",
+                "label": "自分のトレーニング譜面一覧",
+                "emptyTitle": "まだトレーニング譜面がありません",
+                "emptyDescription": "上で弱点と強度を選んで、最初の1件を作ってみましょう。",
+                "noFocus": "鍛える弱点なし",
+                "made": "{date} 作成",
+                "spec": "BPM {bpm} · {seconds, number}秒 · ノーツ{notes}個",
+                "plays": "{count, number}回プレー",
+                "noBest": "最高EXなし",
+                "best": "最高EX {ratio}",
+                "copyUrl": "{title}のダウンロードURLをコピー",
+                "copied": "ダウンロードURLをコピーしました",
+                "remove": "{title}を削除"
+            },
+            "form": {
+                "label": "トレーニング譜面を作る",
+                "description": "弱点を選ぶとAIが区間の構成案を作り、サーバーがそれを1分の7KEYS譜面に合成します。押したときだけ自分のキーで1回呼び出します。",
+                "loading": "弱点プロフィールを読み込み中",
+                "loadError": "弱点プロフィールを読み込めませんでした",
+                "linkedKeyMissing": "リンクで開いた弱点は現在のプロフィールにないか、譜面を作れない弱点のため、別の項目を選びました。",
+                "focusLabel": "鍛える弱点",
+                "autoFocus": "自動（サーバーが弱点を選ぶ）",
+                "intensityLabel": "強度",
+                "intensity": {
+                    "build": {
+                        "name": "BUILD",
+                        "description": "快適な密度以下で、パターンそのものに慣れる段階です。"
+                    },
+                    "push": {
+                        "name": "PUSH",
+                        "description": "快適な密度付近から、EXが保てなくなる限界の密度まで押し上げる段階です。"
+                    },
+                    "over": {
+                        "name": "OVER",
+                        "description": "快適な密度から、EX限界の1.15倍まで超える段階です。"
+                    }
+                },
+                "submit": "作る",
+                "submitting": "作成中",
+                "pending": "AIが構成案を作り、サーバーが譜面を合成しています。数分かかることがあるので、この画面を閉じないでください。",
+                "created": "トレーニング譜面を作成しました：{title}",
+                "openDetail": "詳細を見る"
+            },
+            "removal": {
+                "title": "トレーニング譜面を削除：{title}",
+                "loading": "削除されるものと残るものを数えています",
+                "loadError": "削除されるものを数えられませんでした。しばらくしてからもう一度開いてください。",
+                "removes": "削除されるもの：トレーニング譜面{charts, number}件、自分のフォルダ内のフォルダ項目{folderItems, number}件",
+                "keeps": "残るもの：この譜面のプレー記録{scores, number}回、判定データ{traces, number}件、リプレイ{replays, number}件、譜面パターン分析{patterns, number}件",
+                "keepsFiles": "すでにクライアントでダウンロードしたファイルもそのまま残ります。削除したトレーニング譜面は再ダウンロードできません。",
+                "confirm": "削除"
+            },
+            "edge": {
+                "warmup": "ウォームアップ",
+                "cooldown": "クールダウン"
+            },
+            "kind": {
+                "stream": "連続乱打",
+                "chord_stream": "同時押し乱打",
+                "trill": "トリル",
+                "stair": "階段",
+                "jack": "連打",
+                "chord_jack": "同時押し連打",
+                "scratch_solo": "単独スクラッチ",
+                "scratch_mixed": "スクラッチ混じり",
+                "scratch_run": "スクラッチ連続",
+                "ln_hold": "LNを押したまま打つ",
+                "ln_release": "LNを離した後に打つ",
+                "burst": "短い密集",
+                "rest": "休み区間"
+            },
+            "laneHint": {
+                "all": "全レーン",
+                "left": "左手側",
+                "right": "右手側",
+                "center": "中央",
+                "wide": "広く",
+                "adjacent": "隣接レーン"
+            },
+            "strip": {
+                "hint": "帯の幅は区間の長さ、高さは合成した譜面の実際のNPS、点線は目標NPSです。色はパターンの種類を表します。",
+                "listLabel": "区間一覧",
+                "nps": "目標 {target} / 実際 {actual} NPS"
+            },
+            "trend": {
+                "empty": "判定データのあるプレーがまだないため、区間の結果を描けません。",
+                "listLabel": "区間ごとのEX推移",
+                "sectionTitle": "区間{index} · {focus}",
+                "chartLabel": "区間{index}のEX推移。{summary}",
+                "summary": "最初 {first} → 最後 {last}（{plays, number}回）",
+                "noTrend": "推移に使えるプレーがありません",
+                "noPoints": "この区間の結果はまだありません。"
+            },
+            "beforeAfter": {
+                "listLabel": "弱点ごとの前後比較",
+                "before": "作成前",
+                "after": "作成後",
+                "sample": "ノーツ {notes} · 譜面 {charts}",
+                "afterSample": "{plays, number}回 · ノーツ {notes} · 譜面 {charts}",
+                "afterMissing": "標本条件を満たすプレーがまだ足りません",
+                "delta": "差 {delta}",
+                "hint": "作成前の値は譜面を作ったときの弱点プロフィールの値で、作成後の値はその後のプレーから同じ標本条件で測り直した値です。プレーが少ないと値は大きく揺れます。"
+            },
+            "corrections": {
+                "label": "サーバーが変えた値の一覧",
+                "dropped": "破棄",
+                "chart": "全体",
+                "section": "区間{index}",
+                "field": {
+                    "focus_key": "弱点",
+                    "kind": "パターンの種類",
+                    "base_bpm": "基準BPM",
+                    "bpm_ratio": "BPM倍率",
+                    "weight": "区間の重み",
+                    "measures": "小節数",
+                    "target_nps": "目標NPS",
+                    "chord_size": "同時押しの大きさ",
+                    "scratch_ratio": "スクラッチの割合",
+                    "ln_ratio": "LNの割合"
+                }
+            },
+            "plays": {
+                "label": "このトレーニング譜面のプレー一覧",
+                "noEx": "EXなし",
+                "ex": "EX {ratio}（{score}点）",
+                "noSections": "区間の結果なし",
+                "coach": "プレーコーチ"
+            },
+            "detail": {
+                "title": "トレーニング譜面",
+                "loading": "トレーニング譜面を読み込み中",
+                "notFoundTitle": "トレーニング譜面が見つかりません",
+                "notFoundDescription": "すでに削除したか、自分のアカウントのトレーニング譜面ではありません。",
+                "backToList": "トレーニング譜面一覧",
+                "loadError": "トレーニング譜面を読み込めませんでした",
+                "copyUrl": "ダウンロードURLをコピー",
+                "copied": "ダウンロードURLをコピーしました",
+                "remove": "削除",
+                "made": "作成日",
+                "spec": "譜面情報",
+                "specValue": "BPM {bpm} · {seconds, number}秒 · ノーツ{notes}個",
+                "playLevel": "PLAYLEVEL",
+                "playsLabel": "自分のプレー",
+                "playsValue": "{count, number}回",
+                "best": "最高EX {ratio}",
+                "playLevelNote": "PLAYLEVELは難易度表のレベルではなく、区間の中で最も高いNPSを整数で表した値です。",
+                "focus": "鍛える弱点",
+                "noFocus": "なし",
+                "advice": "AIのアドバイス",
+                "getInGame": "クライアントで入手：MY FOLDERS（自分のフォルダ）の「トレーニング」フォルダ → 薄く表示された行 → GET CHART（譜面を取得）。ダウンロードURLをコピーして自分で取得することもできます。",
+                "sectionsTitle": "区間",
+                "correctionsTitle": "サーバーがAIの構成案から変えた値",
+                "correctionsHint": "AIが決めた値が許容範囲や弱点の種類に合わない場合、サーバーが直してここに残します。",
+                "trendTitle": "区間ごとのEX推移",
+                "trendHint": "プレー順（左が古いプレー）に、区間ごとのEX率の変化を見ます。レーン・手を鍛える区間では、RANDOM系オプションでプレーした回を薄い点で描き、推移の線から外します。",
+                "beforeAfterTitle": "前後比較",
+                "beforeAfterEmpty": "比較する弱点の値が保存されていません。",
+                "playsTitle": "この譜面のプレー",
+                "playsEmpty": "このトレーニング譜面はまだプレーしていません。",
+                "playsShown": "最近の{shown, number}回を表示（全{total, number}回、最大{max, number}回まで表示）"
+            }
         }
     },
     "folder": {
@@ -463,7 +645,9 @@
             "remove": "{title}を外す",
             "moveTop": "一番上へ",
             "moveBottom": "一番下へ",
-            "editNote": "メモを編集"
+            "editNote": "メモを編集",
+            "download": "{title}をダウンロード",
+            "downloadText": "ダウンロード"
         },
         "conflict": {
             "title": "別の場所で先に編集されたフォルダです",
@@ -697,6 +881,28 @@
             "groupsLabel": "グループ別のクリア数",
             "groupDescription": "{group}：クリア{cleared, number}、プレー{played, number}、全体{total, number}",
             "recentLabel": "最近のコース記録"
+        },
+        "weakness": {
+            "title": "弱点",
+            "viewProfile": "弱点プロフィールを見る",
+            "loading": "弱点プロフィールを読み込み中",
+            "loadError": "弱点プロフィールを読み込めませんでした。",
+            "empty": "分析されたプレーがまだありません。新しいクライアントで7KEYS SPをプレーすると弱点が表示されます。",
+            "noWeakness": "根拠が十分な弱点はまだありません。",
+            "listLabel": "弱点の上位",
+            "densityTitle": "密度限界",
+            "densityCaption": "快適な密度 {comfort} · EX限界 {limit}"
+        },
+        "training": {
+            "title": "トレーニング譜面",
+            "make": "トレーニング譜面を作る",
+            "usage": "{used}/{limit}件",
+            "loading": "トレーニング譜面を読み込み中",
+            "loadError": "トレーニング譜面を読み込めませんでした。",
+            "empty": "まだトレーニング譜面がありません。",
+            "listLabel": "最近のトレーニング譜面",
+            "noFocus": "鍛える弱点なし",
+            "plays": "{count, number}回"
         },
         "week": {
             "title": "今週",

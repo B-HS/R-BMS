@@ -28,7 +28,7 @@ const { DASHBOARD_FILL_PANEL_CLASS_NAME, DASHBOARD_FULL_PANEL_CLASS_NAME, DASHBO
     await import('../../src/shared/constants/dashboard')
 
 const { LOGIN_ID, USER_ID } = fixture
-const PANEL_COUNT = 13
+const PANEL_COUNT = 15
 const SIGNED_IN_USER = { id: USER_ID, name: 'Alice', email: 'alice@example.test', loginId: LOGIN_ID, role: 'user' }
 
 let network: ReturnType<typeof fixture.stubFetch>
@@ -81,7 +81,7 @@ const emptyCellsOf = (spans: number[], columns: number) => {
 }
 
 describe('회원 대시보드 격자', () => {
-    test('서버가 본 사용자와 세션이 같으면 패널 열세 개를 읽는 순서대로 그린다', () => {
+    test('서버가 본 사용자와 세션이 같으면 패널 열다섯 개를 읽는 순서대로 그린다', () => {
         const view = renderGrid()
         expect([...view.container.querySelectorAll('h2')].map((heading) => heading.textContent)).toEqual([
             '내 정보',
@@ -91,6 +91,8 @@ describe('회원 대시보드 격자', () => {
             '활동',
             '최근 플레이',
             '단위·코스',
+            '약점',
+            '훈련곡',
             '이번 주',
             '목표',
             '라이벌',
@@ -151,6 +153,7 @@ describe('회원 대시보드 격자', () => {
         expect(
             network.calls.filter((url) => url.includes('/dashboard/rivals') || url.includes('/ai/judge-habit') || url.includes('/ai/gauge-advice')),
         ).toEqual([])
+        expect(network.calls.filter((url) => url.includes('/ai/profile') || url.includes('/ai/training-charts'))).toEqual([])
     })
 
     test('로그인·로그아웃 때 비우는 사용자 범위 캐시에 대시보드와 내 단위가 들어 있고 공개 플레이어 캐시는 남는다', () => {

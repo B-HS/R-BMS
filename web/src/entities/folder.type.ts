@@ -34,6 +34,7 @@ export type FolderItem = {
     title: string
     artist: string
     note: string
+    download_url?: string
 }
 
 export type FolderDetail = FolderSummary & { items: FolderItem[] }

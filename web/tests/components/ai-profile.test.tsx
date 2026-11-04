@@ -278,7 +278,7 @@ describe('AI 허브의 약점 링크', () => {
         expect(new URLSearchParams(searches[0]).get('focus_key')).toBe('tag:trill')
         expect((await page.findByLabelText('연습할 약점')).textContent).toBe('트릴')
         expect(page.getByRole('tab', { name: '추천·연습 폴더' }).getAttribute('aria-selected')).toBe('true')
-        expect(page.queryByRole('tab', { name: '훈련곡' })).toBeNull()
+        expect(page.getByRole('tab', { name: '훈련곡' }).getAttribute('aria-selected')).toBe('false')
     })
 
     test('profile 탭 주소는 약점 프로필 탭을 연다', async () => {

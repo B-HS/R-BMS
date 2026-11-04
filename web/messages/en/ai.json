@@ -131,6 +131,10 @@
         "title": "Play coach",
         "description": "Look at one of your plays segment by segment"
     },
+    "trainingDetail": {
+        "title": "Training chart",
+        "description": "Look at one of your training charts section by section and compare before and after"
+    },
     "practiceFolder": {
         "title": "AI practice folder",
         "sourceLabel": "Candidate source",

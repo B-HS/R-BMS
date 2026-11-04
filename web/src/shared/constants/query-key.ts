@@ -99,6 +99,10 @@ export const QUERY_KEY = {
         GOALS: ['ai', 'goals'],
         SHARING: ['ai', 'sharing'],
         PROFILE: ['ai', 'profile'],
+        TRAINING: ['ai', 'training'],
+        TRAINING_LIST: ['ai', 'training', 'list'],
+        TRAINING_DETAIL: (chartId: string) => ['ai', 'training', 'detail', chartId],
+        TRAINING_REMOVAL: (chartId: string) => ['ai', 'training', 'removal', chartId],
     },
     ADMIN: {
         ALL: ['admin'],

@@ -47,6 +47,13 @@ export const FolderChartRow: FC<FolderChartRowProps> = ({ item, position, levelL
             </div>
             <span className='text-muted-foreground text-2xs hidden w-20 shrink-0 font-mono lg:block'>{formatHash(item.md5)}</span>
             <div className='flex shrink-0 items-center gap-0.5'>
+                {item.download_url && (
+                    <Button asChild variant='ghost' size='xs'>
+                        <a href={item.download_url} download aria-label={t('download', { title })}>
+                            {t('downloadText')}
+                        </a>
+                    </Button>
+                )}
                 <Button
                     variant='ghost'
                     size='icon-xs'
