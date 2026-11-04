@@ -682,6 +682,67 @@ export const aiPracticeFolder = mysqlTable(
     (table) => [primaryKey({ columns: [table.userId, table.previewHash] })],
 )
 
+/**
+ * A generated training chart. `id` is `tc_` plus 32 hex characters from `crypto.randomBytes(16)` so the public download path cannot be guessed.
+ * `bms` holds the original BMS bytes; `md5` and `sha256` are hashes of those bytes.
+ */
+export const trainingChart = mysqlTable(
+    'training_chart',
+    {
+        id: varchar('id', { length: 36 }).primaryKey(),
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        md5: char('md5', { length: 32 }).notNull(),
+        sha256: char('sha256', { length: 64 }).notNull(),
+        title: varchar('title', { length: 200 }).notNull(),
+        playLevel: int('play_level').notNull(),
+        bpm: int('bpm').notNull(),
+        noteCount: int('note_count').notNull(),
+        lengthMs: int('length_ms').notNull(),
+        generatorVersion: int('generator_version').notNull(),
+        spec: json('spec').notNull(),
+        request: json('request').notNull(),
+        profileSnapshot: json('profile_snapshot').notNull(),
+        bms: mediumBlob('bms').notNull(),
+        provider: varchar('provider', { length: 16 }).notNull(),
+        model: varchar('model', { length: 128 }).notNull(),
+        createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    },
+    (table) => [
+        uniqueIndex('training_chart_md5_uniq').on(table.md5),
+        index('training_chart_sha256_idx').on(table.sha256),
+        index('training_chart_user_created_idx').on(table.userId, table.createdAt),
+    ],
+)
+
+/** Points at the one "training" user folder a player has, so it is found again after a rename. */
+export const trainingFolder = mysqlTable('training_folder', {
+    userId: varchar('user_id', { length: 36 })
+        .primaryKey()
+        .references(() => user.id, { onDelete: 'cascade' }),
+    folderId: varchar('folder_id', { length: 36 })
+        .notNull()
+        .references(() => userFolder.id, { onDelete: 'cascade' }),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+})
+
+/** The cached weakness profile of a player for one time window; recomputed when `fingerprint` of the input plays changes. */
+export const playProfile = mysqlTable(
+    'play_profile',
+    {
+        userId: varchar('user_id', { length: 36 })
+            .notNull()
+            .references(() => user.id, { onDelete: 'cascade' }),
+        windowKey: varchar('window_key', { length: 16 }).notNull(),
+        profileVersion: int('profile_version').notNull(),
+        fingerprint: char('fingerprint', { length: 64 }).notNull(),
+        data: json('data').notNull(),
+        computedAt: bigint('computed_at', { mode: 'number' }).notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.windowKey] })],
+)
+
 export const playTrace = mysqlTable(
     'play_trace',
     {

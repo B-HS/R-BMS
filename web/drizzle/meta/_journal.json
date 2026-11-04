@@ -99,6 +99,13 @@
       "when": 1792824932355,
       "tag": "0013_assisted_dan",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1793751638329,
+      "tag": "0014_training_chart",
+      "breakpoints": true
     }
   ]
 }
