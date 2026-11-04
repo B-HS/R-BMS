@@ -382,26 +382,17 @@ impl AppShared {
                     target: SelectFolder::UserFolder(folder.id.clone()),
                 })
                 .collect(),
-            Some(SelectFolder::UserFolder(id)) => self
-                .user_folders
-                .shown
-                .iter()
-                .find(|folder| &folder.id == id)
-                .map(|folder| self.arrange_songs(folder.charts.clone(), filter).into_iter().map(SelectItem::Song).collect())
-                .unwrap_or_default(),
+            Some(SelectFolder::UserFolder(id)) => {
+                let Some((at, folder)) = self.user_folders.shown.iter().enumerate().find(|(_, folder)| &folder.id == id) else {
+                    return Vec::new();
+                };
+                self.held_then_missing(folder.charts.clone(), &folder.missing, |entry| MissingRef::Folder { folder: at, entry }, filter)
+            }
         }
     }
 
-    /// The rows of the level called `level` of `table`: the charts of it the library holds, kept
-    /// and ordered as every list's are, and the ones it does not, dimmed (`SongBar` with
-    /// `existsSong` false, which `Config.showNoSongExistingBar` shows).
-    ///
-    /// A chart that is not held is kept as one that has nothing recorded, no level and no mode
-    /// would be ([`SelectFilter::keeps_missing_charts`]), and never answers a search, which looks
-    /// through the library alone. Under the title ordering it is put among the held ones by its
-    /// title, after a held chart of the same title; under no ordering it follows them in the
-    /// table's own order; under any other it follows them by its title, as the reference puts a
-    /// chart it has nothing to compare by last (`BarSorter`).
+    /// The rows of the level called `level` of `table`: the charts of it the library holds and the
+    /// ones it does not ([`AppShared::held_then_missing`]).
     fn level_rows(&self, table: &TableRef, level: &str, filter: SelectFilter) -> Vec<SelectItem> {
         let Some(at) = table.resolve(self) else {
             return Vec::new();
@@ -409,17 +400,28 @@ impl AppShared {
         let Some((place, (_, owned))) = self.table_levels.get(at).and_then(|levels| levels.iter().enumerate().find(|(_, (name, _))| name == level)) else {
             return Vec::new();
         };
-        let owned = self.arrange_songs(owned.clone(), filter);
+        let missing = self.table_extras.get(at).and_then(|extras| extras.missing.get(place)).map_or(&[][..], Vec::as_slice);
+        self.held_then_missing(owned.clone(), missing, |entry| MissingRef::Table { table: at, level: place, entry }, filter)
+    }
+
+    /// The rows of a folder that lists the charts at `owned` of the library and the charts `missing`
+    /// the library does not hold, the entry at `n` of which is found again at `place(n)`: the held
+    /// ones kept and ordered as every list's are, and the others dimmed (`SongBar` with `existsSong`
+    /// false, which `Config.showNoSongExistingBar` shows). A level of a table and one of the
+    /// player's own folders are both listed this way.
+    ///
+    /// A chart that is not held is kept as one that has nothing recorded, no level and no mode
+    /// would be ([`SelectFilter::keeps_missing_charts`]), and never answers a search, which looks
+    /// through the library alone. Under the title ordering it is put among the held ones by its
+    /// title, after a held chart of the same title; under no ordering it follows them in the
+    /// folder's own order; under any other it follows them by its title, as the reference puts a
+    /// chart it has nothing to compare by last (`BarSorter`).
+    fn held_then_missing(&self, owned: Vec<usize>, missing: &[TableEntry], place: impl Fn(usize) -> MissingRef, filter: SelectFilter) -> Vec<SelectItem> {
+        let owned = self.arrange_songs(owned, filter);
         let shows_missing = self.config.library.show_missing_charts && filter.keeps_missing_charts() && self.search.trim().is_empty();
-        let missing: &[TableEntry] = match self.table_extras.get(at).and_then(|extras| extras.missing.get(place)) {
-            Some(missing) if shows_missing => missing,
-            _ => &[],
-        };
-        let mut missing: Vec<(String, MissingRef)> = missing
-            .iter()
-            .enumerate()
-            .map(|(entry, chart)| (missing_chart_title(chart).to_lowercase(), MissingRef { table: at, level: place, entry }))
-            .collect();
+        let missing = if shows_missing { missing } else { &[] };
+        let mut missing: Vec<(String, MissingRef)> =
+            missing.iter().enumerate().map(|(entry, chart)| (missing_chart_title(chart).to_lowercase(), place(entry))).collect();
         let sort = self.config.library.sort;
         if sort == SortMode::Default {
             return owned.into_iter().map(SelectItem::Song).chain(missing.into_iter().map(|(_, missing)| SelectItem::Missing(missing))).collect();
@@ -596,8 +598,8 @@ pub(crate) fn chart_under_cursor<'a>(
     ChartMeta { main_bpm: measured.bpm.filter(|bpm| bpm.min == bpm.max).map(|bpm| f64::from(bpm.min)), ..measured }
 }
 
-/// What a chart the library does not hold is called: the title its table writes, or its md5 when
-/// the table writes none.
+/// What a chart the library does not hold is called: the title its table or folder writes, or its
+/// md5 when it writes none.
 pub(crate) fn missing_chart_title(chart: &TableEntry) -> &str {
     let title = chart.title.trim();
     if title.is_empty() { chart.md5.trim() } else { title }
@@ -742,9 +744,9 @@ impl AppShared {
             .collect()
     }
 
-    /// The bar of a chart a table lists that the library does not hold (`SongBar` with
-    /// `existsSong` false): its title and artist as the table writes them, and nothing the library
-    /// or the records would say.
+    /// The bar of a chart a table or one of the player's folders lists that the library does not
+    /// hold (`SongBar` with `existsSong` false): its title and artist as the list writes them, and
+    /// nothing the library or the records would say.
     fn missing_bar(&self, missing: &MissingRef) -> SelectBar {
         let chart = self.missing_chart(missing);
         SelectBar {

@@ -1,0 +1,26 @@
+{
+    "id": "uf_7c1e0a9b3d5f4e2a8c6b0d1e2f3a4b",
+    "name": "Training",
+    "description": "Training charts R-BMS made for you",
+    "is_public": false,
+    "position": 0,
+    "item_count": 2,
+    "updated_at": 1793750400000,
+    "items": [
+        {
+            "md5": "5d41402abc4b2a76b9719d911017c592",
+            "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            "title": "R-BMS Training · 2026-11-04 · Normal",
+            "artist": "R-BMS",
+            "note": "trill",
+            "download_url": "https://example.test/api/training/tc_0123456789abcdef0123456789abcdef/chart.zip"
+        },
+        {
+            "md5": "7d793037a0760186574b0282f2f435e7",
+            "sha256": "",
+            "title": "Example",
+            "artist": "Someone",
+            "note": ""
+        }
+    ]
+}

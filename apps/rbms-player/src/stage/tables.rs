@@ -840,7 +840,7 @@ mod tests {
             .map(|item| match item {
                 SelectItem::Folder { label, .. } => label.clone(),
                 SelectItem::Song(index) => format!("song {index}"),
-                SelectItem::Missing(missing) => format!("missing {}", missing.entry),
+                SelectItem::Missing(crate::MissingRef::Table { entry, .. } | crate::MissingRef::Folder { entry, .. }) => format!("missing {entry}"),
                 SelectItem::Course(course) => format!("course {}", course.course),
             })
             .collect()

@@ -472,9 +472,9 @@ fn is_pad_row(row: &KcRow) -> bool {
 }
 
 /// One row in the select list: a folder to descend into ([`select_tree::SelectFolder`]), a playable
-/// chart (index into `AppShared::library`), a chart a difficulty table lists that the library
-/// does not hold (`SongBar` with `existsSong` false), or a course a difficulty table lists
-/// (`GradeBar`).
+/// chart (index into `AppShared::library`), a chart a difficulty table or one of the player's own
+/// folders lists that the library does not hold (`SongBar` with `existsSong` false), or a course a
+/// difficulty table lists (`GradeBar`).
 enum SelectItem {
     Song(usize),
     Folder { label: String, target: select_tree::SelectFolder },
@@ -491,14 +491,16 @@ pub(crate) struct CourseRef {
     pub(crate) course: usize,
 }
 
-/// Where a chart the library does not hold is listed: the table at `table` of the player's list, the
-/// level at `level` of that table's levels, and the entry at `entry` of the charts that level misses
-/// ([`tablesrc::TableExtras::missing`]).
+/// Where a chart the library does not hold is listed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MissingRef {
-    pub(crate) table: usize,
-    pub(crate) level: usize,
-    pub(crate) entry: usize,
+pub(crate) enum MissingRef {
+    /// The table at `table` of the player's list, the level at `level` of that table's levels, and
+    /// the entry at `entry` of the charts that level misses ([`tablesrc::TableExtras::missing`]).
+    Table { table: usize, level: usize, entry: usize },
+    /// The player's folder at `folder` of the folders on show ([`user_folders::UserFolders::shown`]),
+    /// and the entry at `entry` of the charts it lists that the library does not hold
+    /// ([`user_folders::ShownFolder::missing`]).
+    Folder { folder: usize, entry: usize },
 }
 
 /// The best score the player holds on a chart: the EX of the run that scored highest and the most

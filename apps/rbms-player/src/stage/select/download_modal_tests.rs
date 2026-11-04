@@ -1,7 +1,8 @@
-//! The modal a chart a difficulty table lists and the library does not hold opens on: every way of
-//! asking to play such a chart opens it, it offers getting the chart only for a link to a zip
-//! archive and opening a link only for one the browser may be handed, and while it is up it takes
-//! every key, controller key and press before the list or the skin under it does.
+//! The modal a chart a difficulty table or one of the player's folders lists and the library does
+//! not hold opens on: every way of asking to play such a chart opens it, it offers getting the chart
+//! only for a link to a zip archive and opening a link only for one the browser may be handed, it
+//! says what lists the chart and what its links are, and while it is up it takes every key,
+//! controller key and press before the list or the skin under it does.
 //!
 //! The browser and the folder picker it reaches for are the tests' own ([`Reached`]), and so is the
 //! fetch a download is started with: nothing here opens a program of the machine's or a native
@@ -18,7 +19,7 @@ use rbms_skin::property::generated::{BUTTON_AUTOPLAY, BUTTON_PLAY, BUTTON_PRACTI
 use rbms_table::{DifficultyTable, Md5Index, TableEntry};
 use winit::keyboard::KeyCode;
 
-use super::download_modal::{DownloadHands, ModalButton};
+use super::download_modal::{DownloadHands, ModalButton, ModalSource};
 use super::keys::SelectKey;
 use super::skinned_tests::{Browser, KEY_FIVE, KEY_ONE, KEY_THREE, SHORT_STEP, SLOT_BELOW};
 use super::tests::entry;
@@ -27,6 +28,7 @@ use crate::download::Phase;
 use crate::keyconfig::key_index_of;
 use crate::pointer::PointerInput;
 use crate::tablesrc::MatchedTable;
+use crate::text::select::download_modal::DownloadModalText;
 
 /// Where the frames below are saved for a person to open, when this names a folder: the variable
 /// the capture harness reads.
@@ -380,6 +382,105 @@ fn a_url_the_check_refuses_is_no_button() {
     browser.key(KeyCode::Enter);
     assert!(browser.state.download_modal.is_none(), "Enter on CLOSE did not close the modal");
     assert!(reached.borrow().opened.is_empty(), "an address the check refuses was handed to the browser");
+}
+
+/// The training chart of a folder: its link is the server's address for training charts.
+const TRAINING_MD5: &str = "miss-training";
+const TRAINING_URL: &str = "https://folders.test/api/training/tc_0123456789abcdef0123456789abcdef/chart.zip";
+
+/// The chart of a folder whose link is a zip archive somewhere else, and the one the folder gives
+/// no link for.
+const FOLDER_ZIP_MD5: &str = "miss-folder-zip";
+const NO_LINK_MD5: &str = "miss-no-link";
+
+/// What the folder the tests look into is called.
+const FOLDER_NAME: &str = "TRAINING";
+
+/// A browser no skin draws, looking into a folder of the player's that lists the chart the library
+/// holds and three it does not, with the cursor on the chart `md5`.
+fn in_the_folder_on(tag: &str, md5: &str) -> Browser {
+    let mut browser = Browser::over(tag, vec![entry("alpha", "a", "5")], false);
+    let shared = &mut browser.app.shared;
+    let missing = vec![
+        chart(TRAINING_MD5, "R-BMS Training", "R-BMS", "", TRAINING_URL),
+        chart(FOLDER_ZIP_MD5, "Zip", "", "", ZIP_CHART_URL),
+        chart(NO_LINK_MD5, "", "", "", ""),
+    ];
+    shared.user_folders.shown =
+        vec![crate::user_folders::ShownFolder { id: "uf_training".to_owned(), name: FOLDER_NAME.to_owned(), listed: 4, owned: 1, charts: vec![0], missing }];
+    shared.config.library.sort = SortMode::Default;
+    let path = [crate::select_tree::SelectFolder::UserFolders, shared.user_folder(0)];
+    shared.open_for_tests(path);
+    shared.rebuild_select_items();
+    put_the_cursor_on(&mut browser, md5);
+    browser.frame();
+    browser
+}
+
+/// A training chart of a folder opens the modal that says where it is listed among the player's
+/// folders and that it comes with its sounds, with getting it on, and getting it fetches the
+/// address the folder gives.
+#[test]
+fn a_training_chart_of_a_folder_is_got_from_the_address_the_folder_gives() {
+    crate::notify::exclusive(|| {
+        let mut browser = in_the_folder_on("download-folder-training", TRAINING_MD5);
+        browser.key(KeyCode::Enter);
+        let modal = browser.state.download_modal.as_ref().expect("the modal is open over the folder's chart");
+        assert_eq!(modal.source, ModalSource::Folder { training: true });
+        assert_eq!((modal.table_title.as_str(), modal.level_title.as_str()), (crate::select_tree::user_folders_title(), FOLDER_NAME));
+        assert_eq!(modal.note_lines(), [DownloadModalText::NoteTrainingChart]);
+        assert_eq!(modal.buttons()[0], (ModalButton::GetChart, true));
+        assert_eq!(modal.focus, ModalButton::GetChart);
+        browser.frame();
+        capture(&browser, "download-modal-training");
+
+        let (fetch, gate) = crate::download::tests::held(TRAINING_URL, crate::download::tests::stored_zip(&[]));
+        crate::download::tests::use_fetch(&mut browser.app.shared, fetch);
+        browser.app.shared.config.library.download_folder = Some(picked_folder("folder-training").to_string_lossy().into_owned());
+        browser.key(KeyCode::Enter);
+        let job = crate::download::status(&browser.app.shared).expect("getting the chart did not start");
+        assert_eq!((job.md5.as_str(), job.phase), (TRAINING_MD5, Phase::Downloading));
+        browser.key(KeyCode::Enter);
+        drop(gate);
+        crate::download::tests::wait_for_the_job(&mut browser.app.shared);
+        let mut said = Vec::new();
+        crate::notify::drain(&mut said);
+    });
+}
+
+/// Any other chart of a folder says only that it is in the folder and not in the library, and that
+/// the folder gives no link for it when there is none, which leaves getting it off.
+#[test]
+fn a_chart_of_a_folder_says_whether_the_folder_gives_a_link_for_it() {
+    let mut browser = in_the_folder_on("download-folder-zip", FOLDER_ZIP_MD5);
+    browser.key(KeyCode::Enter);
+    let modal = browser.state.download_modal.as_ref().expect("the modal is open");
+    assert_eq!(modal.source, ModalSource::Folder { training: false });
+    assert_eq!(modal.note_lines(), [DownloadModalText::NoteFolderChart]);
+    assert_eq!(modal.buttons()[0], (ModalButton::GetChart, true), "a zip archive of a folder is got as a table's is");
+
+    let mut browser = in_the_folder_on("download-folder-no-link", NO_LINK_MD5);
+    browser.key(KeyCode::Enter);
+    let modal = browser.state.download_modal.as_ref().expect("the modal is open");
+    assert_eq!(modal.source, ModalSource::Folder { training: false });
+    assert_eq!(modal.note_lines(), [DownloadModalText::NoteFolderChart, DownloadModalText::NoteFolderNoLink]);
+    assert_eq!(
+        modal.buttons(),
+        [(ModalButton::GetChart, false), (ModalButton::OpenSongUrl, false), (ModalButton::OpenChartUrl, false), (ModalButton::Close, true)]
+    );
+    assert_eq!(modal.focus, ModalButton::Close);
+    browser.frame();
+    capture(&browser, "download-modal-no-link");
+}
+
+/// A table's chart says what the table's two links are, as it did before folders had charts.
+#[test]
+fn a_tables_chart_says_what_its_two_links_are() {
+    let mut browser = built_in_on("download-table-notes", ZIP_MD5);
+    browser.key(KeyCode::Enter);
+    let modal = browser.state.download_modal.as_ref().expect("the modal is open");
+    assert_eq!(modal.source, ModalSource::Table);
+    assert_eq!(modal.note_lines(), [DownloadModalText::NoteChartFile, DownloadModalText::NoteSongUrl]);
 }
 
 #[test]

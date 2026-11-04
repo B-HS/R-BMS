@@ -50,6 +50,24 @@ fn one_folder_is_asked_for_by_its_id_and_comes_with_its_charts() {
     );
 }
 
+/// The folder answer the web server gives, as its own tests check it
+/// (`contract/server-responses/user-folder-detail.json`): a training chart it made carries the
+/// address it is got from, and a chart it cannot hand out carries none, which reads as nothing.
+#[test]
+fn the_servers_folder_answer_gives_the_address_of_a_training_chart_only() {
+    let answer = include_str!("../../../../contract/server-responses/user-folder-detail.json");
+    let server = TestServer::spawn(vec![ok(answer)]);
+    let contract: UserFolder = serde_json::from_str(answer).expect("the contract folder reads");
+    let folder = server.client_with_token(TOKEN).user_folder(&player(), &contract.summary.id).expect("the folder reads");
+    let _ = server.next_request();
+    assert_eq!(
+        folder.items.iter().map(|item| item.download_url.as_str()).collect::<Vec<_>>(),
+        vec!["https://example.test/api/training/tc_0123456789abcdef0123456789abcdef/chart.zip", ""]
+    );
+    let blank: UserFolderItem = serde_json::from_str(r#"{"md5":"7d793037a0760186574b0282f2f435e7","download_url":""}"#).expect("an empty address reads");
+    assert_eq!(blank.download_url, "");
+}
+
 /// A server from before folders answers 404, and a token that is not the player's 401 or 403: each
 /// is told apart, so a client can pass over the first quietly and hide the folders on the others.
 #[test]

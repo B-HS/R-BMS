@@ -1,11 +1,14 @@
-//! The modal a chart a difficulty table lists and the library does not hold opens on.
+//! The modal a chart a difficulty table or one of the player's own folders lists and the library
+//! does not hold opens on.
 //!
 //! The reference hands the two links of such a chart straight to the browser
 //! (`EventFactory.open_download_site`). This player says first what each link is: the DL of a table
 //! is the chart file alone, a difference chart, and the song it is a chart of -- its sounds and its
-//! pictures -- has to be got from the song's own page and put beside it. Then it offers, in one row
-//! of buttons: getting the chart itself when its link is a zip archive the player can fetch, opening
-//! the song's page, opening the chart's page, and closing the modal.
+//! pictures -- has to be got from the song's own page and put beside it. A folder gives a link only
+//! for a chart the server can hand out itself, which for a training chart the server made is the
+//! chart with its sounds; the modal says so, or that the folder gives no link. Then it offers, in
+//! one row of buttons: getting the chart itself when its link is a zip archive the player can fetch,
+//! opening the song's page, opening the chart's page, and closing the modal.
 //!
 //! The row is one ordered list ([`DownloadModal::buttons`]), and the drawing, the keys and the mouse
 //! all go by its length and by which of its buttons are on. A button that is off is drawn dimmed
@@ -13,7 +16,7 @@
 //! cancelling it, and a line under the note says how far the job is ([`crate::download`]); while
 //! another chart is being got, getting this one is off.
 //!
-//! Opening the modal reads nothing from the disk or the network: the table's entry is in memory. A
+//! Opening the modal reads nothing from the disk or the network: the list's entry is in memory. A
 //! link is handed to the browser only once [`rbms_download::browsable_url`] has let it through
 //! ([`crate::open_url`]), and getting the chart asks for the download folder first when none has
 //! been chosen ([`crate::dialog::pick_download_folder`]).
@@ -35,13 +38,26 @@ use crate::dialog::{DialogHandle, DialogState};
 use crate::download::{JobStatus, Phase, cancel_download, start_download};
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
 use crate::notify::{Level, notify, notify_text};
-use crate::select_tree::{level_title, table_name};
+use crate::select_tree::{level_title, table_name, user_folders_title};
 use crate::stage::result::SkinStatus;
 use crate::text::select::download_modal::DownloadModalText;
 use crate::{AppShared, CH, CW, Hot, KeyCode, MissingRef, SelectItem};
 
 /// What the modal says of the two links of a table's chart.
-const NOTE_LINES: [DownloadModalText; 2] = [DownloadModalText::NoteChartFile, DownloadModalText::NoteSongUrl];
+const TABLE_NOTE_LINES: [DownloadModalText; 2] = [DownloadModalText::NoteChartFile, DownloadModalText::NoteSongUrl];
+
+/// What the modal says of a training chart the server made, of a chart of a folder with a link, and
+/// of one without.
+const TRAINING_NOTE_LINES: [DownloadModalText; 1] = [DownloadModalText::NoteTrainingChart];
+const FOLDER_NOTE_LINES: [DownloadModalText; 1] = [DownloadModalText::NoteFolderChart];
+const FOLDER_NO_LINK_NOTE_LINES: [DownloadModalText; 2] = [DownloadModalText::NoteFolderChart, DownloadModalText::NoteFolderNoLink];
+
+/// What the path of the address a training chart is got from starts with on the score server
+/// (`GET /api/training/{id}/chart.zip`).
+const TRAINING_DOWNLOAD_PATH_PREFIX: &str = "/api/training/";
+
+/// What ends the path of an address and starts its query or its fragment.
+const URL_PATH_ENDS: [char; 2] = ['?', '#'];
 
 /// How dark the screen under the modal is made.
 const BACKDROP_ALPHA: u8 = 180;
@@ -117,12 +133,24 @@ impl ModalButton {
     }
 }
 
-/// The modal over a chart the library does not hold: the table's entry of it, where the table lists
-/// it, what its two links are, and the button the cursor is on.
+/// What lists the chart a modal is open over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModalSource {
+    /// A level of a difficulty table.
+    Table,
+    /// One of the player's own folders, and whether the chart is a training chart the server made:
+    /// one whose link is a zip archive the server hands out at its address for training charts.
+    Folder { training: bool },
+}
+
+/// The modal over a chart the library does not hold: the list's entry of it, what lists it and
+/// where, what its two links are, and the button the cursor is on.
 pub(crate) struct DownloadModal {
     pub(crate) entry: TableEntry,
+    /// Where the chart is listed: the table and its level, or the player's folders and the folder.
     pub(crate) table_title: String,
     pub(crate) level_title: String,
+    pub(crate) source: ModalSource,
     /// What the chart's own link (`url_diff`) leads to.
     pub(crate) chart_link: LinkKind,
     /// The song's link (`url`) and the chart's, each only when it may be handed to the browser.
@@ -136,17 +164,28 @@ pub(crate) struct DownloadModal {
 }
 
 impl DownloadModal {
-    /// The modal over the chart `missing` names, or `None` when the table no longer lists one there.
-    /// The cursor starts on the first button that is on.
+    /// The modal over the chart `missing` names, or `None` when the table or the folder no longer
+    /// lists one there. The cursor starts on the first button that is on.
     pub(crate) fn of(shared: &AppShared, missing: &MissingRef) -> Option<DownloadModal> {
         let entry = shared.missing_chart(missing)?.clone();
-        let level =
-            shared.table_levels.get(missing.table).and_then(|levels| levels.get(missing.level)).map_or(entry.level.as_str(), |(label, _)| label.as_str());
-        let level_title = level_title(shared, missing.table, level);
+        let chart_link = classify_link(&entry.url_diff);
+        let (table_title, level_title, source) = match *missing {
+            MissingRef::Table { table, level, .. } => {
+                let label = shared.table_levels.get(table).and_then(|levels| levels.get(level)).map_or(entry.level.as_str(), |(label, _)| label.as_str());
+                (table_name(shared, table), level_title(shared, table, label), ModalSource::Table)
+            }
+            MissingRef::Folder { folder, .. } => {
+                let name = shared.user_folders.shown.get(folder).map(|folder| folder.name.clone()).unwrap_or_default();
+                let path = entry.url_diff.trim().split(URL_PATH_ENDS).next().unwrap_or_default();
+                let training = chart_link == LinkKind::DirectZip && path.contains(TRAINING_DOWNLOAD_PATH_PREFIX);
+                (user_folders_title().to_owned(), name, ModalSource::Folder { training })
+            }
+        };
         let mut modal = DownloadModal {
-            table_title: table_name(shared, missing.table),
+            table_title,
             level_title,
-            chart_link: classify_link(&entry.url_diff),
+            source,
+            chart_link,
             song_url: browsable_url(&entry.url),
             chart_url: browsable_url(&entry.url_diff),
             entry,
@@ -169,6 +208,18 @@ impl DownloadModal {
             _ => (ModalButton::GetChart, self.chart_link == LinkKind::DirectZip && !self.job.as_ref().is_some_and(JobStatus::is_running)),
         };
         vec![first, (ModalButton::OpenSongUrl, self.song_url.is_some()), (ModalButton::OpenChartUrl, self.chart_url.is_some()), (ModalButton::Close, true)]
+    }
+
+    /// What the modal says of the chart's links: what a table's two links are, that a training chart
+    /// comes with its sounds, or that a folder's chart is not in the library, and that the folder
+    /// gives no link for it when there is none the browser may be handed.
+    pub(crate) fn note_lines(&self) -> &'static [DownloadModalText] {
+        match self.source {
+            ModalSource::Table => &TABLE_NOTE_LINES,
+            ModalSource::Folder { training: true } => &TRAINING_NOTE_LINES,
+            ModalSource::Folder { training: false } if self.chart_url.is_none() => &FOLDER_NO_LINK_NOTE_LINES,
+            ModalSource::Folder { training: false } => &FOLDER_NOTE_LINES,
+        }
     }
 
     /// The download job, when it is getting this chart or last got it.
@@ -269,7 +320,7 @@ pub(super) fn render_download_modal<R: Renderer>(r: &mut R, modal: &DownloadModa
     draw_text(r, x, panel.y + ARTIST_Y, ARTIST_SCALE, th.text_dim, &fit_text(modal.entry.artist.trim(), ARTIST_SCALE, room));
     let place = format!("{} {}", modal.table_title, modal.level_title);
     draw_text(r, x, panel.y + PLACE_Y, PLACE_SCALE, th.text_muted, &fit_text(&place, PLACE_SCALE, room));
-    for (line, text) in NOTE_LINES.iter().enumerate() {
+    for (line, text) in modal.note_lines().iter().enumerate() {
         draw_text(r, x, panel.y + NOTE_Y + NOTE_GAP * line as f32, NOTE_SCALE, th.text, &fit_text(text.get(language()), NOTE_SCALE, room));
     }
     if let Some(status) = modal.status_line() {

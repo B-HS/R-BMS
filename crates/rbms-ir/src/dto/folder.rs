@@ -36,6 +36,10 @@ pub struct UserFolderItem {
     pub artist: String,
     #[serde(default)]
     pub note: String,
+    /// Where the chart can be got as a zip archive, for a chart the server can hand out itself: a
+    /// training chart it made for the player. Empty when the server names no such address.
+    #[serde(default)]
+    pub download_url: String,
 }
 
 /// Every folder of a player's, in the order the player arranged them.
@@ -93,7 +97,7 @@ mod tests {
         let bare: UserFolder = serde_json::from_value(json!({ "id": "uf_1", "name": "A" })).expect("a folder without items reads");
         assert!(bare.items.is_empty());
         let item: UserFolderItem = serde_json::from_value(json!({ "md5": "aa" })).expect("an item with only its md5 reads");
-        assert_eq!((item.sha256.as_str(), item.title.as_str(), item.note.as_str()), ("", "", ""));
+        assert_eq!((item.sha256.as_str(), item.title.as_str(), item.note.as_str(), item.download_url.as_str()), ("", "", "", ""));
     }
 
     #[test]

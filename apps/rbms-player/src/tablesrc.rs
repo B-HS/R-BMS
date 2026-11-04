@@ -1083,9 +1083,13 @@ fn set_table_slot(shared: &mut AppShared, at: usize, table: MatchedTable) {
 }
 
 impl AppShared {
-    /// The table entry of a chart the library does not hold, as the table at its place lists it.
+    /// The table entry of a chart the library does not hold, as the table or the player's folder at
+    /// its place lists it.
     pub(crate) fn missing_chart(&self, missing: &MissingRef) -> Option<&TableEntry> {
-        self.table_extras.get(missing.table)?.missing.get(missing.level)?.get(missing.entry)
+        match *missing {
+            MissingRef::Table { table, level, entry } => self.table_extras.get(table)?.missing.get(level)?.get(entry),
+            MissingRef::Folder { folder, entry } => self.user_folders.shown.get(folder)?.missing.get(entry),
+        }
     }
 
     /// The courses the folder of courses of the table at `at` holds: the ones its header lists, in

@@ -20,10 +20,11 @@ use super::skinned_tests::Browser;
 use super::tests::entry;
 use super::*;
 use crate::app_result::following_song;
-use crate::select_tree::{ListPlace, show_the_list_again};
+use crate::select_tree::{ListPlace, SelectFolder, show_the_list_again};
 use crate::skin_host::ClusterState;
 use crate::skin_host::chart::ChartState;
 use crate::tablesrc::MatchedTable;
+use crate::user_folders::ShownFolder;
 
 /// The charts the library holds, in title order.
 const TITLES: [&str; 3] = ["alpha", "amber", "delta"];
@@ -151,6 +152,28 @@ fn other_orders_put_missing_charts_last() {
             ["alpha", "amber", "missing Aardvark Missing", "missing Amber", "missing Beta Missing", "missing miss-untitled"],
             "{sort:?}"
         );
+    }
+}
+
+/// A folder of the player's that lists what a level lists, the held charts and the missing ones,
+/// has the same rows as the level under every ordering: both are built the one way.
+#[test]
+fn a_players_folder_lists_its_missing_charts_the_way_a_level_does() {
+    let mut browser = browser_in_the_level("missing-folder-like-level");
+    let shared = &mut browser.app.shared;
+    let charts = shared.table_levels[0][0].1.clone();
+    let missing = shared.table_extras[0].missing[0].clone();
+    let listed = charts.len() + missing.len();
+    shared.user_folders.shown =
+        vec![ShownFolder { id: "uf_like_a_level".to_owned(), name: "LIKE A LEVEL".to_owned(), listed, owned: charts.len(), charts, missing }];
+    for sort in [SortMode::Default, SortMode::Title, SortMode::Level, SortMode::Artist] {
+        let level = [shared.table_folder(0), shared.level_folder(0, 0)];
+        shared.open_for_tests(level);
+        let in_the_level = rows_sorted(shared, sort);
+        let folder = [SelectFolder::UserFolders, shared.user_folder(0)];
+        shared.open_for_tests(folder);
+        assert_eq!(rows_sorted(shared, sort), in_the_level, "{sort:?}");
+        assert_eq!(missing_rows(shared), MISSING_IN_TABLE_ORDER.len(), "{sort:?}");
     }
 }
 

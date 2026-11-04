@@ -167,8 +167,14 @@ fn leaving_a_table_puts_the_cursor_on_that_table_at_the_root() {
 #[test]
 fn leaving_my_folders_and_a_folder_of_them_puts_the_cursor_on_each() {
     let mut browser = browser_with("tree-leave-my-folders", false, &[PLAIN]);
-    let folder =
-        |id: &str, charts: Vec<usize>| ShownFolder { id: id.to_owned(), name: id.to_ascii_uppercase(), listed: charts.len(), owned: charts.len(), charts };
+    let folder = |id: &str, charts: Vec<usize>| ShownFolder {
+        id: id.to_owned(),
+        name: id.to_ascii_uppercase(),
+        listed: charts.len(),
+        owned: charts.len(),
+        charts,
+        missing: Vec::new(),
+    };
     browser.app.shared.user_folders.shown = vec![folder("one", vec![0]), folder("two", vec![1, 2])];
     browser.app.shared.rebuild_select_items();
     browser.frame();

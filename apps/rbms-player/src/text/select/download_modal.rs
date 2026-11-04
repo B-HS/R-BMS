@@ -1,4 +1,5 @@
-//! Fixed words of the modal over a chart a difficulty table lists and the library does not hold, by language.
+//! Fixed words of the modal over a chart a difficulty table or one of the player's folders lists and the library does not hold, by
+//! language.
 //!
 //! How far the download job is, and why it could not start, are the download's own lines and are not here. The title of the chart, its
 //! artist and the table and level it is listed under are data.
@@ -18,6 +19,23 @@ rbms_model::translations! {
             "THE SONG ITSELF - ITS SOUNDS AND IMAGES - HAS TO BE GOT FROM THE SONG URL AND PUT BESIDE THE CHART.",
             "곡 자체(음원과 이미지)는 곡 URL에서 받아 차트 옆에 두어야 합니다.",
             "曲そのもの（音源と画像）は曲のURLから入手し、譜面の隣に置く必要があります。",
+        ),
+        /// What the modal says of a chart one of the player's folders lists: a training chart the server made, which comes with its
+        /// sounds, and any other chart, with or without a link the folder gives for it.
+        NoteTrainingChart => (
+            "A TRAINING CHART THE SERVER MADE FOR YOU. GET CHART DOWNLOADS IT WITH ITS CLICK SOUNDS.",
+            "서버가 만들어 준 훈련곡입니다. 차트 받기로 클릭음과 함께 받습니다.",
+            "サーバーが作成したトレーニング譜面です。譜面を取得でクリック音と一緒にダウンロードします。",
+        ),
+        NoteFolderChart => (
+            "THIS CHART IS IN YOUR FOLDER BUT NOT IN THE LIBRARY.",
+            "내 폴더에 있지만 라이브러리에 없는 차트입니다.",
+            "自分のフォルダにありますが、ライブラリにない譜面です。",
+        ),
+        NoteFolderNoLink => (
+            "THE FOLDER HAS NO DOWNLOAD LINK FOR IT. GET IT ELSEWHERE AND RESCAN.",
+            "폴더에 이 차트의 다운로드 링크가 없습니다. 다른 곳에서 받은 뒤 다시 스캔하세요.",
+            "フォルダにこの譜面のダウンロードリンクがありません。別の場所で入手して再スキャンしてください。",
         ),
         /// What the modal says while the folder picker it opened is up, and while a job is getting another chart.
         PickingTheFolder => (
@@ -61,6 +79,9 @@ mod tests {
             (DownloadModalText::Heading, "NOT IN THE LIBRARY"),
             (DownloadModalText::NoteChartFile, "THE TABLE'S DL IS THE CHART FILE ONLY (A DIFFERENCE CHART)."),
             (DownloadModalText::NoteSongUrl, "THE SONG ITSELF - ITS SOUNDS AND IMAGES - HAS TO BE GOT FROM THE SONG URL AND PUT BESIDE THE CHART."),
+            (DownloadModalText::NoteTrainingChart, "A TRAINING CHART THE SERVER MADE FOR YOU. GET CHART DOWNLOADS IT WITH ITS CLICK SOUNDS."),
+            (DownloadModalText::NoteFolderChart, "THIS CHART IS IN YOUR FOLDER BUT NOT IN THE LIBRARY."),
+            (DownloadModalText::NoteFolderNoLink, "THE FOLDER HAS NO DOWNLOAD LINK FOR IT. GET IT ELSEWHERE AND RESCAN."),
             (DownloadModalText::PickingTheFolder, "CHOOSE THE FOLDER THE CHART IS UNPACKED INTO"),
             (DownloadModalText::AnotherDownloadIsRunning, "ANOTHER DOWNLOAD IS RUNNING"),
             (DownloadModalText::KeyHint, "LEFT RIGHT CHOOSE   ENTER PRESS   ESC CLOSE"),

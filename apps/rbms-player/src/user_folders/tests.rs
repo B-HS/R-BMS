@@ -22,6 +22,10 @@ pub(crate) const LONG_NOTES: &str = "uf_00000000000000000000000000000b";
 pub(crate) const OWNED_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 pub(crate) const OWNED_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 pub(crate) const MISSING: &str = "cccccccccccccccccccccccccccccccc";
+pub(crate) const MISSING_TOO: &str = "dddddddddddddddddddddddddddddddd";
+
+/// The address a training chart the test's server made is got from.
+pub(crate) const TRAINING_URL: &str = "https://folders.test/api/training/tc_0123456789abcdef0123456789abcdef/chart.zip";
 
 /// How long a test waits for a fetch to come back before it calls the fetch lost.
 const FETCH_WAIT: Duration = Duration::from_secs(10);
@@ -63,7 +67,12 @@ pub(crate) fn summary(id: &str, name: &str, updated_at: i64, items: usize) -> Us
 }
 
 fn item(md5: &str) -> UserFolderItem {
-    UserFolderItem { md5: md5.into(), sha256: String::new(), title: String::new(), artist: String::new(), note: String::new() }
+    UserFolderItem { md5: md5.into(), sha256: String::new(), title: String::new(), artist: String::new(), note: String::new(), download_url: String::new() }
+}
+
+/// A chart of a folder with its title, and the address it is got from, empty for none.
+pub(crate) fn listed(md5: &str, title: &str, download_url: &str) -> UserFolderItem {
+    UserFolderItem { title: title.into(), download_url: download_url.into(), ..item(md5) }
 }
 
 impl FolderServer {
@@ -76,6 +85,11 @@ impl FolderServer {
 
     pub(crate) fn set_folders(&self, folders: &[(&str, &[&str])]) {
         *self.folders.lock().expect("the folders") = folders.iter().map(|(id, md5s)| ((*id).to_string(), md5s.iter().map(|md5| item(md5)).collect())).collect();
+    }
+
+    /// Answer the folder `id` with `items`, as the server would send them.
+    pub(crate) fn set_items(&self, id: &str, items: Vec<UserFolderItem>) {
+        self.folders.lock().expect("the folders").insert(id.to_string(), items);
     }
 
     pub(crate) fn set_index(&self, index: IndexAnswer) {
@@ -244,10 +258,110 @@ fn the_folders_are_one_row_at_the_top_holding_a_row_per_folder() {
     );
     assert_eq!(
         signed.rows(|shared| vec![SelectFolder::UserFolders, shared.user_folder(0)]),
-        vec![OWNED_A.to_string(), OWNED_B.to_string()],
-        "a chart the library does not have is no row"
+        vec![OWNED_A.to_string(), OWNED_B.to_string(), MISSING.to_string()],
+        "a chart the library does not have is a row after the ones it has"
     );
     assert_eq!(signed.app.shared.user_folders.chart_counts(), (4, 3));
+}
+
+/// The charts a folder lists that the library does not have are kept in the folder's order, each
+/// with what the folder says of it and the address it is got from as its chart's link, and a chart
+/// that arrives in the library leaves them.
+#[test]
+fn the_charts_the_library_does_not_have_are_kept_in_the_folders_order_with_their_address() {
+    let server = FolderServer::serving(vec![summary(PRACTICE, "training", 1, 4)], &[]);
+    server.set_items(
+        PRACTICE,
+        vec![
+            listed(MISSING_TOO, "second", ""),
+            item(OWNED_A),
+            UserFolderItem { sha256: "9f86".into(), ..listed(MISSING, "first", TRAINING_URL) },
+            item(OWNED_B),
+        ],
+    );
+    let mut signed = Signed::new("missing-kept", server);
+    signed.fetch(false);
+    let folder = &signed.app.shared.user_folders.shown[0];
+    assert_eq!((folder.listed, folder.owned, folder.charts.clone()), (4, 2, vec![0, 1]));
+    assert_eq!(
+        folder.missing,
+        vec![
+            TableEntry {
+                md5: MISSING_TOO.into(),
+                sha256: String::new(),
+                level: String::new(),
+                title: "second".into(),
+                artist: String::new(),
+                url: String::new(),
+                url_diff: String::new()
+            },
+            TableEntry {
+                md5: MISSING.into(),
+                sha256: "9f86".into(),
+                level: String::new(),
+                title: "first".into(),
+                artist: String::new(),
+                url: String::new(),
+                url_diff: TRAINING_URL.into()
+            },
+        ]
+    );
+
+    signed.app.shared.library = Library::from_songs(vec![entry(OWNED_A), entry(OWNED_B), entry(MISSING)]);
+    rematch(&mut signed.app.shared);
+    let folder = &signed.app.shared.user_folders.shown[0];
+    assert_eq!(folder.missing.iter().map(|chart| chart.md5.as_str()).collect::<Vec<_>>(), vec![MISSING_TOO], "the chart that arrived is still missing");
+    assert_eq!(folder.owned, 3);
+}
+
+/// An address a chart is got from is kept only when it is a web one: one that would run something
+/// or read the machine's own files is no address, and one with what is not to be trusted in it is
+/// cleaned and cut.
+#[test]
+fn an_address_that_is_not_a_web_one_is_no_address() {
+    let long = format!("https://folders.test/{}", "x".repeat(DOWNLOAD_URL_MAX_CHARS));
+    let server = FolderServer::serving(vec![summary(PRACTICE, "addresses", 1, 5)], &[]);
+    let addresses = ["javascript:alert(1)", "file:///etc/passwd", "ftp://folders.test/a.zip", " HTTPS://folders.test/a\u{7}.zip ", long.as_str()];
+    let md5s = ["11111111111111111111111111111111", "22222222222222222222222222222222", MISSING, MISSING_TOO, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"];
+    server.set_items(PRACTICE, md5s.iter().zip(addresses).map(|(md5, address)| listed(md5, "", address)).collect());
+    let mut signed = Signed::new("addresses", server);
+    signed.fetch(false);
+    let links: Vec<String> = signed.app.shared.user_folders.shown[0].missing.iter().map(|chart| chart.url_diff.clone()).collect();
+    assert_eq!(links[..4], ["", "", "", "HTTPS://folders.test/a.zip"]);
+    assert_eq!(links[4].chars().count(), DOWNLOAD_URL_MAX_CHARS, "a long address is cut");
+}
+
+/// A copy written before copies said what they were, whose charts carry no addresses, still reads,
+/// and the next fetch asks for every folder of it again, stamps unmoved, so the addresses the server
+/// gives now arrive; the copy written then is current, and the fetch after asks for nothing.
+#[test]
+fn a_copy_written_before_the_addresses_reads_and_is_fetched_again_whole() {
+    let mut signed = Signed::new("old-copy", two_folders());
+    let copy = signed.copy_path();
+    std::fs::create_dir_all(copy.parent().expect("the copy is in a folder")).expect("the copy's folder can be made");
+    let old_item = |md5: &str| format!(r#"(md5:"{md5}",sha256:"",title:"",artist:"",note:"")"#);
+    let old_copy = format!(
+        r#"(server:"{SERVER}",player_id:"{PLAYER}",fetched_at:Some(1),folders:[(id:"{PRACTICE}",name:"practice 12",description:"",updated_at:10,items:[{},{},{}]),(id:"{LONG_NOTES}",name:"ln",description:"",updated_at:20,items:[{}])])"#,
+        old_item(OWNED_A),
+        old_item(MISSING),
+        old_item(OWNED_B),
+        old_item(OWNED_B)
+    );
+    std::fs::write(&copy, old_copy).expect("the old copy is written");
+    signed.app.shared.user_folders = UserFolders::default();
+    follow_account(&mut signed.app.shared);
+    let shown = &signed.app.shared.user_folders.shown;
+    assert_eq!(shown.len(), 2, "the old copy did not read");
+    assert_eq!(shown[0].missing.iter().map(|chart| (chart.md5.as_str(), chart.url_diff.as_str())).collect::<Vec<_>>(), vec![(MISSING, "")]);
+
+    signed.server.set_items(PRACTICE, vec![item(OWNED_A), listed(MISSING, "", TRAINING_URL), item(OWNED_B)]);
+    signed.fetch(false);
+    assert_eq!(signed.server.folder_asks(), 2, "a folder of the old copy whose stamp has not moved was not asked for again");
+    assert_eq!(signed.app.shared.user_folders.shown[0].missing[0].url_diff, TRAINING_URL);
+    assert!(std::fs::read_to_string(&copy).expect("the copy is written again").contains(TRAINING_URL));
+
+    signed.fetch(false);
+    assert_eq!(signed.server.folder_asks(), 2, "a current copy whose stamps have not moved was asked for again");
 }
 
 /// What was fetched is kept for the account, and the next fetch asks only for the folders whose

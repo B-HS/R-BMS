@@ -5,8 +5,10 @@
 //!
 //! The folders are edited on the web site and only read here, the way a difficulty table is. A
 //! folder names its charts by md5, which is how they are matched against the library; a chart the
-//! library does not have is not a row, and the folder's row says how many of its charts are there
-//! out of how many it lists.
+//! library does not have is a dimmed row after the ones it has, the way a level of a table lists the
+//! charts it misses, and the folder's row says how many of its charts are there out of how many it
+//! lists. A chart the server can hand out itself carries the address it is got from, which the modal
+//! over such a row fetches it by.
 //!
 //! What was fetched last is kept per account and per server (`user-folders/<hash>.ron` beside the
 //! settings, written in the settings' own format), so the folders are there from the first frame of a run, offline too, and a fetch
@@ -27,6 +29,7 @@ use std::thread::JoinHandle;
 
 use rbms_ir::{IrError, PlayerId, ScoreServer, UserFolderItem, UserFolderSummary, is_path_safe_folder_id};
 use rbms_library::Library;
+use rbms_table::TableEntry;
 use serde::{Deserialize, Serialize};
 
 use crate::AppShared;
@@ -60,6 +63,18 @@ const DESCRIPTION_MAX_CHARS: usize = 255;
 
 /// The length of an md5 written in hex, which is how a chart of a folder is named.
 const MD5_HEX_LEN: usize = 32;
+
+/// The longest address a chart of a folder is got from that is kept.
+const DOWNLOAD_URL_MAX_CHARS: usize = 2_048;
+
+/// The schemes an address a chart of a folder is got from may start with. Any other address is no
+/// address.
+const DOWNLOAD_URL_SCHEMES: [&str; 2] = ["http://", "https://"];
+
+/// What the copies written now are, which a copy written before is told apart by. A copy of an
+/// older version may hold charts without what the server has said of them since, so every folder of
+/// it is asked for again.
+const COPY_VERSION: u32 = 1;
 
 /// How many folders are asked for at once.
 const MAX_PARALLEL_FETCHES: usize = 4;
@@ -115,6 +130,9 @@ struct SavedFolder {
 struct SavedFolders {
     server: String,
     player_id: String,
+    /// What the copy is ([`COPY_VERSION`]), or nothing for one written before copies said.
+    #[serde(default)]
+    version: u32,
     /// When the folders were fetched, in seconds since the Unix epoch.
     #[serde(default)]
     fetched_at: Option<u64>,
@@ -159,6 +177,10 @@ pub(crate) struct ShownFolder {
     pub(crate) owned: usize,
     /// The library positions of the charts the folder lists, in library order.
     pub(crate) charts: Vec<usize>,
+    /// The charts the folder lists that the library does not have, in the folder's order, each as a
+    /// table's entry of it would be: no level and no song page, and the address the chart is got
+    /// from, when the folder gives one, as the chart's link.
+    pub(crate) missing: Vec<TableEntry>,
 }
 
 impl ShownFolder {
@@ -176,16 +198,28 @@ fn matched(folders: &[SavedFolder], library: &Library) -> Vec<ShownFolder> {
         .iter()
         .map(|folder| {
             let mut charts = Vec::new();
+            let mut missing = Vec::new();
             let mut owned = 0;
             for item in &folder.items {
                 let found = library.indices_for_md5(&item.md5);
                 owned += usize::from(!found.is_empty());
+                if found.is_empty() {
+                    missing.push(TableEntry {
+                        md5: item.md5.clone(),
+                        sha256: item.sha256.clone(),
+                        level: String::new(),
+                        title: item.title.clone(),
+                        artist: item.artist.clone(),
+                        url: String::new(),
+                        url_diff: item.download_url.clone(),
+                    });
+                }
                 charts.extend_from_slice(found);
             }
             charts.sort_unstable();
             charts.dedup();
             let name = Some(folder.name.trim()).filter(|name| !name.is_empty()).unwrap_or(UNNAMED_FOLDER).to_ascii_uppercase();
-            ShownFolder { id: folder.id.clone(), name, listed: folder.items.len(), owned, charts }
+            ShownFolder { id: folder.id.clone(), name, listed: folder.items.len(), owned, charts, missing }
         })
         .collect()
 }
@@ -196,13 +230,17 @@ fn tidy_text(text: &str, max: usize) -> String {
 }
 
 /// The folder `summary` describes, holding `items` as a server sent them, with what is not to be
-/// trusted taken out: control characters and excess length in its words, charts not named by an
-/// md5, and charts past what a folder can hold.
+/// trusted taken out: control characters and excess length in its words and in the addresses its
+/// charts are got from, an address that is not a web one, charts not named by an md5, and charts
+/// past what a folder can hold.
 fn tidied(summary: UserFolderSummary, mut items: Vec<UserFolderItem>) -> SavedFolder {
     items.retain(|item| item.md5.len() == MD5_HEX_LEN && item.md5.bytes().all(|byte| byte.is_ascii_hexdigit()));
     items.truncate(MAX_CHARTS_PER_FOLDER);
     for item in &mut items {
         item.md5.make_ascii_lowercase();
+        let url = tidy_text(&item.download_url, DOWNLOAD_URL_MAX_CHARS);
+        let is_web = DOWNLOAD_URL_SCHEMES.iter().any(|scheme| url.get(..scheme.len()).is_some_and(|head| head.eq_ignore_ascii_case(scheme)));
+        item.download_url = if is_web { url } else { String::new() };
     }
     SavedFolder {
         name: tidy_text(&summary.name, NAME_MAX_CHARS),
@@ -228,8 +266,9 @@ enum FetchOutcome {
     Failed(String),
 }
 
-/// Fetch every folder of `account` whose stamp is not the one `previous` holds, and put the
-/// folders together in the order the server lists them.
+/// Fetch every folder of `account` whose stamp is not the one `previous` holds, or every folder when
+/// `previous` is a copy of an older version, and put the folders together in the order the server
+/// lists them.
 fn fetch_folders(server: &dyn ScoreServer, account: &FolderAccount, previous: Option<&SavedFolders>, now: u64) -> FetchOutcome {
     let player = PlayerId { id: account.player_id.clone() };
     let index = match server.user_folders(&player) {
@@ -240,7 +279,9 @@ fn fetch_folders(server: &dyn ScoreServer, account: &FolderAccount, previous: Op
     };
     let summaries: Vec<UserFolderSummary> = index.folders.into_iter().filter(|summary| is_path_safe_folder_id(&summary.id)).take(MAX_FOLDERS).collect();
     let kept: HashMap<&str, &SavedFolder> = previous.map(|saved| saved.folders.iter().map(|folder| (folder.id.as_str(), folder)).collect()).unwrap_or_default();
-    let is_current = |summary: &UserFolderSummary| kept.get(summary.id.as_str()).is_some_and(|folder| folder.updated_at == summary.updated_at);
+    let is_current_version = previous.is_some_and(|saved| saved.version >= COPY_VERSION);
+    let is_current =
+        |summary: &UserFolderSummary| is_current_version && kept.get(summary.id.as_str()).is_some_and(|folder| folder.updated_at == summary.updated_at);
     let stale: Vec<&UserFolderSummary> = summaries.iter().filter(|summary| !is_current(summary)).collect();
     let mut fetched: HashMap<String, Result<Vec<UserFolderItem>, IrError>> = HashMap::new();
     for batch in stale.chunks(MAX_PARALLEL_FETCHES) {
@@ -268,7 +309,7 @@ fn fetch_folders(server: &dyn ScoreServer, account: &FolderAccount, previous: Op
             }
         }
     }
-    let saved = SavedFolders { server: account.server.clone(), player_id: account.player_id.clone(), fetched_at: Some(now), folders };
+    let saved = SavedFolders { server: account.server.clone(), player_id: account.player_id.clone(), version: COPY_VERSION, fetched_at: Some(now), folders };
     FetchOutcome::Fetched { saved, failures }
 }
 

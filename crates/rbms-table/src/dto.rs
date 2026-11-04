@@ -7,7 +7,7 @@ use serde_json::Value;
 /// Tables in the wild are written by hand and by many tools, so every field is read leniently:
 /// a level written as a number is the same level as one written as text, and an entry that
 /// carries only a `sha256` still parses rather than failing the whole body.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableEntry {
     #[serde(default, deserialize_with = "lenient_text")]
     pub md5: String,
