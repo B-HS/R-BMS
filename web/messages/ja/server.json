@@ -35,7 +35,10 @@
         "AI_OUTPUT_TRUNCATED": "AIの出力が上限に達して途中で切れました。",
         "AI_OUTPUT_INVALID": "AIの出力形式が正しくないため、解釈を作成できませんでした。",
         "AI_USAGE_LIMIT": "AIの利用上限に達しました。",
-        "AI_NOT_ENOUGH_DATA": "解釈できる記録がまだ足りません。AIは呼び出していません。"
+        "AI_NOT_ENOUGH_DATA": "解釈できる記録がまだ足りません。AIは呼び出していません。",
+        "TRAINING_CHART_NOT_FOUND": "トレーニング譜面が見つかりません。",
+        "TRAINING_CHART_LIMIT": "これ以上トレーニング譜面を保管できません。先にトレーニング譜面を削除してください。",
+        "TRAINING_FOLDER_UNAVAILABLE": "トレーニングフォルダを作れません。フォルダを1つ削除してから再度お試しください。"
     },
     "httpError": "リクエストに失敗しました（{status}）"
 }

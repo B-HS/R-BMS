@@ -4,7 +4,7 @@ import type { AuthUser } from '@server/lib/auth-context'
 import { resetRateLimits } from '@server/lib/with-rate-limit'
 import { createFolderRoutes } from '@server/route/folder'
 import { createFolderService } from '@server/service/domain/folder/folder.service'
-import { createMemoryFolderDb } from '../support/folder-memory-db'
+import { createMemoryFolderDb, type MemoryTrainingChart } from '../support/folder-memory-db'
 
 const ALICE: AuthUser = { id: 'user-alice', loginId: 'alice', name: 'Alice', role: 'user' }
 const BOB: AuthUser = { id: 'user-bob', loginId: 'bob', name: 'Bob', role: 'user' }
@@ -16,9 +16,9 @@ const BEARER_TOKENS = new Map([
 const MD5 = 'a'.repeat(32)
 const ORIGIN = 'http://localhost:3000'
 
-const createRoutes = () => {
+const createRoutes = (trainingCharts: MemoryTrainingChart[] = []) => {
     let counter = 0
-    const memory = createMemoryFolderDb()
+    const memory = createMemoryFolderDb([], () => trainingCharts)
     const folderService = createFolderService({
         db: memory.db,
         newId: (prefix) => `${prefix}${(++counter).toString(16).padStart(30, '0')}`,
@@ -333,5 +333,58 @@ describe('클라이언트가 읽는 API', () => {
         )
         expect(foreign.status).toBe(404)
         expect((await foreign.json()).error.code).toBe('IR_FOLDER_NOT_FOUND')
+    })
+})
+
+describe('훈련곡 항목의 download_url (plan 2026-11-04 5.2)', () => {
+    const TRAINING_MD5 = 'c'.repeat(32)
+    const TRAINING_ID = `tc_${'1'.repeat(32)}`
+    const playerContext = (playerId: string, folderId: string) => ({ params: Promise.resolve({ playerId, folderId }) })
+    const items = [
+        { md5: TRAINING_MD5, title: 'R-BMS Training', artist: 'R-BMS' },
+        { md5: MD5, title: 'Song', artist: 'Me' },
+    ]
+
+    const setup = async () => {
+        const routes = createRoutes([{ userId: ALICE.id, md5: TRAINING_MD5, id: TRAINING_ID }])
+        const alice = (await createFolder(routes, ALICE, 'training')).data
+        const bob = (await createFolder(routes, BOB, 'copied')).data
+        for (const [user, folder] of [
+            [ALICE, alice],
+            [BOB, bob],
+        ] as const) {
+            await routes.addItems(call('POST', `/api/fe/me/folders/${folder.id}/items`, { user, body: { items } }), folderContext(folder.id))
+        }
+        return { routes, alice, bob }
+    }
+
+    test('웹 상세와 네이티브 읽기 모두 주인의 훈련곡 항목에만 요청 origin 의 주소를 넣는다', async () => {
+        const { routes, alice } = await setup()
+        const expected = `${ORIGIN}/api/training/${TRAINING_ID}/chart.zip`
+        const web = await (await routes.detail(call('GET', `/api/fe/me/folders/${alice.id}`, { user: ALICE }), folderContext(alice.id))).json()
+        expect(web.data.items.map((item: { download_url?: string }) => item.download_url)).toEqual([expected, undefined])
+        expect(Object.keys(web.data.items[1])).not.toContain('download_url')
+        const native = await (
+            await routes.readFolder(
+                call('GET', `/api/players/alice/folders/${alice.id}`, { bearer: 'token-alice' }),
+                playerContext('alice', alice.id),
+            )
+        ).json()
+        expect(native.items[0].download_url).toBe(expected)
+        const otherHost = await (
+            await routes.readFolder(
+                new Request(`https://preview.example.test/api/players/alice/folders/${alice.id}`, {
+                    headers: { authorization: 'Bearer token-alice' },
+                }),
+                playerContext('alice', alice.id),
+            )
+        ).json()
+        expect(otherHost.items[0].download_url).toBe(`https://preview.example.test/api/training/${TRAINING_ID}/chart.zip`)
+    })
+
+    test('다른 사용자의 폴더에 담긴 같은 곡에는 주소가 없다', async () => {
+        const { routes, bob } = await setup()
+        const body = await (await routes.detail(call('GET', `/api/fe/me/folders/${bob.id}`, { user: BOB }), folderContext(bob.id))).json()
+        expect(body.data.items.every((item: object) => !('download_url' in item))).toBe(true)
     })
 })

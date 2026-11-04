@@ -112,12 +112,17 @@ export const folderSummarySchema = z.object({
     updated_at: z.number().int(),
 })
 
+/**
+ * A song of a folder. `download_url` is there only for a training chart the folder's owner made, read with the request's origin
+ * (plan 2026-11-04 5.2); every other item, and every read made without an origin, leaves the field out.
+ */
 export const folderItemSchema = z.object({
     md5: z.string(),
     sha256: z.string(),
     title: z.string(),
     artist: z.string(),
     note: z.string(),
+    download_url: z.string().optional(),
 })
 
 export const folderDetailSchema = folderSummarySchema.extend({ items: z.array(folderItemSchema) })

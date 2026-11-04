@@ -1,7 +1,7 @@
 import { and, asc, count, eq, inArray, max, sql, type SQL } from 'drizzle-orm'
 import { TransactionRollbackError } from 'drizzle-orm/errors'
 import type { Database } from '@server/db'
-import { chart, userFolder, userFolderItem } from '@server/db/schema'
+import { chart, trainingChart, userFolder, userFolderItem } from '@server/db/schema'
 import { hasMysqlErrorCode, MYSQL_ERROR_CODE } from '@server/lib/mysql-error'
 import { newId } from '@server/lib/token'
 import { withLockRetry } from '@server/lib/with-lock-retry'
@@ -75,8 +75,11 @@ export const composeFolder = (
                         artist: userFolderItem.artist,
                         note: userFolderItem.note,
                         position: userFolderItem.position,
+                        trainingChartId: trainingChart.id,
                     })
                     .from(userFolderItem)
+                    .innerJoin(userFolder, eq(userFolder.id, userFolderItem.folderId))
+                    .leftJoin(trainingChart, and(eq(trainingChart.md5, userFolderItem.md5), eq(trainingChart.userId, userFolder.userId)))
                     .where(eq(userFolderItem.folderId, folderId))
                     .orderBy(asc(userFolderItem.position), asc(userFolderItem.md5)),
 

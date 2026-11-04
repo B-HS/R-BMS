@@ -26,8 +26,14 @@ const TABLE_ENTRIES: TableImportEntry[] = [
     { md5: md5Of(903), sha256: '', title: 'Table Three', artist: 'Table Artist', level: '11' },
 ]
 
-const createHarness = (options: { now?: () => number; charts?: Parameters<typeof createMemoryFolderDb>[0] } = {}) => {
-    const memory = createMemoryFolderDb(options.charts)
+const createHarness = (
+    options: {
+        now?: () => number
+        charts?: Parameters<typeof createMemoryFolderDb>[0]
+        trainingCharts?: Parameters<typeof createMemoryFolderDb>[1]
+    } = {},
+) => {
+    const memory = createMemoryFolderDb(options.charts, options.trainingCharts)
     let counter = 0
     const service = createFolderService({
         db: memory.db,
@@ -437,5 +443,28 @@ describe('순수 함수', () => {
     test('nextStamp 는 이전 값보다 항상 크다', () => {
         expect(nextStamp(100, 100)).toBe(101)
         expect(nextStamp(100, 50)).toBe(100)
+    })
+})
+
+describe('folderService.get 의 훈련곡 주소 (plan 2026-11-04 5.2)', () => {
+    const TRAINING_ID = `tc_${'a'.repeat(32)}`
+
+    test('origin 이 있으면 주인이 만든 훈련곡 항목에만 download_url 을 넣고, origin 이 없으면 넣지 않는다', async () => {
+        const { service, createFolder } = createHarness({ trainingCharts: () => [{ userId: OWNER, md5: md5Of(1), id: TRAINING_ID }] })
+        const folder = await createFolder()
+        await service.addItems({ userId: OWNER, folderId: folder.id, items: [itemOf(1), itemOf(2)] })
+        const withOrigin = await service.get({ userId: OWNER, folderId: folder.id, origin: 'https://example.test' })
+        expect(withOrigin?.items.map((item) => item.download_url)).toEqual([`https://example.test/api/training/${TRAINING_ID}/chart.zip`, undefined])
+        expect(withOrigin?.items[1]).toEqual({ md5: md5Of(2), sha256: '', title: 'title-2', artist: 'artist-2', note: '' })
+        const withoutOrigin = await service.get({ userId: OWNER, folderId: folder.id })
+        expect(withoutOrigin?.items.every((item) => !('download_url' in item))).toBe(true)
+    })
+
+    test('다른 사용자가 만든 훈련곡은 주소가 붙지 않는다', async () => {
+        const { service, createFolder } = createHarness({ trainingCharts: () => [{ userId: STRANGER, md5: md5Of(1), id: TRAINING_ID }] })
+        const folder = await createFolder()
+        await service.addItems({ userId: OWNER, folderId: folder.id, items: [itemOf(1)] })
+        const detail = await service.get({ userId: OWNER, folderId: folder.id, origin: 'https://example.test' })
+        expect(detail?.items[0]).not.toHaveProperty('download_url')
     })
 })

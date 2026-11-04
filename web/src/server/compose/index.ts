@@ -34,6 +34,7 @@ import { composeTable } from '@server/compose/table'
 import { composeTableRefresh, tableCourseSyncOf } from '@server/compose/table-refresh'
 import { composeTableSnapshot } from '@server/compose/table-snapshot'
 import { composeTrace } from '@server/compose/trace'
+import { composeTraining } from '@server/compose/training'
 import { chartBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
 import { toJudgeBreakdown, type JudgeColumns } from '@server/compose/judge-row'
 
@@ -432,6 +433,15 @@ const composeAll = () => {
             traceService: trace.traceService,
             tableSnapshotService: tableSnapshot.tableSnapshotService,
             chartPatternService: patterns.chartPatternService,
+            loadTables: getSnapshotTables,
+        }),
+        ...composeTraining(db, {
+            aiFeatureRunner: ai.aiFeatureRunner,
+            aiCredentialService: ai.aiCredentialService,
+            folderService: folder.folderService,
+            chartPatternService: patterns.chartPatternService,
+            traceService: trace.traceService,
+            tableSnapshotService: tableSnapshot.tableSnapshotService,
             loadTables: getSnapshotTables,
         }),
         resolveBuildTrust: (sha256: string | null) => resolveBuildTrust(buildAllowlist, sha256),

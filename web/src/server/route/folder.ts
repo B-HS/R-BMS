@@ -120,9 +120,9 @@ export const createFolderRoutes = (resolveDeps: () => FolderRouteDeps = compose)
             return envelope(unwrapFolderResult(await deps.folderService.reorderFolders({ userId: user.id, folderIds: input.folder_ids })))
         }),
 
-        detail: withRead<FolderContext>(async (_request, context, user, deps) => {
+        detail: withRead<FolderContext>(async (request, context, user, deps) => {
             const folderId = await parseFolderId(context)
-            return envelope(requireFolder(await deps.folderService.get({ userId: user.id, folderId })))
+            return envelope(requireFolder(await deps.folderService.get({ userId: user.id, folderId, origin: new URL(request.url).origin })))
         }),
 
         update: withWrite<FolderContext>(async (request, context, user, deps) => {
@@ -192,9 +192,9 @@ export const createFolderRoutes = (resolveDeps: () => FolderRouteDeps = compose)
             privateJson({ folders: await deps.folderService.list(user.id) }),
         ),
 
-        readFolder: withOwnerRead<PlayerFolderContext>(async (_request, context, user, deps) => {
+        readFolder: withOwnerRead<PlayerFolderContext>(async (request, context, user, deps) => {
             const folderId = await parseFolderId(context)
-            return privateJson(requireFolder(await deps.folderService.get({ userId: user.id, folderId })))
+            return privateJson(requireFolder(await deps.folderService.get({ userId: user.id, folderId, origin: new URL(request.url).origin })))
         }),
     }
 }

@@ -37,4 +37,7 @@ export const ERROR_MESSAGE: Record<ErrorCode, string> = {
     [ERROR_CODE.AI_OUTPUT_INVALID]: 'AI 출력의 형식이 올바르지 않아 해석을 만들지 못했습니다.',
     [ERROR_CODE.AI_USAGE_LIMIT]: 'AI 사용 한도에 닿았습니다.',
     [ERROR_CODE.AI_NOT_ENOUGH_DATA]: '해석할 기록이 아직 모자랍니다. AI 를 부르지 않았습니다.',
+    [ERROR_CODE.TRAINING_CHART_NOT_FOUND]: '훈련곡을 찾을 수 없습니다.',
+    [ERROR_CODE.TRAINING_CHART_LIMIT]: '훈련곡을 더 보관할 수 없습니다. 먼저 훈련곡을 지워 주세요.',
+    [ERROR_CODE.TRAINING_FOLDER_UNAVAILABLE]: '훈련곡 폴더를 만들 수 없습니다. 폴더를 하나 지운 뒤 다시 시도해 주세요.',
 }

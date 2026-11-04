@@ -9,6 +9,7 @@ import { withLockRetry } from '@server/lib/with-lock-retry'
 import type { ChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
 import { exScoreDenominator } from '@server/compose/ai-record-query'
 import type { WeaknessProfileServiceDb } from '@server/service/domain/ai/weakness-profile.service'
+import { trainingSpecSchema } from '@server/service/domain/training/spec'
 import { ANALYSIS_FAILED_JOIN, type AnalysisVersions } from '@server/service/domain/trace/trace-analysis'
 import { createTraceService, type TracedPlayRow, type TraceServiceDb } from '@server/service/domain/trace/trace.service'
 
@@ -343,6 +344,33 @@ export const createWeaknessProfileDb = (db: Database) =>
         }),
     }) satisfies WeaknessProfileServiceDb
 
+/**
+ * The sections of the training chart with this sha256 (plan 2026-11-04 7.1) from its stored spec, or null when no training chart
+ * has these bytes (or its spec does not read). A deleted chart answers null, so a play analysed again after that has no sections.
+ */
+export const createTrainingSectionsOf = (db: Database) => async (chartSha256: string) => {
+    const [row] = await db.select({ spec: trainingChart.spec }).from(trainingChart).where(eq(trainingChart.sha256, chartSha256)).limit(1)
+    if (!row) return null
+    const parsed = trainingSpecSchema.safeParse(row.spec)
+    if (!parsed.success) return null
+    return parsed.data.sections.map((section) => ({
+        index: section.index,
+        kind: section.kind,
+        focus_key: section.focus_key,
+        from_us: section.from_us,
+        to_us: section.to_us,
+    }))
+}
+
+/** How many traces the account keeps of plays on a chart: what deleting a training chart leaves (plan 7.2 `removal`). */
+export const createChartTraceCounter = (db: Database) => async (params: { userId: string; chartSha256: string }) => {
+    const [row] = await db
+        .select({ value: count() })
+        .from(playTrace)
+        .where(and(eq(playTrace.userId, params.userId), eq(playTrace.chartSha256, params.chartSha256)))
+    return row?.value ?? 0
+}
+
 export const composeTrace = (db: Database, deps: { chartPatternService: Pick<ChartPatternService, 'readPattern'> }) => ({
     traceService: createTraceService({
         db: createTraceDb(db),
@@ -350,5 +378,6 @@ export const composeTrace = (db: Database, deps: { chartPatternService: Pick<Cha
         now: () => Date.now(),
         loadPattern: deps.chartPatternService.readPattern,
         reportAnalysisFailure: (error) => console.error('trace analysis failed', summarizeError(error)),
+        trainingSectionsOf: createTrainingSectionsOf(db),
     }),
 })

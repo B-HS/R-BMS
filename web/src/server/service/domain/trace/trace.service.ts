@@ -11,6 +11,7 @@ import {
     type TraceAnalysisFailure,
     type TraceAnalysisSummary,
 } from '@server/service/domain/trace/trace-analysis'
+import type { TrainingSectionSpan } from '@server/service/domain/analysis/play-metrics'
 import { findTraceMismatch, type TraceScoreRow } from '@server/service/domain/trace/trace-check'
 import { gunzipJson, gzipJsonText } from '@server/service/shared/storage/gzip-json'
 
@@ -136,6 +137,8 @@ export type TraceServiceDeps = {
     loadPattern: (md5: string) => Promise<ChartPatternDocument | null>
     /** Called when a stored trace could not be analysed; the trace stays stored and, once marked failed, is analysed again only after a version goes up. */
     reportAnalysisFailure: (error: unknown) => void
+    /** The sections of the training chart with this sha256 (plan 2026-11-04 7.1), null for any other chart; none given reads every chart as not one. */
+    trainingSectionsOf?: (chartSha256: string) => Promise<TrainingSectionSpan[] | null>
 }
 
 export const TRACE_ID_PREFIX = 'tr_'
@@ -194,7 +197,8 @@ const isCurrentFailure = (value: unknown): value is TraceAnalysisFailure =>
 export const createTraceService = (deps: TraceServiceDeps) => {
     const analyze = async (trace: TraceUploadInput, row: { traceId: string; chartSha256: string }) => {
         const pattern = trace.chart.md5 ? await deps.loadPattern(trace.chart.md5) : null
-        const { summary, patternJoin, patternMd5 } = analyzeTrace({ trace, chartSha256: row.chartSha256, pattern })
+        const training = deps.trainingSectionsOf ? await deps.trainingSectionsOf(row.chartSha256) : null
+        const { summary, patternJoin, patternMd5 } = analyzeTrace({ trace, chartSha256: row.chartSha256, pattern, training })
         await deps.db.saveAnalysis({
             traceId: row.traceId,
             analysisVersion: CURRENT_ANALYSIS_VERSIONS.play,

@@ -2,9 +2,17 @@ import type { FolderChartText, FolderItemRow, FolderRow, FolderServiceDb } from 
 
 type StoredFolder = FolderRow & { userId: string }
 
-export const createMemoryFolderDb = (charts: FolderChartText[] = []) => {
+/** A training chart a folder item can be: `userId` made the chart `id` of these bytes (`training_chart`, plan 2026-11-04 5.2). */
+export type MemoryTrainingChart = { userId: string; md5: string; id: string }
+
+export const createMemoryFolderDb = (charts: FolderChartText[] = [], trainingCharts: () => readonly MemoryTrainingChart[] = () => []) => {
     const folders = new Map<string, StoredFolder>()
     const items = new Map<string, FolderItemRow[]>()
+
+    const trainingChartIdOf = (folderId: string, md5: string) => {
+        const owner = folders.get(folderId)?.userId
+        return trainingCharts().find((training) => training.userId === owner && training.md5 === md5)?.id ?? null
+    }
 
     const toRow = (folder: StoredFolder): FolderRow => ({
         id: folder.id,
@@ -32,7 +40,10 @@ export const createMemoryFolderDb = (charts: FolderChartText[] = []) => {
             return folder && folder.userId === userId ? toRow(folder) : null
         },
 
-        listItems: async (folderId) => [...(items.get(folderId) ?? [])].sort((a, b) => a.position - b.position),
+        listItems: async (folderId) =>
+            [...(items.get(folderId) ?? [])]
+                .sort((a, b) => a.position - b.position)
+                .map((item) => ({ ...item, trainingChartId: trainingChartIdOf(folderId, item.md5) })),
 
         sumItemCount: async (userId) => ownedFolders(userId).reduce((sum, folder) => sum + folder.itemCount, 0),
 

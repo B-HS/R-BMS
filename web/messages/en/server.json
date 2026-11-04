@@ -35,7 +35,10 @@
         "AI_OUTPUT_TRUNCATED": "The AI output reached its limit and was cut off.",
         "AI_OUTPUT_INVALID": "The AI output was not in a valid format, so no interpretation could be made.",
         "AI_USAGE_LIMIT": "The AI usage limit has been reached.",
-        "AI_NOT_ENOUGH_DATA": "There are not enough records to interpret yet. The AI was not called."
+        "AI_NOT_ENOUGH_DATA": "There are not enough records to interpret yet. The AI was not called.",
+        "TRAINING_CHART_NOT_FOUND": "The training chart was not found.",
+        "TRAINING_CHART_LIMIT": "No more training charts can be kept. Delete a training chart first.",
+        "TRAINING_FOLDER_UNAVAILABLE": "The training folder cannot be made. Delete a folder and try again."
     },
     "httpError": "The request failed ({status})"
 }

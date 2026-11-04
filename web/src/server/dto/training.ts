@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { weaknessKeySchema } from '@server/service/domain/analysis/weakness-key'
 import type { Locale } from '@shared/i18n/locale'
 
 /** The note patterns the training chart synthesiser can lay out (plan 2026-11-04 3.3, 3.6). */
@@ -79,3 +80,167 @@ export const aiTrainingPlanOutputSchema = z.object({
 
 export type AiTrainingPlanOutput = z.infer<typeof aiTrainingPlanOutputSchema>
 export type AiTrainingPlanSection = AiTrainingPlanOutput['sections'][number]
+
+/** The literal a request names when the server is to pick the weaknesses a chart trains (plan 3.1). */
+export const TRAINING_AUTO_FOCUS = 'auto'
+
+const TRAINING_CHART_ID_PATTERN = /^tc_[0-9a-f]{32}$/
+
+/** A training chart id as the paths carry it: `tc_` and 32 lower-case hex characters (plan 4.1). */
+export const trainingChartIdSchema = z.string().regex(TRAINING_CHART_ID_PATTERN)
+
+/** `POST /api/fe/me/ai/training-charts` (plan 3.1): the weakness to train, or `auto`, and how hard. Nothing else is taken. */
+export const trainingChartCreateSchema = z
+    .object({
+        focus_key: z.union([z.literal(TRAINING_AUTO_FOCUS), weaknessKeySchema]),
+        intensity: z.enum(TRAINING_INTENSITIES),
+    })
+    .strict()
+
+export type TrainingChartCreateInput = z.infer<typeof trainingChartCreateSchema>
+
+/** The public path a training chart's zip is served at (plan 5.1); the folder and training domains build their links with it. */
+export const trainingDownloadPathOf = (id: string) => `/api/training/${id}/chart.zip`
+
+/** `training_chart.request` (plan 4.1): what was asked and the provider's plan as refined, kept private to the owner. */
+export const trainingChartRequestSchema = z.object({
+    focus_key: z.string(),
+    intensity: z.enum(TRAINING_INTENSITIES),
+    plan: aiTrainingPlanOutputSchema,
+    advice: z.string(),
+    description: z.string(),
+})
+
+export type TrainingChartRequest = z.infer<typeof trainingChartRequestSchema>
+
+const evidenceValueSchema = z.string()
+
+/** What the profile said of one focus key when the chart was made: the "before" of the comparison (plan 7.2 `BeforeAfter`). */
+export const trainingTargetSchema = z.object({
+    value: z.number(),
+    unit: z.string(),
+    notes: z.number().int(),
+    charts: z.number().int(),
+    evidence: evidenceValueSchema,
+})
+
+/** `training_chart.profile_snapshot` (plan 4.1): the profile the chart was planned from and its value of every focus key. */
+export const trainingProfileSnapshotSchema = z.object({
+    profile_version: z.number().int(),
+    fingerprint: z.string(),
+    computed_at: z.number().int(),
+    targets: z.record(z.string(), trainingTargetSchema),
+})
+
+export type TrainingProfileSnapshot = z.infer<typeof trainingProfileSnapshotSchema>
+
+/** One training chart in the owner's list (plan 7.2 `TrainingChartSummary`); `download_url` is built on the request's origin. */
+export const trainingChartSummarySchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    created_at: z.number().int(),
+    focus_keys: z.array(z.string()),
+    kinds: z.array(z.string()),
+    note_count: z.number().int(),
+    bpm: z.number().int(),
+    play_level: z.number().int(),
+    length_ms: z.number().int(),
+    download_url: z.string(),
+    plays: z.number().int(),
+    best_ex_ratio: z.number().nullable(),
+    last_played_at: z.number().int().nullable(),
+})
+
+/** `GET /api/fe/me/ai/training-charts`: the owner's charts, newest first, the room left and whether an AI key is registered. */
+export const trainingChartListSchema = z.object({
+    charts: z.array(trainingChartSummarySchema),
+    used: z.number().int(),
+    limit: z.number().int(),
+    can_create: z.boolean(),
+    needs_key: z.boolean(),
+})
+
+/** A section's result in one play, from the play's analysis (plan 2.2.8). */
+export const trainingPlaySectionSchema = z.object({
+    index: z.number().int(),
+    ex_ratio: z.number().nullable(),
+    bp: z.number().int(),
+    mean_err_ms: z.number().nullable(),
+    fast: z.number().int(),
+    slow: z.number().int(),
+})
+
+/** One play of the chart by its owner; `sections` is null when the play has no readable trace. */
+export const trainingPlaySchema = z.object({
+    score_id: z.string(),
+    played_at: z.number().int(),
+    clear: z.number().int(),
+    ex_score: z.number().int(),
+    ex_ratio: z.number().nullable(),
+    bp: z.number().int(),
+    random: z.string(),
+    sections: z.array(trainingPlaySectionSchema).nullable(),
+})
+
+/** One focus key before the chart was made and over the plays since (plan 7.2 `BeforeAfter`); `after` is null below the sample conditions. */
+export const trainingBeforeAfterSchema = z.object({
+    focus_key: z.string(),
+    unit: z.string(),
+    before: trainingTargetSchema,
+    after: trainingTargetSchema.extend({ plays: z.number().int() }).nullable(),
+    delta: z.number().nullable(),
+})
+
+/** A value the server changed from the provider's plan (the stored spec's `corrections`). */
+export const trainingCorrectionViewSchema = z.object({
+    section: z.number().int().nullable(),
+    field: z.string(),
+    from: z.union([z.string(), z.number()]).nullable(),
+    to: z.union([z.string(), z.number()]).nullable(),
+})
+
+/**
+ * `GET /api/fe/me/ai/training-charts/[id]` (plan 7.2 `TrainingChartDetail`). `plays` holds the newest TRAINING_PLAYS_SHOWN plays,
+ * and `play_count` how many there are in all (the summary's count).
+ */
+export const trainingChartDetailSchema = trainingChartSummarySchema.omit({ plays: true }).extend({
+    play_count: z.number().int(),
+    description: z.string(),
+    advice: z.string(),
+    sections: z.array(
+        z.object({
+            index: z.number().int(),
+            focus_key: z.string(),
+            kind: z.enum(TRAINING_PATTERN_KINDS),
+            from_ms: z.number().int(),
+            to_ms: z.number().int(),
+            target_nps: z.number(),
+            actual_nps: z.number(),
+            lane_hint: z.enum(TRAINING_LANE_HINTS),
+            intent: z.string(),
+        }),
+    ),
+    corrections: z.array(trainingCorrectionViewSchema),
+    plays: z.array(trainingPlaySchema),
+    before_after: z.array(trainingBeforeAfterSchema),
+})
+
+/** What deleting a chart takes away and what it leaves (plan 7.2 `removal`), counted before anything is deleted. */
+export const trainingRemovalSchema = z.object({
+    removes: z.object({ training_chart: z.number().int(), folder_items: z.number().int() }),
+    keeps: z.object({
+        chart_pattern: z.number().int(),
+        scores: z.number().int(),
+        traces: z.number().int(),
+        replays: z.number().int(),
+    }),
+})
+
+export const trainingRemovedSchema = trainingRemovalSchema.extend({ removed: z.literal(true) })
+
+export type TrainingChartSummary = z.infer<typeof trainingChartSummarySchema>
+export type TrainingChartList = z.infer<typeof trainingChartListSchema>
+export type TrainingPlay = z.infer<typeof trainingPlaySchema>
+export type TrainingBeforeAfter = z.infer<typeof trainingBeforeAfterSchema>
+export type TrainingChartDetail = z.infer<typeof trainingChartDetailSchema>
+export type TrainingRemoval = z.infer<typeof trainingRemovalSchema>

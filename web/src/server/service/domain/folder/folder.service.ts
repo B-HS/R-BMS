@@ -10,6 +10,7 @@ import {
     type FolderSummaryOutput,
     type FolderUpdateInput,
 } from '@server/dto/folder'
+import { trainingDownloadPathOf } from '@server/dto/training'
 
 export type FolderRow = {
     id: string
@@ -28,6 +29,8 @@ export type FolderItemRow = {
     artist: string
     note: string
     position: number
+    /** The id of the training chart of this md5 that the folder's owner made, when there is one (plan 2026-11-04 5.2). */
+    trainingChartId?: string | null
 }
 
 export type FolderChartText = {
@@ -143,17 +146,22 @@ export const toFolderSummary = (row: FolderRow): FolderSummaryOutput => ({
     updated_at: row.updatedAt,
 })
 
-export const toFolderItem = (row: Pick<FolderItemRow, 'md5' | 'sha256' | 'title' | 'artist' | 'note'>): FolderItemOutput => ({
+/** An item as the API shows it; with an `origin`, an owner's training chart also carries its download address on that origin. */
+export const toFolderItem = (
+    row: Pick<FolderItemRow, 'md5' | 'sha256' | 'title' | 'artist' | 'note' | 'trainingChartId'>,
+    origin?: string,
+): FolderItemOutput => ({
     md5: row.md5,
     sha256: row.sha256 ?? '',
     title: row.title,
     artist: row.artist,
     note: row.note,
+    ...(origin && row.trainingChartId ? { download_url: `${origin}${trainingDownloadPathOf(row.trainingChartId)}` } : {}),
 })
 
-export const toFolderDetail = (row: FolderRow, items: FolderItemRow[]): FolderDetailOutput => ({
+export const toFolderDetail = (row: FolderRow, items: FolderItemRow[], origin?: string): FolderDetailOutput => ({
     ...toFolderSummary(row),
-    items: items.map(toFolderItem),
+    items: items.map((item) => toFolderItem(item, origin)),
 })
 
 export const uniqueByMd5 = <T extends { md5: string }>(items: T[]) => {
@@ -277,10 +285,11 @@ export const createFolderService = (deps: FolderServiceDeps) => {
     return {
         list,
 
-        get: async (params: { userId: string; folderId: string }) => {
+        /** The folder with its songs; `origin` (the request's) adds the download address of the owner's training charts. */
+        get: async (params: { userId: string; folderId: string; origin?: string }) => {
             const folder = await deps.db.findFolder(params)
             if (!folder) return null
-            return toFolderDetail(folder, await deps.db.listItems(folder.id))
+            return toFolderDetail(folder, await deps.db.listItems(folder.id), params.origin)
         },
 
         create: async (params: { userId: string; input: FolderCreateInput }): Promise<FolderResult<FolderSummaryOutput>> => {
