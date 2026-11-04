@@ -305,6 +305,7 @@ const parseGoalId = async (context: GoalContext) => {
 const sourceFailureError = (failure: AiPracticeSourceFailure) => {
     if (failure.reason === 'table_not_found') return createAppError(ERROR_CODE.IR_TABLE_NOT_FOUND)
     if (failure.reason === 'goal_not_found') return createAppError(ERROR_CODE.NOT_FOUND, { reason: failure.reason })
+    if (failure.reason === 'not_enough_data') return toAiAppError(failure)
     return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: failure.field, reason: failure.reason })
 }
 
@@ -313,11 +314,15 @@ const goalFailureError = (failure: AiGoalFailure) => {
     if (failure.reason === 'goal_not_found') return createAppError(ERROR_CODE.NOT_FOUND, { reason: failure.reason })
     if (failure.reason === 'goal_limit')
         return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'goal', reason: 'active_goal_limit', limit: failure.limit })
+    if (failure.reason === 'not_enough_data') return toAiAppError(failure)
     return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: failure.field, reason: failure.reason })
 }
 
+const SOURCE_FAILURE_REASONS = ['table_not_found', 'goal_not_found', 'invalid_source', 'not_enough_data'] as const
+
+/** A practice folder source that could not be read: an unknown table or goal, a bad parameter, or a weakness the profile cannot back. */
 const isSourceFailure = (result: { ok: boolean; reason?: string }): result is { ok: false } & AiPracticeSourceFailure =>
-    !result.ok && (result.reason === 'table_not_found' || result.reason === 'goal_not_found' || result.reason === 'invalid_source')
+    !result.ok && SOURCE_FAILURE_REASONS.some((reason) => reason === result.reason)
 
 /**
  * Features 4 (score-row part), 5, 6, 7 and 10. Each GET returns the deterministic digest with the latest stored AI answer and never

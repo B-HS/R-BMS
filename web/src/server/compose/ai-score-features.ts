@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, max, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, max, sql } from 'drizzle-orm'
 import type { Database } from '@server/db'
-import { aiGoal, aiPracticeFolder, chart, score } from '@server/db/schema'
-import { aiGoalParamsSchema, aiScoreTimingExtraSchema } from '@server/dto/ai'
+import { aiGoal, aiPracticeFolder, chart, score, trainingChart } from '@server/db/schema'
+import { aiGoalStoredParamsSchema, aiScoreTimingExtraSchema } from '@server/dto/ai'
 import { hasMysqlErrorCode, MYSQL_ERROR_CODE } from '@server/lib/mysql-error'
 import { newId } from '@server/lib/token'
 import { withLockRetry } from '@server/lib/with-lock-retry'
@@ -11,10 +11,11 @@ import { createAiJudgeHabitService, type AiJudgeHabitServiceDb } from '@server/s
 import { createAiPracticeFolderService, type AiPracticeFolderServiceDb } from '@server/service/domain/ai/practice-folder.service'
 import { createAiRecommendService, type TableFeatureDeps } from '@server/service/domain/ai/recommend.service'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
-import type { ChartTagLoad, ProgressTable } from '@server/service/domain/ai/table-progress'
+import type { ChartFeatureExtras, ChartTagLoad, ProgressTable } from '@server/service/domain/ai/table-progress'
 import { createAiWeeklySummaryService, type AiWeeklySummaryServiceDb } from '@server/service/domain/ai/weekly-summary.service'
 import { createWeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
-import type { ChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
+import { readChartFeatureExtras } from '@server/service/domain/analysis/chart-features'
+import type { ChartFeaturesRead, ChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
 import type { FolderService } from '@server/service/domain/folder/folder.service'
 import { deriveAssistGrade } from '@server/service/domain/score/assist-grade'
 import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
@@ -43,7 +44,7 @@ const timingExtraOf = (extra: unknown) => {
 }
 
 const toGoalRow = (row: { id: string; kind: string; params: unknown; createdAt: number }) => {
-    const parsed = aiGoalParamsSchema.safeParse({ ...(isRecord(row.params) ? row.params : {}), kind: row.kind })
+    const parsed = aiGoalStoredParamsSchema.safeParse({ ...(isRecord(row.params) ? row.params : {}), kind: row.kind })
     return parsed.success ? ({ id: row.id, params: parsed.data, createdAt: row.createdAt } satisfies AiGoalRow) : null
 }
 
@@ -113,9 +114,14 @@ export const createAiPracticeFolderDb = (db: Database) =>
 export const createAiWeeklySummaryDb = (db: Database) =>
     ({
         listScoresBetween: async ({ userId, from, to }) => {
+            const ownTraining = db
+                .select({ id: trainingChart.id })
+                .from(trainingChart)
+                .where(and(eq(trainingChart.userId, score.userId), eq(trainingChart.sha256, score.chartSha256)))
             const rows = await db
                 .select({
                     chartSha256: score.chartSha256,
+                    isTraining: sql<number>`exists (${ownTraining})`.mapWith(Number),
                     chartMd5: sql<string | null>`coalesce(${score.chartMd5}, ${chart.md5})`,
                     title: chart.title,
                     clear: score.clear,
@@ -137,8 +143,9 @@ export const createAiWeeklySummaryDb = (db: Database) =>
                 .leftJoin(chart, eq(chart.sha256, score.chartSha256))
                 .where(and(eq(score.userId, userId), gte(score.playedAt, from), lt(score.playedAt, to), eq(score.autoplay, false)))
                 .orderBy(asc(score.playedAt), asc(score.id))
-            return rows.map(({ pgreat, great, good, bad, extra, title, gauge, ...row }) => ({
+            return rows.map(({ pgreat, great, good, bad, extra, title, gauge, isTraining, ...row }) => ({
                 ...row,
+                isTraining: isTraining === 1,
                 assistGrade: deriveAssistGrade({ clear: row.clear, gauge }),
                 title: title ?? '',
                 judgedNotes: pgreat + great + good + bad,
@@ -167,6 +174,14 @@ export const createAiWeeklySummaryDb = (db: Database) =>
                 )
                 .groupBy(score.chartSha256, score.scratchAuto, score.clear, score.gauge)
             return rows.map((row) => ({ ...row, assistGrade: deriveAssistGrade(row), exScore: row.exScore ?? 0 }))
+        },
+
+        countTrainingChartsCreated: async ({ userId, from, to }) => {
+            const [row] = await db
+                .select({ value: count() })
+                .from(trainingChart)
+                .where(and(eq(trainingChart.userId, userId), gte(trainingChart.createdAt, from), lt(trainingChart.createdAt, to)))
+            return row?.value ?? 0
         },
     }) satisfies AiWeeklySummaryServiceDb
 
@@ -226,9 +241,18 @@ export const createAiJudgeHabitDb = (db: Database, traceService: Pick<TraceServi
 export const composeWeaknessProfile = (db: Database, traceService: Pick<TraceService, 'analyzedPlaysInWindow'>) =>
     createWeaknessProfileService({ db: createWeaknessProfileDb(db), plays: traceService, now: () => Date.now() })
 
-/** Each chart's tag shares from its pattern features (W3); a chart with no uploaded pattern is absent, and one read from older features is marked stale. */
+/**
+ * Each chart's tag shares from its pattern features (W3); a chart with no uploaded pattern is absent, and one read from older
+ * features is marked stale. A chart whose features are current also gets its extras (plan 2026-11-04 2.3): the ANALYSIS_VERSION 2
+ * fields read through `readChartFeatureExtras`, its soflan events and length; a stale chart gets none.
+ */
 export const createChartTagLoader = (chartPatternService: Pick<ChartPatternService, 'readFeaturesMany'>) => async (md5s: readonly string[]) => {
     const features = await chartPatternService.readFeaturesMany(md5s)
+    const extrasOf = (read: ChartFeaturesRead): ChartFeatureExtras[] => {
+        const extras = read.isStale ? null : readChartFeatureExtras(read.features)
+        if (!extras) return []
+        return [{ ...extras, soflanEvents: read.features.soflan.tempo_jumps + read.features.soflan.long_stops, lengthMs: read.features.length_ms }]
+    }
     return {
         shares: new Map(
             [...features].map(([md5, read]) => [
@@ -237,6 +261,7 @@ export const createChartTagLoader = (chartPatternService: Pick<ChartPatternServi
             ]),
         ),
         staleMd5s: new Set([...features].flatMap(([md5, read]) => (read.isStale ? [md5] : []))),
+        extras: new Map([...features].flatMap(([md5, read]) => extrasOf(read).map((extras) => [md5, extras] as const))),
     } satisfies ChartTagLoad
 }
 
@@ -274,10 +299,11 @@ export const composeAiScoreFeatures = (db: Database, deps: ComposeAiScoreFeature
     const now = () => Date.now()
     const tableDeps: TableFeatureDeps = { ...createTableLoaders(deps), loadChartTags: createChartTagLoader(deps.chartPatternService) }
     const levelLabelOf = createLevelLabelOf(deps.loadTables)
+    const profile = composeWeaknessProfile(db, deps.traceService)
     const shared = { runner: deps.aiFeatureRunner, results: deps.aiResultService }
 
-    const aiRecommendService = createAiRecommendService({ ...tableDeps, ...shared })
-    const aiGoalService = createAiGoalService({ ...tableDeps, ...shared, db: createAiGoalDb(db), newId, now })
+    const aiRecommendService = createAiRecommendService({ ...tableDeps, ...shared, profile })
+    const aiGoalService = createAiGoalService({ ...tableDeps, ...shared, db: createAiGoalDb(db), profile, newId, now })
     const aiPracticeFolderService = createAiPracticeFolderService({
         ...tableDeps,
         ...shared,
@@ -285,14 +311,18 @@ export const composeAiScoreFeatures = (db: Database, deps: ComposeAiScoreFeature
         recommend: aiRecommendService,
         goals: aiGoalService,
         folders: deps.folderService,
+        profile,
         now,
     })
-    const aiWeeklySummaryService = createAiWeeklySummaryService({ ...shared, db: createAiWeeklySummaryDb(db), levelLabelOf, now })
-    const aiJudgeHabitService = createAiJudgeHabitService({
+    const aiWeeklySummaryService = createAiWeeklySummaryService({
         ...shared,
-        db: createAiJudgeHabitDb(db, deps.traceService),
-        profile: composeWeaknessProfile(db, deps.traceService),
+        db: createAiWeeklySummaryDb(db),
+        profile,
+        plays: deps.traceService,
+        levelLabelOf,
+        now,
     })
+    const aiJudgeHabitService = createAiJudgeHabitService({ ...shared, db: createAiJudgeHabitDb(db, deps.traceService), profile })
 
     return { aiRecommendService, aiGoalService, aiPracticeFolderService, aiWeeklySummaryService, aiJudgeHabitService }
 }

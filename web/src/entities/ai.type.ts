@@ -143,6 +143,8 @@ export const AI_RECORD_QUERY_FIELD_OPS = {
     scratch_auto: ['eq'],
     title: ['contains'],
     table: ['eq'],
+    tag: ['eq', 'in'],
+    training: ['eq'],
 } as const satisfies Record<AiRecordQueryField, readonly AiRecordQueryOp[]>
 
 export const AI_RECORD_QUERY_FIELD_LABEL = {
@@ -156,6 +158,8 @@ export const AI_RECORD_QUERY_FIELD_LABEL = {
     scratch_auto: 'SCRATCH AUTO',
     title: '곡 제목',
     table: '난이도표',
+    tag: '패턴 태그',
+    training: '훈련곡',
 } satisfies Record<AiRecordQueryField, string>
 
 export const AI_RECORD_QUERY_VALUE_HINT = {
@@ -169,6 +173,8 @@ export const AI_RECORD_QUERY_VALUE_HINT = {
     scratch_auto: 'true 또는 false',
     title: '제목에 들어간 글자',
     table: '예: insane1',
+    tag: '예: trill 또는 jack,stair',
+    training: 'true 또는 false',
 } satisfies Record<AiRecordQueryField, string>
 
 export const AI_RECORD_QUERY_OP_LABEL = {
@@ -242,7 +248,13 @@ export const AI_RECOMMEND_KIND_LABEL = {
     lamp_up: '램프 올리기',
 } satisfies Record<AiRecommendView['candidates'][number]['kind'], string>
 
-export const AI_GOAL_KINDS = ['lamp_count_at_level', 'clear_all_level', 'ex_rate_on_chart'] as const satisfies readonly AiGoalKind[]
+export const AI_GOAL_KINDS = [
+    'lamp_count_at_level',
+    'clear_all_level',
+    'ex_rate_on_chart',
+    'weakness_residual',
+    'density_limit',
+] as const satisfies readonly AiGoalKind[]
 
 export const AI_OFFSET_DIRECTION_LABEL = {
     earlier: '노트가 먼저 보이도록 올리기',

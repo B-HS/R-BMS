@@ -3,12 +3,14 @@ import {
     AI_TEXT_LIMIT,
     aiGoalPlanOutputSchema,
     type AiEffort,
+    type AiGoalInput,
     type AiGoalOutput,
     type AiGoalParams,
     type AiGoalPlanOutput,
     type AiGoalPlanView,
     type AiGoalProgress,
 } from '@server/dto/ai'
+import type { WeaknessProfileView } from '@server/dto/ai-play'
 import { clearLampToId } from '@server/dto/common'
 import {
     AI_OUTPUT_LANGUAGE_NAME,
@@ -27,16 +29,29 @@ import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.s
 import type { TableFeatureDeps } from '@server/service/domain/ai/recommend.service'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
 import {
+    GOAL_DENSITY_NPS_MARGIN,
     GOAL_PACE_DAYS,
     GOAL_PACE_WEEKS,
     GOAL_REMAINING_FOR_AI,
     SCORE_FEATURE_ANALYSIS_VERSION,
 } from '@server/service/domain/ai/score-feature.constants'
-import { isClearLampId, readTableProgress, toCandidate, type ChartProgress, type ProgressTable } from '@server/service/domain/ai/table-progress'
+import {
+    isClearLampId,
+    practicePoolOf,
+    rankWeaknessCharts,
+    readTableProgress,
+    toCandidate,
+    type ChartProgress,
+    type ChartTagLoad,
+    type ProgressTable,
+} from '@server/service/domain/ai/table-progress'
+import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
+import { roundRatio } from '@server/service/domain/analysis/chart-features'
+import { parseWeaknessKey, WEAKNESS_KEY, type WeaknessKind } from '@server/service/domain/analysis/weakness-key'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_GOAL_FEATURE = 'goal_plan'
-export const AI_GOAL_PROMPT_VERSION = 2
+export const AI_GOAL_PROMPT_VERSION = 3
 export const AI_GOAL_MAX_OUTPUT_TOKENS = 8_000
 export const AI_GOAL_EFFORT = 'low' satisfies AiEffort
 export const AI_GOAL_ID_PREFIX = 'aig_'
@@ -48,6 +63,7 @@ export const buildAiGoalSystemPrompt = (language: Locale) =>
         'You plan the weeks a rhythm game (BMS) player needs to reach one goal they set on a difficulty table.',
         DIGEST_IS_DATA_RULE,
         '`goal` is the goal and where the player stands, `pace` how many charts of the goal had a new best in the last weeks, `remaining` the charts still short of the goal.',
+        "For a `weakness_residual` or `density_limit` goal, `goal.current` is the value of the player's profile now, `goal.baseline` the value when the goal was made and `goal.target` the value to reach, and `remaining` are the charts that train that weakness or density most.",
         `Write at most ${AI_GOAL_LIMIT.MAX_WEEKS} steps, one per week, with \`week_index\` from 1 to \`max_weeks\` in order.`,
         `Each step has one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence \`focus\`, the \`md5\` values of the charts to play that week taken from \`remaining\` only (\`chart_md5s\`), and a \`check_key\` naming the digest item that tells whether the step worked.`,
         ASSIST_GRADE_RULE,
@@ -81,6 +97,8 @@ type AiGoalServiceDeps = TableFeatureDeps & {
     db: AiGoalServiceDb
     runner: Pick<AiFeatureRunner, 'run'>
     results: Pick<AiResultService, 'findLatest'>
+    /** The player's weakness profile, the only way to the `weakness_residual` and `density_limit` goals. */
+    profile?: Pick<WeaknessProfileService, 'view'>
     newId: (prefix: string) => string
     now: () => number
 }
@@ -89,7 +107,30 @@ export type AiGoalFailure =
     | { reason: 'table_not_found' }
     | { reason: 'goal_not_found' }
     | { reason: 'goal_limit'; limit: number }
-    | { reason: 'invalid_goal'; field: 'level' | 'lamp' | 'count' | 'md5' }
+    | { reason: 'invalid_goal'; field: 'level' | 'lamp' | 'count' | 'md5' | 'key' }
+    | { reason: 'not_enough_data'; need: string }
+
+type TableGoalParams = Extract<AiGoalParams, { kind: 'lamp_count_at_level' | 'clear_all_level' | 'ex_rate_on_chart' }>
+type ProfileGoalParams = Extract<AiGoalParams, { kind: 'weakness_residual' | 'density_limit' }>
+
+/** The weakness kinds whose value is an EX ratio difference a residual goal can aim at; timing (ms) and contexts (lift) are not. */
+const RESIDUAL_GOAL_KINDS = ['tag', 'solo', 'combo', 'lane', 'hand', 'bpm', 'soflan', 'fatigue', 'density'] as const satisfies readonly WeaknessKind[]
+const DENSITY_LIMIT_KEY = WEAKNESS_KEY.density('limit')
+
+const isProfileGoal = (params: AiGoalParams): params is ProfileGoalParams => params.kind === 'weakness_residual' || params.kind === 'density_limit'
+
+/** The weakness key a profile goal is about: its own key, or the density limit's. */
+const profileGoalKeyOf = (params: ProfileGoalParams) => (params.kind === 'weakness_residual' ? params.key : DENSITY_LIMIT_KEY)
+
+/**
+ * The profile value a profile goal reads (plan 2026-11-04 2.6 feature 7): a weakness key's cell estimate `R_c`, or the EX density
+ * limit, which is at least the densest NPS seen when the player never dropped below it. Null when the profile has no such value.
+ */
+export const profileGoalValueOf = (params: Pick<ProfileGoalParams, 'kind'> & { key?: string }, profile: WeaknessProfileView) => {
+    if (params.kind === 'density_limit')
+        return profile.density.limit_nps_ex ?? (profile.density.ceiling_reached_ex ? null : profile.density.max_seen_nps)
+    return profile.cells.find((cell) => cell.key === params.key)?.value ?? null
+}
 
 const compareRemaining = (left: ChartProgress, right: ChartProgress) =>
     right.lampId - left.lampId ||
@@ -99,10 +140,10 @@ const compareRemaining = (left: ChartProgress, right: ChartProgress) =>
     left.title.localeCompare(right.title) ||
     left.md5.localeCompare(right.md5)
 
-const scopeOf = (params: AiGoalParams, charts: readonly ChartProgress[]) =>
+const scopeOf = (params: TableGoalParams, charts: readonly ChartProgress[]) =>
     params.kind === 'ex_rate_on_chart' ? charts.filter((chart) => chart.md5 === params.md5) : charts.filter((chart) => chart.level === params.level)
 
-const labelOf = (params: AiGoalParams, table: ProgressTable, scope: readonly ChartProgress[]) => {
+const labelOf = (params: TableGoalParams, table: ProgressTable, scope: readonly ChartProgress[]) => {
     if (params.kind === 'lamp_count_at_level') return `${table.symbol}${params.level} 에서 ${params.lamp} 이상 ${params.count}곡`
     if (params.kind === 'clear_all_level') return `${table.symbol}${params.level} 전부 클리어`
     return `${scope[0]?.title || params.md5} EX ${params.ex_rate}%`
@@ -112,9 +153,12 @@ const labelOf = (params: AiGoalParams, table: ProgressTable, scope: readonly Cha
  * Where a goal stands (plan 5.7), from the player's best records: what it asks for, what is reached, the charts still short of it
  * (closest first) and how many charts of the goal got a new best in the last GOAL_PACE_DAYS days.
  */
-export const computeGoalProgress = (params: AiGoalParams, table: ProgressTable, charts: readonly ChartProgress[], now: number) => {
+const recentUpdatesOf = (charts: readonly ChartProgress[], now: number) =>
+    charts.filter((chart) => chart.playedAt !== null && chart.playedAt >= now - GOAL_PACE_DAYS * DAY_MS).length
+
+export const computeGoalProgress = (params: TableGoalParams, table: ProgressTable, charts: readonly ChartProgress[], now: number) => {
     const scope = scopeOf(params, charts)
-    const recentUpdates = scope.filter((chart) => chart.playedAt !== null && chart.playedAt >= now - GOAL_PACE_DAYS * DAY_MS).length
+    const recentUpdates = recentUpdatesOf(scope, now)
     const label = labelOf(params, table, scope)
     if (params.kind === 'ex_rate_on_chart') {
         const exRate = scope[0]?.exRate ?? null
@@ -145,8 +189,91 @@ export const computeGoalProgress = (params: AiGoalParams, table: ProgressTable, 
     return { progress, remainingCharts: done ? [] : scope.filter((chart) => !reaches(chart)).toSorted(compareRemaining) }
 }
 
+/**
+ * Where a profile goal stands (plan 2026-11-04 2.6 feature 7): the profile value now against the target, reached when it is at the
+ * target or above, and `ratio` the share of the way from the baseline to the target (1 once reached, null without a baseline or a
+ * value). The plan charts are the ones that train the weakness or density, and `recent_updates` counts those with a new best in
+ * the last GOAL_PACE_DAYS days.
+ */
+export const computeProfileGoalProgress = (params: {
+    goal: ProfileGoalParams
+    current: number | null
+    charts: readonly ChartProgress[]
+    now: number
+}) => {
+    const { goal, current } = params
+    const target = goal.kind === 'weakness_residual' ? goal.target_residual : goal.target_nps
+    const done = current !== null && current >= target
+    const span = goal.baseline === null ? 0 : target - goal.baseline
+    const ratioOf = () => {
+        if (done) return 1
+        if (current === null || goal.baseline === null || span <= 0) return null
+        return roundRatio(Math.min(1, Math.max(0, (current - goal.baseline) / span)))
+    }
+    const label = goal.kind === 'weakness_residual' ? `${goal.key} 잔차 ${target} 이상` : `밀도 한계 ${target} NPS 이상`
+    const progress = {
+        label,
+        target,
+        achieved: current ?? goal.baseline ?? 0,
+        done,
+        remaining: done ? 0 : 1,
+        recent_updates: recentUpdatesOf(params.charts, params.now),
+        current,
+        ratio: ratioOf(),
+    } satisfies AiGoalProgress
+    return { progress, remainingCharts: done ? [] : params.charts }
+}
+
+/** The charts a profile goal plans with: a weakness's best-training pool charts, or the pool charts nearest the target NPS. */
+export const profileGoalChartsOf = (params: {
+    goal: ProfileGoalParams
+    pool: readonly ChartProgress[]
+    load: ChartTagLoad
+    limitNps: number | null
+    limit: number
+}) => {
+    const { goal } = params
+    if (goal.kind === 'weakness_residual')
+        return rankWeaknessCharts({ pool: params.pool, key: goal.key, load: params.load, limitNps: params.limitNps, limit: params.limit }).map(
+            ({ chart }) => chart,
+        )
+    return params.pool
+        .flatMap((chart) => {
+            const p90 = params.load.extras?.get(chart.md5)?.nps.p90_2s
+            if (p90 === undefined || Math.abs(p90 - goal.target_nps) > GOAL_DENSITY_NPS_MARGIN) return []
+            return [{ chart, distance: Math.abs(p90 - goal.target_nps) }]
+        })
+        .toSorted(
+            (left, right) =>
+                left.distance - right.distance || left.chart.levelIndex - right.chart.levelIndex || left.chart.md5.localeCompare(right.chart.md5),
+        )
+        .slice(0, params.limit)
+        .map(({ chart }) => chart)
+}
+
+/**
+ * Checks a new profile goal against the profile: a residual goal's key must be one of the weaknesses (else not enough data,
+ * `weakness_profile`) of a kind whose value is an EX ratio difference; a density goal needs a density value. Returns the baseline.
+ */
+export const validateProfileGoal = (
+    params: Extract<AiGoalInput, { kind: 'weakness_residual' | 'density_limit' }>,
+    profile: WeaknessProfileView | null,
+) => {
+    if (!profile) return { ok: false, reason: 'not_enough_data', need: 'weakness_profile' } as const
+    if (params.kind === 'weakness_residual') {
+        if (!profile.weaknesses.some((item) => item.key === params.key))
+            return { ok: false, reason: 'not_enough_data', need: 'weakness_profile' } as const
+        const parsed = parseWeaknessKey(params.key)
+        const isResidual = parsed !== null && params.key !== DENSITY_LIMIT_KEY && RESIDUAL_GOAL_KINDS.some((kind) => kind === parsed.kind)
+        if (!isResidual) return { ok: false, reason: 'invalid_goal', field: 'key' } as const
+    }
+    const baseline = profileGoalValueOf(params, profile)
+    if (params.kind === 'density_limit' && baseline === null) return { ok: false, reason: 'not_enough_data', need: 'weakness_profile' } as const
+    return { ok: true, baseline } as const
+}
+
 /** Checks a new goal against its table: the level exists, the lamp is a clear, the count fits the level, the chart is in the table. */
-export const validateGoal = (params: AiGoalParams, table: ProgressTable) => {
+export const validateGoal = (params: TableGoalParams, table: ProgressTable) => {
     if (params.kind === 'ex_rate_on_chart')
         return table.entries.some((entry) => entry.md5 === params.md5) ? null : ({ reason: 'invalid_goal', field: 'md5' } as const)
     const charts = new Set(table.entries.filter((entry) => entry.level === params.level).map((entry) => entry.md5))
@@ -184,12 +311,38 @@ export const refineGoalPlanOutput = (output: AiGoalPlanOutput, digest: { remaini
 export const goalSubjectKey = (goalId: string) => `goal:${goalId}`
 
 export const createAiGoalService = (deps: AiGoalServiceDeps) => {
-    const progressOf = async (userId: string, goal: AiGoalRow) => {
+    /** The profile read once per request, only when a profile goal asks for it. */
+    const profileReader = (userId: string) => {
+        let pending: Promise<WeaknessProfileView | null> | null = null
+        return () => {
+            pending ??= deps.profile ? deps.profile.view({ userId }) : Promise.resolve(null)
+            return pending
+        }
+    }
+
+    const progressOf = async (userId: string, goal: AiGoalRow, readProfile = profileReader(userId)) => {
         const table = deps.loadTable(goal.params.table)
         if (!table) return null
         const records = (await deps.loadRecords({ tableId: table.id, userId })) ?? {}
-        const { charts } = readTableProgress(table, records)
-        return { table, ...computeGoalProgress(goal.params, table, charts, deps.now()) }
+        const progress = readTableProgress(table, records)
+        const params = goal.params
+        if (!isProfileGoal(params)) return { table, ...computeGoalProgress(params, table, progress.charts, deps.now()) }
+        const profile = await readProfile()
+        const pool = practicePoolOf(progress)
+        const load = await deps.loadChartTags(pool.map((chart) => chart.md5))
+        const charts = profileGoalChartsOf({ goal: params, pool, load, limitNps: profile?.density.limit_nps_ex ?? null, limit: pool.length })
+        const current = profile ? profileGoalValueOf(params, profile) : null
+        return { table, ...computeProfileGoalProgress({ goal: params, current, charts, now: deps.now() }) }
+    }
+
+    /** A new goal checked and given what is kept with it: a table goal against its table, a profile goal against the profile (with its baseline). */
+    const checkNewGoal = async (input: AiGoalInput, table: ProgressTable, readProfile: () => Promise<WeaknessProfileView | null>) => {
+        if (input.kind === 'weakness_residual' || input.kind === 'density_limit') {
+            const checked = validateProfileGoal(input, await readProfile())
+            return checked.ok ? ({ ok: true, params: { ...input, table: table.id, baseline: checked.baseline } } as const) : checked
+        }
+        const invalid = validateGoal(input, table)
+        return invalid ? ({ ok: false, ...invalid } as const) : ({ ok: true, params: { ...input, table: table.id } } as const)
     }
 
     const toGoalOutput = (goal: AiGoalRow, progress: AiGoalProgress | null) =>
@@ -214,7 +367,14 @@ export const createAiGoalService = (deps: AiGoalServiceDeps) => {
             allRemaining: state?.remainingCharts ?? [],
             remaining,
             digest: {
-                goal: progress ? { key: 'goal', kind: goal.params.kind, ...progress } : null,
+                goal: progress
+                    ? {
+                          key: 'goal',
+                          kind: goal.params.kind,
+                          ...progress,
+                          ...(isProfileGoal(goal.params) ? { focus_key: profileGoalKeyOf(goal.params), baseline: goal.params.baseline } : {}),
+                      }
+                    : null,
                 pace: { key: 'pace', recent_updates: progress?.recent_updates ?? 0, days: GOAL_PACE_DAYS, weeks: GOAL_PACE_WEEKS },
                 remaining,
                 max_weeks: AI_GOAL_LIMIT.MAX_WEEKS,
@@ -230,21 +390,31 @@ export const createAiGoalService = (deps: AiGoalServiceDeps) => {
     }
 
     return {
-        list: async (userId: string) =>
-            Promise.all(
-                (await deps.db.listActiveGoals(userId)).map(async (goal) => toGoalOutput(goal, (await progressOf(userId, goal))?.progress ?? null)),
-            ),
+        list: async (userId: string) => {
+            const readProfile = profileReader(userId)
+            return Promise.all(
+                (await deps.db.listActiveGoals(userId)).map(async (goal) =>
+                    toGoalOutput(goal, (await progressOf(userId, goal, readProfile))?.progress ?? null),
+                ),
+            )
+        },
 
-        create: async (params: { userId: string; input: AiGoalParams }) => {
-            const table = deps.loadTable(params.input.table)
+        /**
+         * Adds a goal. A table goal is checked against the table; a profile goal against the profile, which also gives the baseline
+         * kept with it (a key not among the weaknesses, or no profile, is not enough data, before anything is stored).
+         */
+        create: async (params: { userId: string; input: AiGoalInput }) => {
+            const { input } = params
+            const table = deps.loadTable(input.table)
             if (!table) return { ok: false, reason: 'table_not_found' } as const
-            const invalid = validateGoal(params.input, table)
-            if (invalid) return { ok: false, ...invalid } as const
+            const readProfile = profileReader(params.userId)
+            const checked = await checkNewGoal(input, table, readProfile)
+            if (!checked.ok) return checked
             const active = await deps.db.listActiveGoals(params.userId)
             if (active.length >= AI_GOAL_LIMIT.ACTIVE_MAX) return { ok: false, reason: 'goal_limit', limit: AI_GOAL_LIMIT.ACTIVE_MAX } as const
-            const row = { id: deps.newId(AI_GOAL_ID_PREFIX), params: { ...params.input, table: table.id }, createdAt: deps.now() }
+            const row = { id: deps.newId(AI_GOAL_ID_PREFIX), params: checked.params, createdAt: deps.now() } satisfies AiGoalRow
             await deps.db.insertGoal({ ...row, userId: params.userId })
-            return { ok: true, value: toGoalOutput(row, (await progressOf(params.userId, row))?.progress ?? null) } as const
+            return { ok: true, value: toGoalOutput(row, (await progressOf(params.userId, row, readProfile))?.progress ?? null) } as const
         },
 
         archive: (params: { userId: string; goalId: string }) => deps.db.archiveGoal({ ...params, archivedAt: deps.now() }),

@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, gte, inArray, like, lte, ne, notInArray, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, exists, gte, inArray, like, lte, ne, notExists, notInArray, sql, type SQL } from 'drizzle-orm'
 import type { MySqlColumn } from 'drizzle-orm/mysql-core'
 import type { Database } from '@server/db'
-import { chart, chartBest, score } from '@server/db/schema'
+import { chart, chartBest, score, trainingChart } from '@server/db/schema'
 import { AI_RECORD_QUERY_LIMIT } from '@server/dto/ai'
 import { GAUGE_TYPES, NO_ASSIST_GRADE, gaugeTypeToId } from '@server/dto/common'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
+import { CHART_TAG_MIN_RATIO } from '@server/service/domain/ai/score-feature.constants'
 import {
     EX_RATE_BASIS_POINTS_PER_PERCENT,
     type RecordCondition,
@@ -17,6 +18,7 @@ import { EX_PER_PGREAT } from '@server/service/domain/score/best-policy'
 import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { orderedLevels } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import { chartBestScope } from '@server/compose/best-scope'
+import { chartTagShareCondition } from '@server/compose/chart-pattern'
 
 const FULL_EX_RATE_BASIS_POINTS = AI_RECORD_QUERY_LIMIT.EX_RATE_MAX_PERCENT * EX_RATE_BASIS_POINTS_PER_PERCENT
 const LIKE_WILDCARDS = /[\\%_]/g
@@ -37,7 +39,15 @@ const compareNumber = (column: MySqlColumn, op: 'eq' | 'ne' | 'gte' | 'lte' | 'i
     return inArray(column, [...values])
 }
 
-const toWhere = (condition: RecordCondition, columns: RecordColumns) => {
+const toWhere = (db: Database, condition: RecordCondition, columns: RecordColumns) => {
+    if (condition.field === 'tag') return chartTagShareCondition(chart.md5, condition.tags, CHART_TAG_MIN_RATIO)
+    if (condition.field === 'training') {
+        const ownTraining = db
+            .select({ id: trainingChart.id })
+            .from(trainingChart)
+            .where(and(eq(trainingChart.userId, score.userId), eq(trainingChart.sha256, score.chartSha256)))
+        return condition.value ? exists(ownTraining) : notExists(ownTraining)
+    }
     if (condition.field === 'lamp') return compareNumber(columns.clear, condition.op, condition.values)
     if (condition.field === 'gauge') return compareNumber(score.gauge, condition.op, condition.values)
     if (condition.field === 'random') {
@@ -97,7 +107,9 @@ export const toRecordQueryTables = (tables: Map<string, SnapshotTable>): RecordQ
 
 /**
  * The record query reads with every value bound as a parameter: the compiled conditions become Drizzle operators, never SQL text.
- * Every query is pinned to the session user's id.
+ * Every query is pinned to the session user's id. A `tag` condition selects charts by their stored features through
+ * `chartTagShareCondition` (bound JSON path and ratio); a `training` condition joins the play's `chart_sha256` to the user's own
+ * training charts (plan 2026-11-04 7.1; `chart_md5` is nullable and has no index).
  */
 export const createAiRecordQueryDb = (db: Database): AiRecordQueryServiceDb => ({
     listScoreRecords: async ({ userId, conditions, sort, limit }) => {
@@ -106,7 +118,7 @@ export const createAiRecordQueryDb = (db: Database): AiRecordQueryServiceDb => (
             .select(recordSelection(SCORE_COLUMNS))
             .from(score)
             .leftJoin(chart, eq(chart.sha256, score.chartSha256))
-            .where(and(eq(score.userId, userId), ...conditions.map((condition) => toWhere(condition, SCORE_COLUMNS))))
+            .where(and(eq(score.userId, userId), ...conditions.map((condition) => toWhere(db, condition, SCORE_COLUMNS))))
             .orderBy(...SCORE_SORT[sort.sort_field].map((term) => order(term)), desc(score.playedAt), desc(score.id))
             .limit(limit)
         return rows.map((row) => ({ ...row, title: row.title ?? '', artist: row.artist ?? '' }))
@@ -125,7 +137,7 @@ export const createAiRecordQueryDb = (db: Database): AiRecordQueryServiceDb => (
                     eq(chartBest.userId, userId),
                     scratchAutoChosen ? undefined : chartBestScope(db, true),
                     inArray(chart.md5, md5s),
-                    ...conditions.map((condition) => toWhere(condition, BEST_COLUMNS)),
+                    ...conditions.map((condition) => toWhere(db, condition, BEST_COLUMNS)),
                 ),
             )
         return rows.map((row) => ({ ...row, title: row.title ?? '', artist: row.artist ?? '' }))

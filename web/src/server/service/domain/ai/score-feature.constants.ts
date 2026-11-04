@@ -30,6 +30,18 @@ export const CHART_TAG_MIN_RATIO = 0.05
 /** Tags that say little about a chart on their own and are left out of its top tags. */
 export const CHART_TAGS_NOT_SHOWN = ['ln_end', 'with_scratch'] as const
 
+/** How much a candidate's match with the player's weaknesses adds to its score (plan 2026-11-04 2.6 feature 5). */
+export const WEAKNESS_MATCH_WEIGHT = 1
+/** The strong weaknesses a practice folder can pick charts for that a candidate is matched against, strongest first. */
+export const WEAKNESS_MATCH_TOP = 3
+/** The share of a chart's notes carrying a weakness at which that weakness counts fully in the match. */
+export const WEAKNESS_FULL_SHARE = 0.3
+/** Score taken off a candidate whose 90th-percentile NPS is beyond the player's EX density limit times DENSITY_OVER_RATIO. */
+export const DENSITY_OVER_PENALTY = 1
+export const DENSITY_OVER_RATIO = 1.25
+/** A chart trains the density limit when its 90th-percentile NPS lies between these multiples of the limit. */
+export const DENSITY_LIMIT_BAND = { LOW: 0.9, HIGH: 1.15 } as const
+
 export const FOLDER_CANDIDATES = 60
 /** A focus-tag practice folder looks this many levels below the frontier and FRONTIER_WINDOW_LEVELS above it. */
 export const FOCUS_TAG_LEVELS_BELOW = 2
@@ -38,8 +50,12 @@ export const FOCUS_TAG_MIN_RATIO = 0.1
 export const GOAL_REMAINING_FOR_AI = 20
 export const GOAL_PACE_DAYS = 28
 export const GOAL_PACE_WEEKS = 4
+/** A density-limit goal plans with charts whose 90th-percentile NPS is within this many notes per second of its target. */
+export const GOAL_DENSITY_NPS_MARGIN = 1.5
 
 export const WEEKLY_LIST_MAX = 10
+/** The profile weaknesses the week summary measures on the week's own plays. */
+export const WEEKLY_FOCUS_TOP = 3
 
 export const JUDGE_HABIT_RECENT_PLAYS = 100
 /** FAST and SLOW judgments (PGREAT not counted) needed before the FAST share is graded. */

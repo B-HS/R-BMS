@@ -7,16 +7,23 @@ import {
     refineJudgeHabitOutput,
     type TimingScoreRow,
 } from '@server/service/domain/ai/judge-habit.service'
+import type { WeaknessProfileView } from '@server/dto/ai-play'
 import {
     createAiWeeklySummaryService,
     resolveWeekStart,
+    summarizeTraining,
     summarizeWeek,
     weekStartOf,
     type PriorBestRow,
     type WeeklyScoreRow,
 } from '@server/service/domain/ai/weekly-summary.service'
+import { PROFILE_MAX_PLAYS } from '@server/service/domain/ai/play-feature.constants'
+import type { TraceService } from '@server/service/domain/trace/trace.service'
 import { FAKE_USAGE, createFakeAdapter, createMemoryAiServices, testKekEnv } from '../../support/ai-memory-db'
 import { SCORE_API_KEY, SCORE_USER, md5Of, registerScoreKey } from '../../support/ai-score-fixture'
+import { analyzedPlayOf, tallyOf, withMetrics } from '../../support/play-feature-fixture'
+import { readContractTrace } from '../../support/trace-fixture'
+import { trainingProfileOf, trainingWeaknessOf } from '../../support/training-fixture'
 
 const MONDAY = Date.UTC(2026, 9, 19)
 const DAY = 86_400_000
@@ -24,6 +31,7 @@ const SHA = { alpha: 'a'.repeat(64), bravo: 'b'.repeat(64), charlie: 'c'.repeat(
 
 const play = (overrides: Partial<WeeklyScoreRow>): WeeklyScoreRow => ({
     chartSha256: SHA.alpha,
+    isTraining: false,
     chartMd5: md5Of(1),
     title: 'Alpha',
     clear: clearLampToId('Easy'),
@@ -41,13 +49,39 @@ const play = (overrides: Partial<WeeklyScoreRow>): WeeklyScoreRow => ({
     ...overrides,
 })
 
-const setupWeekly = (rows: WeeklyScoreRow[], priors: PriorBestRow[], now = MONDAY + 3 * DAY, output?: unknown) => {
+type WindowPlays = Awaited<ReturnType<TraceService['analyzedPlaysInWindow']>>['plays']
+
+const NORMAL_TRACE = readContractTrace('trace-normal.json')
+
+/** `count` traced plays on six charts from `from`, a day apart, whose trill notes lose EX against the play: a measurable `tag:trill`. */
+const weakTrillPlays = (from: number, count: number): WindowPlays =>
+    Array.from({ length: count }, (_, index) => ({
+        ...withMetrics(analyzedPlayOf(NORMAL_TRACE, { scoreId: `sc_${from}_${index}`, playedAt: from + (index % 6) * DAY + index }), {
+            overall: tallyOf({ pgreat: 320, good: 80 }),
+            by_tag: { trill: tallyOf({ pgreat: 50 + (index % 3), good: 50 - (index % 3) }) },
+        }),
+        chartSha256: String(index % 6).repeat(64),
+        isTraining: false,
+    }))
+
+type WeeklyOptions = {
+    now?: number
+    output?: unknown
+    profile?: WeaknessProfileView
+    plays?: WindowPlays
+    trainingCreated?: number
+}
+
+const setupWeekly = (rows: WeeklyScoreRow[], priors: PriorBestRow[], options: WeeklyOptions = {}) => {
+    const now = options.now ?? MONDAY + 3 * DAY
     const anthropic = createFakeAdapter('anthropic', {
         validKeys: new Set([SCORE_API_KEY]),
-        generate: () => ({ data: output ?? {}, usage: FAKE_USAGE }),
+        generate: () => ({ data: options.output ?? {}, usage: FAKE_USAGE }),
     })
     const services = createMemoryAiServices({ adapters: { anthropic: anthropic.adapter }, env: () => testKekEnv('v1'), now: () => now })
     const ranges: { from: number; to: number }[] = []
+    const createdRanges: { from: number; to: number }[] = []
+    const windows: { sinceMs: number; limit: number }[] = []
     const service = createAiWeeklySummaryService({
         db: {
             listScoresBetween: async ({ from, to }) => {
@@ -55,13 +89,24 @@ const setupWeekly = (rows: WeeklyScoreRow[], priors: PriorBestRow[], now = MONDA
                 return rows.filter((row) => row.playedAt >= from && row.playedAt < to)
             },
             listPriorBests: async ({ before }) => (before === MONDAY ? priors : []),
+            countTrainingChartsCreated: async ({ from, to }) => {
+                createdRanges.push({ from, to })
+                return options.trainingCreated ?? 0
+            },
         },
         runner: services.aiFeatureRunner,
         results: services.aiResultService,
+        profile: { view: async () => options.profile ?? trainingProfileOf({ weaknesses: [] }) },
+        plays: {
+            analyzedPlaysInWindow: async ({ sinceMs, limit }) => {
+                windows.push({ sinceMs, limit })
+                return { plays: options.plays ?? [], stale: 0, failed: 0 }
+            },
+        },
         levelLabelOf: (md5) => (md5 === md5Of(1) ? '★12' : null),
         now: () => now,
     })
-    return { ...services, anthropic, service, ranges }
+    return { ...services, anthropic, service, ranges, createdRanges, windows }
 }
 
 describe('주간 경계 (UTC)', () => {
@@ -188,7 +233,7 @@ describe('주간 성장 요약 (기능 10)', () => {
             ],
             next_week: '다음 주',
         }
-        const context = setupWeekly([play({ playedAt: MONDAY - 3 * DAY, clear: clearLampToId('Hard') })], [], MONDAY + DAY, output)
+        const context = setupWeekly([play({ playedAt: MONDAY - 3 * DAY, clear: clearLampToId('Hard') })], [], { now: MONDAY + DAY, output })
         await registerScoreKey(context)
         const result = await context.service.interpret({ language: 'ko', userId: SCORE_USER, week: '2026-10-12' })
         expect(result).toMatchObject({ ok: true, value: { output: { highlights: [{ key: 'week.lamp_ups' }] } } })
@@ -198,6 +243,54 @@ describe('주간 성장 요약 (기능 10)', () => {
         expect((await context.service.view({ language: 'ko', userId: SCORE_USER, week: '2026-10-12' }))?.ai).toMatchObject({
             is_current: true,
             cached: true,
+        })
+    })
+})
+
+describe('주간 요약의 훈련곡과 약점 초점 (기획 2026-11-04 2.6 기능 10)', () => {
+    test('그 주 훈련곡 판 수와 곡 수를 세고, 그 판도 전체 판 수에 그대로 들어간다', async () => {
+        const rows = [
+            play({ isTraining: true, chartSha256: SHA.bravo, chartMd5: null, title: 'Training' }),
+            play({ isTraining: true, chartSha256: SHA.bravo, chartMd5: null, title: 'Training', playedAt: MONDAY + 2 * DAY }),
+            play({ isTraining: true, chartSha256: SHA.charlie, chartMd5: null, title: 'Training 2' }),
+            play({}),
+        ]
+        expect(summarizeTraining(rows, 2)).toEqual({ created: 2, plays: 3, charts: 2 })
+        const context = setupWeekly(rows, [], { trainingCreated: 2 })
+        const view = await context.service.view({ language: 'ko', userId: SCORE_USER })
+        expect(view).toMatchObject({ totals: { plays: 4 }, training: { created: 2, plays: 3, charts: 2 }, focus: [] })
+        expect(context.createdRanges).toEqual([{ from: MONDAY, to: MONDAY + 7 * DAY }])
+        expect(context.windows).toEqual([])
+    })
+
+    test('프로필 약점 상위 3개를 그 주 판과 앞 주 판으로만 재고, 표본이 모자란 주는 null 이며 digest 키로 쓸 수 있다', async () => {
+        const weaknesses = ['tag:trill', 'tag:jack', 'tag:stair', 'tag:stream'].map((key) => trainingWeaknessOf(key, 'tag'))
+        const output = {
+            headline: '한 주',
+            highlights: [
+                { key: 'tag:trill', title: '트릴', body: '이번 주 트릴이 약했습니다.', tone: 'weakness' },
+                { key: 'training', title: '훈련', body: '훈련곡을 쳤습니다.', tone: 'neutral' },
+            ],
+            next_week: '다음 주',
+        }
+        const context = setupWeekly([play({})], [], {
+            profile: trainingProfileOf({ weaknesses }),
+            plays: [...weakTrillPlays(MONDAY, 12), ...weakTrillPlays(MONDAY - 7 * DAY, 2)],
+            output,
+        })
+        await registerScoreKey(context)
+        const view = await context.service.view({ language: 'ko', userId: SCORE_USER })
+        expect(context.windows).toEqual([{ sinceMs: MONDAY - 7 * DAY, limit: PROFILE_MAX_PLAYS }])
+        expect(view?.focus?.map((item) => item.key)).toEqual(['tag:trill', 'tag:jack', 'tag:stair'])
+        const trill = view?.focus?.[0]
+        expect(trill).toMatchObject({ kind: 'tag', unit: 'ex_residual', profile_value: -0.05, previous: null, plays: 12, previous_plays: 2 })
+        expect(trill?.value ?? 0).toBeLessThan(0)
+        expect(view?.focus?.[1]).toMatchObject({ value: null, previous: null })
+        const result = await context.service.interpret({ language: 'ko', userId: SCORE_USER })
+        expect(result).toMatchObject({ ok: true, value: { output: { highlights: [{ key: 'tag:trill' }, { key: 'training' }] } } })
+        expect(JSON.parse(context.anthropic.generateCalls[0]?.input ?? '{}')).toMatchObject({
+            training: { key: 'training', created: 0, plays: 0, charts: 0 },
+            focus: [{ key: 'tag:trill' }, { key: 'tag:jack' }, { key: 'tag:stair' }],
         })
     })
 })

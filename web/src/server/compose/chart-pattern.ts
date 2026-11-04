@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, inArray, lt } from 'drizzle-orm'
+import { and, asc, count, eq, gt, inArray, lt, or, sql, type SQLWrapper } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { chartPattern } from '@server/db/schema'
 import { hasMysqlErrorCode, MYSQL_ERROR_CODE } from '@server/lib/mysql-error'
@@ -86,6 +86,19 @@ export const createChartPatternDb = (db: Database) =>
             return rows.map((row) => row.md5)
         },
     }) satisfies ChartPatternServiceDb
+
+/**
+ * A condition that `md5` names a chart whose stored features give at least one of `tags` a share of `minRatio` or more of its
+ * judged notes (`features.tags.<tag>.ratio`). The tags are checked names (PATTERN_TAGS) and both the JSON path and the ratio are
+ * bound parameters; it lets another query select by chart features without reading `chart_pattern` itself.
+ */
+export const chartTagShareCondition = (md5: SQLWrapper, tags: readonly string[], minRatio: number) =>
+    inArray(
+        md5,
+        sql`(select ${chartPattern.md5} from ${chartPattern} where ${or(
+            ...tags.map((tag) => sql`json_extract(${chartPattern.features}, ${`$.tags.${tag}.ratio`}) >= ${minRatio}`),
+        )})`,
+    )
 
 export const composeChartPattern = (db: Database, deps: { listCoverageTables: () => readonly CoverageTable[] }) => ({
     chartPatternService: createChartPatternService({

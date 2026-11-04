@@ -34,6 +34,8 @@ const VALID_VALUE = {
     scratch_auto: 'false',
     title: 'Alpha',
     table: 'insane1',
+    tag: 'trill',
+    training: 'true',
 } satisfies Record<AiRecordQueryFilter['field'], string>
 
 const plan = (filters: AiRecordQueryFilter[], overrides: Partial<AiRecordQueryRunInput> = {}): AiRecordQueryRunInput => ({
@@ -213,6 +215,40 @@ describe('난이도표 범위', () => {
         expect(acceptsUnplayed([{ field: 'lamp', op: 'ne', values: [clearLampToId('NoPlay')] }])).toBe(false)
         expect(acceptsUnplayed([{ field: 'lamp', op: 'gte', values: [clearLampToId('Easy')] }])).toBe(false)
         expect(acceptsUnplayed([{ field: 'bp', op: 'lte', value: 5 }])).toBe(false)
+    })
+
+    test('패턴 태그는 같음·중 하나만, 이름은 PATTERN_TAGS 로 확인하고 겹친 태그는 한 번만 남긴다', () => {
+        expect(AI_RECORD_QUERY_ALLOWED_OPS.tag).toEqual(['eq', 'in'])
+        expect(compileOne({ field: 'tag', op: 'in', value: 'trill, JACK,trill' })).toEqual({
+            ok: true,
+            query: {
+                source: 'scores',
+                conditions: [{ field: 'tag', op: 'in', tags: ['trill', 'jack'] }],
+                sort: { sort_field: 'played_at', sort_dir: 'desc' },
+                limit: 20,
+            },
+        })
+        for (const value of ['nope', "trill' or 1=1", 'trill,$.x', ''])
+            expect(compileOne({ field: 'tag', op: 'eq', value })).toEqual({ ok: false, issues: [{ index: 0, reason: 'value_invalid' }] })
+    })
+
+    test('훈련곡은 같음만, 값은 true·false 뿐이고 표 쿼리에서도 DB 조건으로 남는다', () => {
+        expect(AI_RECORD_QUERY_ALLOWED_OPS.training).toEqual(['eq'])
+        expect(compileOne({ field: 'training', op: 'eq', value: ' false ' })).toMatchObject({
+            ok: true,
+            query: { conditions: [{ field: 'training', op: 'eq', value: false }] },
+        })
+        expect(compileOne({ field: 'training', op: 'eq', value: 'yes' })).toEqual({ ok: false, issues: [{ index: 0, reason: 'value_invalid' }] })
+        const query = tableQuery([
+            { field: 'level', op: 'eq', value: '12' },
+            { field: 'training', op: 'eq', value: 'true' },
+            { field: 'tag', op: 'eq', value: 'stair' },
+        ])
+        expect(query.conditions).toEqual([
+            { field: 'training', op: 'eq', value: true },
+            { field: 'tag', op: 'eq', tags: ['stair'] },
+        ])
+        expect(acceptsUnplayed(query.conditions)).toBe(false)
     })
 
     test('결과에는 사용자 필드가 없고 사용자 항목은 스키마가 받지 않는다', () => {

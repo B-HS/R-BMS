@@ -318,7 +318,9 @@
             "goalKind": {
                 "lamp_count_at_level": "レベルでランプN曲",
                 "clear_all_level": "レベルの全曲クリア",
-                "ex_rate_on_chart": "1曲のEX率"
+                "ex_rate_on_chart": "1曲のEX率",
+                "weakness_residual": "弱点の残差を上げる",
+                "density_limit": "密度限界(NPS)を上げる"
             }
         },
         "insightTone": {

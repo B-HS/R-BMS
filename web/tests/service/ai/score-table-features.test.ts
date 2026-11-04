@@ -1,12 +1,23 @@
 import { describe, expect, test } from 'bun:test'
+import { createChartTagLoader } from '@server/compose/ai-score-features'
+import type { WeaknessProfileCell, WeaknessProfileView } from '@server/dto/ai-play'
 import { FOLDER_LIMIT } from '@server/dto/folder'
 import { ASSIST_GRADE_RULE, DIGEST_IS_DATA_RULE } from '@server/service/domain/ai/ai-digest'
-import { buildAiGoalSystemPrompt, computeGoalProgress, refineGoalPlanOutput } from '@server/service/domain/ai/goal-plan.service'
-import { buildAiPracticeSystemPrompt, refinePracticeOutput } from '@server/service/domain/ai/practice-folder.service'
-import { AI_RECOMMEND_FEATURE, buildAiRecommendSystemPrompt, refineRecommendOutput } from '@server/service/domain/ai/recommend.service'
+import { buildAiGoalSystemPrompt, computeGoalProgress, createAiGoalService, refineGoalPlanOutput } from '@server/service/domain/ai/goal-plan.service'
+import { buildAiPracticeSystemPrompt, createAiPracticeFolderService, refinePracticeOutput } from '@server/service/domain/ai/practice-folder.service'
+import {
+    AI_RECOMMEND_FEATURE,
+    buildAiRecommendSystemPrompt,
+    createAiRecommendService,
+    refineRecommendOutput,
+    type TableFeatureDeps,
+} from '@server/service/domain/ai/recommend.service'
 import { readTableProgress } from '@server/service/domain/ai/table-progress'
+import { computeChartFeatures, type ChartFeatures } from '@server/service/domain/analysis/chart-features'
 import { FAKE_USAGE } from '../../support/ai-memory-db'
 import { SCORE_NOW, SCORE_USER, levelRecords, makeTable, md5Of, recordOf, registerScoreKey, setupScoreFeatures } from '../../support/ai-score-fixture'
+import { makePatternDocument } from '../../support/chart-pattern-fixture'
+import { trainingProfileOf, trainingWeaknessOf } from '../../support/training-fixture'
 
 const table = makeTable()
 const RECORDS = { ...levelRecords(table, { '1': 'Hard', '2': 'Easy' }), [md5Of(300)]: recordOf('Failed', 85) }
@@ -446,6 +457,281 @@ describe('목표 계획 (기능 7)', () => {
             [2, '둘째 주 첫째'],
         ])
         expect(new Set(steps.map((step) => step.week_index)).size).toBe(steps.length)
+    })
+})
+
+const BASE_FEATURES = computeChartFeatures(
+    makePatternDocument([
+        [0, 1, 0],
+        [250_000, 2, 0],
+        [500_000, 3, 0],
+    ]),
+)
+
+/** Current (ANALYSIS_VERSION 2) features of a chart with these tag shares and 90th-percentile NPS. */
+const featuresWith = (patch: { tags?: Record<string, number>; p90?: number }): ChartFeatures => ({
+    ...BASE_FEATURES,
+    tags: Object.fromEntries(Object.entries(patch.tags ?? {}).map(([tag, ratio]) => [tag, { notes: 1, ratio }])),
+    nps: { ...BASE_FEATURES.nps, p90_2s: patch.p90 ?? 0 },
+})
+
+const FEATURES = new Map([
+    [md5Of(201), featuresWith({ tags: { trill: 0.15 } })],
+    [md5Of(301), featuresWith({ tags: { trill: 0.3 } })],
+    [md5Of(302), featuresWith({ p90: 12.5 })],
+    [md5Of(303), featuresWith({ p90: 16 })],
+    [md5Of(401), featuresWith({ tags: { trill: 0.05 } })],
+])
+
+const cellOf = (key: string, kind: string, value: number): WeaknessProfileCell => ({
+    key,
+    kind,
+    value,
+    unit: 'ex_residual',
+    ex_ratio: 0.8,
+    bp_rate: 0.05,
+    timing: null,
+    notes: 900,
+    charts: 12,
+    plays: 30,
+    auto_plays: 0,
+    p_value: 0.001,
+    q_threshold: 0.01,
+    evidence: 'strong',
+    leaning: 'weakness',
+    sample_level: 'medium',
+    trend_delta: null,
+    interaction: null,
+})
+
+/** A profile whose matchable weaknesses are `tag:trill` and `density:limit` (12 NPS); `lane:3` cannot pick charts, `tag:jack` is uncertain. */
+const profileOf = (trillValue = -0.06): WeaknessProfileView => ({
+    ...trainingProfileOf({
+        weaknesses: [
+            trainingWeaknessOf('tag:trill', 'tag', { value: trillValue }),
+            trainingWeaknessOf('density:limit', 'density', { unit: 'nps', value: 12 }),
+            trainingWeaknessOf('lane:3', 'lane', { selectable_for_folder: false }),
+            trainingWeaknessOf('tag:jack', 'tag', { evidence: 'uncertain' }),
+            trainingWeaknessOf('timing:trill', 'timing', { unit: 'ms', value: 6, selectable_for_folder: false }),
+        ],
+    }),
+    cells: [cellOf('tag:trill', 'tag', trillValue)],
+})
+
+/** Features 5, 6 and 7 over the real chart-tag loader (current or stale features) with a weakness profile, or none. */
+const setupWithProfile = (options: { stale?: readonly string[]; profile?: WeaknessProfileView | null; output?: unknown } = {}) => {
+    const context = setupScoreFeatures({ records: RECORDS, output: options.output })
+    const state = { profile: options.profile === undefined ? profileOf() : options.profile }
+    const loadChartTags = createChartTagLoader({
+        readFeaturesMany: async (md5s) =>
+            new Map(
+                [...FEATURES]
+                    .filter(([md5]) => md5s.includes(md5))
+                    .map(([md5, features]) => [md5, { features, isStale: options.stale?.includes(md5) ?? false }] as const),
+            ),
+    })
+    const tableDeps: TableFeatureDeps = {
+        loadTable: (tableId) => (tableId === undefined || tableId === context.table.id ? context.table : null),
+        loadRecords: async () => context.state.records,
+        loadChartTags,
+    }
+    const shared = { runner: context.aiFeatureRunner, results: context.aiResultService }
+    const profileDeps = state.profile === null ? {} : { profile: { view: async () => state.profile ?? profileOf() } }
+    let counter = 0
+    const newId = (prefix: string) => `${prefix}${(++counter).toString(16).padStart(30, 'a')}`
+    const now = () => SCORE_NOW
+    const recommend = createAiRecommendService({ ...tableDeps, ...shared, ...profileDeps })
+    const goals = createAiGoalService({ ...tableDeps, ...shared, ...profileDeps, db: context.goalMemory.db, newId, now })
+    const practice = createAiPracticeFolderService({
+        ...tableDeps,
+        ...shared,
+        ...profileDeps,
+        db: context.practiceMemory.db,
+        recommend,
+        goals,
+        folders: context.folderService,
+        now,
+    })
+    return { ...context, state, recommend, goals, practice, loadChartTags }
+}
+
+describe('약점 프로필 키의 기계적 연결 (기획 2026-11-04 2.6 기능 5·6·7)', () => {
+    test('추천 점수는 약점 일치 × 1.0 을 더하고 밀도 한계 × 1.25 를 넘는 곡에서 1.0 을 빼며, 후보마다 focus_keys 를 붙인다', async () => {
+        const context = setupWithProfile()
+        const view = await context.recommend.view({ language: 'ko', userId: SCORE_USER })
+        const byMd5 = new Map((view?.candidates ?? []).map((candidate) => [candidate.md5, candidate]))
+        expect([301, 302, 303].map((index) => [byMd5.get(md5Of(index))?.score, byMd5.get(md5Of(index))?.focus_keys])).toEqual([
+            [2.333, ['tag:trill']],
+            [2.333, ['density:limit']],
+            [1, []],
+        ])
+        expect(byMd5.get(md5Of(300))).toMatchObject({ kind: 'failed', score: 3.85, focus_keys: [] })
+        expect(view?.candidates.map((candidate) => candidate.md5).slice(0, 4)).toEqual([md5Of(300), md5Of(301), md5Of(302), md5Of(303)])
+        expect(view?.profile_keys).toEqual(['tag:trill', 'density:limit'])
+        expect(context.anthropic.generateCalls).toHaveLength(0)
+    })
+
+    test('v1·낡은 특징(새 필드 없음, isStale)이면 던지지 않고 밀도 일치·감점은 0, 태그 일치는 그대로 쓴다', async () => {
+        const context = setupWithProfile({ stale: [md5Of(301), md5Of(302), md5Of(303)] })
+        const load = await context.loadChartTags([md5Of(301), md5Of(302)])
+        expect(load.extras?.size).toBe(0)
+        expect([...load.staleMd5s].toSorted()).toEqual([md5Of(301), md5Of(302)])
+        const view = await context.recommend.view({ language: 'ko', userId: SCORE_USER })
+        const scores = new Map((view?.candidates ?? []).map((candidate) => [candidate.md5, [candidate.score, candidate.focus_keys]]))
+        expect([301, 302, 303].map((index) => scores.get(md5Of(index)))).toEqual([
+            [2.333, ['tag:trill']],
+            [2, []],
+            [2, []],
+        ])
+        expect(view?.pattern_coverage).toMatchObject({ stale_features: 3 })
+        const density = await context.practice.view({
+            language: 'ko',
+            userId: SCORE_USER,
+            input: { source: 'weakness', focus_key: 'density:limit' },
+        })
+        expect(density).toMatchObject({ ok: true, value: { candidates: [], notice: { need: 'candidates' } } })
+    })
+
+    test('프로필이 없으면 추천은 약점 없이 예전 점수 그대로다', async () => {
+        const context = setupWithProfile({ profile: null })
+        const view = await context.recommend.view({ language: 'ko', userId: SCORE_USER })
+        expect(view?.candidates.find((candidate) => candidate.md5 === md5Of(301))).toMatchObject({ score: 2, focus_keys: [] })
+        expect(view?.profile_keys).toEqual([])
+    })
+
+    test('refine: 약점 키 focus_key 는 그 후보의 focus_keys 일 때만 남는다', () => {
+        const digest = {
+            frontier: { key: 'frontier' },
+            weaknesses: [{ key: 'tag:trill' }],
+            candidates: [
+                { key: `chart.${md5Of(1)}`, md5: md5Of(1), focus_keys: ['tag:trill'] },
+                { key: `chart.${md5Of(2)}`, md5: md5Of(2), focus_keys: [] },
+            ],
+        }
+        const refined = refineRecommendOutput(
+            {
+                summary: '',
+                picks: [
+                    { md5: md5Of(2), reason: '트릴', focus_key: 'tag:trill' },
+                    { md5: md5Of(1), reason: '트릴', focus_key: 'tag:trill' },
+                    { md5: md5Of(2), reason: '경계', focus_key: 'frontier' },
+                ],
+            },
+            digest,
+        )
+        expect(refined?.picks.map((pick) => [pick.md5, pick.focus_key])).toEqual([
+            [md5Of(1), 'tag:trill'],
+            [md5Of(2), 'frontier'],
+        ])
+    })
+
+    test('연습 폴더 weakness 출처는 그 약점의 몫이 큰 곡 순이고, AI 에 약점을 함께 넘긴다', async () => {
+        const preview = { name_suffix: '트릴', description: '', items: [{ md5: md5Of(301), memo: '' }] }
+        const context = setupWithProfile({ output: preview })
+        await registerScoreKey(context)
+        const input = { source: 'weakness' as const, focus_key: 'tag:trill' }
+        const view = await context.practice.view({ language: 'ko', userId: SCORE_USER, input })
+        expect(view).toMatchObject({ ok: true, value: { source: 'weakness', focus_key: 'tag:trill', tag: null, notice: null } })
+        expect(view.ok && view.value.candidates.map((candidate) => candidate.md5)).toEqual([md5Of(301), md5Of(201)])
+        const density = await context.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'weakness', focus_key: 'density:limit' } })
+        expect(density.ok && density.value.candidates.map((candidate) => candidate.md5)).toEqual([md5Of(302)])
+        expect(await context.practice.preview({ language: 'ko', userId: SCORE_USER, input })).toMatchObject({ ok: true })
+        expect(JSON.parse(context.anthropic.generateCalls[0]?.input ?? '{}')).toMatchObject({
+            source: { kind: 'weakness', focus_tag: null, weakness: { key: 'tag:trill', kind: 'tag', unit: 'ex_residual' } },
+        })
+        const created = await context.practice.create({ userId: SCORE_USER, input: { ...input, ...preview } })
+        expect(created).toMatchObject({ ok: true, value: { outcome: 'created', name: 'AI 연습 · 트릴', item_count: 1 } })
+    })
+
+    test('프로필 weaknesses 에 없는 키는 weakness_profile, 곡을 고를 수 없는 키는 candidates 로 공급자 호출 전에 막는다', async () => {
+        const context = setupWithProfile({ output: { name_suffix: 'x', description: '', items: [] } })
+        await registerScoreKey(context)
+        for (const [focus_key, need] of [
+            ['tag:stair', 'weakness_profile'],
+            ['lane:3', 'candidates'],
+        ] as const) {
+            const input = { source: 'weakness' as const, focus_key }
+            const expected = { ok: false, reason: 'not_enough_data', need } as const
+            expect(await context.practice.view({ language: 'ko', userId: SCORE_USER, input })).toEqual(expected)
+            expect(await context.practice.preview({ language: 'ko', userId: SCORE_USER, input })).toEqual(expected)
+            expect(
+                await context.practice.create({
+                    userId: SCORE_USER,
+                    input: { ...input, name_suffix: 'x', description: '', items: [{ md5: md5Of(301), memo: '' }] },
+                }),
+            ).toEqual(expected)
+        }
+        expect(await context.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'weakness' } })).toEqual({
+            ok: false,
+            reason: 'invalid_source',
+            field: 'focus_key',
+        })
+        const noProfile = setupWithProfile({ profile: null })
+        expect(await noProfile.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'weakness', focus_key: 'tag:trill' } })).toEqual({
+            ok: false,
+            reason: 'not_enough_data',
+            need: 'weakness_profile',
+        })
+        expect(context.anthropic.generateCalls).toHaveLength(0)
+        expect(await context.folderService.list(SCORE_USER)).toEqual([])
+    })
+
+    test('weakness_residual 목표는 프로필 약점 키만 받고, 생성 때 기준값을 남겨 지금 값과의 비로 진행한다', async () => {
+        const context = setupWithProfile()
+        const create = (input: Parameters<typeof context.goals.create>[0]['input']) => context.goals.create({ userId: SCORE_USER, input })
+        expect(await create({ kind: 'weakness_residual', table: 'insane1', key: 'tag:stair', target_residual: -0.02 })).toEqual({
+            ok: false,
+            reason: 'not_enough_data',
+            need: 'weakness_profile',
+        })
+        expect(await create({ kind: 'weakness_residual', table: 'insane1', key: 'timing:trill', target_residual: -0.02 })).toEqual({
+            ok: false,
+            reason: 'invalid_goal',
+            field: 'key',
+        })
+        expect(context.goalMemory.goals.size).toBe(0)
+        const created = await create({ kind: 'weakness_residual', table: 'insane1', key: 'tag:trill', target_residual: -0.02 })
+        expect(created).toMatchObject({
+            ok: true,
+            value: {
+                params: { kind: 'weakness_residual', key: 'tag:trill', target_residual: -0.02, baseline: -0.06 },
+                progress: { target: -0.02, achieved: -0.06, current: -0.06, ratio: 0, done: false, remaining: 1 },
+            },
+        })
+        context.state.profile = profileOf(-0.04)
+        expect((await context.goals.list(SCORE_USER))[0]?.progress).toMatchObject({ current: -0.04, ratio: 0.5, done: false })
+        const goalId = created.ok ? created.value.id : ''
+        const plan = await context.goals.planView({ language: 'ko', userId: SCORE_USER, goalId })
+        expect(plan?.remaining.map((chart) => chart.md5)).toEqual([md5Of(301), md5Of(201)])
+        context.state.profile = profileOf(-0.01)
+        expect((await context.goals.list(SCORE_USER))[0]?.progress).toMatchObject({ current: -0.01, ratio: 1, done: true, remaining: 0 })
+    })
+
+    test('density_limit 목표는 지금 EX 밀도 한계를 기준값으로 두고 p90 이 목표 ±1.5 인 곡으로 계획하며, 프로필이 없으면 만들지 않는다', async () => {
+        const context = setupWithProfile()
+        const created = await context.goals.create({ userId: SCORE_USER, input: { kind: 'density_limit', table: 'insane1', target_nps: 14 } })
+        expect(created).toMatchObject({
+            ok: true,
+            value: { params: { kind: 'density_limit', target_nps: 14, baseline: 12 }, progress: { target: 14, current: 12, ratio: 0, done: false } },
+        })
+        const goalId = created.ok ? created.value.id : ''
+        expect((await context.goals.planView({ language: 'ko', userId: SCORE_USER, goalId }))?.remaining.map((chart) => chart.md5)).toEqual([
+            md5Of(302),
+        ])
+        const folder = await context.practice.view({ language: 'ko', userId: SCORE_USER, input: { source: 'goal', goal_id: goalId } })
+        expect(folder.ok && folder.value.candidates.map((candidate) => candidate.md5)).toEqual([md5Of(302)])
+
+        const stale = setupWithProfile({ stale: [md5Of(302)] })
+        const staleGoal = await stale.goals.create({ userId: SCORE_USER, input: { kind: 'density_limit', table: 'insane1', target_nps: 14 } })
+        const stalePlan = await stale.goals.planView({ language: 'ko', userId: SCORE_USER, goalId: staleGoal.ok ? staleGoal.value.id : '' })
+        expect(stalePlan).toMatchObject({ remaining: [], notice: { need: 'remaining_charts' } })
+
+        const noProfile = setupWithProfile({ profile: null })
+        expect(await noProfile.goals.create({ userId: SCORE_USER, input: { kind: 'density_limit', table: 'insane1', target_nps: 14 } })).toEqual({
+            ok: false,
+            reason: 'not_enough_data',
+            need: 'weakness_profile',
+        })
     })
 })
 

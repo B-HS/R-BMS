@@ -1,13 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { inArray, like } from 'drizzle-orm'
 import { createAiRecordQueryDb } from '@server/compose/ai-record-query'
+import { composeChartPattern } from '@server/compose/chart-pattern'
 import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
-import { chart, chartBest, score } from '@server/db/schema'
+import { chart, chartBest, chartPattern, score, trainingChart } from '@server/db/schema'
 import type { AiRecordQueryFilter, AiRecordQueryRunInput } from '@server/dto/ai'
 import { clearLampToId, gaugeTypeToId, type ClearLamp } from '@server/dto/common'
 import type { RecordQueryTable } from '@server/service/domain/ai/record-query.compiler'
 import { createAiRecordQueryService } from '@server/service/domain/ai/record-query.service'
+import { makePatternDocument } from '../support/chart-pattern-fixture'
 
 const hasDatabase = Boolean(process.env.RBMS_DB_E2E)
 if (!hasDatabase) {
@@ -99,6 +101,32 @@ const SCORES = [
 
 const UNKNOWN_GAUGE_ID = 99
 
+const PATTERN_NOTES = 8
+const PATTERN_STEP_US = 100_000
+const TRILL_NOTES = Array.from({ length: PATTERN_NOTES }, (_, index) => [index * PATTERN_STEP_US, (index % 2) + 1, 0] as const)
+const JACK_NOTES = Array.from({ length: PATTERN_NOTES }, (_, index) => [index * PATTERN_STEP_US, 3, 0] as const)
+
+/** A training chart row of `userId` on `sha256`; only the owner and the sha256 matter to the record query. */
+const trainingRow = (id: string, userId: string, sha256: string) => ({
+    id: `${PREFIX}_${id}`,
+    userId,
+    md5: id.padEnd(32, '0'),
+    sha256,
+    title: `training ${id}`,
+    playLevel: 12,
+    bpm: 150,
+    noteCount: 100,
+    lengthMs: 60_000,
+    generatorVersion: 1,
+    spec: {},
+    request: {},
+    profileSnapshot: {},
+    bms: Buffer.from('#TITLE x'),
+    provider: 'anthropic',
+    model: 'claude-test',
+    createdAt: T0,
+})
+
 const GRADER_PLAYS = [
     { id: 'g1', clear: 'LightAssistEasy', gauge: gaugeTypeToId('Hazard') },
     { id: 'g2', clear: 'LightAssistEasy', gauge: gaugeTypeToId('AssistEasy') },
@@ -163,6 +191,8 @@ const scoreIds = async (filters: AiRecordQueryFilter[], overrides: Partial<AiRec
 describe.skipIf(!hasDatabase)('기록 질문 쿼리 (임시 MySQL)', () => {
     const cleanup = async () => {
         const db = getDb()
+        await db.delete(trainingChart).where(like(trainingChart.id, `${PREFIX}_%`))
+        await db.delete(chartPattern).where(inArray(chartPattern.md5, [CHARTS.alpha.md5, CHARTS.bravo.md5]))
         await db.delete(chartBest).where(like(chartBest.userId, `${PREFIX}_%`))
         await db.delete(score).where(like(score.id, `${PREFIX}_%`))
         await db.delete(chart).where(
@@ -181,6 +211,13 @@ describe.skipIf(!hasDatabase)('기록 질문 쿼리 (임시 MySQL)', () => {
         await db.insert(chart).values(Object.values(CHARTS).map((row) => ({ ...row, notes: NOTES, mode: 'BEAT_7K' })))
         await db.insert(score).values([...SCORES, ...GRADER_SCORES].map((row) => ({ ...row, chartMd5: null, notes: NOTES, mode: 'BEAT_7K' })))
         await db.insert(chartBest).values(BESTS)
+        const patterns = composeChartPattern(db, { listCoverageTables: () => [] }).chartPatternService
+        for (const [md5, notes] of [
+            [CHARTS.alpha.md5, TRILL_NOTES],
+            [CHARTS.bravo.md5, JACK_NOTES],
+        ] as const)
+            await patterns.upload({ document: makePatternDocument(notes, { md5 }), uploadedBy: OWNER })
+        await db.insert(trainingChart).values([trainingRow('tc1', OWNER, CHARTS.bravo.sha256), trainingRow('tc2', OTHER, CHARTS.alpha.sha256)])
     })
 
     afterAll(cleanup)
@@ -273,5 +310,28 @@ describe.skipIf(!hasDatabase)('기록 질문 쿼리 (임시 MySQL)', () => {
             [CHARTS.bravo.md5, 'NoPlay'],
             [CHARTS.charlie.md5, 'NoPlay'],
         ])
+    })
+
+    test('패턴 태그는 곡 특징의 태그 비율이 5% 이상인 곡의 판이고, 경로와 비율은 매개변수로 묶인다', async () => {
+        expect(await scoreIds([{ field: 'tag', op: 'eq', value: 'trill' }])).toEqual([`${PREFIX}_s2`, `${PREFIX}_s1`])
+        expect(await scoreIds([{ field: 'tag', op: 'eq', value: 'jack' }])).toEqual([`${PREFIX}_s3`])
+        expect(await scoreIds([{ field: 'tag', op: 'in', value: 'jack,trill' }])).toEqual([`${PREFIX}_s3`, `${PREFIX}_s2`, `${PREFIX}_s1`])
+        expect(await scoreIds([{ field: 'tag', op: 'eq', value: 'stair' }])).toEqual([])
+        const table = await runAs(OWNER, [
+            { field: 'level', op: 'gte', value: '12' },
+            { field: 'tag', op: 'eq', value: 'jack' },
+        ])
+        expect(table?.rows.map((row) => row.chart_md5)).toEqual([CHARTS.bravo.md5])
+    })
+
+    test('훈련곡 조건은 그 사용자 자신의 training_chart sha256 으로만 고르고 다른 사용자의 훈련곡은 섞지 않는다', async () => {
+        expect(await scoreIds([{ field: 'training', op: 'eq', value: 'true' }])).toEqual([`${PREFIX}_s3`])
+        expect(await scoreIds([{ field: 'training', op: 'eq', value: 'false' }])).toEqual([`${PREFIX}_s2`, `${PREFIX}_s1`])
+        expect((await runAs(OTHER, [{ field: 'training', op: 'eq', value: 'true' }]))?.rows.map((row) => row.score_id)).toEqual([`${PREFIX}_s4`])
+        const table = await runAs(OWNER, [
+            { field: 'table', op: 'eq', value: 'w9table' },
+            { field: 'training', op: 'eq', value: 'true' },
+        ])
+        expect(table?.rows.map((row) => [row.chart_md5, row.score_id])).toEqual([[CHARTS.bravo.md5, `${PREFIX}_s3`]])
     })
 })

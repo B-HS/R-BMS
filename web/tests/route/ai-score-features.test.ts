@@ -7,6 +7,7 @@ import { buildAiRecommendSystemPrompt } from '@server/service/domain/ai/recommen
 import { createAiWeeklySummaryService } from '@server/service/domain/ai/weekly-summary.service'
 import type { Locale } from '@shared/i18n/locale'
 import { SCORE_API_KEY, SCORE_USER, levelRecords, makeTable, md5Of, recordOf, setupScoreFeatures } from '../support/ai-score-fixture'
+import { trainingProfileOf } from '../support/training-fixture'
 
 const ALICE: AuthUser = { id: SCORE_USER, loginId: 'alice', name: 'Alice', role: 'user' }
 const ORIGIN = 'http://localhost:3000'
@@ -28,9 +29,15 @@ const createRoutes = (locale: Locale = 'ko') => {
                     return []
                 },
                 listPriorBests: async () => [],
+                countTrainingChartsCreated: async ({ userId }) => {
+                    seenUserIds.push(userId)
+                    return 0
+                },
             },
             runner: context.aiFeatureRunner,
             results: context.aiResultService,
+            profile: { view: async () => trainingProfileOf({ weaknesses: [] }) },
+            plays: { analyzedPlaysInWindow: async () => ({ plays: [], stale: 0, failed: 0 }) },
             levelLabelOf: () => null,
             now: () => Date.UTC(2026, 9, 21),
         }),
@@ -180,5 +187,50 @@ describe('점수 기반 AI 기능 API', () => {
         expect([outside.status, (await outside.json()).error.details.reason]).toEqual([400, 'no_candidate_items'])
         const view = await routes.practiceView(request('/practice-folder?source=tag&tag=trill', { user: ALICE }), undefined)
         expect((await view.json()).data).toMatchObject({ source: 'tag', tag: 'trill', notice: { need: 'chart_patterns' }, folders: { used: 1 } })
+    })
+    test('약점 키는 문법이 틀리면 400, 문법은 맞지만 프로필 약점이 아니면 422 weakness_profile 이고 공급자를 부르지 않는다', async () => {
+        const { routes, context } = createRoutes()
+        await context.aiCredentialService.register({ userId: ALICE.id, provider: 'anthropic', apiKey: SCORE_API_KEY })
+        await context.aiCredentialService.setModel({ userId: ALICE.id, provider: 'anthropic', model: 'claude-test' })
+        for (const key of ['tag:nope', `tag:${'x'.repeat(61)}`, 'lane:9', 'combo:trill+chord_2']) {
+            const view = await routes.practiceView(
+                request(`/practice-folder?source=weakness&focus_key=${encodeURIComponent(key)}`, { user: ALICE }),
+                undefined,
+            )
+            expect([key, view.status]).toEqual([key, 400])
+            const goal = await routes.goalCreate(
+                request('/goals', {
+                    user: ALICE,
+                    method: 'POST',
+                    body: { kind: 'weakness_residual', table: 'insane1', key, target_residual: -0.02 },
+                }),
+                undefined,
+            )
+            expect([key, goal.status]).toEqual([key, 400])
+        }
+        const notInProfile = await routes.practicePreview(
+            request('/practice-folder/preview', { user: ALICE, method: 'POST', body: { source: 'weakness', focus_key: 'tag:trill' } }),
+            undefined,
+        )
+        expect([notInProfile.status, (await notInProfile.json()).error]).toEqual([
+            422,
+            expect.objectContaining({ code: 'AI_NOT_ENOUGH_DATA', details: { reason: 'not_enough_data', need: 'weakness_profile' } }),
+        ])
+        const goal = await routes.goalCreate(
+            request('/goals', {
+                user: ALICE,
+                method: 'POST',
+                body: { kind: 'weakness_residual', table: 'insane1', key: 'tag:trill', target_residual: -0.02 },
+            }),
+            undefined,
+        )
+        expect([goal.status, (await goal.json()).error.details]).toEqual([422, { reason: 'not_enough_data', need: 'weakness_profile' }])
+        for (const body of [
+            { kind: 'weakness_residual', table: 'insane1', key: 'tag:trill', target_residual: 0.06 },
+            { kind: 'density_limit', table: 'insane1', target_nps: 41 },
+            { kind: 'density_limit', table: 'insane1', target_nps: 3.9 },
+        ])
+            expect((await routes.goalCreate(request('/goals', { user: ALICE, method: 'POST', body }), undefined)).status).toBe(400)
+        expect(context.anthropic.generateCalls).toHaveLength(0)
     })
 })

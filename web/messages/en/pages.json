@@ -318,7 +318,9 @@
             "goalKind": {
                 "lamp_count_at_level": "N songs with a lamp at a level",
                 "clear_all_level": "Clear every song at a level",
-                "ex_rate_on_chart": "EX rate on one song"
+                "ex_rate_on_chart": "EX rate on one song",
+                "weakness_residual": "Raise a weakness residual",
+                "density_limit": "Raise the density limit (NPS)"
             }
         },
         "insightTone": {

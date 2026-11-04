@@ -14,20 +14,25 @@ import {
     type AiFeatureSpec,
 } from '@server/service/domain/ai/ai-digest'
 import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.service'
+import { PROFILE_MAX_PLAYS } from '@server/service/domain/ai/play-feature.constants'
 import type { AiResultService } from '@server/service/domain/ai/result.service'
 import {
     MILLIS_DECIMALS,
     PERCENT_DECIMALS,
     REFERENCE_RULE_VERSION,
     SCORE_FEATURE_ANALYSIS_VERSION,
+    WEEKLY_FOCUS_TOP,
     WEEKLY_LIST_MAX,
 } from '@server/service/domain/ai/score-feature.constants'
 import { isClearLampId } from '@server/service/domain/ai/table-progress'
+import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
 import { roundRatio } from '@server/service/domain/analysis/chart-features'
+import { measureProfileKeys } from '@server/service/domain/analysis/weakness-profile'
+import type { TraceService } from '@server/service/domain/trace/trace.service'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_WEEKLY_FEATURE = 'weekly_summary'
-export const AI_WEEKLY_PROMPT_VERSION = 2
+export const AI_WEEKLY_PROMPT_VERSION = 3
 export const AI_WEEKLY_MAX_OUTPUT_TOKENS = 8_000
 export const AI_WEEKLY_EFFORT = 'low' satisfies AiEffort
 export const AI_WEEKLY_HIGHLIGHTS_MAX = 6
@@ -48,6 +53,7 @@ export const buildAiWeeklySystemPrompt = (language: Locale) =>
         '`metrics` holds this week (`week.*`) and the week before (`prev.*`); `lamp_changes` and `ex_changes` list charts whose best went up this week; `levels` groups this week by difficulty table level.',
         'If `week.in_progress` is true the week has not ended; say so instead of judging the whole week.',
         'In `lamp_changes` and `ex_changes`, `from_assist_grade` and `to_assist_grade` are the `assist_grade` of `from_lamp` and `to_lamp`.',
+        "`training` counts the training charts made this week and the plays of training charts this week (those plays are in `metrics` too). `focus` measures the top weaknesses of the player's profile (`profile_value`, last 90 days) on this week's traced plays only (`value`) and on last week's (`previous`); a value is null when that week's plays are too few to measure it.",
         ASSIST_GRADE_RULE,
         `Write at most ${AI_WEEKLY_HIGHLIGHTS_MAX} \`highlights\`, each with the \`key\` of the digest item it rests on, a short ${AI_OUTPUT_LANGUAGE_NAME[language]} \`title\`, one or two ${AI_OUTPUT_LANGUAGE_NAME[language]} sentences \`body\` and a \`tone\`.`,
         DIGEST_KEY_RULE,
@@ -66,9 +72,13 @@ export const aiWeeklySpecOf = (language: Locale) =>
         effort: AI_WEEKLY_EFFORT,
     }) satisfies AiFeatureSpec<typeof aiWeeklyOutputSchema>
 
-/** One play of the week as the summary reads it. `maxExScore` is the chart's maximum EX (notes × 2 when the row has none). */
+/**
+ * One play of the week as the summary reads it. `maxExScore` is the chart's maximum EX (notes × 2 when the row has none);
+ * `isTraining` is whether the chart is one of the player's own training charts (by sha256, plan 2026-11-04 7.1).
+ */
 export type WeeklyScoreRow = {
     chartSha256: string
+    isTraining: boolean
     chartMd5: string | null
     title: string
     clear: number
@@ -92,12 +102,16 @@ export type AiWeeklySummaryServiceDb = {
     listScoresBetween: (params: { userId: string; from: number; to: number }) => Promise<WeeklyScoreRow[]>
     /** The best EX of each chart (and SCRATCH AUTO or not) at each lamp and gauge among the user's plays before `before`. */
     listPriorBests: (params: { userId: string; chartSha256s: readonly string[]; before: number }) => Promise<PriorBestRow[]>
+    /** How many training charts the user made with `from <= created_at < to`. */
+    countTrainingChartsCreated: (params: { userId: string; from: number; to: number }) => Promise<number>
 }
 
 type AiWeeklySummaryServiceDeps = {
     db: AiWeeklySummaryServiceDb
     runner: Pick<AiFeatureRunner, 'run'>
     results: Pick<AiResultService, 'findLatest'>
+    profile: Pick<WeaknessProfileService, 'view'>
+    plays: Pick<TraceService, 'analyzedPlaysInWindow'>
     levelLabelOf: (md5: string) => string | null
     now: () => number
 }
@@ -272,6 +286,12 @@ export const refineWeeklyOutput = (output: AiWeeklyOutput, digest: unknown) => {
 
 export const weeklySubjectKey = (weekStart: number) => `week:${toIsoDate(weekStart)}`
 
+/** The training part of a week (plan 2026-11-04 2.6 feature 10): charts made, and the plays and charts of training charts played. */
+export const summarizeTraining = (rows: readonly Pick<WeeklyScoreRow, 'chartSha256' | 'isTraining'>[], created: number) => {
+    const training = rows.filter((row) => row.isTraining)
+    return { created, plays: training.length, charts: new Set(training.map((row) => row.chartSha256)).size }
+}
+
 const metricsOf = (prefix: string, totals: ReturnType<typeof summarizeWeek>['totals']) =>
     Object.entries(totals).map(([name, value]) => ({ key: `${prefix}.${name}`, value }))
 
@@ -282,26 +302,64 @@ export const createAiWeeklySummaryService = (deps: AiWeeklySummaryServiceDeps) =
             rows.length > 0
                 ? await deps.db.listPriorBests({ userId, chartSha256s: [...new Set(rows.map((row) => row.chartSha256))], before: from })
                 : []
-        return summarizeWeek({ rows, priors, levelLabelOf: deps.levelLabelOf })
+        return { ...summarizeWeek({ rows, priors, levelLabelOf: deps.levelLabelOf }), rows }
+    }
+
+    /**
+     * The profile's top WEEKLY_FOCUS_TOP weaknesses measured on this week's and last week's traced plays only (plan 2026-11-04 2.6
+     * feature 10): the newest PROFILE_MAX_PLAYS analysed plays since last week's start, split by week. No weakness, no trace read.
+     */
+    const measureFocus = async (userId: string, start: number) => {
+        const weaknesses = (await deps.profile.view({ userId })).weaknesses.slice(0, WEEKLY_FOCUS_TOP)
+        if (weaknesses.length === 0) return []
+        const { plays, stale } = await deps.plays.analyzedPlaysInWindow({ userId, sinceMs: start - WEEK_MS, limit: PROFILE_MAX_PLAYS })
+        const keys = weaknesses.map((item) => item.key)
+        const measureWeek = (from: number) => {
+            const inWeek = plays.filter((play) => play.playedAt >= from && play.playedAt < from + WEEK_MS)
+            const window = { fromMs: from, toMs: from + WEEK_MS, recentFromMs: from, days: WEEK_DAYS, stale }
+            return { plays: inWeek.length, measured: measureProfileKeys(inWeek, window, keys) }
+        }
+        const week = measureWeek(start)
+        const before = measureWeek(start - WEEK_MS)
+        return weaknesses.map((item) => ({
+            key: item.key,
+            kind: item.kind,
+            unit: item.unit,
+            profile_value: item.value,
+            value: week.measured[item.key]?.value ?? null,
+            previous: before.measured[item.key]?.value ?? null,
+            plays: week.plays,
+            previous_plays: before.plays,
+        }))
     }
 
     const build = async (params: { userId: string; week?: string }) => {
         const now = deps.now()
         const start = resolveWeekStart(params.week, now)
         if (start === null) return null
-        const [current, previous] = await Promise.all([summarize(params.userId, start), summarize(params.userId, start - WEEK_MS)])
+        const [current, previous, created, focus] = await Promise.all([
+            summarize(params.userId, start),
+            summarize(params.userId, start - WEEK_MS),
+            deps.db.countTrainingChartsCreated({ userId: params.userId, from: start, to: start + WEEK_MS }),
+            measureFocus(params.userId, start),
+        ])
         const week = { start: toIsoDate(start), end: toIsoDate(start + WEEK_MS - DAY_MS), in_progress: now < start + WEEK_MS }
+        const training = summarizeTraining(current.rows, created)
         return {
             start,
             week,
             current,
             previous,
+            training,
+            focus,
             digest: {
                 week: { key: 'week', ...week },
                 metrics: [...metricsOf('week', current.totals), ...metricsOf('prev', previous.totals)],
                 lamp_changes: current.lamp_changes,
                 ex_changes: current.ex_changes,
                 levels: current.levels,
+                training: { key: 'training', ...training },
+                focus,
             },
         }
     }
@@ -325,6 +383,8 @@ export const createAiWeeklySummaryService = (deps: AiWeeklySummaryServiceDeps) =
                 lamp_changes: built.current.lamp_changes,
                 ex_changes: built.current.ex_changes,
                 levels: built.current.levels,
+                training: built.training,
+                focus: built.focus,
                 notice: built.current.totals.plays === 0 ? { need: 'week_plays' } : null,
                 ai,
             } satisfies AiWeeklyView

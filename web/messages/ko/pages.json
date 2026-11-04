@@ -318,7 +318,9 @@
             "goalKind": {
                 "lamp_count_at_level": "레벨에서 램프 N곡",
                 "clear_all_level": "레벨 전부 클리어",
-                "ex_rate_on_chart": "한 곡의 EX 비율"
+                "ex_rate_on_chart": "한 곡의 EX 비율",
+                "weakness_residual": "약점 잔차 끌어올리기",
+                "density_limit": "밀도 한계 NPS 올리기"
             }
         },
         "insightTone": {

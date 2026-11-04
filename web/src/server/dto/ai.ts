@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { assistGradeSchema, clearLampSchema, gaugeTypeSchema } from '@server/dto/common'
+import { weaknessKeySchema } from '@server/service/domain/analysis/weakness-key'
 
 export const AI_PROVIDER_IDS = ['anthropic', 'openai', 'ollama'] as const
 export const aiProviderIdSchema = z.enum(AI_PROVIDER_IDS)
@@ -142,7 +143,20 @@ export type AiOperatorLimitsOutput = z.infer<typeof aiOperatorLimitsSchema>
 export type AiUserSettingOutput = z.infer<typeof aiUserSettingSchema>
 export type AiUsageSummaryOutput = z.infer<typeof aiUsageSummarySchema>
 
-export const AI_RECORD_QUERY_FIELDS = ['level', 'lamp', 'ex_rate', 'bp', 'played_at', 'random', 'gauge', 'scratch_auto', 'title', 'table'] as const
+export const AI_RECORD_QUERY_FIELDS = [
+    'level',
+    'lamp',
+    'ex_rate',
+    'bp',
+    'played_at',
+    'random',
+    'gauge',
+    'scratch_auto',
+    'title',
+    'table',
+    'tag',
+    'training',
+] as const
 export const AI_RECORD_QUERY_OPS = ['eq', 'ne', 'gte', 'lte', 'in', 'contains'] as const
 export const AI_RECORD_QUERY_SORT_FIELDS = ['played_at', 'ex_rate', 'bp', 'level', 'lamp'] as const
 export const AI_RECORD_QUERY_SORT_DIRS = ['asc', 'desc'] as const
@@ -178,6 +192,8 @@ export const AI_RECORD_QUERY_ALLOWED_OPS = {
     scratch_auto: ['eq'],
     title: ['contains'],
     table: ['eq'],
+    tag: ['eq', 'in'],
+    training: ['eq'],
 } as const satisfies Record<AiRecordQueryField, readonly AiRecordQueryOp[]>
 
 export const aiRecordQueryFilterSchema = z.object({
@@ -335,8 +351,11 @@ export const aiRecommendViewSchema = z.object({
     table: z.object({ id: z.string(), name: z.string(), symbol: z.string() }),
     frontier: aiLevelProgressSchema.nullable(),
     levels: z.array(aiLevelProgressSchema),
-    candidates: z.array(aiChartCandidateSchema.extend({ kind: z.enum(AI_RECOMMEND_KINDS), score: z.number() })),
+    candidates: z.array(
+        aiChartCandidateSchema.extend({ kind: z.enum(AI_RECOMMEND_KINDS), score: z.number(), focus_keys: z.array(z.string()).optional() }),
+    ),
     pattern_coverage: z.object({ with_features: z.number().int(), candidates: z.number().int(), stale_features: z.number().int() }),
+    profile_keys: z.array(z.string()).optional(),
     notice: aiDataNoticeSchema,
     ai: aiInterpretationSchema(aiRecommendOutputSchema).nullable(),
 })
@@ -346,7 +365,7 @@ export type AiRecommendView = z.infer<typeof aiRecommendViewSchema>
 export type AiChartCandidate = z.infer<typeof aiChartCandidateSchema>
 export type AiLevelProgress = z.infer<typeof aiLevelProgressSchema>
 
-export const AI_PRACTICE_SOURCES = ['recommend', 'tag', 'goal'] as const
+export const AI_PRACTICE_SOURCES = ['recommend', 'tag', 'goal', 'weakness'] as const
 
 export const AI_PRACTICE_LIMIT = {
     ITEMS_MAX: 30,
@@ -362,6 +381,7 @@ export const aiPracticeSourceSchema = z.object({
     table: aiTableIdSchema.optional(),
     tag: z.string().regex(TAG_PATTERN).optional(),
     goal_id: aiGoalIdSchema.optional(),
+    focus_key: weaknessKeySchema.optional(),
 })
 
 export const aiPracticeFolderOutputSchema = z.object({
@@ -384,6 +404,7 @@ export const aiPracticeFolderViewSchema = z.object({
     table_id: z.string(),
     tag: z.string().nullable(),
     goal_id: z.string().nullable(),
+    focus_key: z.string().nullable().optional(),
     candidates: z.array(aiChartCandidateSchema),
     folders: z.object({ used: z.number().int(), limit: z.number().int(), can_create: z.boolean() }),
     notice: aiDataNoticeSchema,
@@ -403,7 +424,7 @@ export type AiPracticeFolderCreateInput = z.infer<typeof aiPracticeFolderCreateS
 export type AiPracticeFolderView = z.infer<typeof aiPracticeFolderViewSchema>
 export type AiPracticeFolderResult = z.infer<typeof aiPracticeFolderResultSchema>
 
-export const AI_GOAL_KINDS = ['lamp_count_at_level', 'clear_all_level', 'ex_rate_on_chart'] as const
+export const AI_GOAL_KINDS = ['lamp_count_at_level', 'clear_all_level', 'ex_rate_on_chart', 'weakness_residual', 'density_limit'] as const
 export type AiGoalKind = (typeof AI_GOAL_KINDS)[number]
 
 export const AI_GOAL_LIMIT = {
@@ -411,30 +432,64 @@ export const AI_GOAL_LIMIT = {
     LEVEL_MAX_CHARS: 32,
     COUNT_MAX: 2000,
     EX_RATE_MAX_PERCENT: 100,
+    TARGET_RESIDUAL_MIN: -0.2,
+    TARGET_RESIDUAL_MAX: 0.05,
+    TARGET_NPS_MIN: 4,
+    TARGET_NPS_MAX: 40,
     MAX_WEEKS: 8,
     WRITE_MAX_BYTES: 4 * 1024,
 } as const
 
 const goalLevelSchema = z.string().trim().min(1).max(AI_GOAL_LIMIT.LEVEL_MAX_CHARS)
 
+const lampCountGoalSchema = z.object({
+    kind: z.literal('lamp_count_at_level'),
+    table: aiTableIdSchema,
+    level: goalLevelSchema,
+    lamp: clearLampSchema,
+    count: z.number().int().min(1).max(AI_GOAL_LIMIT.COUNT_MAX),
+})
+const clearAllGoalSchema = z.object({ kind: z.literal('clear_all_level'), table: aiTableIdSchema, level: goalLevelSchema })
+const exRateGoalSchema = z.object({
+    kind: z.literal('ex_rate_on_chart'),
+    table: aiTableIdSchema,
+    md5: aiMd5Schema,
+    ex_rate: z.number().positive().max(AI_GOAL_LIMIT.EX_RATE_MAX_PERCENT),
+})
+const weaknessResidualGoalSchema = z.object({
+    kind: z.literal('weakness_residual'),
+    table: aiTableIdSchema,
+    key: weaknessKeySchema,
+    target_residual: z.number().min(AI_GOAL_LIMIT.TARGET_RESIDUAL_MIN).max(AI_GOAL_LIMIT.TARGET_RESIDUAL_MAX),
+})
+const densityLimitGoalSchema = z.object({
+    kind: z.literal('density_limit'),
+    table: aiTableIdSchema,
+    target_nps: z.number().min(AI_GOAL_LIMIT.TARGET_NPS_MIN).max(AI_GOAL_LIMIT.TARGET_NPS_MAX),
+})
+/** The profile value a profile goal started from (plan 2026-11-04 2.6 feature 7): the server sets it when the goal is made. */
+const goalBaselineShape = { baseline: z.number().nullable() }
+
+/** A goal as the user asks for it: the kinds and their fields, with no baseline (a sent baseline is dropped). */
 export const aiGoalParamsSchema = z.discriminatedUnion('kind', [
-    z.object({
-        kind: z.literal('lamp_count_at_level'),
-        table: aiTableIdSchema,
-        level: goalLevelSchema,
-        lamp: clearLampSchema,
-        count: z.number().int().min(1).max(AI_GOAL_LIMIT.COUNT_MAX),
-    }),
-    z.object({ kind: z.literal('clear_all_level'), table: aiTableIdSchema, level: goalLevelSchema }),
-    z.object({
-        kind: z.literal('ex_rate_on_chart'),
-        table: aiTableIdSchema,
-        md5: aiMd5Schema,
-        ex_rate: z.number().positive().max(AI_GOAL_LIMIT.EX_RATE_MAX_PERCENT),
-    }),
+    lampCountGoalSchema,
+    clearAllGoalSchema,
+    exRateGoalSchema,
+    weaknessResidualGoalSchema,
+    densityLimitGoalSchema,
 ])
 
-export type AiGoalParams = z.infer<typeof aiGoalParamsSchema>
+/** A goal as it is kept and shown: the two profile kinds carry the baseline taken when the goal was made. */
+export const aiGoalStoredParamsSchema = z.discriminatedUnion('kind', [
+    lampCountGoalSchema,
+    clearAllGoalSchema,
+    exRateGoalSchema,
+    weaknessResidualGoalSchema.extend(goalBaselineShape),
+    densityLimitGoalSchema.extend(goalBaselineShape),
+])
+
+export type AiGoalInput = z.infer<typeof aiGoalParamsSchema>
+export type AiGoalParams = z.infer<typeof aiGoalStoredParamsSchema>
 
 export const aiGoalProgressSchema = z.object({
     label: z.string(),
@@ -443,11 +498,13 @@ export const aiGoalProgressSchema = z.object({
     done: z.boolean(),
     remaining: z.number().int(),
     recent_updates: z.number().int(),
+    current: z.number().nullable().optional(),
+    ratio: z.number().nullable().optional(),
 })
 
 export const aiGoalSchema = z.object({
     id: z.string(),
-    params: aiGoalParamsSchema,
+    params: aiGoalStoredParamsSchema,
     created_at: z.number().int(),
     progress: aiGoalProgressSchema.nullable(),
 })
@@ -511,6 +568,21 @@ export const aiWeeklyViewSchema = z.object({
     lamp_changes: z.array(weeklyChartChangeSchema),
     ex_changes: z.array(weeklyChartChangeSchema),
     levels: z.array(z.object({ key: z.string(), level: z.string(), lamp_ups: z.number().int(), plays: z.number().int() })),
+    training: z.object({ created: z.number().int(), plays: z.number().int(), charts: z.number().int() }).optional(),
+    focus: z
+        .array(
+            z.object({
+                key: z.string(),
+                kind: z.string(),
+                unit: z.string(),
+                profile_value: z.number().nullable(),
+                value: z.number().nullable(),
+                previous: z.number().nullable(),
+                plays: z.number().int(),
+                previous_plays: z.number().int(),
+            }),
+        )
+        .optional(),
     notice: aiDataNoticeSchema,
     ai: aiInterpretationSchema(aiWeeklyOutputSchema).nullable(),
 })

@@ -1,12 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import {
+    challengeWindowOf,
     findFrontierIndex,
+    isDensityOver,
+    practicePoolOf,
+    rankWeaknessCharts,
     toCandidate,
     rankChallengeCandidates,
     readTableProgress,
     summarizeLevels,
     toChartProgress,
     topTagsOf,
+    weaknessShareOf,
+    type ChartFeatureExtras,
 } from '@server/service/domain/ai/table-progress'
 import { levelRecords, makeTable, md5Of, recordOf } from '../../support/ai-score-fixture'
 
@@ -116,5 +122,89 @@ describe('어시스트 등급', () => {
             [md5Of(101)]: { ...recordOf('LightAssistEasy'), assist_grade: 0 as const },
         }
         expect(readTableProgress(table, records).levels[0]).toMatchObject({ played: 2, cleared: 2, hard_or_better: 0 })
+    })
+})
+
+const extrasOf = (patch: Partial<ChartFeatureExtras> & { p90?: number; sustainedS?: number } = {}): ChartFeatureExtras => ({
+    nps: { p50_2s: 5, p90_2s: patch.p90 ?? 10, max_2s: 14, max_8s: 12, sustained_s: patch.sustainedS ?? 0 },
+    combos: patch.combos ?? {},
+    bpmMainBand: patch.bpmMainBand ?? '150-179',
+    soflanEvents: patch.soflanEvents ?? 0,
+    lengthMs: patch.lengthMs ?? 60_000,
+})
+
+describe('약점 키와 곡의 일치 (기획 2026-11-04 2.6 기능 5·6)', () => {
+    test('키 종류마다 곡 특징의 몫을 읽고, 곡을 고르지 못하는 키와 잘못된 키는 0 이다', () => {
+        const input = {
+            tags: { trill: 0.25, chord_2: 0.4 },
+            extras: extrasOf({ p90: 12.5, sustainedS: 15, combos: { 'chord_2+trill': 0.12 }, bpmMainBand: '180-209', soflanEvents: 2 }),
+            limitNps: 12,
+        }
+        expect(weaknessShareOf('tag:trill', input)).toBe(0.25)
+        expect(weaknessShareOf('solo:trill', input)).toBe(0.25)
+        expect(weaknessShareOf('combo:chord_2+trill', input)).toBe(0.12)
+        expect(weaknessShareOf('density:limit', input)).toBe(1)
+        expect(weaknessShareOf('density:sustained', input)).toBe(0.25)
+        expect(weaknessShareOf('bpm:180-209', input)).toBe(1)
+        expect(weaknessShareOf('bpm:<120', input)).toBe(0)
+        expect(weaknessShareOf('soflan:after', input)).toBe(1)
+        for (const key of ['lane:3', 'hand:left', 'timing:trill', 'fatigue', 'bp_context:trill', 'nope', 'tag:nope'])
+            expect(weaknessShareOf(key, input)).toBe(0)
+    })
+
+    test('밀도 한계 구간은 한계의 0.9~1.15 배이고, 한계가 없거나 새 특징이 없으면 일치·감점이 모두 0 이다', () => {
+        const at = (p90: number) => weaknessShareOf('density:limit', { tags: undefined, extras: extrasOf({ p90 }), limitNps: 10 })
+        expect([at(8.9), at(9), at(11.5), at(11.6)]).toEqual([0, 1, 1, 0])
+        expect(weaknessShareOf('density:limit', { tags: undefined, extras: extrasOf({ p90: 10 }), limitNps: null })).toBe(0)
+        const v1 = { tags: { trill: 0.3 }, extras: undefined, limitNps: 10 }
+        expect(
+            ['combo:chord_2+trill', 'density:limit', 'density:sustained', 'bpm:150-179', 'soflan:after'].map((key) => weaknessShareOf(key, v1)),
+        ).toEqual([0, 0, 0, 0, 0])
+        expect(weaknessShareOf('tag:trill', v1)).toBe(0.3)
+        expect([isDensityOver(extrasOf({ p90: 12.5 }), 10), isDensityOver(extrasOf({ p90: 12.6 }), 10)]).toEqual([false, true])
+        expect([isDensityOver(undefined, 10), isDensityOver(extrasOf({ p90: 30 }), null)]).toEqual([false, false])
+    })
+
+    test('약점 곡 순위는 몫 0.1 이상만 몫 큰 순, 같으면 표 순서이고 limit 으로 자른다', () => {
+        const progress = readTableProgress(table, {})
+        const load = {
+            shares: new Map([
+                [md5Of(100), { trill: 0.2 }],
+                [md5Of(101), { trill: 0.4 }],
+                [md5Of(102), { trill: 0.2 }],
+                [md5Of(103), { trill: 0.05 }],
+            ]),
+            staleMd5s: new Set<string>(),
+        }
+        const ranked = rankWeaknessCharts({ pool: progress.charts, key: 'tag:trill', load, limitNps: null, limit: 2 })
+        expect(ranked.map((entry) => [entry.chart.md5, entry.share])).toEqual([
+            [md5Of(101), 0.4],
+            [md5Of(100), 0.2],
+        ])
+    })
+
+    test('추천 창은 경계 ±1 레벨, 연습 풀은 경계 −2~+1 레벨에서 FULL COMBO 아래만이다', () => {
+        const records = { ...levelRecords(table, { '1': 'Hard', '2': 'Hard', '3': 'Hard' }), [md5Of(300)]: recordOf('FullCombo') }
+        const progress = readTableProgress(table, records)
+        expect(progress.frontier?.level).toBe('4')
+        expect([...new Set(challengeWindowOf(progress).map((chart) => chart.level))]).toEqual(['3', '4', '5'])
+        const pool = practicePoolOf(progress)
+        expect([...new Set(pool.map((chart) => chart.level))]).toEqual(['2', '3', '4', '5'])
+        expect(pool.some((chart) => chart.md5 === md5Of(300))).toBe(false)
+    })
+
+    test('점수 가산(bonusOf)은 기존 점수에 더해져 순서를 바꾼다', () => {
+        const progress = readTableProgress(table, {})
+        const ranked = rankChallengeCandidates({
+            charts: progress.charts,
+            levels: progress.levels,
+            frontierIndex: 0,
+            limit: 2,
+            bonusOf: (chart) => (chart.md5 === md5Of(103) ? 0.5 : 0),
+        })
+        expect(ranked.map((entry) => [entry.chart.md5, entry.score])).toEqual([
+            [md5Of(103), 2.5],
+            [md5Of(100), 2],
+        ])
     })
 })

@@ -11,7 +11,7 @@ import {
 } from '@server/compose/ai-score-features'
 import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
-import { aiGoal, aiPracticeFolder, chart, chartPattern, score, userFolder } from '@server/db/schema'
+import { aiGoal, aiPracticeFolder, chart, chartPattern, score, trainingChart, userFolder } from '@server/db/schema'
 import { clearLampToId } from '@server/dto/common'
 import { createAiGoalService } from '@server/service/domain/ai/goal-plan.service'
 import { createAiPracticeFolderService } from '@server/service/domain/ai/practice-folder.service'
@@ -37,6 +37,27 @@ const CHARTS = {
     bravo: { sha256: 'd2'.repeat(32), md5: 'd2'.repeat(16), title: 'W2 Bravo' },
 }
 const PATTERN_MD5 = { current: 'e1'.repeat(16), stale: 'e2'.repeat(16), missing: 'e3'.repeat(16) }
+
+/** A training chart row of `userId` on `sha256` made at `createdAt`; only the owner, sha256 and time matter to the week summary. */
+const trainingRow = (id: string, userId: string, sha256: string, createdAt: number) => ({
+    id: `${PREFIX}_${id}`,
+    userId,
+    md5: id.padEnd(32, '0'),
+    sha256,
+    title: `training ${id}`,
+    playLevel: 12,
+    bpm: 150,
+    noteCount: 100,
+    lengthMs: 60_000,
+    generatorVersion: 1,
+    spec: {},
+    request: {},
+    profileSnapshot: {},
+    bms: Buffer.from('#TITLE x'),
+    provider: 'anthropic',
+    model: 'claude-test',
+    createdAt,
+})
 
 const scoreRow = (id: string, overrides: Partial<typeof score.$inferInsert>) => ({
     id: `${PREFIX}_${id}`,
@@ -71,6 +92,7 @@ const SCORES = [
 describe.skipIf(!hasDatabase)('점수 기반 AI 기능 DB (임시 MySQL)', () => {
     const cleanup = async () => {
         const db = getDb()
+        await db.delete(trainingChart).where(like(trainingChart.id, `${PREFIX}_%`))
         await db.delete(aiPracticeFolder).where(like(aiPracticeFolder.userId, `${PREFIX}_%`))
         await db.delete(userFolder).where(like(userFolder.userId, `${PREFIX}_%`))
         await db.delete(aiGoal).where(like(aiGoal.userId, `${PREFIX}_%`))
@@ -218,6 +240,37 @@ describe.skipIf(!hasDatabase)('점수 기반 AI 기능 DB (임시 MySQL)', () =>
         expect(await weekly.listPriorBests({ userId: OWNER, chartSha256s: [], before: MONDAY })).toEqual([])
     })
 
+    test('주간 판은 본인 훈련곡(sha256)의 판에만 isTraining 을 달고, 그 주에 만든 훈련곡 수를 [시작, 끝) 으로 센다', async () => {
+        const db = getDb()
+        await db
+            .insert(trainingChart)
+            .values([
+                trainingRow('tw1', OWNER, CHARTS.bravo.sha256, MONDAY),
+                trainingRow('tw2', OWNER, 'f9'.repeat(32), MONDAY + 7 * DAY),
+                trainingRow('tw3', OTHER, CHARTS.alpha.sha256, MONDAY + DAY),
+            ])
+        const weekly = createAiWeeklySummaryDb(db)
+        const rows = await weekly.listScoresBetween({ userId: OWNER, from: MONDAY, to: MONDAY + 7 * DAY })
+        expect(rows.map((row) => [row.chartSha256, row.isTraining])).toEqual([
+            [CHARTS.alpha.sha256, false],
+            [CHARTS.bravo.sha256, true],
+        ])
+        expect(await weekly.countTrainingChartsCreated({ userId: OWNER, from: MONDAY, to: MONDAY + 7 * DAY })).toBe(1)
+        expect(await weekly.countTrainingChartsCreated({ userId: OTHER, from: MONDAY, to: MONDAY + 7 * DAY })).toBe(1)
+        expect(await weekly.countTrainingChartsCreated({ userId: OWNER, from: MONDAY + 7 * DAY, to: MONDAY + 14 * DAY })).toBe(1)
+        await db.delete(trainingChart).where(like(trainingChart.id, `${PREFIX}_tw%`))
+    })
+
+    test('프로필 목표는 종류를 열로, 키·목표·기준값을 params 로 저장해 다시 읽는다', async () => {
+        const goals = createAiGoalDb(getDb())
+        const residual = { kind: 'weakness_residual' as const, table: 'insane1', key: 'tag:trill', target_residual: -0.02, baseline: -0.06 }
+        const density = { kind: 'density_limit' as const, table: 'insane1', target_nps: 14, baseline: null }
+        await goals.insertGoal({ id: `aig_${'4'.repeat(30)}`, userId: OTHER, params: residual, createdAt: 1 })
+        await goals.insertGoal({ id: `aig_${'5'.repeat(30)}`, userId: OTHER, params: density, createdAt: 2 })
+        expect((await goals.listActiveGoals(OTHER)).map((goal) => goal.params)).toEqual([residual, density])
+        await getDb().delete(aiGoal).where(eq(aiGoal.userId, OTHER))
+    })
+
     test('판정 습관은 최근 판부터 limit 만큼, 오토플레이 없이 읽는다', async () => {
         const rows = await createAiJudgeHabitDb(getDb(), { analyzedPlaysOfScores: async () => new Map() }).listRecentTimingRows({
             userId: OWNER,
@@ -242,6 +295,9 @@ describe.skipIf(!hasDatabase)('점수 기반 AI 기능 DB (임시 MySQL)', () =>
         expect(staleMd5s.size).toBe(0)
         const [stale] = await db.select({ version: chartPattern.featuresVersion }).from(chartPattern).where(eq(chartPattern.md5, PATTERN_MD5.stale))
         expect(stale?.version).toBe(ANALYSIS_VERSION)
+        const { extras } = await createChartTagLoader(service)([PATTERN_MD5.current])
+        expect(extras?.get(PATTERN_MD5.current)).toMatchObject({ soflanEvents: 0, lengthMs: 700, bpmMainBand: '150-179' })
+        expect(extras?.get(PATTERN_MD5.current)?.nps.p90_2s).toBeGreaterThan(0)
         expect((await createChartTagLoader(service)([])).shares.size).toBe(0)
     })
 })

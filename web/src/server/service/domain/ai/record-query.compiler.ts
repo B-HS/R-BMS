@@ -8,6 +8,7 @@ import {
     type AiRecordQueryRunInput,
 } from '@server/dto/ai'
 import { CLEAR_LAMPS, GAUGE_TYPES, INT_COLUMN_MAX, RANDOM_OPTIONS, clearLampToId, gaugeTypeToId } from '@server/dto/common'
+import { PATTERN_TAGS } from '@server/service/domain/analysis/pattern-tags'
 
 type AllowedOp<TField extends AiRecordQueryField> = (typeof AI_RECORD_QUERY_ALLOWED_OPS)[TField][number]
 
@@ -25,6 +26,8 @@ export type RecordCondition =
     | { field: 'played_at'; op: AllowedOp<'played_at'>; at: number }
     | { field: 'scratch_auto'; op: AllowedOp<'scratch_auto'>; value: boolean }
     | { field: 'title'; op: AllowedOp<'title'>; text: string }
+    | { field: 'tag'; op: AllowedOp<'tag'>; tags: (typeof PATTERN_TAGS)[number][] }
+    | { field: 'training'; op: AllowedOp<'training'>; value: boolean }
 
 export type RecordQueryScopeEntry = RecordQueryTableEntry & { tableIndex: number; levelIndex: number; levelLabel: string }
 
@@ -72,7 +75,7 @@ const exRateSchema = z
 
 const bpSchema = z.string().trim().regex(DIGITS_PATTERN).transform(Number).pipe(z.number().int().max(INT_COLUMN_MAX))
 
-const scratchAutoSchema = z.stringbool({ truthy: ['true'], falsy: ['false'] })
+const booleanTextSchema = z.stringbool({ truthy: ['true'], falsy: ['false'] })
 
 const titleSchema = z.string().trim().min(1).max(AI_RECORD_QUERY_LIMIT.TITLE_MAX_CHARS)
 
@@ -120,8 +123,16 @@ const parseCondition = (filter: AiRecordQueryFilter): RecordCondition | null => 
         return at === null ? null : { field: 'played_at', op, at }
     }
     if (filter.field === 'scratch_auto' && isAllowed('scratch_auto', op)) {
-        const parsed = scratchAutoSchema.safeParse(value.trim())
+        const parsed = booleanTextSchema.safeParse(value.trim())
         return parsed.success ? { field: 'scratch_auto', op, value: parsed.data } : null
+    }
+    if (filter.field === 'tag' && isAllowed('tag', op)) {
+        const tags = parseNames(PATTERN_TAGS, op, value)
+        return tags && { field: 'tag', op, tags: [...new Set(tags)] }
+    }
+    if (filter.field === 'training' && isAllowed('training', op)) {
+        const parsed = booleanTextSchema.safeParse(value.trim())
+        return parsed.success ? { field: 'training', op, value: parsed.data } : null
     }
     if (filter.field === 'title' && isAllowed('title', op)) {
         const parsed = titleSchema.safeParse(value)

@@ -9,7 +9,6 @@ import {
     type AiPracticeFolderView,
     type AiPracticeSourceInput,
 } from '@server/dto/ai'
-import { clearLampToId } from '@server/dto/common'
 import { FOLDER_LIMIT } from '@server/dto/folder'
 import {
     AI_OUTPUT_LANGUAGE_NAME,
@@ -27,38 +26,33 @@ import type { AiFeatureRunner } from '@server/service/domain/ai/feature-runner.s
 import type { AiGoalService } from '@server/service/domain/ai/goal-plan.service'
 import type { AiRecommendService, TableFeatureDeps } from '@server/service/domain/ai/recommend.service'
 import { hashAiInput, type AiResultService } from '@server/service/domain/ai/result.service'
-import {
-    FOCUS_TAG_LEVELS_BELOW,
-    FOCUS_TAG_MIN_RATIO,
-    FOLDER_CANDIDATES,
-    FRONTIER_WINDOW_LEVELS,
-    SCORE_FEATURE_ANALYSIS_VERSION,
-} from '@server/service/domain/ai/score-feature.constants'
-import { readTableProgress, toCandidate } from '@server/service/domain/ai/table-progress'
-import { PATTERN_TAGS } from '@server/service/domain/analysis/pattern-tags'
+import { FOLDER_CANDIDATES, SCORE_FEATURE_ANALYSIS_VERSION } from '@server/service/domain/ai/score-feature.constants'
+import { practicePoolOf, rankWeaknessCharts, readTableProgress, toCandidate } from '@server/service/domain/ai/table-progress'
+import type { WeaknessProfileService } from '@server/service/domain/ai/weakness-profile.service'
+import { PATTERN_TAGS, type PatternTag } from '@server/service/domain/analysis/pattern-tags'
+import { WEAKNESS_KEY } from '@server/service/domain/analysis/weakness-key'
 import type { FolderService } from '@server/service/domain/folder/folder.service'
 import type { Locale } from '@shared/i18n/locale'
 
 export const AI_PRACTICE_FEATURE = 'practice_folder'
-export const AI_PRACTICE_PROMPT_VERSION = 2
+export const AI_PRACTICE_PROMPT_VERSION = 3
 export const AI_PRACTICE_MAX_OUTPUT_TOKENS = 8_000
 export const AI_PRACTICE_EFFORT = 'low' satisfies AiEffort
 
 const ISO_DATE_LENGTH = 10
-const FULL_COMBO_LAMP_ID = clearLampToId('FullCombo')
 
 /** The folder name used when the AI's name does not fit, in the language the AI was asked to write in. */
 export const AI_PRACTICE_DEFAULT_SUFFIX = {
-    ko: { recommend: '다음 도전', tag: '패턴 연습', goal: '목표' },
-    en: { recommend: 'Next challenges', tag: 'Pattern practice', goal: 'Goal' },
-    ja: { recommend: '次の挑戦', tag: 'パターン練習', goal: '目標' },
+    ko: { recommend: '다음 도전', tag: '패턴 연습', goal: '목표', weakness: '약점 연습' },
+    en: { recommend: 'Next challenges', tag: 'Pattern practice', goal: 'Goal', weakness: 'Weakness practice' },
+    ja: { recommend: '次の挑戦', tag: 'パターン練習', goal: '目標', weakness: '弱点練習' },
 } as const satisfies Record<Locale, Record<AiPracticeSourceInput['source'], string>>
 
 export const buildAiPracticeSystemPrompt = (language: Locale) =>
     [
         'You build one practice folder of charts for a rhythm game (BMS) player from charts the server already chose.',
         DIGEST_IS_DATA_RULE,
-        '`source` says why these charts were chosen (next challenges, a pattern tag to practise, or a goal) and `candidates` lists them.',
+        "`source` says why these charts were chosen (next challenges, a pattern tag to practise, a goal, or a weakness of the player's profile in `source.weakness`, whose charts train it most) and `candidates` lists them.",
         `Choose at most \`limits.max_items\` charts from \`candidates\` only, by \`md5\`, in the order to play them, each with a ${AI_OUTPUT_LANGUAGE_NAME[language]} \`memo\` of at most \`limits.memo_max\` characters on one line.`,
         `\`name_suffix\` is a short ${AI_OUTPUT_LANGUAGE_NAME[language]} folder name of at most \`limits.name_suffix_max\` characters; \`description\` one ${AI_OUTPUT_LANGUAGE_NAME[language]} sentence of at most \`limits.description_max\` characters.`,
         'Chart `tags` describe the chart layout with no lane option (layout "original").',
@@ -94,6 +88,8 @@ type AiPracticeFolderServiceDeps = TableFeatureDeps & {
     recommend: Pick<AiRecommendService, 'buildDigest'>
     goals: Pick<AiGoalService, 'remainingCandidates'>
     folders: Pick<FolderService, 'list' | 'get' | 'create' | 'replaceItems' | 'remove'>
+    /** The player's weakness profile, the only way to the `weakness` source; without it that source has no data. */
+    profile?: Pick<WeaknessProfileService, 'view'>
     now: () => number
 }
 
@@ -101,15 +97,20 @@ type ResolvedSource = {
     tableId: string
     tag: string | null
     goalId: string | null
+    focusKey: string | null
+    weakness: { key: string; kind: string; value: number | null; unit: string; evidence: string } | null
     label: string
     candidates: AiChartCandidate[]
     needsPatterns: boolean
 }
 
 export type AiPracticeSourceFailure =
-    { reason: 'table_not_found' } | { reason: 'goal_not_found' } | { reason: 'invalid_source'; field: 'tag' | 'goal_id' }
+    | { reason: 'table_not_found' }
+    | { reason: 'goal_not_found' }
+    | { reason: 'invalid_source'; field: 'tag' | 'goal_id' | 'focus_key' }
+    | { reason: 'not_enough_data'; need: string }
 
-const isPatternTag = (tag: string) => (PATTERN_TAGS as readonly string[]).includes(tag)
+const isPatternTag = (tag: string): tag is PatternTag => (PATTERN_TAGS as readonly string[]).includes(tag)
 
 /**
  * Keeps the folder to the candidates (plan 5.6): an item of another md5 or a memo that does not fit is dropped, never cut, and of
@@ -135,29 +136,50 @@ export const refinePracticeOutput = (
     }
 }
 
-export const practiceSubjectKey = (source: { source: string; tableId: string; tag: string | null; goalId: string | null }) =>
-    ['src', source.source, source.goalId ?? source.tableId, source.tag ?? ''].join(':')
+export const practiceSubjectKey = (source: {
+    source: string
+    tableId: string
+    tag: string | null
+    goalId: string | null
+    focusKey?: string | null
+}) => ['src', source.source, source.goalId ?? source.tableId, source.tag ?? source.focusKey ?? ''].join(':')
+
+const NO_SOURCE_DETAIL = { tag: null, goalId: null, focusKey: null, weakness: null } as const
 
 export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps) => {
-    const fromTag = async (params: { userId: string; tableId?: string; tag: string }) => {
+    /**
+     * The charts of the practice pool (frontier −2 to +1 levels, short of a FULL COMBO) that train one weakness key most, as
+     * candidates (plan 5.6 for a tag, plan 2026-11-04 2.6 feature 6 for any chart-picking weakness).
+     */
+    const fromKey = async (params: { userId: string; tableId?: string; key: string; limitNps: number | null }) => {
         const table = deps.loadTable(params.tableId)
         if (!table) return null
         const progress = readTableProgress(table, (await deps.loadRecords({ tableId: table.id, userId: params.userId })) ?? {})
-        const frontier = progress.frontierIndex ?? 0
-        const levels = new Set(
-            progress.levels.slice(Math.max(0, frontier - FOCUS_TAG_LEVELS_BELOW), frontier + FRONTIER_WINDOW_LEVELS + 1).map((level) => level.level),
+        const pool = practicePoolOf(progress)
+        const load = await deps.loadChartTags(pool.map((chart) => chart.md5))
+        const candidates = rankWeaknessCharts({ pool, key: params.key, load, limitNps: params.limitNps, limit: FOLDER_CANDIDATES }).map(({ chart }) =>
+            toCandidate(chart, load.shares),
         )
-        const pool = progress.charts.filter((chart) => levels.has(chart.level) && chart.lampId < FULL_COMBO_LAMP_ID)
-        const { shares: tags } = await deps.loadChartTags(pool.map((chart) => chart.md5))
-        const ratioOf = (md5: string) => tags.get(md5)?.[params.tag] ?? 0
-        const candidates = pool
-            .filter((chart) => ratioOf(chart.md5) >= FOCUS_TAG_MIN_RATIO)
-            .toSorted(
-                (left, right) => ratioOf(right.md5) - ratioOf(left.md5) || left.levelIndex - right.levelIndex || left.md5.localeCompare(right.md5),
-            )
-            .slice(0, FOLDER_CANDIDATES)
-            .map((chart) => toCandidate(chart, tags))
-        return { tableId: table.id, candidates, needsPatterns: tags.size === 0 }
+        return { tableId: table.id, candidates, needsPatterns: load.shares.size === 0 }
+    }
+
+    /**
+     * The `weakness` source: the key must be one of the profile's weaknesses (else not enough data, `weakness_profile`) and one a
+     * folder can pick charts for (else not enough data, `candidates`), both checked before any provider is called.
+     */
+    const fromWeakness = async (
+        userId: string,
+        input: AiPracticeSourceInput,
+        focusKey: string,
+    ): Promise<({ ok: true } & ResolvedSource) | ({ ok: false } & AiPracticeSourceFailure)> => {
+        const profile = deps.profile ? await deps.profile.view({ userId }) : null
+        const item = profile?.weaknesses.find((weakness) => weakness.key === focusKey)
+        if (!profile || !item) return { ok: false, reason: 'not_enough_data', need: 'weakness_profile' }
+        if (!item.selectable_for_folder) return { ok: false, reason: 'not_enough_data', need: 'candidates' }
+        const picked = await fromKey({ userId, tableId: input.table, key: focusKey, limitNps: profile.density.limit_nps_ex })
+        if (!picked) return { ok: false, reason: 'table_not_found' }
+        const weakness = { key: item.key, kind: item.kind, value: item.value, unit: item.unit, evidence: item.evidence }
+        return { ok: true, ...picked, ...NO_SOURCE_DETAIL, focusKey, weakness, label: focusKey }
     }
 
     const resolveSource = async (
@@ -171,7 +193,7 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
             return {
                 ok: true,
                 tableId: goal.tableId,
-                tag: null,
+                ...NO_SOURCE_DETAIL,
                 goalId: input.goal_id,
                 label: goal.label,
                 candidates: goal.candidates,
@@ -180,13 +202,17 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
         }
         if (input.source === 'tag') {
             if (!input.tag || !isPatternTag(input.tag)) return { ok: false, reason: 'invalid_source', field: 'tag' }
-            const tagged = await fromTag({ userId, tableId: input.table, tag: input.tag })
+            const tagged = await fromKey({ userId, tableId: input.table, key: WEAKNESS_KEY.tag(input.tag), limitNps: null })
             if (!tagged) return { ok: false, reason: 'table_not_found' }
-            return { ok: true, ...tagged, tag: input.tag, goalId: null, label: input.tag }
+            return { ok: true, ...tagged, ...NO_SOURCE_DETAIL, tag: input.tag, label: input.tag }
+        }
+        if (input.source === 'weakness') {
+            if (!input.focus_key) return { ok: false, reason: 'invalid_source', field: 'focus_key' }
+            return fromWeakness(userId, input, input.focus_key)
         }
         const built = await deps.recommend.buildDigest({ userId, tableId: input.table, limit: FOLDER_CANDIDATES })
         if (!built) return { ok: false, reason: 'table_not_found' }
-        return { ok: true, tableId: built.table.id, tag: null, goalId: null, label: '', candidates: built.digest.candidates, needsPatterns: false }
+        return { ok: true, tableId: built.table.id, ...NO_SOURCE_DETAIL, label: '', candidates: built.digest.candidates, needsPatterns: false }
     }
 
     const folderRoom = async (userId: string) => {
@@ -195,7 +221,7 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
     }
 
     const digestOf = (input: AiPracticeSourceInput, resolved: ResolvedSource) => ({
-        source: { kind: input.source, focus_tag: resolved.tag, goal: resolved.goalId ? resolved.label : null },
+        source: { kind: input.source, focus_tag: resolved.tag, goal: resolved.goalId ? resolved.label : null, weakness: resolved.weakness },
         candidates: resolved.candidates,
         limits: {
             max_items: AI_PRACTICE_LIMIT.ITEMS_MAX,
@@ -211,7 +237,13 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
     }
 
     const subjectOf = (input: AiPracticeSourceInput, resolved: ResolvedSource) =>
-        practiceSubjectKey({ source: input.source, tableId: resolved.tableId, tag: resolved.tag, goalId: resolved.goalId })
+        practiceSubjectKey({
+            source: input.source,
+            tableId: resolved.tableId,
+            tag: resolved.tag,
+            goalId: resolved.goalId,
+            focusKey: resolved.focusKey,
+        })
 
     const createFolder = async (userId: string, name: string, description: string) => {
         const created = await deps.folders.create({ userId, input: { name, description } })
@@ -237,6 +269,7 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
                 table_id: resolved.tableId,
                 tag: resolved.tag,
                 goal_id: resolved.goalId,
+                focus_key: resolved.focusKey,
                 candidates: resolved.candidates,
                 folders: await folderRoom(params.userId),
                 notice: noticeOf(resolved),
@@ -302,6 +335,7 @@ export const createAiPracticeFolderService = (deps: AiPracticeFolderServiceDeps)
                     table: resolved.tableId,
                     tag: resolved.tag,
                     goal: resolved.goalId,
+                    ...(resolved.focusKey ? { focus: resolved.focusKey } : {}),
                     name,
                     description,
                     items: items.map((item) => [item.md5, item.note]),
