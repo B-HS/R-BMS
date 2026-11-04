@@ -117,6 +117,8 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 8. 다음 세션 TODO(우선순위)
 
+- (2026-11-04 추가, 최우선) AI 훈련곡·분석 고도화·로그인 대시보드: 구현·게이트·문서는 끝났고 운영 반영이 남았다. 순서와 `!` 명령은 [PROCESS.md](PROCESS.md) 맨 위 체크리스트 T5. 0014 를 운영에 적용하기 전에는 로컬 보류 커밋(분석 v3 부터)을 푸시하지 않는다(`dev` 푸시는 곧 운영 배포다). 설계 [plan/2026-11-04-ai-training-dashboard.md](plan/2026-11-04-ai-training-dashboard.md), ADR 5건은 acknowledge/README.md 의 2026-11-04 절. 이 세션에서 알게 된 것: Workflow 의 `isolation: 'worktree'` 는 `origin/dev` 에서 만들어져 푸시하지 않은 커밋이 들어 있지 않다. 그리고 자동 모드는 web-db `status` 같은 읽기 action 도 거부할 수 있다.
+
 0. 사용자 몫 확인: (a) `CRON_SECRET` 등록과 첫 Cron 결과, (b) 실기 QA 3.23·3.24(특히 한글·일본어 글꼴 모양, 2·4·6 길게 누르기 손맛, 고스트, 레이더 값, 썸네일·휠 속도, 웹 세 언어, A-단위 배지), (c) 일본어 감수를 누구에게 맡길지. 결과를 받으면 PROCESS 에 새 R 항목으로 고친다.
 1. 실기에서 나온 문제 수리(관련 파일은 QA 항목마다 ADR 에 있다).
 2. 테스트 부채 3.112~3.129(`docs/quality-assurance/2026-10-14-test-debt.md`): CJK 하니스 골든 없음, 레이더 3축 스케일·IIDX 대조, 썸네일·분석·형제 탐색 프레임 비용, 랭킹 모드에서 앱 오버레이가 정보창 IR RANKING 을 덮음, 순위 응답 크기, 서버 리플레이 고스트(보류), 0013 이전 판 추정, 플레이어 순위 배지 2개 제한.

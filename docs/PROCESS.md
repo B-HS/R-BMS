@@ -32,10 +32,21 @@
 결정(2026-11-04 사용자 답): workflow 사용(HANDOFF 5절: Workflow 도구만, Fable·Haiku 금지, Opus high·Sonnet xhigh 상한). 생성 방식 = LLM 이 패턴 구성안, 서버가 BMS 로 변환(결정론 분석 결과를 입력으로). 산출물 = 곡 생성 → 내 폴더의 훈련곡 → 구동기에서 바로 받아 플레이(클라이언트 변경 포함). `/` = 기존 홈 유지, 로그인 사용자에게만 대시보드. 다운로드 = 무작위 id 경로의 공개 GET. 훈련곡 판 = 랭킹·검색 포함 전부 반영(제외 조건 없음). 소리 = 클릭 키음 동봉. 분석 버전 올림 + 기존 판·발광표 특징 재계산(운영은 개수 확인 뒤 사용자 `!`). 보관 = 사용자당 20곡, 넘으면 직접 삭제 안내. 클라이언트 = 변경 뒤 release.yml draft 까지(게시는 사용자). 조사 [reference/2026-11-04-ai-training-dashboard/](reference/2026-11-04-ai-training-dashboard/)(wf_154df280-a53).
 
 - [x] T1. 조사 — 현재 AI 분석 격차, 훈련곡 전달 경로, 대시보드
-- [ ] T2. 설계 — `docs/plan/2026-11-04-ai-training-dashboard.md`(단위·파일 소유권·웨이브)
-- [ ] T3. 구현 — 분석 고도화, 훈련곡 생성·전달(서버·DB 0014·웹), 클라이언트 내 폴더 받기, 대시보드
-- [ ] T4. 게이트·문서(ADR, QA, 조사 문서 갱신)·커밋·푸시·CI
-- [ ] T5. 운영 반영 — 0014 마이그레이션, 분석 재계산(사용자 `!`), 클라이언트 release draft
+- [x] T2. 설계 — `docs/plan/2026-11-04-ai-training-dashboard.md`(13단위 U1~U13, 웨이브 W1~W5, 메인 결정 M1~M33. wf_b910ecb0-c5c, 검토 지적 25건 반영, 커밋 `1ce1b5a`)
+
+  진행 기록(2026-11-04): W1(wf_37e0468b-51e) 병합, 통합 게이트 Rust 7,193 통과·웹 2,159 통과(226 건너뜀)·DB 186 통과·빌드·계약 diff 없음. 푸시 `565724d`(0014 파일)·`716a38b`(합성기)·`754b33e`(클라이언트)·`1fd903b`(대시보드 서버), ci run 41751180843 3 OS 통과·web run 41751180821 통과. 로컬 보류 `1dba095`(분석 v3, 버전 상향). release.yml 은 자동 모드가 거부([Production Deploy]) → 사용자 `!` 대기(아래 T5). 노트 초안 scratchpad `release-notes-v0.1.11.md`.
+
+  진행 기록(2026-11-04 W2): Workflow 의 worktree 는 로컬 HEAD 가 아니라 `origin/dev` 에서 만들어진다. 그래서 푸시하지 않은 U2 를 받으려던 U6 이 `git merge` 권한 확인에서 2시간 넘게 멈췄다(wf_cb2a4404-841 중지). U8·U12 결과는 받아 병합(웹 게이트 2,231 통과·build), 커밋 순서를 바꿔 대시보드 화면 `4abffcf` 만 푸시했다. 로컬 보류: `15400cc`(분석 v3), `d8359dd`(재계산 경로). **남은 단위(U6→U7→U9→U10→U11→U13)는 worktree 없이 메인 체크아웃에서 한 단위씩 실행하고 메인이 단위마다 게이트·커밋한다**(U6 wf_7fa5af25-3ad).
+
+  푸시 순서(사용자 취침 중 결정): 0014 마이그레이션에 기대지 않는 커밋(U1 파일·U3·U4·U5, 필요 시 U8)만 먼저 푸시하고 클라이언트 release draft 를 만든다. U2(버전 상향)부터는 로컬 커밋으로 두고, 사용자가 0014 를 운영에 적용(`!`)한 뒤 푸시 → 재계산 count → 사용자 `!` 재계산.
+- [x] T3. 구현 — 분석 고도화, 훈련곡 생성·전달(서버·DB 0014·웹), 클라이언트 내 폴더 받기, 대시보드. 13단위 전부. 로컬 커밋(푸시 보류): `15400cc` U2 분석 v3, `d8359dd` U12 재계산 경로, `b64b9b1` U6 약점 프로필(wf_7fa5af25-3ad), `a778d18` U7 훈련곡 서버, `f21727c` U9 점수 기능(wf_a5582232-239), `29d5d41` U10 AI 화면(wf_0821e53d-8ab), `ca4cbc1` U11 훈련곡 화면·대시보드 8·9 패널(wf_7acd0fb6-579). 최종 게이트(ca4cbc1 + 문서): 웹 verify 2,403 통과·240 건너뜀·0 실패, format, build, DB 198 통과. Rust 는 W1 뒤 바뀌지 않아 W1 결과(7,193 통과) 재사용
+- [ ] T4. 게이트·문서(ADR 5건, QA 3.27, 테스트 부채 3.145~3.159, 조사 문서 구현 결과 절)·커밋·푸시·CI — 문서 커밋은 로컬, 푸시는 T5-1 뒤
+- [ ] T5. 운영 반영(자동 모드가 web-db `status` 읽기 action 과 release.yml 을 모두 거부해 전부 사용자 `!` 몫)
+  1. 사용자 `! gh workflow run web-db.yml --ref dev -f action=migrate` → 0014 적용(파일 `565724d` 는 이미 원격에 있음). 확인은 `! gh workflow run web-db.yml --ref dev -f action=status`
+  2. 메인이 보류 커밋 전부 푸시 → `gh run list --branch dev` 로 web·ci 확인
+  3. 사용자 `! gh workflow run web-db.yml --ref dev -f action=analysis-recompute-count` → 개수 확인 뒤 `! gh workflow run web-db.yml --ref dev -f action=analysis-recompute`(8분 상한, 남으면 반복)
+  4. 사용자 `! gh workflow run release.yml --ref dev -f bump=patch` → draft v0.1.11. 끝나면 메인이 `git pull`·`git fetch --tags` 뒤 노트를 [history/2026-11-04-release-notes-v0.1.11-draft.md](history/2026-11-04-release-notes-v0.1.11-draft.md) 로 교체(`gh release edit v0.1.11 --notes-file ... --draft=true`). 릴리스 실행 중에는 `dev` 에 푸시하지 않는다
+  - 남은 정리: 중지한 W2 worktree `.claude/worktrees/wf_cb2a4404-841-{1,2,3}`(패치는 이미 반영)
 
 ## 체크리스트 — 발광표 곡 삭제·일별 플레이 시간·최근 활동 어시스트 (2026-11-02)
 

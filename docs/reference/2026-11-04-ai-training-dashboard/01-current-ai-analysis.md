@@ -1,5 +1,7 @@
 # 현재 웹 AI 분석 기능 전수 조사와 격차 (훈련곡 생성 대시보드 조사 01)
 
+> 최종 갱신 2026-11-04 · 대응 커밋 2026-11-04 AI 훈련곡 작업(커밋 예정). 본문은 조사 시점(HEAD `4bac699`)의 기록 그대로이고, 끝의 "구현 결과(2026-11-04)" 절이 무엇이 어디에 구현됐는지와 설계에서 달라진 점을 적는다. 본문의 줄 번호와 "없다" 는 구현 전 기준이므로 코드가 정본이다.
+
 > 조사일 2026-11-04 · 브랜치 `dev` · HEAD `4bac699` · 작업 트리 깨끗함(조사 시작 시점). 이 문서는 조사 전용이며 코드·설정·Git 상태를 바꾸지 않았다.
 > 경로는 `/Users/hyunseokbyun/development/R-BMS` 기준 상대 경로이고, `web/` 아래 파일은 `web/` 접두사를 붙였다. 줄 번호는 2026-11-04 HEAD 의 작업 트리 기준이다.
 > `.env*`·비밀 파일·`scoredb.sqlite` 는 읽지 않았고 운영 사이트·운영 DB 에는 요청하지 않았다. 따라서 운영 데이터의 실제 양(트레이스 수, 패턴 수)은 "확인하지 못함"으로 적었다.
@@ -486,3 +488,54 @@
 | 라우트 | `web/src/server/route/ai.ts`, `web/src/app/api/fe/me/ai/**/route.ts`, `web/src/server/route/trace.ts` |
 | 화면 | `web/src/app/(app)/ai/**`, `web/src/widgets/ai/*`, `web/src/features/ai/*`, `web/src/entities/ai.{type,query}.ts` |
 | 표 | `web/src/server/db/schema.ts:522-735` |
+
+---
+
+## 구현 결과(2026-11-04)
+
+설계 [docs/plan/2026-11-04-ai-training-dashboard.md](../../plan/2026-11-04-ai-training-dashboard.md) 2절(분석 고도화)과 결정 D1~D9·M1~M33 대로 구현했다. 아키텍처 정본은 [web 아키텍처 §17](../../web/architecture.md), 결정은 [약점 프로필 통계 ADR](../../acknowledge/2026-11-04-adr-weakness-profile-statistics.md)·[분석 v3와 재계산 ADR](../../acknowledge/2026-11-04-adr-analysis-v3-recompute.md). 위 5절의 격차가 어디서 닫혔는지:
+
+| 이 문서의 격차·항목 | 구현된 곳(`web/src/server/service/domain/` 아래, 달리 적지 않으면) |
+|---|---|
+| 5.1 국소 밀도·밀도 한계(고정 1초 창 경계 분할) | `analysis/local-density.ts`(중심 2초 창 NPS, 문맥은 1초·8초 창의 비로 burst/sustained), `analysis/weakness-profile.ts` 의 `density`(NPS 2칸 등위회귀로 편안한 밀도·EX 한계·BP 한계), 화면 `AiDensityLimitChart` |
+| 5.1 태그별 오차 분포·손 편향 | `analysis/play-metrics.ts` 의 `timing_by_tag`·`by_hand`·`timing_by_hand`·`lane_bp`, 판정 습관 `tag_timing`·`hand_timing` |
+| 5.1 실패 구간·게이지 꺾임의 문맥 | `analysis/bp-runs.ts`(`bp_runs`), `play-metrics.ts` 의 `gauge_drop_contexts`·`gauge_drop_tag_totals`·`gauge_drop_notes` |
+| 5.1 태그 조합 | `analysis/tag-combos.ts`(`by_combo`·`by_tag_solo`, 곡 특징의 `combos`) |
+| 5.2 사용자 프로필 집계 | `analysis/weakness-profile.ts`·`profile-stats.ts`(곡 군집 t 검정, Benjamini–Hochberg), `ai/weakness-profile.service.ts`, 캐시 표 `play_profile`(마이그레이션 0014), `GET /api/fe/me/ai/profile` |
+| 5.3 표본이 적을 때 | 셀마다 `sample_level`(`high`/`medium`/`low`/`insufficient`)과 근거 문구, AI 에는 `strong` 만 |
+| 5.4 표 곡 전체의 커버리지 | 곡 특징 `ANALYSIS_VERSION` 2 와 `analysis-recompute-count`·`analysis-recompute`(운영 재계산, 사용자 `!`) |
+| 6 훈련곡 생성에 재사용 | `ai/training-plan.service.ts`(기능 `training_plan`), `training/*`(합성기·BMS 작성기·zip), `route/training-charts.ts`. [02 문서의 구현 결과](02-training-chart-delivery.md) |
+
+- **버전**: `ANALYSIS_VERSION` 1 → 2, `PLAY_ANALYSIS_VERSION` 2 → 3(3.7절), `PLAY_FEATURE_ANALYSIS_VERSION` 1 → 2, `PROFILE_VERSION` 1(`ai/play-feature.constants.ts`). 새 곡 특징은 `nps`(2초 창 중앙값·90분위·최대, 8초 창 최대, 지속 구간 초)·`combos`·`bpm_main_band`. 새 판 지표 필드는 [ai-features/server.md 부록 D](../ai-features/server.md).
+- **기능 10개의 변경(4절)**: 모두 약점 프로필 키와 새 지표를 받도록 이었고 새 응답 필드는 전부 선택 필드라 옛 화면·시험과 호환된다. 프롬프트 버전: 리포트 v3·코치 v2·비교 v3·판정 습관 v3·게이지 조언 v2, 추천·연습 폴더·목표·기록 질문·주간 요약은 2 → 3.
+
+| 기능 | 달라진 점(요약) |
+|---|---|
+| 1 리포트 | 입력에 프로필, 보기에 `profile_keys` |
+| 2 코치 | 분석에 `bp_runs`·`profile_keys`·`drop_contexts`, 구간마다 `peak_nps` |
+| 3 비교 | 구간마다 `peak_nps`·`mean_err_ms` |
+| 4 판정 습관 | `tag_timing`·`hand_timing`(편차 ms 순) |
+| 5 추천 | 약점이 일치하면 점수에 +1.0, 밀도 한계의 1.25배를 넘는 곡은 −1.0, 후보에 `focus_keys`(비율 0.1 이상), 보기에 `profile_keys`. 경계 ±1 레벨 전체의 곡 특징을 먼저 불러온 뒤 순위를 매긴다(예전에는 상위 40곡만) |
+| 6 연습 폴더 | 출처 `weakness`(+`focus_key`), 폴더 이름 접미사 `약점 연습 / Weakness practice / 弱点練習` |
+| 7 목표 | 종류 둘 추가(`weakness_residual`, `density_limit`), 입력과 저장 스키마를 나눴다(`aiGoalParamsSchema` / `aiGoalStoredParamsSchema`: 기준값 `baseline` 은 서버가 잡는다), 진행에 `current`·`ratio` |
+| 8 게이지 조언 | `drop_contexts` |
+| 9 기록 질문 | 필드 `tag`·`training` |
+| 10 주간 요약 | `training`(그 주 만든 훈련곡·판·곡)·`focus`(프로필 약점 상위 3 의 주간 값) |
+
+### 설계와 달라진 점
+
+- **국소 NPS 창의 끝**: 설계 2.2.1 은 `[0, 판 길이]` 였다. 판 길이는 마지막 노트 + 5초(`PLAY_TIME_MARGIN_MS`)라 곡 끝 노트의 밀도가 최대 절반으로 낮게 읽히므로, 판과 곡 특징 모두 `[0, 마지막 판정 노트 + 1 µs]` 로 자른다(`localDensitiesOf`). 대신 곡 끝의 외딴 노트는 조금 높게 읽힌다(혼자 있는 마지막 노트는 1 NPS).
+- **소프란 사건**: `scroll ≠ 1` 이면 점마다 사건이 겹쳐 세지므로 앞 점과 스크롤 값이 달라진 점(시작값 1)만 사건으로 센다(`soflanEventsOf`). 분류 규칙은 바꾸지 않았다.
+- **요약 크기**: 6만 노트 판의 요약이 30,577 B 였고(시험이 40 KB 예산을 단언) `PLAY_COMBO_TOP` 자르기는 넣지 않았다. 크기를 늘리는 것은 꺾임 수에 비례하는 `gauge_drop_contexts`(꺾임 하나에 약 175 B, 상한 없음)다. 무작위 레인에서 꺾임이 250개 나오게 만든 합성 게이지로는 80.8 KB 였다.
+- **코치·비교의 구간 값**: 2.6 이 요구한 구간별 `peak_nps` 와 평균 오차가 저장 요약에 없어 판 요약의 구간에 `peak_nps`·`mean_err_us` 를 더했다(버전 3 이 아직 나가지 않아 버전 변경 없음). 라이벌 공유는 `id`·`chart_notes`·`notes`·`ex_score`·`bp` 만 고르므로 새 필드가 노출되지 않는다.
+- **약점 키 예시**: 가장 긴 키는 `combo:ln_release_then_hit+scratch_mixed` 가 아니라 앞선 태그가 먼저인 `combo:scratch_mixed+ln_release_then_hit`(39자)이고, `solo:` 는 `COMBO_TAGS` 만 받는다.
+- **셀 해석**: 방향(약점/강점)은 `timing:` 이 항상 약점, 문맥 셀(`bp_context`·`gauge_context`)은 로그 lift 가 0 보다 크면 약점, 나머지는 부호; 심각도는 단위를 하나의 척도로 맞추는 `SEVERITY_UNIT_SCALE`(ms 0.01, 로그 lift 0.1, EX·비율 1)을 쓰고, 문맥 셀의 lift 는 각 군집 개수에 의사 개수 0.5 를 더해 로그가 무한대가 되지 않게 한다. 문맥 셀의 표본 조건은 노트 30 이상·군집 5곡 이상·판 5 이상이다. 이 값들은 휴리스틱이라 실제 데이터로 확인해야 한다(테스트 부채).
+- **밀도 곡선**: 칸당 노트 150·곡 3 이상만 쓰고(`density.curve` 는 쓰인 칸만), 쓰인 칸이 3 미만이면 `insufficient`. 전체 평균 NPS(`overall_mean_nps`)는 저장된 `by_nps` 칸 중앙값으로 추정한다(40+ 는 40).
+- **지문**: 설계 2.5.1 의 입력 외에 그 사용자의 훈련곡 개수를 넣었다(훈련곡을 지우면 낡은 판의 `isTraining` 이 바뀌는데 다른 입력이 알아채지 못한다). 지문은 읽은 뒤 다시 계산해 저장한다(낡은 판 재계산이 `computed_at` 을 바꾸기 때문).
+- **digest 크기 상한**: 기존 상수가 없어 `PLAY_DIGEST_MAX_CHARS`(리포트 12,000, 그 밖 6,000)를 새로 두고 모든 항목을 채운 시험이 단언한다.
+- **`play_trace`·`play_analysis` 불변식**: 프로필 저장·지문 질의(`createWeaknessProfileDb`)는 두 표만 읽을 수 있는 `compose/trace.ts` 에 있다.
+
+### 남은 것
+
+- 5.1 의 데이터가 없는 항목은 그대로다: 일반 LN 의 놓는 타이밍, 7K 밖 모드(5K·14K·9K)의 분석. 다변량 모형(태그·밀도 교락의 분리)은 테스트 부채다.
+- 운영 재계산 전 기간의 동작(읽을 때 낡은 판 최대 10개, 프로필은 `stale` > 0 이면 저장하지 않음)은 [web 아키텍처 §17-5](../../web/architecture.md)에 적었다.

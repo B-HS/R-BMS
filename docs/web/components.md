@@ -1,6 +1,6 @@
 # rbms web — 컴포넌트 / 디자인 토큰 매핑 (W0)
 
-> 최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 에 새 §11 플레이어 통계 모드 전환과 일별 플레이 시간 컴포넌트를 더했다. 이전: 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 새 §10 언어 선택 위젯을 더했다. 나머지는 2026-10-15 기준))
+> 최종 갱신 2026-11-04 · 대응 커밋 2026-11-04 AI 훈련곡 작업(커밋 예정) (2026-11-04 에 새 §12 AI 약점 프로필·훈련곡 화면과 §13 회원 대시보드 컴포넌트를 더했다. 이전: 최종 갱신 2026-11-02 · 대응 커밋 `28085a7`·`8af1a39`·`f737c4d` (2026-11-02 에 새 §11 플레이어 통계 모드 전환과 일별 플레이 시간 컴포넌트를 더했다. 이전: 최종 갱신 2026-10-24 · 대응 커밋 66b9e63 (2026-10-24 에 새 §10 언어 선택 위젯을 더했다. 나머지는 2026-10-15 기준)))
 
 > **구현 상태:** 이 문서는 W0 설계 기준입니다. W1/W2 UI 통합은 완료됐고, 현재 컴포넌트와 경로는 `web/src/{shared,entities,features,widgets,app}`가 정본입니다. 네이티브 `theme.ron` 편집·동기화는 웹 기능이 아니며 [../theme.md](../theme.md)의 경계를 따릅니다.
 
@@ -265,3 +265,63 @@ design.md §7-4의 랜드마크·텍스트 이중 인코딩은 현재 컴포넌�
 - 문구는 `web/messages/{ko,en,ja}/browse.json` 의 `browse.player.playDays`(`title`, `modeLabel`, `loading`, `loadError`, `empty`, `chartLabel`, `barLabel`, `total`, `columnDate`, `columnPlays`, `columnTime`, `note`). 시간은 서버가 주는 추정값이라 화면에 `note` 로 "판과 판 사이 간격으로 추정한 시간입니다 (한국 시간 기준)." 를 항상 적는다.
 - 데이터 계약과 추정 규칙은 [../backend/api-spec.md](../backend/api-spec.md) §12, 캐시는 [architecture.md](./architecture.md) §5, 결정은 [일별 플레이 시간 ADR](../acknowledge/2026-11-02-adr-daily-play-time.md).
 - 홈 "최근 활동"(`widgets/home/recent-activity-panel.tsx`)은 `ScoreRow` 에 `isScratchAuto={row.scratch_auto}` 를 넘겨 `ScratchAutoBadge`(A-SCR)를 붙인다. `ranked` 인 SCRATCH AUTO 판도 목록에 오며 어시스트 등급 램프 이름은 `ScoreRow` 가 이미 `assistGrade` 로 그린다([홈 최근 활동 ADR](../acknowledge/2026-11-02-adr-home-activity-scratch-auto.md)).
+
+
+## 12. AI 약점 프로필·훈련곡 화면(2026-11-04)
+
+구조와 데이터 흐름은 [architecture.md](./architecture.md) §17-4·§17-7, 결정은 [약점 프로필 통계 ADR](../acknowledge/2026-11-04-adr-weakness-profile-statistics.md)·[훈련곡 생성·전달 ADR](../acknowledge/2026-11-04-adr-training-chart-generation-delivery.md). 차트는 라이브러리 없이 CSS/SVG 이고 애니메이션이 없다. 모든 SVG 는 `role='img'` 에 읽을 수 있는 `aria-label` 문장이 있고(시험이 문장과 요소 수로 검사한다, 스냅샷 금지) 색은 토큰만 쓴다(hex·반경·그림자·`font-bold` 금지, 디자인 방향 문서).
+
+| 이름 | 경로 | 용도 |
+|---|---|---|
+| `AiProfilePanel` | `widgets/ai/ai-profile-panel.tsx` | 프로필 탭 본문: 창 요약(판·곡·`auto_plays`·`training_plays`·`stale`, 도움말 `pages.ai.profile.trainingClusterNote`), 밀도 한계, 약점·강점, 태그 잔차, 타이밍, 조합 격자, 손 균형, BP·게이지 문맥. 빈·부족·정상·한계 없음 네 상태 |
+| `AiWeaknessList` | `features/ai/ai-weakness-list.tsx` | `{ label, items, folderHrefOf?, trainingHrefOf? }`. 약점 줄마다 키 라벨·값·표본 배지와 이동 링크. 연습 폴더 링크는 `selectable_for_folder` 일 때만, 훈련곡 링크는 `training_kinds` 가 비지 않았을 때만 그린다(링크는 `<a>`, 동작이 아니라 이동이므로) |
+| `AiSampleBadge` | `features/ai/ai-sample-badge.tsx` | `{ evidence, sampleLevel }`. 표본 등급(`high`/`medium`/`low`/`insufficient`)과 근거 문구 |
+| `AiDensityLimitChart` | `features/ai/ai-density-limit-chart.tsx` | `{ density }`. 밀도 한계 곡선 SVG: 칸별 EX 맞춤 곡선과 편안한 밀도·EX 한계·BP 한계의 세로선. `aria-label` 에 세 값과 관측 최대가 들어간다. 세로선 라벨은 줄로 겹치지 않게 쌓지만 세 값이 약 1 NPS 안에 모이면 옆으로 겹칠 수 있다(브라우저 점검 전) |
+| `AiTagTimingChart` | `features/ai/ai-tag-timing-chart.tsx` | `{ label, rows:{ key, label, deviationMs, sdMs, fastShare, evidence? }[] }`. 태그별 평균 오차 편차 |
+| `AiComboGrid` | `features/ai/ai-combo-grid.tsx` | `{ cells }`. 15×15 태그 조합 격자. 좁은 폭에서는 가로 스크롤(`overflow-x-auto`) |
+| `AiHandBalance` | `features/ai/ai-hand-balance.tsx` | `{ hands, lanes }`. 손·레인 균형 |
+| `AiBpContextList` | `features/ai/ai-bp-context-list.tsx` | `{ bpContexts, gaugeContexts, bpRuns, gauge }`. BP·게이지 꺾임 문맥 |
+| `AiSegmentChart` | `features/ai/ai-segment-chart.tsx` | 구간 BP 막대(기존). 구간 타입에 선택 필드 `hasBpRun?: boolean`이 더해져 연속 BP 구간을 표시 |
+| `AiGoalForm` | `features/ai/ai-goal-form.tsx` | 목표 폼(기존). 종류 두 개(`weakness_residual`: 약점 키를 고르고 목표를 퍼센트포인트 −20~5 로 받아 비율로 보냄, `density_limit`: 목표 NPS 4~40)가 더해졌다. 제출은 `AiGoalInput` |
+| `AiPracticeFolderPanel` | `widgets/ai/ai-practice-folder-panel.tsx` | 연습 폴더 탭(기존). 출처 `weakness` 와 `initialFocusKey` prop 이 더해졌다(허브가 `focus` 로 key 지정). 프로필 약점 중 폴더로 고를 수 있는 것만 선택지에 넣고, 딥링크 키가 목록에 없으면 추가 선택지로 남긴다 |
+| `AiTrainingPanel` | `widgets/ai/ai-training-panel.tsx` | 훈련곡 탭: `{ initialFocusKey }`. 만들기 폼 + 목록. 키가 없으면 만들기를 막고 등록을 안내한다 |
+| `AiTrainingCreateForm` | `widgets/ai/ai-training-create-form.tsx` | 초점(`auto` 또는 훈련할 수 있는 약점)·강도 선택, 20곡 안내, 레인·손 초점이면 `pages.ai.training.optionNotice`. 서버 오류를 그 자리에서 문구로(§17-7) |
+| `AiTrainingList` | `widgets/ai/ai-training-list.tsx` | 훈련곡 줄(제목 → 상세 링크, 초점, 만든 때, 판 수·최고 EX 비율, 다운로드 주소 복사 `CopyButton`, 삭제) |
+| `AiTrainingRemovalDialog` | `widgets/ai/ai-training-removal-dialog.tsx` | 삭제 확인: 함께 사라지는 폴더 항목 수와 남는 기록 개수를 보이고 확인 뒤에만 DELETE |
+| `AiTrainingDetailContent` / `AiTrainingDetailPanel` | `widgets/ai/ai-training-detail-{content,panel}.tsx` | 상세 화면(`/ai/training/[id]`)의 서버 컴포넌트(params 읽기)와 클라이언트 본문 |
+| `AiTrainingSectionStrip` | `features/ai/ai-training-section-strip.tsx` | `{ sections }`. 1분 곡의 구간 띠(초점·종류·목표/실제 NPS) |
+| `AiTrainingSectionTrend` | `features/ai/ai-training-section-trend.tsx` | `{ sections, plays }`. 판별 구간 추이. RANDOM 판은 흐리게 그리고 레인·손 초점 구간의 추세에서는 뺀다 |
+| `AiTrainingBeforeAfter` | `features/ai/ai-training-before-after.tsx` | `{ items }`. 초점 키별 만들 때의 값과 지금 값, 차이 |
+| `AiTrainingCorrectionList` | `features/ai/ai-training-correction-list.tsx` | `{ corrections }`. 서버가 고친 값의 목록(구간·필드·전·후) |
+| `AiTrainingPlayList` | `features/ai/ai-training-play-list.tsx` | `{ plays }`. 훈련곡의 최신 판 50 |
+
+- 화면 쪽 도우미(`entities/ai.type.ts`): `AI_HUB_TABS`·`aiHubHref`·`AI_HUB_PARAM`, `splitAiWeaknessKey`·`aiComboKeyOf`·`formatAiWeaknessValue`(EX 차이는 `%p`, 오차는 `±ms`, 밀도는 `N NPS`, 문맥은 `×lift`)·`isAiResidualGoalKey`, `AI_TRAINING_*` 상수와 `aiTrainingHref`·`isAiTrainingChartId`·`trainableAiWeaknessesOf`·`canAiTrainingPickFocus`·`formatAiWeaknessDelta`·`aiDataNeedOf`. 서버 상수의 거울은 `tests/components/ai-score-features-contract.test.ts`·`ai-training-contract.test.ts` 가 서버와 같음을 고정한다.
+- 훈련곡 줄·상세의 문구는 `pages.ai.training.*`, 약점 이름은 `useAiWeaknessLabel()`(`pages.ai.weaknessKind.*` + `pages.ai.patternTag.*`).
+- 폴더 한 줄(`features/folder/folder-chart-row.tsx`)은 항목에 `download_url` 이 있을 때만 `<a href download>` "받기"를 더한다(`pages.folder.chartRow.{download,downloadText}`).
+
+## 13. 회원 대시보드(2026-11-04)
+
+`/` 가 로그인한 회원에게 보이는 15패널 대시보드다. 구조·캐시는 [architecture.md](./architecture.md) §17-6, 결정은 [회원 대시보드 ADR](../acknowledge/2026-11-04-adr-member-dashboard.md). 차트는 전부 CSS 이고 애니메이션이 없다.
+
+| 이름 | 경로 | 용도 |
+|---|---|---|
+| `HomeBranch` / `HomeBranchSkeleton` | `widgets/home/home-branch{,-skeleton}.tsx` | 서버 분기(`connection()` 뒤 세션 읽기)와 중립 스켈레톤. 쿠키가 없으면 DB 없이 손님 홈 |
+| `MemberDashboardContent` | `widgets/home/member-dashboard-content.tsx` | 서버: 프리페치 다섯(`usePlayer`·overview·stats·일별 플레이 시간·최근 20)을 `HydrationBoundary` 로 내려 격자를 감싼다 |
+| `MemberDashboardGrid` | `widgets/home/member-dashboard-grid.tsx` | 클라이언트: `{ userId, loginId }`. 패널 15개를 읽는 순서로 놓고(손님 격자 안의 `col-span-full` 안쪽 `grid-flow-dense` 격자), 세션이 어긋나면 `HomeBranchSkeleton`, 화면에 들어오면 훈련곡 목록을 한 번 읽어 `MemberRecentPanel` 의 `trainingSha256s` 로 내린다 |
+| 패널 15개 | `widgets/home/member-{profile,summary,lamp,table-progress,calendar,recent,dan-course,weakness,training,week,goal,rival,folder-replay,ai-status,community}-panel.tsx` | 한 파일 한 패널. 폭: 한 칸 profile·lamp·dan-course·week, **넓음**(`DASHBOARD_WIDE_PANEL_CLASS_NAME`, 62rem 부터 2칸) summary·table-progress·calendar·recent·weakness·rival·ai-status, **채움**(`DASHBOARD_FILL_PANEL_CLASS_NAME`, 96rem 부터 2칸) training·goal·folder-replay, **꽉** community. 이 조합이 3열·4열 조밀 배치의 빈 칸을 0 으로 만든다(`member-dashboard-layout.test.tsx` 가 잡는다). 폭을 바꿀 때는 이 시험의 `PANEL_COUNT` 와 h2 목록을 함께 고친다 |
+| `DashboardQueryState` | `features/dashboard/dashboard-query-state.tsx` | `{ isPending, isError, isFetching, onRetry, loadingLabel, errorMessage, isEmpty?, emptyMessage?, emptyAction?, loadingClassName? }`. 로딩 → 오류 → 빈 → 본문 순으로 고른다. 지연·비활성 쿼리는 `isLoading` 이 아니라 `isPending` 을 넘겨야 스켈레톤이 보인다 |
+| `StatTileGrid` | `features/dashboard/stat-tile-grid.tsx` | 요약 타일 8개 |
+| `GradeDistributionChart` | `features/dashboard/grade-distribution-chart.tsx` | DJ 등급 9묶음 세로 막대 |
+| `ActivityCalendar` | `features/dashboard/activity-calendar.tsx` | 7행 × 주 CSS 격자, 농도 5단계 `DASHBOARD_CALENDAR_LEVELS = [0, 1, 3, 6, 10]`(일별 판 수 하한) |
+| `TableLevelProgressList` | `features/dashboard/table-level-progress-list.tsx` | 레벨별 램프 누적 막대(`LampStackBar` 재사용)와 `played/total` |
+| `CourseProgressList` | `features/dashboard/course-progress-list.tsx` | 코스 묶음별 `cleared/total` |
+| `RivalVersusList` | `features/dashboard/rival-versus-list.tsx` | 라이벌별 공통 곡 승·패·무 |
+| `ReplayRow` | `features/dashboard/replay-row.tsx` | 내 최근 리플레이 한 줄(→ `/replays/{id}`) |
+| `FolderReadRow` | `features/dashboard/folder-read-row.tsx` | 최근 수정 폴더 한 줄 |
+| `DensityLimitMini` | `features/dashboard/density-limit-mini.tsx` | `{ density }`. 약점 패널의 밀도 한계 작은 곡선(큰 판은 `AiDensityLimitChart`) |
+| `useInView` | `shared/hooks/use-in-view.ts` | `{ ref(element), isInView }`. 콜백 ref + `useState` 방식(effect 안 동기 `setState` 를 피한다). 지연 패널은 본문에 `ref` 를 달고 `useQuery({ ...xQueryOptions(), enabled: isInView })` 로 쓴다. `IntersectionObserver` 가 없으면 즉시 화면 안. `rootMargin` 은 `DASHBOARD_IN_VIEW_ROOT_MARGIN`('240px') |
+
+- 최근 플레이 패널(`MemberRecentPanel`)은 기존 `ScoreRow` 를 쓰고, 훈련곡 판은 `ScoreRow` 에 배지 자리가 없어 부제를 `TRAINING · 아티스트` 로 바꿔 보인다(`pages.dashboard.recent.training`, 세 언어 같음). 아티스트가 길면 한 줄에서 잘린다.
+- 최근 플레이 목록·라이벌 최근 목록·표 레벨 목록은 `max-h` + 안쪽 스크롤이다. 중첩 스크롤이 터치 기기에서 거슬릴 수 있다.
+- 문구는 `pages.dashboard.{profile,summary,lamp,tableProgress,calendar,recent,danCourse,week,goal,rival,folderReplay,aiStatus,community,weakness,training}`. 달력 패널의 "기간 내 최고"(창 182일)와 요약 타일의 "최근 1년 최고"(371일)는 서버 정의가 달라 라벨을 구분했다. 영어·일본어는 모델 초안이다.
+- 데이터: `entities/dashboard.query.ts`(`dashboardOverviewQueryOptions()`·`dashboardCalendarQueryOptions(days)`·`dashboardTableProgressQueryOptions(tableId)`·`dashboardCoursesQueryOptions()`·`dashboardRivalsQueryOptions(limit)`·`dashboardReplaysQueryOptions(limit)`, 훅 `useDashboard*`, `useAlignedViewer(initialUserId)`), 타입 `entities/dashboard.type.ts`(서버 DTO 에서 유도), 상수 `shared/constants/dashboard.ts`.

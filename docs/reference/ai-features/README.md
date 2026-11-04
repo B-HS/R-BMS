@@ -1,6 +1,6 @@
 # 웹 AI 기능 — 조사 색인
 
-> 최종 갱신 2026-10-19 · 대응 커밋 1eadbb5
+> 최종 갱신 2026-11-04 · 대응 커밋 2026-11-04 AI 훈련곡 작업(커밋 예정) (2026-11-04 에 server.md 부록 D 와 아래 찾기 표의 새 줄을 더했다. 이전: 최종 갱신 2026-10-19 · 대응 커밋 1eadbb5)
 
 웹(`web/`)에 AI 기능 10개를 넣기 위한 조사 보고서 전문과 기획 문서의 자리다. 다시 조사하지 않도록 보고서는 줄이지 않고 그대로 두었다. 코드가 바뀌면 해당 보고서의 절을 함께 고친다.
 
@@ -34,6 +34,8 @@
 | 마이그레이션 운영 순서 | server.md 5.5 · 기획 3.6 |
 | 폴더 한도와 게임 MY FOLDERS 반영 | server.md 1.3·4.1 · 기획 5.6 |
 | 의존성 후보와 최신 버전(2026-10-19) | server.md 6.2 · providers.md 4.2 · 기획 6.2 |
+| 분석 엔진 v3: 버전 상수(`ANALYSIS_VERSION` 2, `PLAY_ANALYSIS_VERSION` 3), 새 곡 특징·판 요약 필드, 재계산 | server.md 부록 D · [2026-11-04 조사 01 의 구현 결과](../2026-11-04-ai-training-dashboard/01-current-ai-analysis.md) |
+| 약점 프로필, 훈련곡 생성·전달, 회원 대시보드 | [web 아키텍처 §17](../../web/architecture.md) · [2026-11-04 조사 01~03](../2026-11-04-ai-training-dashboard/01-current-ai-analysis.md) · [설계](../../plan/2026-11-04-ai-training-dashboard.md) |
 
 ## 조사 사이 어긋남과 보탬
 

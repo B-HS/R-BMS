@@ -1,5 +1,7 @@
 # 훈련곡 전달 경로 조사 - 웹 생성, 내 폴더, 구동기에서 바로 받아 플레이
 
+> 최종 갱신 2026-11-04 · 대응 커밋 2026-11-04 AI 훈련곡 작업(커밋 예정). 본문은 조사 시점(HEAD `4bac699`)의 기록 그대로이고, 끝의 "구현 결과(2026-11-04)" 절이 무엇이 어디에 구현됐는지와 설계에서 달라진 점을 적는다. 본문의 줄 번호와 "없다" 는 구현 전 기준이므로 코드가 정본이다.
+
 > 조사일 2026-11-04 · 브랜치 dev · HEAD `4bac699` · 코드·설정은 수정하지 않았고 커밋·푸시도 하지 않았다. `.env*` 와 비밀 파일은 읽지 않았다.
 > 근거 표기는 `경로:줄` 이고 `web/` 안 파일은 `web/` 를 붙였다. 확인한 사실과 추측을 갈라 적었고, 확인하지 못한 것은 8절에 모았다.
 > 이 조사는 `docs/reference/ai-features/` 와 `docs/plan/2026-10-23-select-tree-download.md` 등 이미 저장된 조사를 먼저 읽고, 훈련곡 전달에 필요한 부분만 원본 코드로 다시 검증했다. 어긋난 곳은 해당 절에 적었다.
@@ -389,3 +391,38 @@ const md5Of = (text: string) => createHash('md5').update(Buffer.from(text, 'utf8
 - 항목: `training-demo.bms`(deflate, 5,702 → 압축), `click.wav`(저장, 4,454 B). zip 전체 5,285 B.
 - 확인: 임시 Rust 크레이트(저장소 밖, `rbms-download` 를 경로 의존으로 사용, `Cargo.lock` 은 저장소 것을 복사)에서 `download_with`(가짜 `get` 이 zip 바이트를 돌려줌, 첫 4바이트 `PK\x03\x04` 통과) → `extract_zip`: `Ok(ExtractReport { written: 2, skipped: 0, charts: 1 })`. 풀린 `training-demo.bms` 의 md5 가 원본과 같다(`5bf1c9f8…`).
 - `classify_link`: `…/training/<md5>.zip` → `DirectZip`, `…/<md5>/download` → `Browser`, `…?md5=abc&file=a.zip` → `Browser`, `…/<md5>/chart.zip?exp=1&sig=abc` → `DirectZip`.
+
+---
+
+## 구현 결과(2026-11-04)
+
+사용자 결정 D1~D5·D7·D8([설계 1.2](../../plan/2026-11-04-ai-training-dashboard.md))대로 "생성 → 내 폴더 훈련곡 → 구동기에서 바로 받기"를 **P2 로** 구현했다(7.3절). P0 의 수동 경로도 그대로 가능하다(웹 상세의 받기 주소). 아키텍처 정본은 [web 아키텍처 §17-2·§17-3·§17-8](../../web/architecture.md), 결정은 [훈련곡 생성·전달 ADR](../../acknowledge/2026-11-04-adr-training-chart-generation-delivery.md)·[훈련곡 판 처리 ADR](../../acknowledge/2026-11-04-adr-training-chart-plays.md).
+
+| 이 문서의 항목 | 구현된 곳 |
+|---|---|
+| 1.1·6.4 저장 구조·마이그레이션 | 마이그레이션 `0014_training_chart`(표 `training_chart`·`training_folder`·`play_profile`): [data-model.md](../../backend/data-model.md) |
+| 1.3·2.3·7.3 클라이언트가 폴더에서 받는 길 | `UserFolderItem.download_url`, 내 폴더 안 없는 곡 흐린 줄(`MissingRef::Folder`), 받기 모달의 출처 분기: [play-options.md 13.6](../../play-options.md) |
+| 3 서버가 BMS 를 서빙 | 공개 `GET /api/training/{id}/chart.zip`(무인증, IP 당 30/min, `no-store`): [api-spec.md §1](../../backend/api-spec.md) |
+| 4 BMS 형식 | `service/domain/training/{synthesize,bms-writer,chart-timing,pattern-document}.ts`, 상수 `training-constants.ts` |
+| 4.4 키음 | `training/wav.ts`(`hit.wav` 2,000 Hz 30 ms, `count.wav` 1,000 Hz 60 ms, 44.1 kHz PCM), zip 작성기 `zip.ts`·`crc32.ts`(새 의존성 없음) |
+| 5 같은 파서로 검증 | 골든 `contract/training-chart/`(합성 사양 셋의 `.bms`·`.pattern.json`, `basic-160.zip`)과 교차 시험: `tests/service/training/golden.test.ts` ↔ `cargo test -p rbms-cli --locked training_contract`, `cargo test -p rbms-download --locked training` |
+| 6.2·6.3 판 회수·오염 방지 | 판은 랭킹에 그대로 들어간다(D4). 훈련곡 연결은 sha256, 구간 결과는 `metrics.training_sections`, 프로필은 훈련곡 판을 한 군집으로 묶음 |
+| 7.1 변경 파일 | 서버 `route/{training,training-charts}.ts`, `compose/training.ts`, `dto/training.ts`, `service/domain/{training,ai}/*`, 클라이언트 `crates/rbms-ir`·`rbms-table`·`apps/rbms-player`(위 표), 웹 화면 `widgets/ai/ai-training-*`, `app/(app)/ai/training/[id]` |
+
+### 설계와 달라진 점
+
+- **zip 작성기의 동작**: 운영 zip 은 BMS 를 deflate 로, 클릭 wav 둘을 저장 방식으로 쓴다. 골든 `basic-160.zip` 만 BMS 도 저장 방식으로 써 zlib 빌드에 따라 바이트가 달라지지 않게 했다. 내용·CRC 는 시험으로 고정했고 deflate 바이트의 런타임 차이는 테스트 부채다.
+- **패턴 문서**: `declared_ln` 은 LN 이 있을 때만 `ln` 이고 없으면 `null` 이다(Rust `document.rs` 의 `declared_ln()` 이 LN 이 없으면 `None`). 설계 3.10 의 "ln 고정" 대신 클라이언트가 읽는 값에 맞췄다. 기준 BPM 150 은 4의 배수 규칙에 맞지 않아 골든 `soflan-ln` 은 152 로 보정되고 보정이 `corrections` 에 남는다.
+- **JSON 왕복의 1 ulp**: `serde_json` 의 `Value` 왕복이 `section` 값을 1 ulp 옮기는 것을 TS 교차 시험이 잡아, Rust 의 `.pattern.json` 은 `extract` 가 쓴 바이트를 그대로 저장하고 바이트 단위로 비교한다. 골든 갱신은 TS 쪽(`RBMS_UPDATE_CONTRACT=1` 로 `.bms`·`.spec.json`·`basic-160.zip`) 다음 Rust 쪽(`.pattern.json`) 순서다.
+- **합성기**: `synthesizeTraining` 이 `{ spec, notes }` 를 돌려주고 구간의 `from_us`·`to_us`·`grid`·`actual_nps`·`notes` 와 `play_level` 을 채운다. 격자 최대 행 속도를 넘는 `target_nps` 의 상한 처리는 합성기가 아니라 `correctTrainingPlan` 이 한다('같은 사양·시드면 같은 바이트'를 지키려고). `bounds` 에 `comfort_nps` 가 더해졌다. `notes_per_row` 는 종류의 실제 배치에 맞췄고(스크래치 종류 1+0.25 등), 마디 분배 2단계 비교는 합계를 다시 계산해 한다. 종류별 실제 NPS 는 목표와 다를 수 있고(계단은 목표 9 에 6.1~6.8, 홀드 LN 은 10.3) `actual_nps` 로 정직하게 기록된다.
+- **폴더 맨 앞 넣기**: `addItems` 는 끝에 붙으므로(`appendItems`) `base_updated_at` 을 준 `replaceItems` 로 한다. 충돌이면 건너뛰고 다음 생성이 빠진 항목을 채운다.
+- **검사 순서**: 설계 3.1 의 한도 → 폴더 → 프로필 사이에 AI 키 등록 확인을 넣었다(키가 없는 사용자의 프로필 계산(최대 300판)을 하지 않으려고). 여전히 공급자 호출 전이다.
+- **상세 응답**: `Summary.plays`(숫자)와 `plays`(배열)가 겹쳐 `never` 가 되므로 상세는 요약에서 `plays` 를 빼고 `play_count` 와 `plays: TrainingPlay[]`(최신 50)를 둔다. 요약에는 설계에 없던 `sha256` 이 더해졌다(대시보드 최근 플레이의 `TRAINING` 표지를 화면에서 대조하려고, 소유자 전용이라 새는 값은 없다).
+- **chart_pattern·trace 표 불변식**: 삭제 미리보기의 `chart_pattern` 존재 확인은 `chartPatternService.readFeaturesMany` 를, trace 개수는 `compose/trace.ts` 의 `createChartTraceCounter` 를 거친다(기존 불변식 시험이 그 표를 읽는 곳을 한 군데로 고정한다).
+- **클라이언트(Rust)**: 설계 6절의 파일 목록 안에서 끝났다. 더해진 것: 폴더 저장본 `version`(`COPY_VERSION` 1; 옛 클라이언트가 `download_url` 을 모른 채 저장한 훈련곡 폴더가 `updated_at` 이 같아 영영 링크가 비는 것을 막는다. 서버가 클라이언트 draft 보다 먼저 나가는 창이 실제로 생기기 때문) 과 공용 도우미 `held_then_missing`(표 레벨과 폴더 줄이 함께 쓴다). 안내 문구 셋(`NoteTrainingChart`·`NoteFolderChart`·`NoteFolderNoLink`)의 한국어·일본어는 감수 전이다.
+- **서버 프리페치와 `download_url`**: 폴더 편집 화면의 서버 프리페치에는 origin 이 없어 링크가 비므로 `FolderEditor` 가 마운트 때 다시 읽는다(화면을 열 때마다 GET 이 한 번 늘어난다).
+
+### 남은 것
+
+- 실기: 생성 → F6 → 내 폴더 흐린 줄 → GET CHART → 플레이 → 점수·trace 업로드 → 웹 상세의 구간 결과([QA 3.27](../../quality-assurance/2026-10-11-default-skin-manual-check.md)).
+- 릴리스: 클라이언트 변경이 든 커밋의 CI 통과 뒤 `release.yml` draft(훈련곡 서버가 운영에 나간 뒤). 노트에 "일반 폴더도 없는 곡 줄이 보인다" 를 적는다.

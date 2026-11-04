@@ -1,5 +1,7 @@
 # 03. 로그인 사용자 "/" 대시보드 조사 (iidx-rank 대시보드 분해와 R-BMS 웹 대응)
 
+> 최종 갱신 2026-11-04 · 대응 커밋 2026-11-04 AI 훈련곡 작업(커밋 예정). 본문은 조사 시점(HEAD `4bac699`)의 기록 그대로이고, 끝의 "구현 결과(2026-11-04)" 절이 무엇이 어디에 구현됐는지와 설계에서 달라진 점을 적는다. 본문의 줄 번호와 "없다" 는 구현 전 기준이므로 코드가 정본이다.
+
 > 작성 2026-11-04 · 조사 시점 R-BMS `dev` `4bac699`(작업 트리 깨끗), iidx-rank `2cd9795`(읽기 전용, `.env*`·`.vercel`·`node_modules`·`.next` 는 읽지 않았다)
 > 목적: 로그인한 사용자가 `/` 에서 대시보드를 보게 한다. 사용자 요청 "iidx-rank 처럼 dashboard 에서 보일 수 있는 내용을 최대한 보여봐", 결정 "기존 홈 내용은 유지하고 로그인 사용자에게만 `/` 를 대시보드로 교체".
 > 이 문서는 코드를 바꾸지 않은 조사 보고서다. 같은 폴더의 01·02 문서(다른 조사)는 읽지 않았다.
@@ -399,3 +401,37 @@ R-BMS 에 없는 iidx-rank 부품: `FittedRowList`(보이는 높이만큼만 행
 7. 활동 달력·DJ 랭크 분포·표 진행도 서버 집계를 1차에 넣을지 2차로 미룰지.
 8. 일본어·영어 문구는 모델 초안으로 가는 기존 방침을 유지하는지(`HANDOFF.md:103`).
 9. **[미확인]** 운영 응답 시간·질의 수 실측, `'use cache'` 저장소 위치, AI digest 서비스 내부 질의 수, better-auth `getSession` 의 DB 질의 수, `DAN.MINE` 이 로그아웃 때 비워지는지(`removeUserScopedQueries` 목록에 없음).
+
+---
+
+## 구현 결과(2026-11-04)
+
+설계 8절(결정 D9·M19~M23·M26)대로 로그인한 회원의 `/` 를 15패널 대시보드로 구현했다(8.1절의 A안, 손님 홈은 그대로). 아키텍처 정본은 [web 아키텍처 §17-6](../../web/architecture.md), 컴포넌트는 [components.md §13](../../web/components.md), 결정은 [회원 대시보드 ADR](../../acknowledge/2026-11-04-adr-member-dashboard.md).
+
+| 이 문서의 항목 | 구현된 곳 |
+|---|---|
+| 8.1 분기 | `app/(app)/page.tsx` → `HomeBranch`(서버) → `MemberDashboardContent`(서버 프리페치 다섯 + `HydrationBoundary`) → `MemberDashboardGrid`(클라이언트) |
+| 8.2 패널 15개 | `widgets/home/member-*-panel.tsx`, 폭 조합과 읽는 순서는 components.md §13 |
+| 8.3 서버 집계 | `route/dashboard.ts`, `service/domain/dashboard/{dashboard.service,play-streak}.ts`, `compose/dashboard.ts`, `dto/dashboard.ts`, `service/dashboard-reads.ts`, 어댑터 `app/api/fe/me/dashboard/**`: [api-spec.md §12](../../backend/api-spec.md) |
+| 7.3 캐시 태그 | `player-dashboard:{loginId}`(읽기 다섯)·`leaderboard-players`(순위): [web 아키텍처 §5-2·§5-3](../../web/architecture.md) |
+| 7.2 쿼리 규칙 | `entities/dashboard.{query,type}.ts`, `QUERY_KEY.DASHBOARD.*`, `USER_SCOPED_QUERY_KEYS` 에 `DASHBOARD.ALL`·`DAN.MINE` |
+| 7.6 비용 | 첫 HTML 프리페치 다섯, 나머지는 클라이언트 지연 로딩, AI 계열은 뷰포트 진입 뒤(`shared/hooks/use-in-view.ts`) |
+
+### 설계와 달라진 점
+
+- **순위**: 설계는 `{userId → position}` 맵을 JS 로 만든다고 했으나 SQL `rank() over (order by <기존 종합 순위 정렬>)` 한 번으로 구한다(경쟁 순위 1, 1, 3). 범위는 종합 순위 화면 기본값(SCRATCH AUTO 포함), `total_players` 는 사용자와 조인한 `chart_best` 보유자 수다. 종합 순위 캐시는 사용자 id → 순위 객체 전체를 담으므로 사용자가 수만 명이 되면 상위 N 만 담는 방식을 검토해야 한다. `compose/fe.ts` 에는 같은 순위 쿼리를 쓰려고 `buildLeaderboardStats`·`listPlayedAtsOf` 등을 export 로 뺐다(동작 변화 없음).
+- **overview 의 계산**: 연속·30일·이번 주는 SQL 일별 `GROUP BY` 가 아니라 최근 371일 판 시각을 한 번 읽어 `summarisePlayDays(days=371)` 로 일별을 만든 뒤 순수 함수로 뽑는다(플레이 시간 추정이 판 순서를 쓰기 때문). 판이 매우 많은 사용자는 캐시 미스에 비용이 늘 수 있다(테스트 부채).
+- **표 진행도**: `total`·`played` 는 표 페이지와 같이 항목 단위(같은 md5 가 두 레벨에 있으면 각각)이고 `lamps` 는 개수 0 인 램프를 빼고 `NoPlay` 를 포함해 합이 `total` 이다. 표 갱신은 이 읽기를 즉시 무효화하지 않는다.
+- **코스·리플레이·라이벌**: 코스 묶음 응답에 카탈로그 그룹 `id` 가 더해졌다(같은 이름의 묶음이 둘이어도 화면 key 가 안정적이도록). 리플레이의 `clear`·`ex_score` 는 점수 id 가 없는 리플레이를 위해 null 허용이고, 라이벌 최근 판은 공개 활동 피드 규칙(`ranked`)을 따르며 공통 곡이 없는 라이벌도 승패 0 으로 담긴다.
+- **패널 6 최근 플레이**: DJ 등급 라벨은 활동 행(`ActivityRow.chart`)에 노트 수가 없어 생략했다(켜려면 `activitySelection` 에 `notes` 를 더하는 서버 변경이 필요). `TRAINING` 표지는 `ScoreRow` 에 배지 자리가 없어 부제를 `TRAINING · 아티스트` 로 바꿔 보인다. 표지는 훈련곡 목록의 sha256 집합(`trainingSha256s`)을 격자가 내려줘 켜고, 격자가 화면에 들어오고 세션이 맞을 때만 목록을 요청한다(패널 9 와 같은 쿼리 키, 요청 한 번). 설계의 "훈련곡 목록의 sha256 과 화면에서 대조" 는 목록 요약에 sha256 이 없어 서버 DTO 에 `sha256` 필드를 더해서 가능해졌다(소유자 전용 경로).
+- **패널 1 내 정보**: 대표 단위 배지는 `useMyDans` 대신 `usePlayer` 응답의 `readDisplayedDans(profile.extra)` 를 쓴다(남에게 보이는 표시 단위와 같은 집합이고 프리페치에 이미 들어 있어 요청이 하나 준다).
+- **패널 9 훈련곡**: 목록 응답(7.2 `Summary`)에 전후 비교가 없고 상세에만 있어 5곡마다 상세를 부르면 요청이 늘어나므로, 제목·초점·판 수·최고 EX·`used/limit` 만 보이고 줄마다 상세로 잇는다.
+- **패널 14 AI 현황**: 판별 trace 보관 사용량은 기존 훅이 없어 넣지 않았다. 게이지 조언 한 줄은 GET 뷰에 추천 게이지 값이 없어 `rescues[].rescued_by` 를 게이지별로 합산해 가장 많이 구한 게이지(동률은 먼저 나온 쪽)를 결정론으로 보인다.
+- **서버 프리페치**: 설계대로 `public-reads`(`readPlayer*`)를 쓰므로 이 함수들이 호출마다 `requireUserId` 로 사용자 id 를 다시 조회해 첫 HTML 에 PK 조회가 3~4회 더 든다(`read-cache` 의 `userId` 직접 함수를 쓰면 줄지만 소유 밖이었다). 운영 응답 시간은 배포 뒤 측정할 부채다.
+- **폭**: 설계가 말하지 않은 폭을 정했다. 넓음 2·4·5·6·8·12·14, 채움 9·11·13, 꽉 15, 한 칸 1·3·7·10. 이 조합만 3열(합 18)과 4열(합 20) 조밀 배치에서 빈 칸이 0 이다(한 칸+한 칸은 3열에서 1칸·4열에서 2칸 구멍). 회원 격자는 손님 격자 안의 `col-span-full` 안쪽 격자이고 손님 격자 클래스는 그대로다. `HomeBranch` 가 `connection()` 과 세션을 읽으므로 손님의 소개 패널도 정적 셸이 아니라 스트리밍으로 온다(최종 DOM 은 같다).
+- **한국어·영어·일본어**: AI 패널 문구는 `entities/ai.type` 의 한국어 상수를 재사용하지 않고 `pages.dashboard.*` 세 언어 키로 새로 썼다. 영어·일본어는 모델 초안이고 CJK 실제 글꼴 폭은 점검하지 않았다.
+
+### 남은 것
+
+- 설계 10.2 부채 (9) 리포트 헤드라인 한 줄, (4) 운영 응답 시간 측정은 [테스트 부채](../../quality-assurance/2026-10-14-test-debt.md) 3.145 이후에 있다.
+- 실제 로그인·실제 DB 로 한 화면 점검은 하지 않았다(시험 데이터 주입 미리보기로 4·3·2·1열 시각만 확인). 실기는 [QA 3.27](../../quality-assurance/2026-10-11-default-skin-manual-check.md).

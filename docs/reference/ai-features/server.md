@@ -1,6 +1,6 @@
 # 웹 AI 기능 기획 조사 (AI1) - 웹 서버가 가진 데이터와 AI 기능을 넣을 자리
 
-> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (조사 본문은 2026-10-19 기준 그대로이고 2026-10-22 에는 `chart_best` 행, 4.3절 순위 줄, 부록 C 만 고쳤다)
+> 최종 갱신 2026-11-04 · 대응 커밋 2026-11-04 AI 훈련곡 작업(커밋 예정) (2026-11-04 에 부록 D 를 더했다: 분석 엔진 v3, 판 요약·곡 특징 버전, 새 지표 필드, 약점 프로필·훈련곡 모듈. 이전: 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c (조사 본문은 2026-10-19 기준 그대로이고 2026-10-22 에는 `chart_best` 행, 4.3절 순위 줄, 부록 C 만 고쳤다))
 > 이 문서는 조사 보고서 전문이다(줄이지 않았다). 끝에 조사자가 함께 낸 "제약"과 "확인하지 못한 것" 목록을 원문 그대로 붙였다. 기획은 [../../plan/2026-10-19-web-ai-features.md](../../plan/2026-10-19-web-ai-features.md), 색인은 [README.md](README.md).
 
 조사 시점 2026-10-19, 브랜치 dev, 코드는 수정하지 않았고 Git 상태도 바꾸지 않았다. `.env*`, `secrets/`, `settings.ron`, `scoredb.sqlite` 는 읽지 않았고 운영 사이트·DB 에 요청하지 않았으며 rbms-player 도 실행하지 않았다. 측정에 쓴 것은 `target/release/rbms-cli` 의 `scan` 과 chart 요약 모드뿐이다(읽기 전용, 임시 sqlite 는 시스템 temp 에만 생성). 경로는 `/Users/hyunseokbyun/development/R-BMS` 기준 상대 경로이고 `web/` 안 파일은 `web/` 접두사를 붙였다. 사용자 결정(BYOK, 3개 공급자, 판별(a)+곡별(b) 패턴, 결정론 집계·AI 는 해석만)은 `docs/PROCESS.md:21-22` 에 이미 기록돼 있다.
@@ -349,6 +349,30 @@ DB 는 MySQL + Drizzle(mysql2), 마이그레이션 0000~0004(`web/drizzle/`)가 
 - `course_best.assist_grade` 는 항상 0 이다. 코스 제출과 `course_score` 에 게이지가 없다.
 - 백필은 `chart_best` 가 가리키는 `score` 의 값만 채운다. 같은 차트에서 게이지가 다른 SCRATCH AUTO 판이 둘 이상인 사용자는 EX 로 고른 최고 기록보다 등급이 높은 다른 판이 `score` 에 있을 수 있고, 그 최고 기록은 더 높은 `(clear, 등급, EX, BP)` 판을 제출할 때 바뀐다. 최고 기록 재선정 스크립트는 만들지 않았다.
 - 프롬프트 문구(`ASSIST_GRADE_RULE`)는 등급 1 을 "ASSIST EASY" 라고 부르고 ASSIST EASY 게이지가 아니라 EASY 게이지의 클리어를 뜻한다. 리뷰 web-2 는 이름 규약과 일치한다고 기각했다.
+
+## 부록 D. 분석 엔진 v3와 판 요약 버전 (2026-11-04 구현 반영)
+
+위 조사는 2026-10-19 기준이다. 2026-11-04 의 "AI 훈련곡·대시보드" 작업([설계](../../plan/2026-11-04-ai-training-dashboard.md), [조사](../2026-11-04-ai-training-dashboard/01-current-ai-analysis.md), [web 아키텍처 §17](../../web/architecture.md))으로 분석 엔진이 v3 가 되었고 서버가 다음을 더 갖는다. 사용자 trace·차트 노트 배치는 여기에 적지 않는다.
+
+**D.1 버전 상수**(정본 `web/src/server/service/domain/analysis/analysis-constants.ts` 와 `ai/*.constants.ts`)
+
+| 상수 | 값 | 뜻 |
+| --- | --- | --- |
+| `ANALYSIS_VERSION` | **2**(이전 1) | 곡 특징(`chart_pattern.features`)의 세대. 낮으면 읽을 때 다시 계산 |
+| `PLAY_ANALYSIS_VERSION` | **3**(이전 2) | 판 요약(`play_analysis.summary`)의 세대. 요약은 두 버전을 함께 저장해 하나라도 낮으면 다시 계산 |
+| `PLAY_FEATURE_ANALYSIS_VERSION` | 2(이전 1) | 판 기반 AI 기능의 digest 세대 |
+| `PROFILE_VERSION` | 1 | 약점 프로필 캐시(`play_profile`)의 세대 |
+| 프롬프트 버전 | 리포트 3·코치 2·비교 3·판정 습관 3·게이지 조언 2, 추천·연습 폴더·목표·기록 질문·주간 요약 2 → 3, 훈련곡 구성안 1 | 올리면 저장된 해석이 사용자가 다시 요청할 때 한 번 다시 만들어진다 |
+| `GENERATOR_VERSION` / `TRAINING_PARSER_VERSION` | 1 / 5 | 훈련곡 합성기 세대 / 훈련곡 패턴 문서가 맞춘 클라이언트 파서 세대 |
+
+**D.2 곡 특징 v2**(`computeChartFeatures`, 기존 필드는 값이 바뀌지 않았다 - 계약 trace 11개와 합성 6개로 HEAD 판과 비교해 차이 0건): `nps`(`p50_2s`·`p90_2s`·`max_2s`: 판정 노트마다의 중심 2초 창 NPS 의 중앙값·90분위·최대, `max_8s`: 8초 창 최대, `sustained_s`: 지속(sustained) 노트가 500 ms 이하 간격으로 이어진 시간의 초), `combos`(태그 쌍이 한 노트에 겹친 비율의 상위), `bpm_main_band`(노트가 가장 많이 놓인 BPM 띠, 동률이면 낮은 띠). `readChartFeatureExtras` 가 이 셋만 읽고 낡은 특징은 `isStale` 로 돌려준다. 값은 소수 둘째 자리(`PEAK_NPS_DECIMALS`)까지.
+
+**D.3 판 요약 v3 가 더한 필드**(BEAT_7K 판의 `metrics`. 이름은 `play-metrics.ts` 의 반환 객체가 정본): `by_nps`(국소 NPS 칸별 판정 셀. 칸마다 `burst`·`sustained` 문맥 셀을 함께), `peak_nps`·`peak_rps_2s`(가장 센 2초 창의 NPS·초당 행 수), `timing_by_tag`(태그별 오차 분포 모멘트), `by_hand`·`timing_by_hand`(좌·우·스크래치 손 셀과 오차), `lane_bp`(레인별 노트·BP), `timing_by_lane[].moments`, `bp_runs`(연속 BP 길이의 막대·문맥·복구 노트 수, 문맥별 `context_*`), `gauge_drop_contexts`(게이지 꺾임마다 창의 노트 수·평균 NPS·상위 태그·BP·태그 합계)·`gauge_drop_tag_totals`·`gauge_drop_notes`, `by_combo`·`by_tag_solo`(태그 조합과 단독 셀), `by_bpm_band`, `soflan_phase`(소프란 사건 수와 국면별 셀), 구간(`segments[]`)마다 `peak_nps`·`mean_err_us`, 훈련곡 판이면 `training_sections`(구간별 EX 비율·BP·FAST/SLOW·오차). 속도 요약에 `speed.soflan_adjust`(`events`, `adjusted`: 소프란 사건 뒤 속도를 맞춘 횟수)가 더해졌고, `analyzeTrace` 의 선택 인자 `training`(구간 경계)과 `readChartFeatureExtras` 가 새 이음새다. 국소 NPS 창의 끝은 판 길이가 아니라 마지막 판정 노트 + 1 µs 다(판 길이에는 곡 끝 뒤 5초가 더해지기 때문).
+- 크기: 6만 노트 합성 판의 요약이 30,577 B(분석 약 150 ms)이고 시험이 40 KB 예산을 단언한다. 크기를 늘리는 것은 `gauge_drop_contexts`(꺾임 하나에 약 175 B, 상한 없음)뿐이다.
+
+**D.4 읽기·재계산 규칙**: 낡은 요약은 읽을 때 한 번에 `PLAY_ANALYSIS_READ_RECOMPUTE_MAX`(10)판까지만 다시 계산하고 나머지는 `stale` 로 센다. 약점 프로필은 `stale` 이 0 이 아니면 `play_profile` 에 저장하지 않는다. 일괄 재계산은 관리자 라우트(곡 특징 `POST /api/admin/chart-patterns/recompute`, 판 `POST /api/admin/traces/recompute`)와 운영의 `web-db.yml` 동작 `analysis-recompute-count`·`analysis-recompute`(8분 상한, 이어 하기. [ci-release.md 6.1](../../ci-release.md))다.
+
+**D.5 새 모듈과 표**: 분석 `analysis/{local-density,bp-runs,tag-combos,play-cells,weakness-key,weakness-profile,profile-stats}.ts`, AI `ai/{weakness-profile,training-plan}.service.ts`, 훈련곡 `training/*`(합성기·BMS 작성기·wav·zip), 표 `play_profile`·`training_chart`·`training_folder`(마이그레이션 0014. [data-model.md](../../backend/data-model.md)), 경로는 [api-spec.md §12](../../backend/api-spec.md). 합성 골든은 `contract/training-chart/`(TS ↔ Rust 교차 시험).
 
 ## 조사자가 낸 제약 목록 (원문)
 
