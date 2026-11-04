@@ -11,6 +11,8 @@ export const RATE_LIMIT = {
     FOLDER_READ: { limit: 120, windowMs: 60_000 },
     TABLE_RECORDS: { limit: 30, windowMs: 60_000 },
     SETTING_WRITE: { limit: 30, windowMs: 60_000 },
+    DASHBOARD: { limit: 60, windowMs: 60_000 },
+    TRAINING_DOWNLOAD: { limit: 30, windowMs: 60_000 },
 } as const
 
 const MAX_BUCKETS = 5000

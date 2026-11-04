@@ -21,27 +21,29 @@ export const kstDayStartOf = (at: number) => Math.floor((at + KST_UTC_OFFSET_MS)
 
 const toKstDate = (dayStart: number) => new Date(dayStart + KST_UTC_OFFSET_MS).toISOString().slice(0, ISO_DATE_LENGTH)
 
-/** The half-open range `[from, to)` of the last `PLAY_DAYS_WINDOW` KST days, the last one being the day that starts at `todayStart`. */
-export const playDaysWindowOf = (todayStart: number) => ({ from: todayStart - (PLAY_DAYS_WINDOW - 1) * DAY_MS, to: todayStart + DAY_MS })
+/** The half-open range `[from, to)` of the last `days` KST days (`PLAY_DAYS_WINDOW` by default), the last one being the day that starts at `todayStart`. */
+export const playDaysWindowOf = (todayStart: number, days = PLAY_DAYS_WINDOW) => ({ from: todayStart - (days - 1) * DAY_MS, to: todayStart + DAY_MS })
 
 /**
- * Estimates how long a player played on each of the last `PLAY_DAYS_WINDOW` KST days from the instants their plays ended.
+ * Estimates how long a player played on each of the last `days` KST days (`PLAY_DAYS_WINDOW` by default) from the instants their plays ended.
  *
  * The server stores no play length, so each play is given the gap to the play before it when that gap is at most `PLAY_SESSION_GAP_MS`, and
  * `PLAY_DEFAULT_MS` otherwise (a first play, or one after a break). A play counts for the day it ended on. `previousPlayedAt` is the latest play
  * before the window: it only joins the first play of the window to a session that began the day before. The stages of a course are score rows of
  * their own, so course rows are not read and nothing is counted twice.
  */
-export const summarisePlayDays = (params: { playedAts: readonly number[]; previousPlayedAt: number | null; todayStart: number }) => {
-    const { from, to } = playDaysWindowOf(params.todayStart)
+export const summarisePlayDays = (params: { playedAts: readonly number[]; previousPlayedAt: number | null; todayStart: number; days?: number }) => {
+    const windowDays = params.days ?? PLAY_DAYS_WINDOW
+    const { from, to } = playDaysWindowOf(params.todayStart, windowDays)
     const ordered = params.playedAts.filter((playedAt) => playedAt >= from && playedAt < to).toSorted((left, right) => left - right)
     const plays = ordered.map((playedAt, index) => {
         const previousPlayedAt = index === 0 ? params.previousPlayedAt : ordered[index - 1]
         const gap = previousPlayedAt === null ? Number.POSITIVE_INFINITY : playedAt - previousPlayedAt
         return { dayIndex: Math.floor((playedAt - from) / DAY_MS), playMs: gap <= PLAY_SESSION_GAP_MS ? gap : PLAY_DEFAULT_MS }
     })
-    const days = Array.from({ length: PLAY_DAYS_WINDOW }, (_, dayIndex): PlayDay => {
-        const ofDay = plays.filter((play) => play.dayIndex === dayIndex)
+    const playsOfDay = Map.groupBy(plays, (play) => play.dayIndex)
+    const days = Array.from({ length: windowDays }, (_, dayIndex): PlayDay => {
+        const ofDay = playsOfDay.get(dayIndex) ?? []
         return { date: toKstDate(from + dayIndex * DAY_MS), plays: ofDay.length, play_ms: ofDay.reduce((sum, play) => sum + play.playMs, 0) }
     })
     return { days, total_plays: plays.length, total_ms: days.reduce((sum, day) => sum + day.play_ms, 0) }

@@ -11,7 +11,7 @@ import { chartBestScope } from '@server/compose/best-scope'
 import { toJudgeBreakdown } from '@server/compose/judge-row'
 import type { ScoreRankingRow } from '@server/service/domain/score/score.service'
 
-const activitySelection = {
+export const activitySelection = {
     scoreId: score.id,
     loginId: user.loginId,
     playerName: user.name,
@@ -29,7 +29,7 @@ const activitySelection = {
     level: chart.level,
 }
 
-const toActivityRow = ({
+export const toActivityRow = ({
     gauge,
     ...row
 }: {
@@ -66,49 +66,72 @@ const LIKE_WILDCARDS = /[\\%_]/g
 
 const escapeLike = (value: string) => value.replace(LIKE_WILDCARDS, (character) => `\\${character}`)
 
+/**
+ * The per-player play and best statistics the player ranking is built from, and the orders it is sorted by. The ranking list and the
+ * dashboard's "N-th of all" figure both read it, so the two never disagree on who ranks above whom.
+ */
+export const buildLeaderboardStats = (db: Database, includeScratchAuto: boolean) => {
+    const playStats = db
+        .select({ userId: score.userId, plays: count().as('plays') })
+        .from(score)
+        .where(and(isNotNull(score.userId), includeScratchAuto ? undefined : eq(score.scratchAuto, false)))
+        .groupBy(score.userId)
+        .as('play_stats')
+
+    const bestStats = db
+        .select({
+            userId: chartBest.userId,
+            playedCharts: sql<string>`count(distinct ${chartBest.chartSha256})`.as('played_charts'),
+            clearedCharts: sql<string>`count(distinct case when ${chartBest.clear} >= ${MIN_CLEAR_LAMP_ID} then ${chartBest.chartSha256} end)`.as(
+                'cleared_charts',
+            ),
+        })
+        .from(chartBest)
+        .where(includeScratchAuto ? undefined : eq(chartBest.scratchAuto, false))
+        .groupBy(chartBest.userId)
+        .as('best_stats')
+
+    const plays = sql`coalesce(${playStats.plays}, 0)`.mapWith(Number)
+    const cleared = sql`coalesce(${bestStats.clearedCharts}, 0)`.mapWith(Number)
+    const played = sql`coalesce(${bestStats.playedCharts}, 0)`.mapWith(Number)
+
+    return {
+        playStats,
+        bestStats,
+        plays,
+        cleared,
+        played,
+        order: {
+            cleared: [desc(cleared), desc(played)],
+            played: [desc(played), desc(cleared)],
+            plays: [desc(plays), desc(cleared)],
+        },
+    }
+}
+
+/** The instants (epoch ms) a player's plays ended inside `[from, to)`, and the latest play before `from` that only joins the window's first play to a session. */
+export const listPlayedAtsOf = (db: Database) => async (params: { userId: string; from: number; to: number }) => {
+    const { userId, from, to } = params
+    const [rows, [previous]] = await Promise.all([
+        db
+            .select({ playedAt: score.playedAt })
+            .from(score)
+            .where(and(eq(score.userId, userId), gte(score.playedAt, from), lt(score.playedAt, to)))
+            .orderBy(asc(score.playedAt)),
+        db
+            .select({ playedAt: score.playedAt })
+            .from(score)
+            .where(and(eq(score.userId, userId), lt(score.playedAt, from)))
+            .orderBy(desc(score.playedAt))
+            .limit(1),
+    ])
+    return { playedAts: rows.map((row) => row.playedAt), previousPlayedAt: previous?.playedAt ?? null }
+}
+
 export const composeFe = (
     db: Database,
     deps: { lookupTableText: TableTextLookup; searchTableMd5s: (query: string) => string[]; listDisplayedDans: FeServiceDeps['listDisplayedDans'] },
 ) => {
-    const buildLeaderboardStats = (includeScratchAuto: boolean) => {
-        const playStats = db
-            .select({ userId: score.userId, plays: count().as('plays') })
-            .from(score)
-            .where(and(isNotNull(score.userId), includeScratchAuto ? undefined : eq(score.scratchAuto, false)))
-            .groupBy(score.userId)
-            .as('play_stats')
-
-        const bestStats = db
-            .select({
-                userId: chartBest.userId,
-                playedCharts: sql<string>`count(distinct ${chartBest.chartSha256})`.as('played_charts'),
-                clearedCharts: sql<string>`count(distinct case when ${chartBest.clear} >= ${MIN_CLEAR_LAMP_ID} then ${chartBest.chartSha256} end)`.as(
-                    'cleared_charts',
-                ),
-            })
-            .from(chartBest)
-            .where(includeScratchAuto ? undefined : eq(chartBest.scratchAuto, false))
-            .groupBy(chartBest.userId)
-            .as('best_stats')
-
-        const plays = sql`coalesce(${playStats.plays}, 0)`.mapWith(Number)
-        const cleared = sql`coalesce(${bestStats.clearedCharts}, 0)`.mapWith(Number)
-        const played = sql`coalesce(${bestStats.playedCharts}, 0)`.mapWith(Number)
-
-        return {
-            playStats,
-            bestStats,
-            plays,
-            cleared,
-            played,
-            order: {
-                cleared: [desc(cleared), desc(played)],
-                played: [desc(played), desc(cleared)],
-                plays: [desc(plays), desc(cleared)],
-            },
-        }
-    }
-
     const feService = createFeService({
         lookupTableText: deps.lookupTableText,
         searchTableMd5s: deps.searchTableMd5s,
@@ -167,7 +190,7 @@ export const composeFe = (
             },
 
             listPlayerLeaderboard: async (query): Promise<{ rows: LeaderboardRow[]; total: number }> => {
-                const stats = buildLeaderboardStats(query.include_scratch_auto)
+                const stats = buildLeaderboardStats(db, query.include_scratch_auto)
                 const rows = await db
                     .select({
                         id: user.id,
@@ -200,22 +223,7 @@ export const composeFe = (
                 return rows.map((row) => ({ clear: row.clear, assistGrade: row.assistGrade, scratchAuto: row.scratchAuto, count: row.value }))
             },
 
-            listPlayerPlayedAts: async ({ userId, from, to }) => {
-                const [rows, [previous]] = await Promise.all([
-                    db
-                        .select({ playedAt: score.playedAt })
-                        .from(score)
-                        .where(and(eq(score.userId, userId), gte(score.playedAt, from), lt(score.playedAt, to)))
-                        .orderBy(asc(score.playedAt)),
-                    db
-                        .select({ playedAt: score.playedAt })
-                        .from(score)
-                        .where(and(eq(score.userId, userId), lt(score.playedAt, from)))
-                        .orderBy(desc(score.playedAt))
-                        .limit(1),
-                ])
-                return { playedAts: rows.map((row) => row.playedAt), previousPlayedAt: previous?.playedAt ?? null }
-            },
+            listPlayerPlayedAts: listPlayedAtsOf(db),
 
             summarise: async () => {
                 const [charts] = await db.select({ value: count() }).from(chart)

@@ -17,6 +17,7 @@ export const CACHE_TAG = {
     playerRecent: (loginId: string) => `player-recent:${loginId}`,
     playerStats: (loginId: string) => `player-stats:${loginId}`,
     playerPlayDays: (loginId: string) => `player-play-days:${loginId}`,
+    playerDashboard: (loginId: string) => `player-dashboard:${loginId}`,
     activityRecent: () => 'activity-recent',
     statsSummary: () => 'stats-summary',
     leaderboardPlayers: () => 'leaderboard-players',
@@ -73,20 +74,24 @@ export const CACHE_PROFILE = {
     feed: 'minutes',
 } as const
 
-export const revalidateOnScoreSubmit = (params: { sha256: string; md5: string | null; loginId: string | null }) => {
-    revalidateTag(CACHE_TAG.chart(params.sha256), CACHE_PROFILE.chart)
-    if (params.md5) revalidateTag(CACHE_TAG.chart(params.md5), CACHE_PROFILE.chart)
-    revalidateTag(CACHE_TAG.chartRanking(params.sha256), CACHE_PROFILE.ranking)
-    revalidateTag(CACHE_TAG.chartBest(params.sha256), CACHE_PROFILE.ranking)
-    revalidateTag(CACHE_TAG.activityRecent(), CACHE_PROFILE.feed)
-    revalidateTag(CACHE_TAG.statsSummary(), CACHE_PROFILE.feed)
-    revalidateTag(CACHE_TAG.leaderboardPlayers(), CACHE_PROFILE.feed)
+export const revalidateOnScoreSubmit = (
+    params: { sha256: string; md5: string | null; loginId: string | null },
+    revalidate: typeof revalidateTag = revalidateTag,
+) => {
+    revalidate(CACHE_TAG.chart(params.sha256), CACHE_PROFILE.chart)
+    if (params.md5) revalidate(CACHE_TAG.chart(params.md5), CACHE_PROFILE.chart)
+    revalidate(CACHE_TAG.chartRanking(params.sha256), CACHE_PROFILE.ranking)
+    revalidate(CACHE_TAG.chartBest(params.sha256), CACHE_PROFILE.ranking)
+    revalidate(CACHE_TAG.activityRecent(), CACHE_PROFILE.feed)
+    revalidate(CACHE_TAG.statsSummary(), CACHE_PROFILE.feed)
+    revalidate(CACHE_TAG.leaderboardPlayers(), CACHE_PROFILE.feed)
     if (!params.loginId) return
-    revalidateTag(CACHE_TAG.player(params.loginId), CACHE_PROFILE.player)
-    revalidateTag(CACHE_TAG.playerScores(params.loginId), CACHE_PROFILE.player)
-    revalidateTag(CACHE_TAG.playerRecent(params.loginId), CACHE_PROFILE.player)
-    revalidateTag(CACHE_TAG.playerStats(params.loginId), CACHE_PROFILE.player)
-    revalidateTag(CACHE_TAG.playerPlayDays(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.player(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.playerScores(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.playerRecent(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.playerStats(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.playerPlayDays(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.playerDashboard(params.loginId), CACHE_PROFILE.player)
 }
 
 export const revalidateOnChartUpsert = (params: { sha256: string; md5: string | null }) => {
@@ -212,22 +217,33 @@ export const getStatsSummaryCached = async () => {
     return compose().feService.summary()
 }
 
-export const revalidateOnReplayUpload = (params: { chartSha256: string; loginId: string | null; scoreId?: string | null }) => {
-    revalidateTag(CACHE_TAG_EXT.chartReplays(params.chartSha256), CACHE_PROFILE.ranking)
-    revalidateTag(CACHE_TAG.chartRanking(params.chartSha256), CACHE_PROFILE.ranking)
-    if (params.scoreId) revalidateTag(CACHE_TAG.score(params.scoreId), CACHE_PROFILE.ranking)
-    if (params.loginId) revalidateTag(CACHE_TAG.playerRecent(params.loginId), CACHE_PROFILE.player)
+export const revalidateOnReplayUpload = (
+    params: { chartSha256: string; loginId: string | null; scoreId?: string | null },
+    revalidate: typeof revalidateTag = revalidateTag,
+) => {
+    revalidate(CACHE_TAG_EXT.chartReplays(params.chartSha256), CACHE_PROFILE.ranking)
+    revalidate(CACHE_TAG.chartRanking(params.chartSha256), CACHE_PROFILE.ranking)
+    if (params.scoreId) revalidate(CACHE_TAG.score(params.scoreId), CACHE_PROFILE.ranking)
+    if (!params.loginId) return
+    revalidate(CACHE_TAG.playerRecent(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.playerDashboard(params.loginId), CACHE_PROFILE.player)
 }
 
-export const revalidateOnCourseSubmit = (params: { courseHash: string; loginId: string | null }) => {
-    revalidateTag(CACHE_TAG_EXT.courseRanking(params.courseHash), CACHE_PROFILE.ranking)
-    revalidateTag(CACHE_TAG_EXT.courseBest(params.courseHash), CACHE_PROFILE.ranking)
-    if (params.loginId) revalidateTag(CACHE_TAG.playerStats(params.loginId), CACHE_PROFILE.player)
+export const revalidateOnCourseSubmit = (
+    params: { courseHash: string; loginId: string | null },
+    revalidate: typeof revalidateTag = revalidateTag,
+) => {
+    revalidate(CACHE_TAG_EXT.courseRanking(params.courseHash), CACHE_PROFILE.ranking)
+    revalidate(CACHE_TAG_EXT.courseBest(params.courseHash), CACHE_PROFILE.ranking)
+    if (!params.loginId) return
+    revalidate(CACHE_TAG.playerStats(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.playerDashboard(params.loginId), CACHE_PROFILE.player)
 }
 
-export const revalidateOnDanAward = (params: { loginId: string }) => {
-    revalidateTag(CACHE_TAG.player(params.loginId), CACHE_PROFILE.player)
-    revalidateTag(CACHE_TAG.leaderboardPlayers(), CACHE_PROFILE.feed)
+export const revalidateOnDanAward = (params: { loginId: string }, revalidate: typeof revalidateTag = revalidateTag) => {
+    revalidate(CACHE_TAG.player(params.loginId), CACHE_PROFILE.player)
+    revalidate(CACHE_TAG.leaderboardPlayers(), CACHE_PROFILE.feed)
+    revalidate(CACHE_TAG.playerDashboard(params.loginId), CACHE_PROFILE.player)
 }
 
 const isCatalogChangedBy = (report: TableRefreshReport) =>
@@ -301,4 +317,46 @@ export const getPlayerPlayDaysCached = async (params: { loginId: string; userId:
     cacheLife('minutes')
     cacheTag(CACHE_TAG.playerPlayDays(params.loginId))
     return compose().feService.playerPlayDays({ userId: params.userId, todayStart: params.todayStart })
+}
+
+export const getLeaderboardPositionsCached = async () => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG.leaderboardPlayers())
+    return compose().dashboardService.leaderboardStandings()
+}
+
+export const getDashboardOverviewCached = async (params: { loginId: string; userId: string; todayStart: number }) => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG.playerDashboard(params.loginId))
+    return compose().dashboardService.overview({ userId: params.userId, todayStart: params.todayStart })
+}
+
+export const getDashboardCalendarCached = async (params: { loginId: string; userId: string; todayStart: number; days: number }) => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG.playerDashboard(params.loginId))
+    return compose().dashboardService.calendar({ userId: params.userId, todayStart: params.todayStart, days: params.days })
+}
+
+export const getDashboardTableProgressCached = async (params: { loginId: string; userId: string; tableId: string }) => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG.playerDashboard(params.loginId))
+    return compose().dashboardService.tableProgress({ userId: params.userId, tableId: params.tableId })
+}
+
+export const getDashboardCoursesCached = async (params: { loginId: string; userId: string }) => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG.playerDashboard(params.loginId), CACHE_TAG_EXT.courseCatalog())
+    return compose().dashboardService.courses({ userId: params.userId })
+}
+
+export const getDashboardReplaysCached = async (params: { loginId: string; userId: string; limit: number }) => {
+    'use cache'
+    cacheLife('minutes')
+    cacheTag(CACHE_TAG.playerDashboard(params.loginId))
+    return compose().dashboardService.replays({ userId: params.userId, limit: params.limit })
 }

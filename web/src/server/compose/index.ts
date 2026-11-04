@@ -24,6 +24,7 @@ import { composeChartPattern } from '@server/compose/chart-pattern'
 import { composeCourse } from '@server/compose/course'
 import { composeCourseCatalog } from '@server/compose/course-catalog'
 import { composeDan } from '@server/compose/dan'
+import { composeDashboard } from '@server/compose/dashboard'
 import { composeFe } from '@server/compose/fe'
 import { composeReplay } from '@server/compose/replay'
 import { composeRival } from '@server/compose/rival'
@@ -384,6 +385,11 @@ const composeAll = () => {
     })
 
     const trace = composeTrace(db, { chartPatternService: patterns.chartPatternService })
+    const dashboard = composeDashboard(db, {
+        tableSnapshotService: tableSnapshot.tableSnapshotService,
+        listCatalogGroups: courseCatalogService.listGroups,
+        lookupTableText: findSnapshotTextByMd5,
+    })
 
     return {
         chartService,
@@ -410,6 +416,7 @@ const composeAll = () => {
         ...composeAiRecordQuery(db, { aiFeatureRunner: ai.aiFeatureRunner, loadTables: getSnapshotTables }),
         ...patterns,
         ...trace,
+        ...dashboard,
         ...composeAiScoreFeatures(db, {
             aiFeatureRunner: ai.aiFeatureRunner,
             aiResultService: ai.aiResultService,
