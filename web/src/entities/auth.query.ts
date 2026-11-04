@@ -16,6 +16,8 @@ const notifySessionChanged = () => authClient.$store.notify('$sessionSignal')
 
 const USER_SCOPED_QUERY_KEYS = [
     QUERY_KEY.AUTH.ALL,
+    QUERY_KEY.DAN.MINE,
+    QUERY_KEY.DASHBOARD.ALL,
     QUERY_KEY.FOLDER.ALL,
     QUERY_KEY.TABLE_SNAPSHOT.RECORDS_ALL,
     QUERY_KEY.TOKEN.ALL,

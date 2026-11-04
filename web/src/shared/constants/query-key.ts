@@ -65,6 +65,15 @@ export const QUERY_KEY = {
         ALL: ['activity'],
         RECENT: (params: Record<string, unknown>) => ['activity', 'recent', params],
     },
+    DASHBOARD: {
+        ALL: ['dashboard'],
+        OVERVIEW: ['dashboard', 'overview'],
+        CALENDAR: (days: number) => ['dashboard', 'calendar', days],
+        TABLE_PROGRESS: (tableId: string) => ['dashboard', 'table-progress', tableId],
+        COURSES: ['dashboard', 'courses'],
+        RIVALS: (limit: number) => ['dashboard', 'rivals', limit],
+        REPLAYS: (limit: number) => ['dashboard', 'replays', limit],
+    },
     LEADERBOARD: {
         ALL: ['leaderboard'],
         PLAYERS: (params: Record<string, unknown>) => ['leaderboard', 'players', params],

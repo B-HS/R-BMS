@@ -6,6 +6,14 @@ import { tableListQueryOptions } from '../../src/entities/table.query'
 import { courseRankingQueryOptions } from '../../src/entities/course.query'
 import { chartLeaderboardQueryOptions } from '../../src/entities/chart.query'
 import { playerPlayDaysQueryOptions, playerRecentQueryOptions } from '../../src/entities/player.query'
+import {
+    dashboardCalendarQueryOptions,
+    dashboardCoursesQueryOptions,
+    dashboardOverviewQueryOptions,
+    dashboardReplaysQueryOptions,
+    dashboardRivalsQueryOptions,
+    dashboardTableProgressQueryOptions,
+} from '../../src/entities/dashboard.query'
 import { QUERY_KEY } from '../../src/shared/constants/query-key'
 
 const originalFetch = globalThis.fetch
@@ -79,6 +87,42 @@ describe('entities 쿼리가 실제 라우트 응답 형태를 따른다', () =>
     test('일별 플레이 시간 쿼리 키는 플레이어마다 다르고 플레이어 전체 키 아래에 있다', () => {
         expect(playerPlayDaysQueryOptions('alice').queryKey).not.toEqual(playerPlayDaysQueryOptions('bob').queryKey)
         expect(playerPlayDaysQueryOptions('alice').queryKey[0]).toBe(QUERY_KEY.PLAYER.ALL[0])
+    })
+
+    test('대시보드 개요와 코스와 리플레이와 라이벌은 /api/fe/me/dashboard 아래 경로로 요청하고 봉투를 벗긴다', async () => {
+        const calls = capture('{"success":true,"data":{"groups":[],"recent":[]}}')
+        expect(await run<{ groups: unknown[]; recent: unknown[] }>(dashboardCoursesQueryOptions())).toEqual({ groups: [], recent: [] })
+        await run(dashboardOverviewQueryOptions())
+        await run(dashboardRivalsQueryOptions(10))
+        await run(dashboardReplaysQueryOptions(5))
+        expect(calls.map((call) => call.replace('/api/fe/me/dashboard', ''))).toEqual([
+            '/courses',
+            '/overview',
+            '/rivals?limit=10',
+            '/replays?limit=5',
+        ])
+    })
+
+    test('대시보드 달력은 창 길이를, 표 진행은 인코딩한 표 아이디를 경로에 싣는다', async () => {
+        const calls = capture('{"success":true,"data":{}}')
+        await run(dashboardCalendarQueryOptions(182))
+        await run(dashboardTableProgressQueryOptions('stella st'))
+        expect(calls).toEqual(['/api/fe/me/dashboard/calendar?days=182', '/api/fe/me/dashboard/tables/stella%20st/progress'])
+    })
+
+    test('대시보드 쿼리 키는 모두 대시보드 전체 키 아래에 있고 창 길이·표·개수가 다르면 키도 다르다', () => {
+        const keys = [
+            dashboardOverviewQueryOptions().queryKey,
+            dashboardCalendarQueryOptions(182).queryKey,
+            dashboardTableProgressQueryOptions('insane1').queryKey,
+            dashboardCoursesQueryOptions().queryKey,
+            dashboardRivalsQueryOptions(10).queryKey,
+            dashboardReplaysQueryOptions(5).queryKey,
+        ]
+        expect(keys.map((key) => key[0])).toEqual(Array(keys.length).fill(QUERY_KEY.DASHBOARD.ALL[0]))
+        expect(dashboardCalendarQueryOptions(182).queryKey).not.toEqual(dashboardCalendarQueryOptions(30).queryKey)
+        expect(dashboardTableProgressQueryOptions('insane1').queryKey).not.toEqual(dashboardTableProgressQueryOptions('stella-st').queryKey)
+        expect(dashboardRivalsQueryOptions(10).queryKey).not.toEqual(dashboardRivalsQueryOptions(20).queryKey)
     })
 
     test('SCRATCH AUTO 포함 여부가 다르면 차트 순위 쿼리 키가 다르다', () => {
