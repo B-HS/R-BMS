@@ -582,6 +582,7 @@ export const AI_TRAINING_CORRECTION_FIELDS = [
     'scratch_ratio',
     'ln_ratio',
     'level',
+    'chord_fill',
 ] as const
 
 export const isAiTrainingCorrectionField = (field: string): field is (typeof AI_TRAINING_CORRECTION_FIELDS)[number] =>

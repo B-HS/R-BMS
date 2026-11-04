@@ -14,6 +14,8 @@ import {
     TRAINING_BPM_RATIOS,
     TRAINING_BPM_STEP,
     TRAINING_BURST_HIGH,
+    TRAINING_CHORD_FILL_KINDS,
+    TRAINING_CHORD_FILL_ROW_NOTES_MAX,
     TRAINING_CHORD_KIND_MIN_SIZE,
     TRAINING_CHORD_KINDS,
     TRAINING_CHORD_SIZE_MAX,
@@ -68,6 +70,7 @@ export const TRAINING_CORRECTION_FIELDS = [
     'scratch_ratio',
     'ln_ratio',
     'level',
+    'chord_fill',
 ] as const
 export type TrainingCorrectionField = (typeof TRAINING_CORRECTION_FIELDS)[number]
 
@@ -259,6 +262,17 @@ export const trainingMaxNpsOf = (section: RowShape & { bpm: number }) => {
     const cells = cellsPerSecondOf(grids[grids.length - 1], section.bpm) * trainingRunFillOf(section.kind)
     const rows = (cells * trainingNotesPerRowOf(section)) / trainingPeakFactorOf(section.kind)
     return Math.min(TRAINING_NPS_CEIL, rows + trainingExtraNpsOf(section))
+}
+
+/**
+ * The most NPS a section can lay once its rows are turned into chords where the density asks for more (TRAINING_CHORD_FILL_KINDS):
+ * TRAINING_CHORD_FILL_ROW_NOTES_MAX keys a row on every cell of its finest grid. Other kinds lay no more than `trainingMaxNpsOf`.
+ */
+export const trainingFilledMaxNpsOf = (section: RowShape & { bpm: number }) => {
+    const rowsMaxNps = trainingMaxNpsOf(section)
+    if (!isOneOf(TRAINING_CHORD_FILL_KINDS, section.kind)) return rowsMaxNps
+    const filledNotesPerRow = TRAINING_CHORD_FILL_ROW_NOTES_MAX + section.scratch_ratio
+    return Math.min(TRAINING_NPS_CEIL, (rowsMaxNps * filledNotesPerRow) / trainingNotesPerRowOf(section))
 }
 
 /** The base tempo held to the chart's range and rounded to a multiple of TRAINING_BPM_STEP. */

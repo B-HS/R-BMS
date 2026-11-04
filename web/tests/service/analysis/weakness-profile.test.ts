@@ -348,6 +348,27 @@ describe('약점 프로필 — 밀도 한계와 SCRATCH AUTO(기획 2.5.2, 2.5.4
         ).toEqual({ limit_nps_ex: null, limit_nps_bp: 5 })
     })
 
+    test('편한 밀도(구간 위 끝)가 보간한 EX·BP 한계보다 크면 둘 중 작은 한계로 자른다', () => {
+        const densityOf = (bins: Parameters<typeof curvePlays>[0]) => {
+            const { comfort_nps, limit_nps_ex, limit_nps_bp } = computeWeaknessProfile(curvePlays(bins), WINDOW).density
+            return { comfort_nps, limit_nps_ex, limit_nps_bp }
+        }
+        expect(
+            densityOf([
+                { key: '4', exScore: 90 },
+                { key: '8', exScore: 90 },
+                { key: '10', exScore: 30 },
+            ]),
+        ).toEqual({ comfort_nps: 9.3, limit_nps_ex: 9.3, limit_nps_bp: null })
+        expect(
+            densityOf([
+                { key: '4', exScore: 90 },
+                { key: '8', exScore: 90 },
+                { key: '10', exScore: 90, bp: 20 },
+            ]),
+        ).toEqual({ comfort_nps: 9.4, limit_nps_ex: null, limit_nps_bp: 9.4 })
+    })
+
     test('밀도 한계 추세는 최근과 이전 한계의 차이를 소수 한 자리로 맞춘다', () => {
         const recent = curvePlays(DENSITY_BINS)
         const older = curvePlays(

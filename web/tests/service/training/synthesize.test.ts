@@ -288,6 +288,84 @@ describe('밀도 흐름 (설계 2026-11-04-training-difficulty 2절)', () => {
     })
 })
 
+describe('동시치기 채움 (한 행 한 노트 종류가 단타 상한을 넘을 때)', () => {
+    const HIGH = trainingBoundsOf({ limit_nps_ex: 24, max_seen_nps: null }, 'over')
+    const FILL_KINDS = ['stream', 'trill', 'stair', 'jack', 'burst', 'scratch_solo', 'scratch_run'] as const
+    const ROW_NOTES_MAX = 3
+    const rowsOf = (notes: readonly TrainingNote[]) => Map.groupBy(notes, tickOf)
+
+    test('L=24 over 에서 본문 p90 이 목표 ±5% 안, max/p50 ≥ 1.25 이고 행은 3노트 이하, 채운 구간은 corrections 에 남는다', () => {
+        for (const kind of FILL_KINDS) {
+            for (const seed of SEEDS) {
+                const chart = chartOf(specOf({ kind }, seed, 220, 'flat', HIGH))
+                const stats = bodyStatsOf(chart)
+                const label = `${kind} ${seed}`
+                expect(stats.p90 / chart.spec.bounds.p90_target, label).toBeGreaterThanOrEqual(0.95)
+                expect(stats.p90 / chart.spec.bounds.p90_target, label).toBeLessThanOrEqual(1.05)
+                expect(stats.max / stats.p50, label).toBeGreaterThanOrEqual(1.25)
+                const rows = rowsOf(chart.notes.filter((note) => note.kind !== 'ln_end'))
+                expect(Math.max(...[...rows.values()].map((row) => row.length)), label).toBeLessThanOrEqual(ROW_NOTES_MAX)
+                const fills = chart.spec.corrections.filter((correction) => correction.field === 'chord_fill')
+                expect(fills.length, label).toBeGreaterThan(0)
+                for (const fill of fills) {
+                    const section = chart.spec.sections[fill.section ?? -1]
+                    const rowsPerSecond = section.actual_rps ?? 0
+                    expect(fill.from, label).toBe(1)
+                    expect(fill.to, label).toBeCloseTo(section.actual_nps / rowsPerSecond, 1)
+                    expect(Number(fill.to), label).toBeGreaterThan(1)
+                    expect(rowsPerSecond, label).toBeLessThan(section.actual_nps)
+                }
+            }
+        }
+    })
+
+    test('채운 곡을 다시 합성해도 chord_fill 보정이 겹치지 않고 같은 사양이 나온다', () => {
+        for (const kind of FILL_KINDS) {
+            const first = synthesizeTraining(specOf({ kind }, 2, 220, 'rising', HIGH))
+            expect(synthesizeTraining(first.spec)).toEqual(first)
+        }
+    })
+
+    test('단타 상한 안의 밀도에서는 행을 바꾸지 않는다 (7키 보충 한 노트만 행에 더해질 수 있다)', () => {
+        for (const kind of FILL_KINDS) {
+            for (const seed of SEEDS) {
+                const chart = chartOf(specOf({ kind }, seed))
+                expect(
+                    chart.spec.corrections.some((correction) => correction.field === 'chord_fill'),
+                    `${kind} ${seed}`,
+                ).toBe(false)
+                expect(chart.notes.length - rowsOf(chart.notes).size, `${kind} ${seed}`).toBeLessThanOrEqual(1)
+            }
+        }
+    })
+
+    test('구간 번호는 AI 계획의 원래 번호다: 앞에서 버린 구간을 건너뛴다', () => {
+        const sections = [
+            { focus_key: 'dropped', kind: 'stream' as const },
+            { focus_key: 'focus', kind: 'stream' as const },
+            { focus_key: 'focus', kind: 'stream' as const },
+            { focus_key: 'focus', kind: 'stream' as const },
+        ].map((options) => ({
+            weight: 1,
+            lane_hint: 'all' as const,
+            chord_size: 1,
+            scratch_ratio: 0,
+            ln_ratio: 0,
+            bpm_ratio: 1,
+            intent: '',
+            ...options,
+        }))
+        const { spec, corrections } = correctTrainingPlan(
+            { description: '', base_bpm: 220, level: 1, shape: 'flat', sections, advice: '' },
+            { allowed: { kinds: [], lane_hints: [], keys: ['focus'] }, bounds: HIGH },
+        )
+        const input = { ...trainingSpecInputOf({ id: ID, userId: 'u', createdAt: 0, intensity: 'over', plan: spec, corrections }), seed: 1 }
+        const fills = synthesizeTraining(input).spec.corrections.filter((correction) => correction.field === 'chord_fill')
+        expect(fills.length).toBeGreaterThan(0)
+        expect(fills.every((fill) => fill.section !== null && fill.section >= 1 && fill.section <= 3)).toBe(true)
+    })
+})
+
 describe('합성 결과 재현', () => {
     test('합성 결과 사양을 다시 합성하면 같은 사양과 노트가 나온다', () => {
         const ALL_KINDS = TRAINING_PATTERN_KINDS

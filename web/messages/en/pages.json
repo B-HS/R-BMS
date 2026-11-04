@@ -568,7 +568,8 @@
                     "chord_size": "chord size",
                     "scratch_ratio": "scratch ratio",
                     "ln_ratio": "LN ratio",
-                    "level": "level within the range"
+                    "level": "level within the range",
+                    "chord_fill": "notes per row (filled with chords)"
                 }
             },
             "plays": {

@@ -580,7 +580,8 @@ type FinishedCell = ReturnType<typeof finishCells>[number]
  * bins, the bins with MIN_BIN_NOTES notes over MIN_BIN_CHARTS charts used, EX ratio fitted never rising and BP rate never falling
  * (weighted isotonic regression), against the EX ratio of the bins at or below the player's median note NPS. The EX and BP limits are
  * where the fitted curve crosses its level, read by straight lines between bin middles (the top bin at its lower edge); a curve that
- * is past the level in its first bin gives that bin's middle, one that never reaches it gives none.
+ * is past the level in its first bin gives that bin's middle, one that never reaches it gives none. The comfortable density is the
+ * upper edge of the last bin within COMFORT_EX_DROP of the baseline, never above either limit.
  */
 const densityLimitOf = (plays: readonly MeasuredPlay[]) => {
     const bins = new Map<number, { counts: Counts; clusters: Set<string> }>()
@@ -625,12 +626,15 @@ const densityLimitOf = (plays: readonly MeasuredPlay[]) => {
     const isStrong = limitIndex > 0 && allClusters.size >= MIN_CELL_CHARTS
     const evidence = used.length < PROFILE_DENSITY_MIN_BINS ? EVIDENCE.INSUFFICIENT : evidenceOf(true, { passed: isStrong })
     const peaks = plays.map((play) => play.metrics.peak_nps[PEAK_WINDOW_KEY] ?? 0)
+    const limitNpsEx = limitEx === null ? null : roundToDecimals(limitEx.x, NPS_SUMMARY_DECIMALS)
+    const limitNpsBp = limitBp === null ? null : roundToDecimals(limitBp.x, NPS_SUMMARY_DECIMALS)
+    const limits = [limitNpsEx, limitNpsBp].filter((limit) => limit !== null)
     return {
         curve,
         baseline_ex: baseline === null ? null : roundRatio(baseline),
-        comfort_nps: comfortIndex < 0 ? null : (curve[comfortIndex].to_nps ?? curve[comfortIndex].from_nps),
-        limit_nps_ex: limitEx === null ? null : roundToDecimals(limitEx.x, NPS_SUMMARY_DECIMALS),
-        limit_nps_bp: limitBp === null ? null : roundToDecimals(limitBp.x, NPS_SUMMARY_DECIMALS),
+        comfort_nps: comfortIndex < 0 ? null : Math.min(curve[comfortIndex].to_nps ?? curve[comfortIndex].from_nps, ...limits),
+        limit_nps_ex: limitNpsEx,
+        limit_nps_bp: limitNpsBp,
         max_seen_nps: lastIndex < 0 ? null : curve[lastIndex].from_nps,
         peak_seen_2s: peaks.length > 0 ? roundToDecimals(Math.max(...peaks), PEAK_NPS_DECIMALS) : null,
         ceiling_reached_ex: limitIndex >= 0,

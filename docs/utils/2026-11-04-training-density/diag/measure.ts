@@ -148,6 +148,13 @@ const measure = (
         bpm: spec.base_bpm,
         mu: spec.bounds.mean_nps,
         target: spec.bounds.p90_target,
+        chordFills: spec.corrections.filter((correction) => correction.field === 'chord_fill').length,
+        notesPerRowMax: Math.max(
+            0,
+            ...spec.corrections.flatMap((correction) =>
+                correction.field === 'chord_fill' && typeof correction.to === 'number' ? [correction.to] : [],
+            ),
+        ),
     }
 }
 
@@ -248,6 +255,15 @@ for (const kind of KINDS)
     lines.push(
         `by reason ${kind}: ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.entry.kind === kind && item.reasons.includes(reason)).length}`).join(', ')}`,
     )
+for (const profile of PROFILES)
+    for (const intensity of INTENSITIES)
+        lines.push(
+            `by reason ${profile.name} ${intensity} (${runs.filter((e) => e.profile === profile.name && e.intensity === intensity).length}): ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.entry.profile === profile.name && item.entry.intensity === intensity && item.reasons.includes(reason)).length}`).join(', ')}`,
+        )
+const chordFilled = runs.filter((entry) => entry.run.chordFills > 0)
+lines.push(
+    `chord_fill: charts ${chordFilled.length} / ${runs.length}, most notes per row ${r2(Math.min(...chordFilled.map((e) => e.run.notesPerRowMax)))}~${r2(Math.max(...chordFilled.map((e) => e.run.notesPerRowMax)))}`,
+)
 for (const profile of PROFILES)
     lines.push(
         `by reason ${profile.name}: ${REASONS.map((reason) => `${reason} ${failed.filter((item) => item.entry.profile === profile.name && item.reasons.includes(reason)).length}`).join(', ')}`,

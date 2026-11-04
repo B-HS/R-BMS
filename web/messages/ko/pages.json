@@ -568,7 +568,8 @@
                     "chord_size": "동시치기 크기",
                     "scratch_ratio": "스크래치 비율",
                     "ln_ratio": "LN 비율",
-                    "level": "강도 안 위치"
+                    "level": "강도 안 위치",
+                    "chord_fill": "행당 노트(동시치기로 채움)"
                 }
             },
             "plays": {

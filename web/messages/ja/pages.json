@@ -568,7 +568,8 @@
                     "chord_size": "同時押しの大きさ",
                     "scratch_ratio": "スクラッチの割合",
                     "ln_ratio": "LNの割合",
-                    "level": "強度内の位置"
+                    "level": "強度内の位置",
+                    "chord_fill": "1行のノーツ数(同時押しで補充)"
                 }
             },
             "plays": {

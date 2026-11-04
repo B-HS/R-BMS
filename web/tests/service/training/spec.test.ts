@@ -9,6 +9,7 @@ import {
     distributeMeasures,
     measureUsOf,
     trainingBoundsOf,
+    trainingFilledMaxNpsOf,
     trainingMaxNpsOf,
     trainingSeedOf,
     trainingShortIdOf,
@@ -187,6 +188,24 @@ describe('구간 보정 (correctTrainingPlan)', () => {
 
         const chords = [0, 1, 2].map(() => section({ focus_key: 'tag:chord_3', kind: 'chord_stream', chord_size: 3 }))
         expect(correctTrainingPlan(plan(chords, 120, 1), { allowed: ALLOWED, bounds: p3 }).spec.base_bpm).toBe(120)
+    })
+
+    test('한 행 한 노트 종류는 동시치기로 채우면 행 상한의 3배(최대 60)까지, 다른 종류는 행 상한 그대로 낼 수 있다', () => {
+        const at = (kind: AiTrainingPlanSection['kind'], scratch_ratio = 0, chord_size = 1) => {
+            const shape = { kind, chord_size, scratch_ratio, bpm: 120 }
+            return { rows: trainingMaxNpsOf(shape), filled: trainingFilledMaxNpsOf(shape) }
+        }
+        for (const kind of ['stream', 'trill', 'stair', 'jack', 'burst', 'scratch_solo', 'scratch_run'] as const) {
+            const { rows, filled } = at(kind)
+            expect(filled, kind).toBeCloseTo(rows * 3, 6)
+        }
+        const mixed = at('stream', 0.5)
+        expect(mixed.filled).toBeCloseTo((mixed.rows * 3.5) / 1.5, 6)
+        for (const kind of ['chord_stream', 'chord_jack', 'scratch_mixed', 'ln_hold', 'ln_release', 'rest'] as const) {
+            const { rows, filled } = at(kind, 0, 3)
+            expect(filled, kind).toBe(rows)
+        }
+        expect(trainingFilledMaxNpsOf({ kind: 'stream', chord_size: 1, scratch_ratio: 0, bpm: 220 })).toBe(60)
     })
 
     test('워밍업은 곡 길이의 8% 안의 마디 수로 줄고 남는 시간은 다른 구간이 받는다', () => {

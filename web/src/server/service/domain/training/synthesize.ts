@@ -19,11 +19,13 @@ import {
     measureUsOf,
     roundNps,
     trainingExtraNpsOf,
+    trainingFilledMaxNpsOf,
     trainingGridsOf,
     trainingMaxNpsOf,
     trainingNotesPerRowOf,
     trainingRunFillOf,
     trainingRunLengthOf,
+    type TrainingCorrection,
     type TrainingSection,
     type TrainingSectionPlan,
     type TrainingSpecInput,
@@ -35,6 +37,8 @@ import {
     TRAINING_BODY_PERCENTILE,
     TRAINING_BURST_HIGH,
     TRAINING_BURST_LOW,
+    TRAINING_CHORD_FILL_KINDS,
+    TRAINING_CHORD_FILL_ROW_NOTES_MAX,
     TRAINING_FOLLOW_SIXTEENTHS,
     TRAINING_HAND_LANES,
     TRAINING_LANE_CANDIDATES,
@@ -100,7 +104,8 @@ type Board = ReturnType<typeof createBoard>
 
 /**
  * A section as its notes are laid: its cells (each measure on the coarsest grid that keeps up with the measure's busiest rows, M4),
- * the share of each cell that carries a row so the rows follow the density curve, and the cell length of each measure.
+ * the share of each cell that carries a row so the rows follow the density curve, the keys a row on each cell adds to its first as a
+ * share (a chord-fill kind where the density asks for more than a row on every cell), and the cell length of each measure.
  */
 type SectionContext = {
     section: TrainingSectionPlan
@@ -110,6 +115,7 @@ type SectionContext = {
     endTick: number
     cells: readonly number[]
     shares: readonly number[]
+    chordShares: readonly number[]
     cellTicksAt: (tick: number) => number
     candidates: readonly number[]
 }
@@ -446,6 +452,54 @@ const layRest = (context: SectionContext) => {
     })
 }
 
+/** The keys of the other hand than `lane`'s (the scratch is the left hand's): either hand's for key 4, which TRAINING_HAND_LANES leaves to both. */
+const otherHandLanesOf = (lane: number): readonly number[] => {
+    if (lane === TRAINING_SCRATCH_LANE || (TRAINING_HAND_LANES.left as readonly number[]).includes(lane)) return TRAINING_HAND_LANES.right
+    if ((TRAINING_HAND_LANES.right as readonly number[]).includes(lane)) return TRAINING_HAND_LANES.left
+    return [...TRAINING_HAND_LANES.left, ...TRAINING_HAND_LANES.right]
+}
+
+/**
+ * Turns rows of a chord-fill kind into chords where its density asks for more than a row on every cell: each row adds its cell's
+ * chord share and takes a key once a whole one has gathered, up to TRAINING_CHORD_FILL_ROW_NOTES_MAX keys a row. The row's first key
+ * keeps the kind's pattern (a trill's hands, a stair's way, a jack's key); an added key is a free key of the other hand, of the lane
+ * hint's keys first, off the keys of the rows before and after where one is free. Returns the keys added.
+ */
+const fillChords = (context: SectionContext, from: number) => {
+    const cellOfTick = new Map(context.cells.map((tick, cell) => [tick, cell]))
+    const rows = Map.groupBy(context.board.laid.slice(from), (note) => note.tick)
+    const ticks = [...rows.keys()].toSorted((a, b) => a - b)
+    const lanesAt = (tick: number | undefined) => (tick === undefined ? [] : (rows.get(tick) ?? []).map((note) => note.lane))
+    let gathered = 0
+    let previous: number[] = []
+    let added = 0
+    ticks.forEach((tick, at) => {
+        const row = lanesAt(tick)
+        const cell = cellOfTick.get(tick)
+        gathered = Math.min(TRAINING_CHORD_FILL_ROW_NOTES_MAX, gathered + (cell === undefined ? 0 : context.chordShares[cell]))
+        const count = Math.min(Math.floor(gathered), TRAINING_CHORD_FILL_ROW_NOTES_MAX - row.length)
+        if (count <= 0) {
+            previous = row
+            return
+        }
+        const near = [...previous, ...lanesAt(ticks[at + 1])]
+        const otherHand = otherHandLanesOf(row[0])
+        const tiers = [otherHand.filter((lane) => context.candidates.includes(lane)), context.candidates, otherHand]
+        const freeOf = (tier: readonly number[], taken: readonly number[]) =>
+            freeLanes(context, tier, tick).filter((lane) => !row.includes(lane) && !taken.includes(lane))
+        const pools = [
+            ...tiers.map((tier) => (taken: readonly number[]) => freeOf(tier, taken).filter((lane) => !near.includes(lane))),
+            ...tiers.map((tier) => (taken: readonly number[]) => freeOf(tier, taken)),
+        ]
+        const picked = pools.reduce<number[]>((taken, poolOf) => [...taken, ...takeRandom(context.random, poolOf(taken), count - taken.length)], [])
+        for (const lane of picked) context.board.lay(lane, tick)
+        gathered -= picked.length
+        added += picked.length
+        previous = [...row, ...picked]
+    })
+    return added
+}
+
 const LAY_KIND = {
     stream: layStream,
     chord_stream: layChordStream,
@@ -529,7 +583,7 @@ const createDensityCurve = (input: TrainingSpecInput, clock: TickClock) => {
         const section = sectionAt(timeUs)
         return burstFactorOf(section, Math.floor((timeUs - clock(startTickOf(section))) / measureUsOf(section.bpm)))
     }
-    const solved = solveBodyMean(curve, { ceilingAt: (timeUs) => trainingMaxNpsOf(sectionAt(timeUs)), modulationAt }, input.bounds.p90_target)
+    const solved = solveBodyMean(curve, { ceilingAt: (timeUs) => trainingFilledMaxNpsOf(sectionAt(timeUs)), modulationAt }, input.bounds.p90_target)
     return { curve, noiseSeed, bodyFromUs, mean: solved.mean, meanMax: solved.meanMax }
 }
 
@@ -537,7 +591,8 @@ type DensityCurve = ReturnType<typeof createDensityCurve>
 
 /**
  * The density the chart lays at each time with the body mean `mean`: over the body, `mean` times the curve, cut to the ceiling of the
- * section laid there; over the warm-up, TRAINING_WARMUP_DENSITY_RATIO of it (a rest's range for a rest).
+ * section laid there with its rows turned into chords where they must; over the warm-up, TRAINING_WARMUP_DENSITY_RATIO of it, cut to
+ * a row on every cell (a rest's range for a rest).
  */
 const densityPlanOf = (density: DensityCurve, clock: TickClock, mean: number) => {
     const warmupNps = (section: TrainingSectionPlan) => {
@@ -546,7 +601,7 @@ const densityPlanOf = (density: DensityCurve, clock: TickClock, mean: number) =>
     }
     const densityAt = (section: TrainingSectionPlan, tick: number) => {
         if (isWarmupSection(section)) return warmupNps(section)
-        return Math.min(trainingMaxNpsOf(section), mean * density.curve.factorAt(clock(tick)))
+        return Math.min(trainingFilledMaxNpsOf(section), mean * density.curve.factorAt(clock(tick)))
     }
     return { mean, densityAt }
 }
@@ -557,13 +612,15 @@ type DensityPlan = ReturnType<typeof densityPlanOf>
  * The cells of a section: each measure on the coarsest of the kind's grids whose cells come at least as fast as the measure's busiest
  * rows (with room for the empty cell after each run of a continuous kind; the finest when none does), each cell carrying the share
  * of a row the density there asks for. A burst's measures take turns at TRAINING_BURST_HIGH and TRAINING_BURST_LOW of the density, so
- * its dense measures read as bursts to the 1-second window.
+ * its dense measures read as bursts to the 1-second window. Where a chord-fill kind's rows on every cell its fill allows still lay
+ * fewer notes than the density, each cell carries the keys over a row's first that make up the rest, as a share of its row.
  */
 const cellsOf = (section: TrainingSectionPlan, densities: DensityPlan) => {
     const grids = trainingGridsOf(section.kind)
     const notesPerRow = trainingNotesPerRowOf(section)
     const extra = trainingExtraNpsOf(section)
     const fill = trainingRunFillOf(section.kind)
+    const isChordFill = isOneOf(TRAINING_CHORD_FILL_KINDS, section.kind)
     const measures = Array.from({ length: section.measure_count }, (_, offset) => {
         const firstTick = (section.measure_from + offset) * TRAINING_MEASURE_TICKS
         const factor = burstFactorOf(section, offset)
@@ -572,19 +629,30 @@ const cellsOf = (section: TrainingSectionPlan, densities: DensityPlan) => {
         const grid = grids.find((candidate) => cellsPerSecondOf(candidate, section.bpm) >= busiest) ?? grids[grids.length - 1]
         const cellTicks = TRAINING_MEASURE_TICKS / grid
         const cells = Array.from({ length: grid }, (_, cell) => firstTick + cell * cellTicks)
-        return { grid, cellTicks, cells, shares: cells.map((tick) => Math.min(1, rowsAt(tick) / cellsPerSecondOf(grid, section.bpm))) }
+        const rowsMax = cellsPerSecondOf(grid, section.bpm) * fill
+        const chordShareAt = (tick: number) =>
+            Math.min(TRAINING_CHORD_FILL_ROW_NOTES_MAX - 1, Math.max(0, (rowsAt(tick) / rowsMax - 1) * notesPerRow))
+        return {
+            grid,
+            cellTicks,
+            cells,
+            shares: cells.map((tick) => Math.min(1, rowsAt(tick) / cellsPerSecondOf(grid, section.bpm))),
+            chordShares: cells.map((tick) => (isChordFill ? chordShareAt(tick) : 0)),
+        }
     })
     return {
         grid: Math.max(...measures.map((measure) => measure.grid)),
         cells: measures.flatMap((measure) => measure.cells),
         shares: measures.flatMap((measure) => measure.shares),
+        chordShares: measures.flatMap((measure) => measure.chordShares),
         cellTicksAt: (tick: number) =>
             measures[Math.min(measures.length - 1, Math.max(0, Math.floor(tick / TRAINING_MEASURE_TICKS) - section.measure_from))].cellTicks,
     }
 }
 
+/** Lays a section's notes; returns its finest grid and the keys it added to rows as chords. */
 const laySection = (board: Board, seed: number, section: TrainingSectionPlan, densities: DensityPlan) => {
-    const { grid, cells, shares, cellTicksAt } = cellsOf(section, densities)
+    const { grid, cells, shares, chordShares, cellTicksAt } = cellsOf(section, densities)
     const context: SectionContext = {
         section,
         random: sectionRandomOf(seed, section.index),
@@ -593,14 +661,16 @@ const laySection = (board: Board, seed: number, section: TrainingSectionPlan, de
         endTick: endTickOf(section),
         cells,
         shares,
+        chordShares,
         cellTicksAt,
         candidates: TRAINING_LANE_CANDIDATES[section.lane_hint],
     }
     const from = board.laid.length
     LAY_KIND[section.kind](context)
+    const chordKeys = fillChords(context, from)
     if (section.scratch_ratio > 0 && !isOneOf(TRAINING_SCRATCH_KINDS, section.kind)) addScratches(context, from)
     if (section.ln_ratio > 0 && !isOneOf(TRAINING_LN_KINDS, section.kind)) addLongNotes(context, from)
-    return grid
+    return { grid, chordKeys }
 }
 
 /** A chart with no note on key 6 or 7 reads as 5 keys: the last row that has room gets key 7 (or 6). */
@@ -633,7 +703,7 @@ const absoluteTickOf = (note: TrainingNote) => note.measure * TRAINING_MEASURE_T
 const layChart = (input: TrainingSpecInput, clock: TickClock, density: DensityCurve, mean: number) => {
     const densities = densityPlanOf(density, clock, mean)
     const board = createBoard()
-    const grids = input.sections.map((section) => laySection(board, input.seed, section, densities))
+    const laid = input.sections.map((section) => laySection(board, input.seed, section, densities))
     const cutoffUs = TRAINING_LENGTH_US - TRAINING_TAIL_US
     const kept = board.laid.filter((note) => clock(note.endTick ?? note.tick) < cutoffUs)
     const keptBoard = createBoard()
@@ -652,13 +722,27 @@ const layChart = (input: TrainingSpecInput, clock: TickClock, density: DensityCu
     const placed = notes.map((note) => ({ timeUs: timeline.timeAt(note.measure + note.num / note.den), lane: note.lane, kind: note.kind }))
     const local = localDensitiesOf(placed)
     const bodyDensities = placed.flatMap((note, at) => (note.kind !== 'ln_end' && note.timeUs >= density.bodyFromUs ? [local[at].nps2] : []))
-    return { densities, grids, keptBoard, notes, timeline, bodyP90: nearestRankOf(bodyDensities, TRAINING_BODY_PERCENTILE) }
+    return { densities, laid, keptBoard, notes, timeline, bodyP90: nearestRankOf(bodyDensities, TRAINING_BODY_PERCENTILE) }
+}
+
+const CHORD_FILL_FIELD = 'chord_fill' satisfies TrainingCorrection['field']
+
+/**
+ * The plan's own number (from 0) of each corrected section: the provider's sections in order, less those the correction dropped
+ * (a `focus_key` correction to null names each).
+ */
+const originalSectionsOf = (input: TrainingSpecInput) => {
+    const dropped = new Set(
+        input.corrections.flatMap((correction) => (correction.field === 'focus_key' && correction.to === null ? [correction.section] : [])),
+    )
+    return Array.from({ length: input.sections.length + dropped.size }, (_, original) => original).filter((original) => !dropped.has(original))
 }
 
 /**
  * Lays the notes of a spec (plan 3.6, 2026-11-04-training-difficulty M4-M10) and fills what the layout decides: each section's times,
  * finest grid, target (the curve's mean over it), notes, actual NPS and rows a second, the body mean and the curve's noise seed in the
- * bounds, and the chart's play level (the body's nps2 p90, rounded). The body mean starts at the one the curve solves for; while the
+ * bounds, the chart's play level (the body's nps2 p90, rounded), and a `chord_fill` correction for each section whose rows were turned
+ * into chords (from the keys a row its plan lays to the notes a row it has). The body mean starts at the one the curve solves for; while the
  * laid body's nps2 p90 is off the target by more than TRAINING_P90_TOLERANCE, it is scaled by target / p90 (up to TRAINING_MEAN_PASSES
  * layouts, within TRAINING_MEAN_REFINE_RATIO of the solved mean and never past the most the curve allows), and the layout nearest the
  * target is kept. The same spec gives the same notes: every
@@ -678,7 +762,9 @@ export const synthesizeTraining = (input: TrainingSpecInput) => {
         layout = layChart(input, clock, density, Math.min(highest, Math.max(lowest, (layout.densities.mean * target) / layout.bodyP90)))
         if (offBy(layout) < offBy(best)) best = layout
     }
-    const { densities, grids, keptBoard, notes, timeline, bodyP90 } = best
+    const { densities, laid, keptBoard, notes, timeline, bodyP90 } = best
+    const originals = originalSectionsOf(input)
+    const chordFills: TrainingCorrection[] = []
     const sections = input.sections.map((section, index): TrainingSection => {
         const startTick = startTickOf(section)
         const endTick = endTickOf(section)
@@ -688,6 +774,11 @@ export const synthesizeTraining = (input: TrainingSpecInput) => {
         const toUs = timeline.timeAt(section.measure_from + section.measure_count)
         const perSecond = (count: number) => (toUs > fromUs ? roundNps((count * MICROS_PER_SECOND) / (toUs - fromUs)) : 0)
         const targets = Array.from({ length: endTick - startTick }, (_, offset) => densities.densityAt(section, startTick + offset))
+        const plannedNotesPerRow = roundNps(trainingNotesPerRowOf(section))
+        const notesPerRow = rows > 0 ? roundNps(inSection.length / rows) : plannedNotesPerRow
+        if (laid[index].chordKeys > 0 && notesPerRow !== plannedNotesPerRow) {
+            chordFills.push({ section: originals[index] ?? index, field: CHORD_FILL_FIELD, from: plannedNotesPerRow, to: notesPerRow })
+        }
         return {
             index: section.index,
             focus_key: section.focus_key,
@@ -702,7 +793,7 @@ export const synthesizeTraining = (input: TrainingSpecInput) => {
             measure_count: section.measure_count,
             from_us: fromUs,
             to_us: toUs,
-            grid: grids[index],
+            grid: laid[index].grid,
             actual_nps: perSecond(inSection.length),
             actual_rps: perSecond(rows),
             notes: inSection.length,
@@ -727,7 +818,7 @@ export const synthesizeTraining = (input: TrainingSpecInput) => {
             noise_seed: density.noiseSeed,
         },
         sections,
-        corrections: input.corrections,
+        corrections: [...input.corrections.filter((correction) => correction.field !== CHORD_FILL_FIELD), ...chordFills],
     }
     return { spec, notes }
 }

@@ -6,7 +6,7 @@ import type { PatternTag } from '@server/service/domain/analysis/pattern-tags'
  * Every fixed value of the training chart generator (plan 2026-11-04 3.5-3.10). The same spec, seed and GENERATOR_VERSION give the
  * same bytes, so a change to any value that moves a note or a byte raises GENERATOR_VERSION.
  */
-export const GENERATOR_VERSION = 2
+export const GENERATOR_VERSION = 3
 
 /** The client parser generation the pattern documents of training charts are written for (`PARSER_VERSION`, rbms-library songdb). */
 export const TRAINING_PARSER_VERSION = 5
@@ -111,6 +111,22 @@ export const TRAINING_FOLLOW_SIXTEENTHS = 1
 export const TRAINING_LN_MIN_CELLS = 2
 export const TRAINING_BURST_HIGH = 1.6
 export const TRAINING_BURST_LOW = 0.4
+/**
+ * The kinds that lay one note a row (a key, or a scratch) and, where the density asks for more than a row on every cell of their
+ * finest grid, add keys to rows for the notes over it (real charts grow chords at their densest and lose solo scratches: 05 7.4,
+ * chord_4plus 1.4-1.7 times, chord_3 1.0-1.2, scratch_solo 0-0.06). The long-note kinds keep their hands to the long notes.
+ */
+export const TRAINING_CHORD_FILL_KINDS = [
+    'stream',
+    'trill',
+    'stair',
+    'jack',
+    'burst',
+    'scratch_solo',
+    'scratch_run',
+] as const satisfies readonly TrainingPatternKind[]
+/** The most notes a row of a chord-fill kind holds. */
+export const TRAINING_CHORD_FILL_ROW_NOTES_MAX = 3
 
 /** The lanes a lane hint lays keys on (the scratch is laid only by the kinds and `scratch_ratio`). */
 export const TRAINING_LANE_CANDIDATES = {
