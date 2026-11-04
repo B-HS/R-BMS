@@ -33,7 +33,7 @@
 
 - [x] D1. 조사 — 훈련곡이 쉬운 원인 진단(보정·범위 자르기·종류별 실제 NPS·LLM 입력), 실제 곡의 밀도 흐름 통계(차트 배치는 저장소에 두지 않음)
 - [x] D2. 설계 — [plan/2026-11-04-training-difficulty.md](plan/2026-11-04-training-difficulty.md)(M1~M11, 단위 V1·V2·V3). 조사 wf_a77a1d3a-0e2, 보고서 04·05, 측정 스크립트 utils/2026-11-04-training-density
-- [ ] D3. 구현·게이트·문서·커밋·푸시·CI
+- [x] D3. 구현·게이트·문서·커밋·푸시·CI — V2 `efd431c`(한계 보간), V1 `1256944`(범위·흐름·보정·LLM 역할, wf_27721caa-fcf), V4 `555469e`(동시치기 채움·편한 밀도 자르기·생성기 3·프로필 3, wf_11e91586-a4d). 게이트: 웹 2,425 통과·0 실패·build, DB 훈련곡·프로필 15 통과, Rust 골든 `training_contract` 3·`rbms-download training` 1. 측정 6,480곡: 조건 밖 925 → 439(테스트 부채 3.160). 문서: ADR `2026-11-04-adr-training-difficulty.md`, 조사 04·05 구현 결과 절, QA 3.28, 테스트 부채 3.160~3.162(3.162 는 무관 커밋의 macOS ci 에서 본 `rbms-audio` 떠는 시험). GitHub 장애(Minor Service Outage)로 푸시가 500 으로 여러 번 거절돼 재시도함
 
 ## 체크리스트 — AI 훈련곡 생성·AI 분석 고도화·로그인 대시보드 (2026-11-04)
 
