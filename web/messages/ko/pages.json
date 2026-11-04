@@ -235,7 +235,8 @@
             "traced_plays": "판별 데이터(새 클라이언트로 친 판의 노트 단위 기록, 리포트는 7키 단일 플레이만)가 5판 아래입니다. 몇 판 더 친 뒤 다시 열어 보세요.",
             "play_trace": "이 판에는 판별 데이터가 없습니다(옛 클라이언트로 쳤거나 업로드를 끈 판). 점수 기록만 보입니다.",
             "play_metrics": "이 판은 7키 단일 플레이가 아니라 구간 분석이 없습니다.",
-            "comparable_play": "구간을 맞대어 볼 판이 없습니다. 판정 합계만 비교합니다."
+            "comparable_play": "구간을 맞대어 볼 판이 없습니다. 판정 합계만 비교합니다.",
+            "weakness_profile": "약점 프로필에 이 약점이 없습니다. 판별 데이터가 있는 판을 더 친 뒤 약점 프로필에 나온 약점으로 다시 고르세요."
         },
         "failureNotice": {
             "title": "AI 호출이 실패했습니다",
@@ -279,7 +280,8 @@
             "billing": "AI 호출은 직접 요청할 때만 일어나며 비용은 내 공급자 계정에 청구됩니다. 공급자 콘솔에서 지출 한도를 걸어 두기를 권합니다."
         },
         "segmentChart": {
-            "bpBySegment": "구간별 BP"
+            "bpBySegment": "구간별 BP",
+            "bpRunStart": "BAD·POOR 연속 시작"
         },
         "setup": {
             "no_key": {
@@ -321,7 +323,11 @@
                 "ex_rate_on_chart": "한 곡의 EX 비율",
                 "weakness_residual": "약점 잔차 끌어올리기",
                 "density_limit": "밀도 한계 NPS 올리기"
-            }
+            },
+            "weaknessKey": "약점",
+            "targetResidual": "목표 잔차(%p, {min}~{max})",
+            "targetNps": "목표 밀도 한계(NPS, {min}~{max})",
+            "noWeaknessKeys": "목표로 삼을 약점이 아직 없습니다. 약점 프로필에 EX 로 재는 약점이 나오면 고를 수 있습니다."
         },
         "insightTone": {
             "strength": "강점",
@@ -337,6 +343,90 @@
         "practiceFolder": {
             "created": "연습 폴더 \"{name}\" 를 만들었습니다",
             "updated": "연습 폴더 \"{name}\" 를 갱신했습니다"
+        },
+        "weaknessKind": {
+            "solo": "{tag} 단독",
+            "combo": "{first} + {second}",
+            "timing": "{tag} 타이밍",
+            "bp_context": "실패 직전 {tag}",
+            "gauge_context": "게이지 급락 중 {tag}",
+            "lane": "{lane}번 레인",
+            "laneScratch": "스크래치 레인",
+            "hand": {
+                "left": "왼손(스크래치 제외 1~3)",
+                "shared": "가운데 4번",
+                "right": "오른손(5~7)",
+                "scratch": "스크래치"
+            },
+            "bpm": "BPM {band}",
+            "soflan": {
+                "after": "소프란 직후",
+                "settled": "소프란 뒤 안정 구간"
+            },
+            "density": {
+                "limit": "밀도 한계",
+                "sustained": "지속 밀도"
+            },
+            "fatigue": "곡 후반 체력"
+        },
+        "profile": {
+            "title": "약점 프로필",
+            "loading": "약점 프로필 계산 중",
+            "loadError": "약점 프로필을 불러오지 못했습니다",
+            "emptyTitle": "아직 분석된 판이 없습니다",
+            "emptyDescription": "새 클라이언트로 7키 단일 플레이를 치면 판별 데이터가 쌓이고, 여기서 못 치는 패턴과 못 버티는 밀도를 보여 줍니다.",
+            "intro": "최근 {days, number}일 동안 판별 데이터가 있는 7키 판 {plays}판 · 차트 {charts}개 · 노트 {notes}개로 계산했습니다. AI 는 부르지 않습니다.",
+            "windowNotes": "SCRATCH AUTO 판 {auto, number}판(밀도·스크래치 칸에서는 뺌) · 훈련곡 판 {training, number}판 · 다시 계산을 기다리는 옛 분석 {stale, number}판",
+            "trainingClusterNote": "훈련곡 판은 곡이 달라도 한 묶음으로 셉니다. 훈련곡만 많이 쳐도 표본 곡 수는 하나만 늘어나므로, 훈련 효과는 일반 곡 판에서 확인됩니다.",
+            "densityTitle": "밀도 한계",
+            "densityInsufficient": "밀도 칸마다 노트와 차트가 모자라 밀도 한계를 그릴 수 없습니다.",
+            "densitySummary": "편안한 밀도 {comfort} · EX 한계 {limitEx} · BP 한계 {limitBp}",
+            "densitySeen": "친 가장 높은 밀도 칸 {maxSeen} · 2초 최고 밀도 {peak} · 기준 EX {baseline}",
+            "noCeiling": "지금까지 친 밀도에서는 EX 가 한계만큼 떨어지지 않았습니다. 더 높은 밀도의 곡을 쳐야 한계가 보입니다.",
+            "sustained": "같은 밀도에서 이어지는 구간 − 짧게 몰리는 구간 EX {value}",
+            "densityChartLabel": "밀도별 EX 비율 그래프. 편안한 밀도 {comfort}, EX 한계 {limitEx}, BP 한계 {limitBp}, 친 가장 높은 밀도 {maxSeen}.",
+            "none": "없음",
+            "npsValue": "{nps} NPS",
+            "chart": {
+                "comfort": "편안",
+                "limitEx": "EX 한계",
+                "limitBp": "BP 한계"
+            },
+            "weaknessesTitle": "약점",
+            "weaknessesEmpty": "근거가 충분한 약점이 아직 없습니다. 판이 늘면 검정을 통과한 약점이 여기에 나옵니다.",
+            "strengthsTitle": "강점",
+            "tagsTitle": "패턴별 잔차",
+            "timingTitle": "패턴별 타이밍(내 평균 대비)",
+            "comboTitle": "패턴 조합",
+            "comboHint": "두 패턴이 함께 나올 때 EX 를 잃는 정도입니다. 진할수록 많이 잃고, 굵은 테두리는 근거가 충분한 약점입니다. 빈 칸은 표본이 모자란 조합입니다.",
+            "comboCaption": "패턴 조합별 EX 잔차",
+            "comboCell": "{first} + {second}: {value}, {evidence}",
+            "handTitle": "손·레인 균형",
+            "handsLabel": "손별",
+            "lanesLabel": "레인별",
+            "handRow": "EX {residual} · BP {bp} · 평균 오차 {timing}",
+            "contextTitle": "무너지는 문맥",
+            "contextEmpty": "눈에 띄는 패턴이 없습니다.",
+            "contextNotes": "노트 {notes}개",
+            "bpRunsLine": "차트별 가장 긴 BAD·POOR 연속 평균 {longest} · 다시 안정되기까지 노트 가운데값 {recovery}",
+            "gaugeLine": "판당 게이지 급락 {drops}회 · 급락 구간 평균 밀도 {dropNps} NPS(전체 {overallNps} NPS)",
+            "bpContextLabel": "BAD·POOR 연속 직전 패턴",
+            "gaugeContextLabel": "게이지 급락 중 패턴",
+            "soflanLine": "소프란 {events}번 중 HI-SPEED 를 맞춘 비율 {share}",
+            "fatigueLine": "곡 후반 체력 {value}",
+            "sampleLevel": {
+                "high": "표본 많음",
+                "medium": "표본 보통",
+                "low": "표본 적음",
+                "insufficient": "표본 부족"
+            },
+            "itemSample": "노트 {notes} · 차트 {charts} · {plays}판",
+            "trend": "최근 30일 {delta}",
+            "folderLink": "연습 폴더",
+            "folderLinkLabel": "{name} 연습 폴더 만들기",
+            "trainingLink": "훈련곡",
+            "trainingLinkLabel": "{name} 훈련곡 만들기",
+            "timingRow": "{deviation} (±{sd} ms, FAST {fast}%)"
         }
     },
     "folder": {

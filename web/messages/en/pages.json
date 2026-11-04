@@ -235,7 +235,8 @@
             "traced_plays": "You have fewer than 5 plays with judgement data (note-level records of plays made with the new client; reports cover 7KEYS SP plays only). Play a few more and open this again.",
             "play_trace": "This play has no judgement data (played with an old client or with upload turned off). Only the score record is shown.",
             "play_metrics": "This play is not a 7KEYS SP play, so there is no segment analysis.",
-            "comparable_play": "There is no play to compare segments with. Only judgement totals are compared."
+            "comparable_play": "There is no play to compare segments with. Only judgement totals are compared.",
+            "weakness_profile": "This weakness is not in your weakness profile. Play more traced plays, then pick a weakness the profile lists."
         },
         "failureNotice": {
             "title": "The AI call failed",
@@ -279,7 +280,8 @@
             "billing": "AI calls happen only when you request them, and the cost is billed to your provider account. Setting a spending limit in the provider console is recommended."
         },
         "segmentChart": {
-            "bpBySegment": "BP by segment"
+            "bpBySegment": "BP by segment",
+            "bpRunStart": "BAD/POOR run starts"
         },
         "setup": {
             "no_key": {
@@ -321,7 +323,11 @@
                 "ex_rate_on_chart": "EX rate on one song",
                 "weakness_residual": "Raise a weakness residual",
                 "density_limit": "Raise the density limit (NPS)"
-            }
+            },
+            "weaknessKey": "Weakness",
+            "targetResidual": "Target residual (%p, {min} to {max})",
+            "targetNps": "Target density limit (NPS, {min} to {max})",
+            "noWeaknessKeys": "No weakness to aim at yet. Once the weakness profile lists a weakness measured in EX, you can pick it."
         },
         "insightTone": {
             "strength": "Strength",
@@ -337,6 +343,90 @@
         "practiceFolder": {
             "created": "Created practice folder \"{name}\"",
             "updated": "Updated practice folder \"{name}\""
+        },
+        "weaknessKind": {
+            "solo": "{tag} alone",
+            "combo": "{first} + {second}",
+            "timing": "{tag} timing",
+            "bp_context": "{tag} before a miss run",
+            "gauge_context": "{tag} in a gauge drop",
+            "lane": "Lane {lane}",
+            "laneScratch": "Scratch lane",
+            "hand": {
+                "left": "Left hand (keys 1-3)",
+                "shared": "Key 4",
+                "right": "Right hand (keys 5-7)",
+                "scratch": "Scratch"
+            },
+            "bpm": "BPM {band}",
+            "soflan": {
+                "after": "Right after a soflan",
+                "settled": "After a soflan settles"
+            },
+            "density": {
+                "limit": "Density limit",
+                "sustained": "Sustained density"
+            },
+            "fatigue": "Late-song stamina"
+        },
+        "profile": {
+            "title": "Weakness profile",
+            "loading": "Computing the weakness profile",
+            "loadError": "Could not load the weakness profile",
+            "emptyTitle": "No analysed plays yet",
+            "emptyDescription": "Play 7KEYS SP with the new client to collect traces; this page then shows the patterns you cannot hit and the density you cannot hold.",
+            "intro": "Computed from {plays} traced 7KEYS plays on {charts} charts ({notes} notes) over the last {days, number} days. No AI is called.",
+            "windowNotes": "SCRATCH AUTO plays {auto, number} (left out of density and scratch cells) · training chart plays {training, number} · old analyses waiting to be recomputed {stale, number}",
+            "trainingClusterNote": "Training chart plays count as one group even across charts. Playing many training charts adds only one chart to a sample, so training shows its effect in plays of regular charts.",
+            "densityTitle": "Density limit",
+            "densityInsufficient": "Not enough notes and charts per density bin to draw the density limit.",
+            "densitySummary": "Comfortable density {comfort} · EX limit {limitEx} · BP limit {limitBp}",
+            "densitySeen": "Highest density bin played {maxSeen} · peak 2 s density {peak} · baseline EX {baseline}",
+            "noCeiling": "Your EX has not dropped to the limit at the densities you played. Play denser charts to find the limit.",
+            "sustained": "EX of sustained minus burst sections at the same density {value}",
+            "densityChartLabel": "EX ratio by density. Comfortable density {comfort}, EX limit {limitEx}, BP limit {limitBp}, highest density played {maxSeen}.",
+            "none": "none",
+            "npsValue": "{nps} NPS",
+            "chart": {
+                "comfort": "Comfort",
+                "limitEx": "EX limit",
+                "limitBp": "BP limit"
+            },
+            "weaknessesTitle": "Weaknesses",
+            "weaknessesEmpty": "No weakness with enough evidence yet. As plays add up, weaknesses that pass the test appear here.",
+            "strengthsTitle": "Strengths",
+            "tagsTitle": "Residual by pattern",
+            "timingTitle": "Timing by pattern (against your mean)",
+            "comboTitle": "Pattern pairs",
+            "comboHint": "How much EX you lose when two patterns come together. Darker loses more; a thick border is a weakness with enough evidence. Empty cells are pairs without enough sample.",
+            "comboCaption": "EX residual by pattern pair",
+            "comboCell": "{first} + {second}: {value}, {evidence}",
+            "handTitle": "Hand and lane balance",
+            "handsLabel": "By hand",
+            "lanesLabel": "By lane",
+            "handRow": "EX {residual} · BP {bp} · mean error {timing}",
+            "contextTitle": "Where plays break",
+            "contextEmpty": "No pattern stands out.",
+            "contextNotes": "{notes} notes",
+            "bpRunsLine": "Mean longest BAD/POOR run per chart {longest} · median notes to recover {recovery}",
+            "gaugeLine": "Gauge drops per play {drops} · mean density in drops {dropNps} NPS (overall {overallNps} NPS)",
+            "bpContextLabel": "Patterns before a BAD/POOR run",
+            "gaugeContextLabel": "Patterns in a gauge drop",
+            "soflanLine": "HI-SPEED adjusted on {share} of {events} soflans",
+            "fatigueLine": "Late-song stamina {value}",
+            "sampleLevel": {
+                "high": "large sample",
+                "medium": "medium sample",
+                "low": "small sample",
+                "insufficient": "not enough sample"
+            },
+            "itemSample": "{notes} notes · {charts} charts · {plays} plays",
+            "trend": "last 30 days {delta}",
+            "folderLink": "Practice folder",
+            "folderLinkLabel": "Make a practice folder for {name}",
+            "trainingLink": "Training chart",
+            "trainingLinkLabel": "Make a training chart for {name}",
+            "timingRow": "{deviation} (±{sd} ms, FAST {fast}%)"
         }
     },
     "folder": {

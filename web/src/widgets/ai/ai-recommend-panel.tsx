@@ -10,7 +10,7 @@ import { LoadErrorState } from '@features/state/load-error-state'
 import { PanelSkeleton } from '@features/state/panel-skeleton'
 import { Badge } from '@shared/ui/badge'
 import { PERCENT_SCALE } from '@shared/constants/ui'
-import { useAiRecommend, useInterpretAiRecommend } from '@entities/ai.query'
+import { useAiRecommend, useAiWeaknessLabel, useInterpretAiRecommend } from '@entities/ai.query'
 import { AI_RECOMMEND_KIND_LABEL } from '@entities/ai.type'
 
 const SHOWN_CANDIDATES = 10
@@ -20,8 +20,10 @@ export const AiRecommendPanel: FC = () => {
     const t = useTranslations('ai.recommend')
     const recommend = useAiRecommend(null)
     const interpret = useInterpretAiRecommend()
+    const weaknessLabel = useAiWeaknessLabel()
 
     const view = recommend.data
+    const profileKeys = view?.profile_keys ?? []
     const ai = interpret.data ?? view?.ai ?? null
     const byMd5 = new Map((view?.candidates ?? []).map((candidate) => [candidate.md5, candidate]))
     const picks = (ai?.output.picks ?? []).flatMap((pick) => {
@@ -77,6 +79,9 @@ export const AiRecommendPanel: FC = () => {
                                   })}
                         </p>
                     </section>
+                    {profileKeys.length > 0 && (
+                        <p className='text-xs break-keep'>{t('profileKeys', { keys: profileKeys.map(weaknessLabel).join(', ') })}</p>
+                    )}
                     {view.notice && <AiDataNotice need={view.notice.need} />}
                     {picks.length === 0 && view.candidates.length > 0 && (
                         <AiChartCandidateList
@@ -84,8 +89,19 @@ export const AiRecommendPanel: FC = () => {
                             symbol={view.table.symbol}
                             candidates={view.candidates.slice(0, SHOWN_CANDIDATES)}
                             renderExtra={(candidate) => {
-                                const kind = view.candidates.find((entry) => entry.md5 === candidate.md5)?.kind
-                                return kind && <Badge variant='secondary'>{AI_RECOMMEND_KIND_LABEL[kind]}</Badge>
+                                const entry = view.candidates.find((row) => row.md5 === candidate.md5)
+                                return (
+                                    entry && (
+                                        <span className='flex flex-wrap items-center gap-1'>
+                                            <Badge variant='secondary'>{AI_RECOMMEND_KIND_LABEL[entry.kind]}</Badge>
+                                            {(entry.focus_keys ?? []).map((key) => (
+                                                <Badge key={key} variant='outline'>
+                                                    {t('focusKey', { name: weaknessLabel(key) })}
+                                                </Badge>
+                                            ))}
+                                        </span>
+                                    )
+                                )
                             }}
                         />
                     )}

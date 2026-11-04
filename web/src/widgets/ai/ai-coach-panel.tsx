@@ -11,7 +11,7 @@ import { LoadErrorState } from '@features/state/load-error-state'
 import { PanelSkeleton } from '@features/state/panel-skeleton'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 import { formatCount, formatDateTime } from '@shared/lib/format'
-import { useAiCoach, useInterpretAiCoach } from '@entities/ai.query'
+import { useAiCoach, useAiWeaknessLabel, useInterpretAiCoach } from '@entities/ai.query'
 import { AI_GAUGE_LABEL, AI_GAUGE_OUTCOME_LABEL, AI_RUN_END_LABEL, aiPatternTagLabel } from '@entities/ai.type'
 
 const MISSING = '—'
@@ -28,9 +28,15 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
     const t = useTranslations('ai.coach')
     const coach = useAiCoach(scoreId)
     const interpret = useInterpretAiCoach(scoreId)
+    const weaknessLabel = useAiWeaknessLabel()
 
     const view = coach.data
     const analysis = view?.analysis ?? null
+    const bpRuns = analysis?.bp_runs ?? []
+    const dropContexts = analysis?.drop_contexts ?? []
+    const profileKeys = analysis?.profile_keys ?? []
+    const hasRunStart = (segment: { from_ms: number; to_ms: number }) =>
+        bpRuns.some((run) => run.from_ms >= segment.from_ms && run.from_ms < segment.to_ms)
     const ai = interpret.data ?? view?.ai ?? null
     const selected = analysis?.segments.find((segment) => segment.id === selectedId) ?? null
     const selectedAdvice = ai?.output.segments.find((segment) => segment.segment_id === selectedId) ?? null
@@ -58,12 +64,14 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                                     bp: segment.bp,
                                     gauge: segment.gauge,
                                     isProblem: analysis.problem_segments.includes(segment.id),
+                                    hasBpRun: hasRunStart(segment),
                                 }))}
                                 gaugeMax={GAUGE_MAX}
                                 selectedId={selectedId}
                                 onSelect={setSelectedId}
                             />
                             <p className='text-muted-foreground text-xs'>{t('chartHint')}</p>
+                            {bpRuns.length > 0 && <p className='text-muted-foreground text-xs'>{t('bpRunHint')}</p>}
                             {selected && (
                                 <section
                                     aria-label={t('selectedLabel')}
@@ -83,6 +91,7 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                                                     : `${(selected.ex_ratio * PERCENT_SCALE).toFixed(RATIO_DECIMALS)}%`,
                                         })}
                                     </p>
+                                    {selected.peak_nps !== undefined && <p>{t('selectedPeakNps', { nps: selected.peak_nps })}</p>}
                                     {selected.top_tags.length > 0 && (
                                         <p className='text-muted-foreground'>
                                             {selected.top_tags.map((tag) => aiPatternTagLabel(tag.tag)).join(' · ')}
@@ -103,6 +112,42 @@ export const AiCoachPanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                                             .join(' · '),
                                     })}
                                 </p>
+                            )}
+                            {bpRuns.length > 0 && (
+                                <ul aria-label={t('bpRunsLabel')} className='flex flex-col gap-0.5 text-xs tabular-nums'>
+                                    {bpRuns.map((run) => (
+                                        <li key={`${run.from_ms}-${run.to_ms}`}>
+                                            {t('bpRunRow', {
+                                                from: formatSeconds(run.from_ms),
+                                                to: formatSeconds(run.to_ms),
+                                                length: run.length,
+                                                nps: run.start_nps,
+                                                recovery: run.recovery_notes ?? MISSING,
+                                            })}
+                                            {run.preceding_tags.length > 0 &&
+                                                ` · ${t('precedingTags', { tags: run.preceding_tags.map((tag) => aiPatternTagLabel(tag.tag)).join(', ') })}`}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {dropContexts.length > 0 && (
+                                <ul aria-label={t('dropContextsLabel')} className='flex flex-col gap-0.5 text-xs tabular-nums'>
+                                    {dropContexts.map((context) => (
+                                        <li key={`${context.from_ms}-${context.to_ms}`}>
+                                            {t('dropContextRow', {
+                                                from: formatSeconds(context.from_ms),
+                                                to: formatSeconds(context.to_ms),
+                                                bp: context.bp,
+                                                nps: context.mean_nps,
+                                            })}
+                                            {context.top_tags.length > 0 &&
+                                                ` · ${context.top_tags.map((tag) => aiPatternTagLabel(tag.tag)).join(', ')}`}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {profileKeys.length > 0 && (
+                                <p className='text-xs break-keep'>{t('profileKeys', { keys: profileKeys.map(weaknessLabel).join(', ') })}</p>
                             )}
                             <ul aria-label={t('otherGaugesLabel')} className='text-muted-foreground flex flex-wrap gap-3 text-xs'>
                                 {analysis.gauge.curves.map((curve) => (

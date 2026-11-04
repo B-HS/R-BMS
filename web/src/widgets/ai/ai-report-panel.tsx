@@ -6,25 +6,32 @@ import { AiDataNotice } from '@features/ai/ai-data-notice'
 import { AiInsightList } from '@features/ai/ai-insight-list'
 import { AiInterpretSection } from '@features/ai/ai-interpret-section'
 import { AiTagResidualList } from '@features/ai/ai-tag-residual-list'
+import { AiWeaknessList } from '@features/ai/ai-weakness-list'
 import { PanelCard } from '@features/shell/panel-card'
 import { LoadErrorState } from '@features/state/load-error-state'
 import { PanelSkeleton } from '@features/state/panel-skeleton'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 import { formatCount } from '@shared/lib/format'
-import { useAiReport, useInterpretAiReport } from '@entities/ai.query'
-import { aiPatternTagLabel } from '@entities/ai.type'
+import { useAiProfile, useAiReport, useInterpretAiReport } from '@entities/ai.query'
+import { aiHubHref, aiPatternTagLabel } from '@entities/ai.type'
 
 const MISSING = '—'
 const RATIO_DECIMALS = 1
 
 const formatRatio = (ratio: number | null) => (ratio === null ? MISSING : `${(ratio * PERCENT_SCALE).toFixed(RATIO_DECIMALS)}%`)
 
-/** Feature 1: the deterministic report from the newest analysed plays first, then the AI's reading of it on a button press. */
+/**
+ * Feature 1: the deterministic report from the newest analysed plays first, then the AI's reading of it on a button press. The
+ * profile weaknesses the report rests on link to a practice folder or a training chart on that weakness.
+ */
 export const AiReportPanel: FC = () => {
     const t = useTranslations('ai.report')
     const report = useAiReport()
     const interpret = useInterpretAiReport()
+    const profileKeys = report.data?.profile_keys ?? []
+    const profile = useAiProfile(profileKeys.length > 0)
 
+    const profileItems = (profile.data?.weaknesses ?? []).filter((item) => profileKeys.includes(item.key))
     const view = report.data
     const ai = interpret.data ?? view?.ai ?? null
     const staleNote = view && view.plays.stale > 0 ? t('staleNote', { stale: view.plays.stale }) : ''
@@ -40,6 +47,14 @@ export const AiReportPanel: FC = () => {
                         {t('intro', { analyzed: view.plays.analyzed, measured: view.plays.measured, notes: `${staleNote}${failedNote}` })}
                     </p>
                     {view.tags.length > 0 && <AiTagResidualList label={t('tagsLabel')} rows={view.tags} />}
+                    {profileItems.length > 0 && (
+                        <AiWeaknessList
+                            label={t('profileKeysLabel')}
+                            items={profileItems}
+                            folderHrefOf={(key) => aiHubHref('recommend', key)}
+                            trainingHrefOf={(key) => aiHubHref('training', key)}
+                        />
+                    )}
                     {view.lanes.length > 0 && (
                         <ul aria-label={t('lanesLabel')} className='grid grid-cols-4 gap-1 text-xs tabular-nums sm:grid-cols-8'>
                             {view.lanes.map((lane) => (

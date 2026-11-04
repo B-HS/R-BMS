@@ -18,7 +18,15 @@
         "otherGaugesLabel": "別のゲージだった場合",
         "aiLabel": "AIコーチ",
         "diagnosisLabel": "区間診断",
-        "nextTry": "次のプレー: {text}"
+        "nextTry": "次のプレー: {text}",
+        "bpRunHint": "バーの上の小さな三角は BAD・POOR 連続が始まった区間です。",
+        "selectedPeakNps": "この区間の最高密度 {nps} NPS",
+        "bpRunsLabel": "BAD・POOR 連続",
+        "bpRunRow": "{from}~{to}: {length, number}ノーツ連続・開始時の密度 {nps} NPS・立て直しまで {recovery}ノーツ",
+        "precedingTags": "直前のパターン {tags}",
+        "dropContextsLabel": "ゲージ急落の直前",
+        "dropContextRow": "{from}~{to}: BP {bp, number}・平均密度 {nps} NPS",
+        "profileKeys": "このプレーの問題区間と重なる自分の弱点: {keys}"
     },
     "compare": {
         "title": "ベスト・ライバル比較",
@@ -36,7 +44,9 @@
         "segmentsLabel": "区間ごとのEX差",
         "segmentLine": "{id}: EX {ex} · BP {bp} · 累計 {cumulative}",
         "aiLabel": "AIによる比較の解釈",
-        "gapsLabel": "差の説明"
+        "gapsLabel": "差の説明",
+        "segmentPeakNps": "最高密度 {nps} NPS",
+        "segmentMeanError": "このプレーの平均誤差 {ms} ms"
     },
     "gaugeAdvice": {
         "title": "ゲージ・オプションのアドバイス",
@@ -52,7 +62,9 @@
         "optionRow": "{option} {plays, number}プレー · EX {exRatio}",
         "scoreRows": "スコア記録: {rows}",
         "aiLabel": "AIのゲージ・オプションアドバイス",
-        "adviceLabel": "ゲージのアドバイス"
+        "adviceLabel": "ゲージのアドバイス",
+        "dropContextsLabel": "ゲージ急落の文脈",
+        "dropNps": "ゲージが急落した区間の平均密度 {drop} NPS(全体 {overall} NPS)"
     },
     "goal": {
         "title": "目標プラン",
@@ -67,7 +79,8 @@
         "openPlan": "プランを見る",
         "archive": "保管",
         "progressLabel": "{label}の進捗",
-        "progressText": "{achieved} / {target} · 直近4週間の更新 {updates, number}曲"
+        "progressText": "{achieved} / {target} · 直近4週間の更新 {updates, number}曲",
+        "profileProgressText": "現在 {current}・開始 {baseline}・目標 {target}・直近4週の更新 {updates, number}曲"
     },
     "goalPlan": {
         "loading": "目標プランを読み込み中",
@@ -109,7 +122,10 @@
         "aiLabel": "AIによる判定の癖の解釈",
         "aiOffset": "オフセット（{direction}）: {reasoning}",
         "aiGreen": "緑数字（{direction}）: {reasoning}",
-        "notesLabel": "判定メモ"
+        "notesLabel": "判定メモ",
+        "tagTimingLabel": "パターン別のタイミング",
+        "tagTimingNote": "弱点プロフィール(直近90日)で自分の平均より明らかに早い・遅いパターンです。JUDGE OFFSET はすべてのノーツを同じように動かすため、この偏りは直せません。",
+        "handTimingLabel": "手別の平均誤差"
     },
     "playDetail": {
         "title": "プレーコーチ",
@@ -121,7 +137,8 @@
         "tagLabel": "練習するパターン",
         "source": {
             "recommend": "次の挑戦候補",
-            "tag": "パターンタグ"
+            "tag": "パターンタグ",
+            "weakness": "弱点プロフィール"
         },
         "loading": "練習候補を計算中",
         "loadError": "練習候補を読み込めませんでした",
@@ -130,7 +147,9 @@
         "aiLabel": "AI練習フォルダのプレビュー",
         "previewLabel": "プレビューの曲",
         "create": "このプレビューでフォルダを作る",
-        "openFolder": "作成したフォルダを開く"
+        "openFolder": "作成したフォルダを開く",
+        "weaknessLabel": "練習する弱点",
+        "weaknessEmpty": "譜面で選べる弱点がまだありません。弱点プロフィールにパターン・密度・BPM・ソフランの弱点が出ると選べます。"
     },
     "readyGate": {
         "loading": "AI設定を読み込み中",
@@ -148,7 +167,9 @@
         "coverageStale": "候補はサーバーがレベルとランプで選びます。曲ごとのパターンがある候補 {withFeatures, number}/{candidates, number}曲（うち古い分析バージョンの{stale, number}曲は再計算前の値）。パターンタグはオプションを切った元の配置が基準です。",
         "candidatesLabel": "おすすめ候補",
         "aiLabel": "AIによるおすすめの解釈",
-        "picksLabel": "AIが選んだ順"
+        "picksLabel": "AIが選んだ順",
+        "profileKeys": "スコアに反映した自分の弱点: {keys}",
+        "focusKey": "{name} の練習"
     },
     "report": {
         "title": "プレーヤーレポート",
@@ -172,7 +193,8 @@
         "weaknesses": "弱み",
         "habits": "癖",
         "practiceLabel": "練習すること",
-        "caveatsLabel": "制約"
+        "caveatsLabel": "制約",
+        "profileKeysLabel": "レポートの根拠にした弱点"
     },
     "weekly": {
         "title": "週間成長サマリー",
@@ -199,7 +221,11 @@
         "untitled": "タイトル未登録",
         "aiLabel": "AI週間サマリー",
         "highlightsLabel": "今週のハイライト",
-        "nextWeekNote": "翌週: {text}"
+        "nextWeekNote": "翌週: {text}",
+        "training": "トレーニング譜面: この週に作った譜面 {created, number}個・トレーニング譜面のプレー {plays, number}回({charts, number}譜面)",
+        "focusCaption": "弱点上位3つの週ごとの変化",
+        "focusHeader": "弱点",
+        "profileHeader": "90日プロフィール"
     },
     "recordQuery": {
         "title": "記録に質問",
@@ -231,7 +257,12 @@
         },
         "limitLabel": "最大件数",
         "run": "この条件でもう一度実行",
-        "footnote": "再実行ではAIを呼び出しません。最大件数は{min}~{max}の範囲に調整されます。"
+        "footnote": "再実行ではAIを呼び出しません。最大件数は{min}~{max}の範囲に調整されます。",
+        "valuePick": "値を選ぶ",
+        "trainingValue": {
+            "true": "トレーニング譜面のみ",
+            "false": "トレーニング譜面を除く"
+        }
     },
     "recordQueryResults": {
         "regionLabel": "質問の結果",

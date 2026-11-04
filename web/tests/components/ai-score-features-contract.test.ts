@@ -8,8 +8,27 @@ import {
     AI_RECOMMEND_KINDS,
 } from '../../src/server/dto/ai'
 import { PATTERN_TAGS } from '../../src/server/service/domain/analysis/pattern-tags'
+import { BPM_BANDS, HAND_KEYS, SP7_LANE_NAMES } from '../../src/server/service/domain/analysis/analysis-constants'
+import { COMBO_TAGS } from '../../src/server/service/domain/analysis/tag-combos'
 import {
+    DENSITY_KEY_PARTS,
+    SOFLAN_KEY_PHASES,
+    WEAKNESS_KEY,
+    WEAKNESS_KINDS,
+    parseWeaknessKey,
+} from '../../src/server/service/domain/analysis/weakness-key'
+import { PROFILE_SAMPLE_LEVELS } from '../../src/server/dto/ai-play'
+import {
+    AI_COMBO_TAGS,
     AI_DATA_NEEDS,
+    AI_DENSITY_PARTS,
+    AI_HAND_KEYS,
+    AI_LANE_NAMES,
+    AI_PROFILE_SAMPLE_LEVELS,
+    AI_SOFLAN_PHASES,
+    AI_WEAKNESS_KINDS,
+    aiComboKeyOf,
+    splitAiWeaknessKey,
     AI_GOAL_KINDS as SCREEN_GOAL_KINDS,
     AI_GREEN_DIRECTION_LABEL,
     AI_OFFSET_DIRECTION_LABEL,
@@ -37,6 +56,10 @@ describe('점수 기반 AI 기능 화면과 서버의 계약', () => {
             GOAL_ACTIVE_MAX: AI_GOAL_LIMIT.ACTIVE_MAX,
             GOAL_COUNT_MAX: AI_GOAL_LIMIT.COUNT_MAX,
             GOAL_EX_RATE_MAX: AI_GOAL_LIMIT.EX_RATE_MAX_PERCENT,
+            GOAL_TARGET_RESIDUAL_MIN: AI_GOAL_LIMIT.TARGET_RESIDUAL_MIN,
+            GOAL_TARGET_RESIDUAL_MAX: AI_GOAL_LIMIT.TARGET_RESIDUAL_MAX,
+            GOAL_TARGET_NPS_MIN: AI_GOAL_LIMIT.TARGET_NPS_MIN,
+            GOAL_TARGET_NPS_MAX: AI_GOAL_LIMIT.TARGET_NPS_MAX,
         })
         const serverNeeds = [
             'table_records',
@@ -51,6 +74,7 @@ describe('점수 기반 AI 기능 화면과 서버의 계약', () => {
             'play_trace',
             'play_metrics',
             'comparable_play',
+            'weakness_profile',
         ]
         expect<string[]>([...AI_DATA_NEEDS].toSorted()).toEqual(serverNeeds.toSorted())
         expect(
@@ -58,6 +82,47 @@ describe('점수 기반 AI 기능 화면과 서버의 계약', () => {
                 .filter((need) => need !== 'fallback')
                 .toSorted(),
         ).toEqual(serverNeeds.toSorted())
+    })
+})
+
+describe('약점 프로필 화면과 서버의 계약', () => {
+    test('약점 종류·조합 태그·손·레인·소프란·밀도·표본 등급 이름이 서버와 같다', () => {
+        expect([...AI_WEAKNESS_KINDS]).toEqual([...WEAKNESS_KINDS])
+        expect([...AI_COMBO_TAGS]).toEqual([...COMBO_TAGS])
+        expect([...AI_HAND_KEYS]).toEqual([...HAND_KEYS])
+        expect([...AI_LANE_NAMES]).toEqual([...SP7_LANE_NAMES])
+        expect([...AI_SOFLAN_PHASES]).toEqual([...SOFLAN_KEY_PHASES])
+        expect([...AI_DENSITY_PARTS]).toEqual([...DENSITY_KEY_PARTS])
+        expect([...AI_PROFILE_SAMPLE_LEVELS]).toEqual([...PROFILE_SAMPLE_LEVELS])
+        expect(Object.keys(MESSAGES.ko.pages.ai.weaknessKind.hand)).toEqual([...HAND_KEYS])
+        expect(Object.keys(MESSAGES.ko.pages.ai.weaknessKind.soflan)).toEqual([...SOFLAN_KEY_PHASES])
+        expect(Object.keys(MESSAGES.ko.pages.ai.weaknessKind.density)).toEqual([...DENSITY_KEY_PARTS])
+        expect(Object.keys(MESSAGES.ko.pages.ai.profile.sampleLevel)).toEqual([...PROFILE_SAMPLE_LEVELS])
+    })
+
+    test('화면이 서버가 만든 약점 키를 같은 종류와 인자로 읽고, 조합 키를 서버와 같게 만든다', () => {
+        const keys = [
+            WEAKNESS_KEY.tag('trill'),
+            WEAKNESS_KEY.solo('scratch_mixed'),
+            WEAKNESS_KEY.combo('scratch_mixed', 'ln_release_then_hit'),
+            WEAKNESS_KEY.lane('S'),
+            WEAKNESS_KEY.hand('shared'),
+            WEAKNESS_KEY.timing('jack'),
+            ...BPM_BANDS.map((band) => WEAKNESS_KEY.bpm(band)),
+            WEAKNESS_KEY.soflan('settled'),
+            WEAKNESS_KEY.fatigue(),
+            WEAKNESS_KEY.density('limit'),
+            WEAKNESS_KEY.bpContext('stair'),
+            WEAKNESS_KEY.gaugeContext('dense'),
+        ]
+        for (const key of keys) {
+            const server = parseWeaknessKey(key)
+            const screen = splitAiWeaknessKey(key)
+            expect(screen?.kind).toBe(server?.kind)
+            expect(screen?.parts).toEqual(server?.arg === null || server?.arg === undefined ? (server?.tags ?? []) : [server.arg])
+        }
+        expect(splitAiWeaknessKey('unknown:trill')).toBeNull()
+        expect(aiComboKeyOf('chord_2', 'dense')).toBe(WEAKNESS_KEY.combo('chord_2', 'dense'))
     })
 })
 

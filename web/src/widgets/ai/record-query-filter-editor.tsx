@@ -7,6 +7,7 @@ import { Input } from '@shared/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/ui/select'
 import { cn } from '@shared/lib/cn'
 import {
+    AI_PATTERN_TAG_LABEL,
     AI_RECORD_QUERY_FIELD_LABEL,
     AI_RECORD_QUERY_FIELD_OPS,
     AI_RECORD_QUERY_FORM_LIMIT,
@@ -19,6 +20,7 @@ import {
     type AiRecordQueryIssue,
     type AiRecordQueryOp,
     type AiRecordQueryPlan,
+    isAiPatternTag,
 } from '@entities/ai.type'
 
 type DraftFilter = AiRecordQueryFilter & { id: string }
@@ -33,6 +35,8 @@ const isSortDir = (value: string): value is AiRecordQueryPlan['sort_dir'] => SOR
 const FIELDS = Object.keys(AI_RECORD_QUERY_FIELD_OPS).filter(isField)
 const SORT_FIELDS = Object.keys(AI_RECORD_QUERY_SORT_LABEL).filter(isSortField)
 const DEFAULT_FIELD = 'lamp' satisfies AiRecordQueryField
+const PATTERN_TAGS = Object.keys(AI_PATTERN_TAG_LABEL).filter(isAiPatternTag)
+const BOOLEAN_VALUES = ['true', 'false'] as const
 
 const firstOp = (field: AiRecordQueryField): AiRecordQueryOp => AI_RECORD_QUERY_FIELD_OPS[field][0]
 
@@ -53,6 +57,7 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
     const [submittedIds, setSubmittedIds] = useState(() => filters.map((filter) => filter.id))
 
     const t = useTranslations('ai.recordQueryEditor')
+    const tAi = useTranslations('pages.ai')
     const issueFor = (id: string) => issues.find((issue) => submittedIds[issue.index] === id)
     const updateFilter = (id: string, change: Partial<AiRecordQueryFilter>) =>
         setFilters((current) => current.map((filter) => (filter.id === id ? { ...filter, ...change } : filter)))
@@ -119,14 +124,52 @@ export const RecordQueryFilterEditor: FC<RecordQueryFilterEditorProps> = ({ init
                                     ))}
                                 </SelectContent>
                             </Select>
-                            <Input
-                                aria-label={t('valueLabel', { index: position })}
-                                aria-invalid={Boolean(issue)}
-                                className='h-7 w-48 max-w-full'
-                                value={filter.value}
-                                placeholder={AI_RECORD_QUERY_VALUE_HINT[filter.field]}
-                                onChange={(event) => updateFilter(filter.id, { value: event.target.value })}
-                            />
+                            {filter.field === 'training' && (
+                                <Select value={filter.value} onValueChange={(value) => updateFilter(filter.id, { value })}>
+                                    <SelectTrigger
+                                        size='sm'
+                                        className='w-48 max-w-full'
+                                        aria-label={t('valueLabel', { index: position })}
+                                        aria-invalid={Boolean(issue)}>
+                                        <SelectValue placeholder={t('valuePick')} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {BOOLEAN_VALUES.map((value) => (
+                                            <SelectItem key={value} value={value}>
+                                                {t(`trainingValue.${value}`)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                            {filter.field === 'tag' && filter.op === 'eq' && (
+                                <Select value={filter.value} onValueChange={(value) => updateFilter(filter.id, { value })}>
+                                    <SelectTrigger
+                                        size='sm'
+                                        className='w-48 max-w-full'
+                                        aria-label={t('valueLabel', { index: position })}
+                                        aria-invalid={Boolean(issue)}>
+                                        <SelectValue placeholder={t('valuePick')} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {PATTERN_TAGS.map((tag) => (
+                                            <SelectItem key={tag} value={tag}>
+                                                {tAi(`patternTag.${tag}`)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                            {filter.field !== 'training' && !(filter.field === 'tag' && filter.op === 'eq') && (
+                                <Input
+                                    aria-label={t('valueLabel', { index: position })}
+                                    aria-invalid={Boolean(issue)}
+                                    className='h-7 w-48 max-w-full'
+                                    value={filter.value}
+                                    placeholder={AI_RECORD_QUERY_VALUE_HINT[filter.field]}
+                                    onChange={(event) => updateFilter(filter.id, { value: event.target.value })}
+                                />
+                            )}
                             <Button
                                 type='button'
                                 variant='ghost'

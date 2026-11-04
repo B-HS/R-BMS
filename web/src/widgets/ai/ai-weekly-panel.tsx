@@ -13,8 +13,8 @@ import { Badge } from '@shared/ui/badge'
 import { Button } from '@shared/ui/button'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 import { formatCount } from '@shared/lib/format'
-import { useAiWeekly, useInterpretAiWeekly } from '@entities/ai.query'
-import type { AiWeeklyView } from '@entities/ai.type'
+import { useAiWeaknessLabel, useAiWeekly, useInterpretAiWeekly } from '@entities/ai.query'
+import { formatAiWeaknessValue, type AiWeeklyView } from '@entities/ai.type'
 
 const DAY_MS = 86_400_000
 const WEEK_MS = 7 * DAY_MS
@@ -44,6 +44,7 @@ export const AiWeeklyPanel: FC = () => {
     const t = useTranslations('ai.weekly')
     const weekly = useAiWeekly(week)
     const interpret = useInterpretAiWeekly()
+    const weaknessLabel = useAiWeaknessLabel()
 
     const view = weekly.data
     const ai = interpret.data ?? view?.ai ?? null
@@ -110,6 +111,46 @@ export const AiWeeklyPanel: FC = () => {
                             </tr>
                         </tbody>
                     </table>
+                    {view.training && (view.training.created > 0 || view.training.plays > 0) && (
+                        <p className='text-xs tabular-nums'>
+                            {t('training', { created: view.training.created, plays: view.training.plays, charts: view.training.charts })}
+                        </p>
+                    )}
+                    {view.focus && view.focus.length > 0 && (
+                        <table className='w-full max-w-md text-xs tabular-nums'>
+                            <caption className='text-muted-foreground text-left'>{t('focusCaption')}</caption>
+                            <thead>
+                                <tr className='text-muted-foreground'>
+                                    <th scope='col' className='text-left font-normal'>
+                                        {t('focusHeader')}
+                                    </th>
+                                    <th scope='col' className='text-right font-normal'>
+                                        {t('thisWeekHeader')}
+                                    </th>
+                                    <th scope='col' className='text-right font-normal'>
+                                        {t('previousWeekHeader')}
+                                    </th>
+                                    <th scope='col' className='text-right font-normal'>
+                                        {t('profileHeader')}
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {view.focus.map((row) => (
+                                    <tr key={row.key}>
+                                        <th scope='row' className='text-left font-normal'>
+                                            {weaknessLabel(row.key)}
+                                        </th>
+                                        <td className='text-right'>{formatAiWeaknessValue(row.key, row.unit, row.value)}</td>
+                                        <td className='text-muted-foreground text-right'>{formatAiWeaknessValue(row.key, row.unit, row.previous)}</td>
+                                        <td className='text-muted-foreground text-right'>
+                                            {formatAiWeaknessValue(row.key, row.unit, row.profile_value)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
                     {view.lamp_changes.length > 0 && (
                         <ul aria-label={t('lampChangesLabel')} className='flex flex-col gap-1 text-xs'>
                             {view.lamp_changes.map((change) => (

@@ -9,8 +9,9 @@ import { LoadErrorState } from '@features/state/load-error-state'
 import { PanelSkeleton } from '@features/state/panel-skeleton'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 import { formatCount } from '@shared/lib/format'
-import { useAiGaugeAdvice, useInterpretAiGaugeAdvice } from '@entities/ai.query'
-import { AI_GAUGE_LABEL, AI_OPTION_LABEL, aiPatternTagLabel } from '@entities/ai.type'
+import { Badge } from '@shared/ui/badge'
+import { useAiGaugeAdvice, useAiWeaknessLabel, useInterpretAiGaugeAdvice } from '@entities/ai.query'
+import { AI_EVIDENCE_LABEL, AI_GAUGE_LABEL, AI_OPTION_LABEL, aiPatternTagLabel, formatAiWeaknessValue } from '@entities/ai.type'
 
 const MISSING = '—'
 const RATIO_DECIMALS = 1
@@ -20,8 +21,10 @@ export const AiGaugeAdvicePanel: FC = () => {
     const t = useTranslations('ai.gaugeAdvice')
     const advice = useAiGaugeAdvice()
     const interpret = useInterpretAiGaugeAdvice()
+    const weaknessLabel = useAiWeaknessLabel()
 
     const view = advice.data
+    const dropContexts = view?.drop_contexts ?? null
     const ai = interpret.data ?? view?.ai ?? null
 
     return (
@@ -78,6 +81,26 @@ export const AiGaugeAdvicePanel: FC = () => {
                                     .join(' · '),
                             })}
                         </p>
+                    )}
+                    {dropContexts && (dropContexts.tags.length > 0 || dropContexts.drop_mean_nps !== null) && (
+                        <section aria-label={t('dropContextsLabel')} className='flex flex-col gap-1 text-xs tabular-nums'>
+                            <p>
+                                {t('dropNps', {
+                                    drop: dropContexts.drop_mean_nps ?? MISSING,
+                                    overall: dropContexts.overall_mean_nps ?? MISSING,
+                                })}
+                            </p>
+                            {dropContexts.tags.length > 0 && (
+                                <ul className='text-muted-foreground flex flex-wrap gap-3'>
+                                    {dropContexts.tags.map((tag) => (
+                                        <li key={tag.key} className='flex items-center gap-1'>
+                                            {weaknessLabel(tag.key)} {formatAiWeaknessValue(tag.key, 'ratio', tag.lift)}
+                                            <Badge variant='outline'>{AI_EVIDENCE_LABEL[tag.evidence]}</Badge>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </section>
                     )}
                     {view.notice && <AiDataNotice need={view.notice.need} />}
                     <AiInterpretSection

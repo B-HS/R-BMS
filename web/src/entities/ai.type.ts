@@ -2,6 +2,7 @@ import type {
     AiChartCandidate,
     AiCredentialOutput,
     AiFailureKind,
+    AiGoalInput,
     AiGoalKind,
     AiGoalOutput,
     AiGoalParams,
@@ -40,7 +41,12 @@ import type {
     AiOptionName,
     AiReportView,
     AiShareSettingOutput,
+    ProfileSampleLevel,
+    WeaknessItem,
+    WeaknessProfileCell,
+    WeaknessProfileView,
 } from '@server/dto/ai-play'
+import { PERCENT_SCALE } from '@shared/constants/ui'
 import { ApiError } from '@shared/lib/fetch'
 
 export type { AiFailureKind, AiProviderId }
@@ -59,6 +65,7 @@ export type AiRecordQueryRow = AiRecordQueryRowOutput
 export type { AiRecordQueryField, AiRecordQueryFilter, AiRecordQueryIssue, AiRecordQueryOp }
 export type {
     AiChartCandidate,
+    AiGoalInput,
     AiGoalKind,
     AiGoalParams,
     AiGoalPlanView,
@@ -74,6 +81,10 @@ export type {
 export type { AiCoachView, AiCompareMode, AiCompareQuery, AiCompareReason, AiCompareView, AiGaugeAdviceView, AiGaugeName, AiOptionName, AiReportView }
 export type AiShareSetting = AiShareSettingOutput
 export type AiGoal = AiGoalOutput
+export type AiWeaknessProfile = WeaknessProfileView
+export type AiWeaknessItem = WeaknessItem
+export type AiWeaknessProfileCell = WeaknessProfileCell
+export type AiProfileSampleLevel = ProfileSampleLevel
 /** How a stored or fresh AI answer was made, without the answer itself. */
 export type AiInterpretationMeta = Omit<NonNullable<AiRecommendView['ai']>, 'output'>
 
@@ -209,11 +220,13 @@ export const AI_RECORD_QUERY_FORM_LIMIT = {
 } as const
 
 /** The hub tabs, kept in the `tab` search parameter. */
-export const AI_HUB_TABS = ['query', 'recommend', 'goals', 'weekly', 'report', 'habit', 'gauge'] as const
+export const AI_HUB_TABS = ['query', 'profile', 'training', 'recommend', 'goals', 'weekly', 'report', 'habit', 'gauge'] as const
 export type AiHubTab = (typeof AI_HUB_TABS)[number]
 
 export const AI_HUB_TAB_LABEL = {
     query: '기록에 묻기',
+    profile: '약점 프로필',
+    training: '훈련곡',
     recommend: '추천·연습 폴더',
     goals: '목표',
     weekly: '주간 요약',
@@ -236,6 +249,7 @@ export const AI_DATA_NEEDS = [
     'play_trace',
     'play_metrics',
     'comparable_play',
+    'weakness_profile',
 ] as const
 
 export type AiDataNeed = (typeof AI_DATA_NEEDS)[number]
@@ -312,6 +326,10 @@ export const AI_SCORE_FEATURE_FORM_LIMIT = {
     GOAL_ACTIVE_MAX: 10,
     GOAL_COUNT_MAX: 2000,
     GOAL_EX_RATE_MAX: 100,
+    GOAL_TARGET_RESIDUAL_MIN: -0.2,
+    GOAL_TARGET_RESIDUAL_MAX: 0.05,
+    GOAL_TARGET_NPS_MIN: 4,
+    GOAL_TARGET_NPS_MAX: 40,
 } as const
 
 /** Mirrors the server's AI_GAUGE_NAMES (pinned by the contract test), named for the screen. */
@@ -366,6 +384,120 @@ export const AI_COMPARE_REASON_LABEL = {
 export const AI_SCORE_ID_PATTERN = /^[A-Za-z0-9_-]{1,36}$/
 
 export const isAiScoreId = (value: string) => AI_SCORE_ID_PATTERN.test(value)
+
+/** The hub search parameters: the tab, and the weakness key a tab opens with (the practice folder's weakness source). */
+export const AI_HUB_PARAM = { TAB: 'tab', FOCUS: 'focus' } as const
+
+/** A hub tab, opened on one weakness key when one is given. */
+export const aiHubHref = (tab: AiHubTab, focusKey?: string) => {
+    const params = new URLSearchParams({ [AI_HUB_PARAM.TAB]: tab })
+    if (focusKey) params.set(AI_HUB_PARAM.FOCUS, focusKey)
+    return `/ai?${params.toString()}`
+}
+
+/** Mirrors the server's WEAKNESS_KINDS (pinned by the contract test): what a weakness key names. */
+export const AI_WEAKNESS_KINDS = [
+    'tag',
+    'solo',
+    'combo',
+    'lane',
+    'hand',
+    'timing',
+    'bpm',
+    'soflan',
+    'fatigue',
+    'density',
+    'bp_context',
+    'gauge_context',
+] as const
+export type AiWeaknessKind = (typeof AI_WEAKNESS_KINDS)[number]
+
+/** Mirrors the server's COMBO_TAGS (pinned by the contract test): the tags of the tag pair grid, in its order. */
+export const AI_COMBO_TAGS = [
+    'chord_2',
+    'chord_3',
+    'chord_4plus',
+    'jack',
+    'trill',
+    'stair',
+    'stream',
+    'scratch_chord',
+    'scratch_mixed',
+    'with_scratch',
+    'scratch_run',
+    'ln_hold_hit',
+    'ln_release_then_hit',
+    'soflan',
+    'dense',
+] as const satisfies readonly AiPatternTag[]
+
+/** Mirrors the server's HAND_KEYS and SP7_LANE_NAMES (pinned by the contract test). */
+export const AI_HAND_KEYS = ['left', 'shared', 'right', 'scratch'] as const
+export const AI_LANE_NAMES = ['1', '2', '3', '4', '5', '6', '7', 'S'] as const
+
+/** Mirrors the server's SOFLAN_KEY_PHASES and DENSITY_KEY_PARTS (pinned by the contract test). */
+export const AI_SOFLAN_PHASES = ['after', 'settled'] as const
+export const AI_DENSITY_PARTS = ['limit', 'sustained'] as const
+
+/** Mirrors the server's PROFILE_SAMPLE_LEVELS (pinned by the contract test). */
+export const AI_PROFILE_SAMPLE_LEVELS = ['high', 'medium', 'low', 'insufficient'] as const satisfies readonly AiProfileSampleLevel[]
+
+const WEAKNESS_KEY_SEPARATOR = ':'
+const WEAKNESS_COMBO_SEPARATOR = '+'
+const FATIGUE_WEAKNESS_KEY = 'fatigue'
+
+const isAiWeaknessKind = (value: string): value is AiWeaknessKind => AI_WEAKNESS_KINDS.some((kind) => kind === value)
+
+/** A weakness key's kind and what follows it (two tags for a pair), or null for a key outside the grammar. The server checks the key itself. */
+export const splitAiWeaknessKey = (key: string) => {
+    if (key === FATIGUE_WEAKNESS_KEY) return { kind: 'fatigue' as const, parts: [] as string[] }
+    const separator = key.indexOf(WEAKNESS_KEY_SEPARATOR)
+    const kind = key.slice(0, separator)
+    if (separator < 0 || !isAiWeaknessKind(kind)) return null
+    const argument = key.slice(separator + 1)
+    return { kind, parts: kind === 'combo' ? argument.split(WEAKNESS_COMBO_SEPARATOR) : [argument] }
+}
+
+/** The key of a tag pair, the earlier tag of the grid first (the server's comboKeyOf). */
+export const aiComboKeyOf = (first: string, second: string) => `combo:${first}${WEAKNESS_COMBO_SEPARATOR}${second}`
+
+/** The weakness kinds a residual goal can aim at (the server's RESIDUAL_GOAL_KINDS): an EX ratio difference, not ms or a lift. */
+export const AI_RESIDUAL_GOAL_KINDS = [
+    'tag',
+    'solo',
+    'combo',
+    'lane',
+    'hand',
+    'bpm',
+    'soflan',
+    'fatigue',
+    'density',
+] as const satisfies readonly AiWeaknessKind[]
+export const AI_DENSITY_LIMIT_KEY = 'density:limit'
+
+/** Whether a residual goal can aim at this weakness key: its value is an EX ratio difference (the density limit is a goal of its own). */
+export const isAiResidualGoalKey = (key: string) => {
+    const split = splitAiWeaknessKey(key)
+    return split !== null && key !== AI_DENSITY_LIMIT_KEY && AI_RESIDUAL_GOAL_KINDS.some((kind) => kind === split.kind)
+}
+
+const SIGNED_DECIMALS = 1
+const LIFT_DECIMALS = 2
+
+const signedText = (value: number, decimals: number) => `${value > 0 ? '+' : ''}${value.toFixed(decimals)}`
+
+/**
+ * A profile value as the screen writes it: an EX ratio difference in percentage points, a timing in ms, a density in notes per
+ * second, and a failure or gauge-drop context as its lift (how many times more often than among all notes).
+ */
+export const formatAiWeaknessValue = (key: string, unit: string, value: number | null) => {
+    if (value === null) return '—'
+    const kind = splitAiWeaknessKey(key)?.kind
+    if (kind === 'bp_context' || kind === 'gauge_context') return `×${value.toFixed(LIFT_DECIMALS)}`
+    if (unit === 'ms') return `${signedText(value, SIGNED_DECIMALS)} ms`
+    if (unit === 'nps') return `${value} NPS`
+    return `${signedText(value * PERCENT_SCALE, SIGNED_DECIMALS)}%p`
+}
 
 /** The coach page of one own play. */
 export const aiPlayHref = (scoreId: string) => `/ai/plays/${encodeURIComponent(scoreId)}`

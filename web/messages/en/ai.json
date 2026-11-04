@@ -18,7 +18,15 @@
         "otherGaugesLabel": "If you had used another gauge",
         "aiLabel": "AI coach",
         "diagnosisLabel": "Segment diagnoses",
-        "nextTry": "Next play: {text}"
+        "nextTry": "Next play: {text}",
+        "bpRunHint": "A small triangle over a bar marks a segment where a BAD/POOR run starts.",
+        "selectedPeakNps": "Peak density in this segment {nps} NPS",
+        "bpRunsLabel": "BAD/POOR runs",
+        "bpRunRow": "{from} to {to}: {length, number} notes in a row · density at start {nps} NPS · {recovery} notes to recover",
+        "precedingTags": "patterns before {tags}",
+        "dropContextsLabel": "Right before gauge drops",
+        "dropContextRow": "{from} to {to}: BP {bp, number} · mean density {nps} NPS",
+        "profileKeys": "Your weaknesses that share this play's problem segments: {keys}"
     },
     "compare": {
         "title": "Best and rival comparison",
@@ -36,7 +44,9 @@
         "segmentsLabel": "EX difference per segment",
         "segmentLine": "{id}: EX {ex} · BP {bp} · Cumulative {cumulative}",
         "aiLabel": "AI comparison reading",
-        "gapsLabel": "Difference explanations"
+        "gapsLabel": "Difference explanations",
+        "segmentPeakNps": "peak density {nps} NPS",
+        "segmentMeanError": "this play's mean error {ms} ms"
     },
     "gaugeAdvice": {
         "title": "Gauge and option advice",
@@ -52,7 +62,9 @@
         "optionRow": "{option} {plays, plural, one {# play} other {# plays}} · EX {exRatio}",
         "scoreRows": "Score records: {rows}",
         "aiLabel": "AI gauge and option advice",
-        "adviceLabel": "Gauge advice"
+        "adviceLabel": "Gauge advice",
+        "dropContextsLabel": "Gauge drop context",
+        "dropNps": "Mean density where the gauge dropped {drop} NPS (overall {overall} NPS)"
     },
     "goal": {
         "title": "Goal plan",
@@ -67,7 +79,8 @@
         "openPlan": "Show plan",
         "archive": "Archive",
         "progressLabel": "{label} progress",
-        "progressText": "{achieved} / {target} · Updated in the last 4 weeks: {updates, plural, one {# song} other {# songs}}"
+        "progressText": "{achieved} / {target} · Updated in the last 4 weeks: {updates, plural, one {# song} other {# songs}}",
+        "profileProgressText": "Now {current} · start {baseline} · target {target} · updated in the last 4 weeks {updates, number}"
     },
     "goalPlan": {
         "loading": "Loading goal plan",
@@ -109,7 +122,10 @@
         "aiLabel": "AI judgement habit reading",
         "aiOffset": "Offset ({direction}): {reasoning}",
         "aiGreen": "GREEN NUMBER ({direction}): {reasoning}",
-        "notesLabel": "Judgement notes"
+        "notesLabel": "Judgement notes",
+        "tagTimingLabel": "Timing by pattern",
+        "tagTimingNote": "Patterns your weakness profile (last 90 days) finds clearly earlier or later than your mean. JUDGE OFFSET moves every note alike, so it cannot fix these.",
+        "handTimingLabel": "Mean error by hand"
     },
     "playDetail": {
         "title": "Play coach",
@@ -121,7 +137,8 @@
         "tagLabel": "Pattern to practice",
         "source": {
             "recommend": "Next challenge candidates",
-            "tag": "Pattern tag"
+            "tag": "Pattern tag",
+            "weakness": "Weakness profile"
         },
         "loading": "Calculating practice candidates",
         "loadError": "Could not load the practice candidates",
@@ -130,7 +147,9 @@
         "aiLabel": "AI practice folder preview",
         "previewLabel": "Preview songs",
         "create": "Create a folder from this preview",
-        "openFolder": "Open the created folder"
+        "openFolder": "Open the created folder",
+        "weaknessLabel": "Weakness to practise",
+        "weaknessEmpty": "No weakness can pick charts yet. Once the weakness profile lists a pattern, density, BPM or soflan weakness, you can pick it."
     },
     "readyGate": {
         "loading": "Loading AI settings",
@@ -148,7 +167,9 @@
         "coverageStale": "The server picks candidates by level and lamp. Candidates with per-song patterns: {withFeatures, number}/{candidates, plural, one {# song} other {# songs}} (of which {stale, plural, one {# song is} other {# songs are}} still on values from an older analysis version, before recalculation). Pattern tags are based on the original layout with options off.",
         "candidatesLabel": "Recommended candidates",
         "aiLabel": "AI recommendation reading",
-        "picksLabel": "Order picked by the AI"
+        "picksLabel": "Order picked by the AI",
+        "profileKeys": "Your weaknesses counted in the score: {keys}",
+        "focusKey": "trains {name}"
     },
     "report": {
         "title": "Player report",
@@ -172,7 +193,8 @@
         "weaknesses": "Weaknesses",
         "habits": "Habits",
         "practiceLabel": "What to practice",
-        "caveatsLabel": "Limitations"
+        "caveatsLabel": "Limitations",
+        "profileKeysLabel": "Weaknesses the report rests on"
     },
     "weekly": {
         "title": "Weekly growth summary",
@@ -199,7 +221,11 @@
         "untitled": "Untitled",
         "aiLabel": "AI weekly summary",
         "highlightsLabel": "Highlights of this week",
-        "nextWeekNote": "Next week: {text}"
+        "nextWeekNote": "Next week: {text}",
+        "training": "Training charts: made this week {created, number} · training chart plays {plays, number} ({charts, number} charts)",
+        "focusCaption": "Weekly change of the top 3 weaknesses",
+        "focusHeader": "Weakness",
+        "profileHeader": "90-day profile"
     },
     "recordQuery": {
         "title": "Ask your records",
@@ -231,7 +257,12 @@
         },
         "limitLabel": "Maximum rows",
         "run": "Run again with these conditions",
-        "footnote": "Running again does not call the AI. The maximum rows are adjusted to between {min} and {max}."
+        "footnote": "Running again does not call the AI. The maximum rows are adjusted to between {min} and {max}.",
+        "valuePick": "Pick a value",
+        "trainingValue": {
+            "true": "Training charts only",
+            "false": "No training charts"
+        }
     },
     "recordQueryResults": {
         "regionLabel": "Question results",

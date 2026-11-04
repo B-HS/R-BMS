@@ -5,13 +5,14 @@ import { useTranslations } from 'next-intl'
 import { AiDataNotice } from '@features/ai/ai-data-notice'
 import { AiInsightList } from '@features/ai/ai-insight-list'
 import { AiInterpretSection } from '@features/ai/ai-interpret-section'
+import { AiTagTimingChart } from '@features/ai/ai-tag-timing-chart'
 import { PanelCard } from '@features/shell/panel-card'
 import { LoadErrorState } from '@features/state/load-error-state'
 import { PanelSkeleton } from '@features/state/panel-skeleton'
 import { Badge } from '@shared/ui/badge'
 import { PERCENT_SCALE } from '@shared/constants/ui'
 import { formatCount } from '@shared/lib/format'
-import { useAiJudgeHabit, useInterpretAiJudgeHabit } from '@entities/ai.query'
+import { useAiJudgeHabit, useAiWeaknessLabel, useInterpretAiJudgeHabit } from '@entities/ai.query'
 import { AI_EVIDENCE_LABEL, AI_GREEN_DIRECTION_LABEL, AI_OFFSET_DIRECTION_LABEL } from '@entities/ai.type'
 
 const MISSING = '—'
@@ -23,9 +24,24 @@ export const AiJudgeHabitPanel: FC = () => {
     const t = useTranslations('ai.judgeHabit')
     const habit = useAiJudgeHabit()
     const interpret = useInterpretAiJudgeHabit()
+    const weaknessLabel = useAiWeaknessLabel()
 
     const view = habit.data
     const ai = interpret.data ?? view?.ai ?? null
+    const tagTimingRows = (view?.tag_timing ?? []).map((row) => ({
+        key: row.key,
+        label: weaknessLabel(`tag:${row.tag}`),
+        deviationMs: row.deviation_ms ?? 0,
+        sdMs: row.sd_ms,
+        fastShare: row.fast_share,
+    }))
+    const handTimingRows = (view?.hand_timing ?? []).map((row) => ({
+        key: row.key,
+        label: weaknessLabel(`hand:${row.hand}`),
+        deviationMs: row.mean_ms,
+        sdMs: row.sd_ms,
+        fastShare: row.fast_share,
+    }))
 
     const formatGreen = (value: { green: number; lane_ms: number; is_estimated?: boolean } | null) =>
         value ? t(value.is_estimated ? 'greenEstimated' : 'green', { green: value.green, laneMs: value.lane_ms }) : MISSING
@@ -91,6 +107,19 @@ export const AiJudgeHabitPanel: FC = () => {
                         )}
                         <p className='text-muted-foreground'>{t(view.offset.source === 'trace' ? 'offsetFromTrace' : 'offsetFromScores')}</p>
                     </section>
+                    {tagTimingRows.length > 0 && (
+                        <section aria-label={t('tagTimingLabel')} className='flex flex-col gap-1'>
+                            <h3 className='text-xs font-medium'>{t('tagTimingLabel')}</h3>
+                            <p className='text-muted-foreground text-xs break-keep'>{t('tagTimingNote')}</p>
+                            <AiTagTimingChart label={t('tagTimingLabel')} rows={tagTimingRows} />
+                        </section>
+                    )}
+                    {handTimingRows.length > 0 && (
+                        <section aria-label={t('handTimingLabel')} className='flex flex-col gap-1'>
+                            <h3 className='text-xs font-medium'>{t('handTimingLabel')}</h3>
+                            <AiTagTimingChart label={t('handTimingLabel')} rows={handTimingRows} />
+                        </section>
+                    )}
                     <section aria-label={t('avgjudgeLabel')} className='text-xs tabular-nums'>
                         {t('avgjudge', { older: view.avgjudge.older_ms ?? MISSING, newer: view.avgjudge.newer_ms ?? MISSING })}{' '}
                         <Badge variant='outline'>{AI_EVIDENCE_LABEL[view.avgjudge.grade]}</Badge>

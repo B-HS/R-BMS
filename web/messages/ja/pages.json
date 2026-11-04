@@ -235,7 +235,8 @@
             "traced_plays": "判定データ(新しいクライアントでプレーした回のノート単位の記録。レポートは7KEYS SPのプレーのみ)が5回未満です。あと何回かプレーしてから、もう一度開いてください。",
             "play_trace": "このプレーには判定データがありません(古いクライアントでプレーしたか、アップロードをオフにしたプレー)。スコア記録のみ表示されます。",
             "play_metrics": "このプレーは7KEYS SPのプレーではないため、区間分析がありません。",
-            "comparable_play": "区間を比べられるプレーがありません。判定の合計のみ比較します。"
+            "comparable_play": "区間を比べられるプレーがありません。判定の合計のみ比較します。",
+            "weakness_profile": "この弱点は弱点プロフィールにありません。判定データのあるプレーを増やし、弱点プロフィールに出た弱点から選び直してください。"
         },
         "failureNotice": {
             "title": "AI呼び出しに失敗しました",
@@ -279,7 +280,8 @@
             "billing": "AI呼び出しは自分で要求したときだけ行われ、費用は自分のプロバイダーアカウントに請求されます。プロバイダーのコンソールで支出上限を設定することをおすすめします。"
         },
         "segmentChart": {
-            "bpBySegment": "区間別BP"
+            "bpBySegment": "区間別BP",
+            "bpRunStart": "BAD・POOR 連続の始まり"
         },
         "setup": {
             "no_key": {
@@ -321,7 +323,11 @@
                 "ex_rate_on_chart": "1曲のEX率",
                 "weakness_residual": "弱点の残差を上げる",
                 "density_limit": "密度限界(NPS)を上げる"
-            }
+            },
+            "weaknessKey": "弱点",
+            "targetResidual": "目標の残差(%p、{min}~{max})",
+            "targetNps": "目標の密度限界(NPS、{min}~{max})",
+            "noWeaknessKeys": "目標にできる弱点がまだありません。弱点プロフィールに EX で測る弱点が出ると選べます。"
         },
         "insightTone": {
             "strength": "強み",
@@ -337,6 +343,90 @@
         "practiceFolder": {
             "created": "練習フォルダ「{name}」を作成しました",
             "updated": "練習フォルダ「{name}」を更新しました"
+        },
+        "weaknessKind": {
+            "solo": "{tag} 単独",
+            "combo": "{first} + {second}",
+            "timing": "{tag} のタイミング",
+            "bp_context": "ミス連続直前の {tag}",
+            "gauge_context": "ゲージ急落中の {tag}",
+            "lane": "{lane}番レーン",
+            "laneScratch": "スクラッチレーン",
+            "hand": {
+                "left": "左手(1~3鍵)",
+                "shared": "4鍵",
+                "right": "右手(5~7鍵)",
+                "scratch": "スクラッチ"
+            },
+            "bpm": "BPM {band}",
+            "soflan": {
+                "after": "ソフラン直後",
+                "settled": "ソフラン後の安定区間"
+            },
+            "density": {
+                "limit": "密度限界",
+                "sustained": "持続密度"
+            },
+            "fatigue": "曲後半の体力"
+        },
+        "profile": {
+            "title": "弱点プロフィール",
+            "loading": "弱点プロフィールを計算中",
+            "loadError": "弱点プロフィールを読み込めませんでした",
+            "emptyTitle": "まだ分析されたプレーがありません",
+            "emptyDescription": "新しいクライアントで 7KEYS SP をプレーすると判定データがたまり、ここに苦手なパターンと耐えられない密度が表示されます。",
+            "intro": "直近 {days, number}日間の判定データがある 7KEYS のプレー {plays}回・譜面 {charts}個・ノーツ {notes}個から計算しました。AI は呼びません。",
+            "windowNotes": "SCRATCH AUTO のプレー {auto, number}回(密度・スクラッチの項目からは除外)・トレーニング譜面のプレー {training, number}回・再計算待ちの旧分析 {stale, number}回",
+            "trainingClusterNote": "トレーニング譜面のプレーは譜面が違っても一つのまとまりとして数えます。トレーニング譜面だけを多くプレーしても標本の譜面数は一つしか増えないため、トレーニングの効果は通常の譜面のプレーで確かめられます。",
+            "densityTitle": "密度限界",
+            "densityInsufficient": "密度の区間ごとのノーツと譜面が足りず、密度限界を描けません。",
+            "densitySummary": "快適な密度 {comfort}・EX 限界 {limitEx}・BP 限界 {limitBp}",
+            "densitySeen": "プレーした最も高い密度の区間 {maxSeen}・2秒の最高密度 {peak}・基準 EX {baseline}",
+            "noCeiling": "これまでプレーした密度では EX が限界まで下がっていません。より密度の高い譜面をプレーすると限界が見えます。",
+            "sustained": "同じ密度で続く区間 − 短く集中する区間の EX {value}",
+            "densityChartLabel": "密度別の EX 率グラフ。快適な密度 {comfort}、EX 限界 {limitEx}、BP 限界 {limitBp}、プレーした最も高い密度 {maxSeen}。",
+            "none": "なし",
+            "npsValue": "{nps} NPS",
+            "chart": {
+                "comfort": "快適",
+                "limitEx": "EX 限界",
+                "limitBp": "BP 限界"
+            },
+            "weaknessesTitle": "弱点",
+            "weaknessesEmpty": "根拠が十分な弱点はまだありません。プレーが増えると検定を通った弱点がここに出ます。",
+            "strengthsTitle": "強み",
+            "tagsTitle": "パターン別の残差",
+            "timingTitle": "パターン別のタイミング(自分の平均との差)",
+            "comboTitle": "パターンの組み合わせ",
+            "comboHint": "二つのパターンが一緒に出るときに EX を失う度合いです。濃いほど多く失い、太い枠は根拠が十分な弱点です。空のマスは標本が足りない組み合わせです。",
+            "comboCaption": "パターンの組み合わせ別の EX 残差",
+            "comboCell": "{first} + {second}: {value}、{evidence}",
+            "handTitle": "手・レーンのバランス",
+            "handsLabel": "手別",
+            "lanesLabel": "レーン別",
+            "handRow": "EX {residual}・BP {bp}・平均誤差 {timing}",
+            "contextTitle": "崩れる文脈",
+            "contextEmpty": "目立つパターンはありません。",
+            "contextNotes": "ノーツ {notes}個",
+            "bpRunsLine": "譜面ごとの最長 BAD・POOR 連続の平均 {longest}・立て直すまでのノーツの中央値 {recovery}",
+            "gaugeLine": "1プレーあたりのゲージ急落 {drops}回・急落区間の平均密度 {dropNps} NPS(全体 {overallNps} NPS)",
+            "bpContextLabel": "BAD・POOR 連続直前のパターン",
+            "gaugeContextLabel": "ゲージ急落中のパターン",
+            "soflanLine": "ソフラン {events}回のうち HI-SPEED を合わせた割合 {share}",
+            "fatigueLine": "曲後半の体力 {value}",
+            "sampleLevel": {
+                "high": "標本 多い",
+                "medium": "標本 普通",
+                "low": "標本 少ない",
+                "insufficient": "標本不足"
+            },
+            "itemSample": "ノーツ {notes}・譜面 {charts}・{plays}回",
+            "trend": "直近30日 {delta}",
+            "folderLink": "練習フォルダ",
+            "folderLinkLabel": "{name} の練習フォルダを作る",
+            "trainingLink": "トレーニング譜面",
+            "trainingLinkLabel": "{name} のトレーニング譜面を作る",
+            "timingRow": "{deviation}(±{sd} ms、FAST {fast}%)"
         }
     },
     "folder": {

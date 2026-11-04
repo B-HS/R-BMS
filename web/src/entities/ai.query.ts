@@ -6,7 +6,7 @@ import { buildApiUrl, fetchEnvelope, fetchNoContent } from '@shared/lib/fetch'
 import type {
     AiCredential,
     AiGoal,
-    AiGoalParams,
+    AiGoalInput,
     AiGoalPlanView,
     AiJudgeHabitView,
     AiModel,
@@ -30,7 +30,9 @@ import type {
     AiGaugeAdviceView,
     AiReportView,
     AiShareSetting,
+    AiWeaknessProfile,
 } from '@entities/ai.type'
+import { AI_DENSITY_PARTS, AI_HAND_KEYS, AI_LANE_NAMES, AI_SOFLAN_PHASES, isAiPatternTag, splitAiWeaknessKey } from '@entities/ai.type'
 
 const MODEL_LIST_STALE_TIME_MS = 300_000
 const JSON_HEADERS = { 'content-type': 'application/json' }
@@ -208,6 +210,7 @@ const AI_FEATURE_PATH = {
     JUDGE_HABIT: '/fe/me/ai/judge-habit',
     REPORT: '/fe/me/ai/report',
     GAUGE_ADVICE: '/fe/me/ai/gauge-advice',
+    PROFILE: '/fe/me/ai/profile',
     SHARING: '/fe/me/traces/sharing',
 } as const
 
@@ -275,6 +278,13 @@ export const aiGaugeAdviceQueryOptions = () =>
         queryFn: () => fetchEnvelope<AiGaugeAdviceView>(buildApiUrl(AI_FEATURE_PATH.GAUGE_ADVICE)),
     })
 
+/** The weakness profile (plan 2026-11-04 2.5.6): computed by the server from the analysed plays, with no AI call. */
+export const aiProfileQueryOptions = () =>
+    queryOptions({
+        queryKey: QUERY_KEY.AI.PROFILE,
+        queryFn: () => fetchEnvelope<AiWeaknessProfile>(buildApiUrl(AI_FEATURE_PATH.PROFILE)),
+    })
+
 export const aiShareSettingQueryOptions = () =>
     queryOptions({
         queryKey: QUERY_KEY.AI.SHARING,
@@ -296,9 +306,38 @@ export const useAiGaugeAdvice = () => useQuery(aiGaugeAdviceQueryOptions())
 
 export const useAiShareSetting = () => useQuery(aiShareSettingQueryOptions())
 
+export const useAiProfile = (enabled = true) => useQuery({ ...aiProfileQueryOptions(), enabled })
+
+const isOneOf = <T extends string>(values: readonly T[], value: string | undefined): value is T => values.some((entry) => entry === value)
+const SCRATCH_LANE = AI_LANE_NAMES[AI_LANE_NAMES.length - 1]
+
+/** Names a weakness key for the screen (`tag:trill` → 트릴, `combo:a+b` → a + b); a key outside the grammar is shown as it is. */
+export const useAiWeaknessLabel = () => {
+    const t = useTranslations('pages.ai')
+    const tagName = (tag: string | undefined) => (tag !== undefined && isAiPatternTag(tag) ? t(`patternTag.${tag}`) : (tag ?? ''))
+
+    return (key: string) => {
+        const split = splitAiWeaknessKey(key)
+        if (!split) return key
+        const [first, second] = split.parts
+        if (split.kind === 'tag') return tagName(first)
+        if (split.kind === 'solo') return t('weaknessKind.solo', { tag: tagName(first) })
+        if (split.kind === 'combo') return t('weaknessKind.combo', { first: tagName(first), second: tagName(second) })
+        if (split.kind === 'timing') return t('weaknessKind.timing', { tag: tagName(first) })
+        if (split.kind === 'bp_context') return t('weaknessKind.bp_context', { tag: tagName(first) })
+        if (split.kind === 'gauge_context') return t('weaknessKind.gauge_context', { tag: tagName(first) })
+        if (split.kind === 'lane') return first === SCRATCH_LANE ? t('weaknessKind.laneScratch') : t('weaknessKind.lane', { lane: first ?? '' })
+        if (split.kind === 'hand') return isOneOf(AI_HAND_KEYS, first) ? t(`weaknessKind.hand.${first}`) : key
+        if (split.kind === 'bpm') return t('weaknessKind.bpm', { band: first ?? '' })
+        if (split.kind === 'soflan') return isOneOf(AI_SOFLAN_PHASES, first) ? t(`weaknessKind.soflan.${first}`) : key
+        if (split.kind === 'density') return isOneOf(AI_DENSITY_PARTS, first) ? t(`weaknessKind.density.${first}`) : key
+        return t('weaknessKind.fatigue')
+    }
+}
+
 export const useAiRecommend = (tableId: string | null) => useQuery(aiRecommendQueryOptions(tableId))
 
-export const useAiPracticeFolder = (source: AiPracticeSourceInput) => useQuery(aiPracticeFolderQueryOptions(source))
+export const useAiPracticeFolder = (source: AiPracticeSourceInput, enabled = true) => useQuery({ ...aiPracticeFolderQueryOptions(source), enabled })
 
 export const useAiGoalList = () => useQuery(aiGoalListQueryOptions())
 
@@ -426,7 +465,7 @@ export const useCreateAiPracticeFolder = () => {
 export const useCreateAiGoal = () => {
     const queryClient = useQueryClient()
     return useMutation({
-        mutationFn: (input: AiGoalParams) =>
+        mutationFn: (input: AiGoalInput) =>
             fetchEnvelope<AiGoal>(buildApiUrl(AI_FEATURE_PATH.GOALS), { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(input) }),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY.AI.GOALS }),
     })

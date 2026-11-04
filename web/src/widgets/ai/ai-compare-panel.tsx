@@ -107,6 +107,10 @@ export const AiComparePanel: FC<{ scoreId: string }> = ({ scoreId }) => {
                                             bp: signed(segment.bp_diff),
                                             cumulative: signed(segment.cumulative_ex_diff),
                                         })}
+                                        {segment.peak_nps !== undefined && ` · ${t('segmentPeakNps', { nps: segment.peak_nps })}`}
+                                        {segment.mean_err_ms !== undefined &&
+                                            segment.mean_err_ms !== null &&
+                                            ` · ${t('segmentMeanError', { ms: `${segment.mean_err_ms > 0 ? '+' : ''}${segment.mean_err_ms}` })}`}
                                         {segment.top_tags.length > 0 && ` · ${segment.top_tags.map((tag) => aiPatternTagLabel(tag.tag)).join(', ')}`}
                                     </li>
                                 ))}

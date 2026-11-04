@@ -11,27 +11,49 @@ import { LoadErrorState } from '@features/state/load-error-state'
 import { PanelSkeleton } from '@features/state/panel-skeleton'
 import { Button } from '@shared/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/ui/select'
+import { ApiError } from '@shared/lib/fetch'
 import { formatCount } from '@shared/lib/format'
-import { useAiPracticeFolder, useCreateAiPracticeFolder, usePreviewAiPracticeFolder } from '@entities/ai.query'
+import { useAiPracticeFolder, useAiProfile, useAiWeaknessLabel, useCreateAiPracticeFolder, usePreviewAiPracticeFolder } from '@entities/ai.query'
 import { AI_PATTERN_TAG_LABEL, AI_SCORE_FEATURE_FORM_LIMIT, isAiPatternTag, type AiPatternTag, type AiPracticeSourceInput } from '@entities/ai.type'
 
-const SOURCES = ['recommend', 'tag'] as const
+const SOURCES = ['recommend', 'tag', 'weakness'] as const
 type PanelSource = (typeof SOURCES)[number]
 
 const isPanelSource = (value: string): value is PanelSource => SOURCES.some((source) => source === value)
 const TAGS = Object.keys(AI_PATTERN_TAG_LABEL).filter(isAiPatternTag)
 const DEFAULT_TAG = 'trill' satisfies AiPatternTag
 
-export const AiPracticeFolderPanel: FC = () => {
-    const [source, setSource] = useState<PanelSource>('recommend')
+const needOf = (error: unknown) => {
+    const need = error instanceof ApiError ? error.details?.need : undefined
+    return typeof need === 'string' ? need : null
+}
+
+/**
+ * Feature 6: a practice folder from the next challenge candidates, one pattern tag, or one weakness of the profile (`initialFocusKey`
+ * opens it on that weakness, as the profile's links do). The candidates come from the server; the AI only orders them on a press.
+ */
+export const AiPracticeFolderPanel: FC<{ initialFocusKey?: string | null }> = ({ initialFocusKey = null }) => {
+    const [source, setSource] = useState<PanelSource>(initialFocusKey ? 'weakness' : 'recommend')
     const [tag, setTag] = useState<AiPatternTag>(DEFAULT_TAG)
+    const [pickedFocusKey, setPickedFocusKey] = useState<string | null>(initialFocusKey)
 
     const t = useTranslations('ai.practiceFolder')
-    const input: AiPracticeSourceInput = source === 'tag' ? { source, tag } : { source }
-    const practice = useAiPracticeFolder(input)
+    const weaknessLabel = useAiWeaknessLabel()
+    const profile = useAiProfile(source === 'weakness')
+    const focusKeys = (profile.data?.weaknesses ?? []).filter((item) => item.selectable_for_folder).map((item) => item.key)
+    const shownFocusKeys = pickedFocusKey && !focusKeys.includes(pickedFocusKey) ? [pickedFocusKey, ...focusKeys] : focusKeys
+    const focusKey = pickedFocusKey ?? focusKeys[0] ?? null
+    const input: AiPracticeSourceInput = {
+        source,
+        ...(source === 'tag' ? { tag } : {}),
+        ...(source === 'weakness' && focusKey ? { focus_key: focusKey } : {}),
+    }
+    const isWaitingForKey = source === 'weakness' && focusKey === null
+    const practice = useAiPracticeFolder(input, !isWaitingForKey)
     const preview = usePreviewAiPracticeFolder()
     const create = useCreateAiPracticeFolder()
 
+    const errorNeed = needOf(practice.error)
     const view = practice.data
     const previewData = preview.data ?? view?.ai ?? null
     const byMd5 = new Map((view?.candidates ?? []).map((candidate) => [candidate.md5, candidate]))
@@ -81,9 +103,36 @@ export const AiPracticeFolderPanel: FC = () => {
                         </SelectContent>
                     </Select>
                 )}
+                {source === 'weakness' && focusKey !== null && (
+                    <Select
+                        value={focusKey}
+                        onValueChange={(value) => {
+                            setPickedFocusKey(value)
+                            preview.reset()
+                        }}>
+                        <SelectTrigger size='sm' className='w-52' aria-label={t('weaknessLabel')}>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {shownFocusKeys.map((value) => (
+                                <SelectItem key={value} value={value}>
+                                    {weaknessLabel(value)}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
             </div>
-            {practice.isPending && <PanelSkeleton label={t('loading')} />}
-            {practice.isError && <LoadErrorState title={t('loadError')} isRetrying={practice.isFetching} onRetry={() => void practice.refetch()} />}
+            {isWaitingForKey && profile.isPending && <PanelSkeleton label={t('loading')} />}
+            {isWaitingForKey && profile.isError && (
+                <LoadErrorState title={t('loadError')} isRetrying={profile.isFetching} onRetry={() => void profile.refetch()} />
+            )}
+            {isWaitingForKey && profile.data && <p className='text-muted-foreground text-xs break-keep'>{t('weaknessEmpty')}</p>}
+            {!isWaitingForKey && practice.isPending && <PanelSkeleton label={t('loading')} />}
+            {practice.isError && errorNeed && <AiDataNotice need={errorNeed} />}
+            {practice.isError && !errorNeed && (
+                <LoadErrorState title={t('loadError')} isRetrying={practice.isFetching} onRetry={() => void practice.refetch()} />
+            )}
             {view && (
                 <>
                     <p className='text-muted-foreground text-xs'>
