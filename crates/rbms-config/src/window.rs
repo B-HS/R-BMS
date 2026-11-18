@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serializer};
 pub const WINDOW_RESOLUTION_COUNT: usize = 5;
 
 /// How many window modes the WINDOW MODE row offers.
-pub const WINDOW_MODE_COUNT: usize = 2;
+pub const WINDOW_MODE_COUNT: usize = 3;
 
 /// The inner size the window opens at, in logical pixels. Every entry is 16:9, the proportion the
 /// built-in screens are laid out in.
@@ -61,30 +61,39 @@ impl WindowResolution {
     }
 }
 
-/// Whether the window is an ordinary window or covers the whole screen.
+/// Whether the window is an ordinary window or covers the whole screen, and how.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum WindowMode {
     #[default]
     Windowed,
     /// A decoration-free window over the whole monitor the window is on, with no video mode change.
     Borderless,
+    /// Exclusive full screen: the monitor the window is on is switched to the video mode nearest
+    /// the RESOLUTION row, at its highest refresh rate, and the window takes it alone.
+    Fullscreen,
 }
 
 impl WindowMode {
     /// Every mode, in the order the row steps through them.
-    pub const ALL: [WindowMode; WINDOW_MODE_COUNT] = [WindowMode::Windowed, WindowMode::Borderless];
+    pub const ALL: [WindowMode; WINDOW_MODE_COUNT] = [WindowMode::Windowed, WindowMode::Borderless, WindowMode::Fullscreen];
 
     /// Name the row shows.
     pub fn label(self) -> &'static str {
         match self {
             WindowMode::Windowed => "WINDOWED",
             WindowMode::Borderless => "BORDERLESS",
+            WindowMode::Fullscreen => "FULLSCREEN",
         }
     }
 
     /// Token the choice is stored under.
     pub fn token(self) -> &'static str {
         self.label()
+    }
+
+    /// Whether the window covers the whole monitor it is on, either way.
+    pub fn covers_the_monitor(self) -> bool {
+        self != WindowMode::Windowed
     }
 
     /// The mode a stored token names, falling back to the windowed one.
@@ -97,7 +106,7 @@ impl WindowMode {
 pub const WINDOW_RESOLUTION_LABELS: &[&str] = &["1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160"];
 
 /// Labels the WINDOW MODE row shows, one per entry of [`WindowMode::ALL`].
-pub const WINDOW_MODE_LABELS: &[&str] = &["WINDOWED", "BORDERLESS"];
+pub const WINDOW_MODE_LABELS: &[&str] = &["WINDOWED", "BORDERLESS", "FULLSCREEN"];
 
 /// Stores [`WindowResolution`] as its token.
 pub mod window_resolution_token {
@@ -152,6 +161,14 @@ mod tests {
         for entry in WindowMode::ALL {
             assert_eq!(WindowMode::from_token(entry.token()), entry);
         }
+    }
+
+    #[test]
+    fn the_row_steps_from_a_window_to_borderless_to_exclusive_full_screen() {
+        assert_eq!(WindowMode::ALL, [WindowMode::Windowed, WindowMode::Borderless, WindowMode::Fullscreen]);
+        assert_eq!(WINDOW_MODE_LABELS.len(), WINDOW_MODE_COUNT);
+        assert_eq!(WindowMode::from_token("fullscreen"), WindowMode::Fullscreen);
+        assert_eq!(WindowMode::ALL.map(WindowMode::covers_the_monitor), [false, true, true]);
     }
 
     #[test]

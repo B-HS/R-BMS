@@ -778,21 +778,21 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingTab::Display,
         "LETTERBOX",
         SettingKind::Toggle,
-        "Keep the skin's own aspect ratio inside the window; off stretches it to the window. A borderless window always keeps it",
+        "Keep the skin's own aspect ratio inside the window; off stretches it to the window. A borderless or full screen window always keeps it",
     ),
     row(
         SettingId::WindowResolution,
         SettingTab::Display,
         "RESOLUTION",
         SettingKind::Cycle { values: WINDOW_RESOLUTION_LABELS },
-        "Size of the window; a borderless window takes its monitor's size instead",
+        "Size of the window, or the video mode full screen asks for; a borderless window takes its monitor's size instead",
     ),
     row(
         SettingId::WindowMode,
         SettingTab::Display,
         "WINDOW MODE",
         SettingKind::Cycle { values: WINDOW_MODE_LABELS },
-        "An ordinary window or one covering the monitor",
+        "An ordinary window, one covering the monitor, or exclusive full screen",
     ),
     row(SettingId::Bga, SettingTab::Display, "BGA", SettingKind::Toggle, "Show the chart's background animation"),
     row(SettingId::DebugMode, SettingTab::Display, "DEBUG MODE", SettingKind::Toggle, "Draw the frame and audio counters"),
@@ -2182,6 +2182,10 @@ mod tests {
         assert_eq!(config.display.window_resolution, WindowResolution::UltraHd2160);
         assert_eq!(adjust(&mut config, SettingId::WindowMode, 1), AdjustOutcome::Changed);
         assert_eq!(display_value(&config, SettingId::WindowMode), "BORDERLESS");
+        assert_eq!(adjust(&mut config, SettingId::WindowMode, 1), AdjustOutcome::Changed);
+        assert_eq!(display_value(&config, SettingId::WindowMode), "FULLSCREEN");
+        assert_eq!(adjust(&mut config, SettingId::WindowMode, 1), AdjustOutcome::Changed, "the list wraps");
+        assert_eq!(config.display.window_mode, WindowMode::Windowed);
         assert_eq!(cycle_values(SettingId::WindowMode), WINDOW_MODE_LABELS);
     }
 

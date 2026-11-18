@@ -773,7 +773,7 @@ pub struct DisplayOptions {
     /// Inner size the window opens at, and is put back to when the mode returns to a window.
     #[serde(with = "crate::window::window_resolution_token")]
     pub window_resolution: WindowResolution,
-    /// Whether the window is an ordinary one or covers its whole monitor.
+    /// Whether the window is an ordinary one or covers its whole monitor, borderless or exclusive.
     #[serde(with = "crate::window::window_mode_token")]
     pub window_mode: WindowMode,
     /// Lay a five-key chart out on its own lane widths rather than on the seven-key ones.
@@ -808,10 +808,11 @@ impl Default for DisplayOptions {
 
 impl DisplayOptions {
     /// Whether the logical screen is fitted inside the window at its own proportions. A window that
-    /// covers a monitor takes the monitor's shape, which is not always 16:9, so it is always fitted;
-    /// an ordinary window follows the LETTERBOX row.
+    /// covers a monitor, borderless or in exclusive full screen, takes the shape of the monitor or of
+    /// the video mode it was given, which is not always 16:9, so it is always fitted; an ordinary
+    /// window follows the LETTERBOX row.
     pub fn fits_screen_shape(&self) -> bool {
-        self.letterbox || self.window_mode == WindowMode::Borderless
+        self.letterbox || self.window_mode.covers_the_monitor()
     }
 }
 

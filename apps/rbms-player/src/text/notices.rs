@@ -234,6 +234,11 @@ rbms_model::translations! {
             "글꼴 파일을 읽지 못했습니다 ({0}): {1}",
             "フォントを読み込めませんでした（{0}）: {1}",
         ),
+        FullscreenFellBackToBorderless => (
+            "FULLSCREEN cannot change the video mode here: the window covers the monitor as BORDERLESS instead",
+            "이 환경에서는 FULLSCREEN이 화면 모드를 바꿀 수 없어 창이 BORDERLESS로 모니터를 덮습니다",
+            "この環境ではFULLSCREENで画面モードを変えられないため、ウィンドウはBORDERLESSでモニターを覆います",
+        ),
         ReplayLoadFailed => (
             "replay load failed: {0}",
             "리플레이를 불러오지 못했습니다: {0}",
@@ -901,6 +906,11 @@ mod tests {
             (NoticeText::SettingsNotLoaded, vec![&"bad ron"], "settings not loaded (bad ron); running on defaults and leaving the file alone"),
             (NoticeText::FontNotFound, vec![&"f.ttf", &"no such file"], "font not found: f.ttf (no such file)"),
             (NoticeText::FontNotRead, vec![&"f.ttf", &"denied"], "font read failed (f.ttf): denied"),
+            (
+                NoticeText::FullscreenFellBackToBorderless,
+                vec![],
+                "FULLSCREEN cannot change the video mode here: the window covers the monitor as BORDERLESS instead",
+            ),
             (NoticeText::ReplayLoadFailed, vec![&"truncated"], "replay load failed: truncated"),
             (NoticeText::ChartNotFound, vec![&"a.bms", &"no such file"], "chart not found: a.bms (no such file)"),
             (NoticeText::ReplayNotSaved, vec![&"disk full", &"r.ron"], "replay not saved: disk full (r.ron)"),

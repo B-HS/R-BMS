@@ -88,19 +88,24 @@ rbms_model::translations! {
              各言語はその言語自身の表記で示します。スキンや譜面が提供する文字はそのままです。"
         ),
         WindowMode => (
-            "WINDOWED is an ordinary window of the size RESOLUTION names. BORDERLESS covers the whole monitor the window is on.",
-            "WINDOWED는 해상도 행이 정한 크기의 일반 창입니다. BORDERLESS는 창이 있는 모니터 전체를 덮습니다.",
-            "WINDOWEDは解像度で指定した大きさの通常のウィンドウです。BORDERLESSはウィンドウのあるモニター全体を覆います。"
+            "WINDOWED is an ordinary window of the size RESOLUTION names. BORDERLESS covers the monitor; on macOS it is the system's full screen, \
+             where Game Mode works. FULLSCREEN takes the monitor alone in the video mode nearest RESOLUTION at its highest refresh rate, \
+             or is BORDERLESS where it cannot.",
+            "WINDOWED는 해상도 행이 정한 크기의 일반 창입니다. BORDERLESS는 모니터 전체를 덮으며, macOS에서는 Game Mode가 동작하는 시스템 전체 화면입니다. \
+             FULLSCREEN은 해상도에 가장 가까운 화면 모드를 가장 높은 주사율로 독점하고, 그럴 수 없으면 BORDERLESS가 됩니다.",
+            "WINDOWEDは解像度で指定した大きさの通常のウィンドウです。BORDERLESSはモニター全体を覆い、macOSではGame Modeが働くシステムのフルスクリーンです。\
+             FULLSCREENは解像度に最も近い画面モードを最高のリフレッシュレートで占有し、できなければBORDERLESSになります。"
         ),
         WindowResolution => (
-            "The size of the window in WINDOWED mode. A BORDERLESS window takes the size of its monitor instead.",
-            "WINDOWED 모드에서 창의 크기입니다. BORDERLESS 창은 대신 모니터 크기를 따릅니다.",
-            "WINDOWEDモードでのウィンドウの大きさです。BORDERLESSのウィンドウは代わりにモニターの大きさになります。"
+            "The size of the window in WINDOWED mode, and the video mode FULLSCREEN asks the monitor for, or the nearest one it has. \
+             A BORDERLESS window takes the size of its monitor instead.",
+            "WINDOWED 모드에서 창의 크기이며, FULLSCREEN이 모니터에 요청하는 화면 모드입니다(없으면 가장 가까운 것). BORDERLESS 창은 대신 모니터 크기를 따릅니다.",
+            "WINDOWEDモードでのウィンドウの大きさで、FULLSCREENがモニターに求める画面モードです（なければ最も近いもの）。BORDERLESSのウィンドウは代わりにモニターの大きさになります。"
         ),
         Letterbox => (
-            "ON fits the screen inside the window at its own proportions. OFF stretches it to the window. A BORDERLESS window is always fitted.",
-            "ON이면 화면을 원래 비율로 창 안에 맞추고, OFF이면 창에 맞춰 늘립니다. BORDERLESS 창은 항상 비율을 유지합니다.",
-            "ONにすると画面を元の比率のままウィンドウ内に収め、OFFにするとウィンドウに合わせて引き伸ばします。BORDERLESSのウィンドウは常に比率を保ちます。"
+            "ON fits the screen inside the window at its own proportions. OFF stretches it to the window. A BORDERLESS or FULLSCREEN window is always fitted.",
+            "ON이면 화면을 원래 비율로 창 안에 맞추고, OFF이면 창에 맞춰 늘립니다. BORDERLESS·FULLSCREEN 창은 항상 비율을 유지합니다.",
+            "ONにすると画面を元の比率のままウィンドウ内に収め、OFFにするとウィンドウに合わせて引き伸ばします。BORDERLESS・FULLSCREENのウィンドウは常に比率を保ちます。"
         ),
         Font => (
             "The font the player writes its text with. Choose a TTF, OTF or TTC file; it is loaded at once and again at every start. \

@@ -915,6 +915,17 @@ fn a_borderless_window_is_always_fitted_to_its_shape() {
     display.letterbox = false;
     display.window_mode = WindowMode::Borderless;
     assert!(display.fits_screen_shape(), "a monitor that is not 16:9 would stretch the screen");
+    display.window_mode = WindowMode::Fullscreen;
+    assert!(display.fits_screen_shape(), "a video mode that is not 16:9 would stretch the screen");
+}
+
+#[test]
+fn exclusive_full_screen_is_stored_under_its_token() {
+    let mut c = Config::default();
+    c.display.window_mode = WindowMode::Fullscreen;
+    assert!(ron_of(&c).contains("\"FULLSCREEN\""));
+    let (config, _) = migrate(&format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, display: (window_mode: "FULLSCREEN"))"#)).expect("the token parses");
+    assert_eq!(config.display.window_mode, WindowMode::Fullscreen);
 }
 
 /// A skin is authored for one shape, so a fresh install keeps that shape inside an ordinary window
