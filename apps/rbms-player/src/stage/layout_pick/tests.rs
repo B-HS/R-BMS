@@ -10,7 +10,7 @@ use rbms_library::{Library, SongEntry};
 use super::*;
 use crate::App;
 use crate::borrowed_layout::BorrowedLayout;
-use crate::keyconfig::Shortcut;
+use crate::captured_layouts::{CAPTURED_LAYOUTS_FILE, CapturedLayouts, CapturedRun, RunKind};
 use crate::select_tree::SelectFolder;
 use crate::stage::render_tests::app;
 use crate::stage::select::tests::press;
@@ -48,6 +48,9 @@ fn with_chart(tag: &str, text: &str, mode: Mode, md5: Option<&str>) -> App {
     let own = decode_chart(text.as_bytes(), &path.to_string_lossy()).expect("a chart").md5;
     let mut app = app();
     app.shared.library = Library::from_songs(vec![entry(&path, mode, md5.map_or(own, str::to_string))]);
+    let captures = dir.join(CAPTURED_LAYOUTS_FILE);
+    let _ = std::fs::remove_file(&captures);
+    app.shared.captured_layouts = CapturedLayouts::load(&captures);
     app
 }
 
@@ -295,4 +298,258 @@ fn the_key_opens_the_screen_on_a_chart_and_not_on_a_folder() {
     app.shared.rebuild_select_items();
     assert_eq!(app.shared.focused_song_index(), Some(0));
     assert!(matches!(browser.handle_key(&mut ctx(&mut app), press(code)), Transition::Open(Stage::LayoutPick(_))));
+}
+
+/// A frame of the screen that was up for `dt_seconds`.
+fn frame(app: &mut App, state: &mut LayoutPickState, dt_seconds: f32) {
+    state.update(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: dt_seconds });
+}
+
+/// How long the frames of the clock test are up, in seconds and in the clock's microseconds.
+const HALF_A_SECOND: f32 = 0.5;
+const HALF_A_SECOND_US: i64 = 500_000;
+
+/// A frame long enough to run past the end of any chart of these tests.
+const PAST_THE_END: f32 = 60.0;
+
+/// The preview plays on the screen's own clock from the moment the chart is read: it moves on by
+/// the time each frame was up, stands still while stopped, moves by measures on the page keys, goes
+/// back to the top on Home, keeps its place when the rows are written again, and begins the chart
+/// again once it has run past its end.
+#[test]
+fn the_preview_plays_on_the_screens_clock_and_begins_again_at_the_end() {
+    let mut app = with_chart("clock", SEVEN_KEY_CHART, Mode::BEAT_7K, None);
+    let mut state = LayoutPickState::open(&app.shared, 0);
+    settle(&mut app, &mut state);
+    assert_eq!((state.clock().at_us(), state.clock().is_playing()), (0, true), "the preview did not open playing from the top");
+    frame(&mut app, &mut state, HALF_A_SECOND);
+    assert_eq!(state.clock().at_us(), HALF_A_SECOND_US);
+    key(&mut app, &mut state, KeyCode::Digit3);
+    assert_eq!(state.clock().at_us(), HALF_A_SECOND_US, "writing the rows moved the preview");
+    key(&mut app, &mut state, KeyCode::Space);
+    frame(&mut app, &mut state, HALF_A_SECOND);
+    assert_eq!((state.clock().at_us(), state.clock().is_playing()), (HALF_A_SECOND_US, false), "a stopped preview moved");
+    key(&mut app, &mut state, KeyCode::Space);
+    frame(&mut app, &mut state, HALF_A_SECOND);
+    assert_eq!(state.clock().at_us(), 2 * HALF_A_SECOND_US, "the preview did not play again");
+    let last = state.measures().len() - 1;
+    key(&mut app, &mut state, KeyCode::PageUp);
+    assert_eq!((state.measure(), state.clock().at_us()), (last, state.measures()[last]), "the page key did not go four measures on, to the last");
+    key(&mut app, &mut state, KeyCode::PageDown);
+    assert_eq!((state.measure(), state.clock().at_us()), (0, 0));
+    frame(&mut app, &mut state, HALF_A_SECOND);
+    key(&mut app, &mut state, KeyCode::Home);
+    assert_eq!(state.clock().at_us(), 0, "Home did not go back to the top");
+    frame(&mut app, &mut state, PAST_THE_END);
+    assert_eq!((state.clock().at_us(), state.clock().is_playing()), (0, true), "the preview did not begin the chart again");
+}
+
+/// The clock on its own: a frame of no time or of negative time leaves it, and the measures it
+/// moves by are counted from the one it is in.
+#[test]
+fn the_preview_clock_counts_frames_and_measures() {
+    let starts = [0, 1_000, 2_000, 3_000];
+    let mut clock = PreviewClock::default();
+    clock.advance(0.0, 10_000);
+    clock.advance(-1.0, 10_000);
+    assert_eq!(clock.at_us(), 0);
+    clock.seek(1_500);
+    assert_eq!(clock.measure(&starts), 1);
+    clock.move_measures(&starts, 1);
+    assert_eq!(clock.at_us(), 2_000);
+    clock.move_measures(&starts, -MEASURES_PER_PAGE);
+    assert_eq!(clock.at_us(), 0);
+    clock.seek(1_500);
+    clock.move_measures(&[], 1);
+    assert_eq!(clock.at_us(), 1_500, "a chart not read yet moved the clock");
+    clock.seek(-5);
+    assert_eq!(clock.at_us(), 0);
+    assert_eq!(clock::end_of(4_000), 4_000 + clock::END_TAIL_US);
+}
+
+/// A capture of the app's first chart laid out by `option` from `seed`, as a run of it by hand is
+/// captured.
+fn capture_of(app: &App, option: NoteOption, seed: u64) -> CapturedLayout {
+    let entry = &app.shared.library.songs()[0];
+    let run = CapturedRun { md5: &entry.md5, title: &entry.title, subtitle: "", mode: entry.mode, option, seed, ex_score: 100, lamp: "HARD" };
+    run.capture(RunKind::default()).expect("the run is captured")
+}
+
+/// Keep `capture` at `at_ms`.
+fn keep(app: &mut App, capture: CapturedLayout, at_ms: i64) {
+    app.shared.captured_layouts.keep(capture, at_ms);
+}
+
+/// A seed MIRROR is captured with: any seed lays MIRROR out the same, and a seed of zero is never
+/// one a run had.
+const MIRROR_SEED: u64 = 99;
+
+/// The seed RANDOM lays the seven-key chart out as `3517246` from.
+const SEED_3517246: u64 = 4761;
+
+/// The moments the captures of a test are kept at, the later one first in the list.
+const EARLIER_MS: i64 = 1_700_000_000_000;
+const LATER_MS: i64 = 1_700_000_060_000;
+
+/// An app with the seven-key chart and two captures of it: MIRROR, and later RANDOM as `3517246`.
+fn with_two_captures(tag: &str) -> App {
+    let mut app = with_chart(tag, SEVEN_KEY_CHART, Mode::BEAT_7K, None);
+    app.shared.config.play.autoplay = false;
+    let mirror = capture_of(&app, NoteOption::Mirror, MIRROR_SEED);
+    keep(&mut app, mirror, EARLIER_MS);
+    let random = capture_of(&app, NoteOption::Random, SEED_3517246);
+    keep(&mut app, random, LATER_MS);
+    app
+}
+
+/// The cursor on a capture of the chart writes the rows as it and lays the preview out so with no
+/// seed to look for, and the layout is played on the capture's own arrangement and seed.
+#[test]
+fn a_captured_layout_is_shown_and_played_on_its_own_arrangement_and_seed() {
+    let mut app = with_two_captures("captured");
+    let mut state = LayoutPickState::open(&app.shared, 0);
+    settle(&mut app, &mut state);
+    key(&mut app, &mut state, KeyCode::ArrowRight);
+    assert_eq!(rows_text(&state), ["3517246"], "the newest capture is not on the rows");
+    assert!(matches!(state.seed, SeedLook::Captured), "a seed was looked for a captured layout");
+    key(&mut app, &mut state, KeyCode::ArrowDown);
+    assert_eq!(rows_text(&state), ["7654321"]);
+    assert_eq!(state.status(Language::English), "PLAYED AS MIRROR, SEED 99 (CAPTURED)");
+    let started = key(&mut app, &mut state, KeyCode::Enter);
+    assert!(matches!(started, Transition::To(Stage::Loading(_) | Stage::Decide(_))), "the run did not take the screen's place");
+    let borrowed = app.shared.borrowed_layout().cloned();
+    assert_eq!(borrowed.map(|BorrowedLayout { random, seed, .. }| (random, seed)), Some((NoteOption::Mirror, MIRROR_SEED)));
+}
+
+/// A captured layout written over on the rows is the player's own pick again, looked for and played
+/// as RANDOM; typed back as it was, it is the capture's again.
+#[test]
+fn a_captured_layout_written_over_is_played_as_the_rows_are() {
+    let mut app = with_two_captures("captured-over");
+    let mut state = LayoutPickState::open(&app.shared, 0);
+    settle(&mut app, &mut state);
+    key(&mut app, &mut state, KeyCode::ArrowRight);
+    key(&mut app, &mut state, KeyCode::ArrowDown);
+    key(&mut app, &mut state, KeyCode::ArrowLeft);
+    key(&mut app, &mut state, KeyCode::Backspace);
+    key(&mut app, &mut state, KeyCode::Backspace);
+    assert_eq!(rows_text(&state), ["7654312"]);
+    assert!(!matches!(state.seed, SeedLook::Captured), "the rows are no longer the capture's");
+    key(&mut app, &mut state, KeyCode::Digit2);
+    assert_eq!(rows_text(&state), ["7654321"], "the same lanes typed back");
+    assert!(matches!(state.seed, SeedLook::Captured), "the rows are the capture's again");
+    key(&mut app, &mut state, KeyCode::Digit0);
+    settle(&mut app, &mut state);
+    let seed = state.found_seed().expect("OFF is looked for as RANDOM again");
+    assert!(matches!(key(&mut app, &mut state, KeyCode::Enter), Transition::To(_)));
+    assert_eq!(app.shared.borrowed_layout().map(|layout| (layout.random, layout.seed)), Some((NoteOption::Random, seed)));
+}
+
+/// Delete pressed twice on the list removes the capture under the cursor, from the file too; a key
+/// pressed between the two takes the first back.
+#[test]
+fn a_captured_layout_is_removed_on_a_second_delete() {
+    let mut app = with_two_captures("removed");
+    let mut state = LayoutPickState::open(&app.shared, 0);
+    key(&mut app, &mut state, KeyCode::ArrowRight);
+    key(&mut app, &mut state, KeyCode::Delete);
+    assert!(state.list.is_armed() && matches!(state.notice, Some((Notice::Says(LayoutPickText::RemoveArmed), _))));
+    assert_eq!(app.shared.captured_layouts.all().len(), 2, "the first press removed the capture");
+    key(&mut app, &mut state, KeyCode::ArrowDown);
+    assert!(!state.list.is_armed(), "another key did not take the first press back");
+    key(&mut app, &mut state, KeyCode::Delete);
+    key(&mut app, &mut state, KeyCode::Delete);
+    assert!(matches!(state.notice, Some((Notice::Says(LayoutPickText::Removed), _))));
+    let left: Vec<String> = app.shared.captured_layouts.all().iter().map(|capture| capture.random_label.clone()).collect();
+    assert_eq!(left, ["RANDOM"]);
+    let path = app.shared.library.songs()[0].path.with_file_name(CAPTURED_LAYOUTS_FILE);
+    assert_eq!(CapturedLayouts::load(&path).all().len(), 1, "the file still holds the removed capture");
+    assert_eq!(rows_text(&state), ["3517246"], "the cursor did not come to the capture that is left");
+}
+
+/// A capture of another chart, among every chart's, is played on that chart: Enter goes there with
+/// the rows written as it. One whose chart the library does not have is said to be missing.
+#[test]
+fn a_capture_of_another_chart_goes_to_that_chart_or_says_it_is_missing() {
+    let mut app = with_chart("elsewhere", SEVEN_KEY_CHART, Mode::BEAT_7K, None);
+    let first = app.shared.library.songs()[0].clone();
+    let second_path = first.path.with_file_name("second.bms");
+    let second_text = SEVEN_KEY_CHART.replace("#BPM 150", "#BPM 151");
+    std::fs::write(&second_path, &second_text).expect("the chart is written");
+    let second_md5 = decode_chart(second_text.as_bytes(), &second_path.to_string_lossy()).expect("a chart").md5;
+    let missing = CapturedLayout { md5: "0123456789abcdef0123456789abcdef".to_string(), ..capture_of(&app, NoteOption::Mirror, MIRROR_SEED) };
+    let elsewhere = CapturedLayout { md5: second_md5.clone(), ..capture_of(&app, NoteOption::Random, SEED_3517246) };
+    keep(&mut app, missing, EARLIER_MS);
+    keep(&mut app, elsewhere, LATER_MS);
+    app.shared.library = Library::from_songs(vec![first, entry(&second_path, Mode::BEAT_7K, second_md5.clone())]);
+    let mut state = LayoutPickState::open(&app.shared, 0);
+    key(&mut app, &mut state, KeyCode::ArrowRight);
+    assert!(state.list.entries(&app.shared.captured_layouts, &state.md5).is_empty(), "another chart's capture is in this chart's list");
+    key(&mut app, &mut state, KeyCode::Tab);
+    assert_eq!(state.list.entries(&app.shared.captured_layouts, &state.md5).len(), 2);
+    assert_eq!(rows_text(&state), ["1234567"], "another chart's capture was written on this chart's rows");
+    assert!(matches!(key(&mut app, &mut state, KeyCode::Enter), Transition::Stay));
+    assert_eq!((state.md5.as_str(), state.focus, rows_text(&state)), (second_md5.as_str(), Focus::Captured, vec!["3517246".to_string()]));
+    key(&mut app, &mut state, KeyCode::ArrowDown);
+    assert!(matches!(key(&mut app, &mut state, KeyCode::Enter), Transition::Stay));
+    assert!(matches!(state.notice, Some((Notice::Says(LayoutPickText::CapturedChartMissing), _))), "{:?}", state.notice);
+    assert_eq!(state.md5, second_md5, "a missing chart was gone to");
+}
+
+/// On a controller SELECT goes round the rows and the list, and while the list has the keys the
+/// lanes work it -- the first two keys move the cursor, the third turns to every chart's captures,
+/// the fourth pressed twice removes one -- rather than writing the rows.
+#[test]
+fn a_controller_works_the_list_with_select_and_its_lanes() {
+    let mut app = with_two_captures("pad");
+    app.shared.mode = Mode::BEAT_7K;
+    let mut state = LayoutPickState::open(&app.shared, 0);
+    let pad = |app: &mut App, state: &mut LayoutPickState, event: PadEvent| state.handle_pad(&mut ctx(app), event);
+    let lane = |lane: usize| PadEvent::Lane { lane, dir: ScratchDir::Forward, press: true };
+    pad(&mut app, &mut state, PadEvent::Control(ControlAction::Select));
+    assert_eq!((state.focus, rows_text(&state)), (Focus::Captured, vec!["3517246".to_string()]));
+    pad(&mut app, &mut state, lane(1));
+    assert_eq!(rows_text(&state), ["7654321"], "the second key did not move the cursor down");
+    pad(&mut app, &mut state, lane(0));
+    assert_eq!(rows_text(&state), ["3517246"], "the first key did not move the cursor up");
+    pad(&mut app, &mut state, lane(2));
+    assert_eq!(state.list.scope, captured::Scope::All);
+    pad(&mut app, &mut state, lane(3));
+    pad(&mut app, &mut state, lane(3));
+    assert_eq!(app.shared.captured_layouts.all().len(), 1, "the fourth key pressed twice did not remove the capture");
+    pad(&mut app, &mut state, PadEvent::Control(ControlAction::Select));
+    assert_eq!(state.focus, Focus::Rows);
+    pad(&mut app, &mut state, lane(1));
+    assert_eq!(rows_text(&state), ["2134567"], "the rows did not take the lane");
+}
+
+/// Where a test saves what it drew when asked to, and the name it saves the screen under.
+const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
+const CAPTURE_FILE: &str = "layout-pick-captured.png";
+
+/// How far into the seven-key chart the drawn screen is played, in seconds: into its second measure,
+/// where its notes are.
+const AMONG_THE_NOTES: f32 = 1.8;
+
+/// The screen with captures in its list draws more than the same screen with none; saved as
+/// `layout-pick-captured.png` when a capture folder is named.
+#[test]
+fn the_screen_draws_its_list_of_captured_layouts() {
+    let draw = |app: &mut App| {
+        let mut state = LayoutPickState::open(&app.shared, 0);
+        settle(app, &mut state);
+        key(app, &mut state, KeyCode::ArrowRight);
+        frame(app, &mut state, AMONG_THE_NOTES);
+        let mut pixels = HeadlessCanvas::new(CW, CH);
+        state.draw(&mut ctx(app), &mut Canvas::Headless(&mut pixels));
+        pixels
+    };
+    let listed = draw(&mut with_two_captures("drawn"));
+    let bare = draw(&mut with_chart("drawn-bare", SEVEN_KEY_CHART, Mode::BEAT_7K, None));
+    assert!(listed.lit_pixels() > bare.lit_pixels(), "the list drew nothing");
+    if let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV) {
+        let folder = std::path::PathBuf::from(folder);
+        std::fs::create_dir_all(&folder).expect("the capture folder can be created");
+        image::save_buffer(folder.join(CAPTURE_FILE), listed.rgba(), CW, CH, image::ExtendedColorType::Rgba8).expect("the capture is written");
+    }
 }

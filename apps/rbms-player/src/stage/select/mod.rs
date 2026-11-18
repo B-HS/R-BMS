@@ -1158,6 +1158,7 @@ impl SelectState {
             | Shortcut::RefDetail
             | Shortcut::Retry
             | Shortcut::NextSong
+            | Shortcut::CaptureLayout
             | Shortcut::ReplayPause
             | Shortcut::ReplayFaster
             | Shortcut::ReplaySlower

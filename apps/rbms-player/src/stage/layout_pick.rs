@@ -16,6 +16,31 @@
 //! It is a screen of its own rather than a panel of the browser: it reads the lane keys as lanes to
 //! write, and its preview is the built-in playfield, which clears the frame it is drawn on.
 //!
+//! # The preview
+//!
+//! The preview plays the chart laid out as the rows are, on the screen's own clock
+//! ([`clock::PreviewClock`]), at the scroll speed a run of the chart would start at -- the HI-SPEED
+//! row, or the speed that holds the green number when it is held -- under the player's lane cover,
+//! lift and hidden band, and with no sound. Space stops and plays it, the page keys move it four
+//! measures, Home goes back to the top, and a preview that runs off the end of its chart begins it
+//! again. Writing the rows again lays the chart out again under the same moment.
+//!
+//! It is the built-in playfield rather than the play skin's run of the sample chart
+//! ([`crate::stage::play::skin_preview::PlaySample`]): that run is the whole play screen, gauge and
+//! all, drawn into a rectangle, so its lanes would be a quarter of the rectangle and too narrow to
+//! number; it walks the skin's scene on the application's one table of skin timers, which has no way
+//! to stand still or to be moved about in the chart; and it is played by a written hand whose
+//! judgements are nothing to this screen. Making it any chart's, paused and moved about, reaches
+//! into the play menu's and the skin menu's previews.
+//!
+//! # Captured layouts
+//!
+//! The layouts the player captured on a result screen ([`crate::captured_layouts`]) are listed
+//! beside the field: the chart's own first, every chart's on the turn of a key. The cursor on a
+//! capture of the chart shows it -- the rows are written as it and the preview laid out so -- and
+//! START plays it on its own arrangement and seed, which need no looking for. A capture of another
+//! chart is played on that chart: START goes there, when the library has it.
+//!
 //! The chart is read, and the seed looked for, on threads of their own: a large chart, or a
 //! fourteen-key layout whose seed is hundreds of millions of draws away, never holds a frame up. A
 //! layout written while a seed is still being looked for cancels that search.
@@ -34,20 +59,27 @@ use rbms_chart::shuffle::{
     NoteOption, SeedSearchError, apply_lane_permutation, is_layout_row, layout_row_text, permutation_of_layout, random_seed_for, random_seed_limit,
     side_key_lanes,
 };
+use rbms_config::{HeldTravel, PlayOptions, held_speed};
 use rbms_model::translations::Catalog;
 use rbms_model::{Language, LnKind, Mode, Model, TimeLine};
 use rbms_play::ScratchDir;
 use rbms_render::text::language;
-use rbms_render::{Color, PlayfieldView, Renderer, Skin, draw_text, draw_text_right, render_playfield_view, text_width, theme};
+use rbms_render::{Color, LaneShade, PlayfieldView, Renderer, Skin, draw_text, draw_text_right, render_lane_cover, render_playfield_view, text_width, theme};
 use winit::keyboard::KeyCode;
 
 use crate::app_play::{decode_chart, scratch_auto_color, scratch_auto_lanes};
 use crate::borrowed_layout::{LayoutRefusal, LayoutRequest};
+use crate::captured_layouts::CapturedLayout;
+use crate::format::fmt_datetime;
 use crate::gamepad::PadEvent;
-use crate::keyconfig::ControlAction;
+use crate::keyconfig::{ControlAction, Shortcut};
+use crate::stage::play::BpmStats;
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::text::menus::layout_pick::LayoutPickText;
 use crate::{AppShared, CH, CW};
+
+use captured::{CapturedList, ListView};
+use clock::{PreviewClock, end_of};
 
 /// Where the heading, the title and the lines over the field start from the left.
 const TEXT_X: f32 = 40.0;
@@ -86,11 +118,15 @@ const LANE_NUMBER_SCALE: f32 = 1.6;
 const MEASURE_RIGHT_INSET: f32 = 40.0;
 const MEASURE_Y: f32 = 690.0;
 
-/// How tall a measure is drawn, as a share of the field: four measures are in view at once.
-const PREVIEW_HISPEED: f64 = 0.25;
-
 /// How many measures Page Up and Page Down move the preview by.
 const MEASURES_PER_PAGE: i64 = 4;
+
+/// The places of a side's key lanes, counted from 0, that work the list of captured layouts while
+/// it has the keys: up, down, the other scope, and removal.
+const LIST_KEY_UP: usize = 0;
+const LIST_KEY_DOWN: usize = 1;
+const LIST_KEY_SCOPE: usize = 2;
+const LIST_KEY_REMOVE: usize = 3;
 
 /// How long a refused key or a refused start is said for.
 const NOTICE_SHOWN_FOR: Duration = Duration::from_secs(2);
@@ -185,9 +221,10 @@ enum Preview {
     Reading(Receiver<Option<ReadChart>>),
     /// The file is not a chart, or could not be read.
     Failed,
-    /// The chart, laid out as the rows are now, and where each of its measures starts. The two
-    /// charts are boxed so a preview still being read is not as large as one that has been.
-    Read { chart: Box<ReadChart>, laid_out: Box<Model>, measures: Vec<i64> },
+    /// The chart, laid out as the rows are now, where each of its measures starts, where the
+    /// preview begins it again, and its tempos. The two charts are boxed so a preview still being
+    /// read is not as large as one that has been.
+    Read { chart: Box<ReadChart>, laid_out: Box<Model>, measures: Vec<i64>, end_us: i64, bpm: BpmStats },
 }
 
 /// Where the seed of the layout stands.
@@ -198,6 +235,15 @@ enum SeedLook {
     Looking { perm: Vec<usize>, cancel: Arc<AtomicBool>, reply: Receiver<Result<u64, SeedSearchError>> },
     /// The search for the seed of `perm` came to an end.
     Done { perm: Vec<usize>, answer: Result<u64, SeedSearchError> },
+    /// The rows are a captured layout, which is played on its own arrangement and seed.
+    Captured,
+}
+
+/// Where the keys go: to the rows, or to the list of captured layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Rows,
+    Captured,
 }
 
 /// Something said for a while under the status line.
@@ -205,7 +251,7 @@ enum SeedLook {
 enum Notice {
     /// A lane number refused to a row.
     DigitRefused(u8),
-    /// A start refused for a reason of this screen.
+    /// A start refused, or the list worked, for a reason of this screen.
     Says(LayoutPickText),
     /// A start the borrowed layout refused.
     Refusal(LayoutRefusal),
@@ -235,10 +281,15 @@ pub(crate) struct LayoutPickState {
     side: usize,
     preview: Preview,
     seed: SeedLook,
-    /// The measure at the judgement line of the preview.
-    measure: usize,
-    /// Turns of the wheel not yet taken as a measure.
+    /// Where the preview stands in the chart, and whether it plays.
+    clock: PreviewClock,
+    /// Turns of the wheel not yet taken as a measure or a row of the list.
     wheel: f32,
+    focus: Focus,
+    list: CapturedList,
+    /// The captured layout last shown on the rows; it is played on its own terms while the rows
+    /// are still as it wrote them.
+    loaded: Option<CapturedLayout>,
     notice: Option<(Notice, Instant)>,
     /// The keys of the chart's mode, which may not be the mode last played.
     lane_keys: Vec<(KeyCode, usize)>,
@@ -276,8 +327,11 @@ impl LayoutPickState {
             side: 0,
             preview: Preview::Reading(read_chart(path, ln)),
             seed: SeedLook::Unsupported,
-            measure: 0,
+            clock: PreviewClock::default(),
             wheel: 0.0,
+            focus: Focus::Rows,
+            list: CapturedList::default(),
+            loaded: None,
             notice: None,
             lane_keys: shared.keyconfig.lane_keys(mode),
             reverse_keys: shared.keyconfig.scratch_reverse_keys(mode),
@@ -310,6 +364,12 @@ impl LayoutPickState {
         permutation_of_layout(self.mode, &self.layout())
     }
 
+    /// The captured layout the rows are written as, while they still are.
+    fn captured_on_show(&self) -> Option<&CapturedLayout> {
+        let layout = self.layout();
+        self.loaded.as_ref().filter(|capture| capture.rows(self.mode).as_ref() == Some(&layout))
+    }
+
     /// The seed of the layout as the rows stand, once it has been found.
     pub(crate) fn found_seed(&self) -> Option<u64> {
         match &self.seed {
@@ -318,8 +378,9 @@ impl LayoutPickState {
         }
     }
 
-    /// Lay the preview out again and look for the seed again, after the rows changed. A seed still
-    /// being looked for is given up.
+    /// Lay the preview out again and look for the seed again, after the rows changed, where the
+    /// preview stands. A seed still being looked for is given up, and none is looked for while the
+    /// rows are a captured layout, which brings its own.
     fn relay_out(&mut self) {
         if let SeedLook::Looking { cancel, .. } = &self.seed {
             cancel.store(true, Ordering::Relaxed);
@@ -332,7 +393,10 @@ impl LayoutPickState {
             **laid_out = chart.model.clone();
             apply_lane_permutation(laid_out, &perm);
         }
-        self.seed = look_for_seed(self.mode, perm, limit);
+        self.seed = match self.captured_on_show() {
+            Some(_) => SeedLook::Captured,
+            None => look_for_seed(self.mode, perm, limit),
+        };
     }
 
     /// Change the row of `side` by `edit`, and lay the preview out again.
@@ -358,6 +422,30 @@ impl LayoutPickState {
         }
     }
 
+    /// Write the rows as `capture` and lay the preview out so, when it is a capture of this chart
+    /// whose rows can be written.
+    fn show_capture(&mut self, capture: CapturedLayout) {
+        if !self.writable() || !capture.md5.eq_ignore_ascii_case(&self.md5) {
+            return;
+        }
+        let Some(rows) = capture.rows(self.mode) else {
+            return;
+        };
+        self.rows = self.lanes.iter().zip(&rows).map(|(keys, row)| SideRow::new(u8::try_from(keys.len()).unwrap_or(u8::MAX), Some(row))).collect();
+        self.loaded = Some(capture);
+        self.relay_out();
+    }
+
+    /// Show the capture under the list's cursor, while the list has the keys.
+    fn show_selected(&mut self, shared: &AppShared) {
+        if self.focus != Focus::Captured {
+            return;
+        }
+        if let Some(capture) = self.list.selected(&shared.captured_layouts, &self.md5) {
+            self.show_capture(capture);
+        }
+    }
+
     /// The side a typed number goes to next.
     #[cfg(test)]
     pub(crate) fn side(&self) -> usize {
@@ -368,18 +456,143 @@ impl LayoutPickState {
         self.side = (self.side + 1) % self.rows.len().max(1);
     }
 
+    /// SELECT: the next side's row, after the last side's the list of captured layouts, and after
+    /// the list the first side's row again.
+    fn next_focus(&mut self, shared: &AppShared) {
+        match self.focus {
+            Focus::Captured => {
+                self.focus = Focus::Rows;
+                self.side = 0;
+            }
+            Focus::Rows if self.side + 1 < self.rows.len() => self.side += 1,
+            Focus::Rows => self.focus_captured(shared),
+        }
+    }
+
+    /// Give the keys to the list of captured layouts, and show the capture under its cursor.
+    fn focus_captured(&mut self, shared: &AppShared) {
+        self.focus = Focus::Captured;
+        self.show_selected(shared);
+    }
+
     /// A lane of the chart's mode pressed: a key lane is typed into its side's row as that side's
     /// lane number, and the turntable moves the preview a measure, later turned forwards and earlier
-    /// turned back.
-    fn press_lane(&mut self, lane: usize, dir: ScratchDir, now: Instant) {
-        if self.mode.is_scratch(lane) {
-            self.move_measures(if matches!(dir, ScratchDir::Backward) { -1 } else { 1 });
+    /// turned back. While the list of captured layouts has the keys they work the list instead
+    /// ([`LayoutPickState::list_lane`]).
+    fn press_lane(&mut self, shared: &mut AppShared, lane: usize, dir: ScratchDir, now: Instant) {
+        let backward = matches!(dir, ScratchDir::Backward);
+        let place = self.lanes.iter().enumerate().find_map(|(side, keys)| keys.iter().position(|key| *key == lane).map(|at| (side, at)));
+        if self.focus == Focus::Captured {
+            self.list_lane(shared, place.map(|(_, at)| at), backward, now);
             return;
         }
-        let place = self.lanes.iter().enumerate().find_map(|(side, keys)| keys.iter().position(|key| *key == lane).map(|at| (side, at)));
+        if self.mode.is_scratch(lane) {
+            self.move_measures(if backward { -1 } else { 1 });
+            return;
+        }
         if let Some((side, at)) = place {
             self.side = side;
             self.type_lane(side, u8::try_from(at + 1).unwrap_or(u8::MAX), now);
+        }
+    }
+
+    /// A lane pressed while the list of captured layouts has the keys, `place` being where it is
+    /// among its side's key lanes and `None` for the turntable: the turntable and the first two
+    /// keys move the cursor, the third turns to the other scope, and the fourth removes the capture
+    /// on a second press.
+    fn list_lane(&mut self, shared: &mut AppShared, place: Option<usize>, backward: bool, now: Instant) {
+        if place == Some(LIST_KEY_REMOVE) {
+            self.press_remove(shared, now);
+            return;
+        }
+        self.list.disarm();
+        match place {
+            None if backward => self.step_list(shared, -1),
+            None => self.step_list(shared, 1),
+            Some(LIST_KEY_UP) => self.step_list(shared, -1),
+            Some(LIST_KEY_DOWN) => self.step_list(shared, 1),
+            Some(LIST_KEY_SCOPE) => self.turn_scope(shared),
+            Some(_) => {}
+        }
+    }
+
+    /// Move the list's cursor `by` rows and show the capture it comes to.
+    fn step_list(&mut self, shared: &AppShared, by: i64) {
+        let len = self.list.entries(&shared.captured_layouts, &self.md5).len();
+        self.list.step(by, len);
+        self.show_selected(shared);
+    }
+
+    /// Turn the list to the chart's captures or to every chart's, and show the capture under the
+    /// cursor.
+    fn turn_scope(&mut self, shared: &AppShared) {
+        self.list.turn_scope(&shared.captured_layouts, &self.md5);
+        self.show_selected(shared);
+    }
+
+    /// The removal key on the list: the first press says a second one removes the capture under
+    /// the cursor, and the second removes it from the file.
+    fn press_remove(&mut self, shared: &mut AppShared, now: Instant) {
+        let Some(selected) = self.list.selected(&shared.captured_layouts, &self.md5) else {
+            return;
+        };
+        let Some(capture) = self.list.press_remove(selected) else {
+            self.notice = Some((Notice::Says(LayoutPickText::RemoveArmed), now));
+            return;
+        };
+        shared.captured_layouts.remove(&capture);
+        self.notice = Some((Notice::Says(LayoutPickText::Removed), now));
+        if self.loaded.as_ref().is_some_and(|loaded| loaded.same_layout(&capture)) {
+            self.loaded = None;
+            self.relay_out();
+        }
+        self.step_list(shared, 0);
+    }
+
+    /// The capture under the list's cursor while the list has the keys, when it is of another chart.
+    fn selected_elsewhere(&self, shared: &AppShared) -> Option<CapturedLayout> {
+        if self.focus != Focus::Captured {
+            return None;
+        }
+        let selected = self.list.selected(&shared.captured_layouts, &self.md5)?;
+        (!selected.md5.eq_ignore_ascii_case(&self.md5)).then_some(selected)
+    }
+
+    /// Enter and START: on a capture of another chart in the list, go to that chart; otherwise play
+    /// the rows ([`LayoutPickState::start`]).
+    fn confirm(&mut self, shared: &mut AppShared, now: Instant) -> Transition {
+        match self.selected_elsewhere(shared) {
+            Some(capture) => {
+                self.go_to_chart(shared, &capture, now);
+                Transition::Stay
+            }
+            None => self.start(shared, now),
+        }
+    }
+
+    /// Open the screen on the chart of `capture`, with the list on it and the rows written as it,
+    /// or say that the library has no such chart.
+    fn go_to_chart(&mut self, shared: &mut AppShared, capture: &CapturedLayout, now: Instant) {
+        let Some(chart_index) = shared.library.songs().iter().position(|entry| entry.md5.eq_ignore_ascii_case(&capture.md5)) else {
+            self.notice = Some((Notice::Says(LayoutPickText::CapturedChartMissing), now));
+            return;
+        };
+        self.leave(shared);
+        let mut there = LayoutPickState::open(shared, chart_index);
+        there.focus = Focus::Captured;
+        there.list.scope = self.list.scope;
+        there.list.point_at(&shared.captured_layouts, &there.md5, capture);
+        there.show_capture(capture.clone());
+        *self = there;
+    }
+
+    /// Give up a seed still being looked for, and keep what the rows hold for the mode.
+    fn leave(&mut self, shared: &mut AppShared) {
+        if let SeedLook::Looking { cancel, .. } = &self.seed {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if self.writable() {
+            shared.picked_layouts.keep(self.mode, self.layout());
         }
     }
 
@@ -392,15 +605,31 @@ impl LayoutPickState {
     }
 
     /// The measure at the judgement line of the preview.
-    #[cfg(test)]
     pub(crate) fn measure(&self) -> usize {
-        self.measure
+        self.clock.measure(self.measures())
+    }
+
+    /// Where the preview stands, for the tests that check its clock.
+    #[cfg(test)]
+    pub(crate) fn clock(&self) -> PreviewClock {
+        self.clock
     }
 
     fn move_measures(&mut self, by: i64) {
-        let last = self.measures().len().saturating_sub(1);
-        let at = i64::try_from(self.measure).unwrap_or(i64::MAX).saturating_add(by).max(0);
-        self.measure = usize::try_from(at).unwrap_or(usize::MAX).min(last);
+        if let Preview::Read { measures, .. } = &self.preview {
+            self.clock.move_measures(measures, by);
+        }
+    }
+
+    /// The scroll speed the preview is drawn at, which is the one a run of this chart would start at:
+    /// the one the settings hold, or, while a green number is held from chart to chart, the one that
+    /// holds it on this chart under the lane cover as it stands.
+    fn shown_hispeed(&self, play: &PlayOptions) -> f64 {
+        let Preview::Read { bpm, .. } = &self.preview else {
+            return play.hispeed;
+        };
+        let held = bpm.held(play).and_then(|bpm| held_speed(&HeldTravel::of(play, bpm)));
+        held.map_or(play.hispeed, |held| held.hispeed)
     }
 
     /// Take what the reading thread and the seed search have finished since the last frame.
@@ -409,8 +638,10 @@ impl LayoutPickState {
             match reply.try_recv() {
                 Ok(Some(chart)) => {
                     let measures = measure_starts(&chart.model.timelines);
+                    let end_us = end_of(chart.model.timelines.last().map_or(0, |line| line.time_us));
+                    let bpm = BpmStats::of(&chart.model);
                     let laid_out = Box::new(chart.model.clone());
-                    self.preview = Preview::Read { chart: Box::new(chart), laid_out, measures };
+                    self.preview = Preview::Read { chart: Box::new(chart), laid_out, measures, end_us, bpm };
                     self.relay_out();
                 }
                 Ok(None) | Err(TryRecvError::Disconnected) => self.preview = Preview::Failed,
@@ -447,24 +678,36 @@ impl LayoutPickState {
             _ if self.chart_changed() => Some(LayoutPickText::ChartChanged),
             (_, SeedLook::Unsupported) => Some(LayoutPickText::UnsupportedMode),
             (_, SeedLook::Done { answer: Err(SeedSearchError::Unreachable), .. }) => Some(LayoutPickText::Unreachable),
+            (_, SeedLook::Captured) if self.captured_on_show().is_some() => None,
             _ if self.found_seed().is_none() => Some(LayoutPickText::NotReady),
             _ => None,
         }
     }
 
-    /// Play the chart laid out as the rows are: as RANDOM with the seed found for them, on a layout
-    /// borrowed for the run. The run takes this screen's place over the browser. A layout that cannot
-    /// be played yet stays, and the screen says why.
+    /// What the run is asked to borrow: a captured layout on show is played on its own arrangement
+    /// and seed, and said to be of the moment it was captured; any other layout is played as RANDOM
+    /// with the seed found for it.
+    fn request(&self) -> Option<LayoutRequest> {
+        if let (SeedLook::Captured, Some(capture)) = (&self.seed, self.captured_on_show()) {
+            let source = fmt_datetime(capture.captured_at);
+            return Some(LayoutRequest { md5: capture.md5.clone(), random_label: capture.random_label.clone(), seed: capture.seed, source });
+        }
+        let seed = self.found_seed()?;
+        let source = LayoutPickText::Source.fill(language(), &[&self.layout_text()]);
+        Some(LayoutRequest { md5: self.md5.clone(), random_label: NoteOption::Random.label().to_string(), seed, source })
+    }
+
+    /// Play the chart laid out as the rows are, on a layout borrowed for the run ([`LayoutPickState::request`]).
+    /// The run takes this screen's place over the browser. A layout that cannot be played yet stays,
+    /// and the screen says why.
     fn start(&mut self, shared: &mut AppShared, now: Instant) -> Transition {
         if let Some(why) = self.not_playable(shared) {
             self.notice = Some((Notice::Says(why), now));
             return Transition::Stay;
         }
-        let Some(seed) = self.found_seed() else {
+        let Some(request) = self.request() else {
             return Transition::Stay;
         };
-        let source = LayoutPickText::Source.fill(language(), &[&self.layout_text()]);
-        let request = LayoutRequest { md5: self.md5.clone(), random_label: NoteOption::Random.label().to_string(), seed, source };
         match shared.borrow_layout(request, self.chart_index) {
             Ok(Transition::Open(stage)) => Transition::To(stage),
             Ok(other) => other,
@@ -476,19 +719,34 @@ impl LayoutPickState {
     }
 
     /// A key that is neither a fixed key of the screen nor one that moves the preview: a lane of the
-    /// chart's mode, a number, or START.
+    /// chart's mode, a number, START or SELECT.
     fn other_key(&mut self, shared: &mut AppShared, code: KeyCode, now: Instant) -> Transition {
         let lane = self.lane_keys.iter().find(|(key, _)| *key == code).map(|(_, lane)| (*lane, ScratchDir::Forward));
         let lane = lane.or_else(|| self.reverse_keys.iter().find(|(key, _)| *key == code).map(|(_, lane)| (*lane, ScratchDir::Backward)));
         if let Some((lane, dir)) = lane {
-            self.press_lane(lane, dir, now);
+            self.press_lane(shared, lane, dir, now);
             return Transition::Stay;
         }
         match number_of(code) {
+            Some(_) if self.focus == Focus::Captured => {}
             Some(0) => self.edit(self.side, SideRow::in_order),
             Some(number) => self.type_lane(self.side, number, now),
-            None if shared.keyconfig.control_key(ControlAction::Start) == Some(code) => return self.start(shared, now),
+            None if shared.keyconfig.control_key(ControlAction::Start) == Some(code) => return self.confirm(shared, now),
+            None if shared.keyconfig.control_key(ControlAction::Select) == Some(code) => self.next_focus(shared),
             None => {}
+        }
+        Transition::Stay
+    }
+
+    /// A key that works the list of captured layouts while it has the keys, or else whatever the
+    /// key does on the rows ([`LayoutPickState::other_key`]).
+    fn list_key(&mut self, shared: &mut AppShared, code: KeyCode, now: Instant) -> Transition {
+        match code {
+            KeyCode::ArrowUp => self.step_list(shared, -1),
+            KeyCode::ArrowDown => self.step_list(shared, 1),
+            KeyCode::Tab => self.turn_scope(shared),
+            KeyCode::Delete => self.press_remove(shared, now),
+            code => return self.other_key(shared, code, now),
         }
         Transition::Stay
     }
@@ -503,6 +761,10 @@ impl LayoutPickState {
             (_, SeedLook::Looking { .. }) => LayoutPickText::Searching.get(language).to_string(),
             (_, SeedLook::Done { answer: Ok(seed), .. }) => LayoutPickText::SeedFound.fill(language, &[seed]),
             (_, SeedLook::Done { answer: Err(SeedSearchError::Unreachable), .. }) => LayoutPickText::Unreachable.get(language).to_string(),
+            (_, SeedLook::Captured) => match self.captured_on_show() {
+                Some(capture) => LayoutPickText::CapturedSeed.fill(language, &[&capture.random_label, &capture.seed]),
+                None => LayoutPickText::NotReady.get(language).to_string(),
+            },
             (_, SeedLook::Done { .. }) => LayoutPickText::NotReady.get(language).to_string(),
         }
     }
@@ -514,7 +776,7 @@ impl LayoutPickState {
         for (side, row) in self.rows.iter().enumerate() {
             if self.rows.len() > 1 {
                 let name = SIDE_NAMES.get(side).copied().unwrap_or_default();
-                let colour = if side == self.side { th.accent } else { th.text_dim };
+                let colour = if side == self.side && self.focus == Focus::Rows { th.accent } else { th.text_dim };
                 draw_text(canvas, x, LAYOUT_Y, LAYOUT_SCALE, colour, name);
                 x += text_width(&format!("{name} "), LAYOUT_SCALE);
             }
@@ -530,7 +792,7 @@ impl LayoutPickState {
     fn digit_colour(&self, side: usize, place: usize) -> Color {
         let th = theme();
         let typed = self.rows.get(side).is_some_and(|row| place < row.typed_len());
-        match (typed, side == self.side) {
+        match (typed, side == self.side && self.focus == Focus::Rows) {
             (false, _) => th.text_muted,
             (true, true) => th.accent,
             (true, false) => th.text,
@@ -550,58 +812,114 @@ impl LayoutPickState {
             }
         }
     }
+
+    /// The preview: the chart laid out as the rows are, where the clock stands, under the lane
+    /// shades the player has on.
+    fn draw_preview(&self, shared: &AppShared, canvas: &mut Canvas<'_>) {
+        let Preview::Read { laid_out, .. } = &self.preview else {
+            canvas.clear(theme().bg);
+            return;
+        };
+        let play = &shared.config.play;
+        let view = PlayfieldView {
+            timelines: &laid_out.timelines,
+            microtime: self.clock.at_us(),
+            hispeed: self.shown_hispeed(play),
+            beam_on: &[],
+            beam_off: &[],
+            constant: play.constant_speed,
+            legacy_note: self.legacy_note,
+            auto_lanes: &self.auto_lanes,
+            auto_note: self.auto_note,
+        };
+        render_playfield_view(canvas, &self.skin, &view);
+        render_lane_cover(canvas, &self.skin, LaneShade { cover: shared.effective_cover(), hidden: shared.effective_hidden() });
+    }
+
+    /// The list of captured layouts, beside the field.
+    fn draw_list(&self, shared: &AppShared, canvas: &mut Canvas<'_>, language: Language) {
+        let capture_key = shared.keyconfig.shortcut_bind(Shortcut::CaptureLayout).map(|bind| bind.label()).unwrap_or_default();
+        let view = ListView { md5: &self.md5, focused: self.focus == Focus::Captured, capture_key: &capture_key, language };
+        self.list.draw(canvas, &shared.captured_layouts, &view);
+    }
 }
 
 impl StageHandler for LayoutPickState {
-    fn update(&mut self, _ctx: &mut FrameCtx<'_>) -> Transition {
+    /// Take what the threads finished, and move a playing preview on by the frame's time.
+    fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.poll();
+        if let Preview::Read { end_us, .. } = &self.preview {
+            self.clock.advance(ctx.dt, *end_us);
+        }
         Transition::Stay
     }
 
-    /// Escape goes back to the browser and Enter plays the layout. Tab turns to the other side's row.
-    /// A number or a lane key puts that lane in the next place, Backspace takes the last place back,
-    /// Delete every place, and 0 types the row in order. Up and down move the preview a measure,
-    /// Page Up and Page Down four, Home and End to the chart's first and last; the turntable moves it a
-    /// measure too. START plays the layout as Enter does.
+    /// Escape goes back to the browser and Enter plays the layout. Space plays and stops the
+    /// preview, Page Up and Page Down move it four measures, Home and End to the chart's first and
+    /// last. Right gives the keys to the list of captured layouts and Left back to the rows.
+    ///
+    /// On the rows Tab turns to the other side's row, a number or a lane key puts that lane in the
+    /// next place, Backspace takes the last place back, Delete every place, and 0 types the row in
+    /// order; up and down move the preview a measure, and so does the turntable. On the list up and
+    /// down move the cursor, Tab turns to the other scope and Delete pressed twice removes the
+    /// capture. START plays the layout as Enter does, and SELECT goes round the rows and the list.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if !key.pressed {
             return Transition::Stay;
         }
+        if key.code != KeyCode::Delete {
+            self.list.disarm();
+        }
         match key.code {
             KeyCode::Escape => return Transition::Back,
-            KeyCode::Enter | KeyCode::NumpadEnter => return self.start(ctx.shared, ctx.now),
+            KeyCode::Enter | KeyCode::NumpadEnter => return self.confirm(ctx.shared, ctx.now),
+            KeyCode::Space => self.clock.toggle(),
+            KeyCode::PageUp => self.move_measures(MEASURES_PER_PAGE),
+            KeyCode::PageDown => self.move_measures(-MEASURES_PER_PAGE),
+            KeyCode::Home => self.clock.seek(0),
+            KeyCode::End => self.move_measures(i64::MAX),
+            KeyCode::ArrowRight => self.focus_captured(ctx.shared),
+            KeyCode::ArrowLeft => self.focus = Focus::Rows,
+            code if self.focus == Focus::Captured => return self.list_key(ctx.shared, code, ctx.now),
             KeyCode::Tab => self.next_side(),
             KeyCode::Backspace => self.edit(self.side, SideRow::erase),
             KeyCode::Delete => self.edit(self.side, SideRow::clear),
             KeyCode::ArrowUp => self.move_measures(1),
             KeyCode::ArrowDown => self.move_measures(-1),
-            KeyCode::PageUp => self.move_measures(MEASURES_PER_PAGE),
-            KeyCode::PageDown => self.move_measures(-MEASURES_PER_PAGE),
-            KeyCode::Home => self.measure = 0,
-            KeyCode::End => self.measure = self.measures().len().saturating_sub(1),
             code => return self.other_key(ctx.shared, code, ctx.now),
         }
         Transition::Stay
     }
 
-    /// The wheel moves the preview a measure a line: rolled towards the player, earlier.
-    fn handle_scroll(&mut self, _ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
+    /// The wheel moves the preview a measure a line, rolled towards the player earlier, or the
+    /// list's cursor a row while the list has the keys.
+    fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
         self.wheel += lines;
         while self.wheel.abs() >= 1.0 {
             let step = self.wheel.signum();
             self.wheel -= step;
-            self.move_measures(if step > 0.0 { -1 } else { 1 });
+            let by = if step > 0.0 { -1 } else { 1 };
+            match self.focus {
+                Focus::Rows => self.move_measures(by),
+                Focus::Captured => self.step_list(ctx.shared, by),
+            }
         }
         Transition::Stay
     }
 
     /// A controller's lane does what its key does, when the controller is read in the chart's mode;
-    /// START plays the layout and SELECT turns to the other side's row.
+    /// START plays the layout and SELECT goes round the rows and the list.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: PadEvent) -> Transition {
         match event {
-            PadEvent::Lane { lane, dir, press: true } if ctx.shared.mode == self.mode => self.press_lane(lane, dir, ctx.now),
-            PadEvent::Control(ControlAction::Start) => return self.start(ctx.shared, ctx.now),
-            PadEvent::Control(ControlAction::Select) => self.next_side(),
+            PadEvent::Lane { lane, dir, press: true } if ctx.shared.mode == self.mode => self.press_lane(ctx.shared, lane, dir, ctx.now),
+            PadEvent::Control(ControlAction::Start) => {
+                self.list.disarm();
+                return self.confirm(ctx.shared, ctx.now);
+            }
+            PadEvent::Control(ControlAction::Select) => {
+                self.list.disarm();
+                self.next_focus(ctx.shared);
+            }
             _ => {}
         }
         Transition::Stay
@@ -609,12 +927,7 @@ impl StageHandler for LayoutPickState {
 
     /// The layout written is kept for the mode, and a seed still being looked for is given up.
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
-        if let SeedLook::Looking { cancel, .. } = &self.seed {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        if self.writable() {
-            ctx.shared.picked_layouts.keep(self.mode, self.layout());
-        }
+        self.leave(ctx.shared);
     }
 
     /// The screen reads every key itself, so the option overlay does not open over it.
@@ -622,30 +935,13 @@ impl StageHandler for LayoutPickState {
         true
     }
 
-    /// The preview first, since the playfield clears the frame; then the lines over it and the lane
-    /// numbers under it.
+    /// The preview first, since the playfield clears the frame; then the lines over it, the lane
+    /// numbers under it and the list beside it.
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         let th = theme();
         let language = language();
         canvas.clear_bga();
-        let at = self.measures().get(self.measure).copied().unwrap_or_default();
-        match &self.preview {
-            Preview::Read { laid_out, .. } => {
-                let view = PlayfieldView {
-                    timelines: &laid_out.timelines,
-                    microtime: at,
-                    hispeed: PREVIEW_HISPEED,
-                    beam_on: &[],
-                    beam_off: &[],
-                    constant: false,
-                    legacy_note: self.legacy_note,
-                    auto_lanes: &self.auto_lanes,
-                    auto_note: self.auto_note,
-                };
-                render_playfield_view(canvas, &self.skin, &view);
-            }
-            _ => canvas.clear(th.bg),
-        }
+        self.draw_preview(ctx.shared, canvas);
         draw_text(canvas, TEXT_X, HEADING_Y, HEADING_SCALE, th.text, LayoutPickText::ShortcutLabel.get(language));
         draw_text(canvas, TEXT_X, TITLE_Y, TITLE_SCALE, th.text_dim, &self.title);
         if self.writable() {
@@ -658,11 +954,17 @@ impl StageHandler for LayoutPickState {
         if let Some(notice) = notice {
             draw_text(canvas, TEXT_X, NOTICE_Y, STATUS_SCALE, th.accent, &notice);
         }
-        draw_text(canvas, TEXT_X, HINT_Y, HINT_SCALE, th.text_muted, LayoutPickText::HintTyping.get(language));
+        let keys = if self.focus == Focus::Captured { LayoutPickText::HintCaptured } else { LayoutPickText::HintTyping };
+        draw_text(canvas, TEXT_X, HINT_Y, HINT_SCALE, th.text_muted, keys.get(language));
         draw_text(canvas, TEXT_X, HINT_SECOND_Y, HINT_SCALE, th.text_muted, LayoutPickText::HintMoving.get(language));
+        self.draw_list(ctx.shared, canvas, language);
         if !self.measures().is_empty() {
-            let measure = LayoutPickText::Measure.fill(language, &[&(self.measure + 1), &self.measures().len()]);
-            draw_text_right(canvas, CW as f32 - MEASURE_RIGHT_INSET, MEASURE_Y, STATUS_SCALE, th.text_dim, &measure);
+            let measure = LayoutPickText::Measure.fill(language, &[&(self.measure() + 1), &self.measures().len()]);
+            let shown = match self.clock.is_playing() {
+                true => measure,
+                false => format!("{}   {measure}", LayoutPickText::Stopped.get(language)),
+            };
+            draw_text_right(canvas, CW as f32 - MEASURE_RIGHT_INSET, MEASURE_Y, STATUS_SCALE, th.text_dim, &shown);
         }
     }
 }
@@ -693,14 +995,14 @@ fn measure_starts(timelines: &[TimeLine]) -> Vec<i64> {
 }
 
 /// The playfield the preview is drawn on: the built-in one the player has, with the turntable on the
-/// side they play it on, a double chart's sides apart, nothing lifted and no picture beside it, laid
-/// out across the middle of the screen under the lines over it.
+/// side they play it on, the lift they have on, a double chart's sides apart and no picture beside
+/// it, laid out across the middle of the screen under the lines over it.
 fn preview_skin(shared: &AppShared, mode: Mode) -> Skin {
     let mut cfg = shared.skin_cfg.clone();
     let width = if mode.player > 1 { DUAL_FIELD_WIDTH } else { FIELD_WIDTH };
     cfg.scratch_left = shared.config.play.scratch_left;
     cfg.five_key_layout = shared.config.display.five_key_layout;
-    cfg.lift = 0.0;
+    cfg.lift = shared.effective_lift();
     cfg.bga = None;
     cfg.dual_field = true;
     cfg.top_y = FIELD_TOP;
@@ -743,5 +1045,7 @@ fn look_for_seed(mode: Mode, perm: Vec<usize>, limit: u64) -> SeedLook {
 const READ_THREAD_NAME: &str = "rbms-layout-pick-read";
 const SEARCH_THREAD_NAME: &str = "rbms-layout-pick-seed";
 
+mod captured;
+mod clock;
 #[cfg(test)]
 mod tests;

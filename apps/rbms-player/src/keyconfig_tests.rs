@@ -1048,6 +1048,35 @@ fn the_layout_pick_key_ships_on_a_free_key_and_an_earlier_file_reads_as_it_did()
     assert!(!written.contains("layout_pick"), "a key nobody moved was written to the file: {written}");
 }
 
+/// The key that captures a result's layout is a shortcut of the result screen a controller can be
+/// given. A result screen reads every lane key as a key of the reference's table, so it ships on a key
+/// no shipped layout of any mode plays a lane on, no control is read from and no other shortcut of
+/// the result ships on; and a key config written before it existed reads it on that key, unless the
+/// player had put the other result keys there.
+#[test]
+fn the_capture_key_ships_on_a_free_key_and_an_earlier_file_reads_as_it_did() {
+    let shipped = Shortcut::CaptureLayout.default_key();
+    assert_eq!((shipped, Shortcut::CaptureLayout.config_key()), (KeyCode::KeyP, "result_capture_layout"));
+    assert_eq!((Shortcut::CaptureLayout.group(), Shortcut::CaptureLayout.screen()), (crate::keyconfig::ShortcutGroup::Result, ShortcutScreen::Result));
+    assert!(Shortcut::CaptureLayout.takes_a_pad(), "a controller can be given it");
+    let fresh = KeyConfig::default();
+    for &mode in Mode::ALL {
+        let lanes = default_keys_for_mode(mode).into_iter().chain(default_reverse_keys_for_mode(mode));
+        assert!(lanes.into_iter().all(|(lane_key, _)| lane_key != shipped), "{} plays a lane on it", mode.name);
+        assert!(collisions(&fresh, mode).is_empty(), "{}", mode.name);
+    }
+    assert!(ControlAction::ALL.into_iter().all(|action| fresh.control_key(action) != Some(shipped)), "a control is read from it");
+    assert_eq!(fresh.shortcut_on(ShortcutScreen::Result, shipped), Some(Shortcut::CaptureLayout));
+
+    let earlier: KeyConfig = ron::from_str(&format!(r#"(shortcuts: {{"result_retry": "{}"}})"#, key_name(KeyCode::KeyT))).expect("the file parses");
+    assert_eq!(earlier.shortcut_key(Shortcut::CaptureLayout), Some(shipped), "a file with no word for it leaves it on the key it ships on");
+    let taken: KeyConfig = ron::from_str(&format!(r#"(shortcuts: {{"result_next": "{}"}})"#, key_name(shipped))).expect("the file parses");
+    assert_eq!(taken.shortcut_key(Shortcut::CaptureLayout), None, "it took a key the player had given another key of the result");
+    assert_eq!(taken.shortcut_on(ShortcutScreen::Result, shipped), Some(Shortcut::NextSong));
+    let written = ron::ser::to_string(&fresh).expect("the key config is written");
+    assert!(!written.contains("result_capture_layout"), "a key nobody moved was written to the file: {written}");
+}
+
 /// The shortcuts and the controls are stored under names that do not change with what the rows are
 /// called on screen, each name is used once, and the ten controls an older pad block names keep the
 /// names it knows them by.

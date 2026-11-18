@@ -10,9 +10,9 @@ return {
     result_stage_one = { en = "{0} STAGE", ko = "스테이지 {0}개", ja = "{0}ステージ" },
     result_stage_many = { en = "{0} STAGES", ko = "스테이지 {0}개", ja = "{0}ステージ" },
     result_hint_chart = {
-        en = "ENTER  CONTINUE        RETRY AND NEXT CHART  THEIR KEYS IN KEY CONFIG (R AND N AS SHIPPED)",
-        ko = "ENTER  계속        재도전과 다음 차트  키 설정에서 지정한 키 (기본 R, N)",
-        ja = "ENTER  続ける        リトライと次の譜面  キー設定で割り当てたキー（初期設定はR、N）",
+        en = "ENTER  CONTINUE        RETRY, NEXT CHART AND CAPTURE LAYOUT  THEIR KEYS IN KEY CONFIG (R, N AND P AS SHIPPED)",
+        ko = "ENTER  계속        재도전, 다음 차트, 배치 저장  키 설정에서 지정한 키 (기본 R, N, P)",
+        ja = "ENTER  続ける        リトライ、次の譜面、配置を保存  キー設定で割り当てたキー（初期設定はR、N、P）",
     },
     result_hint_course = { en = "ENTER  CONTINUE", ko = "ENTER  계속", ja = "ENTER  続ける" },
     result_hint_gauge_key = { en = "KEY 6  GAUGE", ko = "KEY 6  게이지", ja = "KEY 6  ゲージ" },

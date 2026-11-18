@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use rbms_chart::shuffle::NoteOption;
 use rbms_library::{Library, SongEntry};
 use rbms_play::{NullSink, ScratchDir, SessionClock, SessionOptions};
 use rbms_render::result::TargetView;
@@ -1423,4 +1424,145 @@ fn a_controller_button_bound_to_run_again_does_what_its_key_does() {
     let now = Instant::now();
     let asked = app.stage.handle_marked_pad(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, PadEvent::Shortcut(Shortcut::Retry), PadMark::default());
     assert!(matches!(asked, Transition::To(Stage::Loading(_))), "the button did not act on the built-in screen");
+}
+
+/// The seed the run a capture is taken of was laid out with.
+const CAPTURED_SEED: u64 = 0x5EED;
+
+/// An app whose library holds the fixture chart, written to a file of the test's own, and which keeps
+/// its captures in a file of the test's own; played on `random`.
+fn capturing_app(tag: &str, random: NoteOption) -> App {
+    let dir = std::env::temp_dir().join(format!("rbms-result-capture-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a temp dir");
+    let path = dir.join("captured.bms");
+    std::fs::write(&path, RECORD_CHART).expect("the chart is written");
+    let decoded = crate::app_play::decode_chart(RECORD_CHART, &path.to_string_lossy()).expect("the chart decodes");
+    let mut app = with_library(plain_app());
+    app.shared.library = Library::from_songs(vec![SongEntry { path, mode: decoded.mode, ..song(PLAYED_PATH, &decoded.md5) }]);
+    app.shared.captured_layouts = crate::captured_layouts::CapturedLayouts::load(&dir.join(crate::captured_layouts::CAPTURED_LAYOUTS_FILE));
+    app.shared.config.play.random = random;
+    app
+}
+
+/// The fixture run of the chart laid out from the capture seed.
+fn run_to_capture() -> PlaySession {
+    let decoded = crate::app_play::decode_chart(RECORD_CHART, "captured.bms").expect("the chart decodes");
+    PlaySession::new(decoded.model, SessionOptions { seed: CAPTURED_SEED, ..SessionOptions::default() })
+}
+
+/// What the screens said, in English, while `body` ran.
+fn said_while(body: impl FnOnce()) -> Vec<String> {
+    crate::notify::exclusive(|| {
+        body();
+        let mut said = Vec::new();
+        crate::notify::drain(&mut said);
+        said.into_iter().map(|(_, line)| line).collect()
+    })
+}
+
+/// The capture key on the built-in screen keeps the layout of the run -- its arrangement, its seed,
+/// its lane order, what it came to -- once, says so, and says that a second press finds it kept.
+#[test]
+fn the_capture_key_keeps_the_runs_layout_once() {
+    let mut app = capturing_app("kept", NoteOption::RRandom);
+    let run = ResultRun::of(&run_to_capture(), &app.shared, standing(false));
+    let mut screen = state().played(run);
+    let capture = press(Shortcut::CaptureLayout.default_key());
+    let said = said_while(|| {
+        let first = screen.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, capture);
+        assert!(matches!(first, Transition::Stay), "the capture key left the screen");
+        screen.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(Shortcut::CaptureLayout.default_key()));
+    });
+    let kept = app.shared.captured_layouts.all();
+    assert_eq!(kept.len(), 1, "the same layout was kept twice");
+    let md5 = app.shared.library.songs()[0].md5.clone();
+    let layout = kept[0].layout_text();
+    assert_eq!((kept[0].md5.as_str(), kept[0].random_label.as_str(), kept[0].seed, kept[0].lamp.as_str()), (md5.as_str(), "R-RANDOM", CAPTURED_SEED, "CLEAR"));
+    assert_eq!(kept[0].layout.len(), 1);
+    assert_eq!(said, [format!("layout captured: R-RANDOM {layout}"), format!("this layout is captured already: R-RANDOM {layout}")]);
+}
+
+/// A run that is no lane order of the player's own is not captured, and the screen says why: a
+/// run that lays its notes out one by one, one on OFF, one AUTOPLAY played, a replay watched, a
+/// course stage, and a screen with no run.
+#[test]
+fn the_capture_key_says_why_a_run_is_not_captured() {
+    let refused = |app: &mut App, screen: &mut ResultState| {
+        let said = said_while(|| {
+            screen.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(Shortcut::CaptureLayout.default_key()));
+        });
+        assert!(app.shared.captured_layouts.all().is_empty(), "{said:?} kept a capture");
+        said
+    };
+    let mut app = capturing_app("note-by-note", NoteOption::SRandom);
+    let mut screen = state().played(ResultRun::of(&run_to_capture(), &app.shared, standing(false)));
+    assert_eq!(refused(&mut app, &mut screen), ["layout not captured: S-RANDOM lays the notes out one by one, not as a lane order"]);
+    let mut app = capturing_app("off", NoteOption::Off);
+    let mut screen = state().played(ResultRun::of(&run_to_capture(), &app.shared, standing(false)));
+    assert_eq!(refused(&mut app, &mut screen), ["layout not captured: the run was played on OFF"]);
+    let mut app = capturing_app("autoplay", NoteOption::Random);
+    app.shared.config.play.autoplay = true;
+    let mut screen = state().played(ResultRun::of(&run_to_capture(), &app.shared, standing(false)));
+    assert_eq!(refused(&mut app, &mut screen), ["layout not captured: AUTOPLAY played this run"]);
+    let mut app = capturing_app("replay", NoteOption::Random);
+    app.shared.replay = Some(watched_replay());
+    let mut screen = state().played(ResultRun::of(&run_to_capture(), &app.shared, standing(false)));
+    assert_eq!(refused(&mut app, &mut screen), ["layout not captured: this is a replay being watched"]);
+    let mut app = capturing_app("course", NoteOption::Random);
+    app.shared.course_run = Some(rbms_course::CourseRun::new(rbms_course::Course::default(), 100.0));
+    let mut screen = state().played(ResultRun::of(&run_to_capture(), &app.shared, standing(false)));
+    assert_eq!(refused(&mut app, &mut screen), ["layout not captured: a course stage or a practice run is not captured"]);
+    let mut app = capturing_app("no-run", NoteOption::Random);
+    assert_eq!(refused(&mut app, &mut state()), ["layout not captured: there is no run on this screen"]);
+}
+
+/// On a skin's scene the capture key acts at once, before the scene listens, and leaves the scene
+/// as it was; a controller button bound to it does the same.
+#[test]
+fn the_capture_key_acts_at_once_on_a_skins_scene_and_from_a_controller() {
+    let built = capturing_app("skin-run", NoteOption::Mirror);
+    let run = ResultRun::of(&run_to_capture(), &built.shared, standing(false));
+    let (mut app, _pixels) = listening_screen("capture", state().played(run));
+    app.shared.captured_layouts = built.shared.captured_layouts.clone();
+    assert!(matches!(key(&mut app, press(Shortcut::CaptureLayout.default_key())), Transition::Stay));
+    assert!(!app.shared.skin_timers.is_on(timer_id::FADEOUT), "the capture key closed the result");
+    assert_eq!(app.shared.captured_layouts.all().first().map(|capture| capture.random_label.as_str()), Some("MIRROR"));
+    app.shared.captured_layouts.remove(&app.shared.captured_layouts.all()[0].clone());
+    let now = Instant::now();
+    let asked = app.stage.handle_marked_pad(
+        &mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 },
+        crate::gamepad::PadEvent::Shortcut(Shortcut::CaptureLayout),
+        crate::gamepad::PadMark::default(),
+    );
+    assert!(matches!(asked, Transition::Stay));
+    assert_eq!(app.shared.captured_layouts.all().len(), 1, "the controller button did not capture the layout");
+    assert!(!app.shared.skin_timers.is_on(timer_id::FADEOUT));
+}
+
+/// A run captured on its result is played again from LAYOUT PICK on the same arrangement and the
+/// same seed: the list of the chart's captures opens on it, and START borrows it as it was.
+#[test]
+fn a_captured_run_is_played_again_from_layout_pick_on_its_arrangement_and_seed() {
+    const WAIT: Duration = Duration::from_secs(30);
+    let mut app = capturing_app("again", NoteOption::RRandom);
+    let run = ResultRun::of(&run_to_capture(), &app.shared, standing(false));
+    let mut screen = state().played(run);
+    screen.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(Shortcut::CaptureLayout.default_key()));
+    app.shared.config.play.random = NoteOption::Off;
+    let mut pick = crate::stage::LayoutPickState::open(&app.shared, 0);
+    pick.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(KeyCode::ArrowRight));
+    let deadline = Instant::now() + WAIT;
+    let started = loop {
+        pick.update(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 });
+        let started = pick.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(KeyCode::Enter));
+        if !matches!(started, Transition::Stay) {
+            break started;
+        }
+        assert!(Instant::now() < deadline, "the chart was never ready to play");
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    assert!(matches!(started, Transition::To(Stage::Loading(_) | Stage::Decide(_))));
+    let borrowed = app.shared.borrowed_layout().map(|layout| (layout.random, layout.seed));
+    assert_eq!(borrowed, Some((NoteOption::RRandom, CAPTURED_SEED)));
 }

@@ -11,7 +11,7 @@ use winit::keyboard::KeyCode;
 use crate::gamepad::PadConfig;
 use crate::text::layout_play::LayoutPlayText;
 use crate::text::menus::key_editor::{ControlLabelText, LaneLabelText, ShortcutGroupText, ShortcutLabelText};
-use crate::text::menus::layout_pick::LayoutPickText;
+use crate::text::menus::layout_pick::{CaptureText, LayoutPickText};
 use crate::text::notices::NoticeText;
 
 mod chord;
@@ -773,6 +773,8 @@ pub enum Shortcut {
     RefFavourite,
     Retry,
     NextSong,
+    /// Keep the layout the run on the result screen was played on, for LAYOUT PICK to play again.
+    CaptureLayout,
     ReplayPause,
     ReplayFaster,
     ReplaySlower,
@@ -784,7 +786,7 @@ pub enum Shortcut {
 
 impl Shortcut {
     /// Every shortcut, group by group, in the order the key editor and the key guide list them.
-    pub const ALL: [Shortcut; 33] = [
+    pub const ALL: [Shortcut; 34] = [
         Shortcut::Search,
         Shortcut::Filter,
         Shortcut::Sort,
@@ -812,6 +814,7 @@ impl Shortcut {
         Shortcut::RefFavourite,
         Shortcut::Retry,
         Shortcut::NextSong,
+        Shortcut::CaptureLayout,
         Shortcut::ReplayPause,
         Shortcut::ReplayFaster,
         Shortcut::ReplaySlower,
@@ -842,7 +845,7 @@ impl Shortcut {
             | Shortcut::RefKeyConfig
             | Shortcut::RefSearch
             | Shortcut::RefFavourite => ShortcutGroup::SkinBrowser,
-            Shortcut::Retry | Shortcut::NextSong => ShortcutGroup::Result,
+            Shortcut::Retry | Shortcut::NextSong | Shortcut::CaptureLayout => ShortcutGroup::Result,
             Shortcut::ReplayPause
             | Shortcut::ReplayFaster
             | Shortcut::ReplaySlower
@@ -894,6 +897,7 @@ impl Shortcut {
             Shortcut::ReplayBack => ShortcutLabelText::ReplayBack,
             Shortcut::ReplayPlayLayout => return LayoutPlayText::ShortcutLabel.get(language()),
             Shortcut::LayoutPick => return LayoutPickText::ShortcutLabel.get(language()),
+            Shortcut::CaptureLayout => return CaptureText::ShortcutLabel.get(language()),
         };
         text.get(language())
     }
@@ -928,6 +932,7 @@ impl Shortcut {
             Shortcut::RefFavourite => "number_favourite",
             Shortcut::Retry => "result_retry",
             Shortcut::NextSong => "result_next",
+            Shortcut::CaptureLayout => "result_capture_layout",
             Shortcut::ReplayPause => "replay_pause",
             Shortcut::ReplayFaster => "replay_faster",
             Shortcut::ReplaySlower => "replay_slower",
@@ -943,7 +948,9 @@ impl Shortcut {
     /// from, next to the one the key editor is on. The key that plays a watched replay's layout
     /// ships on one no shipped layout plays a lane on and no control or other key of a replay under
     /// analysis is read from. The key to LAYOUT PICK ships on a letter no shipped layout plays a lane
-    /// on and nothing else of the browser is read from.
+    /// on and nothing else of the browser is read from. The key that captures a result's layout does
+    /// too: a result screen reads every lane key as a key of the reference's table, and the fifth
+    /// key, which ships on C, runs the chart again on a new arrangement.
     pub fn default_key(self) -> KeyCode {
         match self {
             Shortcut::Search => KeyCode::Slash,
@@ -973,6 +980,7 @@ impl Shortcut {
             Shortcut::RefFavourite => KeyCode::F9,
             Shortcut::Retry => KeyCode::KeyR,
             Shortcut::NextSong => KeyCode::KeyN,
+            Shortcut::CaptureLayout => KeyCode::KeyP,
             Shortcut::ReplayPause => KeyCode::Space,
             Shortcut::ReplayFaster => KeyCode::Equal,
             Shortcut::ReplaySlower => KeyCode::Minus,

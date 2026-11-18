@@ -59,6 +59,7 @@ mod app_ranking;
 mod app_result;
 mod assets;
 mod borrowed_layout;
+mod captured_layouts;
 mod command_line;
 mod course_ir;
 mod course_ui;
@@ -829,6 +830,8 @@ struct AppShared {
     /// The layout last written on LAYOUT PICK for each mode, held while the app runs and written to
     /// no file.
     picked_layouts: stage::layout_pick::PickedLayouts,
+    /// The layouts captured on a result screen, kept beside the settings file for LAYOUT PICK.
+    captured_layouts: captured_layouts::CapturedLayouts,
     gpu: Option<Gpu>,
     /// The one output stream for the whole app lifetime. Opened lazily on the first frame (or the
     /// first chart/preview load) and kept across Play, Result and Select; stage changes clear the
@@ -1068,6 +1071,7 @@ impl App {
         let practice_book = practice::PracticeBook::load(&practice::practice_path(&settings_path));
         let favorites_path = favorites_path(&settings_path);
         let favorites = Favorites::load(&favorites_path);
+        let captured_layouts = captured_layouts::CapturedLayouts::beside(&settings_path);
         if let Some(url) = &launch.table_url
             && !config.library.tables.iter().any(|t| &t.location == url)
         {
@@ -1172,6 +1176,7 @@ impl App {
                 own_play_options: None,
                 borrowed_layout: None,
                 picked_layouts: stage::layout_pick::PickedLayouts::default(),
+                captured_layouts,
                 kc_edit_mode: MODE,
                 gpu: None,
                 audio: None,

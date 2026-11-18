@@ -37,8 +37,8 @@
 
 use std::path::Path;
 
-use rbms_judge::ClearType;
 use rbms_judge::windows::JudgeWindowSet;
+use rbms_judge::{ClearType, assist_grade};
 use rbms_model::Mode;
 use rbms_model::translations::Catalog;
 use rbms_play::{PlayRecord, PlaySession};
@@ -52,6 +52,8 @@ use rbms_skin::timer::{MICROS_PER_MILLI, TimerState, timer_id};
 use winit::keyboard::KeyCode;
 
 use crate::app_result::{following_song, next_song, offers_retry, retry};
+use crate::captured_layouts::{CaptureRefusal, CapturedLayout, CapturedRun, RunKind};
+use crate::format::lamp_label_color;
 use crate::ir_outcome::IrLineKind;
 use crate::ir_ranking::RankingState;
 use crate::keyconfig::{KEY_INDEX_COUNT, Shortcut, ShortcutScreen};
@@ -645,6 +647,9 @@ pub(crate) struct ResultRun {
     /// Whether the run counted towards the player's records, which is what lets a run-again keep
     /// its arrangement (`PlayerResource.isUpdateScore`).
     updates_score: bool,
+    /// The capture of the layout the run was played on, or why it has none
+    /// ([`Shortcut::CaptureLayout`]).
+    capture: Result<CapturedLayout, CaptureRefusal>,
     /// What the screen says of a run the player played with an assist on, which set no best score.
     assist_note: Option<&'static str>,
     /// What the screen says of a run played at another PLAYBACK RATE than the chart's own, which was
@@ -708,9 +713,25 @@ impl ResultRun {
             ..ResultInput::from_record(record, shared.mode, lamp)
         });
         let played_by_hand = !shared.run_plays_itself() && shared.replay.is_none();
+        let capture = CapturedRun {
+            md5: &chart.md5,
+            title: &chart.title,
+            subtitle: &chart.subtitle,
+            mode: model.mode,
+            option: shared.config.play.random,
+            seed: session.seed(),
+            ex_score: record.summary.ex_score,
+            lamp: lamp_label_color(lamp, assist_grade(lamp, Some(record.finished_gauge))).0,
+        }
+        .capture(RunKind {
+            plays_itself: shared.run_plays_itself(),
+            replay: shared.replay.is_some(),
+            course_or_practice: shared.course_run.is_some() || shared.practice_requested,
+        });
         ResultRun {
             stagefile,
             seed: session.seed(),
+            capture,
             updates_score,
             assist_note: assist_note(custom_judge, own_total, scratch_auto).filter(|_| played_by_hand && unsaved_playback_percent.is_none()),
             playback_note: unsaved_playback_percent.filter(|_| played_by_hand).map(playback_note),
@@ -731,6 +752,7 @@ impl ResultRun {
             snapshot,
             stagefile: None,
             seed: 0,
+            capture: Err(CaptureRefusal::NoRun),
             updates_score: false,
             assist_note: None,
             playback_note: None,
@@ -1013,6 +1035,19 @@ impl ResultState {
         shared.select_gen = shared.select_gen.wrapping_add(1);
     }
 
+    /// Keep the layout the run was played on for LAYOUT PICK, or say why it is not kept. The key
+    /// acts at once on every state of the screen, a skin's scene included, and leaves the scene
+    /// alone.
+    fn capture_layout(&self, shared: &mut AppShared) {
+        let capture = self.run.as_ref().map_or(Err(CaptureRefusal::NoRun), |run| run.capture.clone());
+        match capture {
+            Ok(capture) => {
+                shared.keep_captured_layout(capture);
+            }
+            Err(refusal) => refusal.report(),
+        }
+    }
+
     /// Play the clear or fail cue, once (`MusicResult.prepare`).
     fn announce(&mut self, shared: &mut AppShared) {
         if !std::mem::replace(&mut self.stage.announced, true) {
@@ -1232,8 +1267,13 @@ impl StageHandler for ResultState {
     }
 
     /// Keys on the result screen. A skin's scene keeps them until it listens; the built-in screen
-    /// acts on them at once; and a screen still waiting for its skin takes Escape alone.
+    /// acts on them at once; and a screen still waiting for its skin takes Escape alone. The key
+    /// that captures the run's layout acts at once on all three.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        if key.pressed && ctx.shared.shortcut_for(ShortcutScreen::Result, key.code) == Some(Shortcut::CaptureLayout) {
+            self.capture_layout(ctx.shared);
+            return Transition::Stay;
+        }
         match self.stage.skin {
             SkinStatus::Gone => ResultState::built_in_key(ctx, &key),
             SkinStatus::Reading if key.pressed && key.code == KeyCode::Escape => ctx.shared.leave_play(),
@@ -1247,11 +1287,15 @@ impl StageHandler for ResultState {
 
     /// A controller button bound to the run-again or the next-chart shortcut does what its key
     /// does: at once on the built-in screen, through the scene on a skin's, and nothing while the
-    /// skin is still being read.
+    /// skin is still being read. One bound to the capture of the layout captures it at once.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
         let crate::gamepad::PadEvent::Shortcut(shortcut) = event else {
             return Transition::Stay;
         };
+        if shortcut == Shortcut::CaptureLayout {
+            self.capture_layout(ctx.shared);
+            return Transition::Stay;
+        }
         match (self.stage.skin, shortcut) {
             (SkinStatus::Gone, Shortcut::Retry) if offers_retry(ctx.shared) => retry(ctx.shared),
             (SkinStatus::Gone, Shortcut::NextSong) if offers_retry(ctx.shared) => next_song(ctx.shared),
