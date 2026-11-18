@@ -1409,8 +1409,8 @@ impl App {
             self.shared.poll_audio_clock();
         }
 
-        for (event, at) in self.shared.poll_pad() {
-            let transition = self.stage.handle_pad(&mut FrameCtx { shared: &mut self.shared, now: at, dt: 0.0 }, event);
+        for (event, at, mark) in self.shared.poll_pad() {
+            let transition = self.stage.handle_marked_pad(&mut FrameCtx { shared: &mut self.shared, now: at, dt: 0.0 }, event, mark);
             self.apply(transition, event_loop);
         }
 

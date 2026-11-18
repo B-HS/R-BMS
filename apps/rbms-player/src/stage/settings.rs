@@ -36,7 +36,7 @@
 use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
-use crate::keyconfig::Shortcut;
+use crate::keyconfig::{KeyBind, Shortcut};
 use crate::number_row::{EditKey, NumberInput, NumberValue, hot_rect, number_edit_hint};
 use crate::settings_ui::{SettingRow, audio_status_text, is_resettable, shipped_value, step_audio_device};
 use crate::settings_view::{
@@ -962,7 +962,8 @@ impl SettingsState {
     /// The keys that open the play menu, the skin menu and the key editor, as the key configuration
     /// names them now.
     fn link_keys(&self, shared: &AppShared) -> [String; 3] {
-        [Shortcut::PlayMenu, Shortcut::SkinMenu, Shortcut::KeyConfig].map(|shortcut| shared.shortcut_key(shortcut).map_or(NO_KEY, key_name).to_string())
+        [Shortcut::PlayMenu, Shortcut::SkinMenu, Shortcut::KeyConfig]
+            .map(|shortcut| shared.keyconfig.shortcut_bind(shortcut).map_or_else(|| NO_KEY.to_string(), KeyBind::label))
     }
 
     /// The keys of the screen as the line at its foot names them: what the question about a group,

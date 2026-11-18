@@ -1,8 +1,8 @@
 use crate::gamepad::{ANALOG_THRESHOLD_RANGE, AXIS_DEADZONE_RANGE, AnalogMode, DEBOUNCE_MS_RANGE, PadBinding, PadConfig};
 use crate::keyconfig::{
-    Bindable, Clash, ControlAction, GUIDE_KEY, HeldKeys, KEY_INDEX_COUNT, KeyConfig, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutScreen,
-    UNNAMED_KEY, belongs_to_a_typed_line, clash_among, default_keys_for_mode, default_reverse_keys_for_mode, fixed_keys_of, key_from_name, key_index_of,
-    key_name, mode_config_key,
+    Bindable, Clash, ControlAction, GUIDE_KEY, HeldKeys, KEY_INDEX_COUNT, KeyBind, KeyConfig, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut,
+    ShortcutScreen, UNNAMED_KEY, belongs_to_a_typed_line, clash_among, default_keys_for_mode, default_reverse_keys_for_mode, fixed_keys_of, key_from_name,
+    key_index_of, key_name, mode_config_key,
 };
 use rbms_model::Mode;
 use rbms_play::ScratchDir;
@@ -15,7 +15,7 @@ use winit::keyboard::KeyCode;
 /// editor draws in red.
 fn collisions(keys: &KeyConfig, mode: Mode) -> std::collections::HashSet<KeyCode> {
     let bound = keys.bound_keys(mode);
-    bound.iter().filter_map(|(target, key)| key.filter(|code| clash_among(bound.iter().copied(), *target, *code).is_some())).collect()
+    bound.iter().filter_map(|(target, key)| key.filter(|bind| clash_among(bound.iter().copied(), *target, *bind).is_some()).and_then(KeyBind::single)).collect()
 }
 
 fn shared_with(keyconfig: &KeyConfig) -> crate::AppShared {
@@ -91,8 +91,8 @@ fn default_config_has_every_mode_and_control() {
 /// a key a player asks for in the key editor rather than one shipped where a stray press in a run
 /// would move something -- the switch that lets the offset adjust itself above all. The modifier
 /// for the finer step is among them because no one key is free on every shipped layout: unbound,
-/// it is the shift that plays no lane.
-const UNBOUND_BY_DEFAULT: [ControlAction; 9] = [
+/// it is the shift that plays no lane. ESC is among them because Escape itself is always there.
+const UNBOUND_BY_DEFAULT: [ControlAction; 10] = [
     ControlAction::HiddenUp,
     ControlAction::HiddenDown,
     ControlAction::LiftToggle,
@@ -102,6 +102,7 @@ const UNBOUND_BY_DEFAULT: [ControlAction; 9] = [
     ControlAction::KeepGreenToggle,
     ControlAction::AutoAdjustToggle,
     ControlAction::Fine,
+    ControlAction::Escape,
 ];
 
 #[test]
@@ -387,7 +388,7 @@ fn control_token_matches_default_strings() {
 
 #[test]
 fn control_action_all_has_distinct_nonempty_labels() {
-    assert_eq!(ControlAction::ALL.len(), 20);
+    assert_eq!(ControlAction::ALL.len(), 21);
     let mut labels: Vec<&str> = ControlAction::ALL.iter().map(|a| a.label()).collect();
     for l in &labels {
         assert!(!l.is_empty(), "label non-empty");
@@ -1144,7 +1145,7 @@ fn the_shipped_keys_clash_with_nothing_in_any_mode() {
     for &mode in Mode::ALL {
         for (target, key) in keys.bound_keys(mode) {
             let Some(code) = key else { continue };
-            assert_eq!(keys.clash(mode, target, code), None, "{} {target:?} on {code:?}", mode.name);
+            assert_eq!(keys.clash_of(mode, target, code), None, "{} {target:?} on {code:?}", mode.name);
         }
     }
 }

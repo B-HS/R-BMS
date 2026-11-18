@@ -22,7 +22,7 @@ use winit::keyboard::KeyCode;
 use super::SelectState;
 use super::keys::{KeyLayout, SelectKey};
 pub(super) use crate::keyconfig::GUIDE_KEY;
-use crate::keyconfig::{ControlAction, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, key_index_of, key_name};
+use crate::keyconfig::{ControlAction, KeyBind, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, key_index_of, key_name};
 use crate::text::select::guide::GuideText;
 use crate::{AppShared, CH, CW, Hot};
 
@@ -120,6 +120,12 @@ fn bound_label(code: Option<KeyCode>) -> &'static str {
     code.map_or(UNBOUND, shortcut_label)
 }
 
+/// What a key or two keys held together that may be bound to nothing are called: each key as
+/// [`shortcut_label`] calls it, two joined as `A + B`.
+fn bind_label(bind: Option<KeyBind>) -> String {
+    bind.map_or_else(|| UNBOUND.to_string(), |bind| bind.label_with(shortcut_label))
+}
+
 /// The keys of one entry, as one string.
 fn keys_label(keys: &[KeyCode]) -> String {
     keys.iter().map(|code| shortcut_label(*code)).collect::<Vec<_>>().join(" ")
@@ -181,9 +187,14 @@ fn index_label(shared: &AppShared, index: usize) -> &'static str {
     bound_label(forward.or(backward))
 }
 
-/// The key a control is read from right now, or [`UNBOUND`].
-fn control_label(shared: &AppShared, action: ControlAction) -> &'static str {
-    bound_label(shared.control_key_in_force(action))
+/// The key or the two keys a control is read from right now, or [`UNBOUND`].
+fn control_label(shared: &AppShared, action: ControlAction) -> String {
+    bind_label(shared.control_bind_in_force(action))
+}
+
+/// The key or the two keys a shortcut is read from right now, or [`UNBOUND`].
+fn shortcut_bind_label(shared: &AppShared, shortcut: Shortcut) -> String {
+    bind_label(shared.shortcut_bind(shortcut))
 }
 
 /// The lines of one group of shortcuts, each with the key it is on now.
@@ -191,7 +202,7 @@ fn group_rows(shared: &AppShared, group: ShortcutGroup) -> Vec<GuideRow> {
     Shortcut::ALL
         .into_iter()
         .filter(|shortcut| shortcut.group() == group && !matches!(shortcut, Shortcut::OptionsPin | Shortcut::OptionsHold))
-        .map(|shortcut| GuideRow::new(bound_label(shared.shortcut_key(shortcut)), shortcut_does(shortcut)))
+        .map(|shortcut| GuideRow::new(shortcut_bind_label(shared, shortcut), shortcut_does(shortcut)))
         .collect()
 }
 
@@ -200,7 +211,7 @@ fn group_rows(shared: &AppShared, group: ShortcutGroup) -> Vec<GuideRow> {
 pub(super) fn browser_rows(shared: &AppShared) -> Vec<GuideRow> {
     let language = language();
     let fixed = FIXED_KEYS.iter().map(|fixed| GuideRow::new(keys_label(fixed.keys), fixed.does.get(language)));
-    let options = format!("{} {}", bound_label(shared.shortcut_key(Shortcut::OptionsPin)), bound_label(shared.shortcut_key(Shortcut::OptionsHold)));
+    let options = format!("{} {}", shortcut_bind_label(shared, Shortcut::OptionsPin), shortcut_bind_label(shared, Shortcut::OptionsHold));
     fixed
         .chain(group_rows(shared, ShortcutGroup::Browser))
         .chain([GuideRow::new(options, GuideText::OptionsOverlay.get(language)), GuideRow::new(shortcut_label(GUIDE_KEY), GuideText::ThisGuide.get(language))])
@@ -225,10 +236,10 @@ pub(super) fn panel_rows(shared: &AppShared) -> Vec<GuideRow> {
     let language = language();
     let start = control_label(shared, ControlAction::Start);
     let select = control_label(shared, ControlAction::Select);
-    let detail = bound_label(shared.shortcut_key(Shortcut::RefDetail));
+    let detail = shortcut_bind_label(shared, Shortcut::RefDetail);
     let mut rows = vec![
-        GuideRow::new(start, GuideText::HoldForPlayOptions.get(language)),
-        GuideRow::new(select, GuideText::HoldForAssistOptions.get(language)),
+        GuideRow::new(&start, GuideText::HoldForPlayOptions.get(language)),
+        GuideRow::new(&select, GuideText::HoldForAssistOptions.get(language)),
         GuideRow::new(format!("{start} + {select} / {detail}"), GuideText::HoldForDetailOptions.get(language)),
         GuideRow::new(GuideText::PlusTurntable.fill(language, &[&start]), GuideText::Target.get(language)),
     ];
@@ -264,7 +275,9 @@ pub(super) fn play_rows(shared: &AppShared) -> Vec<GuideRow> {
         .iter()
         .map(|(less, more, does)| GuideRow::new(format!("{} {}", control_label(shared, *less), control_label(shared, *more)), does.get(language)));
     let switches = CONTROL_SWITCHES.iter().map(|(action, does)| GuideRow::new(control_label(shared, *action), does.get(language)));
-    let fine = shared.control_key_in_force(ControlAction::Fine).map_or(GuideText::ShiftNoLane.get(language), shortcut_label);
+    let fine = shared
+        .control_bind_in_force(ControlAction::Fine)
+        .map_or_else(|| GuideText::ShiftNoLane.get(language).to_string(), |bind| bind.label_with(shortcut_label));
     pairs.chain(switches).chain([GuideRow::new(fine, GuideText::HoldFineStep.get(language))]).collect()
 }
 
@@ -286,8 +299,17 @@ pub(super) fn combination_rows(shared: &AppShared) -> Vec<GuideRow> {
         GuideRow::new(GuideText::PlusKeys.fill(language, &[&select]), GuideText::GreenNumberByOneMs.get(language)),
         GuideRow::new(format!("{start} + {select}"), GuideText::LiftOrHiddenTurns.get(language)),
         GuideRow::new(GuideText::MouseWheel.get(language), GuideText::LaneCover.get(language)),
-        GuideRow::new(shortcut_label(KeyCode::Escape), GuideText::StopTheChart.get(language)),
+        GuideRow::new(escape_label(shared), GuideText::StopTheChart.get(language)),
     ]
+}
+
+/// The keys that stop a chart: Escape, and beside it the key or the two keys the player gave ESC.
+fn escape_label(shared: &AppShared) -> String {
+    let escape = shortcut_label(KeyCode::Escape);
+    match shared.control_bind_in_force(ControlAction::Escape) {
+        Some(bind) => format!("{escape} / {}", bind.label_with(shortcut_label)),
+        None => escape.to_string(),
+    }
 }
 
 /// Everything the guide lists, column by column.
@@ -350,8 +372,7 @@ pub(super) fn render_guide<R: Renderer>(r: &mut R, shared: &AppShared) -> Vec<(R
     r.fill_rect(panel, th.panel_hi);
     r.fill_rect(Rect::new(panel.x, panel.y, panel.w, RULE_THICKNESS), th.focus);
     draw_text(r, panel.x + PAD_X, panel.y + TITLE_Y, TITLE_SCALE, th.text, GuideText::Title.get(language()));
-    let hint =
-        GuideText::Hint.fill(language(), &[&shortcut_label(GUIDE_KEY), &shortcut_label(GUIDE_KEY), &bound_label(shared.shortcut_key(Shortcut::KeyConfig))]);
+    let hint = GuideText::Hint.fill(language(), &[&shortcut_label(GUIDE_KEY), &shortcut_label(GUIDE_KEY), &shortcut_bind_label(shared, Shortcut::KeyConfig)]);
     draw_text_right(r, panel.x + panel.w - PAD_X, panel.y + TITLE_Y + HINT_DROP, HINT_SCALE, th.text_muted, &hint);
 
     let column_w = (panel.w - PAD_X * 2.0 - COLUMN_GAP * (COLUMN_COUNT - 1) as f32) / COLUMN_COUNT as f32;
@@ -435,6 +456,19 @@ mod tests {
         assert!(rows.iter().any(|(keys, does)| keys.ends_with("두 번") && does == "레인 커버 ON/OFF"), "{rows:#?}");
         let headings: Vec<&str> = columns(&app.shared).into_iter().flatten().map(|section| section.heading).collect();
         assert_eq!(headings, ["선곡", "화면", "숫자 키", "옵션 패널", "건반 1-7 및 턴테이블", "플레이 중", "플레이 중, 함께 누르기"]);
+    }
+
+    /// Two keys held together are named as `A + B`, and the key given to ESC beside Escape.
+    #[test]
+    fn a_chord_is_named_as_its_two_keys_and_the_key_given_to_esc_beside_escape() {
+        let mut app = app();
+        let mode = app.shared.mode;
+        let chord = KeyBind::chord(KeyCode::ControlLeft, KeyCode::F7).expect("two keys");
+        app.shared.keyconfig.bind_keys(mode, crate::keyconfig::Bindable::Shortcut(Shortcut::Folders), chord);
+        app.shared.keyconfig.set_control(ControlAction::Escape, KeyCode::Backspace);
+        let rows: Vec<String> = columns(&app.shared).into_iter().flatten().flat_map(|section| section.rows).map(|row| row.keys).collect();
+        assert!(rows.iter().any(|keys| keys == "LCTRL + F7"), "{rows:#?}");
+        assert!(rows.iter().any(|keys| keys == "ESC / BACKSPACE"), "{rows:#?}");
     }
 
     #[test]

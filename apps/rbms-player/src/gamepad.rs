@@ -29,7 +29,7 @@
 //! turntable algorithms are therefore testable with no controller plugged in.
 //!
 //! A button or a two-key axis is resolved change by change, each at the instant the controller
-//! layer stamped it ([`PadMapper::resolve_changes`]): a press and a release that both arrive
+//! layer stamped it ([`PadMapper::resolve_changes_marked`]): a press and a release that both arrive
 //! between two frames are both played, each at its own time, and the debounce window is measured
 //! between those instants. Only a turntable is still read once a poll, since its state machines
 //! count readings rather than time.
@@ -37,6 +37,8 @@
 //! Wired into the frame loop by the integration branch; see `docs/plan/phase-g-wiring/G5-gamepad.md`.
 
 mod analog;
+#[cfg(test)]
+mod chord_tests;
 #[cfg(test)]
 mod tests;
 
@@ -143,6 +145,20 @@ impl PadBinding {
             PadBinding::Button(_) | PadBinding::Standard(_) => None,
         }
     }
+
+    /// Whether it is pressed and let go like a key -- a button, a menu button or a direction of an
+    /// axis -- and so can be one of two elements held together. A turntable spins.
+    pub fn is_a_key(self) -> bool {
+        !matches!(self, PadBinding::AnalogScratch { .. })
+    }
+
+    /// The display token of two elements held together, as the key editor shows them.
+    pub fn chord_label(first: PadBinding, second: Option<PadBinding>) -> String {
+        match second {
+            Some(second) => format!("{}{}{}", first.label(), crate::keyconfig::CHORD_LABEL_JOIN, second.label()),
+            None => first.label(),
+        }
+    }
 }
 
 /// What a control reads on a controller until the player binds it to something else: START and
@@ -180,6 +196,13 @@ pub struct PadConfig {
     /// Shortcut bindings the player has set, keyed by [`Shortcut::config_key`]. None ships bound,
     /// and a key config written before a controller could be given one reads none.
     pub shortcuts: BTreeMap<String, PadBinding>,
+    /// The second element of each control the player bound to two elements held together, keyed as
+    /// `controls` is; the first is the control's entry there. A key config written before two
+    /// elements could be held together has no such table and binds every control to one element.
+    pub control_chords: BTreeMap<String, PadBinding>,
+    /// The second element of each shortcut bound to two elements held together, keyed as
+    /// `shortcuts` is.
+    pub shortcut_chords: BTreeMap<String, PadBinding>,
     pub debounce_ms: u32,
     pub analog_mode: AnalogMode,
     pub analog_threshold: u32,
@@ -195,6 +218,8 @@ impl Default for PadConfig {
             scratch_reverse: BTreeMap::new(),
             controls: BTreeMap::new(),
             shortcuts: BTreeMap::new(),
+            control_chords: BTreeMap::new(),
+            shortcut_chords: BTreeMap::new(),
             debounce_ms: DEFAULT_DEBOUNCE_MS,
             analog_mode: AnalogMode::default(),
             analog_threshold: DEFAULT_ANALOG_THRESHOLD,
@@ -251,8 +276,10 @@ impl PadConfig {
         self.controls.get(action.config_key()).copied().or_else(|| default_control_binding(action))
     }
 
-    /// Bind a control, or with `None` drop the player's binding so it reads its default again.
+    /// Bind a control to one element, or with `None` drop the player's binding so it reads its
+    /// default again. Either way a second element it was held with is dropped.
     pub fn set_control(&mut self, action: ControlAction, binding: Option<PadBinding>) {
+        self.control_chords.remove(action.config_key());
         match binding {
             Some(binding) => {
                 self.controls.insert(action.config_key().to_string(), binding);
@@ -263,14 +290,26 @@ impl PadConfig {
         }
     }
 
+    /// The element a control's binding is held together with, when the player bound it to two.
+    pub fn control_chord(&self, action: ControlAction) -> Option<PadBinding> {
+        self.controls.get(action.config_key()).and(self.control_chords.get(action.config_key()).copied())
+    }
+
     /// What a shortcut is bound to on the controller, which is nothing until the player binds it,
     /// and nothing ever for a shortcut a controller cannot be given ([`Shortcut::takes_a_pad`]).
     pub fn shortcut_binding(&self, shortcut: Shortcut) -> Option<PadBinding> {
         self.shortcuts.get(shortcut.config_key()).copied().filter(|_| shortcut.takes_a_pad())
     }
 
-    /// Bind a shortcut, or with `None` unbind it.
+    /// The element a shortcut's binding is held together with, when the player bound it to two.
+    pub fn shortcut_chord(&self, shortcut: Shortcut) -> Option<PadBinding> {
+        self.shortcut_binding(shortcut).and(self.shortcut_chords.get(shortcut.config_key()).copied())
+    }
+
+    /// Bind a shortcut to one element, or with `None` unbind it. Either way a second element it was
+    /// held with is dropped.
     pub fn set_shortcut(&mut self, shortcut: Shortcut, binding: Option<PadBinding>) {
+        self.shortcut_chords.remove(shortcut.config_key());
         match binding {
             Some(binding) if shortcut.takes_a_pad() => {
                 self.shortcuts.insert(shortcut.config_key().to_string(), binding);
@@ -291,6 +330,16 @@ impl PadConfig {
         }
     }
 
+    /// The element something's binding is held together with on the controller, when it is bound
+    /// to two. A lane and a reverse spin never are.
+    pub fn chord_of(&self, target: Bindable) -> Option<PadBinding> {
+        match target {
+            Bindable::Control(action) => self.control_chord(action),
+            Bindable::Shortcut(shortcut) => self.shortcut_chord(shortcut),
+            Bindable::Lane(_) | Bindable::ScratchReverse(_) => None,
+        }
+    }
+
     /// Bind something on the controller, or with `None` take the player's binding away. START and
     /// SELECT then read the pad's own menu buttons again, as they do in a fresh key config.
     pub fn bind(&mut self, mode: Mode, target: Bindable, binding: Option<PadBinding>) {
@@ -302,12 +351,35 @@ impl PadConfig {
         }
     }
 
+    /// Bind a control or a shortcut to two elements held together. Two of one element, a turntable,
+    /// a lane, a reverse spin and a shortcut a controller cannot be given are not bound at all.
+    pub fn bind_chord(&mut self, target: Bindable, first: PadBinding, second: PadBinding) {
+        if first == second || !first.is_a_key() || !second.is_a_key() {
+            return;
+        }
+        let key = match target {
+            Bindable::Control(action) => {
+                self.set_control(action, Some(first));
+                action.config_key()
+            }
+            Bindable::Shortcut(shortcut) if shortcut.takes_a_pad() => {
+                self.set_shortcut(shortcut, Some(first));
+                shortcut.config_key()
+            }
+            Bindable::Shortcut(_) | Bindable::Lane(_) | Bindable::ScratchReverse(_) => return,
+        };
+        let chords = if matches!(target, Bindable::Control(_)) { &mut self.control_chords } else { &mut self.shortcut_chords };
+        chords.insert(key.to_string(), second);
+    }
+
     /// Drop every binding the player made, leaving the tuning of the controller itself alone.
     pub fn restore_bindings(&mut self) {
         self.lanes.clear();
         self.scratch_reverse.clear();
         self.controls.clear();
         self.shortcuts.clear();
+        self.control_chords.clear();
+        self.shortcut_chords.clear();
     }
 
     /// The axes this config reads as turntables for `mode`, in lane order.
@@ -322,50 +394,62 @@ impl PadConfig {
         axes
     }
 
-    /// Every element this config listens to for `mode`, paired with what it drives, in the order
-    /// the reference walks its elements: a lane's forward direction before its backward one, and
-    /// an axis' plus direction before its minus.
-    fn plan(&self, mode: Mode) -> Vec<(PadElement, PadTarget)> {
-        let mut plan = Vec::new();
+    /// Every element this config listens to for `mode`, paired with what it drives alone, in the
+    /// order the reference walks its elements: a lane's forward direction before its backward one,
+    /// and an axis' plus direction before its minus. Then every pair of elements a control or a
+    /// shortcut is bound to held together, with what the two drive.
+    fn plan(&self, mode: Mode) -> PadPlan {
+        let mut singles = Vec::new();
         for lane in 0..mode.key {
             let Some(binding) = self.lane_binding(mode, lane) else { continue };
             match binding {
-                PadBinding::Button(code) => plan.push((PadElement::Button(code), PadTarget::lane(lane, ScratchDir::Forward))),
-                PadBinding::Standard(button) => plan.push((PadElement::Standard(button), PadTarget::lane(lane, ScratchDir::Forward))),
-                PadBinding::Axis { axis, positive } => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::lane(lane, ScratchDir::Forward))),
                 PadBinding::AnalogScratch { axis } => {
-                    plan.push((PadElement::AxisDir { axis, positive: true }, PadTarget::lane(lane, ScratchDir::Forward)));
+                    singles.push((PadElement::AxisDir { axis, positive: true }, PadTarget::lane(lane, ScratchDir::Forward)));
                     if mode.is_scratch(lane) {
-                        plan.push((PadElement::AxisDir { axis, positive: false }, PadTarget::lane(lane, ScratchDir::Backward)));
+                        singles.push((PadElement::AxisDir { axis, positive: false }, PadTarget::lane(lane, ScratchDir::Backward)));
                     }
                 }
+                key => singles.extend(PadElement::of(key).map(|element| (element, PadTarget::lane(lane, ScratchDir::Forward)))),
             }
         }
         for lane in (0..mode.key).filter(|&lane| mode.is_scratch(lane)) {
-            match self.scratch_reverse_binding(mode, lane) {
-                Some(PadBinding::Button(code)) => plan.push((PadElement::Button(code), PadTarget::lane(lane, ScratchDir::Backward))),
-                Some(PadBinding::Standard(button)) => plan.push((PadElement::Standard(button), PadTarget::lane(lane, ScratchDir::Backward))),
-                Some(PadBinding::Axis { axis, positive }) => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::lane(lane, ScratchDir::Backward))),
-                Some(PadBinding::AnalogScratch { .. }) | None => {}
+            singles.extend(
+                self.scratch_reverse_binding(mode, lane).and_then(PadElement::of).map(|element| (element, PadTarget::lane(lane, ScratchDir::Backward))),
+            );
+        }
+        let controls = ControlAction::ALL.into_iter().map(|action| (PadTarget::Control(action), self.control_binding(action), self.control_chord(action)));
+        let shortcuts =
+            Shortcut::ALL.into_iter().map(|shortcut| (PadTarget::Shortcut(shortcut), self.shortcut_binding(shortcut), self.shortcut_chord(shortcut)));
+        let mut chords = Vec::new();
+        for (target, first, second) in controls.chain(shortcuts) {
+            let Some(first) = first.and_then(PadElement::of) else { continue };
+            match second.and_then(PadElement::of) {
+                Some(second) => chords.push(([first, second], target)),
+                None => singles.push((first, target)),
             }
         }
-        for action in ControlAction::ALL {
-            match self.control_binding(action) {
-                Some(PadBinding::Button(code)) => plan.push((PadElement::Button(code), PadTarget::Control(action))),
-                Some(PadBinding::Standard(button)) => plan.push((PadElement::Standard(button), PadTarget::Control(action))),
-                Some(PadBinding::Axis { axis, positive }) => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::Control(action))),
-                Some(PadBinding::AnalogScratch { .. }) | None => {}
+        PadPlan { singles, chords }
+    }
+}
+
+/// What a config listens to for one mode: every element with what it drives alone, and every pair
+/// of elements with what the two held together drive.
+struct PadPlan {
+    singles: Vec<(PadElement, PadTarget)>,
+    chords: Vec<([PadElement; 2], PadTarget)>,
+}
+
+impl PadPlan {
+    /// Every element of the plan, in plan order, each once: the single ones, then the pairs.
+    fn elements(&self) -> Vec<PadElement> {
+        let mut order: Vec<PadElement> = Vec::new();
+        let all = self.singles.iter().map(|(element, _)| *element).chain(self.chords.iter().flat_map(|(pair, _)| *pair));
+        for element in all {
+            if !order.contains(&element) {
+                order.push(element);
             }
         }
-        for shortcut in Shortcut::ALL {
-            match self.shortcut_binding(shortcut) {
-                Some(PadBinding::Button(code)) => plan.push((PadElement::Button(code), PadTarget::Shortcut(shortcut))),
-                Some(PadBinding::Standard(button)) => plan.push((PadElement::Standard(button), PadTarget::Shortcut(shortcut))),
-                Some(PadBinding::Axis { axis, positive }) => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::Shortcut(shortcut))),
-                Some(PadBinding::AnalogScratch { .. }) | None => {}
-            }
-        }
-        plan
+        order
     }
 }
 
@@ -386,6 +470,19 @@ enum PadElement {
     AxisDir { axis: u32, positive: bool },
 }
 
+impl PadElement {
+    /// The element a binding that is pressed like a key is read from, or `None` for a turntable,
+    /// which is two elements read by its own rules.
+    fn of(binding: PadBinding) -> Option<PadElement> {
+        match binding {
+            PadBinding::Button(code) => Some(PadElement::Button(code)),
+            PadBinding::Standard(button) => Some(PadElement::Standard(button)),
+            PadBinding::Axis { axis, positive } => Some(PadElement::AxisDir { axis, positive }),
+            PadBinding::AnalogScratch { .. } => None,
+        }
+    }
+}
+
 /// What an element drives when it changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PadTarget {
@@ -400,13 +497,41 @@ impl PadTarget {
     }
 
     /// The event this target makes when its element changes to `pressed`. A control and a shortcut
-    /// fire only on the way down.
+    /// fire only on the way down, but for ESC, which goes up as well as down as the Escape key does
+    /// ([`PadMark::pressed`] says which).
     fn event(self, pressed: bool) -> Option<PadEvent> {
         match self {
             PadTarget::Lane { lane, dir } => Some(PadEvent::Lane { lane, dir, press: pressed }),
-            PadTarget::Control(action) => pressed.then_some(PadEvent::Control(action)),
+            PadTarget::Control(action) => (pressed || action == ControlAction::Escape).then_some(PadEvent::Control(action)),
             PadTarget::Shortcut(shortcut) => pressed.then_some(PadEvent::Shortcut(shortcut)),
         }
+    }
+
+    /// The event that says the target is held.
+    fn held_event(self) -> PadEvent {
+        match self {
+            PadTarget::Lane { lane, dir } => PadEvent::Lane { lane, dir, press: true },
+            PadTarget::Control(action) => PadEvent::Control(action),
+            PadTarget::Shortcut(shortcut) => PadEvent::Shortcut(shortcut),
+        }
+    }
+}
+
+/// What the controller layer knows of an event beyond the event itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PadMark {
+    /// Whether what made the event went down rather than up: what tells ESC going down from ESC
+    /// coming up.
+    pub pressed: bool,
+    /// Whether it is a lane pressed by the element whose press made two elements held together.
+    /// The lane is played in a run, and is the pair's alone anywhere else.
+    pub made_a_chord: bool,
+}
+
+impl Default for PadMark {
+    /// What an event that came with no mark is taken as: a plain press.
+    fn default() -> Self {
+        PadMark { pressed: true, made_a_chord: false }
     }
 }
 
@@ -414,8 +539,13 @@ impl PadTarget {
 ///
 /// A lane carries its spin direction because rbms models a scratch as one lane spun two ways,
 /// where the reference models it as two separate lane assignments. A control carries no state: it
-/// fires on the press, like the key that does the same job, and so does a shortcut. What is still
-/// held afterwards is read back with [`PadState::held`].
+/// fires on the press, like the key that does the same job, and so does a shortcut; ESC alone fires
+/// on the release too, and its [`PadMark`] says which. What is still held afterwards is read back
+/// with [`PadState::held`].
+///
+/// A control or a shortcut bound to two elements fires when the second of them goes down, in either
+/// order. That press does not also fire what the element alone drives, but for a lane, which is
+/// played.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PadEvent {
     Lane { lane: usize, dir: ScratchDir, press: bool },
@@ -517,10 +647,16 @@ impl PadMapper {
     /// and has let through by then, then every button and two-key axis direction that changed, then
     /// every turntable direction, read only when its window is open — which is also what keeps a
     /// turntable's idle counter advancing at the same rate the reference advances it. The frame
-    /// loop resolves change by change instead ([`PadMapper::resolve_changes`]); this is what the
+    /// loop resolves change by change instead ([`PadMapper::resolve_changes_marked`]); this is what the
     /// tests of the element rules drive.
     #[cfg(test)]
     pub fn resolve(&mut self, now_us: i64, cfg: &PadConfig, mode: Mode, snapshot: &PadSnapshot) -> Vec<PadEvent> {
+        self.resolve_marked(now_us, cfg, mode, snapshot).into_iter().map(|(event, _)| event).collect()
+    }
+
+    /// [`PadMapper::resolve`], with what each event carries beyond itself.
+    #[cfg(test)]
+    pub fn resolve_marked(&mut self, now_us: i64, cfg: &PadConfig, mode: Mode, snapshot: &PadSnapshot) -> Vec<(PadEvent, PadMark)> {
         if !cfg.enabled {
             return Vec::new();
         }
@@ -529,22 +665,15 @@ impl PadMapper {
         let plan = cfg.plan(mode);
         let mut opened = Vec::new();
         self.take_opened(now_us, cfg, &plan, &mut opened);
-        let mut events: Vec<PadEvent> = opened.into_iter().map(|(event, _)| event).collect();
+        let mut events: Vec<(PadEvent, PadMark)> = opened.into_iter().map(|(event, _, mark)| (event, mark)).collect();
         events.extend(self.read_keys(now_us, cfg, &plan, snapshot));
         events.extend(self.read_turntables(now_us, cfg, &plan, snapshot));
         events
     }
 
-    /// Resolve one poll of raw changes, each at the instant on the controller clock it happened at,
-    /// into the events they make, each with its own instant, earliest first. `snapshot` is brought
-    /// up to date on the way.
-    ///
-    /// A button or two-key axis direction is read change by change, as LR2 reads a key: a press is
-    /// taken the instant it came, a release inside the debounce window after its press is taken the
-    /// instant the window ends if the element still reads up then, and not at all if it was pressed
-    /// again before, and a press within one of LR2's polls of a release taken is the switch
-    /// bouncing and is not taken. A press and its release inside one poll are therefore both
-    /// played. A turntable is read once, at `now_us`, after every change has been taken in.
+    /// Resolve one poll of raw changes into the events they make, each with its own instant,
+    /// earliest first ([`PadMapper::resolve_changes_marked`], without the marks).
+    #[cfg(test)]
     pub fn resolve_changes(
         &mut self,
         changes: &[(i64, PadChange)],
@@ -553,6 +682,27 @@ impl PadMapper {
         mode: Mode,
         snapshot: &mut PadSnapshot,
     ) -> Vec<(PadEvent, i64)> {
+        self.resolve_changes_marked(changes, now_us, cfg, mode, snapshot).into_iter().map(|(event, at_us, _)| (event, at_us)).collect()
+    }
+
+    /// Resolve one poll of raw changes, each at the instant on the controller clock it happened at,
+    /// into the events they make, each with its own instant and its [`PadMark`], earliest first.
+    /// `snapshot` is brought up to date on the way.
+    ///
+    /// A button or two-key axis direction is read change by change, as LR2 reads a key: a press is
+    /// taken the instant it came, a release inside the debounce window after its press is taken the
+    /// instant the window ends if the element still reads up then, and not at all if it was pressed
+    /// again before, and a press within one of LR2's polls of a release taken is the switch
+    /// bouncing and is not taken. A press and its release inside one poll are therefore both
+    /// played. A turntable is read once, at `now_us`, after every change has been taken in.
+    pub fn resolve_changes_marked(
+        &mut self,
+        changes: &[(i64, PadChange)],
+        now_us: i64,
+        cfg: &PadConfig,
+        mode: Mode,
+        snapshot: &mut PadSnapshot,
+    ) -> Vec<(PadEvent, i64, PadMark)> {
         if !cfg.enabled {
             changes.iter().for_each(|(_, change)| change.apply(snapshot));
             return Vec::new();
@@ -564,12 +714,12 @@ impl PadMapper {
             self.take_opened(at_us, cfg, &plan, &mut events);
             change.apply(snapshot);
             let keys = self.read_keys(at_us, cfg, &plan, snapshot);
-            events.extend(keys.into_iter().map(|event| (event, at_us)));
+            events.extend(keys.into_iter().map(|(event, mark)| (event, at_us, mark)));
         }
         self.take_opened(now_us, cfg, &plan, &mut events);
         self.count_turn(snapshot);
         let turntables = self.read_turntables(now_us, cfg, &plan, snapshot);
-        events.extend(turntables.into_iter().map(|event| (event, now_us)));
+        events.extend(turntables.into_iter().map(|(event, mark)| (event, now_us, mark)));
         events
     }
 
@@ -579,19 +729,48 @@ impl PadMapper {
     }
 
     /// The distinct elements of `plan` that `wanted` keeps, in plan order.
-    fn elements(&self, plan: &[(PadElement, PadTarget)], wanted: impl Fn(&PadMapper, PadElement) -> bool) -> Vec<PadElement> {
-        let mut order: Vec<PadElement> = Vec::new();
-        for (element, _) in plan {
-            if !order.contains(element) && wanted(self, *element) {
-                order.push(*element);
+    fn elements(&self, plan: &PadPlan, wanted: impl Fn(&PadMapper, PadElement) -> bool) -> Vec<PadElement> {
+        plan.elements().into_iter().filter(|element| wanted(self, *element)).collect()
+    }
+
+    /// Whether the debounce has handed `element` over as down.
+    fn handed(&self, element: PadElement) -> bool {
+        self.gates.get(&element).is_some_and(Lr2Debounce::handed)
+    }
+
+    /// The events of `plan` that the elements in `fired` changing to the state each holds there
+    /// make, each with its mark: first every pair of elements that came to be held together or
+    /// stopped being so, then every element's own targets, in plan order. The press that makes a
+    /// pair fires nothing its element drives alone but a lane.
+    fn events_of(&self, plan: &PadPlan, fired: &BTreeMap<PadElement, bool>) -> Vec<(PadEvent, PadMark)> {
+        let before = |element: PadElement| fired.get(&element).map_or(self.handed(element), |now| !now);
+        let mut made_by: Vec<PadElement> = Vec::new();
+        let mut events = Vec::new();
+        for ([first, second], target) in &plan.chords {
+            let was = before(*first) && before(*second);
+            let is = self.handed(*first) && self.handed(*second);
+            if is == was {
+                continue;
             }
+            if is {
+                made_by.extend([*first, *second].into_iter().filter(|element| fired.get(element) == Some(&true)));
+            }
+            events.extend(target.event(is).map(|event| (event, PadMark { pressed: is, made_a_chord: false })));
         }
-        order
+        for (element, target) in &plan.singles {
+            let Some(&pressed) = fired.get(element) else { continue };
+            let made_a_chord = pressed && made_by.contains(element);
+            if made_a_chord && !matches!(target, PadTarget::Lane { .. }) {
+                continue;
+            }
+            events.extend(target.event(pressed).map(|event| (event, PadMark { pressed, made_a_chord })));
+        }
+        events
     }
 
     /// Offer every button and two-key axis direction of `plan` to its debounce at `at_us`, as it
-    /// reads in `snapshot`. What is taken is handed back as the plan's events, in plan order.
-    fn read_keys(&mut self, at_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], snapshot: &PadSnapshot) -> Vec<PadEvent> {
+    /// reads in `snapshot`. What is taken is handed back as the plan's events ([`PadMapper::events_of`]).
+    fn read_keys(&mut self, at_us: i64, cfg: &PadConfig, plan: &PadPlan, snapshot: &PadSnapshot) -> Vec<(PadEvent, PadMark)> {
         let window = Duration::from_millis(u64::from(cfg.effective_debounce_ms()));
         let deadzone = cfg.effective_axis_deadzone();
         let mut fired: BTreeMap<PadElement, bool> = BTreeMap::new();
@@ -601,15 +780,14 @@ impl PadMapper {
                 fired.insert(element, raw);
             }
         }
-        plan.iter().filter_map(|(element, target)| target.event(*fired.get(element)?)).collect()
+        self.events_of(plan, &fired)
     }
 
     /// Read every turntable direction of `plan` at `at_us`: each at most once, and only once the
     /// window has passed since its last accepted change, either way -- the reference
     /// implementation's lock (`BMControllerInputProcessor.java:136`, inequality included), whose
-    /// readings the turntable algorithms count. What changed is handed back as the plan's events,
-    /// in plan order.
-    fn read_turntables(&mut self, at_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], snapshot: &PadSnapshot) -> Vec<PadEvent> {
+    /// readings the turntable algorithms count. What changed is handed back as the plan's events.
+    fn read_turntables(&mut self, at_us: i64, cfg: &PadConfig, plan: &PadPlan, snapshot: &PadSnapshot) -> Vec<(PadEvent, PadMark)> {
         let window = Duration::from_millis(u64::from(cfg.effective_debounce_ms()));
         let deadzone = cfg.effective_axis_deadzone();
         let mut fired: BTreeMap<PadElement, bool> = BTreeMap::new();
@@ -622,12 +800,12 @@ impl PadMapper {
                 fired.insert(element, raw);
             }
         }
-        plan.iter().filter_map(|(element, target)| target.event(*fired.get(element)?)).collect()
+        self.events_of(plan, &fired)
     }
 
     /// Take every release of a button or two-key axis direction the debounce kept out and has let
     /// through by `until_us`, at the instant its window ended, earliest first.
-    fn take_opened(&mut self, until_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], events: &mut Vec<(PadEvent, i64)>) {
+    fn take_opened(&mut self, until_us: i64, cfg: &PadConfig, plan: &PadPlan, events: &mut Vec<(PadEvent, i64, PadMark)>) {
         let window = Duration::from_millis(u64::from(cfg.effective_debounce_ms()));
         let mut opened: Vec<(i64, PadElement)> = self
             .elements(plan, |mapper, element| !mapper.is_turntable(element))
@@ -639,27 +817,32 @@ impl PadMapper {
             if let Some(gate) = self.gates.get_mut(&element) {
                 gate.hand_over(false, opens_us);
             }
-            events.extend(plan.iter().filter(|(planned, _)| *planned == element).filter_map(|(_, target)| target.event(false)).map(|event| (event, opens_us)));
+            let released = BTreeMap::from([(element, false)]);
+            events.extend(self.events_of(plan, &released).into_iter().map(|(event, mark)| (event, opens_us, mark)));
         }
     }
 
-    /// Everything the controller is holding down as of the last [`PadMapper::resolve_changes`], as the
-    /// events that put it there, each once. It reads the accepted (debounced) state of every
+    /// Everything the controller is holding down as of the last [`PadMapper::resolve_changes_marked`], as
+    /// the events that put it there, each once. It reads the accepted (debounced) state of every
     /// element the config listens to, so a lane held by two elements stays held until both let go.
+    ///
+    /// A control or a shortcut bound to two elements is held while both are. An element that is
+    /// one of two held together that way does not hold what it drives alone, but for a lane: the
+    /// pair the player bound wins over START or SELECT held with a key of the key table.
     pub fn held(&self, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
         if !cfg.enabled {
             return Vec::new();
         }
+        let plan = cfg.plan(mode);
+        let together: Vec<&([PadElement; 2], PadTarget)> = plan.chords.iter().filter(|(pair, _)| pair.iter().all(|element| self.handed(*element))).collect();
+        let taken: Vec<PadElement> = together.iter().flat_map(|(pair, _)| *pair).collect();
+        let alone = plan
+            .singles
+            .iter()
+            .filter(|(element, target)| self.handed(*element) && (matches!(target, PadTarget::Lane { .. }) || !taken.contains(element)))
+            .map(|(_, target)| *target);
         let mut held = Vec::new();
-        for (element, target) in cfg.plan(mode) {
-            if !self.gates.get(&element).is_some_and(Lr2Debounce::handed) {
-                continue;
-            }
-            let event = match target {
-                PadTarget::Lane { lane, dir } => PadEvent::Lane { lane, dir, press: true },
-                PadTarget::Control(action) => PadEvent::Control(action),
-                PadTarget::Shortcut(shortcut) => PadEvent::Shortcut(shortcut),
-            };
+        for event in alone.chain(together.into_iter().map(|(_, target)| *target)).map(PadTarget::held_event) {
             if !held.contains(&event) {
                 held.push(event);
             }
@@ -737,6 +920,68 @@ pub fn stamped_instant_us(stamped: SystemTime, wall_now: SystemTime, now_us: i64
     at_us.clamp(earliest_us.min(now_us), now_us)
 }
 
+/// How many presses and releases the key editor's capture keeps while nobody asks for them. The
+/// frame loop notes every change, in the editor or not, so what is kept is bounded.
+const CAPTURE_EVENTS_KEPT: usize = 16;
+
+/// What the key editor is told of a controller while it waits for a binding: each button pressed or
+/// let go by its native code, and each direction of an axis pressed once the axis passes
+/// [`CAPTURE_AXIS_THRESHOLD`] that way and let go once it comes back inside it. Two elements held
+/// together are told apart from one pressed and let go by the order of these
+/// ([`crate::keyconfig::ChordCapture`]).
+#[derive(Debug, Default)]
+pub struct PadCapture {
+    /// The direction each axis is counted as pressed in.
+    axes: BTreeMap<u32, bool>,
+    events: std::collections::VecDeque<(PadBinding, bool)>,
+}
+
+impl PadCapture {
+    /// Take in one change of the controller.
+    pub fn note(&mut self, change: PadChange) {
+        match change {
+            PadChange::Button { code, pressed, .. } => self.push(PadBinding::Button(code), pressed),
+            PadChange::Axis { code, value } => {
+                let now = (value.abs() >= CAPTURE_AXIS_THRESHOLD).then_some(value > 0.0);
+                let was = self.axes.get(&code).copied();
+                if now == was {
+                    return;
+                }
+                if let Some(positive) = was {
+                    self.push(PadBinding::Axis { axis: code, positive }, false);
+                }
+                match now {
+                    Some(positive) => {
+                        self.axes.insert(code, positive);
+                        self.push(PadBinding::Axis { axis: code, positive }, true);
+                    }
+                    None => {
+                        self.axes.remove(&code);
+                    }
+                }
+            }
+            PadChange::Disconnected => self.axes.clear(),
+        }
+    }
+
+    fn push(&mut self, binding: PadBinding, pressed: bool) {
+        self.events.push_back((binding, pressed));
+        while self.events.len() > CAPTURE_EVENTS_KEPT {
+            self.events.pop_front();
+        }
+    }
+
+    /// Every press and release noted since this was last asked, oldest first.
+    pub fn take(&mut self) -> Vec<(PadBinding, bool)> {
+        self.events.drain(..).collect()
+    }
+
+    /// Drop what was noted, keeping which way each axis stands.
+    pub fn forget(&mut self) {
+        self.events.clear();
+    }
+}
+
 /// The controller, and the snapshot of it a frame is resolved against.
 ///
 /// Held by the app for as long as it runs: the gilrs context is what knows a controller was
@@ -745,7 +990,7 @@ pub struct PadState {
     gilrs: gilrs::Gilrs,
     snapshot: PadSnapshot,
     mapper: PadMapper,
-    capture: Option<PadBinding>,
+    capture: PadCapture,
     /// The controller's own clock. The debounce window is a difference between two of its
     /// readings, so it must not be the run clock, which is reset at the top of every chart.
     epoch: Instant,
@@ -775,7 +1020,7 @@ impl PadState {
                 gilrs,
                 snapshot: PadSnapshot::default(),
                 mapper: PadMapper::new(),
-                capture: None,
+                capture: PadCapture::default(),
                 epoch: Instant::now(),
                 last_change_us: i64::MIN,
             }),
@@ -797,15 +1042,15 @@ impl PadState {
         self.epoch.elapsed().as_micros() as i64
     }
 
-    /// Everything the controller did since the last poll, each with the instant it happened at,
-    /// earliest first, already debounced. This is the call the frame loop makes: the instants are
-    /// the ones gilrs stamped each change with as it arrived, not the frame's, so a press is judged
-    /// at the moment it was made however late in its frame it is read.
-    pub fn poll_now(&mut self, cfg: &PadConfig, mode: Mode) -> Vec<(PadEvent, Instant)> {
+    /// Everything the controller did since the last poll, each with the instant it happened at and
+    /// its [`PadMark`], earliest first, already debounced. This is the call the frame loop makes: the
+    /// instants are the ones gilrs stamped each change with as it arrived, not the frame's, so a
+    /// press is judged at the moment it was made however late in its frame it is read.
+    pub fn poll_now(&mut self, cfg: &PadConfig, mode: Mode) -> Vec<(PadEvent, Instant, PadMark)> {
         let now_us = self.now_us();
         let changes = self.pump(cfg, now_us, SystemTime::now());
-        let events = self.mapper.resolve_changes(&changes, now_us, cfg, mode, &mut self.snapshot);
-        events.into_iter().map(|(event, at_us)| (event, self.epoch + Duration::from_micros(at_us.max(0) as u64))).collect()
+        let events = self.mapper.resolve_changes_marked(&changes, now_us, cfg, mode, &mut self.snapshot);
+        events.into_iter().map(|(event, at_us, mark)| (event, self.epoch + Duration::from_micros(at_us.max(0) as u64), mark)).collect()
     }
 
     /// What the controller is holding down right now, as of the last poll.
@@ -818,9 +1063,9 @@ impl PadState {
         self.mapper.take_turn()
     }
 
-    /// The binding the player last produced, for the key editor's "press something" mode. Taking
-    /// it clears it, so the next binding captured is the next thing pressed.
-    pub fn take_capture(&mut self, cfg: &PadConfig) -> Option<PadBinding> {
+    /// What the player pressed and let go since this was last asked, for the key editor's "press
+    /// something" mode ([`PadCapture`]). Taking it clears it.
+    pub fn take_capture(&mut self, cfg: &PadConfig) -> Vec<(PadBinding, bool)> {
         self.pump_into_snapshot(cfg);
         self.capture.take()
     }
@@ -828,7 +1073,7 @@ impl PadState {
     /// Drop whatever was pressed before capture mode was entered.
     pub fn drain(&mut self, cfg: &PadConfig) {
         self.pump_into_snapshot(cfg);
-        self.capture = None;
+        self.capture.forget();
     }
 
     /// Take in what the controller did without playing any of it, for the key editor.
@@ -838,12 +1083,13 @@ impl PadState {
     }
 
     /// Every change gilrs has queued since the last pump, each at the instant it was stamped with
-    /// on the controller clock, noting the last thing pressed for the key editor on the way.
+    /// on the controller clock, noting what was pressed and let go for the key editor on the way.
     fn pump(&mut self, cfg: &PadConfig, now_us: i64, wall_now: SystemTime) -> Vec<(i64, PadChange)> {
         let mut changes = Vec::new();
         while let Some(event) = self.gilrs.next_event() {
             let at_us = stamped_instant_us(event.time, wall_now, now_us, self.last_change_us);
             if matches!(event.event, gilrs::EventType::Disconnected) {
+                self.capture.note(PadChange::Disconnected);
                 changes.push((at_us, PadChange::Disconnected));
                 continue;
             }
@@ -852,22 +1098,15 @@ impl PadState {
             }
             let change = match event.event {
                 gilrs::EventType::ButtonPressed(button, code) => {
-                    let code = code.into_u32();
-                    self.capture = Some(PadBinding::Button(code));
-                    PadChange::Button { code, standard: StandardButton::from_gilrs(button), pressed: true }
+                    PadChange::Button { code: code.into_u32(), standard: StandardButton::from_gilrs(button), pressed: true }
                 }
                 gilrs::EventType::ButtonReleased(button, code) => {
                     PadChange::Button { code: code.into_u32(), standard: StandardButton::from_gilrs(button), pressed: false }
                 }
-                gilrs::EventType::AxisChanged(_, value, code) => {
-                    let axis = code.into_u32();
-                    if value.abs() >= CAPTURE_AXIS_THRESHOLD {
-                        self.capture = Some(PadBinding::Axis { axis, positive: value > 0.0 });
-                    }
-                    PadChange::Axis { code: axis, value }
-                }
+                gilrs::EventType::AxisChanged(_, value, code) => PadChange::Axis { code: code.into_u32(), value },
                 _ => continue,
             };
+            self.capture.note(change);
             self.last_change_us = at_us;
             changes.push((at_us, change));
         }

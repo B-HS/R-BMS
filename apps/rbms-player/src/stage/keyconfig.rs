@@ -10,15 +10,21 @@
 //! already has is refused and the line says what has it ([`crate::keyconfig::Bindable::read_with`]);
 //! a controller element is taken as it is and flagged, as it always was.
 //!
+//! A lane takes the first key pressed. A control or a shortcut takes a key pressed and let go, or
+//! two keys held together: the first held while the second goes down
+//! ([`crate::keyconfig::ChordCapture`]). The controller's cell takes elements the same way.
+//!
 //! The editor's own keys are fixed: they are what binds every other.
 #![allow(clippy::wildcard_imports)]
 
+#[cfg(test)]
+mod chord_tests;
 mod table;
 #[cfg(test)]
 mod tests;
 
 use crate::gamepad::{AnalogMode, PadBinding};
-use crate::keyconfig::{Bindable, Clash, KeyConfig, UNNAMED_KEY};
+use crate::keyconfig::{Bindable, Captured, ChordCapture, Clash, KeyBind, KeyConfig};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::text::menus::key_editor::{KeyEditorNoticeText, KeyEditorText};
 use crate::*;
@@ -83,6 +89,8 @@ enum Notice {
     None,
     /// The key was refused: something read at the same moment has it.
     Taken(Bindable),
+    /// The two keys were refused: something read at the same moment has the same two.
+    ChordTaken(Bindable),
     /// The key was refused: the screen that reads the row keeps it for itself.
     Fixed,
     /// The key was refused: the key config file has no word for it.
@@ -104,6 +112,9 @@ pub(crate) struct KeyConfigState {
     column: Column,
     capturing: bool,
     notice: Notice,
+    /// What a capture of keys, and one of controller elements, holds waiting for a second.
+    keys: ChordCapture<KeyCode>,
+    elements: ChordCapture<PadBinding>,
 }
 
 impl KeyConfigState {
@@ -173,22 +184,56 @@ impl KeyConfigState {
         }
     }
 
-    /// Bind the captured key to the focused row unless something read at the same moment has it,
-    /// the row's screen keeps it, or the key config file has no word for it.
-    fn capture(&mut self, shared: &mut AppShared, code: KeyCode) {
-        self.capturing = false;
-        let Some(target) = self.focused_target(shared).filter(|_| code != KeyCode::Escape) else {
+    /// Arm a capture of the focused cell, with nothing held waiting for a second.
+    fn arm(&mut self) {
+        self.capturing = true;
+        self.keys = ChordCapture::default();
+        self.elements = ChordCapture::default();
+    }
+
+    /// One key going down or up while the keyboard cell waits for its binding. Escape going down
+    /// calls the capture off. A lane takes the first key that goes down; a control or a shortcut
+    /// takes a key once it is let go, or two once the second goes down while the first is held.
+    fn capture_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) {
+        let Some(target) = self.focused_target(shared) else {
+            self.capturing = false;
             return;
         };
+        if key.pressed && key.code == KeyCode::Escape {
+            self.capturing = false;
+            return;
+        }
+        let captured = match (target.takes_a_chord(), key.pressed, key.released) {
+            (false, true, _) => Some(Captured::Single(key.code)),
+            (true, true, _) => self.keys.press(key.code),
+            (true, false, true) => self.keys.release(key.code),
+            _ => None,
+        };
+        let bind = match captured {
+            Some(Captured::Single(code)) => Some(KeyBind::Single(code)),
+            Some(Captured::Chord(first, second)) => KeyBind::chord(first, second),
+            None => None,
+        };
+        if let Some(bind) = bind {
+            self.capturing = false;
+            self.give_keys(shared, target, bind);
+        }
+    }
+
+    /// Bind the captured key or keys to `target` unless something read at the same moment has
+    /// them, the row's screen keeps one of them, or the key config file has no word for one.
+    fn give_keys(&mut self, shared: &mut AppShared, target: Bindable, bind: KeyBind) {
         let mode = shared.kc_edit_mode;
-        self.notice = if key_name(code) == UNNAMED_KEY {
+        let chord = matches!(bind, KeyBind::Chord(..));
+        self.notice = if !bind.is_named() {
             Notice::Unnamed
         } else {
-            match shared.keyconfig.clash(mode, target, code) {
+            match shared.keyconfig.clash_of(mode, target, bind) {
+                Some(Clash::With(other)) if chord => Notice::ChordTaken(other),
                 Some(Clash::With(other)) => Notice::Taken(other),
                 Some(Clash::Fixed) => Notice::Fixed,
                 None => {
-                    shared.keyconfig.bind(mode, target, Some(code));
+                    shared.keyconfig.bind_keys(mode, target, bind);
                     Notice::None
                 }
             }
@@ -238,7 +283,7 @@ impl KeyConfigState {
                         state.drain(&keyconfig.pad);
                     }
                 }
-                self.capturing = true;
+                self.arm();
             }
             Some(Line::Mode) => self.cycle_edit_mode(shared, STEP_FORWARD),
             Some(Line::PadDevice) => self.cycle_pad_device(shared, STEP_FORWARD),
@@ -278,27 +323,48 @@ impl KeyConfigState {
         shared.keyconfig.pad.analog_mode = all[next];
     }
 
-    /// Bind whatever the controller reports next to the focused cell. Returns once a binding has
+    /// Bind what the controller reports next to the focused cell. Returns once a binding has
     /// landed; until then the capture stays armed and the next frame asks again.
     fn capture_pad(&mut self, ctx: &mut FrameCtx<'_>) {
         let Some(target) = self.focused_target(ctx.shared).filter(|_| self.column == Column::Pad) else {
             return;
         };
-        let AppShared { pad, keyconfig, kc_edit_mode, .. } = ctx.shared;
+        let AppShared { pad, keyconfig, .. } = &mut *ctx.shared;
         let Some(state) = pad.as_mut() else {
             return;
         };
-        let Some(binding) = state.take_capture(&keyconfig.pad) else {
-            return;
-        };
-        let binding = match target {
-            Bindable::Lane(lane) if kc_edit_mode.is_scratch(lane) && keyconfig.pad.analog_mode != AnalogMode::Off => {
-                binding.as_analog_scratch().unwrap_or(binding)
+        let changes = state.take_capture(&keyconfig.pad);
+        self.capture_elements(ctx.shared, target, &changes);
+    }
+
+    /// Elements of the controller going down (`true`) or up while its cell waits for a binding,
+    /// oldest first. A lane takes the first that goes down, a turntable for a scratch lane while an
+    /// algorithm reads one; a control or a shortcut takes an element once it is let go, or two once
+    /// the second goes down while the first is held.
+    fn capture_elements(&mut self, shared: &mut AppShared, target: Bindable, changes: &[(PadBinding, bool)]) {
+        let mode = shared.kc_edit_mode;
+        for &(binding, pressed) in changes {
+            let captured = match (target.takes_a_chord(), pressed) {
+                (false, true) => Some(Captured::Single(binding)),
+                (false, false) => None,
+                (true, true) => self.elements.press(binding),
+                (true, false) => self.elements.release(binding),
+            };
+            let pad = &mut shared.keyconfig.pad;
+            match captured {
+                None => continue,
+                Some(Captured::Single(binding)) => {
+                    let binding = match target {
+                        Bindable::Lane(lane) if mode.is_scratch(lane) && pad.analog_mode != AnalogMode::Off => binding.as_analog_scratch().unwrap_or(binding),
+                        _ => binding,
+                    };
+                    pad.bind(mode, target, Some(binding));
+                }
+                Some(Captured::Chord(first, second)) => pad.bind_chord(target, first, second),
             }
-            _ => binding,
-        };
-        keyconfig.pad.bind(*kc_edit_mode, target, Some(binding));
-        self.capturing = false;
+            self.capturing = false;
+            return;
+        }
     }
 
     /// The first line drawn, which keeps the cursor in the middle of what is on screen.
@@ -314,6 +380,7 @@ impl KeyConfigState {
         let in_red = |text: String| (text, Color::RED);
         match self.notice {
             Notice::Taken(other) => return in_red(KeyEditorNoticeText::Taken.fill(language(), &[&other.label(mode)])),
+            Notice::ChordTaken(other) => return in_red(KeyEditorNoticeText::ChordTaken.fill(language(), &[&other.label(mode)])),
             Notice::Fixed => return in_red(KeyEditorNoticeText::Fixed.get(language()).to_string()),
             Notice::Unnamed => return in_red(KeyEditorNoticeText::Unnamed.get(language()).to_string()),
             Notice::KeyboardOnly => return in_red(KeyEditorNoticeText::KeyboardOnly.get(language()).to_string()),
@@ -332,22 +399,43 @@ impl KeyConfigState {
         match clash {
             Some(Clash::With(other)) => in_red(KeyEditorNoticeText::SharedWith.fill(language(), &[&other.label(mode)])),
             Some(Clash::Fixed) => in_red(KeyEditorNoticeText::FixedOnItsScreen.get(language()).to_string()),
-            None => match shared.keyconfig.lane_sharing(mode, target).filter(|_| self.column == Column::Keyboard) {
-                Some(lane) => (KeyEditorNoticeText::AlsoLane.fill(language(), &[&Bindable::Lane(lane).label(mode)]), theme.text_dim),
-                None => (String::new(), theme.text_dim),
+            None => match (self.overlap(shared, bound, target), shared.keyconfig.lane_sharing(mode, target).filter(|_| self.column == Column::Keyboard)) {
+                (Some(said), _) => (said, theme.warn),
+                (None, Some(lane)) => (KeyEditorNoticeText::AlsoLane.fill(language(), &[&Bindable::Lane(lane).label(mode)]), theme.text_dim),
+                (None, None) => (String::new(), theme.text_dim),
             },
         }
     }
+
+    /// What the editor says of the cell under the cursor sharing a key with something read at the
+    /// same moment, one of the two alone and the other held with a second: pressed first, the key
+    /// does what it does alone.
+    fn overlap(&self, shared: &AppShared, bound: &Bindings, target: Bindable) -> Option<String> {
+        let mode = shared.kc_edit_mode;
+        let (shared_key, other, mine_is_chord) = match self.column {
+            Column::Keyboard => {
+                let (code, other) = shared.keyconfig.chord_overlap(mode, target)?;
+                (key_name(code).to_string(), other, matches!(bound.key_of(target), Some(KeyBind::Chord(..))))
+            }
+            Column::Pad => {
+                let (element, other) = bound.pad_overlap(target)?;
+                (element.label(), other, bound.pad_chord_of(target).is_some())
+            }
+        };
+        let words = if mine_is_chord { KeyEditorNoticeText::ChordKeyAlone } else { KeyEditorNoticeText::KeyInChord };
+        Some(words.fill(language(), &[&shared_key, &other.label(mode)]))
+    }
 }
 
-/// A key as the editor draws it: its word in the key config file, or a dash for none.
-fn key_token(code: Option<KeyCode>) -> String {
-    code.map_or(UNBOUND, key_name).to_string()
+/// A key or two keys as the editor draws them: each by its word in the key config file, or a dash
+/// for none.
+fn key_token(bind: Option<KeyBind>) -> String {
+    bind.map_or_else(|| UNBOUND.to_string(), KeyBind::label)
 }
 
-/// A pad binding as the editor draws it: a dash for none.
-fn pad_token(binding: Option<PadBinding>) -> String {
-    binding.map_or_else(|| UNBOUND.to_string(), PadBinding::label)
+/// A pad binding as the editor draws it, with the element held together with it: a dash for none.
+fn pad_token(binding: Option<PadBinding>, second: Option<PadBinding>) -> String {
+    binding.map_or_else(|| UNBOUND.to_string(), |first| PadBinding::chord_label(first, second))
 }
 
 impl StageHandler for KeyConfigState {
@@ -360,22 +448,37 @@ impl StageHandler for KeyConfigState {
         Transition::Stay
     }
 
-    /// Key-config editor input. In capture mode the next key (except Esc) is bound to the focused
-    /// cell unless it is refused; otherwise the editor's own keys move the cursor, switch the mode
-    /// being edited, start a rebind, clear or restore a cell, or save and go back.
+    /// The editor's own keys are fixed, and a key pressed to be bound is that key.
+    fn reads_keys_as_they_are(&self) -> bool {
+        true
+    }
+
+    /// The controller's ESC leaves the editor as Escape does, but for while the controller's cell
+    /// waits for an element: the element pressed is the binding.
+    fn takes_pad_escape(&self) -> bool {
+        !(self.capturing && self.column == Column::Pad)
+    }
+
+    /// Key-config editor input. In capture mode the next key (except Esc), or the next two held
+    /// together, are bound to the focused cell unless refused ([`KeyConfigState::capture_key`]);
+    /// otherwise the editor's own keys move the cursor, switch the mode being edited, start a
+    /// rebind, clear or restore a cell, or save and go back.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        if self.capturing && self.column == Column::Keyboard {
+            if key.pressed {
+                self.notice = Notice::None;
+            }
+            self.capture_key(ctx.shared, &key);
+            return Transition::Stay;
+        }
         if !key.pressed {
             return Transition::Stay;
         }
         let armed = std::mem::take(&mut self.notice) == Notice::RestoreArmed;
         if self.capturing {
-            if self.column == Column::Pad {
-                if key.code == KeyCode::Escape {
-                    self.capturing = false;
-                }
-                return Transition::Stay;
+            if key.code == KeyCode::Escape {
+                self.capturing = false;
             }
-            self.capture(ctx.shared, key.code);
             return Transition::Stay;
         }
         match key.code {
@@ -423,10 +526,13 @@ impl StageHandler for KeyConfigState {
         let pad_right = x0 + PANEL_W;
         draw_text(canvas, x0, TITLE_Y, TITLE_SCALE, th.text, KeyEditorText::Title.get(language()));
         draw_text_right(canvas, pad_right, TITLE_Y + HEADING_TEXT_Y, ROW_SCALE, th.accent, mode_short(edit_mode));
-        let (hint, hint_col) = match (self.capturing, self.column) {
-            (true, Column::Keyboard) => (KeyEditorText::CaptureKeyHint, th.accent),
-            (true, Column::Pad) => (KeyEditorText::CapturePadHint, th.accent),
-            (false, _) => (KeyEditorText::KeysHint, th.text_muted),
+        let chord = self.focused_target(ctx.shared).is_some_and(Bindable::takes_a_chord);
+        let (hint, hint_col) = match (self.capturing, self.column, chord) {
+            (true, Column::Keyboard, false) => (KeyEditorText::CaptureKeyHint, th.accent),
+            (true, Column::Keyboard, true) => (KeyEditorText::CaptureChordKeyHint, th.accent),
+            (true, Column::Pad, false) => (KeyEditorText::CapturePadHint, th.accent),
+            (true, Column::Pad, true) => (KeyEditorText::CaptureChordPadHint, th.accent),
+            (false, ..) => (KeyEditorText::KeysHint, th.text_muted),
         };
         let hint = hint.get(language());
         draw_text(canvas, x0, HINT_Y, HINT_SCALE, hint_col, &fit_text(hint, HINT_SCALE, PANEL_W));
@@ -473,7 +579,12 @@ impl StageHandler for KeyConfigState {
                     draw_text(canvas, x0 + CELL_PAD, y + ROW_TEXT_Y, ROW_SCALE, label_col, &target.label(edit_mode));
                     let cells = [
                         (Column::Keyboard, keyboard_right, key_token(bound.key_of(target)), bound.key_clash(target).is_some()),
-                        (Column::Pad, pad_right, if takes_a_pad { pad_token(bound.pad_of(target)) } else { String::new() }, bound.pad_clash(target).is_some()),
+                        (
+                            Column::Pad,
+                            pad_right,
+                            if takes_a_pad { pad_token(bound.pad_of(target), bound.pad_chord_of(target)) } else { String::new() },
+                            bound.pad_clash(target).is_some(),
+                        ),
                     ];
                     for (column, right, token, clashes) in cells {
                         let focused = on && column == self.column;

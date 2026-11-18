@@ -11,6 +11,8 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 use crate::AppShared;
+use crate::gamepad::{PadEvent, PadMark};
+use crate::keyconfig::{Bindable, ControlAction};
 use crate::pointer::{PointerInput, route_pointer};
 
 pub(crate) mod canvas;
@@ -19,6 +21,8 @@ pub(crate) mod capture;
 pub(crate) mod course_result;
 pub(crate) mod decide;
 pub(crate) mod folders;
+#[cfg(test)]
+mod input_tests;
 pub(crate) mod keyconfig;
 pub(crate) mod layout_pick;
 pub(crate) mod loading;
@@ -142,6 +146,11 @@ pub(crate) struct KeyInput<'a> {
     pub text: Option<&'a str>,
 }
 
+/// The Escape key going down, or with `pressed` false coming up.
+fn escape_input(pressed: bool) -> KeyInput<'static> {
+    KeyInput { code: KeyCode::Escape, pressed, released: !pressed, text: None }
+}
+
 /// Whether a mouse event is the left button going down, the one thing the built-in screens act on.
 pub(crate) const fn is_left_press(button: MouseButton, pressed: bool) -> bool {
     pressed && matches!(button, MouseButton::Left)
@@ -178,7 +187,7 @@ pub(crate) trait StageHandler {
     /// composing and the text it commits. A screen that takes no composed text is unchanged.
     fn handle_ime(&mut self, _ctx: &mut FrameCtx<'_>, _ime: &winit::event::Ime) {}
     /// One controller event, already debounced. A screen with no use for a controller is unchanged.
-    fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
+    fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: PadEvent) -> Transition {
         let _ = (ctx, event);
         Transition::Stay
     }
@@ -199,6 +208,18 @@ pub(crate) trait StageHandler {
     fn holds_keys(&self, ctx: &FrameCtx<'_>) -> bool {
         let _ = ctx;
         false
+    }
+
+    /// Whether this screen reads every key of the keyboard as the key it is, with no chord made of
+    /// it and no key read as ESC: the key editor, whose own keys are what binds every other.
+    fn reads_keys_as_they_are(&self) -> bool {
+        false
+    }
+
+    /// Whether the controller's ESC going down reaches this screen as Escape right now. The key
+    /// editor waiting for a controller element takes the element instead.
+    fn takes_pad_escape(&self) -> bool {
+        true
     }
 }
 
@@ -323,11 +344,60 @@ impl Stage {
     ///
     /// The held-key set the START, SELECT and key-index queries read is updated next, from every
     /// key, so a key the overlay or a text box took still counts as down.
+    ///
+    /// Then the key is read through what is bound to it, the same way on every screen:
+    ///
+    /// * A press that makes a chord of two keys ([`crate::keyconfig::KeyBind`]) hands the screen
+    ///   the chord's control as a controller hands it one, or ESC as Escape going down; a chord's
+    ///   shortcut is read from the key by the screen as any shortcut is
+    ///   ([`AppShared::shortcut_for`]). The press then goes on as itself, but does nothing its key
+    ///   alone is bound to. Its lane is still played in a run and is the chord's anywhere else. The
+    ///   release that breaks ESC's chord is Escape coming up.
+    /// * The key that is ESC's own reaches the screen as Escape, going down and coming up.
+    ///
+    /// The key editor reads every key as it is ([`StageHandler::reads_keys_as_they_are`]), and a
+    /// key of a search word that is being typed is a letter of the word.
     pub(crate) fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if ctx.shared.skin_text_key(&key) {
             return Transition::Stay;
         }
         ctx.shared.note_key(&key);
+        let typed = self.takes_composed_text(ctx.shared) && crate::keyconfig::belongs_to_a_typed_line(key.code);
+        if typed || self.view().reads_keys_as_they_are() {
+            ctx.shared.keyconfig.held.forget_chord_event();
+            return self.deliver_key(ctx, key);
+        }
+        let keeps_lanes = self.id() == StageId::Play;
+        let event = ctx.shared.keyconfig.held.chord_event().cloned().map(|event| crate::keyconfig::ChordEvent { keeps_lanes, ..event });
+        if let Some(event) = event.clone() {
+            ctx.shared.keyconfig.held.note_chord_event(event);
+        }
+        let transition = self.key_through_bindings(ctx, key, event);
+        ctx.shared.keyconfig.held.forget_chord_event();
+        transition
+    }
+
+    /// Hand the screen what a key is bound to and then the key itself ([`Stage::handle_key`]),
+    /// stopping at the first thing that moves the app to another screen.
+    fn key_through_bindings(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>, event: Option<crate::keyconfig::ChordEvent>) -> Transition {
+        let chords = event.as_ref().map(|event| event.chords.clone()).unwrap_or_default();
+        for target in chords {
+            let next = match target {
+                Bindable::Control(ControlAction::Escape) => self.deliver_key(ctx, escape_input(key.pressed)),
+                Bindable::Control(action) if key.pressed => self.handler().handle_pad(ctx, PadEvent::Control(action)),
+                Bindable::Control(_) | Bindable::Shortcut(_) | Bindable::Lane(_) | Bindable::ScratchReverse(_) => Transition::Stay,
+            };
+            if !matches!(next, Transition::Stay) {
+                return next;
+            }
+        }
+        let made_a_chord = event.is_some_and(|event| event.pressed);
+        let key = if !made_a_chord && ctx.shared.escape_key() == Some(key.code) { KeyInput { code: KeyCode::Escape, ..key } } else { key };
+        self.deliver_key(ctx, key)
+    }
+
+    /// Hand one key to the option overlay, and to the screen when the overlay does not take it.
+    fn deliver_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         let holds_keys = self.view().holds_keys(ctx);
         if crate::app_options::options_key(ctx, self.id(), holds_keys, &key) {
             return Transition::Stay;
@@ -371,8 +441,19 @@ impl Stage {
 
     /// Route one controller event to the screen that is up. The option overlay does not take these:
     /// it is opened and moved with keys, and a lane held on a controller must reach the run under it.
-    pub(crate) fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
-        self.handler().handle_pad(ctx, event)
+    ///
+    /// ESC is the exception: it goes down and comes up as the Escape key, to the overlay and the
+    /// screen alike, so every screen and every ESCAPE setting of a run takes it as it takes the key.
+    /// A lane pressed by the element whose press made two elements held together is played in a
+    /// run and is the pair's anywhere else. Which of the two an event is, and whether ESC went down
+    /// or came up, is what its `mark` says.
+    pub(crate) fn handle_marked_pad(&mut self, ctx: &mut FrameCtx<'_>, event: PadEvent, mark: PadMark) -> Transition {
+        match event {
+            PadEvent::Control(ControlAction::Escape) if mark.pressed && !self.view().takes_pad_escape() => Transition::Stay,
+            PadEvent::Control(ControlAction::Escape) => self.deliver_key(ctx, escape_input(mark.pressed)),
+            PadEvent::Lane { press: true, .. } if mark.made_a_chord && self.id() != StageId::Play => Transition::Stay,
+            _ => self.handler().handle_pad(ctx, event),
+        }
     }
 
     pub(crate) fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {

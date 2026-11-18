@@ -1399,7 +1399,7 @@ fn the_run_again_keys_are_read_from_where_the_key_configuration_has_them() {
 /// on a skin's screen, where it waits for the scene to listen, and at once on the built-in one.
 #[test]
 fn a_controller_button_bound_to_run_again_does_what_its_key_does() {
-    use crate::gamepad::PadEvent;
+    use crate::gamepad::{PadEvent, PadMark};
     use crate::keyconfig::Shortcut;
 
     let (mut scene, mut timers) = listening();
@@ -1421,6 +1421,6 @@ fn a_controller_button_bound_to_run_again_does_what_its_key_does() {
         }
     }
     let now = Instant::now();
-    let asked = app.stage.handle_pad(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, PadEvent::Shortcut(Shortcut::Retry));
+    let asked = app.stage.handle_marked_pad(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, PadEvent::Shortcut(Shortcut::Retry), PadMark::default());
     assert!(matches!(asked, Transition::To(Stage::Loading(_))), "the button did not act on the built-in screen");
 }

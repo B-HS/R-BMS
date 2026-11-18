@@ -9,10 +9,9 @@
 use rbms_model::Mode;
 use rbms_model::translations::Catalog;
 use rbms_render::text::language;
-use winit::keyboard::KeyCode;
 
 use crate::gamepad::{PadBinding, PadConfig};
-use crate::keyconfig::{Bindable, Clash, KeyConfig, Shortcut, ShortcutGroup, clash_among};
+use crate::keyconfig::{Bindable, Clash, KeyBind, KeyConfig, Shortcut, ShortcutGroup, clash_among, overlap_among};
 use crate::text::menus::key_editor::KeyEditorText;
 use crate::{KcRow, is_pad_row, kc_rows};
 
@@ -87,39 +86,71 @@ pub(super) fn lines(mode: Mode) -> Vec<Line> {
     top.into_iter().chain(lanes).chain(play).chain(shortcuts).chain(controller).chain([heading(KeyEditorText::Defaults), Line::RestoreAll]).collect()
 }
 
+/// One thing that can be bound, with what it is bound to on the keyboard and, as its first element
+/// and the second one held with it, on the controller.
+type Row = (Bindable, Option<KeyBind>, Option<PadBinding>, Option<PadBinding>);
+
 /// Everything that can be bound for the mode being edited, with what each is bound to on the
 /// keyboard and on the controller, read once for a frame.
 pub(super) struct Bindings {
-    rows: Vec<(Bindable, Option<KeyCode>, Option<PadBinding>)>,
+    rows: Vec<Row>,
 }
 
 impl Bindings {
     pub(super) fn read(keys: &KeyConfig, mode: Mode) -> Bindings {
         let pad: &PadConfig = &keys.pad;
-        Bindings { rows: keys.bound_keys(mode).into_iter().map(|(target, key)| (target, key, pad.binding_of(mode, target))).collect() }
+        let rows = keys.bound_keys(mode).into_iter().map(|(target, key)| (target, key, pad.binding_of(mode, target), pad.chord_of(target))).collect();
+        Bindings { rows }
     }
 
-    fn of(&self, target: Bindable) -> Option<&(Bindable, Option<KeyCode>, Option<PadBinding>)> {
-        self.rows.iter().find(|(bound, _, _)| *bound == target)
+    fn of(&self, target: Bindable) -> Option<&Row> {
+        self.rows.iter().find(|(bound, ..)| *bound == target)
     }
 
-    pub(super) fn key_of(&self, target: Bindable) -> Option<KeyCode> {
-        self.of(target).and_then(|(_, key, _)| *key)
+    pub(super) fn key_of(&self, target: Bindable) -> Option<KeyBind> {
+        self.of(target).and_then(|(_, key, ..)| *key)
     }
 
     pub(super) fn pad_of(&self, target: Bindable) -> Option<PadBinding> {
-        self.of(target).and_then(|(_, _, pad)| *pad)
+        self.of(target).and_then(|(_, _, pad, _)| *pad)
     }
 
-    /// Why the key `target` has is one it should not have, if it is.
+    /// The element the controller binding of `target` is held together with, when it has two.
+    pub(super) fn pad_chord_of(&self, target: Bindable) -> Option<PadBinding> {
+        self.of(target).and_then(|(.., second)| *second)
+    }
+
+    /// Why the key or the two keys `target` has are ones it should not have, if they are.
     pub(super) fn key_clash(&self, target: Bindable) -> Option<Clash> {
-        let code = self.key_of(target)?;
-        clash_among(self.rows.iter().map(|(bound, key, _)| (*bound, *key)), target, code)
+        let bind = self.key_of(target)?;
+        clash_among(self.rows.iter().map(|(bound, key, ..)| (*bound, *key)), target, bind)
     }
 
-    /// What else the controller element `target` has drives at the same moment, if anything.
+    /// What else the controller element or the two elements `target` has drives at the same
+    /// moment, if anything: the same element, or the same two in either order.
     pub(super) fn pad_clash(&self, target: Bindable) -> Option<Bindable> {
-        let binding = self.pad_of(target)?;
-        self.rows.iter().find(|(other, _, pad)| *other != target && *pad == Some(binding) && target.read_with(*other)).map(|(other, _, _)| *other)
+        let mine = (self.pad_of(target)?, self.pad_chord_of(target));
+        self.rows
+            .iter()
+            .find(|(other, _, first, second)| *other != target && first.is_some_and(|first| same_elements(mine, (first, *second))) && target.read_with(*other))
+            .map(|(other, ..)| *other)
+    }
+
+    /// A controller element `target` shares with something read at the same moment, one of them
+    /// alone and the other with a second element held ([`overlap_among`]), and what has it.
+    pub(super) fn pad_overlap(&self, target: Bindable) -> Option<(PadBinding, Bindable)> {
+        let bound: Vec<(Bindable, Option<PadBinding>, Option<PadBinding>)> =
+            self.rows.iter().map(|(bound, _, first, second)| (*bound, *first, *second)).collect();
+        overlap_among(&bound, target)
+    }
+}
+
+/// Whether two controller bindings are the same element, or the same two held together in either
+/// order.
+fn same_elements(one: (PadBinding, Option<PadBinding>), two: (PadBinding, Option<PadBinding>)) -> bool {
+    match (one, two) {
+        ((a, Some(b)), (c, Some(d))) => (a, b) == (c, d) || (a, b) == (d, c),
+        ((a, None), (c, None)) => a == c,
+        _ => false,
     }
 }

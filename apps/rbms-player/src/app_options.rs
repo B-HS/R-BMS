@@ -22,7 +22,7 @@ use rbms_render::text::language;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, text_width, theme};
 use winit::keyboard::KeyCode;
 
-use crate::keyconfig::{Shortcut, key_name};
+use crate::keyconfig::{KeyBind, Shortcut};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageId};
 use crate::text::settings::screen::OptionsText;
 use crate::text::settings::{row_label, shown_value};
@@ -295,7 +295,7 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
         draw_text_right(canvas, value_right_x, row_y, ROW_SCALE, value_color, &value);
         ry += row_pitch;
     }
-    let pin = ctx.shared.shortcut_key(Shortcut::OptionsPin).map_or(NO_PIN_KEY, key_name);
+    let pin = ctx.shared.keyconfig.shortcut_bind(Shortcut::OptionsPin).map_or_else(|| NO_PIN_KEY.to_string(), KeyBind::label);
     let hint = OptionsText::Hint.fill(language(), &[&pin]);
     let hint_x = x + (panel.w - text_width(&hint, HINT_SCALE)) * 0.5;
     draw_text(canvas, hint_x, y + panel.h - HINT_H, HINT_SCALE, th.text_muted, &hint);

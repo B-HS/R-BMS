@@ -27,6 +27,16 @@ rbms_model::translations! {
             "컨트롤러의 버튼을 누르거나 축을 움직이세요   ESC 취소",
             "コントローラーのボタンを押すか軸を動かしてください   ESC キャンセル",
         ),
+        CaptureChordKeyHint => (
+            "PRESS AND RELEASE A KEY, OR HOLD ONE AND PRESS A SECOND FOR A COMBINATION   ESC CANCELS",
+            "키를 눌렀다 떼거나, 한 키를 누른 채 두 번째 키를 눌러 조합으로 지정하세요   ESC 취소",
+            "キーを押して離すか、1つを押したまま2つ目を押して組み合わせにしてください   ESC キャンセル",
+        ),
+        CaptureChordPadHint => (
+            "PRESS AND RELEASE A BUTTON, OR HOLD ONE AND PRESS A SECOND FOR A COMBINATION   ESC CANCELS",
+            "버튼을 눌렀다 떼거나, 한 버튼을 누른 채 두 번째 버튼을 눌러 조합으로 지정하세요   ESC 취소",
+            "ボタンを押して離すか、1つを押したまま2つ目を押して組み合わせにしてください   ESC キャンセル",
+        ),
         ActionColumn => ("ACTION", "동작", "操作"),
         KeyboardColumn => ("KEYBOARD", "키보드", "キーボード"),
         ModeLabel => ("EDIT MODE (LANES OF)", "편집할 모드 (레인)", "編集するモード（レーン）"),
@@ -93,6 +103,21 @@ rbms_model::translations! {
             "{0}도 같은 키를 씁니다 - 선곡 화면에서는 둘 다 동작합니다",
             "{0}にも割り当て済みです - 選曲画面では両方が動作します",
         ),
+        ChordTaken => (
+            "THAT COMBINATION IS {0} - PICK ANOTHER, OR CLEAR THAT ROW FIRST",
+            "이 조합은 {0}에 쓰이고 있습니다 - 다른 조합을 고르거나 먼저 그 줄을 해제하세요",
+            "その組み合わせは{0}に使われています - 別の組み合わせを選ぶか、先にその行を解除してください",
+        ),
+        ChordKeyAlone => (
+            "{0} ALONE IS {1} - PRESSED FIRST, IT DOES THAT TOO",
+            "{0} 단독 입력은 {1}입니다 - 먼저 누르면 그 동작도 실행됩니다",
+            "{0}単独は{1}です - 先に押すとその操作も実行されます",
+        ),
+        KeyInChord => (
+            "{0} IS ALSO PART OF THE COMBINATION OF {1} - PRESSED FIRST, THIS ROW ACTS TOO",
+            "{0} 키는 {1} 조합에도 쓰입니다 - 먼저 누르면 이 줄의 동작도 실행됩니다",
+            "{0}は{1}の組み合わせにも使われています - 先に押すとこの行の操作も実行されます",
+        ),
     }
 }
 
@@ -129,6 +154,7 @@ rbms_model::translations! {
         Fine => ("FINE STEP WHILE HELD (UNSET: SHIFT)", "누르는 동안 미세 조정 (미지정 시 SHIFT)", "押している間は微調整（未設定時はSHIFT）"),
         Start => ("START"),
         Select => ("SELECT"),
+        Escape => ("ESC"),
     }
 }
 

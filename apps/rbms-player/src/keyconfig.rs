@@ -14,6 +14,9 @@ use crate::text::menus::key_editor::{ControlLabelText, LaneLabelText, ShortcutGr
 use crate::text::menus::layout_pick::LayoutPickText;
 use crate::text::notices::NoticeText;
 
+mod chord;
+pub use chord::*;
+
 /// Parse a key token (the vocabulary used in the keyconfig file and `--keys`) into a `KeyCode`.
 pub fn key_from_name(s: &str) -> Option<KeyCode> {
     use KeyCode::*;
@@ -383,11 +386,15 @@ pub enum ControlAction {
     Fine,
     Start,
     Select,
+    /// The Escape key of every screen, on a key or a controller element of the player's choosing.
+    /// What it is bound to goes down and comes up as Escape does, so a run's ESCAPE setting holds
+    /// it, presses it twice or takes it at once as it does the key.
+    Escape,
 }
 
 impl ControlAction {
     /// Every control, in the order the key editor and the key guide list them.
-    pub const ALL: [ControlAction; 20] = [
+    pub const ALL: [ControlAction; 21] = [
         ControlAction::HiSpeedUp,
         ControlAction::HiSpeedDown,
         ControlAction::CoverUp,
@@ -408,6 +415,7 @@ impl ControlAction {
         ControlAction::Fine,
         ControlAction::Start,
         ControlAction::Select,
+        ControlAction::Escape,
     ];
 
     /// What the control is called on screen.
@@ -438,6 +446,7 @@ impl ControlAction {
             ControlAction::Fine => ControlLabelText::Fine,
             ControlAction::Start => ControlLabelText::Start,
             ControlAction::Select => ControlLabelText::Select,
+            ControlAction::Escape => ControlLabelText::Escape,
         };
         text.get(language())
     }
@@ -468,6 +477,7 @@ impl ControlAction {
             ControlAction::Fine => "FINE STEP",
             ControlAction::Start => "START",
             ControlAction::Select => "SELECT",
+            ControlAction::Escape => "ESCAPE",
         }
     }
 
@@ -556,6 +566,8 @@ pub struct ControlBinds {
     /// because no one key is free on every shipped layout: left without a key, the modifier is a
     /// shift key that plays no lane and runs no control ([`crate::AppShared::fine_pressed`]).
     pub fine: String,
+    /// The key that is Escape as well as Escape itself. It ships unbound: Escape is always there.
+    pub escape: String,
 }
 
 impl Default for ControlBinds {
@@ -581,6 +593,7 @@ impl Default for ControlBinds {
             offset_down: DEFAULT_OFFSET_DOWN_KEY.into(),
             auto_adjust_toggle: String::new(),
             fine: String::new(),
+            escape: String::new(),
         }
     }
 }
@@ -652,6 +665,7 @@ impl ControlBinds {
             ControlAction::Fine => &mut self.fine,
             ControlAction::Start => &mut self.start,
             ControlAction::Select => &mut self.select,
+            ControlAction::Escape => &mut self.escape,
         }
     }
 
@@ -677,6 +691,7 @@ impl ControlBinds {
             ControlAction::Fine => &self.fine,
             ControlAction::Start => &self.start,
             ControlAction::Select => &self.select,
+            ControlAction::Escape => &self.escape,
         }
     }
 }
@@ -1023,11 +1038,13 @@ impl Bindable {
     /// transport beside the controls. The browser reads its shortcuts beside START and SELECT. A
     /// lane key is read on the browser too, as a key of the reference's key table, but there it
     /// only ever adds to what a shortcut does and the shipped layout already shares one, so that
-    /// pair is not refused ([`KeyConfig::lane_sharing`] names it instead).
+    /// pair is not refused ([`KeyConfig::lane_sharing`] names it instead). ESC is read on every
+    /// screen, beside every shortcut.
     pub fn read_with(self, other: Bindable) -> bool {
         use Bindable::{Control, Lane, ScratchReverse, Shortcut};
         match (self, other) {
             (Lane(_) | ScratchReverse(_) | Control(_), Lane(_) | ScratchReverse(_) | Control(_)) => true,
+            (Shortcut(_), Control(ControlAction::Escape)) | (Control(ControlAction::Escape), Shortcut(_)) => true,
             (Shortcut(shortcut), Control(action)) | (Control(action), Shortcut(shortcut)) => match shortcut.screen() {
                 ShortcutScreen::Browser => action.is_menu_button(),
                 ShortcutScreen::Replay => true,
@@ -1046,6 +1063,12 @@ impl Bindable {
             Bindable::Shortcut(shortcut) => fixed_keys_of(shortcut.screen()),
             Bindable::Lane(_) | Bindable::ScratchReverse(_) | Bindable::Control(_) => &[KeyCode::Escape],
         }
+    }
+
+    /// Whether it can be bound to two keys held together. A control and a shortcut are fired or
+    /// held; a lane and a reverse spin are played, and stay on one key.
+    pub fn takes_a_chord(self) -> bool {
+        matches!(self, Bindable::Control(_) | Bindable::Shortcut(_))
     }
 
     /// Everything that can be bound for `mode`, in the order the key editor lists it.
@@ -1067,14 +1090,40 @@ pub enum Clash {
     Fixed,
 }
 
-/// Why `code` cannot be given to `target`, if it cannot, among everything in `bound` with the key
-/// each has: the screen that reads `target` keeps the key for itself, or something read at the same
-/// moment already has it ([`Bindable::read_with`]). What `target` itself has is never a clash.
-pub fn clash_among(bound: impl IntoIterator<Item = (Bindable, Option<KeyCode>)>, target: Bindable, code: KeyCode) -> Option<Clash> {
-    if target.fixed_keys().contains(&code) {
+/// Why `bind` cannot be given to `target`, if it cannot, among everything in `bound` with the keys
+/// each has: the screen that reads `target` keeps one of its keys for itself, or something read at
+/// the same moment already has the same keys ([`Bindable::read_with`]), a chord in either order.
+/// What `target` itself has is never a clash, and neither is a chord one of whose keys is something
+/// else's single key: pressed first, that key does what it does alone, which the key editor says
+/// ([`KeyConfig::chord_overlap`]).
+pub fn clash_among(bound: impl IntoIterator<Item = (Bindable, Option<KeyBind>)>, target: Bindable, bind: KeyBind) -> Option<Clash> {
+    if bind.keys().into_iter().any(|code| target.fixed_keys().contains(&code)) {
         return Some(Clash::Fixed);
     }
-    bound.into_iter().find(|(other, key)| *other != target && *key == Some(code) && target.read_with(*other)).map(|(other, _)| Clash::With(other))
+    bound
+        .into_iter()
+        .find(|(other, theirs)| *other != target && theirs.is_some_and(|theirs| theirs.same_keys(bind)) && target.read_with(*other))
+        .map(|(other, _)| Clash::With(other))
+}
+
+/// A key `target`'s keys share with something else read at the same moment, among everything in
+/// `bound`, without the two being the same keys: one of `target`'s two keys is the other's single
+/// key, or `target`'s single key is one of the other's two. Answered as the key and what else has
+/// it. Such a pair is not refused ([`clash_among`]), but the key pressed first does what it does
+/// alone.
+pub fn overlap_among<B: Copy + PartialEq>(bound: &[(Bindable, Option<B>, Option<B>)], target: Bindable) -> Option<(B, Bindable)> {
+    let (_, first, second) = bound.iter().find(|(bound, _, _)| *bound == target)?;
+    let mine: Vec<B> = [*first, *second].into_iter().flatten().collect();
+    let chord = second.is_some();
+    bound.iter().filter(|(other, _, _)| *other != target && target.read_with(*other)).find_map(|(other, their_first, their_second)| {
+        let theirs: Vec<B> = [*their_first, *their_second].into_iter().flatten().collect();
+        let other_is_chord = their_second.is_some();
+        if chord == other_is_chord {
+            return None;
+        }
+        let shared = mine.iter().find(|key| theirs.contains(key))?;
+        Some((*shared, *other))
+    })
 }
 
 /// How many key indices the screens ask about. The reference implementation numbers the keys of a
@@ -1117,9 +1166,13 @@ pub fn key_index_of(mode: Mode, lane: usize, dir: ScratchDir) -> Option<usize> {
 /// It holds physical keys rather than lanes, so a key rebound while it is down (the editor does
 /// this) is read against the new binding on the next query instead of leaving a lane held. It is
 /// runtime state, never written to the key config file.
+///
+/// Beside the keys it holds one thing that lasts only while a key is handed to the screen that is
+/// up: what that key did to the chords bound on the keyboard ([`ChordEvent`]).
 #[derive(Clone, Debug, Default)]
 pub struct HeldKeys {
     down: HashSet<KeyCode>,
+    chord_event: Option<ChordEvent>,
 }
 
 impl HeldKeys {
@@ -1139,9 +1192,34 @@ impl HeldKeys {
         self.down.iter().copied()
     }
 
-    /// Forget every key, for a window that lost focus and so will never see them released.
+    /// Forget every key, for a window that lost focus and so will never see them released, and with
+    /// them every chord they held.
     pub fn clear(&mut self) {
         self.down.clear();
+        self.chord_event = None;
+    }
+
+    /// What the key being handled did to the chords, if it made or broke any.
+    pub fn chord_event(&self) -> Option<&ChordEvent> {
+        self.chord_event.as_ref()
+    }
+
+    /// Note what the key being handled did to the chords. A key that made or broke none leaves
+    /// nothing to note.
+    pub fn note_chord_event(&mut self, event: ChordEvent) {
+        self.chord_event = (!event.chords.is_empty()).then_some(event);
+    }
+
+    /// Forget what the key that was handled did to the chords, once it has been handled, or for a
+    /// key the chords are not read from.
+    pub fn forget_chord_event(&mut self) {
+        self.chord_event = None;
+    }
+
+    /// Whether the press of `code` being handled made a chord, which keeps it from doing what it
+    /// does alone.
+    pub fn press_made_a_chord(&self, code: KeyCode) -> bool {
+        self.chord_event.as_ref().is_some_and(|event| event.made_by(code))
     }
 }
 
@@ -1319,15 +1397,24 @@ impl KeyConfig {
     /// ([`KeyConfig::takes_from`]), when it stays without a key, as a row of the key editor to fill
     /// in: a key the file names is the player's choice. It is the rule a shortcut the file says
     /// nothing of follows ([`KeyConfig::shortcut_key`]).
+    ///
+    /// A control bound to two keys held together has no one key, and reads `None` here
+    /// ([`KeyConfig::control_bind`]).
     pub fn control_key(&self, action: ControlAction) -> Option<KeyCode> {
-        let own = key_from_name(self.controls.token(action));
+        self.control_bind(action).and_then(KeyBind::single)
+    }
+
+    /// What a control is read from: one key or two held together, or `None` for a control that has
+    /// none. A key given later is read as [`KeyConfig::control_key`] says; a chord is the player's.
+    pub fn control_bind(&self, action: ControlAction) -> Option<KeyBind> {
+        let own = KeyBind::parse(self.controls.token(action));
         let Some((token, _)) = action.given_later().filter(|(_, since)| self.generation < *since) else {
             return own;
         };
         let shipped = key_from_name(token);
         match own {
-            Some(code) if Some(code) != shipped => Some(code),
-            _ => shipped.filter(|code| !self.takes_from(action, *code)),
+            Some(bind) if shipped.map(KeyBind::Single) != Some(bind) => Some(bind),
+            _ => shipped.filter(|code| !self.takes_from(action, *code)).map(KeyBind::Single),
         }
     }
 
@@ -1359,8 +1446,7 @@ impl KeyConfig {
             return;
         }
         for action in ControlAction::ALL.into_iter().filter(|action| action.given_later().is_some_and(|(_, since)| self.generation < since)) {
-            let token = self.control_key(action).map(key_name).unwrap_or_default();
-            *self.controls.slot(action) = token.to_string();
+            *self.controls.slot(action) = self.control_bind(action).map(KeyBind::token).unwrap_or_default();
         }
         for &mode in Mode::ALL {
             let given: Vec<(KeyCode, usize)> = default_reverse_keys_for_mode(mode)
@@ -1388,12 +1474,28 @@ impl KeyConfig {
     ///
     /// A shortcut the file says nothing of does not take its shipped key from a shortcut the player
     /// put there ([`KeyConfig::shipped_key_unless_given_away`]).
+    ///
+    /// A shortcut bound to two keys held together has no one key, and reads `None` here
+    /// ([`KeyConfig::shortcut_bind`]).
     pub fn shortcut_key(&self, shortcut: Shortcut) -> Option<KeyCode> {
+        self.shortcut_bind(shortcut).and_then(KeyBind::single)
+    }
+
+    /// What a shortcut is read from: one key or two held together, or `None` for one the player
+    /// left without a key, read as [`KeyConfig::shortcut_key`] says.
+    pub fn shortcut_bind(&self, shortcut: Shortcut) -> Option<KeyBind> {
         match self.shortcuts.get(shortcut.config_key()) {
-            None => self.shipped_key_unless_given_away(shortcut),
+            None => self.shipped_key_unless_given_away(shortcut).map(KeyBind::Single),
             Some(token) if token.is_empty() => None,
-            Some(token) => Some(key_from_name(token).unwrap_or_else(|| shortcut.default_key())),
+            Some(token) => Some(KeyBind::parse(token).unwrap_or(KeyBind::Single(shortcut.default_key()))),
         }
+    }
+
+    /// Every control and shortcut bound to two keys held together, with the two.
+    pub fn chords(&self) -> Vec<(Bindable, KeyBind)> {
+        let controls = ControlAction::ALL.into_iter().filter_map(|action| Some((Bindable::Control(action), self.control_bind(action)?)));
+        let shortcuts = Shortcut::ALL.into_iter().filter_map(|shortcut| Some((Bindable::Shortcut(shortcut), self.shortcut_bind(shortcut)?)));
+        controls.chain(shortcuts).filter(|(_, bind)| matches!(bind, KeyBind::Chord(..))).collect()
     }
 
     /// The key a shortcut ships on, or `None` when the file gives that very key to another shortcut
@@ -1450,6 +1552,25 @@ impl KeyConfig {
         }
     }
 
+    /// Give something one key or two held together. Two keys go only to what takes a chord
+    /// ([`Bindable::takes_a_chord`]), and a key the file has no word for is not bound at all.
+    pub fn bind_keys(&mut self, mode: Mode, target: Bindable, bind: KeyBind) {
+        let KeyBind::Chord(..) = bind else {
+            return self.bind(mode, target, bind.single());
+        };
+        if !target.takes_a_chord() || !bind.is_named() {
+            return;
+        }
+        self.settle_shipped_keys();
+        match target {
+            Bindable::Control(action) => *self.controls.slot(action) = bind.token(),
+            Bindable::Shortcut(shortcut) => {
+                self.shortcuts.insert(shortcut.config_key().to_string(), bind.token());
+            }
+            Bindable::Lane(_) | Bindable::ScratchReverse(_) => {}
+        }
+    }
+
     /// Put something back on the key it ships on.
     pub fn restore(&mut self, mode: Mode, target: Bindable) {
         match target {
@@ -1460,8 +1581,9 @@ impl KeyConfig {
         }
     }
 
-    /// Everything that can be bound for `mode`, with the key each is read from right now.
-    pub fn bound_keys(&self, mode: Mode) -> Vec<(Bindable, Option<KeyCode>)> {
+    /// Everything that can be bound for `mode`, with the key or the two keys each is read from
+    /// right now.
+    pub fn bound_keys(&self, mode: Mode) -> Vec<(Bindable, Option<KeyBind>)> {
         let lanes = self.lane_keys(mode);
         let reverse = self.scratch_reverse_keys(mode);
         let on = |keys: &[(KeyCode, usize)], lane: usize| keys.iter().find(|(_, bound)| *bound == lane).map(|(code, _)| *code);
@@ -1469,10 +1591,10 @@ impl KeyConfig {
             .into_iter()
             .map(|target| {
                 let key = match target {
-                    Bindable::Lane(lane) => on(&lanes, lane),
-                    Bindable::ScratchReverse(lane) => on(&reverse, lane),
-                    Bindable::Control(action) => self.control_key(action),
-                    Bindable::Shortcut(shortcut) => self.shortcut_key(shortcut),
+                    Bindable::Lane(lane) => on(&lanes, lane).map(KeyBind::Single),
+                    Bindable::ScratchReverse(lane) => on(&reverse, lane).map(KeyBind::Single),
+                    Bindable::Control(action) => self.control_bind(action),
+                    Bindable::Shortcut(shortcut) => self.shortcut_bind(shortcut),
                 };
                 (target, key)
             })
@@ -1480,8 +1602,33 @@ impl KeyConfig {
     }
 
     /// Why `code` cannot be given to `target` in `mode`, if it cannot ([`clash_among`]).
+    #[cfg(test)]
     pub fn clash(&self, mode: Mode, target: Bindable, code: KeyCode) -> Option<Clash> {
-        clash_among(self.bound_keys(mode), target, code)
+        self.clash_of(mode, target, KeyBind::Single(code))
+    }
+
+    /// Why `bind` cannot be given to `target` in `mode`, if it cannot ([`clash_among`]).
+    pub fn clash_of(&self, mode: Mode, target: Bindable, bind: KeyBind) -> Option<Clash> {
+        clash_among(self.bound_keys(mode), target, bind)
+    }
+
+    /// The key `target` shares in `mode` with something read at the same moment without the two
+    /// being the same keys, and what has it ([`overlap_among`]): what the key editor warns of.
+    pub fn chord_overlap(&self, mode: Mode, target: Bindable) -> Option<(KeyCode, Bindable)> {
+        let split = |bind: Option<KeyBind>| match bind {
+            Some(KeyBind::Single(code)) => (Some(code), None),
+            Some(KeyBind::Chord(first, second)) => (Some(first), Some(second)),
+            None => (None, None),
+        };
+        let bound: Vec<(Bindable, Option<KeyCode>, Option<KeyCode>)> = self
+            .bound_keys(mode)
+            .into_iter()
+            .map(|(bound, bind)| {
+                let (first, second) = split(bind);
+                (bound, first, second)
+            })
+            .collect();
+        overlap_among(&bound, target)
     }
 
     /// The lane of `mode` that is on the same key as a shortcut of the browser, if one is. The two
@@ -1493,7 +1640,7 @@ impl KeyConfig {
         if shortcut.screen() != ShortcutScreen::Browser {
             return None;
         }
-        let code = self.shortcut_key(shortcut)?;
+        let code = self.shortcut_bind(shortcut)?.single()?;
         self.lane_keys(mode).into_iter().chain(self.scratch_reverse_keys(mode)).find(|(key, _)| *key == code).map(|(_, lane)| lane)
     }
 

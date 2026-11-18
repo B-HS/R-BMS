@@ -6,7 +6,8 @@
 //! owns it.
 #![allow(clippy::wildcard_imports)]
 
-use crate::keyconfig::{HeldKeys, Shortcut, ShortcutScreen, key_index_of};
+use crate::gamepad::PadMark;
+use crate::keyconfig::{Bindable, ChordEvent, HeldKeys, KeyBind, Shortcut, ShortcutScreen, held_chords_with, key_index_of, keys_in_held_chords};
 use crate::skin_host::HeldKeyQuery;
 use crate::*;
 
@@ -232,7 +233,18 @@ impl AppShared {
     /// Which lane a key plays and which way it spins it. A scratch lane has one key per direction
     /// and the judge engine needs to know which one arrived, because spinning the other way is what
     /// ends a charge note (`JudgeManager.java:358-372`). Every other binding spins forward.
+    ///
+    /// The press that makes a chord of two keys plays its lane in a run and nowhere else: on any
+    /// other screen the key is the chord's ([`ChordEvent::keeps_lanes`]).
     pub(crate) fn lane_input_for(&self, code: KeyCode) -> Option<(usize, ScratchDir)> {
+        if self.keyconfig.held.chord_event().is_some_and(|event| event.made_by(code) && !event.keeps_lanes) {
+            return None;
+        }
+        self.lane_on(code)
+    }
+
+    /// The lane a key plays and the way it spins it, whatever the key being handled did.
+    fn lane_on(&self, code: KeyCode) -> Option<(usize, ScratchDir)> {
         match self.lane_for(code) {
             Some(lane) => Some((lane, ScratchDir::Forward)),
             None => self.active_reverse_keys.iter().find(|(k, _)| *k == code).map(|(_, lane)| (*lane, ScratchDir::Backward)),
@@ -243,21 +255,68 @@ impl AppShared {
     /// same key (see [`ControlAction::yields_to_lanes`]), so a key config that already plays a
     /// column on the letter they ship on keeps playing it.
     pub(crate) fn control_key_in_force(&self, action: ControlAction) -> Option<KeyCode> {
-        self.keyconfig.control_key(action).filter(|&code| !action.yields_to_lanes() || self.lane_input_for(code).is_none())
+        self.control_bind_in_force(action).and_then(KeyBind::single)
     }
 
-    /// Which configured control (if any) a key triggers.
+    /// The key or the two keys a control is read from right now: its single key as
+    /// [`AppShared::control_key_in_force`] reads it, or its chord, which no lane takes.
+    pub(crate) fn control_bind_in_force(&self, action: ControlAction) -> Option<KeyBind> {
+        match self.keyconfig.control_bind(action)? {
+            KeyBind::Single(code) if action.yields_to_lanes() && self.lane_on(code).is_some() => None,
+            bind => Some(bind),
+        }
+    }
+
+    /// Which configured control (if any) a key triggers. The press that makes a chord triggers
+    /// none: the chord is handed to the screen as a controller hands it a control
+    /// ([`crate::stage::Stage::handle_key`]), and the key's own control waits for a press of its own.
     pub(crate) fn control_for(&self, code: KeyCode) -> Option<ControlAction> {
+        if self.keyconfig.held.press_made_a_chord(code) {
+            return None;
+        }
+        self.single_control_on(code)
+    }
+
+    /// The control a key alone is the key of right now, whatever the key being handled did.
+    fn single_control_on(&self, code: KeyCode) -> Option<ControlAction> {
         ControlAction::ALL.into_iter().find(|a| self.control_key_in_force(*a) == Some(code))
     }
 
-    /// Record one keyboard event in the held-key set the START, SELECT and key-index queries read.
-    /// A repeat of a key already down changes nothing.
+    /// Record one keyboard event in the held-key set the START, SELECT and key-index queries read,
+    /// with what it did to the chords bound on the keyboard: the ones its press made or its release
+    /// broke ([`HeldKeys::chord_event`]), which lasts until the key has been handled. A repeat of a
+    /// key already down changes nothing.
     pub(crate) fn note_key(&mut self, key: &KeyInput<'_>) {
+        let chords = self.keyconfig.chords();
+        let held = &mut self.keyconfig.held;
+        held.forget_chord_event();
         if key.pressed {
-            self.keyconfig.held.press(key.code);
+            held.press(key.code);
+            let made = held_chords_with(&chords, held, key.code);
+            held.note_chord_event(ChordEvent { code: key.code, pressed: true, chords: made, keeps_lanes: true });
         } else if key.released {
-            self.keyconfig.held.release(key.code);
+            let broken = held_chords_with(&chords, held, key.code);
+            held.release(key.code);
+            held.note_chord_event(ChordEvent { code: key.code, pressed: false, chords: broken, keeps_lanes: true });
+        }
+    }
+
+    /// The key that is ESC as well as Escape itself, when ESC has one key of its own.
+    pub(crate) fn escape_key(&self) -> Option<KeyCode> {
+        self.control_key_in_force(ControlAction::Escape)
+    }
+
+    /// Every key that is one of two keys of a chord that is held ([`keys_in_held_chords`]).
+    fn keys_in_chords(&self) -> std::collections::HashSet<KeyCode> {
+        keys_in_held_chords(&self.keyconfig.chords(), &self.keyconfig.held)
+    }
+
+    /// Whether `bind` is down: a single key that is down and is not one of two keys of a chord that
+    /// is held, or a chord both of whose keys are down.
+    fn bind_down(&self, bind: KeyBind) -> bool {
+        match bind {
+            KeyBind::Single(code) => self.keyconfig.held.is_down(code) && !self.keys_in_chords().contains(&code),
+            KeyBind::Chord(..) => bind.is_held(&self.keyconfig.held),
         }
     }
 
@@ -303,21 +362,28 @@ impl AppShared {
         if self.control_held(ControlAction::Fine) {
             return true;
         }
-        self.keyconfig.control_key(ControlAction::Fine).is_none()
+        self.keyconfig.control_bind(ControlAction::Fine).is_none()
             && FINE_FALLBACK_KEYS
                 .into_iter()
-                .any(|code| self.keyconfig.held.is_down(code) && self.lane_input_for(code).is_none() && self.control_for(code).is_none())
+                .any(|code| self.bind_down(KeyBind::Single(code)) && self.lane_on(code).is_none() && self.single_control_on(code).is_none())
     }
 
+    /// Whether a control is down on the keyboard or the controller. A control bound to two keys is
+    /// down while both are, and one bound to a key that is one of two keys of a chord that is held
+    /// is not: the chord the player bound wins.
     fn control_held(&self, action: ControlAction) -> bool {
-        self.control_key_in_force(action).is_some_and(|code| self.keyconfig.held.is_down(code)) || self.pad_held().contains(&PadEvent::Control(action))
+        self.control_bind_in_force(action).is_some_and(|bind| self.bind_down(bind)) || self.pad_held().contains(&PadEvent::Control(action))
     }
 
     /// Whether a control that repeats while it is held is down: the key a press of it is read from
-    /// ([`AppShared::control_for`]), or the controller element it was given. A key two controls
-    /// were left on repeats the one its press runs and not the other.
+    /// ([`AppShared::control_for`]), the two keys it is bound to, or the controller element it was
+    /// given. A key two controls were left on repeats the one its press runs and not the other.
     pub(crate) fn control_repeating(&self, action: ControlAction) -> bool {
-        let key_down = self.control_key_in_force(action).is_some_and(|code| self.keyconfig.held.is_down(code) && self.control_for(code) == Some(action));
+        let key_down = match self.control_bind_in_force(action) {
+            Some(KeyBind::Single(code)) => self.bind_down(KeyBind::Single(code)) && self.single_control_on(code) == Some(action),
+            Some(chord) => self.bind_down(chord),
+            None => false,
+        };
         key_down || self.pad_held().contains(&PadEvent::Control(action))
     }
 
@@ -326,19 +392,36 @@ impl AppShared {
         self.keyconfig.shortcut_key(shortcut)
     }
 
-    /// The shortcut `screen` reads from `code`, if one is on it.
+    /// The key or the two keys a shortcut is read from right now.
+    pub(crate) fn shortcut_bind(&self, shortcut: Shortcut) -> Option<KeyBind> {
+        self.keyconfig.shortcut_bind(shortcut)
+    }
+
+    /// The shortcut `screen` reads from `code`, if one is on it. The press of `code` that makes a
+    /// chord reads the chord's shortcut, if it is one of the screen's, and never the key's own.
     pub(crate) fn shortcut_for(&self, screen: ShortcutScreen, code: KeyCode) -> Option<Shortcut> {
-        self.keyconfig.shortcut_on(screen, code)
+        match self.keyconfig.held.chord_event().filter(|event| event.made_by(code)) {
+            Some(event) => event.chords.iter().find_map(|target| match target {
+                Bindable::Shortcut(shortcut) if shortcut.screen() == screen => Some(*shortcut),
+                _ => None,
+            }),
+            None => self.keyconfig.shortcut_on(screen, code),
+        }
     }
 
-    /// Whether `code` is the key of `shortcut` right now.
+    /// Whether `code` going down or up is the key of `shortcut` right now: its own key, or one of
+    /// the two keys of its chord whose press made the chord or whose release broke it. The press
+    /// that makes a chord is not the key's own shortcut.
     pub(crate) fn is_shortcut(&self, shortcut: Shortcut, code: KeyCode) -> bool {
-        self.shortcut_key(shortcut) == Some(code)
+        let event = self.keyconfig.held.chord_event().filter(|event| event.code == code);
+        let chord = event.is_some_and(|event| event.chords.contains(&Bindable::Shortcut(shortcut)));
+        let made = event.is_some_and(|event| event.pressed);
+        chord || (!made && self.shortcut_key(shortcut) == Some(code))
     }
 
-    /// Whether the key of a shortcut that is read as held is down.
+    /// Whether the key or the two keys of a shortcut that is read as held are down.
     pub(crate) fn shortcut_held(&self, shortcut: Shortcut) -> bool {
-        self.shortcut_key(shortcut).is_some_and(|code| self.keyconfig.held.is_down(code))
+        self.shortcut_bind(shortcut).is_some_and(|bind| self.bind_down(bind))
     }
 
     /// Whether the key with the reference implementation's index `index` (`0..KEY_INDEX_COUNT`:
@@ -353,8 +436,16 @@ impl AppShared {
     /// Whether the key with the index `index` is down on the keyboard, whatever the controller
     /// holds: what a turntable's direction is read from beside a controller whose turntable is
     /// counted in ticks ([`AppShared::take_turntable_ticks`]).
+    ///
+    /// A key that is one of two keys of a chord that is held is the chord's, and is no index.
     pub(crate) fn keyboard_index_pressed(&self, index: usize) -> bool {
-        self.keyconfig.held.iter().filter_map(|code| self.lane_input_for(code)).any(|(lane, dir)| key_index_of(self.mode, lane, dir) == Some(index))
+        let chorded = self.keys_in_chords();
+        self.keyconfig
+            .held
+            .iter()
+            .filter(|code| !chorded.contains(code))
+            .filter_map(|code| self.lane_on(code))
+            .any(|(lane, dir)| key_index_of(self.mode, lane, dir) == Some(index))
     }
 
     /// How many ticks the controller's turntable has turned since this was last asked, forward
@@ -364,17 +455,14 @@ impl AppShared {
         self.pad.as_mut().and_then(crate::gamepad::PadState::take_turn)
     }
 
-    /// Everything the controller did since the last frame, each with the instant it happened at,
-    /// or nothing when there is no controller.
+    /// Everything the controller did since the last frame, each with the instant it happened at
+    /// and what it carries beyond itself ([`PadMark`]), or nothing when there is no controller.
     ///
     /// The two fields are taken apart rather than reached through `self`, because the poll needs
     /// the controller mutably and its bindings immutably at the same time.
-    pub(crate) fn poll_pad(&mut self) -> Vec<(PadEvent, Instant)> {
+    pub(crate) fn poll_pad(&mut self) -> Vec<(PadEvent, Instant, PadMark)> {
         let AppShared { pad, keyconfig, mode, .. } = self;
-        let Some(pad) = pad.as_mut() else {
-            return Vec::new();
-        };
-        pad.poll_now(&keyconfig.pad, *mode)
+        pad.as_mut().map(|pad| pad.poll_now(&keyconfig.pad, *mode)).unwrap_or_default()
     }
 
     /// Whether the course in progress forbids the hi-speed and lane-shade controls
@@ -483,7 +571,8 @@ impl AppShared {
             | ControlAction::AutoAdjustToggle
             | ControlAction::Fine
             | ControlAction::Start
-            | ControlAction::Select => ControlEffect::None,
+            | ControlAction::Select
+            | ControlAction::Escape => ControlEffect::None,
         }
     }
 

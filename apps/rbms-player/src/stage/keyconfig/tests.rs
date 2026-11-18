@@ -35,6 +35,17 @@ fn press(app: &mut App, state: &mut KeyConfigState, code: KeyCode) -> Transition
     state.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, key)
 }
 
+fn release(app: &mut App, state: &mut KeyConfigState, code: KeyCode) -> Transition {
+    let key = KeyInput { code, pressed: false, released: true, text: None };
+    state.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, key)
+}
+
+/// A key pressed and let go, as a person types one.
+fn tap(app: &mut App, state: &mut KeyConfigState, code: KeyCode) {
+    press(app, state, code);
+    release(app, state, code);
+}
+
 /// An editor with its cursor on the keyboard cell of `target`.
 fn on(app: &App, target: Bindable) -> KeyConfigState {
     let sel =
@@ -43,14 +54,14 @@ fn on(app: &App, target: Bindable) -> KeyConfigState {
 }
 
 fn rebind(app: &mut App, state: &mut KeyConfigState, code: KeyCode) {
-    press(app, state, KeyCode::Enter);
+    tap(app, state, KeyCode::Enter);
     assert!(state.capturing, "Enter did not arm the capture");
-    press(app, state, code);
+    tap(app, state, code);
     assert!(!state.capturing, "the capture stayed armed after a key");
 }
 
 fn key_of(app: &App, target: Bindable) -> Option<KeyCode> {
-    app.shared.keyconfig.bound_keys(app.shared.kc_edit_mode).into_iter().find(|(bound, _)| *bound == target).and_then(|(_, key)| key)
+    app.shared.keyconfig.bound_keys(app.shared.kc_edit_mode).into_iter().find(|(bound, _)| *bound == target).and_then(|(_, key)| key).and_then(KeyBind::single)
 }
 
 /// Draw the editor at `size`, save the frame as `name` when a capture folder was asked for, and
