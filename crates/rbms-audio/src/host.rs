@@ -15,6 +15,8 @@ use std::sync::mpsc::{Sender, channel};
 
 use cpal::traits::{DeviceTrait, HostTrait};
 
+use crate::latency::{OutputLatency, read_output_latency};
+
 /// The name the host thread carries, so a stack trace and a panic message both name it.
 const HOST_THREAD_NAME: &str = "rbms-audio-host";
 
@@ -68,6 +70,18 @@ pub fn output_device_names() -> Vec<String> {
             .map(|devices| devices.filter_map(|device| device.description().ok().map(|description| description.name().to_string())).collect())
             .unwrap_or_default()
     })
+}
+
+/// The delay the output device named `device_name` adds before a frame is heard, its frames
+/// turned into time at `stream_rate`, or `None` where the device does not say or cannot be asked
+/// (every platform but macOS).
+///
+/// Asked on the host thread like every other question about the host, and never from the audio
+/// callback: opening a unit on the device to ask it takes milliseconds. A caller asks when the
+/// stream opens and before a run starts, never while one is running.
+pub fn output_device_latency(device_name: &str, stream_rate: u32) -> Option<OutputLatency> {
+    let device_name = device_name.to_owned();
+    ask(move || read_output_latency(&device_name, stream_rate))
 }
 
 #[cfg(test)]

@@ -440,6 +440,54 @@ pub(crate) fn audio_reopen_deadline(pending: bool, armed: Option<Instant>, now: 
     if pending { Some(now + AUDIO_REOPEN_DEBOUNCE) } else { armed }
 }
 
+/// The shortest compensated device delay the player is told about when the stream opens. A wired
+/// device's few milliseconds change nothing anyone would have set JUDGE OFFSET for.
+const OUTPUT_LATENCY_NOTICE_MIN: Duration = Duration::from_millis(30);
+
+/// The notice a stream opened with `compensated` of its device's delay taken out gives, if any:
+/// one for a delay worth knowing about, worded for a Bluetooth device when the device is one.
+pub(crate) fn output_latency_notice(reported: Option<rbms_audio::OutputLatency>, compensated: Duration) -> Option<NoticeText> {
+    if compensated < OUTPUT_LATENCY_NOTICE_MIN {
+        return None;
+    }
+    match reported.is_some_and(|latency| latency.bluetooth) {
+        true => Some(NoticeText::OutputLatencyCompensatedBluetooth),
+        false => Some(NoticeText::OutputLatencyCompensated),
+    }
+}
+
+/// The debug overlay's line about the device's own delay: what it reported, and how much of that
+/// the clock is compensating for.
+pub(crate) fn output_latency_line(reported: Option<rbms_audio::OutputLatency>, compensated: Duration) -> String {
+    let compensated_ms = us_to_millis(compensated.as_micros() as f64);
+    match reported {
+        Some(latency) => format!(
+            "OUTPUT LATENCY {} FR {:.1} MS{}  COMPENSATED {compensated_ms:.1} MS",
+            latency.frames,
+            us_to_millis(latency.delay.as_micros() as f64),
+            if latency.bluetooth { " BLUETOOTH" } else { "" }
+        ),
+        None => format!("OUTPUT LATENCY NOT REPORTED  COMPENSATED {compensated_ms:.1} MS"),
+    }
+}
+
+/// Say what the opened device reported about its own delay on standard output, and tell the player
+/// once when a delay worth knowing about is being compensated for.
+fn announce_output_latency(device_name: &str, reported: Option<rbms_audio::OutputLatency>, compensated: Duration) {
+    if let Some(latency) = reported {
+        println!(
+            "audio: {device_name} adds {} frames ({:.1} ms){}, compensating {:.1} ms",
+            latency.frames,
+            us_to_millis(latency.delay.as_micros() as f64),
+            if latency.bluetooth { " over Bluetooth" } else { "" },
+            us_to_millis(compensated.as_micros() as f64)
+        );
+    }
+    if let Some(notice) = output_latency_notice(reported, compensated) {
+        notify_text(Level::Info, notice, &[&device_name, &compensated.as_millis()]);
+    }
+}
+
 /// Screens that hold the loaded chart's keysound bank in the shared stream.
 ///
 /// DECIDE and LOADING are where the bank is filled, PLAY sounds from it, and RESULT still holds it —
@@ -553,6 +601,7 @@ impl AppShared {
 
         self.audio_failed = false;
         self.ensure_audio();
+        self.refresh_output_latency();
         let mut keysounds: Option<KeysoundLoad> = None;
         let chart_gain = rbms_chart::chart_gain(model.meta.volwav);
         self.chart_gain = chart_gain;
@@ -888,11 +937,13 @@ impl AppShared {
 
     fn open_audio_with(&mut self, options: &AudioOptions) {
         match AudioEngine::open(options) {
-            Ok((audio, report)) => {
+            Ok((mut audio, report)) => {
                 println!("audio: {} — {} Hz, {} ch", report.device_name, report.sample_rate, report.channels);
                 for note in &report.notes {
                     println!("audio: {note}");
                 }
+                audio.set_output_latency_compensation(self.config.audio.compensate_output_latency);
+                announce_output_latency(&report.device_name, report.output_latency, audio.output_latency());
                 self.audio_max_voices = options.max_voices;
                 self.audio_opened_with = Some(options.clone());
                 self.audio_report = Some(report);
@@ -938,7 +989,15 @@ impl AppShared {
     /// The deadline is pushed back on every frame the change is still moving, so walking a row
     /// through several values reopens the stream once at the end instead of once per step. Never
     /// while a chart owns the stream: the reopen waits until the player is back on the song list.
+    ///
+    /// The OUTPUT LATENCY row is followed here too, on the same terms: at once wherever a chart does
+    /// not own the stream, so the clock of a run never moves while it is being played.
     pub(crate) fn poll_audio_reopen(&mut self, now: Instant, stage: StageId, keysounds_decoding: bool) {
+        if !audio_reopen_blocked(stage, keysounds_decoding)
+            && let Some(audio) = self.audio.as_mut()
+        {
+            audio.set_output_latency_compensation(self.config.audio.compensate_output_latency);
+        }
         self.audio_reopen_at = audio_reopen_deadline(self.audio_reopen_pending(), self.audio_reopen_at, now);
         self.clear_audio_reopen_pending();
         let Some(due) = self.audio_reopen_at else {
@@ -949,6 +1008,17 @@ impl AppShared {
         }
         self.audio_reopen_at = None;
         self.reopen_audio();
+    }
+
+    /// Ask the output device again how long it holds a frame back, and compensate as the OUTPUT
+    /// LATENCY row says. Called while a chart loads, before its run starts: a device can change its
+    /// delay while the stream stays open (macOS Game Mode does on a Bluetooth device), and the run
+    /// must start on the delay that holds while it plays, which is never read again until it ends.
+    pub(crate) fn refresh_output_latency(&mut self) {
+        if let Some(audio) = self.audio.as_mut() {
+            audio.set_output_latency_compensation(self.config.audio.compensate_output_latency);
+            audio.refresh_output_latency();
+        }
     }
 
     /// Release everything the loaded chart owns in the shared stream without closing it: drop its
@@ -967,10 +1037,18 @@ impl AppShared {
     /// Begin actual play: capture the song-clock anchor, so the position starts at ~0. Called once
     /// keysounds finish decoding (or immediately when there are none). The skin's scene clock is
     /// not touched: it belongs to the scene, which the screen change into the run has restarted.
+    ///
+    /// On a stream compensating for its device's delay the anchor is put that delay past the
+    /// audible position ([`rbms_audio::AudioClocks::run_anchor_us`]): the song position waits at
+    /// zero while the device catches up, and the chart's opening sounds are booked at frames the
+    /// mixer has not rendered yet rather than started late.
     pub(crate) fn start_play(&mut self) {
         self.clock = self.song_instant();
         self.audio_dead_at.set(None);
-        self.anchor_us = self.audio_clock_us();
+        self.anchor_us = match self.audio.as_ref().filter(|audio| audio.is_alive()) {
+            Some(audio) => audio.clocks(self.song_instant()).run_anchor_us(),
+            None => self.audio_clock_us(),
+        };
         self.song_us_last.set(0);
         self.timing.clear();
     }
@@ -1180,6 +1258,7 @@ impl AppShared {
                 mix.late_schedules,
                 audio.timestamp_fallbacks()
             ));
+            lines.push(output_latency_line(audio.device_output_latency(), audio.output_latency()));
         }
         if let Some(report) = self.audio_report.as_ref() {
             let name: String = report.device_name.chars().take(DEVICE_NAME_OVERLAY_CHARS).collect();
@@ -1618,6 +1697,28 @@ mod tests {
     #[test]
     fn a_dead_stream_reports_no_lookahead_so_only_the_poll_interval_remains() {
         assert_eq!(schedule_position_us(4_000_000, 0, 0, false), 4_000_000);
+    }
+
+    /// A stream that opens on a delayed device tells the player once, worded for the kind of device,
+    /// and says nothing for a delay too small to matter or one that is not being compensated for.
+    #[test]
+    fn the_player_hears_of_a_compensated_device_delay_only_when_it_matters() {
+        let airpods = rbms_audio::OutputLatency::of_frames(7_680, 48_000, true);
+        let usb = rbms_audio::OutputLatency::of_frames(1_680, 48_000, false);
+        let speakers = rbms_audio::OutputLatency::of_frames(108, 48_000, false);
+        assert_eq!(output_latency_notice(Some(airpods), airpods.delay), Some(NoticeText::OutputLatencyCompensatedBluetooth));
+        assert_eq!(output_latency_notice(Some(usb), usb.delay), Some(NoticeText::OutputLatencyCompensated));
+        assert_eq!(output_latency_notice(Some(speakers), speakers.delay), None, "a built-in speaker's 2 ms is not worth a notice");
+        assert_eq!(output_latency_notice(Some(airpods), Duration::ZERO), None, "OUTPUT LATENCY OFF compensates nothing and says nothing");
+        assert_eq!(output_latency_notice(None, Duration::ZERO), None);
+    }
+
+    #[test]
+    fn the_debug_overlay_shows_what_the_device_reported_and_what_is_compensated() {
+        let airpods = rbms_audio::OutputLatency::of_frames(7_680, 48_000, true);
+        assert_eq!(output_latency_line(Some(airpods), airpods.delay), "OUTPUT LATENCY 7680 FR 160.0 MS BLUETOOTH  COMPENSATED 160.0 MS");
+        assert_eq!(output_latency_line(Some(airpods), Duration::ZERO), "OUTPUT LATENCY 7680 FR 160.0 MS BLUETOOTH  COMPENSATED 0.0 MS");
+        assert_eq!(output_latency_line(None, Duration::ZERO), "OUTPUT LATENCY NOT REPORTED  COMPENSATED 0.0 MS");
     }
 
     #[test]

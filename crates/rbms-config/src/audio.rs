@@ -67,6 +67,9 @@ pub struct AudioOptions {
     pub loop_result_sound: bool,
     /// Repeat the course result's clear or fail cue until the screen closes (`isLoopCourseResultSound`).
     pub loop_course_result_sound: bool,
+    /// Hold notes and judgement back by the delay the output device reports it adds (OUTPUT
+    /// LATENCY AUTO), so they meet the sound as it is heard. Off, the clock is the stream's alone.
+    pub compensate_output_latency: bool,
     #[serde(skip)]
     pub(crate) reopen_pending: bool,
 }
@@ -86,6 +89,7 @@ impl Default for AudioOptions {
             guide_se: false,
             loop_result_sound: false,
             loop_course_result_sound: false,
+            compensate_output_latency: true,
             reopen_pending: false,
         }
     }
@@ -111,6 +115,7 @@ impl PartialEq for AudioOptions {
             && self.guide_se == other.guide_se
             && self.loop_result_sound == other.loop_result_sound
             && self.loop_course_result_sound == other.loop_course_result_sound
+            && self.compensate_output_latency == other.compensate_output_latency
     }
 }
 

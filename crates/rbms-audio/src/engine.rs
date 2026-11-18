@@ -9,6 +9,8 @@ use cpal::{BufferSize, FromSample, SampleFormat, SizedSample, StreamConfig, Supp
 
 use crate::AudioError;
 use crate::decode::{DecodedAudio, decode_bytes};
+use crate::host::output_device_latency;
+use crate::latency::OutputLatency;
 use crate::mixer::{Bus, CHANNELS_PER_SAMPLE_ID, Command, MixStats, Mixer, SampleData, channel_key, effect_key};
 
 /// Default polyphony. The reference implementation's `deviceSimultaneousSources` default is 256
@@ -57,8 +59,14 @@ const LOOKAHEAD_EXTRA_FRAMES: u32 = 2;
 const MAX_EXTRAPOLATION_BUFFERS: u32 = 3;
 
 /// Playback leads above this are treated as a backend reporting error rather than real latency,
-/// and the buffer-derived estimate is used instead.
+/// and the buffer-derived estimate is used instead. It is checked against the backend's own figure
+/// only: the delay the output device adds on top is checked against [`MAX_OUTPUT_LATENCY_MS`].
 const MAX_PLAYBACK_AHEAD_MS: u64 = 200;
+
+/// The longest delay an output device is taken to add before a frame is heard. A device that
+/// reports more is held to this: a Bluetooth headset reports around 150 ms, and a figure several
+/// times that is a device reporting wrongly, not one the player could play against.
+pub const MAX_OUTPUT_LATENCY_MS: u64 = 1_000;
 
 /// Callback-to-callback gap, relative to the period the previous buffer covered, above which a
 /// dropout is assumed. cpal exposes no xrun signal, so this is an estimate.
@@ -110,6 +118,9 @@ pub struct AudioOpenReport {
     pub buffer: BufferSize,
     pub fallback_step: u8,
     pub notes: Vec<String>,
+    /// The delay the opened device reported it adds before a frame is heard, `None` where it does
+    /// not say or cannot be asked. Reported whether or not it is compensated for.
+    pub output_latency: Option<OutputLatency>,
 }
 
 /// The clock state the audio callback last published, read atomically in one seqlock pass.
@@ -118,8 +129,13 @@ pub struct ClockSnapshot {
     pub frames_at_callback_start: u64,
     pub frames_rendered: u64,
     pub callback_at: Instant,
+    /// How long after `callback_at` the first frame of that callback is heard: the backend's own
+    /// lead, plus [`output_latency`](Self::output_latency).
     pub playback_ahead: Duration,
     pub buffer_frames: u32,
+    /// The delay the output device adds that the engine was told to compensate for, already part
+    /// of [`playback_ahead`](Self::playback_ahead).
+    pub output_latency: Duration,
 }
 
 /// The three play positions a host needs, all derived from one [`ClockSnapshot`] so they agree with
@@ -129,6 +145,20 @@ pub struct AudioClocks {
     pub audible_us: i64,
     pub scheduled_us: i64,
     pub lookahead_us: i64,
+    /// The compensated device delay inside `lookahead_us`.
+    pub output_latency_us: i64,
+}
+
+impl AudioClocks {
+    /// Where a run starting now puts its song position zero on the engine's axis.
+    ///
+    /// The audible position runs the device delay behind what the mixer has already rendered, so a
+    /// run anchored on it would ask for its opening sounds at frames that are gone. Anchoring the
+    /// device delay later leaves exactly the lead a device without one has: the song position waits
+    /// at zero for that long, and the opening sounds are booked in time.
+    pub fn run_anchor_us(&self) -> i64 {
+        self.audible_us + self.output_latency_us
+    }
 }
 
 /// A half-open span of sample ids, and therefore of mixer channel keys. Keeping chart keysounds and
@@ -258,6 +288,10 @@ pub struct AudioEngine {
     last_stats: Cell<MixStats>,
     instance: u64,
     effect_serial: u8,
+    device_name: String,
+    device_latency: Option<OutputLatency>,
+    compensate_output_latency: bool,
+    output_latency: Duration,
 }
 
 impl AudioEngine {
@@ -351,16 +385,41 @@ impl AudioEngine {
         frames_to_us(self.clock_frames(), self.out_rate)
     }
 
-    /// Everything the last callback published about the clock, read as one consistent record.
+    /// Everything the last callback published about the clock, read as one consistent record, with
+    /// the compensated device delay added to its playback lead.
     pub fn snapshot(&self) -> ClockSnapshot {
-        let state = read_clock_state(&self.telemetry.clock, &self.last_clock);
-        ClockSnapshot {
-            frames_at_callback_start: state.frames_start,
-            frames_rendered: state.frames_end,
-            callback_at: self.clock_epoch + Duration::from_nanos(state.callback_nanos),
-            playback_ahead: Duration::from_nanos(state.playback_ahead_nanos),
-            buffer_frames: state.buffer_frames,
-        }
+        snapshot_of(read_clock_state(&self.telemetry.clock, &self.last_clock), self.clock_epoch, self.output_latency)
+    }
+
+    /// Ask the device this stream plays on again how long it holds a frame back, and compensate for
+    /// the new figure if compensation is on. The answer is kept and returned.
+    ///
+    /// The question goes to the audio host thread and takes milliseconds, so a host asks when the
+    /// stream opens and before a run starts, never while one is running: the audible position moves
+    /// by however much the figure changed.
+    pub fn refresh_output_latency(&mut self) -> Option<OutputLatency> {
+        self.device_latency = output_device_latency(&self.device_name, self.out_rate);
+        self.output_latency = compensated_output_latency(self.compensate_output_latency, self.device_latency);
+        self.device_latency
+    }
+
+    /// Turn compensation for the device's own delay on or off. On, the audible position runs that
+    /// much behind what the mixer has rendered, which is when it is heard; off, the clock is the
+    /// backend's alone. Cheap: it asks the device nothing.
+    pub fn set_output_latency_compensation(&mut self, compensate: bool) {
+        self.compensate_output_latency = compensate;
+        self.output_latency = compensated_output_latency(compensate, self.device_latency);
+    }
+
+    /// The delay the device reported when it was last asked, compensated for or not.
+    pub fn device_output_latency(&self) -> Option<OutputLatency> {
+        self.device_latency
+    }
+
+    /// The device delay the clock is compensating for right now: nothing when compensation is off
+    /// or the device does not say.
+    pub fn output_latency(&self) -> Duration {
+        self.output_latency
     }
 
     /// Position the DAC is sounding at `now`, in µs, interpolated between callbacks. This is the
@@ -392,10 +451,7 @@ impl AudioEngine {
     /// single snapshot. Reading them separately can mix two callbacks' records, which breaks the
     /// identity `scheduled - audible == lookahead` the caller relies on.
     pub fn clocks(&self, now: Instant) -> AudioClocks {
-        let snapshot = self.snapshot();
-        let audible_us = audible_us_from(&snapshot, now, self.out_rate);
-        let lookahead_us = lookahead_us_from(&snapshot, self.out_rate);
-        AudioClocks { audible_us, scheduled_us: audible_us + lookahead_us, lookahead_us }
+        clocks_from(&self.snapshot(), now, self.out_rate)
     }
 
     /// `false` once the device reported a stream error (device unplugged, format change, driver
@@ -728,6 +784,40 @@ fn lookahead_us_from(snapshot: &ClockSnapshot, out_rate: u32) -> i64 {
     device_lead_us + frames_to_us(snapshot.buffer_frames.saturating_add(LOOKAHEAD_EXTRA_FRAMES) as u64, out_rate)
 }
 
+/// The audible position, the scheduling position, the lead between them and the device delay inside
+/// that lead, all from one snapshot.
+fn clocks_from(snapshot: &ClockSnapshot, now: Instant, out_rate: u32) -> AudioClocks {
+    let audible_us = audible_us_from(snapshot, now, out_rate);
+    let lookahead_us = lookahead_us_from(snapshot, out_rate);
+    let output_latency_us = snapshot.output_latency.as_micros() as i64;
+    AudioClocks { audible_us, scheduled_us: audible_us + lookahead_us, lookahead_us, output_latency_us }
+}
+
+/// A published clock record as the host reads it: the device delay being compensated for is added
+/// to the playback lead the callback published, which the callback has already checked against
+/// [`MAX_PLAYBACK_AHEAD_MS`] on its own. Adding it here rather than in the callback means a delay set
+/// on the game thread is part of the very next reading, with no callback in between that could
+/// pair it with a record published before it.
+fn snapshot_of(state: ClockState, clock_epoch: Instant, output_latency: Duration) -> ClockSnapshot {
+    ClockSnapshot {
+        frames_at_callback_start: state.frames_start,
+        frames_rendered: state.frames_end,
+        callback_at: clock_epoch + Duration::from_nanos(state.callback_nanos),
+        playback_ahead: Duration::from_nanos(state.playback_ahead_nanos) + output_latency,
+        buffer_frames: state.buffer_frames,
+        output_latency,
+    }
+}
+
+/// The device delay the clock compensates for: the one the device reported, held to
+/// [`MAX_OUTPUT_LATENCY_MS`], when compensation is on, and nothing otherwise.
+fn compensated_output_latency(compensate: bool, device: Option<OutputLatency>) -> Duration {
+    match (compensate, device) {
+        (true, Some(latency)) => latency.delay.min(Duration::from_millis(MAX_OUTPUT_LATENCY_MS)),
+        _ => Duration::ZERO,
+    }
+}
+
 /// Whether the backend's `playback - callback` lead can be trusted. Backends that report `playback`
 /// before `callback`, or an implausibly long lead, fall back to the buffer-derived estimate.
 fn ahead_is_usable(reported: Option<Duration>) -> bool {
@@ -903,14 +993,16 @@ fn open_first_rung(
 ) -> Option<(AudioEngine, AudioOpenReport)> {
     for (step, config) in rungs {
         match open_stream(device, &config, sample_format, opts.max_voices) {
-            Ok(engine) => {
+            Ok(mut engine) => {
+                let output_latency = engine.refresh_output_latency();
                 let report = AudioOpenReport {
-                    device_name: device_display_name(device),
+                    device_name: engine.device_name.clone(),
                     sample_rate: config.sample_rate,
                     channels: config.channels,
                     buffer: config.buffer_size,
                     fallback_step: step.max(step_floor),
                     notes: std::mem::take(notes),
+                    output_latency,
                 };
                 return Some((engine, report));
             }
@@ -961,6 +1053,10 @@ fn open_stream(device: &cpal::Device, config: &StreamConfig, sample_format: Samp
         last_stats: Cell::new(MixStats::default()),
         instance: NEXT_ENGINE_INSTANCE.fetch_add(1, Ordering::Relaxed),
         effect_serial: 0,
+        device_name: device_display_name(device),
+        device_latency: None,
+        compensate_output_latency: false,
+        output_latency: Duration::ZERO,
     })
 }
 
@@ -1060,6 +1156,7 @@ mod tests {
             callback_at,
             playback_ahead,
             buffer_frames,
+            output_latency: Duration::ZERO,
         }
     }
 
@@ -1461,7 +1558,8 @@ mod tests {
         const ONSET_START_US: i64 = 100_000;
         const SAMPLE_FRAMES: usize = 96;
 
-        for frame_hz in [60u32, 120] {
+        for (frame_hz, latency_ms) in [60u32, 120].into_iter().flat_map(|hz| OUTPUT_LATENCIES_MS.map(|ms| (hz, ms))) {
+            let latency = Duration::from_millis(latency_ms);
             let period = frames_to_duration(BUFFER, RATE);
             let frame_period = Duration::from_micros(1_000_000 / frame_hz as u64);
             let poll_us = frame_period.as_micros() as i64;
@@ -1483,13 +1581,17 @@ mod tests {
                 for cmd in queued.drain(..) {
                     mixer.apply(cmd);
                 }
-                let snap = ClockSnapshot {
-                    frames_at_callback_start: callback * BUFFER as u64,
-                    frames_rendered: (callback + 1) * BUFFER as u64,
-                    callback_at,
-                    playback_ahead: period,
-                    buffer_frames: BUFFER,
-                };
+                let snap = snapshot_of(
+                    ClockState {
+                        frames_start: callback * BUFFER as u64,
+                        frames_end: (callback + 1) * BUFFER as u64,
+                        callback_nanos: (period * callback as u32).as_nanos() as u64,
+                        playback_ahead_nanos: period.as_nanos() as u64,
+                        buffer_frames: BUFFER,
+                    },
+                    epoch,
+                    latency,
+                );
                 mixer.mix(&mut out);
 
                 while epoch + frame_period * (frame as u32) < callback_at + period {
@@ -1514,9 +1616,160 @@ mod tests {
                 callback += 1;
             }
 
-            assert!(booked > 100, "the simulation must actually book onsets, booked {booked} at {frame_hz} Hz");
-            assert_eq!(mixer.stats().late_schedules, 0, "at {frame_hz} Hz an onset was booked in the mixer's past");
+            assert!(booked > 100, "the simulation must actually book onsets, booked {booked} at {frame_hz} Hz and {latency_ms} ms");
+            assert_eq!(mixer.stats().late_schedules, 0, "at {frame_hz} Hz and a {latency_ms} ms device an onset was booked in the mixer's past");
         }
+    }
+
+    /// Device delays the clock is tried at: none, an AirPods Pro 2 at 48 kHz, and a slow headset
+    /// past the backend lead check.
+    const OUTPUT_LATENCIES_MS: [u64; 3] = [0, 160, 400];
+
+    /// The device delay holds the audible position back by itself, which is when the frame is
+    /// heard, and grows the lead by the same amount, so the position a scheduler books against --
+    /// a frame position -- does not move at all.
+    #[test]
+    fn the_output_latency_holds_the_audible_position_back_and_leaves_the_booking_position_where_it_was() {
+        const RATE: u32 = 48_000;
+        const BUFFER: u32 = 512;
+        let epoch = Instant::now();
+        let period = frames_to_duration(BUFFER, RATE);
+        let state = ClockState {
+            frames_start: 48_000,
+            frames_end: 48_000 + BUFFER as u64,
+            callback_nanos: 0,
+            playback_ahead_nanos: period.as_nanos() as u64,
+            buffer_frames: BUFFER,
+        };
+        let without = clocks_from(&snapshot_of(state, epoch, Duration::ZERO), epoch, RATE);
+        for latency_ms in OUTPUT_LATENCIES_MS {
+            let latency_us = latency_ms as i64 * 1_000;
+            let snap = snapshot_of(state, epoch, Duration::from_millis(latency_ms));
+            assert_eq!(snap.playback_ahead, period + Duration::from_millis(latency_ms));
+            let clocks = clocks_from(&snap, epoch, RATE);
+            assert_eq!(clocks.audible_us, without.audible_us - latency_us, "{latency_ms} ms: the audible position is held back by the delay");
+            assert_eq!(clocks.lookahead_us, without.lookahead_us + latency_us, "{latency_ms} ms: the lead grows by the delay");
+            assert_eq!(clocks.scheduled_us, without.scheduled_us, "{latency_ms} ms: the booking position moved");
+            assert_eq!(clocks.output_latency_us, latency_us);
+            assert_eq!(clocks.run_anchor_us(), without.audible_us, "{latency_ms} ms: a run starting now anchors where it would without a delay");
+        }
+    }
+
+    #[test]
+    fn the_audible_position_stays_continuous_across_a_callback_boundary_behind_a_device_delay() {
+        let callback_at = Instant::now();
+        let period = frames_to_duration(512, 48_000);
+        for latency_ms in OUTPUT_LATENCIES_MS {
+            let latency = Duration::from_millis(latency_ms);
+            let old = snapshot(callback_at, 48_000, period + latency, 512);
+            let new = snapshot(callback_at + period, 48_512, period + latency, 512);
+            let boundary = callback_at + period;
+            assert_eq!(audible_us_from(&old, boundary, 48_000), audible_us_from(&new, boundary, 48_000), "{latency_ms} ms: the reading jumped");
+            assert_eq!(
+                audible_us_from(&new, boundary, 48_000),
+                1_000_000 - latency_ms as i64 * 1_000,
+                "{latency_ms} ms: what is heard at the boundary is the delay behind the previous buffer's start"
+            );
+        }
+    }
+
+    /// The backend's own lead is checked against its 200 ms limit before the device delay is added,
+    /// so a delay that takes the sum past the limit is not mistaken for a backend reporting wrongly.
+    #[test]
+    fn the_backend_lead_is_checked_before_the_device_delay_is_added() {
+        let backend = Duration::from_millis(150);
+        let published = ahead_or_fallback(Some(backend), 512, 48_000);
+        assert_eq!(published, backend, "the backend's figure is under its limit");
+        let state = ClockState { frames_start: 0, frames_end: 512, callback_nanos: 0, playback_ahead_nanos: published.as_nanos() as u64, buffer_frames: 512 };
+        for latency_ms in OUTPUT_LATENCIES_MS {
+            let latency = Duration::from_millis(latency_ms);
+            assert_eq!(snapshot_of(state, Instant::now(), latency).playback_ahead, backend + latency, "{latency_ms} ms");
+        }
+    }
+
+    #[test]
+    fn the_device_delay_is_compensated_only_when_asked_and_only_up_to_its_limit() {
+        let airpods = OutputLatency::of_frames(7_680, 48_000, true);
+        assert_eq!(compensated_output_latency(true, Some(airpods)), Duration::from_millis(160));
+        assert_eq!(compensated_output_latency(false, Some(airpods)), Duration::ZERO, "OFF leaves the clock the backend's alone");
+        assert_eq!(compensated_output_latency(true, None), Duration::ZERO, "a device that does not say adds nothing");
+        let absurd = OutputLatency::of_frames(96_000, 48_000, false);
+        assert_eq!(compensated_output_latency(true, Some(absurd)), Duration::from_millis(MAX_OUTPUT_LATENCY_MS));
+    }
+
+    /// How many of a run's sounds the mixer is handed too late, for a run that starts on a device
+    /// with `latency` of its own and books its sounds against the engine's clocks once per display
+    /// frame, anchoring its song position zero with `anchor` at the frame it starts on.
+    fn late_onsets_of_a_run(latency: Duration, anchor: fn(&AudioClocks) -> i64) -> (u64, usize) {
+        const RATE: u32 = 48_000;
+        const BUFFER: u32 = 512;
+        const FRAME_HZ: u64 = 60;
+        const START_CALLBACK: u64 = 20;
+        const ONSET_SPACING_US: i64 = 7_000;
+        const SONG_US: i64 = 2_000_000;
+        const RUN_CALLBACKS: u64 = 300;
+        const SAMPLE_FRAMES: usize = 96;
+
+        let period = frames_to_duration(BUFFER, RATE);
+        let frame_period = Duration::from_micros(1_000_000 / FRAME_HZ);
+        let poll_us = frame_period.as_micros() as i64;
+        let epoch = Instant::now();
+        let start_at = epoch + period * START_CALLBACK as u32;
+        let sample = Arc::new(SampleData { pcm: vec![0.25f32; SAMPLE_FRAMES].into(), channels: 1, rate: RATE });
+        let mut mixer = Mixer::new(RATE, 1, 64);
+        let mut out = vec![0.0f32; BUFFER as usize];
+        let onsets: Vec<i64> = (0..).map(|i| i * ONSET_SPACING_US).take_while(|at| *at < SONG_US).collect();
+        let (mut next_onset, mut queued, mut frame) = (0usize, Vec::new(), 0u64);
+        let (mut anchor_us, mut song_us): (Option<i64>, i64) = (None, 0);
+
+        for callback in 0..RUN_CALLBACKS {
+            let callback_at = epoch + period * callback as u32;
+            for cmd in queued.drain(..) {
+                mixer.apply(cmd);
+            }
+            let state = ClockState {
+                frames_start: callback * BUFFER as u64,
+                frames_end: (callback + 1) * BUFFER as u64,
+                callback_nanos: (period * callback as u32).as_nanos() as u64,
+                playback_ahead_nanos: period.as_nanos() as u64,
+                buffer_frames: BUFFER,
+            };
+            let snap = snapshot_of(state, epoch, latency);
+            mixer.mix(&mut out);
+            while epoch + frame_period * (frame as u32) < callback_at + period {
+                let now = epoch + frame_period * frame as u32;
+                frame += 1;
+                if now < start_at {
+                    continue;
+                }
+                let clocks = clocks_from(&snap, now, RATE);
+                let anchor = *anchor_us.get_or_insert_with(|| anchor(&clocks));
+                song_us = monotonic_us(song_us, clocks.audible_us - anchor);
+                let sched = song_us + clocks.lookahead_us + poll_us;
+                while next_onset < onsets.len() && onsets[next_onset] <= sched {
+                    let at_frame = ((anchor + onsets[next_onset]) as i128 * RATE as i128 / 1_000_000) as u64;
+                    queued.push(Command::Play { sample: Arc::clone(&sample), gain: 1.0, pan: 0.0, pitch: 1.0, key: next_onset as u32, at_frame, bus: Bus::Bg });
+                    next_onset += 1;
+                }
+            }
+        }
+        (mixer.stats().late_schedules, next_onset)
+    }
+
+    /// A run that starts on a delayed device anchors its song position zero the delay later than
+    /// the audible position, and so books its opening sounds exactly as a run on a device without a
+    /// delay does. Anchored on the bare audible position, every sound in the first delay's worth of
+    /// the chart would be handed to the mixer after its frame had gone, and start late.
+    #[test]
+    fn a_run_anchored_past_the_device_delay_books_its_opening_as_a_run_without_one_does() {
+        let (late_without, booked_without) = late_onsets_of_a_run(Duration::ZERO, AudioClocks::run_anchor_us);
+        assert!(booked_without > 100, "the run must actually book its sounds, booked {booked_without}");
+        for latency_ms in OUTPUT_LATENCIES_MS {
+            let latency = Duration::from_millis(latency_ms);
+            assert_eq!(late_onsets_of_a_run(latency, AudioClocks::run_anchor_us), (late_without, booked_without), "{latency_ms} ms");
+        }
+        let (late_on_audible, _) = late_onsets_of_a_run(Duration::from_millis(160), |clocks| clocks.audible_us);
+        assert!(late_on_audible > late_without, "anchored on the audible position a 160 ms device loses no more of the opening: {late_on_audible}");
     }
 
     #[test]

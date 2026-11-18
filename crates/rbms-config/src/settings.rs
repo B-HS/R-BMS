@@ -167,6 +167,9 @@ const SKIN_DOCUMENT_LABELS: &[&str] = &[DEFAULT_VALUE];
 const AUDIO_BUFFER_LABELS: &[&str] = &[AUTO_VALUE, "128", "192", "256", "384", "512", "768", "1024", "2048"];
 const AUDIO_SAMPLE_RATE_LABELS: &[&str] = &[AUTO_VALUE, "44100", "48000", "88200", "96000"];
 
+/// What the OUTPUT LATENCY row shows: compensating for the device's own delay, or not.
+const OUTPUT_LATENCY_LABELS: &[&str] = &[AUTO_VALUE, OFF_VALUE];
+
 /// Every row of the settings screen.
 ///
 /// The ids are declared in list order, so [`SettingId::row_index`] is also the position of the row
@@ -273,10 +276,11 @@ pub enum SettingId {
     DownloadFolder,
     DiscordStatus,
     PlaybackRate,
+    OutputLatency,
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 100;
+pub const SETTING_COUNT: usize = 101;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -381,6 +385,7 @@ impl SettingId {
         SettingId::DownloadFolder,
         SettingId::DiscordStatus,
         SettingId::PlaybackRate,
+        SettingId::OutputLatency,
     ];
 
     /// Position of the row in the whole settings list, which is also its index in [`SettingId::ALL`].
@@ -903,6 +908,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         },
         "Voices the mixer may sound at once",
     ),
+    row(
+        SettingId::OutputLatency,
+        SettingTab::Audio,
+        "OUTPUT LATENCY",
+        SettingKind::Cycle { values: OUTPUT_LATENCY_LABELS },
+        "Hold notes and judgement back by the delay the output device reports",
+    ),
     row(SettingId::SoundFolder, SettingTab::Audio, "SOUND FOLDER", SettingKind::Action, "Folder the system sound set is read from"),
     row(SettingId::GuideSe, SettingTab::Audio, "GUIDE SE", SettingKind::Toggle, "Sound a cue on every judgement"),
     row(SettingId::Sort, SettingTab::Select, "SORT", SettingKind::Cycle { values: SORT_LABELS }, "How the song list is ordered"),
@@ -1188,6 +1200,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::AudioPolyphony => config.audio.polyphony.to_string(),
         SettingId::SoundFolder => optional_text(config.audio.sound_folder.as_deref()),
         SettingId::GuideSe => on_off(config.audio.guide_se),
+        SettingId::OutputLatency => cycle_label(id, usize::from(!config.audio.compensate_output_latency)),
     }
 }
 
@@ -1409,6 +1422,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::AutoUploadTrace => toggle(&mut config.network.auto_upload_trace),
         SettingId::DiscordStatus => toggle(&mut config.network.discord_status),
         SettingId::GuideSe => toggle(&mut config.audio.guide_se),
+        SettingId::OutputLatency => toggle(&mut config.audio.compensate_output_latency),
         SettingId::MasterVolume => {
             let next = step_volume(config.audio.master, delta);
             store(&mut config.audio.master, next)
@@ -2437,6 +2451,7 @@ mod tests {
                 SettingId::AudioBuffer,
                 SettingId::AudioSampleRate,
                 SettingId::AudioPolyphony,
+                SettingId::OutputLatency,
                 SettingId::SoundFolder,
                 SettingId::GuideSe,
             ]

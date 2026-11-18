@@ -46,6 +46,23 @@ fn the_shipped_audio_defaults_match_the_config_defaults() {
     assert_eq!(AudioOptions::default(), Config::default().audio);
 }
 
+/// A file written before the row existed compensates, as a fresh install does, and the row flips
+/// between AUTO and OFF without asking for the stream to be opened again.
+#[test]
+fn output_latency_compensation_is_on_for_an_older_file_and_flips_without_a_reopen() {
+    let older: Config = ron::from_str(r#"(audio: (guide_se: true))"#).expect("a file without the row parses");
+    assert!(older.audio.compensate_output_latency, "a file from before the row is compensated like a fresh install");
+    let mut config = Config::default();
+    assert_eq!(display_value(&config, SettingId::OutputLatency), AUTO_VALUE);
+    assert_eq!(adjust(&mut config, SettingId::OutputLatency, 1), AdjustOutcome::Changed);
+    assert_eq!(display_value(&config, SettingId::OutputLatency), OFF_VALUE);
+    assert!(!config.audio.reopen_pending(), "the clock takes the change without reopening the stream");
+    assert_eq!(adjust(&mut config, SettingId::OutputLatency, -1), AdjustOutcome::Changed);
+    assert!(config.audio.compensate_output_latency);
+    let back: Config = ron::from_str(&ron_of(&config)).expect("a config round-trips");
+    assert!(back.audio.compensate_output_latency);
+}
+
 #[test]
 fn the_pending_reopen_flag_is_set_and_cleared_explicitly() {
     let mut audio = AudioOptions::default();

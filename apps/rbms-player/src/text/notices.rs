@@ -164,6 +164,18 @@ rbms_model::translations! {
             "오디오 스트림이 멈췄습니다 — 시스템 시계 기준으로 전환합니다",
             "オーディオストリームが停止しました — システム時計に切り替えます",
         ),
+        OutputLatencyCompensated => (
+            "audio: {0} plays {1} ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). If you moved JUDGE OFFSET for this device, set it back",
+            "오디오: {0}의 소리가 {1} ms 늦게 나와 노트와 판정을 그만큼 늦춥니다(출력 지연 AUTO). 이 장치 때문에 판정 오프셋을 옮겨 두었다면 되돌려 주세요",
+            "オーディオ: {0} は音が {1} ms 遅れて出るため、ノーツと判定をその分遅らせます（出力遅延 AUTO）。このデバイスのために判定オフセットを動かしていたら戻してください",
+        ),
+        OutputLatencyCompensatedBluetooth => (
+            "audio: {0} is a Bluetooth device that plays {1} ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). \
+             If you moved JUDGE OFFSET for this device, set it back",
+            "오디오: 블루투스 장치 {0}의 소리가 {1} ms 늦게 나와 노트와 판정을 그만큼 늦춥니다(출력 지연 AUTO). 이 장치 때문에 판정 오프셋을 옮겨 두었다면 되돌려 주세요",
+            "オーディオ: Bluetoothデバイス {0} は音が {1} ms 遅れて出るため、ノーツと判定をその分遅らせます（出力遅延 AUTO）。\
+             このデバイスのために判定オフセットを動かしていたら戻してください",
+        ),
         TokenNotRevoked => (
             "logged out, but the server did not revoke the token (delete it on the web site): {0}",
             "로그아웃했지만 서버가 토큰을 폐기하지 않았습니다 (웹 사이트에서 직접 삭제해 주세요): {0}",
@@ -880,6 +892,17 @@ mod tests {
             (NoticeText::ChartMd5Mismatch, vec![&"aa", &"bb"], "warning: chart md5 mismatch (replay aa vs file bb); replay may desync"),
             (NoticeText::AudioReopenFailed, vec![], "audio: reopen failed — trying the previous device settings"),
             (NoticeText::AudioStreamStopped, vec![], "audio stream stopped — falling back to the wall clock"),
+            (
+                NoticeText::OutputLatencyCompensated,
+                vec![&"USB DAC", &"35"],
+                "audio: USB DAC plays 35 ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). If you moved JUDGE OFFSET for this device, set it back",
+            ),
+            (
+                NoticeText::OutputLatencyCompensatedBluetooth,
+                vec![&"AirPods", &"160"],
+                "audio: AirPods is a Bluetooth device that plays 160 ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). \
+                 If you moved JUDGE OFFSET for this device, set it back",
+            ),
             (NoticeText::TokenNotRevoked, vec![&"timeout"], "logged out, but the server did not revoke the token (delete it on the web site): timeout"),
             (
                 NoticeText::LetGoOfLoginTokenNotRevoked,
@@ -1082,6 +1105,18 @@ mod tests {
             let _installed = InstalledLanguage::new(language);
             for (sentence, row) in sentences {
                 assert!(sentence.get(language).contains(row_label(row)), "{sentence:?} {language:?} does not name the row as {:?}", row_label(row));
+            }
+        }
+    }
+
+    #[test]
+    fn the_output_latency_notice_names_both_rows_as_the_settings_screen_does() {
+        for language in Language::ALL {
+            let _installed = InstalledLanguage::new(language);
+            for notice in [NoticeText::OutputLatencyCompensated, NoticeText::OutputLatencyCompensatedBluetooth] {
+                for row in [SettingId::OutputLatency, SettingId::JudgeOffset] {
+                    assert!(notice.get(language).contains(row_label(row)), "{notice:?} {language:?} does not name the row as {:?}", row_label(row));
+                }
             }
         }
     }

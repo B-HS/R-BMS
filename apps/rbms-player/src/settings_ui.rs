@@ -514,6 +514,7 @@ mod tests {
         (SettingId::DownloadFolder, "DOWNLOAD FOLDER", "(none)"),
         (SettingId::DiscordStatus, "DISCORD STATUS", "ON"),
         (SettingId::PlaybackRate, "PLAYBACK RATE", "100%"),
+        (SettingId::OutputLatency, "OUTPUT LATENCY", "AUTO"),
     ];
 
     /// An app with no library, no window and no server, so every row reads out of a fresh document.
@@ -804,6 +805,7 @@ mod tests {
             buffer: rbms_audio::cpal::BufferSize::Default,
             fallback_step: 0,
             notes: notes.iter().map(|n| (*n).to_string()).collect(),
+            output_latency: None,
         }
     }
 

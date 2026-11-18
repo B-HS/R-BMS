@@ -115,6 +115,7 @@ rbms_model::translations! {
         DownloadFolder => ("DOWNLOAD FOLDER", "다운로드 폴더", "ダウンロードフォルダ"),
         DiscordStatus => ("DISCORD STATUS", "DISCORD 상태", "DISCORDステータス"),
         PlaybackRate => ("PLAYBACK RATE", "재생 속도", "再生速度"),
+        OutputLatency => ("OUTPUT LATENCY", "출력 지연", "出力遅延"),
     }
 }
 
@@ -223,6 +224,7 @@ impl RowLabelText {
             SettingId::DownloadFolder => RowLabelText::DownloadFolder,
             SettingId::DiscordStatus => RowLabelText::DiscordStatus,
             SettingId::PlaybackRate => RowLabelText::PlaybackRate,
+            SettingId::OutputLatency => RowLabelText::OutputLatency,
         }
     }
 }

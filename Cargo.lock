@@ -2950,6 +2950,7 @@ dependencies = [
 name = "rbms-audio"
 version = "0.1.11"
 dependencies = [
+ "coreaudio-rs",
  "cpal",
  "rtrb",
  "symphonia",

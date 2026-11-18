@@ -92,7 +92,10 @@ const NETWORK_SECTIONS: &[Section] = &[
 
 const AUDIO_SECTIONS: &[Section] = &[
     Section { heading: "VOLUME", rows: &[SettingId::MasterVolume, SettingId::KeyVolume, SettingId::BgmVolume, SettingId::SystemVolume] },
-    Section { heading: "OUTPUT", rows: &[SettingId::AudioDevice, SettingId::AudioBuffer, SettingId::AudioSampleRate, SettingId::AudioPolyphony] },
+    Section {
+        heading: "OUTPUT",
+        rows: &[SettingId::AudioDevice, SettingId::AudioBuffer, SettingId::AudioSampleRate, SettingId::AudioPolyphony, SettingId::OutputLatency],
+    },
     Section { heading: "SYSTEM SOUNDS", rows: &[SettingId::SoundFolder, SettingId::GuideSe] },
 ];
 
@@ -204,6 +207,7 @@ pub(crate) fn description(id: SettingId) -> String {
         SettingId::AudioBuffer => RowDescriptionText::AudioBuffer,
         SettingId::AudioSampleRate => RowDescriptionText::AudioSampleRate,
         SettingId::AudioPolyphony => RowDescriptionText::AudioPolyphony,
+        SettingId::OutputLatency => RowDescriptionText::OutputLatency,
         SettingId::SoundFolder => RowDescriptionText::SoundFolder,
         SettingId::GuideSe => RowDescriptionText::GuideSe,
         SettingId::Sort => RowDescriptionText::Sort,

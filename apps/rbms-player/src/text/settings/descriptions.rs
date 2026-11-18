@@ -337,6 +337,15 @@ rbms_model::translations! {
             "믹서가 동시에 재생할 수 있는 소리의 수입니다. 바꾸면 출력을 다시 엽니다.",
             "ミキサーが同時に再生できる音の数です。変更すると出力を開き直します。"
         ),
+        OutputLatency => (
+            "Holds notes and judgement back by the delay the output device reports, so they meet the sound as it is heard (a Bluetooth headset \
+             reports around 150 ms). AUTO reads it on macOS when the output opens and before every run; elsewhere nothing is read, and JUDGE OFFSET \
+             lines a delayed device up. Keysounds are still heard that much late.",
+            "출력 장치가 알려 주는 지연만큼 노트와 판정을 늦춰 들리는 소리에 맞춥니다(블루투스 이어폰은 약 150 ms). AUTO는 macOS에서 출력을 열 때와 \
+             플레이 시작 전에 읽습니다. 다른 OS에서는 읽지 않으니 판정 오프셋으로 맞추세요. 키음은 그만큼 늦게 들립니다.",
+            "出力デバイスが報告する遅延だけノーツと判定を遅らせ、聞こえる音に合わせます（Bluetoothイヤホンは約150 ms）。AUTOはmacOSで出力を開くときと\
+             プレー開始前に読み取ります。他のOSでは読み取らないため、判定オフセットで合わせてください。キー音はその分遅れて聞こえます。"
+        ),
         SoundFolder => (
             "The folder the system sounds are read from. With none chosen every system sound is silent.",
             "시스템 사운드를 읽어 오는 폴더입니다. 고르지 않으면 모든 시스템 사운드가 무음입니다.",

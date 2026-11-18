@@ -55,8 +55,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>$VERSION</string>
     <key>CFBundleVersion</key>
     <string>$VERSION</string>
+    <key>GCSupportsGameMode</key>
+    <true/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.music-games</string>
+    <key>LSSupportsGameMode</key>
+    <true/>
     <key>LSMinimumSystemVersion</key>
     <string>$MINIMUM_MACOS</string>
     <key>NSHighResolutionCapable</key>
