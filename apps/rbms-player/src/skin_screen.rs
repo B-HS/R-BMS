@@ -109,7 +109,6 @@ use rbms_render::{Color, FrameData, Renderer, SkinAssets, SkinFrame, SkinImage, 
 use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinColor, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
 use rbms_skin::lua::{BoundFrame, SkinLua};
-use rbms_skin::property::generated::OFFSET_ALL;
 use rbms_skin::property::{HostCall, SkinHost, StaticScreen};
 use rbms_skin::timer::TimerState;
 use rbms_video::VideoDecoder;
@@ -234,52 +233,35 @@ fn skin_failure_message(document: Option<&str>, note: &str, reason: &str) -> Str
 /// Borrowed from the configuration rather than copied, because a frame reads a handful of ids and
 /// the stored choices already answer them.
 ///
-/// A nudge is stored in pixels of what the screen is drawn on, which is how the reference applies
-/// one: it adds an offset to a rectangle it has already scaled to its output (`SkinObject.prepare`,
-/// `LaneRenderer.java:521-524`), so the same number moves an object by the same count of pixels on
-/// a small window as on a large one. A document here is laid out in its own units and scaled as it
-/// is drawn, so a nudge is answered in those units: the stored pixels over how many pixels one unit
-/// is drawn across. Its angle and its alpha are not lengths and are answered as stored. The one
-/// offset that is not a length either is `OFFSET_ALL`, which is a share of the whole screen and is
-/// read as it is stored.
-#[derive(Debug, Clone, Copy)]
+/// A nudge is stored in the document's own units and answered as stored: it moves an object by that
+/// many units of the layout it is added to, which the drawing then scales onto the target with the
+/// rest of the document. So one number puts an object in the same place of the screen at every
+/// window size, every resolution and every display scale, and a document laid out at 1280x720 reads
+/// it in its 1280x720 units as one laid out at 1920x1080 reads it in its own. The reference adds an
+/// offset to a rectangle it has already scaled to its output (`SkinObject.prepare`,
+/// `LaneRenderer.java:521-524`), so there the same number moves an object further on a small window
+/// than on a large one; reading it in the document's units gives what the reference gives when it
+/// runs at the size the skin was authored at, wherever this player runs. Its angle and its alpha are
+/// not lengths, and `OFFSET_ALL` is a share of the whole screen; every part of a nudge is answered as
+/// it is stored.
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct DocumentOffsets<'a> {
     document: Option<&'a SkinCustomisation>,
-    /// How many of the document's own units one pixel of the target is, across and down.
-    units_per_pixel: (f32, f32),
-}
-
-/// One unit of a document to a pixel of its target, which is a document drawn at the size it was
-/// authored at.
-const ONE_TO_ONE: f32 = 1.0;
-const UNSCALED: (f32, f32) = (ONE_TO_ONE, ONE_TO_ONE);
-
-impl Default for DocumentOffsets<'_> {
-    fn default() -> Self {
-        DocumentOffsets { document: None, units_per_pixel: UNSCALED }
-    }
 }
 
 impl<'a> DocumentOffsets<'a> {
-    /// The nudges stored in `document`, for a document authored at `authored` and drawn on a target
-    /// of `target` pixels. A document or a target with no extent is taken as drawn one to one.
-    pub(crate) fn drawn_at(document: Option<&'a SkinCustomisation>, authored: (f32, f32), target: (u32, u32)) -> DocumentOffsets<'a> {
-        let units = |authored: f32, target: u32| if authored > 0.0 && target > 0 { authored / target as f32 } else { ONE_TO_ONE };
-        DocumentOffsets { document, units_per_pixel: (units(authored.0, target.0), units(authored.1, target.1)) }
+    /// The nudges stored in `document`.
+    pub(crate) fn new(document: Option<&'a SkinCustomisation>) -> DocumentOffsets<'a> {
+        DocumentOffsets { document }
     }
 }
 
 impl OffsetSource for DocumentOffsets<'_> {
     fn offset(&self, id: i32) -> Option<SkinOffset> {
-        let stored = self.document.and_then(|stored| stored.offset(id))?;
-        if id == OFFSET_ALL {
-            return Some(stored);
-        }
-        let (across, down) = self.units_per_pixel;
-        Some(SkinOffset { x: stored.x * across, y: stored.y * down, w: stored.w * across, h: stored.h * down, ..stored })
+        self.document.and_then(|stored| stored.offset(id))
     }
 
-    /// A colour is no length, so it is answered as stored whatever size the document is drawn at.
+    /// A colour is answered as stored, as a nudge is.
     fn color(&self, id: i32) -> Option<SkinColor> {
         self.document.and_then(|stored| stored.color(id))
     }
@@ -1346,13 +1328,11 @@ impl AppShared {
         self.skin_screens.warnings(screen)
     }
 
-    /// The nudges the document one screen is drawn with stands on, on a target of `target` pixels,
-    /// held by the caller for the length of a frame: the player's own over the ones the pack came
-    /// with ([`SkinLibrary::customisation_for`]).
-    pub(crate) fn skin_offsets(&self, screen: i32, target: (u32, u32)) -> DocumentOffsets<'_> {
-        let document = self.skins.customisation_for(&self.config, screen);
-        let authored = self.skin_screens.get(screen).map_or((0.0, 0.0), |compiled| compiled.authored_size());
-        DocumentOffsets::drawn_at(document, authored, target)
+    /// The nudges the document one screen is drawn with stands on, held by the caller for the
+    /// length of a frame: the player's own over the ones the pack came with
+    /// ([`SkinLibrary::customisation_for`]).
+    pub(crate) fn skin_offsets(&self, screen: i32) -> DocumentOffsets<'_> {
+        DocumentOffsets::new(self.skins.customisation_for(&self.config, screen))
     }
 
     /// Makes one frame of a document: gathers the state it is drawn from into one host, prepares
@@ -1682,7 +1662,7 @@ impl AppShared {
     /// from the document and the frame.
     pub(crate) fn draw_play_skin(&self, canvas: &mut Canvas<'_>, screen: i32, scene: &PlayDraw<'_>) -> bool {
         let window = canvas.native().size();
-        let offsets = self.skin_offsets(screen, window);
+        let offsets = self.skin_offsets(screen);
         let inputs = FrameInputs {
             chart: ChartState::Chart(scene.chart),
             play: Some((scene.shown, scene.offsets)),
@@ -1703,7 +1683,7 @@ impl AppShared {
     /// This and the screens below it draw on the target's own pixels
     /// ([`PreparedDocument::draw_native`]).
     pub(crate) fn draw_select_skin(&self, canvas: &mut Canvas<'_>, scene: &SelectDraw<'_>) -> bool {
-        let offsets = self.skin_offsets(SKIN_TYPE_MUSIC_SELECT, canvas.native().size());
+        let offsets = self.skin_offsets(SKIN_TYPE_MUSIC_SELECT);
         let options_open = self.options.is_open();
         let bars = scene.data.bars.map(|bars| SongBars { options_open, ..*bars });
         let data = FrameData { bars: bars.as_ref(), ..scene.data };
@@ -1719,7 +1699,7 @@ impl AppShared {
     /// holds itself are put on the host for the clusters that report them, and the ranking cluster
     /// is told how the submission stands ([`AppShared::skin_ir_link`]).
     pub(crate) fn draw_result_skin(&self, canvas: &mut Canvas<'_>, screen: i32, scene: &ResultDraw<'_>) -> bool {
-        let offsets = self.skin_offsets(screen, canvas.native().size());
+        let offsets = self.skin_offsets(screen);
         let chart = scene.chart.map_or_else(ChartState::default, ChartState::Chart);
         let result = scene.run.map(|run| FinishedRun::new(run, scene.scene));
         let inputs = FrameInputs { chart, result, ..FrameInputs::new(&offsets, scene.data, canvas.native().size()) };
@@ -1752,7 +1732,7 @@ impl AppShared {
     /// settings cluster for what the player has chosen. The decide screen is not the player screen,
     /// so neither loading option is on, as on the reference's decide screen.
     pub(crate) fn draw_decide_skin(&self, canvas: &mut Canvas<'_>, scene: &DecideDraw<'_>) -> bool {
-        let offsets = self.skin_offsets(SKIN_TYPE_DECIDE, canvas.native().size());
+        let offsets = self.skin_offsets(SKIN_TYPE_DECIDE);
         let loading = LoadingState { screen: LoadingScreen::Elsewhere, progress: scene.progress };
         let settings = Some(SettingsView::of_config(&self.config));
         let inputs = FrameInputs { chart: ChartState::Chart(scene.chart), loading, settings, ..FrameInputs::new(&offsets, scene.data, canvas.native().size()) };
@@ -1762,7 +1742,7 @@ impl AppShared {
     /// Draw the key configuration screen's document, with `keys` naming what each lane of the mode
     /// being configured is bound to, in lane order.
     pub(crate) fn draw_keyconfig_skin(&self, canvas: &mut Canvas<'_>, keys: &[String]) -> bool {
-        let offsets = self.skin_offsets(SKIN_TYPE_KEY_CONFIG, canvas.native().size());
+        let offsets = self.skin_offsets(SKIN_TYPE_KEY_CONFIG);
         let settings = Some(SettingsView::of_config(&self.config));
         let inputs = FrameInputs { keyconfig: KeyConfigState { keys }, settings, ..FrameInputs::new(&offsets, FrameData::default(), canvas.native().size()) };
         self.with_skin_frame(SKIN_TYPE_KEY_CONFIG, inputs, |document| document.draw_native(canvas)).is_some()

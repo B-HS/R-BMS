@@ -21,10 +21,10 @@
 //!
 //! # What is measured against the whole window
 //!
-//! The rectangle is where the document lands and nothing else. A nudge the player made is stored in
-//! pixels of the window, and a skin's Lua is told how large the window is: both are answered for the
-//! window, so a nudge moves an object by the same share of the screen in the preview as it does on
-//! the screen itself.
+//! The rectangle is where the document lands and nothing else. A skin's Lua is told how large the
+//! window is, as it is on the screen itself. A nudge the player made is stored in the document's
+//! own units, which the rectangle scales with the rest of the document, so a nudge moves an object
+//! by the same share of the screen in the preview as it does on the screen itself.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -190,7 +190,7 @@ impl AppShared {
     pub(crate) fn draw_skin_preview(&self, canvas: &mut Canvas<'_>, at: PreviewFrame, scene: PreviewScene<'_>) -> PreviewDrawn {
         let PreviewFrame { screen, now_us, rect } = at;
         let window = canvas.native().size();
-        let offsets = self.skin_offsets(screen, window);
+        let offsets = self.skin_offsets(screen);
         let mut course = None;
         let inputs = match scene {
             PreviewScene::Select(select) => FrameInputs { chart: select.chart, select: Some(select.shown), ..FrameInputs::new(&offsets, select.data, window) },

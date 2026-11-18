@@ -821,8 +821,13 @@ fn render_until_document_compiled(app: &mut App, pixels: &mut crate::stage::Head
 
 /// Draws the play screen until its document has compiled, answering the app and the last frame.
 fn play_until_compiled(tag: &str, document: &str) -> (App, crate::stage::HeadlessCanvas) {
+    play_until_compiled_on(tag, document, (CW, CH))
+}
+
+/// [`play_until_compiled`] on a target of `size` pixels.
+fn play_until_compiled_on(tag: &str, document: &str, size: (u32, u32)) -> (App, crate::stage::HeadlessCanvas) {
     let mut app = document_app(tag, document);
-    let mut pixels = crate::stage::HeadlessCanvas::new(CW, CH);
+    let mut pixels = crate::stage::HeadlessCanvas::new(size.0, size.1);
     let compiled = render_until_document_compiled(&mut app, &mut pixels);
     assert!(compiled, "the fixture document never finished compiling: {:?}", app.shared.skin_warnings(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS));
     (app, pixels)
@@ -853,21 +858,32 @@ const NUDGED_MARK_SCREEN: (u32, u32) = (601, 417);
 const NUDGE_X: f32 = 50.0;
 const NUDGED_MARK_OFFSET_ID: i32 = 40;
 
-#[test]
-fn a_play_document_reads_the_nudges_the_player_stored_for_it() {
+/// A target half as large again as the fixture document, which is laid out at 1280x720, how many of
+/// its pixels one unit of the document is drawn across, and where the nudged mark sits on it.
+const LARGER_TARGET: (u32, u32) = (1920, 1080);
+const LARGER_SCALE: f32 = 1.5;
+const NUDGED_MARK_LARGER_SCREEN: (u32, u32) = (903, 627);
+
+/// The colour of the mark the fixture draws.
+fn mark_colour() -> Color {
+    Color::rgb(12, 200, 90)
+}
+
+/// The fixture document with a mark that names [`NUDGED_MARK_OFFSET_ID`] at [`NUDGED_MARK_DOCUMENT`].
+fn nudged_document() -> String {
     let (x, y) = NUDGED_MARK_DOCUMENT;
-    let nudged = play_document().replacen(r#""image": ["#, r#""image": [{ "id": "mark-dot", "src": "mark", "x": 0, "y": 0, "w": 2, "h": 2 }, "#, 1).replacen(
+    play_document().replacen(r#""image": ["#, r#""image": [{ "id": "mark-dot", "src": "mark", "x": 0, "y": 0, "w": 2, "h": 2 }, "#, 1).replacen(
         r#""destination": ["#,
         &format!(
             r#""destination": [{{ "id": "mark-dot", "offset": {NUDGED_MARK_OFFSET_ID}, "dst": [{{ "time": 0, "x": {x}, "y": {y}, "w": 4, "h": 4 }}] }}, "#
         ),
         1,
-    );
-    let (mut app, mut pixels) = play_until_compiled("nudge", &nudged);
-    let mark = Color::rgb(12, 200, 90);
-    let (sx, sy) = NUDGED_MARK_SCREEN;
-    assert_eq!(pixels.pixel_at(sx, sy), mark, "before any nudge the object sits where the document put it");
+    )
+}
 
+/// Stores a nudge of [`NUDGE_X`] across under [`NUDGED_MARK_OFFSET_ID`] for the play document, as
+/// the skin menu does.
+fn store_nudge(app: &mut App) {
     let path = app.shared.config.skin.document(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).expect("the fixture document is selected").to_owned();
     app.shared
         .config
@@ -875,8 +891,37 @@ fn a_play_document_reads_the_nudges_the_player_stored_for_it() {
         .customise(&path)
         .offsets
         .insert(NUDGED_MARK_OFFSET_ID, rbms_skin::dst::SkinOffset { x: NUDGE_X, y: 0.0, w: 0.0, h: 0.0, r: 0.0, a: 0.0 });
+}
+
+#[test]
+fn a_play_document_reads_the_nudges_the_player_stored_for_it() {
+    let (mut app, mut pixels) = play_until_compiled("nudge", &nudged_document());
+    let mark = mark_colour();
+    let (sx, sy) = NUDGED_MARK_SCREEN;
+    assert_eq!(pixels.pixel_at(sx, sy), mark, "before any nudge the object sits where the document put it");
+
+    store_nudge(&mut app);
     let redrawn = render_until_document_compiled(&mut app, &mut pixels);
     assert!(redrawn, "the document stays compiled while a nudge is stored");
     assert_eq!(pixels.pixel_at(sx + NUDGE_X as u32, sy), mark, "the nudge the player stored moved the object on the play screen");
     assert_ne!(pixels.pixel_at(sx, sy), mark, "and it left the place it was drawn at before");
+}
+
+/// A nudge is read in the units of the document it is stored for, whatever size that document is
+/// laid out at and whatever size it is drawn on: a document laid out at 1280x720 and drawn on a
+/// 1920x1080 target moves an object by the stored nudge scaled as the rest of the document is, not
+/// by the stored nudge in pixels of the target.
+#[test]
+fn a_nudge_is_read_in_the_units_of_a_document_laid_out_at_another_size() {
+    let (mut app, mut pixels) = play_until_compiled_on("nudge-larger", &nudged_document(), LARGER_TARGET);
+    let mark = mark_colour();
+    let (sx, sy) = NUDGED_MARK_LARGER_SCREEN;
+    assert_eq!(pixels.pixel_at(sx, sy), mark, "before any nudge the object sits where the document put it, scaled onto the target");
+
+    store_nudge(&mut app);
+    let redrawn = render_until_document_compiled(&mut app, &mut pixels);
+    assert!(redrawn, "the document stays compiled while a nudge is stored");
+    let moved = (NUDGE_X * LARGER_SCALE) as u32;
+    assert_eq!(pixels.pixel_at(sx + moved, sy), mark, "the nudge was not drawn at the scale of the document");
+    assert_ne!(pixels.pixel_at(sx + NUDGE_X as u32, sy), mark, "the nudge was read in pixels of the target");
 }

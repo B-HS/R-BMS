@@ -14,6 +14,10 @@
 //! The lift moves the judgement with the line it stands on, so a lifted run is held the same way and
 //! its judgement to the same distance from that line.
 //!
+//! The pack's JUDGE POSITION is a nudge the player stores, and a nudge is read in the document's own
+//! pixels: a judgement raised by [`RAISED_BY`] stands that many document pixels over an unraised one
+//! on every frame, held the same way, while the judgement line under it stays where it was.
+//!
 //! Each frame's measurements are printed as a row of a table, which is what a run with
 //! `--nocapture` shows.
 
@@ -27,6 +31,9 @@ const SIZES: [(u32, u32); 5] = [(1280, 720), (1920, 1080), (2560, 1440), (1728, 
 
 /// The frames a lifted run is measured on.
 const LIFTED_SIZES: [(u32, u32); 3] = [(1280, 720), (1920, 1080), (2560, 1440)];
+
+/// How far a raised run's JUDGE POSITION lifts its judgement, in document pixels.
+const RAISED_BY: f32 = 30.0;
 
 /// The frame the others are compared with: the pack's own size.
 const REFERENCE_SIZE: (u32, u32) = (1920, 1080);
@@ -160,19 +167,45 @@ impl Measured<'_> {
     }
 }
 
+/// How a measured run stands its judgement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Stance {
+    /// As the pack has it.
+    Plain,
+    /// Lifted, with the lane cover down.
+    Lifted,
+    /// Raised by [`RAISED_BY`] on the pack's JUDGE POSITION.
+    Raised,
+}
+
+impl Stance {
+    /// What the run's tag calls it.
+    fn name(self) -> &'static str {
+        match self {
+            Stance::Plain => "plain",
+            Stance::Lifted => "lifted",
+            Stance::Raised => "raised",
+        }
+    }
+}
+
 /// A run by hand on the default pack drawn at `size`, played early by a GREAT so the timing word
-/// shows, with nothing over its lanes but the judgement and the line it stands on; lifted and with
-/// its lane cover down when `lifted` says so. Answers where the judgement was drawn.
-fn judged_at(size: (u32, u32), lifted: bool) -> Judgement {
-    let tag = format!("judge-sizes-{}-{}x{}", if lifted { "lifted" } else { "plain" }, size.0, size.1);
+/// shows, with nothing over its lanes but the judgement and the line it stands on, and stood as
+/// `stance` says. Answers where the judgement was drawn.
+///
+/// `test` names the test the run is drawn for, so two tests that draw the same run at once keep to
+/// folders of their own.
+fn judged_at(test: &str, size: (u32, u32), stance: Stance) -> Judgement {
+    let tag = format!("judge-sizes-{test}-{}-{}x{}", stance.name(), size.0, size.1);
     let cleared = AROUND_THE_JUDGEMENT.iter().filter(|part| **part != JUDGE_LINE_PART).map(|part| (*part, opacity(NO_OPACITY)));
-    let offsets: Vec<(&str, SkinOffset)> = cleared.collect();
+    let position = (stance == Stance::Raised).then(|| (JUDGE_POSITION, raised(RAISED_BY)));
+    let offsets: Vec<(&str, SkinOffset)> = cleared.chain(position).collect();
     let pack = default_pack();
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: 1 };
     let setup =
         FieldSetup { tag: &tag, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(size), rows: &[], offsets: &offsets, carried: CARRIED_COMBO };
     let mut run = FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("{tag}: not entered: {reason}"));
-    if lifted {
+    if stance == Stance::Lifted {
         let play = &mut run.app.shared.config.play;
         (play.enable_lift, play.lift, play.enable_cover, play.cover) = (true, PART_LIFT, true, PART_COVER);
     }
@@ -201,6 +234,19 @@ fn judged_at(size: (u32, u32), lifted: bool) -> Judgement {
 /// The pixels of a frame of `size` to a document pixel, across and down, for the default pack.
 fn pixels_a_unit(size: (u32, u32)) -> (f64, f64) {
     (f64::from(size.0) / f64::from(REFERENCE_SIZE.0), f64::from(size.1) / f64::from(REFERENCE_SIZE.1))
+}
+
+/// `judgement` as it stands raised by `by` document pixels: everything over the judgement line goes
+/// up, and the line stays.
+fn raised_by(judgement: &Judgement, by: f64) -> Judgement {
+    let up = |ink: &Ink| Ink { top: ink.top - by, y: ink.y - by, ..*ink };
+    Judgement {
+        word: up(&judgement.word),
+        figures: judgement.figures.iter().map(up).collect(),
+        difference: up(&judgement.difference),
+        timing: up(&judgement.timing),
+        line: judgement.line,
+    }
 }
 
 /// Holds the judgement drawn on a frame of `size` to the one drawn on the reference frame.
@@ -233,9 +279,22 @@ fn assert_alike(label: &str, size: (u32, u32), drawn: &Judgement, reference: &Ju
 /// The judgement lands on the same document pixels on every frame size and shape.
 #[test]
 fn the_default_pack_draws_its_judgement_on_the_same_document_pixels_at_every_size() {
-    let reference = judged_at(REFERENCE_SIZE, false);
+    let reference = judged_at("same", REFERENCE_SIZE, Stance::Plain);
     for size in SIZES.into_iter().filter(|size| *size != REFERENCE_SIZE) {
-        assert_alike("plain", size, &judged_at(size, false), &reference);
+        assert_alike("plain", size, &judged_at("same", size, Stance::Plain), &reference);
+    }
+}
+
+/// A judgement raised on the pack's JUDGE POSITION stands [`RAISED_BY`] document pixels over the
+/// unraised one on every frame size and shape, the reference frame among them: a nudge is read in the
+/// document's own pixels, not in the frame's. Every size is drawn before any is held, so a run with
+/// `--nocapture` prints the whole table.
+#[test]
+fn the_default_pack_raises_its_judgement_by_the_same_document_pixels_at_every_size() {
+    let reference = raised_by(&judged_at("raise", REFERENCE_SIZE, Stance::Plain), f64::from(RAISED_BY));
+    let drawn: Vec<((u32, u32), Judgement)> = SIZES.into_iter().map(|size| (size, judged_at("raise", size, Stance::Raised))).collect();
+    for (size, judgement) in &drawn {
+        assert_alike("raised", *size, judgement, &reference);
     }
 }
 
@@ -243,12 +302,12 @@ fn the_default_pack_draws_its_judgement_on_the_same_document_pixels_at_every_siz
 /// the lifted line as an unlifted one does from its own.
 #[test]
 fn the_default_pack_lifts_its_judgement_alike_at_every_size() {
-    let reference = judged_at(REFERENCE_SIZE, true);
-    let unlifted = judged_at(REFERENCE_SIZE, false);
+    let reference = judged_at("lift", REFERENCE_SIZE, Stance::Lifted);
+    let unlifted = judged_at("lift", REFERENCE_SIZE, Stance::Plain);
     let below = (reference.line.y - reference.word.y) - (unlifted.line.y - unlifted.word.y);
     assert!(below.abs() <= IMAGE_SLACK, "the lifted word stands {below:.2} document pixels further from its line than an unlifted one");
     assert!(reference.word.y < unlifted.word.y, "the lift does not raise the judgement");
     for size in LIFTED_SIZES.into_iter().filter(|size| *size != REFERENCE_SIZE) {
-        assert_alike("lifted", size, &judged_at(size, true), &reference);
+        assert_alike("lifted", size, &judged_at("lift", size, Stance::Lifted), &reference);
     }
 }

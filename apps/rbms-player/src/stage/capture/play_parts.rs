@@ -18,8 +18,9 @@
 //! - every judgement a press can take starts on one column, and so does the line over it;
 //! - on every field of every document the word and a combo of three figures stand in the middle,
 //!   and a combo of five ends inside the field;
-//! - the offset that says where the judgement stands moves it up by as many pixels as it is set to
-//!   and down by as many when it is set below nothing, and the row that hides it leaves none of it;
+//! - the offset that says where the judgement stands moves it up by as many pixels of the document
+//!   as it is set to and down by as many when it is set below nothing, whatever size the frame is,
+//!   and the row that hides it leaves none of it;
 //! - with every part at no opacity and the judgement hidden a frame of a run that is being played is
 //!   one colour, and with any one part back at full opacity it no longer is;
 //! - the keys of the skin menu take the parts off the field of a run as setting their offsets does:
@@ -100,7 +101,7 @@ const FIELD_ON_THE_RIGHT: (&str, &str) = ("Field Side", "Right");
 type RowChoice = (&'static str, &'static str);
 
 /// The offset of the pack's play documents that says where the judgement stands, and how far it is
-/// moved in the frames that hold it to that, in pixels of the screen.
+/// moved in the frames that hold it to that, in pixels of the document.
 const JUDGE_POSITION: &str = "Judge Position";
 const JUDGEMENT_MOVED_BY: f32 = 100.0;
 
@@ -152,7 +153,7 @@ fn opacity(percent: f32) -> SkinOffset {
     SkinOffset { a: ((percent - FULL_OPACITY) * OPAQUE_ALPHA / FULL_OPACITY).round(), ..SkinOffset::default() }
 }
 
-/// The offset that moves what it is applied to up by `pixels` of the screen.
+/// The offset that moves what it is applied to up by `pixels` of the document.
 fn raised(pixels: f32) -> SkinOffset {
     SkinOffset { y: pixels, ..SkinOffset::default() }
 }
@@ -678,8 +679,9 @@ fn the_default_pack_centres_a_judgement_on_every_field_and_keeps_its_combo_insid
 }
 
 /// The offset that says where the judgement stands moves all of it up by as many pixels of the
-/// screen as it is set to, and down by as many when it is set below nothing; and the row that hides
-/// the judgement leaves none of it on the field.
+/// document as it is set to, and down by as many when it is set below nothing: on a frame of
+/// [`HELD_SIZE`], half the size the pack is authored at, that is half as many pixels of the frame.
+/// And the row that hides the judgement leaves none of it on the field.
 #[test]
 fn the_default_pack_moves_its_judgement_by_its_position_and_hides_it_when_told_to() {
     let stood_with = |label: &str, rows: &[(&str, &str)], offsets: &[(&str, SkinOffset)]| {
@@ -687,12 +689,13 @@ fn the_default_pack_moves_its_judgement_by_its_position_and_hides_it_when_told_t
         let (columns, rows) = run.field();
         let down_ms = run.strike(0, GREAT_OFF_MS).unwrap_or_else(|reason| panic!("{label}: not played: {reason}"));
         run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS).unwrap_or_else(|reason| panic!("{label}: not drawn: {reason}"));
-        run.ink(&columns, &rows)
+        (run.ink(&columns, &rows), run.document().def.h)
     };
-    let moved = JUDGEMENT_MOVED_BY as u32;
-    let home = stood_with("home", &[], &[]).expect("a judgement and the line over it are drawn over the field");
-    let up = stood_with("up", &[], &[(JUDGE_POSITION, raised(JUDGEMENT_MOVED_BY))]);
-    let down = stood_with("down", &[], &[(JUDGE_POSITION, raised(-JUDGEMENT_MOVED_BY))]);
+    let (home, authored_height) = stood_with("home", &[], &[]);
+    let home = home.expect("a judgement and the line over it are drawn over the field");
+    let moved = (JUDGEMENT_MOVED_BY * HELD_SIZE.1 as f32 / authored_height as f32).round() as u32;
+    let (up, _) = stood_with("up", &[], &[(JUDGE_POSITION, raised(JUDGEMENT_MOVED_BY))]);
+    let (down, _) = stood_with("down", &[], &[(JUDGE_POSITION, raised(-JUDGEMENT_MOVED_BY))]);
     assert_eq!(
         up,
         Some(InkBox { top: home.top - moved, bottom: home.bottom - moved, ..home }),
@@ -703,7 +706,7 @@ fn the_default_pack_moves_its_judgement_by_its_position_and_hides_it_when_told_t
         Some(InkBox { top: home.top + moved, bottom: home.bottom + moved, ..home }),
         "a position below nothing does not move the judgement down by it"
     );
-    assert_eq!(stood_with("hidden", &[HIDDEN_JUDGEMENT], &[]), None, "a judgement that is hidden is drawn all the same");
+    assert_eq!(stood_with("hidden", &[HIDDEN_JUDGEMENT], &[]).0, None, "a judgement that is hidden is drawn all the same");
 }
 
 /// With every part at no opacity and the judgement hidden, a frame of a run that is being played is

@@ -83,9 +83,9 @@ rbms_model::translations! {
             "このスキンが宣言するファイルスロットです: 使用するファイルを選びます",
         ),
         OffsetPlaceHelp => (
-            "An offset of this skin, in pixels - percent for the whole screen. The slider is coarse: arrows or ENTER set it exactly. 0 key resets",
-            "이 스킨의 오프셋입니다. 단위는 픽셀이고, 화면 전체는 퍼센트입니다. 슬라이더는 거칠어서 화살표 키나 ENTER 키로 정확히 정합니다. 0 키로 초기화",
-            "このスキンのオフセット。単位はピクセル（画面全体は%）。スライダーは粗いので、矢印キーかENTERで正確に設定。0キーでリセット",
+            "An offset of this skin, in skin pixels - percent for the whole screen. The slider is coarse: arrows or ENTER set it exactly. 0 key resets",
+            "이 스킨의 오프셋입니다. 단위는 스킨 좌표의 픽셀이고, 화면 전체는 퍼센트입니다. 슬라이더는 거칠어서 화살표 키나 ENTER 키로 정확히 정합니다. 0 키로 초기화",
+            "このスキンのオフセット。単位はスキン座標のピクセル（画面全体は%）。スライダーは粗いので、矢印キーかENTERで正確に設定。0キーでリセット",
         ),
         OffsetAngleHelp => (
             "An offset of this skin: a turn, in degrees. 0 key resets",
@@ -118,9 +118,9 @@ rbms_model::translations! {
             "このスキンの色のチャンネル1つです。0〜255。アルファはその部分の不透明度に乗算されます。0キーでリセット",
         ),
         AutomaticPlaceHelp => (
-            "An offset the game adds to every play skin, in pixels - percent for the whole screen. Arrows or ENTER set it exactly. 0 key resets",
-            "모든 플레이 스킨에 게임이 더하는 오프셋입니다. 단위는 픽셀이고, 화면 전체는 퍼센트입니다. 화살표 키나 ENTER 키로 정확히 정합니다. 0 키로 초기화",
-            "ゲームが全プレースキンに加えるオフセット。単位はピクセル（画面全体は%）。矢印キーかENTERで正確に設定。0キーでリセット",
+            "An offset the game adds to every play skin, in skin pixels - percent for the whole screen. Arrows or ENTER set it exactly. 0 key resets",
+            "모든 플레이 스킨에 게임이 더하는 오프셋입니다. 단위는 스킨 좌표의 픽셀이고, 화면 전체는 퍼센트입니다. 화살표 키나 ENTER 키로 정확히 정합니다. 0 키로 초기화",
+            "ゲームが全プレースキンに加えるオフセット。単位はスキン座標のピクセル（画面全体は%）。矢印キーかENTERで正確に設定。0キーでリセット",
         ),
         AutomaticAlphaHelp => (
             "An offset the game adds to every play skin: added to the opacity, from -255 (gone) to +255. 0 key resets",

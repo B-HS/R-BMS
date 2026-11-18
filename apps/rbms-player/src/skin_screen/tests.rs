@@ -62,55 +62,39 @@ fn a_document_nudge_is_read_from_the_choices_stored_for_that_document() {
     let mut document = SkinCustomisation::default();
     document.offsets.insert(46, nudge);
 
-    let offsets = DocumentOffsets::drawn_at(Some(&document), (1280.0, 720.0), (1280, 720));
+    let offsets = DocumentOffsets::new(Some(&document));
     assert_eq!(offsets.offset(46), Some(nudge), "a row the document carries is read");
     assert_eq!(offsets.offset(48), None, "a row the document does not carry is answered anyway");
 
     assert_eq!(DocumentOffsets::default().offset(46), None, "a document nobody has customised nudges nothing");
 }
 
-/// A colour is read out of the choices stored for the document being drawn, as stored at any size
-/// the document is drawn at, and an id nobody set a colour under answers nothing, which leaves a
-/// destination in its own colour.
+/// A colour is read out of the choices stored for the document being drawn, as stored, and an id
+/// nobody set a colour under answers nothing, which leaves a destination in its own colour.
 #[test]
-fn a_document_colour_is_read_as_stored_whatever_size_the_document_is_drawn_at() {
+fn a_document_colour_is_read_as_stored() {
     let color = rbms_skin::dst::SkinColor::rgba(10, 20, 30, 40);
     let mut document = SkinCustomisation::default();
     document.colors.insert(120, color);
-    let smaller = DocumentOffsets::drawn_at(Some(&document), (1920.0, 1080.0), (1280, 720));
-    assert_eq!(smaller.color(120), Some(color), "a stored colour was not read, or was scaled like a length");
-    assert_eq!(smaller.color(121), None, "an id nobody set a colour under answered one");
+    let offsets = DocumentOffsets::new(Some(&document));
+    assert_eq!(offsets.color(120), Some(color), "a stored colour was not read as stored");
+    assert_eq!(offsets.color(121), None, "an id nobody set a colour under answered one");
     assert_eq!(DocumentOffsets::default().color(120), None, "a document nobody has customised has a colour");
 }
 
-/// A nudge is so many pixels of what the screen is drawn on, whatever size the document was authored
-/// at: a document drawn at two thirds of its size is told a nudge half as large again in its own
-/// units, which the drawing then scales back to the pixels that were stored. An angle and an alpha
-/// are not lengths, and the offset that moves the whole screen is a share of it; none of them is
-/// touched.
+/// A nudge is so many of the document's own units, answered as stored: every length of it, its angle,
+/// its alpha, and the offset that moves the whole screen, which is a share of it. Nothing of the
+/// target it is drawn on comes into it, so the drawing scales it with the rest of the document.
 #[test]
-fn a_nudge_is_pixels_of_the_target_whatever_size_the_document_is_drawn_at() {
-    const AUTHORED: (f32, f32) = (1920.0, 1080.0);
-    const SMALLER: (u32, u32) = (1280, 720);
-    const SCALE: f32 = 1.5;
+fn a_nudge_is_answered_in_the_documents_own_units() {
     let nudge = SkinOffset { x: 30.0, y: -12.0, w: 6.0, h: 4.0, r: 45.0, a: -100.0 };
     let mut document = SkinCustomisation::default();
     document.offsets.insert(46, nudge);
     document.offsets.insert(OFFSET_ALL, nudge);
 
-    let full = DocumentOffsets::drawn_at(Some(&document), AUTHORED, (1920, 1080));
-    assert_eq!(full.offset(46), Some(nudge), "a document drawn at its own size reads a nudge as stored");
-
-    let smaller = DocumentOffsets::drawn_at(Some(&document), AUTHORED, SMALLER);
-    let told = smaller.offset(46).expect("the row is stored");
-    assert_eq!((told.x, told.y, told.w, told.h), (nudge.x * SCALE, nudge.y * SCALE, nudge.w * SCALE, nudge.h * SCALE));
-    assert_eq!((told.r, told.a), (nudge.r, nudge.a), "an angle or an alpha was scaled like a length");
-    let drawn_scale = SMALLER.0 as f32 / AUTHORED.0;
-    assert_eq!(told.x * drawn_scale, nudge.x, "the nudge does not come to the stored pixels once the document is drawn");
-    assert_eq!(smaller.offset(OFFSET_ALL), Some(nudge), "the whole-screen offset is a share of the screen, not a length");
-
-    let unknown = DocumentOffsets::drawn_at(Some(&document), (0.0, 0.0), (0, 0));
-    assert_eq!(unknown.offset(46), Some(nudge), "a document with no size to go by is read one to one");
+    let offsets = DocumentOffsets::new(Some(&document));
+    assert_eq!(offsets.offset(46), Some(nudge), "a nudge was not answered as stored");
+    assert_eq!(offsets.offset(OFFSET_ALL), Some(nudge), "the whole-screen offset was not answered as stored");
 }
 
 /// The `STRING_TITLE` id, which the decide screen's state answers with the title it was handed.
