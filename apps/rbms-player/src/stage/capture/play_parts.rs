@@ -31,6 +31,8 @@
 //! with parts taken off it, and the wider fields. The other draws the judgement of the pack [`SKIN_PACK_ENV`] names frame by frame, so what
 //! another pack does with a judgement can be laid beside it.
 
+mod judge_sizes;
+
 use rbms_config::SettingTab;
 use rbms_skin::dst::SkinOffset;
 
