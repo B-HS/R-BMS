@@ -28,15 +28,16 @@ local ROWS = LAYOUT.score_rows
 local CELLS = LAYOUT.target_cells
 
 local HEAD_LINES = {
-    { ref = props.text.GENRE, top = SONG.lines.genre, size = theme.type.label, color = theme.color.sub },
-    { ref = props.text.TITLE, top = SONG.lines.title, size = theme.type.title, color = theme.color.text },
-    { ref = props.text.SUBTITLE, top = SONG.lines.subtitle, size = theme.type.label, color = theme.color.sub },
-    { ref = props.text.FULLARTIST, top = SONG.lines.artist, size = theme.type.body, color = theme.color.text },
+    { ref = props.text.GENRE, baseline = SONG.baselines.genre, size = theme.type.label, color = theme.color.sub },
+    { ref = props.text.TITLE, baseline = SONG.baselines.title, size = theme.type.heading, color = theme.color.text },
+    { ref = props.text.SUBTITLE, baseline = SONG.baselines.subtitle, size = theme.type.label, color = theme.color.sub },
+    { ref = props.text.FULLARTIST, baseline = SONG.baselines.artist, size = theme.type.body, color = theme.color.text },
 }
-local HEAD_COURSE = { top = SONG.lines.title, size = theme.type.title, label = i18n.t("common_course") }
-local HEAD_META = { label_size = theme.type.caption, bpm = "BPM" }
+local HEAD_COURSE = { baseline = SONG.baselines.title, size = theme.type.heading, label = i18n.t("common_course") }
+local HEAD_META = { label_size = theme.type.caption, value_size = theme.type.label, bpm = "BPM" }
 
-local SECTION = { title_drop = 12 }
+local SECTION = kit.SECTION
+local CONTENT_INSET = SECTION.label_drop - SECTION.header
 local EX_PER_NOTE = 2
 local RANK_STEPS = 9
 local PERCENT = 100
@@ -76,17 +77,13 @@ local TARGETS = {
     gutter = 32,
     sprite = "num24",
     digits = 5,
-    title_drop = 8,
-    content_drop = 28,
 }
 
 local FOLDER = {
-    top = 368,
-    count_baseline = 448,
+    top = LAYOUT.chart_data.top,
     count_sprite = "num64",
     digits = 5,
-    lamps_top = 480,
-    first_row = 512,
+    lamps_top = 416,
     pitch = 72,
     row_height = 40,
     per_column = 6,
@@ -98,7 +95,7 @@ local FOLDER = {
     sprite = "num32",
 }
 
-local COURSE = { top = 368, first_row = 400, pitch = 56, stages = 5, constraints_top = 898, constraints_value_top = 930 }
+local COURSE = { top = LAYOUT.chart_data.top, pitch = 56, stages = 5, constraints_top = LAYOUT.targets.top }
 local CONSTRAINTS = {
     { op = 1002, label = "CLASS" },
     { op = 1003, label = "MIRROR" },
@@ -137,23 +134,28 @@ local function bpm_range(main_state)
     end
 end
 
-local function head_meta(s, main_state)
-    local box = { x = REGION.x + REGION.width - SONG.meta_width, w = SONG.meta_width, align = "right" }
+local function head_meta(s, main_state, x)
+    local box = { x = x, w = SONG.meta_width }
     local genre, title, subtitle, artist = table.unpack(HEAD_LINES)
-    local function label_top(line)
-        return line.top + theme.cap_height(line.size) - theme.cap_height(HEAD_META.label_size)
-    end
+    local label_size = HEAD_META.label_size
 
-    caption(s, i18n.t("common_level"), ui.merge(box, { top = label_top(genre) }))
-    local level = { sprite = SONG.level_sprite, ref = props.number.PLAYLEVEL, digit = SONG.level_digits, align = "right", saturate = true }
-    local baseline = title.top + theme.cap_height(title.size)
+    caption(s, i18n.t("common_level"), ui.merge(box, { top = theme.text_top(genre.baseline, label_size) }))
+    local level = { sprite = SONG.level_sprite, ref = props.number.PLAYLEVEL, digit = SONG.level_digits, saturate = true }
     parts.by_difficulty(function(_, op, color)
-        s:number(level, { x = box.x, baseline = baseline, w = box.w }, kit.arriving({ color = color, op = { ON_CHART, op } }))
+        s:number(level, { x = box.x, baseline = title.baseline, w = box.w }, kit.arriving({ color = color, op = { ON_CHART, op } }))
     end)
 
-    caption(s, HEAD_META.bpm, ui.merge(box, { top = label_top(subtitle) }))
-    local bpm = { value = bpm_range(main_state), size = artist.size, align = "right", overflow = FIT }
-    s:text(bpm, { x = box.x, top = artist.top, w = box.w }, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
+    caption(s, HEAD_META.bpm, ui.merge(box, { top = theme.text_top(subtitle.baseline, label_size) }))
+    local bpm = { value = bpm_range(main_state), size = HEAD_META.value_size, overflow = FIT }
+    s:text(bpm, { x = box.x, top = theme.text_top(artist.baseline, HEAD_META.value_size), w = box.w }, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
+end
+
+local function head_lines(s, x, opts)
+    local right = REGION.x + REGION.width
+    for _, line in ipairs(HEAD_LINES) do
+        local spec = { ref = line.ref, size = line.size, overflow = FIT }
+        s:text(spec, { x = x, top = theme.text_top(line.baseline, line.size), w = right - x }, kit.sliding(ui.merge(opts, { color = line.color })))
+    end
 end
 
 local function head(s, main_state)
@@ -163,16 +165,12 @@ local function head(s, main_state)
     s:rect(bar, theme.color.accent, { op = { ON_FOLDER } })
     s:rect(bar, theme.color.accent, { op = { ON_COURSE } })
 
-    local x = REGION.x + SONG.bar_width + SONG.text_gap
-    local right = REGION.x + REGION.width
-    local width = right - SONG.meta_width - SONG.meta_gap - x
-    for _, line in ipairs(HEAD_LINES) do
-        local spec = { ref = line.ref, size = line.size, overflow = FIT }
-        s:text(spec, { x = x, top = line.top, w = width }, kit.sliding({ color = line.color }))
-    end
-    local course_title = { x = x, top = HEAD_COURSE.top, w = right - x }
+    local meta_x = REGION.x + SONG.bar_width + SONG.text_gap
+    head_meta(s, main_state, meta_x)
+    head_lines(s, meta_x + SONG.meta_width + SONG.text_gap, { op = { ON_CHART } })
+    head_lines(s, meta_x, { op = { -ON_CHART } })
+    local course_title = { x = meta_x, top = theme.text_top(HEAD_COURSE.baseline, HEAD_COURSE.size), w = REGION.x + REGION.width - meta_x }
     s:text({ text = HEAD_COURSE.label, size = HEAD_COURSE.size, overflow = FIT }, course_title, kit.sliding({ color = theme.color.text, op = { ON_COURSE } }))
-    head_meta(s, main_state)
 end
 
 local function stage(s)
@@ -188,11 +186,8 @@ local function stage(s)
     s:text({ text = parts.stage_image.missing, size = size, align = "center", overflow = FIT }, label, motion.fade_in(STAGE.missing_at, STAGE.fade, unpictured))
 end
 
-local function section(s, area, key, title_drop)
-    local on = { op = { ON_CHART } }
-    s:rect({ x = area.x, top = area.top, w = area.width, h = theme.grid.rule }, theme.color.line, on)
-    local title = { value = i18n.t(key), size = theme.type.caption, overflow = FIT }
-    s:text(title, { x = area.x, top = area.top + (title_drop or SECTION.title_drop), w = area.width }, { color = theme.color.sub, op = { ON_CHART } })
+local function section(s, area, key, op)
+    return kit.section(s, area, i18n.t(key), { op = { op or ON_CHART } })
 end
 
 local function chart_length(main_state)
@@ -247,8 +242,8 @@ local function facts(s, main_state)
     local cells = {}
     local function place(id, label)
         local cell = FACTS.cells[id]
-        local top = area.top + FACTS.label_drop + cell.row * FACTS.row_pitch
-        local baseline = top + FACTS.value_drop
+        local top = area.top + SECTION.label_drop + cell.row * FACTS.row_pitch
+        local baseline = kit.value_baseline(top, size)
         caption(s, label, { x = area.x + cell.x, top = top, w = cell.width })
         cells[id] = { x = area.x + cell.x, top = theme.text_top(baseline, size), w = cell.width, baseline = baseline }
         return cells[id]
@@ -417,10 +412,18 @@ local function next_rank(main_state)
     end
 end
 
+local function score_label_top()
+    return LAYOUT.score.top + SECTION.label_drop
+end
+
+local function score_baseline()
+    return kit.value_baseline(score_label_top(), theme.type.heading)
+end
+
 local function score_numbers(s, when)
     local area = LAYOUT.score
-    local top = area.top + ROWS.label_drop
-    local baseline = area.top + ROWS.baseline_drop
+    local top = score_label_top()
+    local baseline = score_baseline()
     local columns = {
         { label = "EX SCORE", ref = props.number.SCORE, sprite = SCORE.big_sprite, width = ROWS.ex_width, size = theme.type.heading },
         { label = "MISS COUNT", ref = props.number.MISSCOUNT, sprite = SCORE.small_sprite, width = ROWS.miss_width, size = theme.type.body },
@@ -438,7 +441,8 @@ end
 
 local function rank_badge(s, when)
     local area = LAYOUT.score
-    local box = { x = area.x + area.width - ROWS.badge_width, top = area.top + ROWS.label_drop, w = ROWS.badge_width, h = ROWS.badge_height }
+    local top = score_label_top()
+    local box = { x = area.x + area.width - ROWS.badge_width, top = top, w = ROWS.badge_width, h = score_baseline() - top }
     local size = theme.type.heading
     local text_box = { x = box.x, top = theme.centered_top(box, size), w = box.w }
     for level = 0, theme.rank_last do
@@ -452,10 +456,14 @@ local function rank_badge(s, when)
     dash(s, size, text_box, when, "center")
 end
 
+local function lamp_row_top(size)
+    return theme.text_top(LAYOUT.score.top + ROWS.lamp_baseline_drop, size)
+end
+
 local function clear(s)
     local area = LAYOUT.score
     local size = theme.type.label
-    local box = { x = area.x, top = area.top + ROWS.lamp_drop, w = area.width - ROWS.badge_width - LAYOUT.gap }
+    local box = { x = area.x, top = lamp_row_top(size), w = area.width - ROWS.badge_width - LAYOUT.gap }
     local function place(name, color, op, graded)
         local spec = { text = name, size = size, overflow = FIT }
         s:text(spec, box, kit.arriving({ color = color, op = { ON_CHART, op, table.unpack(graded or {}) } }))
@@ -475,7 +483,7 @@ end
 local function next_rank_text(s, main_state, when)
     local area = LAYOUT.score
     local size = theme.type.label
-    local box = { x = area.x + area.width - ROWS.badge_width, top = area.top + ROWS.lamp_drop, w = ROWS.badge_width }
+    local box = { x = area.x + area.width - ROWS.badge_width, top = lamp_row_top(size), w = ROWS.badge_width }
     local spec = { value = next_rank(main_state), size = size, align = "right", overflow = FIT }
     s:text(spec, box, kit.arriving(ui.merge({ color = theme.color.sub }, when.shown)))
 end
@@ -603,8 +611,7 @@ end
 local function targets(s, main_state)
     local area = LAYOUT.targets
     local title_area = { x = area.x, top = area.top, width = CELLS.rate_x - TARGETS.gutter }
-    section(s, title_area, "info_score_targets", TARGETS.title_drop)
-    local top = area.top + TARGETS.content_drop
+    local top = section(s, title_area, "info_score_targets")
     local size = theme.type.caption
     for index, step in ipairs(TARGETS.steps) do
         local medal = theme.medal_order[index]
@@ -629,7 +636,7 @@ local function targets(s, main_state)
     end
 
     local rate_area = { x = area.x + CELLS.rate_x, top = area.top, width = area.width - CELLS.rate_x }
-    section(s, rate_area, "info_clear_rate", TARGETS.title_drop)
+    section(s, rate_area, "info_clear_rate")
     local value_size = theme.type.label
     local value_box = { x = rate_area.x, top = top + (CELLS.chip_height - theme.cap_height(value_size)) / 2, w = rate_area.width }
     local value = { value = clear_rate(main_state), size = value_size, align = "right", overflow = FIT }
@@ -638,15 +645,15 @@ end
 
 local function folder(s)
     local on = { op = { ON_FOLDER } }
-    caption(s, i18n.t("common_charts"), { x = REGION.x, top = FOLDER.top, w = REGION.width }, on)
+    local count_top = section(s, { x = REGION.x, top = FOLDER.top, width = REGION.width }, "common_charts", ON_FOLDER) + CONTENT_INSET
     local total = { sprite = FOLDER.count_sprite, ref = props.number.FOLDER_TOTALSONGS, digit = FOLDER.digits, saturate = true }
-    s:number(total, { x = REGION.x, baseline = FOLDER.count_baseline }, kit.arriving({ color = theme.color.text, op = { ON_FOLDER } }))
-    caption(s, i18n.t("common_clear_lamps"), { x = REGION.x, top = FOLDER.lamps_top, w = REGION.width }, on)
+    s:number(total, { x = REGION.x, top = count_top }, kit.arriving({ color = theme.color.text, op = { ON_FOLDER } }))
+    local first_row = section(s, { x = REGION.x, top = FOLDER.lamps_top, width = REGION.width }, "common_clear_lamps", ON_FOLDER) + CONTENT_INSET
     for index = 1, theme.clear_last + 1 do
         local lamp = theme.clear[theme.clear_last + 1 - index]
         local column = math.floor((index - 1) / FOLDER.per_column)
         local x = FOLDER.columns[column + 1]
-        local top = FOLDER.first_row + ((index - 1) % FOLDER.per_column) * FOLDER.pitch
+        local top = first_row + ((index - 1) % FOLDER.per_column) * FOLDER.pitch
         local row = { x = x, top = top, w = FOLDER.width, h = FOLDER.row_height }
         local text_top = theme.centered_top(row, FOLDER.size)
         s:rect({ x = x, top = top, w = FOLDER.chip_width, h = FOLDER.row_height }, lamp.color, on)
@@ -674,16 +681,15 @@ local function constraints(main_state)
 end
 
 local function course(s, main_state)
-    local on = { op = { ON_COURSE } }
-    caption(s, i18n.t("common_stages"), { x = REGION.x, top = COURSE.top, w = REGION.width }, on)
+    local first_row = section(s, { x = REGION.x, top = COURSE.top, width = REGION.width }, "common_stages", ON_COURSE) + CONTENT_INSET
     for stage_index = 1, COURSE.stages do
         local spec = { ref = props.text.COURSE1_TITLE + stage_index - 1, size = theme.type.body, overflow = FIT }
-        local box = { x = REGION.x, top = COURSE.first_row + (stage_index - 1) * COURSE.pitch, w = REGION.width }
+        local box = { x = REGION.x, top = first_row + (stage_index - 1) * COURSE.pitch, w = REGION.width }
         s:text(spec, box, kit.sliding({ color = theme.color.text, op = { ON_COURSE } }))
     end
-    caption(s, i18n.t("info_constraints"), { x = REGION.x, top = COURSE.constraints_top, w = REGION.width }, on)
+    local value_top = section(s, { x = REGION.x, top = COURSE.constraints_top, width = REGION.width }, "info_constraints", ON_COURSE) + CONTENT_INSET
     local spec = { value = constraints(main_state), size = theme.type.label, overflow = FIT }
-    local box = { x = REGION.x, top = COURSE.constraints_value_top, w = REGION.width }
+    local box = { x = REGION.x, top = value_top, w = REGION.width }
     s:text(spec, box, kit.arriving({ color = theme.color.sub, op = { ON_COURSE } }))
 end
 

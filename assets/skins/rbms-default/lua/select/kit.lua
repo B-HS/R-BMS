@@ -6,6 +6,26 @@ local motion = require("lua.motion")
 local kit = {}
 
 kit.ARRIVAL = { fade = 150, slide = 150, distance = 16 }
+kit.SECTION = theme.select_layout.section
+
+function kit.section_rule(s, area, opts)
+    s:rect({ x = area.x, top = area.top, w = area.width, h = theme.grid.rule }, theme.color.line, opts)
+end
+
+function kit.section_title(s, area, title, opts)
+    local spec = { value = title, size = theme.type.caption, overflow = props.text_overflow.SHRINK_CUT }
+    s:text(spec, { x = area.x, top = area.top + kit.SECTION.title_drop, w = area.width }, ui.merge(opts, { color = theme.color.sub }))
+end
+
+function kit.section(s, area, title, opts)
+    kit.section_rule(s, area, opts)
+    kit.section_title(s, area, title, opts)
+    return area.top + kit.SECTION.header
+end
+
+function kit.value_baseline(label_top, size)
+    return label_top + theme.cap_height(theme.type.caption) + kit.SECTION.value_gap + theme.cap_height(size)
+end
 
 function kit.arriving(opts)
     return motion.fade_in(0, kit.ARRIVAL.fade, ui.merge(opts, { timer = props.timer.SONGBAR_CHANGE }))

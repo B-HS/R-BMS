@@ -27,8 +27,7 @@ local IR_RANKING = {
 local AREA = theme.select_layout.records
 
 local LAYOUT = {
-    title_drop = 12,
-    rows_top = AREA.top + AREA.header_height,
+    rows_top = AREA.top + kit.SECTION.header,
     row_inset = 2,
     lamp = { x = 0, width = 6, inset = 6 },
     label = { x = 14, width = 100 },
@@ -198,18 +197,16 @@ local function ranking_row(s, main_state, row)
 end
 
 local function heading(s, key, column, ops)
-    local box = { x = AREA.x + column.x, top = AREA.top + LAYOUT.title_drop, w = column.width }
+    local box = { x = AREA.x + column.x, top = AREA.top + kit.SECTION.title_drop, w = column.width }
     local spec = { value = i18n.t(key), size = theme.type.caption, align = "right", overflow = props.text_overflow.SHRINK_CUT }
     s:text(spec, box, { color = theme.color.muted, op = ops })
 end
 
 function records.build(s, main_state)
-    local on = { op = { ON_CHART } }
-    s:rect({ x = AREA.x, top = AREA.top, w = AREA.width, h = theme.grid.rule }, theme.color.line, on)
-    local title_box = { x = AREA.x, top = AREA.top + LAYOUT.title_drop, w = AREA.width }
-    local title = { size = theme.type.caption, overflow = props.text_overflow.SHRINK_CUT }
-    s:text(ui.merge(title, { value = i18n.t("info_my_records") }), title_box, { color = theme.color.sub, op = LISTING_OPS })
-    s:text(ui.merge(title, { value = i18n.t("info_ir_ranking") }), title_box, { color = theme.color.sub, op = RANKING_OPS })
+    local area = { x = AREA.x, top = AREA.top, width = AREA.width }
+    kit.section_rule(s, area, { op = { ON_CHART } })
+    kit.section_title(s, area, i18n.t("info_my_records"), { op = LISTING_OPS })
+    kit.section_title(s, area, i18n.t("info_ir_ranking"), { op = RANKING_OPS })
     heading(s, "info_records_ex_score", LAYOUT.ex, LISTING_OPS)
     heading(s, "info_records_miss", LAYOUT.miss, LISTING_OPS)
     heading(s, "info_records_ex_score", LAYOUT.ranking_ex, RANKING_OPS)

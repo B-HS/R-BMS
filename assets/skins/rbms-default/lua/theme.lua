@@ -316,10 +316,10 @@ theme.panel = {
     caution = theme.tone.orange,
 }
 
-local RADAR_AREA = { x = 64, top = 640, width = 256, height = 256 }
+local RADAR_AREA = { x = 64, top = 576, width = 256, height = 296 }
 local RADAR_PICTURE = { side = 256, radius = 124 }
 local RADAR_SIDE = 160
-local RADAR_CENTER_DROP = 144
+local RADAR_CENTER_DROP = 168
 
 theme.radar = {
     area = RADAR_AREA,
@@ -355,29 +355,36 @@ theme.ranking = {
 
 theme.select_layout = {
     head = {
-        chip = { top = 56, height = 36 },
-        style_chip = { x = 232, width = 88 },
-        mode_chip = { x = 336, width = 200 },
-        search = { label_x = 552, x = 640, width = 336 },
-        clock = { x = 992, width = 104 },
+        baseline = 77,
+        control = { top = 48, height = 40, inset = 12, gap = 8 },
+        place = { x = 64, width = 552 },
+        search = { label_x = 632, x = 736, width = 360, label_gap = 12 },
+        chips = { x = 1128, name_gap = 8 },
+        clock = { x = 1752, width = 104 },
     },
+    foot = {
+        center = 1040,
+        button_height = 40,
+        key_height = 28,
+        hints = { x = 64, right = 1096, key_gap = 8, label_width = 64, item_gap = 20 },
+        replay = { x = 1128, label_width = 76, cell = 40, gap = 4 },
+        actions = { gap = 8, group_gap = 16 },
+    },
+    section = { title_drop = 12, header = 40, label_drop = 48, value_gap = 10 },
     gap = 16,
     song = {
         top = 136,
-        height = 200,
+        height = 136,
         bar_width = 8,
-        text_gap = 32,
-        meta_gap = 32,
-        meta_width = 168,
-        level_sprite = "num64",
+        text_gap = 24,
+        meta_width = 104,
+        level_sprite = "num44",
         level_digits = 3,
-        lines = { genre = 154, title = 188, subtitle = 262, artist = 294 },
+        baselines = { genre = 153, title = 199, subtitle = 228, artist = 263 },
     },
-    cover = { x = 64, top = 352, side = 256 },
-    chart_data = { x = 352, top = 352, width = 744, height = 256 },
+    cover = { x = 64, top = 296, side = 256 },
+    chart_data = { x = 352, top = 296, width = 744, height = 256 },
     facts = {
-        label_drop = 48,
-        value_drop = 40,
         row_pitch = 56,
         sprite = "num24",
         notes_digits = 5,
@@ -396,21 +403,18 @@ theme.select_layout = {
         graph = { x = 0, top_drop = 104, width = 400, height = 152 },
         lanes = { x = 432, top_drop = 164, width = 312, height = 92 },
     },
-    score = { x = 352, top = 640, width = 400, height = 256 },
+    score = { x = 352, top = 576, width = 400, height = 296 },
     score_rows = {
-        label_drop = 36,
-        baseline_drop = 92,
         ex_width = 144,
-        miss_width = 96,
-        badge_width = 128,
-        badge_height = 56,
-        lamp_drop = 102,
-        progress_drop = 130,
-        pairs = { baseline_drop = { 182, 206 }, width = 184, gap = 32 },
-        judges = { top_drop = 220, baseline_rise = 34, width = 80 },
+        miss_width = 112,
+        badge_width = 112,
+        lamp_baseline_drop = 136,
+        progress_drop = 152,
+        pairs = { baseline_drop = { 208, 232 }, width = 184, gap = 32 },
+        judges = { top_drop = 248, baseline_rise = 34, width = 80 },
     },
-    records = { x = 784, top = 640, width = 312, height = 256, rows = 6, header_height = 40, row_height = 36 },
-    targets = { x = 352, top = 912, width = 744, height = 64 },
+    records = { x = 784, top = 576, width = 312, height = 296, rows = 6, row_height = 42 },
+    targets = { x = 352, top = 896, width = 744, height = 72 },
     target_cells = { pitch = 200, chip_width = 52, chip_height = 28, number_x = 58, number_width = 74, diff_x = 136, diff_width = 52, rate_x = 632 },
     bar = {
         badge = { x = 0, width = 56 },

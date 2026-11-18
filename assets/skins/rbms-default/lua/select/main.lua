@@ -2,7 +2,6 @@ local theme = require("lua.theme")
 local props = require("lua.props")
 local ui = require("lua.ui")
 local parts = require("lua.parts")
-local i18n = require("lua.i18n")
 local list = require("lua.select.list")
 local controls = require("lua.select.controls")
 local info = require("lua.select.info")
@@ -32,7 +31,7 @@ local function bands(s)
     local grid = theme.grid
     s:rect({ x = 0, top = 0, w = theme.width, h = grid.header_rule }, theme.color.bg)
     s:rect({ x = 0, top = grid.footer_rule, w = theme.width, h = theme.height - grid.footer_rule }, theme.color.bg)
-    parts.frame(s, i18n.t("bar_music_select"))
+    parts.frame(s)
 end
 
 function screen.build()

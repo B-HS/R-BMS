@@ -54,8 +54,6 @@ local GRAPH = { id = "graph.bar.lamps", x = TITLE.plain_x, top = 54, width = TIT
 
 local SCROLL = { x = 1872, top = 136, height = 832, lamps_width = 8, gap = 4, thumb_width = 4, thumb = 32, track = 2 }
 
-local PATH = { top = 120, trailing = "%s*>%s*$" }
-
 local function slot_top(slot)
     return WHEEL.center_top + (slot - WHEEL.center) * WHEEL.pitch
 end
@@ -280,23 +278,11 @@ local function trim(s)
     s:rect({ x = x, top = lower, w = width, h = grid.footer_rule - lower }, theme.color.bg)
 end
 
-local function path(s, main_state)
-    local spec = {
-        size = theme.type.caption,
-        overflow = props.text_overflow.SHRINK,
-        value = function()
-            return (main_state.text(props.text.DIRECTORY):gsub(PATH.trailing, ""))
-        end,
-    }
-    s:text(spec, { x = WHEEL.x, top = PATH.top, w = WHEEL.width }, { color = theme.color.muted })
-end
-
 function list.build(s, main_state)
     frame(s)
     wheel(s)
     trim(s)
     scrollbar(s, main_state)
-    path(s, main_state)
 end
 
 return list

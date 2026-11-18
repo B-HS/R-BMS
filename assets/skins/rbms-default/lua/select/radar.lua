@@ -15,7 +15,6 @@ local FIRST_AXIS_ANGLE = -90
 local EDGE_TO_SIDE = math.sqrt(3) / 2
 
 local LAYOUT = {
-    title_drop = 12,
     label_size = theme.type.caption,
     value_sprite = "num18",
     value_digits = 3,
@@ -158,10 +157,7 @@ end
 
 function radar.build(s, main_state)
     local area = theme.radar.area
-    local on = { op = { ON_CHART } }
-    s:rect({ x = area.x, top = area.top, w = area.width, h = theme.grid.rule }, theme.color.line, on)
-    local title = { value = i18n.t("info_notes_radar"), size = theme.type.caption, overflow = props.text_overflow.SHRINK_CUT }
-    s:text(title, { x = area.x, top = area.top + LAYOUT.title_drop, w = area.width }, { color = theme.color.sub, op = { ON_CHART } })
+    kit.section(s, { x = area.x, top = area.top, width = area.width }, i18n.t("info_notes_radar"), { op = { ON_CHART } })
 
     local shown = { op = { ON_CHART }, draw = present(main_state) }
     grid(s, shown)
