@@ -61,6 +61,32 @@ local function lamp_set(s, id, selector)
     return s:object("imageset", ui.merge({ id = id, images = images }, selector))
 end
 
+local function graded_lamps(s, box, ops, graded_as)
+    for grade = 1, theme.assist_grade_last do
+        s:rect(box, theme.assist_grade[grade].color, kit.arriving({ op = ops, draw = graded_as(grade) }))
+    end
+end
+
+local function record_graded(main_state, row)
+    local lamp = props.extension_number.MY_RECORD_LAMP_FIRST + row
+    local graded = props.extension_number.MY_RECORD_ASSIST_GRADE_FIRST + row
+    return function(grade)
+        return function()
+            return main_state.number(lamp) == theme.graded_clear and main_state.number(graded) == grade
+        end
+    end
+end
+
+local function ranking_graded(main_state, row)
+    local lamp = IR_RANKING.clear_first + row
+    local graded = props.extension_number.RANKING_ASSIST_GRADE_FIRST + row
+    return function(grade)
+        return function()
+            return main_state.event_index(lamp) == theme.graded_clear and main_state.number(graded) == grade
+        end
+    end
+end
+
 local function centered_number(s, spec, box, opts)
     local sprite = s:sprite(spec.sprite)
     local rise = sprite.cell_h - sprite.pad * 2
@@ -105,6 +131,7 @@ local function record_row(s, main_state, row)
     local on = { op = LISTING_OPS }
     local set = lamp_set(s, "set.record.lamp" .. row, { value = props.extension_number.MY_RECORD_LAMP_FIRST + row })
     s:place(set, cell(row, LAYOUT.lamp, LAYOUT.lamp.inset), kit.arriving(on))
+    graded_lamps(s, cell(row, LAYOUT.lamp, LAYOUT.lamp.inset), LISTING_OPS, record_graded(main_state, row))
 
     local label_box = cell(row, LAYOUT.label)
     local label_size = theme.type.caption
@@ -155,6 +182,7 @@ local function ranking_row(s, main_state, row)
 
     local set = lamp_set(s, "set.ranking.lamp" .. row, { ref = IR_RANKING.clear_first + row })
     s:place(set, cell(row, LAYOUT.lamp, LAYOUT.lamp.inset), kit.arriving(on))
+    graded_lamps(s, cell(row, LAYOUT.lamp, LAYOUT.lamp.inset), RANKING_OPS, ranking_graded(main_state, row))
 
     local place = { sprite = LAYOUT.place.sprite, ref = IR_RANKING.place_first + row, digit = LAYOUT.place.digits, align = "right" }
     centered_number(s, place, cell(row, LAYOUT.place), kit.arriving(ui.merge(on, { color = theme.color.sub })))

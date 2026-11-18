@@ -161,6 +161,17 @@ local function lamps(s)
     return placed
 end
 
+local function graded_lamps(s)
+    local parent = bar_box()
+    local block = s:define_image("block")
+    local box = { x = LAMP.x, top = 0, w = LAMP.width, h = WHEEL.bar_height }
+    local placed = {}
+    for grade = 1, theme.assist_grade_last do
+        placed[grade] = s:dst(block, box, { color = theme.assist_grade[grade].color }, parent)
+    end
+    return placed
+end
+
 local function trophies(s)
     local parent = bar_box()
     local block = s:define_image("block")
@@ -226,6 +237,7 @@ local function wheel(s)
         graph = graph(s),
         rank = ranks(s),
         thumb = thumb(s),
+        lamp_graded = graded_lamps(s),
     })
 end
 

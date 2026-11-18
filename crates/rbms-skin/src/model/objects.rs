@@ -615,6 +615,11 @@ pub struct SongList {
     /// This player's own addition: where a bar's picture goes, against the bar's corner. Its id
     /// names nothing: the picture is the browser's to supply, one per bar.
     pub thumb: Option<Destination>,
+    /// This player's own addition: the lamp a light-assist clear with an assist grade draws instead
+    /// of its `lamp` entry, one image per grade from ASSIST EASY to ASSIST EXHARD, placed against the
+    /// bar's corner as a lamp is. The reference reads no such key, so a document written for it is
+    /// unharmed by one that names it.
+    pub lamp_graded: Vec<Destination>,
 }
 
 /// A character sprite sheet in the reference's pomyu-chara format.

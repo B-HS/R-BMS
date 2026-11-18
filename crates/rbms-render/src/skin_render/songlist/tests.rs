@@ -16,7 +16,7 @@ use rbms_skin::property::MapHost;
 use rbms_skin::property::generated::OPTION_PANEL1;
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerState};
 
-use super::bars::{BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_RANKS, BAR_TEXTS, BAR_TROPHIES};
+use super::bars::{BAR_ASSIST_GRADES, BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_RANKS, BAR_TEXTS, BAR_TROPHIES};
 use super::{
     BarDistribution, BarHold, BarKind, BarScroll, BarScroller, BarTrophy, LAMP_KINDS, RANK_KINDS, SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS, SongBar,
     SongBars,
@@ -67,6 +67,7 @@ const LEVEL_BAND: i32 = 16;
 const DIGIT_CELL: (i32, i32) = (4, 2);
 const GRAPH_BAND: i32 = 32;
 const RANK_BAND: i32 = 40;
+const GRADED_BAND: i32 = 44;
 
 /// Images the fixture's bar set holds, one per kind of bar.
 const BAR_IMAGES: usize = 7;
@@ -243,6 +244,8 @@ enum Piece {
     Graph(usize),
     /// A rank badge, by the DJ LEVEL it stands for.
     Rank(usize),
+    /// A graded lamp, by the assist grade it stands for less one.
+    Graded(usize),
     /// A bar's picture, which is cut from no band of the sheet.
     Picture,
     /// A composed title.
@@ -362,7 +365,7 @@ fn document(wheel: &Wheel<'_>) -> String {
             "type": 5, "name": "wheel", "w": {}, "h": {},
             "source": [{{ "id": "sheet", "path": "sheet.tex" }}],
             "font": [{{ "id": "0", "path": "font.ttf" }}],
-            "image": [{bars},{lamp_images},{trophies},{label_images},{rank_images},{{"id":"cover","src":"sheet","x":60,"y":60,"w":4,"h":4,"act":19}}],
+            "image": [{bars},{lamp_images},{trophies},{label_images},{rank_images},{graded_images},{{"id":"cover","src":"sheet","x":60,"y":60,"w":4,"h":4,"act":19}}],
             "imageset": [{{ "id": "bars", "images": [{set}] }}],
             "value": [{levels}],
             "graph": [{{ "id": "graph", "src": "sheet", "x": 0, "y": {GRAPH_BAND}, "w": {kinds}, "h": 2, "divx": {kinds}, "type": {graph_type} }}],
@@ -384,6 +387,7 @@ fn document(wheel: &Wheel<'_>) -> String {
         trophies = images("trophy", BAR_TROPHIES, TROPHY_BAND, (SMALL_CELL, SMALL_CELL)),
         label_images = images("label", BAR_LABELS, LABEL_BAND, (SMALL_CELL, SMALL_CELL)),
         rank_images = images("rank", BAR_RANKS, RANK_BAND, (SMALL_CELL, SMALL_CELL)),
+        graded_images = images("graded", BAR_ASSIST_GRADES, GRADED_BAND, (SMALL_CELL, SMALL_CELL)),
         set = wheel.bar_set.iter().map(|id| format!(r#""{id}""#)).collect::<Vec<_>>().join(","),
         graph_type = wheel.graph_type,
         on = bar(ON_X, ""),
@@ -470,6 +474,7 @@ impl Rig {
             LABEL_BAND => Piece::Label((x / SMALL_CELL) as usize),
             GRAPH_BAND => Piece::Graph(x as usize),
             RANK_BAND => Piece::Rank((x / SMALL_CELL) as usize),
+            GRADED_BAND => Piece::Graded((x / SMALL_CELL) as usize),
             _ => Piece::Digit(((y - LEVEL_BAND) / DIGIT_CELL.1) as usize, (x / DIGIT_CELL.0) as usize),
         }
     }
@@ -1252,4 +1257,88 @@ fn a_picture_the_renderer_let_go_of_is_not_drawn() {
     let thumbs = [(0, picture)];
     let quads = rig.draw(&SongBars { thumbs: &thumbs, ..SongBars::new(&bars, 0) });
     assert!(quads.iter().all(|quad| quad.tex != picture));
+}
+
+/// The lamp an assist grade splits, as the browser numbers lamps.
+const LAMP_LIGHT_ASSIST: i32 = 3;
+
+/// The highest assist grade, ASSIST EXHARD.
+const ASSIST_GRADE_EXHARD: u8 = 4;
+
+/// A wheel that declares this player's graded lamps, one per assist grade, where the lamp goes.
+fn graded_wheel() -> String {
+    let graded = records(BAR_ASSIST_GRADES, |index| nested(&format!("graded-{index}"), LAMP_AT, ""));
+    format!(r#","lamp_graded":[{graded}]"#)
+}
+
+/// One light-assist chart for each assist grade, no grade first, filling the fixture's slots in order.
+fn graded_bars() -> Vec<SongBar> {
+    (0..=ASSIST_GRADE_EXHARD).map(|grade| SongBar { lamp: LAMP_LIGHT_ASSIST, assist_grade: grade, ..song("LIGHT ASSIST") }).collect()
+}
+
+/// The colour drawn at the middle of the lamp of the bar on `slot`.
+fn lamp_colour(rig: &Rig, slot: usize) -> Color {
+    let x = bar_x(slot) + LAMP_AT.0 + LAMP_AT.2 / 2;
+    let y = slot_y(slot, PITCH) + LAMP_AT.1 + LAMP_AT.3 / 2;
+    rig.canvas.inner.pixel_at(x as u32, (DOC.1 as i32 - y - 1) as u32)
+}
+
+/// Each assist grade of a light-assist lamp draws its own graded lamp in the lamp's place, so the
+/// five grades come out as five different images in five different colours.
+#[test]
+fn every_assist_grade_of_a_light_assist_lamp_draws_a_lamp_of_its_own() {
+    let extra = graded_wheel();
+    let mut rig = Rig::with("graded", &Wheel { wheel_extra: &extra, ..Wheel::default() }, DOC);
+    assert!(rig.screen.warnings().is_empty(), "{:?}", rig.screen.warnings());
+    let bars = graded_bars();
+    let pieces = rig.pieces(&SongBars::new(&bars, CENTER));
+
+    let lamps: Vec<(Piece, Rect)> = pieces.iter().copied().filter(|(piece, _)| matches!(piece, Piece::Lamp(_) | Piece::Graded(_))).collect();
+    let wanted = [Piece::Lamp(3), Piece::Graded(0), Piece::Graded(1), Piece::Graded(2), Piece::Graded(3)];
+    assert_eq!(kinds(&lamps), wanted, "no grade keeps the light-assist lamp and each grade takes its own, one lamp a bar");
+    for ((_, rect), slot) in lamps.iter().zip(0..SLOTS) {
+        assert!(same(*rect, part_on(bar_x(slot), slot_y(slot, PITCH), LAMP_AT)), "the lamp of slot {slot} landed on {rect:?}");
+    }
+
+    let colours: Vec<Color> = (0..SLOTS).map(|slot| lamp_colour(&rig, slot)).collect();
+    for (first, colour) in colours.iter().enumerate() {
+        assert!(colours[first + 1..].iter().all(|other| other != colour), "the lamps of the five grades are five colours: {colours:?}");
+    }
+}
+
+/// A grade rides only on the light-assist lamp: any other lamp is drawn as it is, a grade the wheel
+/// has no graded lamp under keeps the light-assist lamp, and a wheel drawn against a rival draws the
+/// player's lamp from its own list.
+#[test]
+fn a_graded_lamp_stands_in_only_for_a_light_assist_lamp_it_has_an_image_for() {
+    let extra = graded_wheel();
+    let mut rig = Rig::with("graded-only", &Wheel { wheel_extra: &extra, ..Wheel::default() }, DOC);
+    let past_exhard = ASSIST_GRADE_EXHARD + 1;
+    let bars = vec![
+        SongBar { lamp: 5, assist_grade: 2, ..song("CLEAR") },
+        SongBar { lamp: LAMP_LIGHT_ASSIST, assist_grade: past_exhard, ..song("PAST EXHARD") },
+        SongBar { lamp: LAMP_LIGHT_ASSIST, assist_grade: 3, ..table(0) },
+    ];
+    let lamps = |pieces: Vec<(Piece, Rect)>| kinds(&pieces).into_iter().filter(|piece| matches!(piece, Piece::Lamp(_) | Piece::Graded(_))).collect::<Vec<_>>();
+    let alone = lamps(rig.pieces(&SongBars::new(&bars, 0)));
+    assert_eq!(alone, [Piece::Lamp(3), Piece::Graded(2), Piece::Lamp(5), Piece::Lamp(3), Piece::Graded(2)]);
+
+    let against = lamps(rig.pieces(&SongBars { rival: true, ..SongBars::new(&bars, 0) }));
+    assert!(against.iter().all(|piece| matches!(piece, Piece::Lamp(_))), "the player's lamp against a rival is never a graded one: {against:?}");
+}
+
+/// A document that declares no graded lamps draws a graded light-assist clear exactly as it draws
+/// one with no grade, to the pixel.
+#[test]
+fn a_wheel_without_graded_lamps_draws_every_grade_as_the_light_assist_lamp() {
+    let mut rig = Rig::new("no-graded");
+    let graded = graded_bars();
+    let plain: Vec<SongBar> = graded.iter().map(|bar| SongBar { assist_grade: 0, ..bar.clone() }).collect();
+
+    let plain_pieces = rig.pieces(&SongBars::new(&plain, CENTER));
+    let plain_pixels = rig.canvas.inner.pixels().to_vec();
+    let graded_pieces = rig.pieces(&SongBars::new(&graded, CENTER));
+    assert!(kinds(&graded_pieces).iter().all(|piece| !matches!(piece, Piece::Graded(_))), "{graded_pieces:?}");
+    assert_eq!(kinds(&graded_pieces), kinds(&plain_pieces));
+    assert!(rig.canvas.inner.pixels() == plain_pixels.as_slice(), "not one pixel differs");
 }

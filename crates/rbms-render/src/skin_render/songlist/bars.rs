@@ -33,6 +33,17 @@ pub(crate) const BAR_LABELS: usize = 5;
 /// none: the list is this player's own.
 pub(crate) const BAR_RANKS: usize = 8;
 
+/// How many graded lamps a wheel carries, one per assist grade from ASSIST EASY to ASSIST EXHARD.
+/// The reference's wheel has none: the list is this player's own.
+pub(crate) const BAR_ASSIST_GRADES: usize = 4;
+
+/// The lamp an assist grade splits: LIGHT ASSIST (`ClearType.LightAssistEasy`).
+const LAMP_LIGHT_ASSIST: i32 = 3;
+
+/// The assist grade of a lamp that has none: a light-assist clear on the ASSIST EASY gauge, and every
+/// other lamp.
+const ASSIST_GRADE_NONE: u8 = 0;
+
 /// How many clear lamps a folder's charts are counted into, from no play up to max
 /// (`DirectoryBar.getLamps`).
 pub const LAMP_KINDS: usize = 11;
@@ -237,6 +248,11 @@ pub struct SongBar {
     /// or `None` for a bar with no score. It picks the wheel's rank badge, which only a document
     /// for this player declares; a rank the wheel has no badge under draws nothing.
     pub rank: Option<u8>,
+    /// The assist grade inside the player's lamp: zero for none, one to four for ASSIST EASY to
+    /// ASSIST EXHARD. Only a light-assist lamp has one. It picks the wheel's graded lamp in place of
+    /// the lamp, which only a document for this player declares; a grade the wheel has no lamp
+    /// under draws the lamp as it is.
+    pub assist_grade: u8,
 }
 
 impl SongBar {
@@ -267,6 +283,7 @@ impl SongBar {
             features: 0,
             distribution: None,
             rank: None,
+            assist_grade: ASSIST_GRADE_NONE,
         }
     }
 
@@ -310,6 +327,15 @@ impl SongBar {
     /// Which rank badge the bar draws, or `None` for a bar with no score.
     pub(crate) fn rank_index(&self) -> Option<usize> {
         self.rank.map(usize::from)
+    }
+
+    /// Which graded lamp the bar draws in place of its lamp, or `None` for a bar whose lamp is not a
+    /// light-assist one or carries no grade.
+    pub(crate) fn graded_lamp_index(&self) -> Option<usize> {
+        if self.lamp != LAMP_LIGHT_ASSIST {
+            return None;
+        }
+        usize::from(self.assist_grade).checked_sub(1)
     }
 
     /// Which trophy a course draws, or `None` for a bar that is not a course or has no medal.

@@ -199,6 +199,8 @@ props.extension_number = {
     MY_RECORD_MISS_COUNT_FIRST = 21072,
     MY_RECORD_DJ_LEVEL_FIRST = 21078,
     PLAYBACK_PERCENT = 21084,
+    MY_RECORD_ASSIST_GRADE_FIRST = 21087,
+    RANKING_ASSIST_GRADE_FIRST = 21093,
 }
 
 props.extension_float = {

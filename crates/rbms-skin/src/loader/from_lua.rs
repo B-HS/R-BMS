@@ -516,6 +516,7 @@ impl References<'_, '_> {
         if let Some(thumb) = &mut list.thumb {
             self.destination(thumb, &field(source, "thumb")?)?;
         }
+        self.each(&mut list.lamp_graded, source, "lamp_graded", Self::destination)?;
         Ok(())
     }
 

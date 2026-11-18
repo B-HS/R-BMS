@@ -359,7 +359,7 @@ fn the_built_in_rows_made_from_the_model_are_the_rows_the_browser_always_drew() 
 
 /// A chart's best clear SCRATCH AUTO played on HARD is drawn on the built-in row in the colour of the
 /// ASSIST HARD it is, as the records under it name it, not the LIGHT ASSIST colour of its lamp; a
-/// skin is still handed the lamp alone.
+/// skin's wheel is handed the lamp as it always was, with the grade beside it.
 #[test]
 fn a_graded_light_assist_clear_lights_the_built_in_row_in_its_grade() {
     let mut app = fixture_app();
@@ -372,7 +372,10 @@ fn a_graded_light_assist_clear_lights_the_built_in_row_in_its_grade() {
     let bars = app.shared.select_bars(&facts_of(&app), None, false);
     let beta = bar_titled(&bars, "beta");
     assert_eq!((beta.lamp, beta.assist_grade), (Some(rbms_store::LIGHT_ASSIST_CLEAR_ID), rbms_store::ASSIST_GRADE_HARD));
-    assert_eq!(wheel_bar(beta, ADDED_AT).lamp, i32::from(rbms_store::LIGHT_ASSIST_CLEAR_ID), "a skin reads the lamp as it always did");
+    let wheel = wheel_bar(beta, ADDED_AT);
+    assert_eq!(wheel.lamp, i32::from(rbms_store::LIGHT_ASSIST_CLEAR_ID), "a skin reads the lamp as it always did");
+    assert_eq!(wheel.assist_grade, rbms_store::ASSIST_GRADE_HARD, "and the grade inside it beside the lamp");
+    assert_eq!(wheel_bar(bar_titled(&bars, "alpha"), ADDED_AT).assist_grade, rbms_store::ASSIST_GRADE_NONE, "a chart with no graded clear has no grade");
 
     let mut state = SelectState::new();
     state.refresh_bars(&app.shared);

@@ -13,7 +13,7 @@ use rbms_skin::loader::{LoadedSkin, NamedTrack, StretchKind};
 use rbms_skin::model::{GraphDef, ImageDef, PropertyRef, SkinDef, ValueDef};
 use rbms_skin::property::{NameSpace, extension};
 
-use super::bars::{BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_RANKS, BAR_SLOTS, BAR_TEXTS, BAR_TROPHIES, LAMP_KINDS, RANK_KINDS};
+use super::bars::{BAR_ASSIST_GRADES, BAR_LABELS, BAR_LAMPS, BAR_LEVELS, BAR_RANKS, BAR_SLOTS, BAR_TEXTS, BAR_TROPHIES, LAMP_KINDS, RANK_KINDS};
 use super::{BarArea, BarPart, GraphPart, ImagePart, Kept, LevelPart, PADDING_ALTERNATE_ZERO, Slot, SongListBody, TextPart, ThumbPart};
 use crate::skin_render::SkinAssets;
 use crate::skin_render::draw::ImageSelect;
@@ -255,6 +255,7 @@ pub(crate) fn build_songlist(
         graph: tracks.graph.as_ref().and_then(|named| builder.graph(named)),
         rank: builder.list(&tracks.rank, BAR_RANKS, Builder::image),
         thumb: tracks.thumb.as_ref().and_then(Builder::thumb),
+        lamp_graded: builder.list(&tracks.lamp_graded, BAR_ASSIST_GRADES, Builder::image),
         areas: RefCell::new(vec![BarArea::EMPTY; count]),
         slots,
     };

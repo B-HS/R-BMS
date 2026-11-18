@@ -528,6 +528,8 @@ fn this_players_own_values_are_routed_and_read_absent_until_a_cluster_knows_them
         (IdSpace::Integer, RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_FOLDER_LAMP_COUNT_LAST, Cluster::Select),
         (IdSpace::Integer, RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_CHART_COUNT, Cluster::Select),
         (IdSpace::Integer, RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAST, Cluster::Select),
+        (IdSpace::Integer, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST, Cluster::Select),
+        (IdSpace::Integer, RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST, RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST, Cluster::Ir),
         (IdSpace::Float, RBMS_FLOAT_NOTES_RADAR_FIRST, RBMS_FLOAT_NOTES_RADAR_LAST, Cluster::Chart),
         (IdSpace::Rate, RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST, Cluster::Chart),
         (IdSpace::Rate, RBMS_RATE_FOLDER_LAMP_FIRST, RBMS_RATE_FOLDER_LAMP_LAST, Cluster::Select),
@@ -562,7 +564,7 @@ fn the_default_skin_names_this_players_own_ids_by_the_numbers_answered() {
         .find(|file| file.name == "lua/props.lua")
         .map(|file| std::str::from_utf8(file.bytes).expect("the script is text"))
         .expect("the pack ships its property table");
-    let named: [(&str, &str, i32); 31] = [
+    let named: [(&str, &str, i32); 33] = [
         ("extension", "SCRATCH_AUTO_ON", RBMS_OPTION_SCRATCH_AUTO_ON),
         ("extension", "KEEP_GREEN_NUMBER_ON", RBMS_OPTION_KEEP_GREEN_NUMBER_ON),
         ("extension", "LANE_COVER_ON", RBMS_OPTION_LANE_COVER_ON),
@@ -589,6 +591,8 @@ fn the_default_skin_names_this_players_own_ids_by_the_numbers_answered() {
         ("extension_number", "MY_RECORD_LAMP_FIRST", RBMS_NUMBER_MY_RECORD_LAMP_FIRST),
         ("extension_number", "MY_RECORD_MISS_COUNT_FIRST", RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST),
         ("extension_number", "MY_RECORD_DJ_LEVEL_FIRST", RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST),
+        ("extension_number", "MY_RECORD_ASSIST_GRADE_FIRST", RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST),
+        ("extension_number", "RANKING_ASSIST_GRADE_FIRST", RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST),
         ("extension_float", "NOTES_RADAR_FIRST", RBMS_FLOAT_NOTES_RADAR_FIRST),
         ("extension_rate", "LANE_NOTES_FIRST", RBMS_RATE_LANE_NOTES_FIRST),
         ("extension_rate", "FOLDER_LAMP_FIRST", RBMS_RATE_FOLDER_LAMP_FIRST),

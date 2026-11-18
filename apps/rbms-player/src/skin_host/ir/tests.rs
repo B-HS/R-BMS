@@ -518,6 +518,22 @@ fn a_score_is_on_the_lamp_it_was_made_on_and_a_graded_light_assist_clear_is_stil
 }
 
 #[test]
+fn a_graded_light_assist_score_reads_its_grade_beside_its_lamp_and_every_other_score_reads_none() {
+    let mut rows = vec![scored("Hard", 300, ClearType::Hard, Some(1))];
+    for grade in [AssistGrade::None, AssistGrade::Easy, AssistGrade::Clear, AssistGrade::Hard, AssistGrade::ExHard] {
+        rows.push(RankingRow { player: "Assisted".to_string(), ..graded_row(ClearType::LightAssistEasy, grade, None) });
+    }
+    let ranking = ranking_of(rows);
+    let browser = browser_of(Some(&ranking));
+    let ir = browsing(&browser);
+    let grade = |slot: i32| ir.integer(RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST + slot).expect("answered");
+
+    assert_eq!((0..7).map(grade).collect::<Vec<_>>(), [0, 0, 1, 2, 3, 4, INTEGER_ABSENT], "the last slot holds no score");
+    assert_eq!(ir.integer(RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST), Some(INTEGER_ABSENT));
+    assert_eq!(ir.integer(RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST + 1), None, "past the run is nobody's answer here");
+}
+
+#[test]
 fn a_page_found_apart_is_part_of_the_list_where_its_place_in_the_ranking_is() {
     let top = RankingBoard {
         rows: (0..RANKING_PAGE_LIMIT).map(|place| scored("Top", 5000 - place, ClearType::Failed, None)).collect(),
@@ -555,6 +571,7 @@ fn the_result_screen_s_list_still_has_no_values() {
         assert_eq!(result.integer(NUMBER_RANKING1_CLEAR + slot), Some(INTEGER_ABSENT));
         assert_eq!(result.image_index(NUMBER_RANKING1_EXSCORE + slot), Some(IMAGE_INDEX_ABSENT));
         assert_eq!(result.image_index(NUMBER_RANKING1_CLEAR + slot), Some(IMAGE_INDEX_ABSENT));
+        assert_eq!(result.integer(RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST + slot), Some(INTEGER_ABSENT));
         assert_eq!(result.text(STRING_RANKING1_NAME + slot).as_deref(), Some(""));
     }
 }
@@ -588,6 +605,7 @@ fn a_host_lent_the_browser_reads_the_list_through_the_ranking_cluster_for_a_char
     assert_eq!((host.integer(NUMBER_RANKING1_EXSCORE), host.integer(NUMBER_RANKING1_CLEAR)), (970, 4));
     assert_eq!((host.image_index(NUMBER_RANKING1_EXSCORE), host.image_index(NUMBER_RANKING1_CLEAR)), (0, i32::from(clear_type_id(ClearType::Hard))));
     assert_eq!(host.text(STRING_RANKING1_NAME), "P3");
+    assert_eq!(host.integer(RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST), 0, "a hard clear has no grade, read through the ranking cluster");
     assert_eq!(host.rate(RATE_RANKING_POSITION), Some(3.0 / 12.0), "the position is the offset over the scores received");
     assert_eq!(
         (host.integer(NUMBER_RANKING10_EXSCORE - 1), host.integer(NUMBER_RANKING10_EXSCORE)),

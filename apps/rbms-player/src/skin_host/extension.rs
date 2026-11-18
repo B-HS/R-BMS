@@ -44,6 +44,7 @@ pub use rbms_skin::property::extension::{
     EXTENSION_VALUE_FIRST, EXTENSION_VALUE_LAST, RBMS_IMAGE_NOTES_RADAR,
 };
 
+use super::ir::RANKING_SLOTS;
 use super::result::snapshot::REPLAY_SLOT_COUNT;
 use crate::keyconfig::KEY_INDEX_COUNT;
 
@@ -219,6 +220,25 @@ pub const RBMS_NUMBER_MY_RECORD_LAST: i32 = run_last(RBMS_NUMBER_MY_RECORD_DJ_LE
 /// 100 where the option is off.
 pub const RBMS_NUMBER_PLAYBACK_PERCENT: i32 = 21_084;
 
+/// The first of the assist grades of the record rows, 0 for none up to 4 for ASSIST EXHARD, in the
+/// row order of [`RBMS_NUMBER_MY_RECORD_LAMP_FIRST`]. Only a row whose lamp is the light-assist one
+/// has a grade other than none.
+pub const RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST: i32 = 21_087;
+
+/// The last number of the run that starts at [`RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST`].
+pub const RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST: i32 = run_last(RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST, MY_RECORD_ROWS);
+
+/// How many scores of the ranking a skin reads by slot (`NUMBER_RANKING1_CLEAR` to
+/// `NUMBER_RANKING10_CLEAR`).
+pub const RANKING_GRADE_SLOTS: i32 = RANKING_SLOTS as i32;
+
+/// The first of the assist grades of the ranking's scores on show, 0 for none up to 4 for ASSIST
+/// EXHARD: the number `first + s` is the score whose lamp `NUMBER_RANKING1_CLEAR + s` reads.
+pub const RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST: i32 = 21_093;
+
+/// The last number of the run that starts at [`RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST`].
+pub const RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST: i32 = run_last(RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST, RANKING_GRADE_SLOTS);
+
 /// The first of the six NOTES RADAR values of the chart under the cursor as shown, 0 to 200, in the
 /// order of [`RBMS_NUMBER_NOTES_RADAR_FIRST`].
 pub const RBMS_FLOAT_NOTES_RADAR_FIRST: i32 = 21_020;
@@ -300,7 +320,7 @@ mod tests {
     ];
 
     /// Every number this player keeps for itself, as runs of ids.
-    const NUMBER_RUNS: [(i32, i32); 7] = [
+    const NUMBER_RUNS: [(i32, i32); 9] = [
         (RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST),
         (RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST),
         (RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_NUMBER_SIBLING_CHART_LEVEL_LAST),
@@ -308,6 +328,8 @@ mod tests {
         (RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_CHART_COUNT),
         (RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAST),
         (RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_NUMBER_PLAYBACK_PERCENT),
+        (RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST),
+        (RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST, RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST),
     ];
 
     /// Every float this player keeps for itself, as runs of ids.
@@ -394,6 +416,9 @@ mod tests {
         for pair in record_runs.windows(2) {
             assert_eq!(pair[1] - pair[0], MY_RECORD_ROWS, "the record runs follow one another, a row each");
         }
+        assert_eq!(RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST - RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST + 1, MY_RECORD_ROWS, "a grade for each record row");
+        let ranking_slots = i32::try_from(RANKING_SLOTS).expect("the ranking's slots fit an id");
+        assert_eq!(RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST - RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST + 1, ranking_slots, "a grade for each ranking slot");
     }
 
     #[test]

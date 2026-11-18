@@ -13,10 +13,11 @@ use rbms_store::scoredb::{BestScore, JudgeCounts};
 
 use super::*;
 use crate::skin_host::extension::{
-    EXTENSION_VALUE_FIRST, RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST,
-    RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAMP_FIRST, RBMS_NUMBER_MY_RECORD_LAST, RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST,
-    RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_OPTION_SIBLING_CHART_LAST, RBMS_RATE_FOLDER_LAMP_FIRST,
-    RBMS_RATE_FOLDER_LAMP_LAST, RBMS_TEXT_MY_RECORD_DATE_FIRST, RBMS_TEXT_MY_RECORD_DATE_LAST,
+    EXTENSION_VALUE_FIRST, RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST,
+    RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST, RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST, RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAMP_FIRST,
+    RBMS_NUMBER_MY_RECORD_LAST, RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST, RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST, RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST,
+    RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_OPTION_SIBLING_CHART_LAST, RBMS_RATE_FOLDER_LAMP_FIRST, RBMS_RATE_FOLDER_LAMP_LAST, RBMS_TEXT_MY_RECORD_DATE_FIRST,
+    RBMS_TEXT_MY_RECORD_DATE_LAST,
 };
 use crate::skin_host::ir::IrBrowser;
 use crate::skin_host::select::browse::{BrowseFacts, RecordRow, SIBLING_SLOTS, SiblingChart};
@@ -800,9 +801,9 @@ fn browse_facts() -> BrowseFacts {
         siblings: [None, Some(SiblingChart { level: 5 }), Some(SiblingChart { level: 8 }), None, None],
         folder_lamps: [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         records: [
-            Some(RecordRow { ex_score: 210, lamp: 5, miss_count: 7, dj_level: 6, date: "2024-01-02 03:04".to_string() }),
+            Some(RecordRow { ex_score: 210, lamp: 5, miss_count: 7, dj_level: 6, assist_grade: 0, date: "2024-01-02 03:04".to_string() }),
             None,
-            Some(RecordRow { ex_score: 99, lamp: 1, miss_count: 40, dj_level: 2, date: String::new() }),
+            Some(RecordRow { ex_score: 99, lamp: 1, miss_count: 40, dj_level: 2, assist_grade: 0, date: String::new() }),
             None,
             None,
             None,
@@ -845,6 +846,7 @@ fn a_frame_the_browser_worked_nothing_out_for_reads_the_absent_value_of_every_id
     assert!(slots().all(|slot| state.boolean(RBMS_OPTION_SIBLING_CHART_FIRST + slot) == Some(false)));
     assert!(slots().all(|slot| state.integer(RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST + slot) == Some(INTEGER_ABSENT)));
     assert!((RBMS_NUMBER_MY_RECORD_EX_FIRST..=RBMS_NUMBER_MY_RECORD_LAST).all(|id| state.integer(id) == Some(INTEGER_ABSENT)));
+    assert!((RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST..=RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST).all(|id| state.integer(id) == Some(INTEGER_ABSENT)));
     assert!((RBMS_TEXT_MY_RECORD_DATE_FIRST..=RBMS_TEXT_MY_RECORD_DATE_LAST).all(|id| state.text(id).as_deref() == Some("")));
     assert!((RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST..=RBMS_NUMBER_FOLDER_CHART_COUNT).all(|id| state.integer(id) == Some(0)));
     assert!((RBMS_RATE_FOLDER_LAMP_FIRST..=RBMS_RATE_FOLDER_LAMP_LAST).all(|id| state.rate(id) == Some(0.0)));
@@ -868,6 +870,8 @@ fn the_host_answers_the_ids_of_the_other_charts_the_folder_and_the_plays_through
     assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST), [Cluster::Select]);
     assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_FOLDER_CHART_COUNT), [Cluster::Select]);
     assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_MY_RECORD_LAST), [Cluster::Select]);
+    assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST), [Cluster::Select]);
+    assert_eq!(routed(IdSpace::Integer, RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST), [Cluster::Ir], "the ranking's grades are the ranking's");
     assert_eq!(routed(IdSpace::Rate, RBMS_RATE_FOLDER_LAMP_LAST), [Cluster::Select]);
     assert_eq!(routed(IdSpace::Text, RBMS_TEXT_MY_RECORD_DATE_LAST), [Cluster::Select]);
 
@@ -878,6 +882,7 @@ fn the_host_answers_the_ids_of_the_other_charts_the_folder_and_the_plays_through
     assert_eq!(host.rate(RBMS_RATE_FOLDER_LAMP_FIRST + 10), Some(0.25));
     assert_eq!(host.float(RBMS_RATE_FOLDER_LAMP_FIRST + 10), 0.25, "a float read falls back to the rate of the same id");
     assert_eq!(host.integer(RBMS_NUMBER_MY_RECORD_LAMP_FIRST), 5);
+    assert_eq!(host.integer(RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST), 0);
     assert_eq!(host.text(RBMS_TEXT_MY_RECORD_DATE_FIRST), "2024-01-02 03:04");
 }
 

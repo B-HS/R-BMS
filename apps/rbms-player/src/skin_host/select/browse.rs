@@ -15,8 +15,9 @@
 //!   many charts of the open folder sit on each lamp, and how many it holds;
 //! - rates [`RBMS_RATE_FOLDER_LAMP_FIRST`] on: each lamp's share of those charts;
 //! - numbers [`RBMS_NUMBER_MY_RECORD_EX_FIRST`], [`RBMS_NUMBER_MY_RECORD_LAMP_FIRST`],
-//!   [`RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST`] and [`RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST`] on, and
-//!   texts [`RBMS_TEXT_MY_RECORD_DATE_FIRST`] on: the figures and the date of each record row.
+//!   [`RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST`], [`RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST`] and
+//!   [`RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST`] on, and texts [`RBMS_TEXT_MY_RECORD_DATE_FIRST`] on:
+//!   the figures and the date of each record row.
 
 use std::borrow::Cow;
 
@@ -26,9 +27,9 @@ use rbms_skin::lua::{LocalTime, local_time};
 use rbms_skin::property::{INTEGER_ABSENT, TEXT_ABSENT};
 
 use crate::skin_host::extension::{
-    MY_RECORD_ROWS, RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST, RBMS_NUMBER_MY_RECORD_EX_FIRST,
-    RBMS_NUMBER_MY_RECORD_LAMP_FIRST, RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST, RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_OPTION_SIBLING_CHART_FIRST,
-    RBMS_RATE_FOLDER_LAMP_FIRST, RBMS_TEXT_MY_RECORD_DATE_FIRST, SIBLING_CHART_SLOTS,
+    MY_RECORD_ROWS, RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_LAMP_COUNT_FIRST, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST,
+    RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST, RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAMP_FIRST, RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST,
+    RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_RATE_FOLDER_LAMP_FIRST, RBMS_TEXT_MY_RECORD_DATE_FIRST, SIBLING_CHART_SLOTS,
 };
 use crate::skin_host::score::standing::ScoreSheet;
 use crate::skin_host::score::whole;
@@ -57,19 +58,23 @@ pub struct RecordRow {
     pub miss_count: i32,
     /// The DJ LEVEL of the play: 0 for F up to 7 for AAA (`rbms_render::dj_rank`).
     pub dj_level: i32,
+    /// The assist grade inside the play's lamp, 0 for none up to 4 for ASSIST EXHARD.
+    pub assist_grade: i32,
     /// When the play was made in the machine's local time, or nothing where the play carries no date.
     pub date: String,
 }
 
 impl RecordRow {
-    /// The row of a play whose figures are `sheet`, made at `date` seconds after the epoch.
-    pub fn of(sheet: &ScoreSheet, date: Option<i64>) -> RecordRow {
+    /// The row of a play whose figures are `sheet`, graded `assist_grade` inside its lamp and made at
+    /// `date` seconds after the epoch.
+    pub fn of(sheet: &ScoreSheet, assist_grade: u8, date: Option<i64>) -> RecordRow {
         let (ex_score, max_ex_score) = (sheet.ex_score(), sheet.max_ex_score());
         RecordRow {
             ex_score: whole(ex_score),
             lamp: i32::from(sheet.clear),
             miss_count: whole(sheet.min_bp),
             dj_level: i32::try_from(dj_rank(ex_score, max_ex_score)).unwrap_or_default(),
+            assist_grade: i32::from(assist_grade),
             date: date.filter(|date| *date > 0).and_then(local_time).map(clock_text).unwrap_or_default(),
         }
     }
@@ -98,9 +103,14 @@ fn place_in(id: i32, first: i32, count: usize) -> Option<usize> {
 }
 
 /// The first id of each run of record figures, in the order of [`RecordRow`]: the EX score, the lamp,
-/// the miss count and the DJ LEVEL.
-const RECORD_FIGURES: [i32; 4] =
-    [RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAMP_FIRST, RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST, RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST];
+/// the miss count, the DJ LEVEL and the assist grade.
+const RECORD_FIGURES: [i32; 5] = [
+    RBMS_NUMBER_MY_RECORD_EX_FIRST,
+    RBMS_NUMBER_MY_RECORD_LAMP_FIRST,
+    RBMS_NUMBER_MY_RECORD_MISS_COUNT_FIRST,
+    RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST,
+    RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST,
+];
 
 impl BrowseFacts {
     /// How many charts the open folder holds: the lamps added up.
@@ -134,7 +144,8 @@ impl BrowseFacts {
             0 => record.ex_score,
             1 => record.lamp,
             2 => record.miss_count,
-            _ => record.dj_level,
+            3 => record.dj_level,
+            _ => record.assist_grade,
         })
     }
 

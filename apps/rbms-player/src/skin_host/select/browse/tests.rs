@@ -2,13 +2,14 @@ use rbms_skin::lua::LocalTime;
 
 use super::*;
 use crate::skin_host::extension::{
-    RBMS_NUMBER_FOLDER_LAMP_COUNT_LAST, RBMS_NUMBER_MY_RECORD_LAST, RBMS_NUMBER_SIBLING_CHART_LEVEL_LAST, RBMS_OPTION_SIBLING_CHART_LAST,
-    RBMS_RATE_FOLDER_LAMP_LAST, RBMS_TEXT_MY_RECORD_DATE_LAST,
+    RBMS_NUMBER_FOLDER_LAMP_COUNT_LAST, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST, RBMS_NUMBER_MY_RECORD_LAST, RBMS_NUMBER_SIBLING_CHART_LEVEL_LAST,
+    RBMS_OPTION_SIBLING_CHART_LAST, RBMS_RATE_FOLDER_LAMP_LAST, RBMS_TEXT_MY_RECORD_DATE_LAST,
 };
 
-/// A record row whose figures are `ex`, `lamp`, `miss`, `level` and whose date is `date`.
-fn row(ex: i32, lamp: i32, miss: i32, level: i32, date: &str) -> Option<RecordRow> {
-    Some(RecordRow { ex_score: ex, lamp, miss_count: miss, dj_level: level, date: date.to_string() })
+/// A record row whose figures are `ex`, `lamp`, `miss`, `level` and `grade` and whose date is
+/// `date`.
+fn row(ex: i32, lamp: i32, miss: i32, level: i32, grade: i32, date: &str) -> Option<RecordRow> {
+    Some(RecordRow { ex_score: ex, lamp, miss_count: miss, dj_level: level, assist_grade: grade, date: date.to_string() })
 }
 
 /// Charts in the first and third slots, ten charts in the folder, and the best and one later play.
@@ -16,7 +17,7 @@ fn facts() -> BrowseFacts {
     BrowseFacts {
         siblings: [Some(SiblingChart { level: 3 }), None, Some(SiblingChart { level: 9 }), None, None],
         folder_lamps: [4, 1, 0, 0, 0, 2, 0, 0, 0, 0, 3],
-        records: [row(1500, 6, 12, 5, "2023-11-14 22:13"), row(1400, 5, 20, 4, "2023-11-13 08:00"), None, None, None, None],
+        records: [row(1500, 6, 12, 5, 0, "2023-11-14 22:13"), row(1400, 3, 20, 4, 3, "2023-11-13 08:00"), None, None, None, None],
     }
 }
 
@@ -58,7 +59,7 @@ fn a_folder_with_no_chart_holds_none_on_any_lamp_and_every_share_of_it_is_zero()
 }
 
 #[test]
-fn a_record_row_reads_its_four_figures_and_its_date_and_a_row_with_no_play_reads_absent() {
+fn a_record_row_reads_its_five_figures_and_its_date_and_a_row_with_no_play_reads_absent() {
     let facts = facts();
     let figure = |first: i32, row: usize| facts.integer(first + i32::try_from(row).expect("a row fits"));
 
@@ -68,6 +69,9 @@ fn a_record_row_reads_its_four_figures_and_its_date_and_a_row_with_no_play_reads
     assert_eq!(figure(RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST, 0), Some(5));
     assert_eq!(figure(RBMS_NUMBER_MY_RECORD_EX_FIRST, 1), Some(1400));
     assert_eq!(figure(RBMS_NUMBER_MY_RECORD_DJ_LEVEL_FIRST, 1), Some(4));
+    assert_eq!(figure(RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST, 0), Some(0), "a hard clear has no grade");
+    assert_eq!(figure(RBMS_NUMBER_MY_RECORD_LAMP_FIRST, 1), Some(3));
+    assert_eq!(figure(RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST, 1), Some(3), "a light-assist clear reads its grade beside its lamp");
     for first in RECORD_FIGURES {
         assert_eq!(figure(first, 2), Some(INTEGER_ABSENT), "figure {first} of a row with no play");
         assert_eq!(figure(first, RECORD_ROWS - 1), Some(INTEGER_ABSENT));
@@ -91,6 +95,8 @@ fn an_id_outside_the_runs_is_nobody_s_answer() {
     assert_eq!(facts.integer(RBMS_NUMBER_FOLDER_CHART_COUNT + 1), None);
     assert_eq!(facts.integer(RBMS_NUMBER_MY_RECORD_EX_FIRST - 1), None);
     assert_eq!(facts.integer(RBMS_NUMBER_MY_RECORD_LAST + 1), None);
+    assert_eq!(facts.integer(RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST - 1), None);
+    assert_eq!(facts.integer(RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST + 1), None);
     assert_eq!(facts.rate(RBMS_RATE_FOLDER_LAMP_FIRST - 1), None);
     assert_eq!(facts.rate(RBMS_RATE_FOLDER_LAMP_LAST + 1), None);
     assert_eq!(facts.text(RBMS_TEXT_MY_RECORD_DATE_FIRST - 1), None);
@@ -108,19 +114,22 @@ fn sheet() -> ScoreSheet {
 #[test]
 fn a_record_row_is_the_figures_of_a_sheet_and_the_moment_it_was_made() {
     let made = 1_700_000_000;
-    let row = RecordRow::of(&sheet(), Some(made));
+    let row = RecordRow::of(&sheet(), 0, Some(made));
 
-    assert_eq!((row.ex_score, row.lamp, row.miss_count), (140, 5, 9));
+    assert_eq!((row.ex_score, row.lamp, row.miss_count, row.assist_grade), (140, 5, 9, 0));
     assert_eq!(row.dj_level, 5, "140 of 200 is 7/10, which is A");
     assert_eq!(Some(row.date.as_str()), local_time(made).map(clock_text).as_deref(), "the moment is read in the machine's own time");
     assert!(!row.date.is_empty());
+
+    let light_assist = ScoreSheet { clear: 3, ..sheet() };
+    assert_eq!(RecordRow::of(&light_assist, 4, Some(made)).assist_grade, 4, "the grade inside the lamp rides with the row");
 }
 
 #[test]
 fn a_record_row_with_no_moment_to_name_has_no_date() {
-    assert_eq!(RecordRow::of(&sheet(), None).date, "");
-    assert_eq!(RecordRow::of(&sheet(), Some(0)).date, "", "a play of the epoch itself is one that was never dated");
-    assert_eq!(RecordRow::of(&sheet(), Some(-1)).date, "");
+    assert_eq!(RecordRow::of(&sheet(), 0, None).date, "");
+    assert_eq!(RecordRow::of(&sheet(), 0, Some(0)).date, "", "a play of the epoch itself is one that was never dated");
+    assert_eq!(RecordRow::of(&sheet(), 0, Some(-1)).date, "");
 }
 
 #[test]
@@ -132,7 +141,7 @@ fn a_moment_is_written_to_the_minute_the_way_the_record_list_writes_it() {
 
 #[test]
 fn a_sheet_with_no_note_is_the_lowest_level_and_an_ex_of_nothing() {
-    let row = RecordRow::of(&ScoreSheet::default(), None);
+    let row = RecordRow::of(&ScoreSheet::default(), 0, None);
 
     assert_eq!((row.ex_score, row.dj_level), (0, 0));
 }

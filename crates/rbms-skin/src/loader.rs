@@ -474,6 +474,8 @@ pub struct SongListTracks {
     pub rank: Vec<NamedTrack>,
     /// Where a bar's picture goes ([`crate::model::SongList::thumb`]).
     pub thumb: Option<NamedTrack>,
+    /// The lamps of the assist grades, ASSIST EASY first ([`crate::model::SongList::lamp_graded`]).
+    pub lamp_graded: Vec<NamedTrack>,
 }
 
 /// The destinations a document nests inside its repeating objects, assembled once at load.
@@ -761,6 +763,7 @@ fn build_nested(skin: &mut LoadedSkin) -> Result<(), SkinError> {
             graph: list.graph.as_ref().map(|graph| build_slot(skin, "song bar graph", graph, false)).transpose()?,
             rank: build_slots(skin, "song bar rank", &list.rank, false)?,
             thumb: list.thumb.as_ref().map(|thumb| build_slot(skin, "song bar picture", thumb, false)).transpose()?,
+            lamp_graded: build_slots(skin, "song bar graded lamp", &list.lamp_graded, false)?,
         };
         skin.nested.songlist = Some(tracks);
     }

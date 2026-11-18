@@ -29,7 +29,9 @@
 //! was fetched or failed, the player's place on it, how many scores came back, how many of those sit
 //! on each lamp, and the ten scores of the list a skin draws from the place the list is scrolled to
 //! (`MusicSelector.getRankingOffset`): the EX score, the place, whose it is (the player's, a rival's
-//! or neither), the lamp and the name of each. The reference counts every score the service holds;
+//! or neither), the lamp and the name of each, and this player's own number of each
+//! ([`RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST`] on) for the assist grade inside its lamp, which the
+//! reference has no id for. The reference counts every score the service holds;
 //! the service pages its ranking and does not say how many it holds, so the count here is of the
 //! scores the pages received so far hold, the player's own page among them. The rivals' scores are
 //! not read from the board here, and a skin that asks for one reads the absent value of its kind. The
@@ -47,6 +49,7 @@ use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 use rbms_skin::timer::{TimerId, timer_id};
 
+use super::extension::{RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST, RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST};
 use super::{ClusterState, ResultScene, STRING_TARGET_NAME};
 use crate::ir_outcome::IrStatus;
 use crate::ir_ranking::{RANKING_PAGE_LIMIT, RankingBoard, RankingState};
@@ -166,6 +169,9 @@ pub struct IrScore {
     pub player_type: i32,
     /// The lamp the score was made on, no play to max (`cleartype_ranking`).
     pub clear: i32,
+    /// The assist grade inside that lamp, 0 for none up to 4 for ASSIST EXHARD
+    /// ([`RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST`]).
+    pub assist_grade: i32,
     /// The name of the player, or the id the service knows them by when they gave none
     /// (`rankingname`).
     pub player: String,
@@ -236,6 +242,7 @@ fn score_at(board: &RankingBoard, index: usize) -> Option<IrScore> {
         place: i32::try_from(place).unwrap_or(i32::MAX),
         player_type,
         clear: i32::from(row.record_lamp.clear),
+        assist_grade: i32::from(row.record_lamp.assist_grade),
         player: row.player.clone(),
     })
 }
@@ -328,6 +335,9 @@ impl IrBrowser {
             NUMBER_IR_PLAYER_TOTAL_FULLCOMBO_RATE_AFTERDOT => tenths(self.count(FULL_COMBO_UP)).unwrap_or(INTEGER_ABSENT),
             NUMBER_RANKING1_EXSCORE..=NUMBER_RANKING10_EXSCORE => self.slot(NUMBER_RANKING1_EXSCORE, id).map_or(INTEGER_ABSENT, |score| score.ex_score),
             NUMBER_RANKING1_CLEAR..=NUMBER_RANKING10_CLEAR => self.slot(NUMBER_RANKING1_CLEAR, id).map_or(INTEGER_ABSENT, |score| score.place),
+            RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST..=RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST => {
+                self.slot(RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST, id).map_or(INTEGER_ABSENT, |score| score.assist_grade)
+            }
             NUMBER_RIVAL_PERFECT..=NUMBER_RIVAL_POOR_RATE => INTEGER_ABSENT,
             _ => return None,
         })
@@ -502,6 +512,7 @@ impl ClusterState for IrState<'_> {
             CLEAR_SPREAD_FIRST..=CLEAR_SPREAD_LAST => Some(INTEGER_ABSENT),
             NUMBER_RIVAL_PERFECT..=NUMBER_RIVAL_POOR_RATE => Some(INTEGER_ABSENT),
             NUMBER_RANKING1_EXSCORE..=NUMBER_RANKING10_CLEAR => Some(INTEGER_ABSENT),
+            RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST..=RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST => Some(INTEGER_ABSENT),
             _ => None,
         }
     }

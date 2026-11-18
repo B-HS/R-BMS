@@ -139,9 +139,9 @@ pub(super) fn record_rows(plays: &[PlayLog], best: Option<&BestScore>) -> [Optio
     let best_row = best.filter(|best| best.minbp != UNSET_MINIMUM).map(|best| {
         let scored = best.ex_score();
         let first_to_score = plays.iter().rev().find(|play| sets_best(play.assist, play.rule_version) && play.judge.ex_score() == scored);
-        RecordRow::of(&BarRecord::of_best(best, PointFamily::default()).sheet, first_to_score.map(|play| play.date))
+        RecordRow::of(&BarRecord::of_best(best, PointFamily::default()).sheet, best.assist_grade, first_to_score.map(|play| play.date))
     });
-    let mut latest = plays.iter().take(RECORD_ROWS - 1).map(|play| RecordRow::of(&sheet_of_play(play), Some(play.date)));
+    let mut latest = plays.iter().take(RECORD_ROWS - 1).map(|play| RecordRow::of(&sheet_of_play(play), play.assist_grade(), Some(play.date)));
     std::array::from_fn(|row| if row == BEST_ROW { best_row.clone() } else { latest.next() })
 }
 

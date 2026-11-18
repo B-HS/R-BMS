@@ -100,6 +100,7 @@ const NESTED_ARRAY_FIELDS: &[&str] = &[
     "item",
     "label",
     "lamp",
+    "lamp_graded",
     "level",
     "listoff",
     "liston",

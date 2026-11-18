@@ -31,6 +31,13 @@
 //! prepared after every part of the reference's own, so a document that declares neither is drawn
 //! and asked exactly as before. Both are kept parts: drawn where their destination last put them.
 //!
+//! A third such list (`lamp_graded`) holds one lamp per assist grade, ASSIST EASY to ASSIST EXHARD.
+//! It adds no pass: a bar whose own lamp is the light-assist one and that carries a grade the list
+//! has an image under draws that image in the lamp pass instead of its `lamp` entry. A wheel drawn
+//! with a rival picked draws the player's lamp from `playerlamp`, which the list does not stand in
+//! for. It is prepared last, after the rank badges, so a document that leaves it out is drawn and
+//! asked exactly as before.
+//!
 //! A frame is settled while it is prepared. The reference asks a slot's conditions twice in a
 //! frame, once as it prepares the wheel and once as it draws the bar, and asks a level's again for
 //! every bar; here all of that happens in [`prepare_songlist`], in the same order, and what it
@@ -422,6 +429,9 @@ pub(crate) struct SongListBody {
     rank: Vec<Option<ImagePart>>,
     /// Boxed because the part holds an object, which may itself be a wheel.
     thumb: Option<Box<ThumbPart>>,
+    /// The lamps of the assist grades, ASSIST EASY first, each drawn in place of the light-assist
+    /// lamp of a bar that carries that grade.
+    lamp_graded: Vec<Option<ImagePart>>,
     /// What each slot shows, as the frame prepared last left it.
     areas: RefCell<Vec<BarArea>>,
 }
@@ -452,6 +462,7 @@ impl SongListBody {
             thumb.prepare(frame);
         }
         self.rank.iter().flatten().for_each(|image| image.prepare(frame));
+        self.lamp_graded.iter().flatten().for_each(|image| image.prepare(frame));
     }
 
     /// What slot `slot` shows: which bar landed on it, where the slide has carried it, and what it
@@ -742,7 +753,8 @@ pub(crate) fn draw_songlist<R: Renderer>(
         let lamps = if list.rival {
             [numbered(&body.player_lamp, shown.lamp), numbered(&body.rival_lamp, shown.rival_lamp)]
         } else {
-            [numbered(&body.lamp, shown.lamp), None]
+            let graded = shown.graded_lamp_index().and_then(|index| part(&body.lamp_graded, index));
+            [graded.or_else(|| numbered(&body.lamp, shown.lamp)), None]
         };
         for lamp in lamps.into_iter().flatten() {
             painter.kept(lamp, corner);

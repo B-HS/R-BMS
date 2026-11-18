@@ -306,6 +306,7 @@ fn nested_destinations(def: &SkinDef) -> Vec<&Destination> {
             .chain(&list.graph)
             .chain(&list.rank)
             .chain(&list.thumb)
+            .chain(&list.lamp_graded)
     });
     note.chain(judge).chain(wheel).collect()
 }
