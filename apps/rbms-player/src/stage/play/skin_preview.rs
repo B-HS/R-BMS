@@ -78,6 +78,8 @@ use crate::target::{self, TargetContext};
 const SAMPLE_TITLE: &str = "SAMPLE TRACK 01";
 const SAMPLE_ARTIST: &str = "PREVIEW ARTIST";
 const SAMPLE_GENRE: &str = "PREVIEW";
+/// Whether the sample's assists name the LN MODE as a chart that leaves its long notes to it would.
+const SAMPLE_LN_MODE_DECIDES: bool = true;
 
 /// The tempo the sample chart opens at and the one it changes to, and the measure it changes on.
 const OPENING_BPM: u32 = 150;
@@ -763,6 +765,7 @@ impl PlaySample {
             played: settings.played,
             load_progress: LOADED,
             changed_playback_percent: None,
+            setup: super::run_setup::run_setup(shared, &self.session, play.random, SAMPLE_LN_MODE_DECIDES),
         };
         let shown = PlayShown::of(&self.session, &live);
         let (lift, lanecover, hidden) =

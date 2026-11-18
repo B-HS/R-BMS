@@ -140,3 +140,31 @@ fn a_run_whose_notes_have_all_gone_by_is_rated_over_the_whole_chart() {
     assert_eq!(shown.run.standing.now_rate, shown.run.standing.rate, "with every note gone by the two rates are one");
     assert_eq!((shown.run.sheet.min_bp, shown.run.sheet.max_combo), (1, 3), "the unhit fourth note is a POOR");
 }
+
+/// A chart whose second measure holds, besides plain notes on the first key at 2.0, 2.5, 3.0 and 3.5
+/// seconds, a long note on the third key from 2.5 to 3.5 seconds, a mine on the second key at 2.5
+/// and a hidden note on the fourth key at 3.0.
+const MIXED_CHART: &[u8] = b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00153:00010001\r\n#001D2:0100\r\n#00134:0010\r\n";
+
+#[test]
+fn the_notes_per_second_count_the_notes_a_player_hits_and_nothing_else() {
+    let model = to_model(&parse(MIXED_CHART), Mode::BEAT_7K);
+    let count = |chart_ms| notes_in_the_last_second(&model.timelines, chart_ms);
+    let notes = || model.timelines.iter().flat_map(|timeline| timeline.notes.iter().flatten());
+    assert!(notes().any(|note| matches!(note.kind, NoteKind::Mine { .. })), "the chart holds its mine");
+    assert!(notes().any(|note| matches!(note.kind, NoteKind::LongEnd { .. })), "and its long note");
+    assert!(model.timelines.iter().any(|timeline| timeline.hidden.iter().flatten().next().is_some()), "and its hidden note");
+
+    assert_eq!(count(Some(3_250)), 3, "the plain notes at 2.5 s and 3.0 s and the head of the long note at 2.5 s; not the mine or the hidden note");
+    assert_eq!(count(Some(3_500)), 2, "the plain notes at 3.0 s and 3.5 s; not the end of the long note at 3.5 s");
+    assert_eq!(count(Some(3_000)), 3, "a note on the judge line has reached it, and one a whole second back is gone");
+    assert_eq!((count(Some(1_000)), count(Some(9_000)), count(None)), (0, 0, 0), "before the notes, after them, and before the chart plays");
+}
+
+#[test]
+fn a_frame_counts_the_notes_of_the_last_second_by_its_play_timer() {
+    let live = PlayLive { clock: PlayClock { now_us: 3_250_000, started_us: 0 }, ..PlayLive::default() };
+
+    assert_eq!(PlayShown::of(&midway(), &live).notes_per_second, 2, "the notes at 2.5 s and 3.0 s");
+    assert_eq!(PlayShown::of(&midway(), &PlayLive::default()).notes_per_second, 0, "a stopped play timer has played nothing");
+}

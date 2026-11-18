@@ -57,6 +57,10 @@ const ROWS_HELD_SHOT_MS: i64 = 7_500;
 const CAPTURED_COURSE: &str = "Capture Course";
 const CAPTURED_COURSE_STAGES: usize = 2;
 
+/// The folders of the song browser a captured run is picked in, outermost first, so its head names
+/// where it was started: the last two of them, a table and its level.
+const CAPTURED_FOLDERS: [&str; 3] = ["TABLES", "発狂BMS", "★8"];
+
 /// The shares of the field the three covers take in the captures that draw them.
 const CAPTURED_COVER: f32 = 0.3;
 const CAPTURED_LIFT: f32 = 0.2;
@@ -227,6 +231,8 @@ impl RowsRun {
             course.index = CAPTURED_COURSE_STAGES - 1;
             app.shared.course_run = Some(course);
         }
+        app.shared.select_path =
+            CAPTURED_FOLDERS.map(|title| crate::select_tree::OpenedFolder::plain(crate::select_tree::SelectFolder::TableGroup(title.to_owned()))).to_vec();
         app.shared.skins.request_for(&app.shared.config, screen);
         let size = size.unwrap_or(authored);
         let mut pixels = HeadlessCanvas::new(size.0, size.1);

@@ -20,6 +20,8 @@ layout.OPTION = {
     DIFFERENCE_OFF = 913,
     JUDGE_SHOW = 914,
     JUDGE_HIDE = 915,
+    NPS_ON = 916,
+    NPS_OFF = 917,
     NOTES_WHITE_BLUE = 930,
     NOTES_WHITE_DEEP_BLUE = 931,
     NOTES_WHITE_YELLOW = 932,
@@ -37,6 +39,7 @@ layout.OPTION_NAME = {
     LANES = "Lane Width",
     DIFFERENCE = "Score Difference",
     JUDGE = "Judge Display",
+    NPS = "NPS Display",
     NOTES = "Note Colors",
     BOMB = "Bomb Color",
 }
@@ -353,6 +356,7 @@ function layout.of(mode, option)
     view.detail = option[layout.OPTION_NAME.DETAIL] or layout.OPTION.DETAIL_FAST_SLOW
     view.difference = option[layout.OPTION_NAME.DIFFERENCE] or layout.OPTION.DIFFERENCE_TARGET
     view.judge_shown = option[layout.OPTION_NAME.JUDGE] ~= layout.OPTION.JUDGE_HIDE
+    view.nps_shown = option[layout.OPTION_NAME.NPS] ~= layout.OPTION.NPS_OFF
     view.bomb_tint = option[layout.OPTION_NAME.BOMB] == layout.OPTION.BOMB_WHITE and theme.note.white or nil
     view.lanes = {}
     for _, field in ipairs(view.fields) do

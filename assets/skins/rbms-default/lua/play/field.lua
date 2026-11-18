@@ -63,6 +63,16 @@ local ABOVE = {
     },
 }
 
+local NPS = {
+    sprite = "num24",
+    digits = 3,
+    label = "NPS",
+    label_gap = 6,
+    label_width = 48,
+    value = theme.color.text,
+    caption = theme.color.muted,
+}
+
 local COVER = {
     edge = 2,
     inset = 12,
@@ -287,6 +297,26 @@ local function judge_of(s, side, row)
     s:place(id, nil, {})
 end
 
+local function above_offsets()
+    return { props.offset.LIFT, layout.JUDGE_POSITION.id, props.offset.JUDGEDETAIL_1P }
+end
+
+local function difference_of(view)
+    local ref = ABOVE.refs[view.difference]
+    if ref == nil then
+        return nil
+    end
+    return { sprite = ABOVE.sprite, ref = ref, digit = ABOVE.difference_digits, zeropadding = props.padding.ZEROS, saturate = true }
+end
+
+local function detail_x(s, view, row)
+    local difference = difference_of(view)
+    if difference == nil then
+        return row.left
+    end
+    return row.left + s:number_box(difference, { x = row.left, top = ABOVE.top }).span + ABOVE.gap
+end
+
 local function above_of(s, view, side, row)
     local option = layout.OPTION
     local first = side.side == 0
@@ -300,15 +330,14 @@ local function above_of(s, view, side, row)
             timer = props.timer.JUDGE_1P + side.side,
             keys = { { time = 0 }, { time = JUDGE.shown } },
             loop = props.loop.ONCE,
-            offsets = { props.offset.LIFT, layout.JUDGE_POSITION.id, props.offset.JUDGEDETAIL_1P },
+            offsets = above_offsets(),
         }
     end
-    local ref = ABOVE.refs[view.difference]
-    local slot = { x = row.left, top = ABOVE.top, w = ABOVE.word_width }
-    if ref ~= nil then
-        local difference = { sprite = ABOVE.sprite, ref = ref, digit = ABOVE.difference_digits, zeropadding = props.padding.ZEROS, saturate = true }
-        slot.x = slot.x + s:number(difference, slot, placed(nil, ABOVE.difference)).span + ABOVE.gap
+    local difference = difference_of(view)
+    if difference ~= nil then
+        s:number(difference, { x = row.left, top = ABOVE.top, w = ABOVE.word_width }, placed(nil, ABOVE.difference))
     end
+    local slot = { x = detail_x(s, view, row), top = ABOVE.top, w = ABOVE.word_width }
     if view.detail == option.DETAIL_FAST_SLOW then
         s:text({ text = "FAST", size = ABOVE.size }, slot, placed({ early }, ABOVE.fast))
         s:text({ text = "SLOW", size = ABOVE.size }, slot, placed({ late }, ABOVE.slow))
@@ -320,14 +349,28 @@ local function above_of(s, view, side, row)
     end
 end
 
-local function judges(s, view)
-    if not view.judge_shown then
-        return
+local function nps(s, view, row)
+    local x = detail_x(s, view, row)
+    if view.detail ~= layout.OPTION.DETAIL_OFF then
+        x = x + ABOVE.word_width + ABOVE.gap
     end
+    local value = { sprite = NPS.sprite, ref = props.extension_number.PLAY_NPS, digit = NPS.digits, saturate = true, align = "right" }
+    local placed = s:number(value, { x = x, top = ABOVE.top }, { color = NPS.value, offsets = above_offsets() })
+    local size = theme.type.caption
+    local label = { x = x + placed.span + NPS.label_gap, top = theme.text_top(ABOVE.top + placed.rise, size), w = NPS.label_width }
+    s:text({ text = NPS.label, size = size }, label, { color = NPS.caption, offsets = above_offsets() })
+end
+
+local function judges(s, view)
     for _, side in ipairs(view.fields) do
         local row = judge_row(s, side)
-        judge_of(s, side, row)
-        above_of(s, view, side, row)
+        if view.judge_shown then
+            judge_of(s, side, row)
+            above_of(s, view, side, row)
+        end
+        if view.nps_shown and side.side == 0 then
+            nps(s, view, row)
+        end
     end
 end
 

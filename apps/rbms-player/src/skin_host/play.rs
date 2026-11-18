@@ -21,6 +21,10 @@
 //! zero and a whole millisecond is neither early nor late, and only the first of the six judgements
 //! has an option of its own (the reference gives GREAT and below none).
 //!
+//! This player's own ids of the run are answered here too ([`super::extension`]): the folder the run
+//! was started from, the gauge it is on, the arrangement of each side and its assists as texts
+//! 21010 to 21014, and the notes that reached the judge line in the last second as number 21085.
+//!
 //! The practice state option (1080) is always off. The reference's play screen has a state in which
 //! a practice range is chosen; this player chooses one on a screen of its own, so a play screen
 //! here is never in that state.
@@ -32,15 +36,28 @@
 //! (The reference answers zero for the durations on a screen other than the play screen; here a
 //! screen that has no play frame has no answer.)
 
+use std::borrow::Cow;
+
 use rbms_config::PLAYBACK_RATE_UNCHANGED_PERCENT;
+use rbms_judge::gauge::GaugeIndex;
 use rbms_skin::property::generated::*;
 
-use super::extension::{RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_PLAYBACK_RATE_CHANGED};
+use super::extension::{
+    RBMS_NUMBER_PLAY_NPS, RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_OPTION_PLAYBACK_RATE_CHANGED, RBMS_TEXT_PLAY_ARRANGE_1P, RBMS_TEXT_PLAY_ARRANGE_2P,
+    RBMS_TEXT_PLAY_ASSIST, RBMS_TEXT_PLAY_GAUGE, RBMS_TEXT_PLAY_ORIGIN,
+};
 use super::{ClusterState, INDEX_TIMING_AUTO_ADJUST};
 
 pub mod shown;
 
-pub use shown::{Judgement, LaneSettings, PLAYER_SIDES, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
+pub use shown::{
+    ARRANGED_SIDES, Judgement, LaneSettings, PLAYER_SIDES, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, RunSetup, Scroll, notes_in_the_last_second,
+    travel_region_ms,
+};
+
+/// The names of the gauges as the option panel names them, by the number the reference gives each
+/// gauge (the default skin's `theme.gauge_name`).
+pub const GAUGE_NAMES: [&str; GaugeIndex::COUNT] = ["ASSIST EASY", "EASY", "NORMAL", "HARD", "EX HARD", "HAZARD", "CLASS", "EX CLASS", "EX HARD CLASS"];
 
 /// The gauges that are groove gauges and the first that is a hard gauge, by the number the
 /// reference gives them (`BooleanPropertyFactory.gauge_groove`, `gauge_hard`).
@@ -271,8 +288,23 @@ impl ClusterState for PlayState<'_> {
             VALUE_JUDGE_2P_DURATION => side_timing(SIDE_2P),
             VALUE_JUDGE_3P_DURATION => side_timing(SIDE_3P),
             RBMS_NUMBER_PLAYBACK_PERCENT => live.changed_playback_percent.unwrap_or(PLAYBACK_RATE_UNCHANGED_PERCENT),
+            RBMS_NUMBER_PLAY_NPS => shown.notes_per_second,
             _ => return None,
         })
+    }
+
+    fn text(&self, id: i32) -> Option<Cow<'_, str>> {
+        let shown = self.shown?;
+        let setup = &shown.live.setup;
+        let [first, second] = setup.arrangements;
+        Some(Cow::Borrowed(match id {
+            RBMS_TEXT_PLAY_ORIGIN => &setup.origin,
+            RBMS_TEXT_PLAY_GAUGE => usize::try_from(shown.gauge.kind).ok().and_then(|kind| GAUGE_NAMES.get(kind)).copied().unwrap_or_default(),
+            RBMS_TEXT_PLAY_ARRANGE_1P => first,
+            RBMS_TEXT_PLAY_ARRANGE_2P => second,
+            RBMS_TEXT_PLAY_ASSIST => &setup.assists,
+            _ => return None,
+        }))
     }
 
     fn image_index(&self, id: i32) -> Option<i32> {

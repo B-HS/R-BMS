@@ -26,6 +26,10 @@
 //! - the keys of the skin menu take the parts off the field of a run as setting their offsets does:
 //!   what the menu stores is what the run is drawn with.
 //!
+//! A run that holds the judgement or the parts to something has the figure of notes a second
+//! switched off (the row `NPS Display`): it stands over the field beside the judgement for the
+//! whole run, and what is held there is the judgement and the parts alone.
+//!
 //! Two more draw for a person to look at, and only where [`CAPTURE_DIR_ENV`] names a folder. One
 //! draws the default pack at the size it is authored at: a judgement frame by frame, the judgements a
 //! press can take and the combos one is drawn in front of, the judgement moved and hidden, the field
@@ -94,6 +98,7 @@ const BEST_DIFFERENCE: (&str, &str) = ("Score Difference", "Best");
 const NO_DETAIL: (&str, &str) = ("Judge Detail", "Off");
 const MILLISECONDS: (&str, &str) = ("Judge Detail", "Milliseconds");
 const HIDDEN_JUDGEMENT: (&str, &str) = ("Judge Display", "Hide");
+const NO_NOTES_PER_SECOND: (&str, &str) = ("NPS Display", "Off");
 const WIDE_LANES: (&str, &str) = ("Lane Width", "Wide");
 const FIELD_ON_THE_RIGHT: (&str, &str) = ("Field Side", "Right");
 
@@ -525,8 +530,9 @@ fn judged_run_carrying(tag: &str, strokes: usize, carried: u32, rows: &[(&str, &
     let pack = default_pack();
     let cleared = AROUND_THE_JUDGEMENT.iter().map(|part| (*part, opacity(NO_OPACITY)));
     let offsets: Vec<(&str, SkinOffset)> = cleared.chain(offsets.iter().copied()).collect();
+    let rows: Vec<(&str, &str)> = std::iter::once(NO_NOTES_PER_SECOND).chain(rows.iter().copied()).collect();
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes };
-    let setup = FieldSetup { tag, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows, offsets: &offsets, carried };
+    let setup = FieldSetup { tag, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows: &rows, offsets: &offsets, carried };
     FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("{tag}: not entered: {reason}"))
 }
 
@@ -728,7 +734,7 @@ fn the_default_pack_draws_nothing_of_a_part_at_no_opacity() {
         mode: rbms_model::Mode::BEAT_7K,
         played,
         size: Some(HELD_SIZE),
-        rows: &[HIDDEN_JUDGEMENT],
+        rows: &[HIDDEN_JUDGEMENT, NO_NOTES_PER_SECOND],
         offsets: &[],
         carried: 0,
     };
@@ -772,7 +778,7 @@ fn the_keys_of_the_skin_menu_take_the_parts_of_the_default_pack_off_the_field() 
         mode: rbms_model::Mode::BEAT_7K,
         played,
         size: Some(HELD_SIZE),
-        rows: &[HIDDEN_JUDGEMENT],
+        rows: &[HIDDEN_JUDGEMENT, NO_NOTES_PER_SECOND],
         offsets: &[],
         carried: 0,
     };
@@ -889,7 +895,7 @@ fn the_notes_left_at_full_opacity_are_drawn_where_the_run_stands_however_long_th
             mode: rbms_model::Mode::BEAT_7K,
             played,
             size: Some(HELD_SIZE),
-            rows: &[HIDDEN_JUDGEMENT],
+            rows: &[HIDDEN_JUDGEMENT, NO_NOTES_PER_SECOND],
             offsets: &[],
             carried: 0,
         };

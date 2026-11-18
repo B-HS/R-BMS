@@ -131,7 +131,7 @@ impl AppShared {
     /// A search is a folder of its own to the reference, titled with the word (`SearchWordBar`), and
     /// a list a search narrows is that folder: its title is what a skin that draws this path has to
     /// say the list on show is what a word found, and which word.
-    fn open_folders(&self) -> Vec<String> {
+    pub(crate) fn open_folders(&self) -> Vec<String> {
         let word = self.search.trim();
         if self.is_in_the_flat_list() && !word.is_empty() {
             return vec![format!("{SEARCH_TITLE_OPENS}{word}{SEARCH_TITLE_CLOSES}")];

@@ -199,6 +199,7 @@ props.extension_number = {
     MY_RECORD_MISS_COUNT_FIRST = 21072,
     MY_RECORD_DJ_LEVEL_FIRST = 21078,
     PLAYBACK_PERCENT = 21084,
+    PLAY_NPS = 21085,
     MY_RECORD_ASSIST_GRADE_FIRST = 21087,
     RANKING_ASSIST_GRADE_FIRST = 21093,
 }
@@ -214,6 +215,11 @@ props.extension_rate = {
 
 props.extension_text = {
     MY_RECORD_DATE_FIRST = 21000,
+    PLAY_ORIGIN = 21010,
+    PLAY_GAUGE = 21011,
+    PLAY_ARRANGE_1P = 21012,
+    PLAY_ARRANGE_2P = 21013,
+    PLAY_ASSIST = 21014,
 }
 
 props.extension_image = {

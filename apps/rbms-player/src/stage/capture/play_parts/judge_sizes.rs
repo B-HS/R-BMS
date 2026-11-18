@@ -202,8 +202,16 @@ fn judged_at(test: &str, size: (u32, u32), stance: Stance) -> Judgement {
     let offsets: Vec<(&str, SkinOffset)> = cleared.chain(position).collect();
     let pack = default_pack();
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: 1 };
-    let setup =
-        FieldSetup { tag: &tag, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(size), rows: &[], offsets: &offsets, carried: CARRIED_COMBO };
+    let setup = FieldSetup {
+        tag: &tag,
+        pack: &pack,
+        mode: rbms_model::Mode::BEAT_7K,
+        played,
+        size: Some(size),
+        rows: &[NO_NOTES_PER_SECOND],
+        offsets: &offsets,
+        carried: CARRIED_COMBO,
+    };
     let mut run = FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("{tag}: not entered: {reason}"));
     if stance == Stance::Lifted {
         let play = &mut run.app.shared.config.play;

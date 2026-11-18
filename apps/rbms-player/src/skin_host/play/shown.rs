@@ -2,16 +2,22 @@
 //!
 //! [`PlayShown::of`] reads a live [`PlaySession`] and the few things only the screen knows
 //! ([`PlayLive`]) and makes plain values of them: the run so far held against the best and the
-//! target, the gauge being played, the last judgement of each side, the lane figures and the clock.
-//! It is a pure function of its two arguments. It reads no timer table, no configuration and no
-//! screen, and it allocates nothing, so the screen can make one every frame and lend it to the host
+//! target, the gauge being played, the last judgement of each side, the lane figures, the clock and
+//! how many notes the last second of the chart brought ([`notes_in_the_last_second`]). It is a pure
+//! function of its two arguments. It reads no timer table, no configuration and no screen, and it
+//! allocates nothing (the texts of [`RunSetup`] are shared, not copied), so the screen can make one
+//! every frame and lend it to the host
 //! ([`ScreenHost::show_play`](crate::skin_host::ScreenHost::show_play)).
 //!
 //! Everything in [`PlayLive`] is a figure the reference keeps in `BMSPlayer`, `LaneRenderer` or the
 //! player's configuration and that the judge engine does not hold. Where the reference's figure is a
 //! different number type from the one the screen has (the lane cover is a `float`, the tempo a
-//! `double`), the field has the reference's type, so the skin reads the same truncation.
+//! `double`), the field has the reference's type, so the skin reads the same truncation. The one
+//! exception is [`RunSetup`], which the reference has no figure for at all.
 
+use std::sync::Arc;
+
+use rbms_model::{NoteKind, TimeLine};
 use rbms_play::PlaySession;
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState, timer_id};
 
@@ -151,8 +157,48 @@ impl Default for PlayClock {
     }
 }
 
+/// How many sides a run's lanes are arranged for: the first player's and, on a double play chart,
+/// the second's.
+pub const ARRANGED_SIDES: usize = 2;
+
+/// What a run was started with and from, which no frame of it changes: settled once when the run
+/// starts, from the run itself and not from the settings, which a run can be laid out against (a
+/// layout borrowed from a replay, a replay being watched, a practice slice).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RunSetup {
+    /// The folder of the song browser the run was started from, as its last two titles joined by
+    /// `" / "` (a difficulty table's name and the level): empty for a run started anywhere else.
+    pub origin: Arc<str>,
+    /// The arrangement each side's lanes were laid out with, by the name the option panel gives it
+    /// (`OFF`, `MIRROR`, `RANDOM` and the rest); empty for a side the chart has not.
+    pub arrangements: [&'static str; ARRANGED_SIDES],
+    /// The assists the run is played with, by the names the option panel gives them and joined by
+    /// `" · "`: only the ones that are on, and empty when none is.
+    pub assists: Arc<str>,
+}
+
+/// How far back from the judge line [`notes_in_the_last_second`] counts, in microseconds of the
+/// chart.
+pub const NOTES_PER_SECOND_WINDOW_US: i64 = 1_000_000;
+
+/// How many notes reached the judge line in the second of the chart up to `chart_ms`, the play head:
+/// the notes a player hits, a plain note or the head of a long note, timed after `chart_ms` less a
+/// second and at or before `chart_ms`. A mine, a note the chart hides and the end of a long note are
+/// not counted. Nothing has reached the line before the chart plays (`None`).
+pub fn notes_in_the_last_second(timelines: &[TimeLine], chart_ms: Option<i64>) -> i32 {
+    let Some(now_us) = chart_ms.map(|ms| ms.saturating_mul(MICROS_PER_MILLI)) else {
+        return 0;
+    };
+    let first = timelines.partition_point(|timeline| timeline.time_us <= now_us.saturating_sub(NOTES_PER_SECOND_WINDOW_US));
+    let last = timelines.partition_point(|timeline| timeline.time_us <= now_us);
+    let hit = |kind: &NoteKind| matches!(kind, NoteKind::Normal | NoteKind::LongStart { .. });
+    let count =
+        timelines.get(first..last).unwrap_or_default().iter().flat_map(|timeline| timeline.notes.iter().flatten()).filter(|note| hit(&note.kind)).count();
+    i32::try_from(count).unwrap_or(i32::MAX)
+}
+
 /// What only the play screen knows, for [`PlayShown::of`].
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PlayLive {
     pub phase: PlayPhase,
     pub kind: PlayKind,
@@ -193,6 +239,8 @@ pub struct PlayLive {
     /// chart's own speed: its PLAYBACK RATE, or a practice slice's FREQUENCY. The tempos and travel
     /// times of [`PlayLive::scroll`] are already the ones the player hears at it.
     pub changed_playback_percent: Option<i32>,
+    /// Where the run was started from and what it was laid out and played with.
+    pub setup: RunSetup,
 }
 
 /// The play screen's frame, as the host reads it.
@@ -208,6 +256,9 @@ pub struct PlayShown {
     /// How long the reference keeps the chart in its playing state, in milliseconds
     /// (`BMSPlayer.getPlaytime`).
     pub play_time_ms: i32,
+    /// How many notes reached the judge line in the last second of the chart, by the play timer
+    /// ([`notes_in_the_last_second`]).
+    pub notes_per_second: i32,
 }
 
 impl PlayShown {
@@ -215,11 +266,12 @@ impl PlayShown {
     pub fn of(session: &PlaySession, live: &PlayLive) -> PlayShown {
         let judge = session.judge();
         PlayShown {
-            live: *live,
+            live: live.clone(),
             run: RunScore::of_session(session, live.best_score, live.target_score, live.paced_now),
             gauge: GaugeReading::of_engine(judge),
             qualified: judge.gauge.selected().is_cleared(),
             play_time_ms: i32::try_from(session.play_time_ms()).unwrap_or(i32::MAX),
+            notes_per_second: notes_in_the_last_second(&session.model().timelines, live.clock.elapsed_ms()),
         }
     }
 

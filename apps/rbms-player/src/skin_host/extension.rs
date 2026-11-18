@@ -246,6 +246,12 @@ pub const RBMS_FLOAT_NOTES_RADAR_FIRST: i32 = 21_020;
 /// The last float of the run that starts at [`RBMS_FLOAT_NOTES_RADAR_FIRST`].
 pub const RBMS_FLOAT_NOTES_RADAR_LAST: i32 = run_last(RBMS_FLOAT_NOTES_RADAR_FIRST, NOTES_RADAR_AXES);
 
+/// How many notes reached the judge line in the last second of the chart, on the play screen: the
+/// notes a player hits (a plain note or the head of a long note, and no mine, hidden note or end of
+/// a long note) timed within the second of the chart up to the play head. Zero before the chart
+/// plays.
+pub const RBMS_NUMBER_PLAY_NPS: i32 = 21_085;
+
 /// The first of the shares of each lane of the chart under the cursor: the notes on the lane over the
 /// notes on its fullest lane, in the lane order of [`RBMS_NUMBER_LANE_NOTES_FIRST`].
 pub const RBMS_RATE_LANE_NOTES_FIRST: i32 = 21_000;
@@ -266,6 +272,30 @@ pub const RBMS_TEXT_MY_RECORD_DATE_FIRST: i32 = 21_000;
 
 /// The last text of the run that starts at [`RBMS_TEXT_MY_RECORD_DATE_FIRST`].
 pub const RBMS_TEXT_MY_RECORD_DATE_LAST: i32 = run_last(RBMS_TEXT_MY_RECORD_DATE_FIRST, MY_RECORD_ROWS);
+
+/// The folder of the song browser the run on the play screen was started from: the titles of the
+/// last two folders that were open, outermost first, joined by `" / "` (a difficulty table's name
+/// and the level, for a level of a table). Empty for a run started at the top of the browser and
+/// for one started anywhere else: a course, a replay being watched, a chart named on the command
+/// line. It stays as it was when a run is started again or the next song is played.
+pub const RBMS_TEXT_PLAY_ORIGIN: i32 = 21_010;
+
+/// The name of the gauge the run on the play screen is on, as the option panel names it. It is the
+/// run's own gauge: a course stage's is a course gauge, and it follows the run onto another gauge
+/// as GAUGE AUTO SHIFT moves it.
+pub const RBMS_TEXT_PLAY_GAUGE: i32 = 21_011;
+
+/// The arrangement the run on the play screen laid the first player's lanes out with, and the
+/// second player's, by the name the option panel gives it (`OFF` included): the run's own, a
+/// borrowed layout's or a watched replay's, whatever the settings say. The second is empty for a
+/// chart of one side.
+pub const RBMS_TEXT_PLAY_ARRANGE_1P: i32 = 21_012;
+pub const RBMS_TEXT_PLAY_ARRANGE_2P: i32 = 21_013;
+
+/// The assists the run on the play screen is played with, by the names the option panel gives
+/// them, joined by `" · "`: SCRATCH AUTO, the LN MODE where it decides the chart's long notes and
+/// is not LN, EX JUDGE, CONSTANT and LEGACY NOTE, each only while it is on. Empty when none is.
+pub const RBMS_TEXT_PLAY_ASSIST: i32 = 21_014;
 
 /// The last option of a run of five that starts at `first`.
 pub const fn assist_grade_options_last(first: i32) -> i32 {
@@ -320,7 +350,7 @@ mod tests {
     ];
 
     /// Every number this player keeps for itself, as runs of ids.
-    const NUMBER_RUNS: [(i32, i32); 9] = [
+    const NUMBER_RUNS: [(i32, i32); 10] = [
         (RBMS_NUMBER_LANE_NOTES_FIRST, RBMS_NUMBER_LANE_NOTES_LAST),
         (RBMS_NUMBER_NOTES_RADAR_FIRST, RBMS_NUMBER_NOTES_RADAR_LAST),
         (RBMS_NUMBER_SIBLING_CHART_LEVEL_FIRST, RBMS_NUMBER_SIBLING_CHART_LEVEL_LAST),
@@ -328,6 +358,7 @@ mod tests {
         (RBMS_NUMBER_FOLDER_CHART_COUNT, RBMS_NUMBER_FOLDER_CHART_COUNT),
         (RBMS_NUMBER_MY_RECORD_EX_FIRST, RBMS_NUMBER_MY_RECORD_LAST),
         (RBMS_NUMBER_PLAYBACK_PERCENT, RBMS_NUMBER_PLAYBACK_PERCENT),
+        (RBMS_NUMBER_PLAY_NPS, RBMS_NUMBER_PLAY_NPS),
         (RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_FIRST, RBMS_NUMBER_MY_RECORD_ASSIST_GRADE_LAST),
         (RBMS_NUMBER_RANKING_ASSIST_GRADE_FIRST, RBMS_NUMBER_RANKING_ASSIST_GRADE_LAST),
     ];
@@ -339,7 +370,7 @@ mod tests {
     const RATE_RUNS: [(i32, i32); 2] = [(RBMS_RATE_LANE_NOTES_FIRST, RBMS_RATE_LANE_NOTES_LAST), (RBMS_RATE_FOLDER_LAMP_FIRST, RBMS_RATE_FOLDER_LAMP_LAST)];
 
     /// Every text this player keeps for itself, as runs of ids.
-    const TEXT_RUNS: [(i32, i32); 1] = [(RBMS_TEXT_MY_RECORD_DATE_FIRST, RBMS_TEXT_MY_RECORD_DATE_LAST)];
+    const TEXT_RUNS: [(i32, i32); 2] = [(RBMS_TEXT_MY_RECORD_DATE_FIRST, RBMS_TEXT_MY_RECORD_DATE_LAST), (RBMS_TEXT_PLAY_ORIGIN, RBMS_TEXT_PLAY_ASSIST)];
 
     /// The highest option and event the reference declares, and the bands it leaves to a skin.
     const REFERENCE_OPTION_MAX: i32 = 3035;

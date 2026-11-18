@@ -38,7 +38,9 @@ local HEAD = {
     stage = theme.type.label,
     narrow_below = 480,
     narrow_stage_width = 128,
+    origin_share = 0.4,
 }
+local ORIGIN = props.extension_text.PLAY_ORIGIN
 local BGA = { inset = 24 }
 local SCORE = {
     most_pitch = 72,
@@ -109,7 +111,16 @@ local FOOT = {
     green = theme.tone.green,
     green_digits = 4,
     cover_digits = 4,
-    status_top = 68,
+    options_top = 68,
+    status_room = 120,
+}
+local OPTIONS = {
+    gauge = props.index.GAUGE_1P,
+    gauge_widths = { [0] = 120, 50, 81, 53, 81, 76, 62, 90, 145 },
+    gauge_lamps = { [0] = 3, 4, 5, 6, 7, 8, 5, 6, 7 },
+    arrangements = { props.extension_text.PLAY_ARRANGE_1P, props.extension_text.PLAY_ARRANGE_2P },
+    assist = props.extension_text.PLAY_ASSIST,
+    separator = " · ",
 }
 local PACE = {
     head = 28,
@@ -140,6 +151,12 @@ local function caption_on(s, label, x, baseline, width, opts)
     return parts.caption(s, label, { x = x, top = theme.text_top(baseline, size), w = width }, opts)
 end
 
+local function origin_known(main_state, known)
+    return function()
+        return (main_state.text(ORIGIN) ~= "") == known
+    end
+end
+
 local function head(s, view, main_state)
     local box = view.head
     local narrow = box.w < HEAD.narrow_below
@@ -168,6 +185,13 @@ local function head(s, view, main_state)
     }
     s:text(rate, stage_box, { op = { PLAYBACK.changed }, color = theme.tone.yellow })
 
+    local origin_ends = { { ops = {}, right = right } }
+    if narrow then
+        origin_ends = { { ops = { -PLAYBACK.changed }, right = right }, { ops = { PLAYBACK.changed }, right = stage_box.x - HEAD.gap } }
+    end
+    local origin_most = math.floor(box.w * HEAD.origin_share)
+    local artist = { ref = props.text.FULLARTIST, size = HEAD.line, overflow = props.text_overflow.SHRINK }
+    local origin = { ref = ORIGIN, size = HEAD.line, align = "right", overflow = props.text_overflow.SHRINK }
     local level = { sprite = "num18", ref = props.number.PLAYLEVEL, known = main_state.number(props.number.PLAYLEVEL) }
     parts.by_difficulty(function(index, op, color, name)
         local shown = { op = { op }, color = color }
@@ -175,9 +199,22 @@ local function head(s, view, main_state)
         local level_at = { x = x + HEAD.name_widths[index] + HEAD.level_gap, baseline = baseline }
         local placed = s:number(level, level_at, shown)
         local artist_x = level_at.x + placed.span + HEAD.artist_gap
-        local artist = { x = artist_x, top = top, w = right - artist_x }
-        local credited = { op = narrow and { op, -in_course } or { op }, color = theme.color.sub }
-        s:text({ ref = props.text.FULLARTIST, size = HEAD.line, overflow = props.text_overflow.SHRINK }, artist, credited)
+        local credited = narrow and { op, -in_course } or { op }
+        s:text(artist, { x = artist_x, top = top, w = right - artist_x }, { op = credited, draw = origin_known(main_state, false), color = theme.color.sub })
+        for _, ending in ipairs(origin_ends) do
+            local origin_x = math.max(artist_x, ending.right - origin_most)
+            if ending.right > origin_x then
+                s:text(origin, { x = origin_x, top = top, w = ending.right - origin_x }, { op = { op, table.unpack(ending.ops) }, color = theme.color.accent })
+            end
+            local artist_width = origin_x - HEAD.artist_gap - artist_x
+            if artist_width > 0 then
+                local beside = { op = { table.unpack(credited) }, draw = origin_known(main_state, true), color = theme.color.sub }
+                for _, id in ipairs(ending.ops) do
+                    table.insert(beside.op, id)
+                end
+                s:text(artist, { x = artist_x, top = top, w = artist_width }, beside)
+            end
+        end
     end)
 end
 
@@ -396,7 +433,7 @@ local function foot_speed(s, box, main_state)
     s:number(green, { x = second.x, baseline = baseline }, { color = FOOT.green })
 end
 
-local function foot_state(s, box, status_top)
+local function foot_shades(s, box)
     local changing = { op = { props.option.LANECOVER1_CHANGING } }
     local shades = { { label = i18n.t("play_cover"), ref = props.number.LANECOVER1 }, { label = "LIFT", ref = props.number.LIFT1 } }
     for index, shade in ipairs(shades) do
@@ -405,17 +442,83 @@ local function foot_state(s, box, status_top)
         local figure = { sprite = FOOT.sprite, ref = shade.ref, digit = FOOT.cover_digits }
         s:number(figure, { x = column.x, baseline = box.top + FOOT.value_baseline }, ui.merge(changing, { color = theme.color.text }))
     end
+end
 
-    local status = { x = box.x, top = box.top + status_top, w = box.w }
-    parts.caption(s, "AUTOPLAY", status, { op = { props.option.AUTOPLAY_ON }, color = theme.color.accent })
-    parts.caption(s, i18n.t("common_replay"), status, { op = { props.option.REPLAY_PLAYING }, color = theme.color.accent })
+local STATUSES = { { op = props.option.AUTOPLAY_ON, label = "AUTOPLAY" }, { op = props.option.REPLAY_PLAYING, label = i18n.t("common_replay") } }
+
+local function foot_status(s, box)
+    local row = { x = box.x, top = box.top + FOOT.options_top, w = box.w }
+    for _, status in ipairs(STATUSES) do
+        s:text({ text = status.label, size = theme.type.caption, align = "right" }, row, { op = { status.op }, color = theme.color.accent })
+    end
+end
+
+local function by_status(with_status, place)
+    if not with_status then
+        place({}, 0)
+        return
+    end
+    place({ -STATUSES[1].op, -STATUSES[2].op }, 0)
+    for _, status in ipairs(STATUSES) do
+        place({ status.op }, FOOT.status_room)
+    end
+end
+
+local function joined(main_state, ...)
+    local refs = { ... }
+    return function()
+        local words = {}
+        for _, ref in ipairs(refs) do
+            local word = main_state.text(ref)
+            if word ~= "" then
+                table.insert(words, word)
+            end
+        end
+        if #words == 0 then
+            return ""
+        end
+        return OPTIONS.separator .. table.concat(words, OPTIONS.separator)
+    end
+end
+
+local function gauge_is(main_state, kind)
+    return function()
+        return main_state.event_index(OPTIONS.gauge) == kind
+    end
+end
+
+local function foot_options(s, box, main_state, side, with_status)
+    local row = { x = box.x, top = box.top + FOOT.options_top }
+    local size = theme.type.caption
+    local spec = { size = size, overflow = props.text_overflow.SHRINK }
+    if side > 1 then
+        by_status(with_status, function(ops, status_room)
+            local text = ui.merge(spec, { ref = OPTIONS.arrangements[side] })
+            s:text(text, { x = row.x, top = row.top, w = box.w - status_room }, { op = ops, color = theme.color.sub })
+        end)
+        return
+    end
+    for kind = 0, #theme.gauge_name do
+        local drawn = gauge_is(main_state, kind)
+        local width = OPTIONS.gauge_widths[kind]
+        local lamp = theme.clear[OPTIONS.gauge_lamps[kind]].color
+        s:text({ text = theme.gauge_name[kind], size = size }, { x = row.x, top = row.top, w = width }, { draw = drawn, color = lamp })
+        by_status(with_status, function(ops, status_room)
+            local rest = ui.merge(spec, { value = joined(main_state, OPTIONS.arrangements[side], OPTIONS.assist) })
+            s:text(rest, { x = row.x + width, top = row.top, w = box.w - width - status_room }, { op = ops, draw = drawn, color = theme.color.sub })
+        end)
+    end
 end
 
 local function foot(s, view, main_state)
     local first = view.foot[1]
     local last = view.foot[#view.foot]
     foot_speed(s, first, main_state)
-    foot_state(s, last, first == last and FOOT.status_top or 0)
+    foot_shades(s, last)
+    for side, box in ipairs(view.foot) do
+        foot_options(s, box, main_state, side, box == last)
+    end
+    foot_status(s, last)
 end
 
 local function progress(s, view)

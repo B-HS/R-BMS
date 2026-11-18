@@ -45,6 +45,7 @@ local function properties(mode)
         def = "Target",
     })
     table.insert(list, parts.shown_or_hidden(name.JUDGE, option.JUDGE_SHOW, option.JUDGE_HIDE))
+    table.insert(list, chosen(name.NPS, { name = "On", op = option.NPS_ON }, { name = "Off", op = option.NPS_OFF }))
     if mode.sides == 1 then
         table.insert(list, chosen(name.GRAPH, { name = "On", op = option.GRAPH_ON }, { name = "Off", op = option.GRAPH_OFF }))
     end

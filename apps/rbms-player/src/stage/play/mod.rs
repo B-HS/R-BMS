@@ -48,6 +48,7 @@ mod hold_tests;
 #[cfg(test)]
 mod input_time_tests;
 mod key_gate;
+mod run_setup;
 mod scene;
 #[cfg(test)]
 mod screen_tests;
@@ -69,7 +70,7 @@ use crate::app_result::{enter_result, run_target};
 use crate::ghost::{GhostPace, RunGhosts};
 use crate::keyconfig::{Shortcut, ShortcutScreen, mode_config_key};
 use crate::skin_host::options::SettingsView;
-use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
+use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, RunSetup, Scroll, travel_region_ms};
 use crate::skin_host::play_timers::{CHART_PREVIEW, FieldOffsets, PlayingFrame, SceneEvent};
 use crate::skin_host::score::standing::PacedScores;
 use crate::skin_screen::PlayDraw;
@@ -306,6 +307,9 @@ pub(crate) struct PlayState {
     /// What the scroll settings did while the chart played, looked at once a frame, for the trace
     /// the run keeps ([`crate::play_trace`]).
     pub(crate) speed_log: crate::play_trace::SpeedLog,
+    /// Where the run was started from and what it was laid out and played with, settled on the
+    /// first frame a skin draws of it ([`PlayState::ensure_setup`]).
+    setup: Option<RunSetup>,
 }
 
 /// The frame `PlaySession::bga_frame` reports before the chart's first background event, which is
@@ -370,6 +374,7 @@ impl PlayState {
             carried_combo,
             field: None,
             speed_log: crate::play_trace::SpeedLog::default(),
+            setup: None,
         }
     }
 
@@ -1131,7 +1136,23 @@ impl PlayState {
             long_note_mode: settings.played.long_note_mode,
             played: settings.played,
             load_progress: self.load_progress(),
+            setup: self.setup.clone().unwrap_or_default(),
         }
+    }
+
+    /// Settle what the run was started with and from, once, before the first frame a skin draws of
+    /// it: the folder of the song browser it was picked in, the arrangement it was laid out with --
+    /// a practice slice's own, or what the settings hold for the run, which is a borrowed layout's
+    /// or a watched replay's while one is laid out -- and its assists. The LN MODE counts as an
+    /// assist only where the chart leaves its long notes to it, which is when the run's record is
+    /// kept under the mode.
+    fn ensure_setup(&mut self, shared: &AppShared) {
+        if self.setup.is_some() {
+            return;
+        }
+        let arrangement = self.practice.as_ref().map_or(shared.config.play.random, |practice| practice.option);
+        let ln_mode_decides = self.ln_mode_key != rbms_store::SCORE_LN_MODE_FROM_CHART;
+        self.setup = Some(run_setup::run_setup(shared, &self.session, arrangement, ln_mode_decides));
     }
 
     /// Where the judgement graph's cursor runs: the whole chart, or the slice a practice run plays.
@@ -1211,6 +1232,7 @@ impl PlayState {
             return false;
         };
         self.ensure_feed(shared);
+        self.ensure_setup(shared);
         if self.scene.is_none() {
             self.feed_unentered(shared);
         }

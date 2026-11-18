@@ -1,6 +1,8 @@
 //! The play screen's clusters answer each id as the reference's factories do, for a fixture run
 //! written for the purpose, and the host routes them together with the score and the load.
 
+use std::sync::Arc;
+
 use rbms_chart::to_model;
 use rbms_model::Mode;
 use rbms_parser::parse;
@@ -31,6 +33,13 @@ const PLAY_TIME_MS: i32 = 8_500;
 /// When the play timer of the host switched on, and the frame the host is built at: 3.25 seconds in.
 const PLAY_STARTED_US: i64 = 2_000_000;
 const FRAME_US: i64 = 5_250_000;
+
+/// Where the fixture run was started from and the assists it is played with.
+const ORIGIN: &str = "発狂BMS / ★8";
+const ASSISTS: &str = "SCRATCH AUTO · EX JUDGE";
+
+/// The default skin's names of the gauges, which the option panel shows.
+const DEFAULT_THEME: &str = include_str!("../../../../../assets/skins/rbms-default/lua/theme.lua");
 
 /// The fixture with three of its four notes judged: a PGREAT on time, a GREAT early and a GOOD late.
 fn midway() -> PlaySession {
@@ -75,6 +84,7 @@ fn live() -> PlayLive {
         played: PlayedOptions { random: 2, random_2p: 3, double_option: 1, custom_judge: true, bpm_guide: true, ..PlayedOptions::default() },
         load_progress: 1.0,
         changed_playback_percent: None,
+        setup: RunSetup { origin: Arc::from(ORIGIN), arrangements: ["RANDOM", ""], assists: Arc::from(ASSISTS) },
     }
 }
 
@@ -704,4 +714,53 @@ fn a_host_over_a_play_frame_takes_the_load_from_the_frame() {
     assert_eq!((host.boolean(OPTION_NOW_LOADING), host.boolean(OPTION_LOADED)), (Some(true), Some(false)));
     assert_eq!(host.integer(NUMBER_LOADING_PROGRESS), 40);
     assert_eq!(host.rate(RATE_LOAD_PROGRESS), Some(0.4));
+}
+
+#[test]
+fn the_run_s_own_texts_read_where_it_started_its_gauge_its_arrangement_and_its_assists() {
+    let timers = TimerState::new();
+    let shown = shown();
+    let host = host_over(&timers, &shown);
+
+    for id in RBMS_TEXT_PLAY_ORIGIN..=RBMS_TEXT_PLAY_ASSIST {
+        assert_eq!(clusters_of(IdSpace::Text, id).next(), Some(Cluster::Play), "text {id}");
+    }
+    let texts = [RBMS_TEXT_PLAY_ORIGIN, RBMS_TEXT_PLAY_GAUGE, RBMS_TEXT_PLAY_ARRANGE_1P, RBMS_TEXT_PLAY_ARRANGE_2P, RBMS_TEXT_PLAY_ASSIST];
+    assert_eq!(
+        texts.map(|id| host.text(id).into_owned()),
+        [ORIGIN, GAUGE_NAMES[usize::try_from(shown.gauge.kind).expect("a gauge number")], "RANDOM", "", ASSISTS]
+    );
+    assert_eq!(PlayState::default().text(RBMS_TEXT_PLAY_ORIGIN), None, "a cluster with no frame answers no text");
+}
+
+#[test]
+fn the_gauge_text_follows_the_gauge_the_run_is_on_now() {
+    let timers = TimerState::new();
+    let mut shown = shown();
+    for (kind, name) in [(0, "ASSIST EASY"), (4, "EX HARD"), (6, "CLASS"), (8, "EX HARD CLASS")] {
+        shown.gauge = GaugeReading { kind, ..shown.gauge };
+        let host = host_over(&timers, &shown);
+        assert_eq!(host.text(RBMS_TEXT_PLAY_GAUGE), name, "gauge {kind}");
+        assert_eq!(host.image_index(BUTTON_GAUGE_1P), kind, "the skin reads the colour off the same gauge");
+    }
+}
+
+#[test]
+fn every_gauge_name_is_the_one_the_default_skin_s_option_panel_shows() {
+    for (kind, name) in GAUGE_NAMES.iter().enumerate() {
+        let entry = format!("[{kind}] = \"{name}\",");
+        assert!(DEFAULT_THEME.contains(&entry), "theme.lua names gauge {kind} otherwise than {name}");
+    }
+}
+
+#[test]
+fn the_notes_per_second_count_what_reached_the_judge_line_in_the_last_second_of_the_play_timer() {
+    let timers = TimerState::new();
+    let shown = shown();
+    let host = host_over(&timers, &shown);
+
+    assert_eq!(clusters_of(IdSpace::Integer, RBMS_NUMBER_PLAY_NPS).next(), Some(Cluster::Play));
+    assert_eq!(host.integer(RBMS_NUMBER_PLAY_NPS), 2, "3.25 s into the chart, the notes at 2.5 s and 3.0 s are within the second");
+    let stopped = shown_with(PlayLive { clock: PlayClock::stopped(FRAME_US), ..live() });
+    assert_eq!(host_over(&timers, &stopped).integer(RBMS_NUMBER_PLAY_NPS), 0, "nothing has reached the line before the chart plays");
 }
