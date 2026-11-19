@@ -523,6 +523,26 @@ fn a_controller_works_the_list_with_select_and_its_lanes() {
     assert_eq!(rows_text(&state), ["2134567"], "the rows did not take the lane");
 }
 
+/// On the keyboard as on a controller, the lane key of the fourth key pressed twice removes the
+/// capture under the cursor while the list has the keys, and any other key between the two presses
+/// takes the first back.
+#[test]
+fn the_fourth_lane_key_pressed_twice_on_the_keyboard_removes_a_capture() {
+    let mut app = with_two_captures("lane-remove");
+    let mut state = LayoutPickState::open(&app.shared, 0);
+    key(&mut app, &mut state, KeyCode::ArrowRight);
+    let fourth = lane_key(&app, Mode::BEAT_7K, LIST_KEY_REMOVE);
+    let first = lane_key(&app, Mode::BEAT_7K, LIST_KEY_UP);
+    key(&mut app, &mut state, fourth);
+    assert!(state.list.is_armed(), "the first press did not ask for a second");
+    key(&mut app, &mut state, first);
+    key(&mut app, &mut state, fourth);
+    assert_eq!(app.shared.captured_layouts.all().len(), 2, "a key between the two presses did not take the first back");
+    key(&mut app, &mut state, fourth);
+    assert_eq!(app.shared.captured_layouts.all().len(), 1, "the fourth lane key pressed twice did not remove the capture");
+    assert!(matches!(state.notice, Some((Notice::Says(LayoutPickText::Removed), _))), "{:?}", state.notice);
+}
+
 /// Where a test saves what it drew when asked to, and the name it saves the screen under.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 const CAPTURE_FILE: &str = "layout-pick-captured.png";

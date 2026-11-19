@@ -48,9 +48,13 @@ pub(crate) struct CapturedLayout {
 }
 
 impl CapturedLayout {
-    /// Whether the two are the same chart laid out by the same arrangement and seed.
+    /// Whether the two are the same chart laid out alike by the same arrangement: from the same
+    /// seed, or from seeds that write the same lane order. MIRROR and ROTATE lay a chart out alike
+    /// from every seed and R-RANDOM in one of a few shifts, so a run on either is the same layout as
+    /// another whatever seed it had. A capture with no lane order written is told apart by its seed.
     pub(crate) fn same_layout(&self, other: &CapturedLayout) -> bool {
-        self.md5.eq_ignore_ascii_case(&other.md5) && self.random_label.eq_ignore_ascii_case(&other.random_label) && self.seed == other.seed
+        let laid_out_alike = self.seed == other.seed || (!self.layout.is_empty() && self.layout == other.layout);
+        self.md5.eq_ignore_ascii_case(&other.md5) && self.random_label.eq_ignore_ascii_case(&other.random_label) && laid_out_alike
     }
 
     /// The arrangement it was played on.
@@ -197,12 +201,18 @@ pub(crate) struct CapturedLayouts {
 
 impl CapturedLayouts {
     /// Read the captures at `path`. A file that is not there yet is none -- the state of a fresh
-    /// install -- and one that cannot be read is reported and taken as none, so a broken file never
-    /// stops a screen from opening. Such a file is written over by the next capture.
+    /// install -- and one that cannot be read, as text or as captures, is reported and taken as
+    /// none, so a broken file never stops a screen from opening. Such a file is written over by the
+    /// next capture.
     pub(crate) fn load(path: &Path) -> CapturedLayouts {
         let path = path.to_path_buf();
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return CapturedLayouts { file: CapturedFile::default(), path };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return CapturedLayouts { file: CapturedFile::default(), path },
+            Err(e) => {
+                notify_text(Level::Warn, CaptureText::NotLoaded, &[&e]);
+                return CapturedLayouts { file: CapturedFile::default(), path };
+            }
         };
         match ron::from_str::<CapturedFile>(&text) {
             Ok(file) => CapturedLayouts { file, path },

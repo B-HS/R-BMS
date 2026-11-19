@@ -481,7 +481,7 @@ impl LayoutPickState {
     /// ([`LayoutPickState::list_lane`]).
     fn press_lane(&mut self, shared: &mut AppShared, lane: usize, dir: ScratchDir, now: Instant) {
         let backward = matches!(dir, ScratchDir::Backward);
-        let place = self.lanes.iter().enumerate().find_map(|(side, keys)| keys.iter().position(|key| *key == lane).map(|at| (side, at)));
+        let place = self.place_of(lane);
         if self.focus == Focus::Captured {
             self.list_lane(shared, place.map(|(_, at)| at), backward, now);
             return;
@@ -494,6 +494,20 @@ impl LayoutPickState {
             self.side = side;
             self.type_lane(side, u8::try_from(at + 1).unwrap_or(u8::MAX), now);
         }
+    }
+
+    /// The side a key lane of the chart's mode is on, and where it is among that side's key lanes;
+    /// `None` for the turntable.
+    fn place_of(&self, lane: usize) -> Option<(usize, usize)> {
+        self.lanes.iter().enumerate().find_map(|(side, keys)| keys.iter().position(|key| *key == lane).map(|at| (side, at)))
+    }
+
+    /// Whether `code` is a key that removes the capture under the list's cursor: Delete, or, while
+    /// the list has the keys, the key of a side's fourth key lane. A removal waits for its second
+    /// press through these and is taken back by any other key.
+    fn removes_a_capture(&self, code: KeyCode) -> bool {
+        let removal_lane = |lane: usize| self.place_of(lane).is_some_and(|(_, at)| at == LIST_KEY_REMOVE);
+        code == KeyCode::Delete || (self.focus == Focus::Captured && self.lane_keys.iter().any(|(key, lane)| *key == code && removal_lane(*lane)))
     }
 
     /// A lane pressed while the list of captured layouts has the keys, `place` being where it is
@@ -613,6 +627,16 @@ impl LayoutPickState {
     #[cfg(test)]
     pub(crate) fn clock(&self) -> PreviewClock {
         self.clock
+    }
+
+    /// The chart as the preview has it laid out, once it is read, for the tests that hold it
+    /// against a run.
+    #[cfg(test)]
+    pub(crate) fn previewed(&self) -> Option<&Model> {
+        match &self.preview {
+            Preview::Read { laid_out, .. } => Some(laid_out),
+            _ => None,
+        }
     }
 
     fn move_measures(&mut self, by: i64) {
@@ -867,7 +891,7 @@ impl StageHandler for LayoutPickState {
         if !key.pressed {
             return Transition::Stay;
         }
-        if key.code != KeyCode::Delete {
+        if !self.removes_a_capture(key.code) {
             self.list.disarm();
         }
         match key.code {

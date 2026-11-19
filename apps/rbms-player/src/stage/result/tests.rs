@@ -1566,3 +1566,121 @@ fn a_captured_run_is_played_again_from_layout_pick_on_its_arrangement_and_seed()
     let borrowed = app.shared.borrowed_layout().map(|layout| (layout.random, layout.seed));
     assert_eq!(borrowed, Some((NoteOption::RRandom, CAPTURED_SEED)));
 }
+
+/// The pulses a beat of the one-note-a-lane charts is, and the most lanes any of their modes has.
+const ONE_NOTE_RESOLUTION: i64 = 240;
+const ONE_NOTE_LANES: i64 = 16;
+
+/// A bmson chart of the mode `hint` names with one note on each of its lanes, each on a beat of its
+/// own, so where a note is played after the lanes are laid out says which lane it came from.
+fn one_note_a_lane(hint: &str) -> String {
+    let notes: Vec<String> = (1..=ONE_NOTE_LANES).map(|x| format!(r#"{{"x":{x},"y":{}}}"#, x * ONE_NOTE_RESOLUTION)).collect();
+    format!(
+        r#"{{"info":{{"init_bpm":120,"resolution":{ONE_NOTE_RESOLUTION},"mode_hint":"{hint}"}},"sound_channels":[{{"name":"a.ogg","notes":[{}]}}]}}"#,
+        notes.join(",")
+    )
+}
+
+/// Where each note of `model` is, by the moment it is on and its lane.
+fn lanes_by_time(model: &rbms_model::Model) -> Vec<(i64, usize)> {
+    let lanes = model.timelines.iter().flat_map(|line| line.notes.iter().enumerate().filter(|(_, note)| note.is_some()).map(|(lane, _)| (line.time_us, lane)));
+    lanes.collect()
+}
+
+/// A run of the chart at `path` laid out as the load lays it out -- the arrangement and the seed
+/// the app hands the load, a seed carried from a run before taking the place of a fresh one -- and
+/// where its notes went.
+fn run_laid_out(app: &mut App, path: &std::path::Path, carried_seed: Option<u64>) -> (PlayState, Vec<(i64, usize)>) {
+    let bytes = std::fs::read(path).expect("the chart reads");
+    let mut decoded = crate::app_play::decode_chart(&bytes, &path.to_string_lossy()).expect("the chart decodes");
+    app.shared.chart_path = path.to_string_lossy().into_owned();
+    let (random, seed) = app.shared.layout_to_load(&decoded.md5, carried_seed);
+    crate::app_play::lay_out_notes(&mut decoded.model, random, seed, decoded.bmson.as_deref(), &decoded.mode);
+    let lanes = lanes_by_time(&decoded.model);
+    app.shared.mode = decoded.mode;
+    let session = PlaySession::new(decoded.model, SessionOptions { seed, ..SessionOptions::default() });
+    (PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string()), lanes)
+}
+
+/// Play `played` through by hand, end it on its result screen, and press the capture key there
+/// after the arrangement in the settings was changed to `changed_to`, as the option panel of the
+/// screen changes it.
+fn capture_on_its_result(app: &mut App, played: &mut PlayState, changed_to: NoteOption) {
+    crate::borrowed_layout::tests::play_through(played);
+    app.shared.replay = None;
+    let Transition::To(Stage::Result(mut screen)) = enter_result(played, &mut app.shared) else {
+        panic!("the run did not end on its result screen");
+    };
+    app.shared.config.play.random = changed_to;
+    screen.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(Shortcut::CaptureLayout.default_key()));
+}
+
+/// The modes LAYOUT PICK lays out, by the mode hint a bmson chart names them with, and the
+/// arrangements a capture is kept of.
+const LAID_OUT_MODES: [(&str, Mode); 5] =
+    [("beat-5k", Mode::BEAT_5K), ("beat-7k", Mode::BEAT_7K), ("popn-9k", Mode::POPN_9K), ("beat-10k", Mode::BEAT_10K), ("beat-14k", Mode::BEAT_14K)];
+const CAPTURED_ARRANGEMENTS: [NoteOption; 4] = [NoteOption::Random, NoteOption::RRandom, NoteOption::Mirror, NoteOption::Rotate];
+
+/// How long the test of every mode waits for a chart to be read for its preview.
+const PREVIEW_READ_WAIT: Duration = Duration::from_secs(30);
+
+/// What a capture says is what the run was: on every mode LAYOUT PICK lays out, one side or two, and
+/// on every arrangement a capture is kept of, the lane order written for a run played through and
+/// ended on its result is where that run put each lane's notes, whatever the option panel of the
+/// result screen was turned to before the key was pressed. LAYOUT PICK previews the capture laid out
+/// as the run was, START plays it laid out so again, and that run captured is the same capture.
+#[test]
+fn a_capture_is_the_layout_the_run_was_played_on_in_every_mode_and_arrangement() {
+    for (hint, mode) in LAID_OUT_MODES {
+        let text = one_note_a_lane(hint);
+        for option in CAPTURED_ARRANGEMENTS {
+            let tag = format!("faithful-{hint}-{}", option.label());
+            let dir = std::env::temp_dir().join(format!("rbms-result-capture-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("a temp dir");
+            let path = dir.join("chart.bmson");
+            std::fs::write(&path, &text).expect("the chart is written");
+            let decoded = crate::app_play::decode_chart(text.as_bytes(), &path.to_string_lossy()).expect("the chart decodes");
+            assert_eq!(decoded.mode, mode, "{hint}");
+            let original = lanes_by_time(&decoded.model);
+            assert!((0..mode.key).all(|lane| original.iter().any(|(_, from)| *from == lane)), "{tag}: a lane of the chart has no note to follow");
+            let mut app = with_library(plain_app());
+            app.shared.library = Library::from_songs(vec![SongEntry { path: path.clone(), mode, ..song(PLAYED_PATH, &decoded.md5) }]);
+            app.shared.captured_layouts = crate::captured_layouts::CapturedLayouts::load(&dir.join(crate::captured_layouts::CAPTURED_LAYOUTS_FILE));
+            app.shared.config.play.random = option;
+
+            let (mut played, played_lanes) = run_laid_out(&mut app, &path, Some(CAPTURED_SEED));
+            capture_on_its_result(&mut app, &mut played, NoteOption::Off);
+            let kept = app.shared.captured_layouts.all().to_vec();
+            assert_eq!(kept.len(), 1, "{tag}: the run was not captured");
+            assert_eq!((kept[0].random_label.as_str(), kept[0].seed), (option.label(), CAPTURED_SEED), "{tag}");
+
+            let mut perm: Vec<usize> = (0..mode.key).collect();
+            for ((at, from), (moved_at, to)) in original.iter().zip(&played_lanes) {
+                assert_eq!(at, moved_at, "{tag}: a note moved in time");
+                perm[*from] = *to;
+            }
+            let rows = rbms_chart::shuffle::layout_of_permutation(mode, &perm).expect("the run kept its lanes on their sides");
+            let written: Vec<String> = rows.iter().map(|row| rbms_chart::shuffle::layout_row_text(row)).collect();
+            assert_eq!(kept[0].layout, written, "{tag}: the lane order written is not where the run put the notes");
+
+            let mut pick = crate::stage::LayoutPickState::open(&app.shared, 0);
+            pick.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(KeyCode::ArrowRight));
+            let deadline = Instant::now() + PREVIEW_READ_WAIT;
+            while pick.previewed().is_none() {
+                pick.update(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 });
+                assert!(Instant::now() < deadline, "{tag}: the chart was never read");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(pick.previewed().map(lanes_by_time), Some(played_lanes.clone()), "{tag}: the preview is not laid out as the run was");
+            let started = pick.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, press(KeyCode::Enter));
+            assert!(matches!(started, Transition::To(Stage::Loading(_) | Stage::Decide(_))), "{tag}: the capture was not played");
+
+            let (mut again, again_lanes) = run_laid_out(&mut app, &path, None);
+            assert_eq!(again.session.seed(), CAPTURED_SEED, "{tag}");
+            assert_eq!(again_lanes, played_lanes, "{tag}: the run on the capture is not laid out as the captured run was");
+            capture_on_its_result(&mut app, &mut again, NoteOption::Off);
+            assert_eq!(app.shared.captured_layouts.all(), kept.as_slice(), "{tag}: the run on the capture is another capture");
+        }
+    }
+}
