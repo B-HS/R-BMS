@@ -16,7 +16,7 @@ local TABS = {
     { id = "btn.side.volume", icon = "icon_volume" },
 }
 
-local PANEL = { x = 64, top = 128, width = 1032, height = 840, slide = 200, inset = 32, title_top = 168, rule_top = 216 }
+local PANEL = { x = 64, top = theme.select_layout.song.top, width = 1032, height = 832, slide = 200, inset = 32, title_top = 168, rule_top = 216, clear_above = 4 }
 local ROW = { first = 240, pitch = 72, height = 56, inset = 24 }
 local SETTINGS = {
     { id = "btn.side.keyconfig", label = i18n.t("side_key_config"), act = props.event.KEYCONFIG, fixed = i18n.t("side_open") },
@@ -92,6 +92,7 @@ end
 
 local function shell(s, timer, title, hint)
     local box = { x = PANEL.x, top = PANEL.top, w = PANEL.width, h = PANEL.height }
+    s:rect({ x = box.x, top = box.top - PANEL.clear_above, w = box.w, h = PANEL.clear_above }, theme.color.bg, entering(timer))
     s:rect(box, theme.color.raised, entering(timer))
     s:rect({ x = box.x, top = box.top, w = box.w, h = theme.grid.rule }, theme.color.accent, entering(timer))
     local inner = { x = box.x + PANEL.inset, w = box.w - PANEL.inset * 2 }

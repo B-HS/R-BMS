@@ -25,6 +25,7 @@
 use rbms_skin::dst::{SkinColor, SkinOffset};
 use rbms_skin::model::Animation;
 
+use super::long_text::{TRACE_OF_INK, ink_runs};
 use super::*;
 
 /// The row of the pack's play documents that says how wide a lane is, and its item for the wider one.
@@ -210,10 +211,29 @@ impl RowsRun {
         ending: PlayEnding,
         course: bool,
     ) -> Result<RowsRun, String> {
-        let name = format!("{tag}.bms");
-        let model = chart_model(&mode_chart(mode.title, mode.sides), &name, mode.mode);
-        let chart = settings_of(&format!("{tag}-chart")).with_file_name(&name);
-        let EnteredPlay { mut app, screen, size: authored, play_time_ms, arrived, _keysounds } = enter_play_scene(&default_pack(), tag, &chart, model, ending)?;
+        let (model, chart) = chart_for(tag, mode);
+        let entered = enter_play_scene(&default_pack(), tag, &chart, model, ending)?;
+        RowsRun::settle(entered, rows, colours, size, course)
+    }
+
+    /// [`Self::enter`] for a run started as `start` says, which is what its options line names.
+    fn enter_started(
+        tag: &str,
+        mode: &RowMode,
+        rows: &[(&str, &str)],
+        size: Option<(u32, u32)>,
+        ending: PlayEnding,
+        start: &RunStart,
+    ) -> Result<RowsRun, String> {
+        let (model, chart) = chart_for(tag, mode);
+        let entered = enter_play_scene_started(&default_pack(), tag, &chart, model, ending, 0, start)?;
+        RowsRun::settle(entered, rows, &[], size, false)
+    }
+
+    /// Switch the rows and set the colours of a scene that was entered, make it the last stage of a
+    /// course when `course` says so, and wait for its document.
+    fn settle(entered: EnteredPlay, rows: &[(&str, &str)], colours: &[(&str, SkinColor)], size: Option<(u32, u32)>, course: bool) -> Result<RowsRun, String> {
+        let EnteredPlay { mut app, screen, size: authored, play_time_ms, arrived, _keysounds } = entered;
         for (row, item) in rows {
             if !choose_in_skin(&mut app, screen, row, item) {
                 return Err(format!("the document has no row {row:?} with an item {item:?}"));
@@ -301,6 +321,13 @@ impl RowsRun {
         assert_eq!(self.app.shared.skin_failure(self.screen), None, "{label}: the document failed");
         assert_eq!(self.app.shared.skin_warnings(self.screen), &[] as &[String], "{label}: the document compiled with warnings");
     }
+}
+
+/// The chart written for `mode` as a file called after `tag`, and where that file is.
+fn chart_for(tag: &str, mode: &RowMode) -> (rbms_model::Model, std::path::PathBuf) {
+    let name = format!("{tag}.bms");
+    let model = chart_model(&mode_chart(mode.title, mode.sides), &name, mode.mode);
+    (model, settings_of(&format!("{tag}-chart")).with_file_name(&name))
 }
 
 /// The name a run is entered and reported under: its mode and the items its rows are switched to.
@@ -700,6 +727,167 @@ fn the_play_scene_of_the_default_pack_is_captured_with_its_rows_switched() {
         println!("{label}: captured {}", saved.join(", "));
     }
     assert_eq!(files_under(&pack), before, "capturing the default pack's play scene changed its folder");
+}
+
+/// The gauge, the JUDGE WIDTH and the LN MODE that give the options line of a run its longest
+/// words: the EX-HARD course gauge, a judge window twice the chart's and HCN.
+const LONGEST_GAUGE: (rbms_judge::gauge::GaugeIndex, f32) = (rbms_judge::gauge::GaugeIndex::ExHardClass, 100.0);
+const WIDE_JUDGE_RATE: i32 = 200;
+const LONGEST_LN_MODE_KEY: &str = "HCN";
+
+/// The JUDGE settings that make a run judged wider than its chart asks, which is the assist EX JUDGE.
+fn wide_judge() -> rbms_play::JudgeSetup {
+    rbms_play::JudgeSetup { judge_rate_key: [WIDE_JUDGE_RATE; rbms_play::JUDGE_WIDTH_TIER_COUNT], ..rbms_play::JudgeSetup::default() }
+}
+
+/// A run played with every assist the options line names and laid out with R-RANDOM, on the gauge
+/// with the longest name: the longest line the options row can have.
+fn longest_start() -> RunStart {
+    RunStart {
+        arrangement: rbms_chart::shuffle::NoteOption::RRandom,
+        gauge: Some(LONGEST_GAUGE),
+        judge: Some(rbms_play::JudgeSetup { ln_mode: rbms_judge::ln::LnMode::HellChargeNote, ..wide_judge() }),
+        ln_mode_key: LONGEST_LN_MODE_KEY.to_owned(),
+        scratch_auto: true,
+        constant_speed: true,
+        legacy_note: true,
+    }
+}
+
+/// A run with one assist and an arrangement: a line that fits where the longest does not.
+fn assisted_start() -> RunStart {
+    RunStart { arrangement: rbms_chart::shuffle::NoteOption::Mirror, scratch_auto: true, ..RunStart::default() }
+}
+
+/// A run with one short assist: EX JUDGE, which fits on the options line of the narrowest field.
+fn judged_start() -> RunStart {
+    RunStart { judge: Some(wide_judge()), ..RunStart::default() }
+}
+
+/// What makes a run start as one of the options lines is drawn for.
+type StartOf = fn() -> RunStart;
+
+/// The runs whose options line is drawn, each by the name its frames are saved under: none of the
+/// assists, one, and all of them.
+const OPTION_STARTS: [(&str, StartOf); 3] = [("short", RunStart::default), ("assisted", assisted_start), ("longest", longest_start)];
+
+/// The scenes the options line is captured in: every key mode, the lanes wide, and the field on the
+/// right, which move the box the line is written in.
+const OPTION_SHOTS: [(&RowMode, &[(&str, &str)]); 10] = [
+    (&FIVE, &[]),
+    (&FIVE, &[WIDE]),
+    (&FIVE, &[WIDE, FIELD_ON_THE_RIGHT]),
+    (&SEVEN, &[]),
+    (&SEVEN, &[WIDE]),
+    (&SEVEN, &[FIELD_ON_THE_RIGHT]),
+    (&NINE, &[]),
+    (&TEN, &[]),
+    (&FOURTEEN, &[]),
+    (&FOURTEEN, &[WIDE]),
+];
+
+/// Captures the options line of the default pack's play scene for a person to look at, in every
+/// scene of [`OPTION_SHOTS`] and with each of [`OPTION_STARTS`]: without [`CAPTURE_DIR_ENV`] this
+/// passes without drawing anything.
+#[test]
+fn the_options_line_of_the_default_pack_is_captured_in_every_key_mode_with_none_of_its_assists_and_with_all() {
+    if std::env::var_os(CAPTURE_DIR_ENV).is_none() {
+        return;
+    }
+    for (mode, rows) in OPTION_SHOTS {
+        for (start_name, start) in OPTION_STARTS {
+            let prefix = format!("options-{}-{start_name}", label_of(mode, rows));
+            let mut run = RowsRun::enter_started(&prefix, mode, rows, None, PlayEnding::StillPlaying, &start())
+                .unwrap_or_else(|reason| panic!("{prefix}: not entered: {reason}"));
+            run.open(|_, _| {}).unwrap_or_else(|reason| panic!("{prefix}: not opened: {reason}"));
+            run.play_to(HELD_ROWS_CHART_MS).unwrap_or_else(|reason| panic!("{prefix}: not played: {reason}"));
+            run.assert_clean(&prefix);
+            save(&prefix, CAPTURE_EXTENSION, run.size, run.pixels.rgba());
+        }
+    }
+}
+
+/// The name of the gauge the pack's options line writes for a run on the NORMAL gauge, by which the
+/// row of that line is found in the document.
+const NORMAL_GAUGE: &str = "NORMAL";
+
+/// How far above the options line a frame is read from, in the pixels of the document: clear of the
+/// readouts over it, which end a line's height and more above.
+const OPTIONS_SCAN_LEAD: i32 = 6;
+
+/// The assists of the longest run in the order the options line names them, and the first of them,
+/// which a field with no turntable leaves out.
+const LONGEST_ASSISTS: &str = "SCRATCH AUTO · HCN · EX JUDGE · CONSTANT · LEGACY NOTE";
+const FIRST_OF_THE_ASSISTS: &str = "SCRATCH AUTO · ";
+
+/// The scale, in the legacy unit of the text engine, at which a line of the size of a caption is
+/// measured: a caption is 18 pixels and a unit of the scale 8.5.
+const CAPTION_SCALE: f32 = 18.0 / 8.5;
+
+/// The least a line of assists is squeezed to, as a share of the width it has unsqueezed. The
+/// narrowest field squeezes the longest of them to about two thirds.
+const LEAST_ASSISTS_SQUEEZE: f32 = 0.65;
+
+impl RowsRun {
+    /// The row, counted down from the top of the document, that the options line of the first field
+    /// starts at: where the name of the gauge is written, the lowest place the screen writes NORMAL.
+    fn options_row_top(&self) -> i32 {
+        let height = self.authored().1;
+        let def = &self.document().def;
+        let named = def.text.iter().filter(|text| text.constant_text.as_deref() == Some(NORMAL_GAUGE));
+        named.map(|text| self.placed(&text.id)).map(|placed| height - placed.y - placed.h).max().expect("the options line names the NORMAL gauge")
+    }
+}
+
+/// The options line of a run says the gauge and the arrangement, and the assists after them while
+/// they fit; where they do not fit it says them under the line, a line of their own, which is wholly
+/// on the screen and is squeezed to no less than [`LEAST_ASSISTS_SQUEEZE`] of its width. A run with
+/// no assist, and one whose assist fits, has the one line it has always had, in every key mode.
+#[test]
+fn the_default_pack_writes_the_assists_of_a_run_under_its_options_line_only_where_they_do_not_fit_beside_it() {
+    let runs: [(&str, RunStart, usize); 3] = [("short", RunStart::default(), 1), ("judged", judged_start(), 1), ("longest", longest_start(), 2)];
+    for (mode, rows) in OPTION_SHOTS {
+        for (name, start, lines) in &runs {
+            let label = format!("{}-{name}", label_of(mode, rows));
+            let mut run = RowsRun::enter_started(&format!("options-held-{label}"), mode, rows, Some(HELD_ROWS_SIZE), PlayEnding::StillPlaying, start)
+                .unwrap_or_else(|reason| panic!("{label}: not entered: {reason}"));
+            run.open(|_, _| {}).unwrap_or_else(|reason| panic!("{label}: not opened: {reason}"));
+            run.play_to(HELD_ROWS_CHART_MS).unwrap_or_else(|reason| panic!("{label}: not played: {reason}"));
+            run.assert_clean(&label);
+
+            let (width, height) = run.authored();
+            let (across, down) = (HELD_ROWS_SIZE.0 as f32 / width as f32, HELD_ROWS_SIZE.1 as f32 / height as f32);
+            let lanes = run.lanes();
+            let field = lanes.chunks(lanes.len() / mode.sides.len()).next().expect("a field has lanes");
+            let left = field.iter().map(|lane| lane.x).min().unwrap_or_default();
+            let right = field.iter().map(|lane| lane.x + lane.w).max().unwrap_or_default();
+            let columns = (left as f32 * across).ceil() as u32..(right as f32 * across).floor() as u32;
+            let top = ((run.options_row_top() - OPTIONS_SCAN_LEAD) as f32 * down).floor() as u32;
+
+            let drawn = ink_runs(&run.pixels, columns.clone(), top..HELD_ROWS_SIZE.1, false, TRACE_OF_INK);
+            assert_eq!(
+                drawn.len(),
+                *lines,
+                "{label}: the options line is written on {} lines, not {lines}: the rows that carry ink are {drawn:?}",
+                drawn.len()
+            );
+            if *lines == 1 {
+                continue;
+            }
+            let under = drawn.last().expect("a second line");
+            assert!(under.end < HELD_ROWS_SIZE.1, "{label}: the second line of the options line runs to the foot of the screen: {drawn:?}");
+
+            let assists = if mode.mode == Some(rbms_model::Mode::POPN_9K) { LONGEST_ASSISTS.trim_start_matches(FIRST_OF_THE_ASSISTS) } else { LONGEST_ASSISTS };
+            let written = ink_runs(&run.pixels, columns, under.clone(), true, TRACE_OF_INK);
+            let ink = (written.last().map_or(0, |last| last.end) - written.first().map_or(0, |first| first.start)) as f32 / across;
+            let unsqueezed = rbms_render::font::text_width(assists, CAPTION_SCALE);
+            assert!(
+                ink >= unsqueezed * LEAST_ASSISTS_SQUEEZE,
+                "{label}: the assists are squeezed to {:.2} of their width, which is {unsqueezed:.0} px unsqueezed and {ink:.0} px drawn",
+                ink / unsqueezed
+            );
+        }
+    }
 }
 
 mod colours;

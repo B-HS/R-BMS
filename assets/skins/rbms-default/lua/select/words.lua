@@ -25,7 +25,6 @@ words.bga = { [0] = "ON", [2] = "OFF" }
 words.fix = { [0] = "OFF", "START BPM", "MAX BPM", "MAIN BPM", "MIN BPM" }
 words.shift = { [0] = "NONE", "CONTINUE", "SURVIVAL TO GROOVE", "BEST CLEAR", "SELECT TO UNDER" }
 words.algorithm = { [0] = "COMBO", "DURATION", "LOWEST" }
-words.algorithm_set_elsewhere = "SCORE"
 
 words.random = listed("words_random_", 0, 7)
 
@@ -88,7 +87,7 @@ words.assist_rule = {
     title = t("words_assist_title"),
     lead = lines("words_assist_lead", 2),
     rows = {
-        { gauge = "EX HARD, HAZARD", grade = 4 },
+        { gauge = "EX-HARD, HAZARD", grade = 4 },
         { gauge = "HARD", grade = 3 },
         { gauge = "NORMAL", grade = 2 },
         { gauge = "EASY", grade = 1 },

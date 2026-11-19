@@ -18,7 +18,6 @@ local FIELD = { height = 52, inset = 10, arrow = 20, arrow_inset = 14, gap = 12 
 
 panel.HEADER = HEADER
 panel.ROWS = ROWS
-panel.WIRE = WIRE
 
 local Sheet = {}
 Sheet.__index = Sheet

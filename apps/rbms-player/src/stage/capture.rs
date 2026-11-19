@@ -84,6 +84,7 @@ mod panels;
 mod play_parts;
 mod play_rows;
 mod search;
+mod side_panel;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -2394,10 +2395,56 @@ fn enter_play_scene(pack: &Path, tag: &str, chart: &Path, model: rbms_model::Mod
 /// The gauge a stage of a course begins on when the stage before it left it full.
 const COURSE_STAGE_GAUGE: (rbms_judge::gauge::GaugeIndex, f32) = (rbms_judge::gauge::GaugeIndex::Class, 100.0);
 
+/// What a captured run is started with, beside its chart, that the options line of a play skin
+/// names: the arrangement its lanes are laid out with, the gauge it begins on, and the assists it is
+/// played with. The default is a run with none of them: the arrangement off and the gauge the
+/// settings choose.
+#[derive(Clone)]
+struct RunStart {
+    arrangement: rbms_chart::shuffle::NoteOption,
+    /// The gauge the run begins on, when it is not the one the settings choose.
+    gauge: Option<(rbms_judge::gauge::GaugeIndex, f32)>,
+    /// The judge settings the run is played with, which carry its LN MODE and its JUDGE WIDTH.
+    judge: Option<rbms_play::JudgeSetup>,
+    /// The key the run's record is kept under: the LN MODE counts as an assist only when it is not
+    /// [`SCORE_LN_MODE_FROM_CHART`].
+    ln_mode_key: String,
+    scratch_auto: bool,
+    constant_speed: bool,
+    legacy_note: bool,
+}
+
+impl Default for RunStart {
+    fn default() -> Self {
+        RunStart {
+            arrangement: rbms_chart::shuffle::NoteOption::Off,
+            gauge: None,
+            judge: None,
+            ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_owned(),
+            scratch_auto: false,
+            constant_speed: false,
+            legacy_note: false,
+        }
+    }
+}
+
 /// The same scene for a run that begins with a combo of `carried` already counted, the way a stage
 /// of a course begins with the combo of the stage before it: on the gauge of a course, which is the
 /// state a run takes a combo over with. A run that carries nothing is entered as any other.
 fn enter_play_scene_carrying(pack: &Path, tag: &str, chart: &Path, model: rbms_model::Model, ending: PlayEnding, carried: u32) -> Result<EnteredPlay, String> {
+    enter_play_scene_started(pack, tag, chart, model, ending, carried, &RunStart::default())
+}
+
+/// The same scene for a run started as `start` says.
+fn enter_play_scene_started(
+    pack: &Path,
+    tag: &str,
+    chart: &Path,
+    model: rbms_model::Model,
+    ending: PlayEnding,
+    carried: u32,
+    start: &RunStart,
+) -> Result<EnteredPlay, String> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize};
 
@@ -2414,12 +2461,20 @@ fn enter_play_scene_carrying(pack: &Path, tag: &str, chart: &Path, model: rbms_m
     app.shared.mode = mode;
     app.shared.config.play.autoplay = autoplay;
     app.shared.config.play.gauge = gauge;
+    app.shared.config.play.random = start.arrangement;
+    app.shared.config.play.constant_speed = start.constant_speed;
+    app.shared.config.play.legacy_note = start.legacy_note;
     app.shared.active_keys = app.shared.keyconfig.lane_keys(mode);
     app.shared.active_reverse_keys = app.shared.keyconfig.scratch_reverse_keys(mode);
     let play_time_ms = rbms_play::play_time_ms(&model, autoplay);
-    let initial_gauge = (carried > 0).then_some(COURSE_STAGE_GAUGE);
-    let session = PlaySession::new(model, SessionOptions { autoplay, gauge, initial_gauge, initial_combo: carried, ..SessionOptions::default() });
-    let mut play = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+    let initial_gauge = start.gauge.or((carried > 0).then_some(COURSE_STAGE_GAUGE));
+    let auto_lanes = crate::app_play::scratch_auto_lanes(mode, start.scratch_auto);
+    let mut session =
+        PlaySession::new(model, SessionOptions { autoplay, gauge, initial_gauge, initial_combo: carried, auto_lanes, ..SessionOptions::default() });
+    if let Some(judge) = start.judge {
+        session.set_judge_setup(judge);
+    }
+    let mut play = PlayState::new(session, std::collections::HashMap::new(), 0, start.ln_mode_key.clone());
     let arrived = Arc::new(AtomicUsize::new(PLAY_LOADING_DONE));
     let (sender, rx) = std::sync::mpsc::channel();
     let keysounds = KeysoundLoad { rx, progress: Arc::clone(&arrived), cancel: Arc::new(AtomicBool::new(false)), total: PLAY_LOADING_TOTAL };

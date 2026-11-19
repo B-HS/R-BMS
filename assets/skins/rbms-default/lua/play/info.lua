@@ -116,12 +116,58 @@ local FOOT = {
 }
 local OPTIONS = {
     gauge = props.index.GAUGE_1P,
-    gauge_widths = { [0] = 120, 50, 81, 53, 81, 76, 62, 90, 145 },
+    gauge_widths = { [0] = 120, 50, 81, 53, 84, 76, 62, 90, 148 },
     gauge_lamps = { [0] = 3, 4, 5, 6, 7, 8, 5, 6, 7 },
     arrangements = { props.extension_text.PLAY_ARRANGE_1P, props.extension_text.PLAY_ARRANGE_2P },
     assist = props.extension_text.PLAY_ASSIST,
     separator = " · ",
+    line_pitch = theme.grid.unit * 3,
+    glyph = "[\1-\127\194-\244][\128-\191]*",
+    glyph_widths = {
+        A = 12.38,
+        B = 11.75,
+        C = 13.12,
+        D = 13.0,
+        E = 10.88,
+        F = 10.62,
+        G = 13.38,
+        H = 13.38,
+        I = 4.88,
+        J = 10.25,
+        K = 12.12,
+        L = 10.12,
+        M = 16.25,
+        N = 13.62,
+        O = 13.75,
+        P = 11.5,
+        Q = 13.75,
+        R = 11.62,
+        S = 11.5,
+        T = 11.62,
+        U = 13.38,
+        V = 12.38,
+        W = 17.75,
+        X = 12.25,
+        Y = 12.25,
+        Z = 11.38,
+        ["0"] = 11.38,
+        ["1"] = 7.38,
+        ["2"] = 11.0,
+        ["3"] = 11.12,
+        ["4"] = 11.62,
+        ["5"] = 10.62,
+        ["6"] = 11.12,
+        ["7"] = 10.25,
+        ["8"] = 11.12,
+        ["9"] = 11.12,
+        [" "] = 5.12,
+        ["-"] = 8.25,
+        ["+"] = 11.88,
+        ["·"] = 5.12,
+    },
+    unknown_glyph = theme.type.caption,
 }
+local TEXT_WIDTHS = {}
 local PACE = {
     head = 28,
     legend = 140,
@@ -481,10 +527,61 @@ local function joined(main_state, ...)
     end
 end
 
+function info.text_width(text)
+    local width = TEXT_WIDTHS[text]
+    if width ~= nil then
+        return width
+    end
+    width = 0
+    for glyph in text:gmatch(OPTIONS.glyph) do
+        width = width + (OPTIONS.glyph_widths[glyph] or OPTIONS.unknown_glyph)
+    end
+    TEXT_WIDTHS[text] = width
+    return width
+end
+
 local function gauge_is(main_state, kind)
     return function()
         return main_state.event_index(OPTIONS.gauge) == kind
     end
+end
+
+local function apart_when(main_state, side, box_width, status_room, kind)
+    local together = joined(main_state, OPTIONS.arrangements[side], OPTIONS.assist)
+    return function()
+        if main_state.text(OPTIONS.assist) == "" then
+            return false
+        end
+        local name_width = OPTIONS.gauge_widths[kind or main_state.event_index(OPTIONS.gauge)] or 0
+        return info.text_width(together()) > box_width - name_width - status_room
+    end
+end
+
+local function both(first, second)
+    return function()
+        return first() and second()
+    end
+end
+
+local function not_(check)
+    return function()
+        return not check()
+    end
+end
+
+local function foot_assists(s, box, main_state, side, with_status)
+    local at = { x = box.x, top = box.top + FOOT.options_top + OPTIONS.line_pitch, w = box.w }
+    local spec = {
+        size = theme.type.caption,
+        overflow = props.text_overflow.SHRINK,
+        value = function()
+            return main_state.text(OPTIONS.assist)
+        end,
+    }
+    by_status(with_status, function(ops, status_room)
+        local apart = apart_when(main_state, side, box.w, status_room)
+        s:text(spec, at, { op = ops, draw = apart, color = theme.color.sub })
+    end)
 end
 
 local function foot_options(s, box, main_state, side, with_status)
@@ -504,10 +601,15 @@ local function foot_options(s, box, main_state, side, with_status)
         local lamp = theme.clear[OPTIONS.gauge_lamps[kind]].color
         s:text({ text = theme.gauge_name[kind], size = size }, { x = row.x, top = row.top, w = width }, { draw = drawn, color = lamp })
         by_status(with_status, function(ops, status_room)
-            local rest = ui.merge(spec, { value = joined(main_state, OPTIONS.arrangements[side], OPTIONS.assist) })
-            s:text(rest, { x = row.x + width, top = row.top, w = box.w - width - status_room }, { op = ops, draw = drawn, color = theme.color.sub })
+            local apart = apart_when(main_state, side, box.w, status_room, kind)
+            local at = { x = row.x + width, top = row.top, w = box.w - width - status_room }
+            local together = ui.merge(spec, { value = joined(main_state, OPTIONS.arrangements[side], OPTIONS.assist) })
+            local alone = ui.merge(spec, { value = joined(main_state, OPTIONS.arrangements[side]) })
+            s:text(together, at, { op = ops, draw = both(drawn, not_(apart)), color = theme.color.sub })
+            s:text(alone, at, { op = ops, draw = both(drawn, apart), color = theme.color.sub })
         end)
     end
+    foot_assists(s, box, main_state, side, with_status)
 end
 
 local function foot(s, view, main_state)

@@ -57,7 +57,7 @@ pub use shown::{
 
 /// The names of the gauges as the option panel names them, by the number the reference gives each
 /// gauge (the default skin's `theme.gauge_name`).
-pub const GAUGE_NAMES: [&str; GaugeIndex::COUNT] = ["ASSIST EASY", "EASY", "NORMAL", "HARD", "EX HARD", "HAZARD", "CLASS", "EX CLASS", "EX HARD CLASS"];
+pub const GAUGE_NAMES: [&str; GaugeIndex::COUNT] = ["ASSIST EASY", "EASY", "NORMAL", "HARD", "EX-HARD", "HAZARD", "CLASS", "EX CLASS", "EX-HARD CLASS"];
 
 /// The gauges that are groove gauges and the first that is a hard gauge, by the number the
 /// reference gives them (`BooleanPropertyFactory.gauge_groove`, `gauge_hard`).

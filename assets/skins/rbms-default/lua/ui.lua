@@ -66,10 +66,6 @@ function ui.digit_count(value)
     return #digits_of(value)
 end
 
-function ui.box(x, top, w, h)
-    return { x = x, top = top, w = w, h = h }
-end
-
 function ui.inset(box, left, top, right, bottom)
     local t = top or left
     local r = right or left

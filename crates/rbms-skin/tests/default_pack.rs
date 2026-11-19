@@ -774,3 +774,32 @@ fn a_folder_path_too_long_for_the_browsers_header_keeps_the_folders_it_ends_with
     assert_eq!(kept.4, format!("… > {wide}"), "a wide letter takes the room of more than one narrow one");
     assert_eq!(kept.5, format!("{short} > {}", "x".repeat(18)), "a path of wide and narrow letters that fits is left alone");
 }
+
+/// The play screen puts the assists of a run under its options line when they would not fit beside
+/// it, and decides that by adding up the width of each letter it will write, because a skin cannot
+/// ask the text engine. The sum is never more than a hundredth under what the engine measures for
+/// the lines the options line writes, at the 18 pixels of a caption (measured with the bundled face
+/// at that size), and at most three hundredths over it, the pairs of letters the engine kerns being
+/// the difference. A letter the table does not hold counts as wide as the caption is high.
+#[test]
+fn the_play_screen_adds_up_the_width_of_its_options_line_to_within_three_percent_over_the_text_engines() {
+    const PROBE: &str = "
+        local width = require('lua.play.info').text_width
+        return width('SCRATCH AUTO \u{b7} HCN \u{b7} EX JUDGE \u{b7} CONSTANT \u{b7} LEGACY NOTE'), width(' \u{b7} R-RANDOM'), width('EX-HARD CLASS'), width('ALL-SCRATCH'), width('H-RANDOM'), width(''), width('ふ')
+    ";
+    const ENGINE_WIDTHS: [f64; 5] = [555.65, 115.75, 145.04, 124.30, 102.23];
+    const CAPTION_SIZE: f64 = 18.0;
+    const MOST_UNDER: f64 = 0.01;
+    const MOST_OVER: f64 = 0.03;
+    let runtime = pack_runtime(LuaMode::Full);
+    let summed = eval_in_pack::<(f64, f64, f64, f64, f64, f64, f64)>(&runtime, &MapHost::new(), PROBE).expect("the probe runs");
+
+    for (engine, ours) in ENGINE_WIDTHS.iter().zip([summed.0, summed.1, summed.2, summed.3, summed.4]) {
+        assert!(
+            ours >= engine * (1.0 - MOST_UNDER) && ours <= engine * (1.0 + MOST_OVER),
+            "the sum {ours} is not between a hundredth under and three hundredths over the {engine} px the text engine measures"
+        );
+    }
+    assert_eq!(summed.5, 0.0, "nothing written is no width");
+    assert_eq!(summed.6, CAPTION_SIZE, "a letter the table does not hold is as wide as the caption is high");
+}

@@ -36,10 +36,6 @@ function motion.grow_down(start, duration, opts)
     return ui.merge(opts, { keys = { { time = start, h = 0 }, { time = start + duration } }, acc = props.acc.DECELERATE })
 end
 
-function motion.grow_up(start, duration, height, opts)
-    return ui.merge(opts, { keys = { { time = start, h = 0, dtop = height }, { time = start + duration } }, acc = props.acc.DECELERATE })
-end
-
 function motion.progress_right(duration, opts)
     return ui.merge(opts, { keys = { { time = 0, w = 0 }, { time = duration } } })
 end

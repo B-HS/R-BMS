@@ -40,12 +40,18 @@ const LONG_MEASURES: u32 = 56;
 const OBJECTS_PER_LANE: usize = 16;
 const LONG_LANES: [&str; 7] = ["11", "12", "13", "14", "15", "18", "19"];
 
-/// What the best of the long chart is: its clear lamp (EX HARD), its EX, its misses and its combo.
+/// What every play of the long chart is: its clear lamp (EX HARD), its EX, its misses and its combo.
 /// The EX, the misses and the combo have five digits.
 const LONG_BEST_CLEAR: u8 = 7;
 const LONG_BEST_EX: u32 = 12_000;
 const LONG_BEST_BREAKS: u32 = 12_345;
 const LONG_BEST_COMBO: u32 = 11_111;
+
+/// How many times the long chart was played, all of them cleared: the least that gives PLAY COUNT
+/// and CLEAR COUNT five digits, the most a count of the pair of the info window shows whole. The
+/// plays are a second apart.
+const LONG_PLAYS: u32 = 10_000;
+const MILLIS_PER_PLAY: i64 = 1_000;
 
 fn long_chart_text(title: &str, subtitle: &str, difficulty: u32, level: u32) -> String {
     let notes: String =
@@ -71,14 +77,24 @@ fn long_text_app(pack: &Path, tag: &str) -> Result<App, String> {
     }
     app.shared.library = report.library;
     app.shared.song_db = crate::library::open_song_db(&database);
-    let best =
-        app.shared.library.songs().iter().find(|entry| entry.title == LONG_TITLE && entry.subtitle == LONG_SUBTITLE).map(|entry| rbms_store::ScoreRecord {
-            mode: entry.mode.name.to_owned(),
-            counts: [LONG_BEST_EX / EX_PER_PGREAT, LONG_BEST_EX % EX_PER_PGREAT, 0, LONG_BEST_BREAKS, 0, 0],
-            max_combo: LONG_BEST_COMBO,
-            ..record(&entry.md5, LONG_BEST_CLEAR, LONG_BEST_EX, LONG_BEST_BREAKS, BROWSER_RECORD_PLAYED_AT)
-        });
-    app.shared.scores = rbms_store::ScoreBook::from_records(best.into_iter().collect());
+    let plays: Vec<rbms_store::ScoreRecord> = app
+        .shared
+        .library
+        .songs()
+        .iter()
+        .find(|entry| entry.title == LONG_TITLE && entry.subtitle == LONG_SUBTITLE)
+        .map(|entry| {
+            (0..LONG_PLAYS)
+                .map(|play| rbms_store::ScoreRecord {
+                    mode: entry.mode.name.to_owned(),
+                    counts: [LONG_BEST_EX / EX_PER_PGREAT, LONG_BEST_EX % EX_PER_PGREAT, 0, LONG_BEST_BREAKS, 0, 0],
+                    max_combo: LONG_BEST_COMBO,
+                    ..record(&entry.md5, LONG_BEST_CLEAR, LONG_BEST_EX, LONG_BEST_BREAKS, BROWSER_RECORD_PLAYED_AT + i64::from(play) * MILLIS_PER_PLAY)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    app.shared.scores = rbms_store::ScoreBook::from_records(plays);
     let mut scores = ScoreDb::open_in_memory().map_err(|error| format!("the score database did not open: {error}"))?;
     scores.migrate().map_err(|error| format!("the score database was not laid out: {error}"))?;
     migrate_score_book(&mut scores, &app.shared.scores).map_err(|error| format!("the record was not stored: {error}"))?;
@@ -139,26 +155,38 @@ const HEAD_TEXT_COLUMNS: Range<u32> = 224..1096;
 const HEAD_TEXT_ROWS: Range<u32> = 112..280;
 const BEST_MISS_COLUMNS: Range<u32> = 1046..1098;
 const BEST_RECORD_ROWS: Range<u32> = 618..656;
-const COMBO_PAIR_COLUMNS: Range<u32> = 352..552;
-const COMBO_PAIR_ROWS: Range<u32> = 764..790;
+
+/// The three label and value pairs of MY SCORE that count: the columns and the rows each is drawn
+/// in, and how many letters its label has.
+struct CountPair {
+    label: &'static str,
+    columns: Range<u32>,
+    rows: Range<u32>,
+    letters: usize,
+}
+
+const COUNT_PAIRS: [CountPair; 3] = [
+    CountPair { label: "MAX COMBO", columns: 352..552, rows: 764..790, letters: 8 },
+    CountPair { label: "PLAY COUNT", columns: 560..752, rows: 764..790, letters: 9 },
+    CountPair { label: "CLEAR COUNT", columns: 560..752, rows: 788..814, letters: 10 },
+];
 
 /// How many lines the head of a chart writes, how many digits the misses of the best are, how many
-/// letters MAX COMBO has and how many digits the combo of the best has, and how many pixels apart
-/// the last letter and the first digit are to be read as two words.
+/// digits the combo and the counts of the best have, and how many pixels apart the last letter and
+/// the first digit are to be read as two words.
 const HEAD_LINES: usize = 4;
 const BEST_MISS_DIGITS: usize = 5;
-const COMBO_LABEL_GLYPHS: usize = 8;
-const COMBO_VALUE_GLYPHS: usize = 5;
+const COUNT_VALUE_GLYPHS: usize = 5;
 const LABEL_TO_VALUE_GAP: u32 = 3;
 
 /// The brightest channel a pixel has to reach to be taken as part of a glyph: any trace of one for
 /// the rows between two lines, and a body of the glyph for the columns between two digits.
-const TRACE_OF_INK: u8 = 16;
-const BODY_OF_INK: u8 = 64;
+pub(super) const TRACE_OF_INK: u8 = 16;
+pub(super) const BODY_OF_INK: u8 = 64;
 
 /// The runs of rows of `rows` of `pixels` that carry ink in `columns` -- of columns when `by_column`
 /// -- each as the range it covers.
-fn ink_runs(pixels: &HeadlessCanvas, columns: Range<u32>, rows: Range<u32>, by_column: bool, ink: u8) -> Vec<Range<u32>> {
+pub(super) fn ink_runs(pixels: &HeadlessCanvas, columns: Range<u32>, rows: Range<u32>, by_column: bool, ink: u8) -> Vec<Range<u32>> {
     let carries = |x: u32, y: u32| {
         let color = pixels.pixel_at(x, y);
         color.r.max(color.g).max(color.b) >= ink
@@ -179,7 +207,8 @@ fn ink_runs(pixels: &HeadlessCanvas, columns: Range<u32>, rows: Range<u32>, by_c
 /// The four lines of a chart's head leave blank pixel rows between them even where a letter that
 /// hangs below its line stands over one that rises above the next -- a title ending in `g`, `y` or
 /// `p` over a subtitle that opens with `[` -- the misses of a best that has five digits are drawn
-/// with all five, and the label MAX COMBO is clear of a combo that has five digits.
+/// with all five, and the labels MAX COMBO, PLAY COUNT and CLEAR COUNT are clear of the five digits
+/// beside them.
 ///
 /// Runs wherever the tests do: it draws the default pack's browser and keeps nothing.
 #[test]
@@ -193,15 +222,10 @@ fn the_default_packs_info_window_keeps_its_lines_apart_and_its_five_digit_number
     let digits = ink_runs(&pixels, BEST_MISS_COLUMNS, BEST_RECORD_ROWS, true, BODY_OF_INK);
     assert_eq!(digits.len(), BEST_MISS_DIGITS, "the misses of the best are not all drawn: the columns that carry ink are {digits:?}");
 
-    let pair = ink_runs(&pixels, COMBO_PAIR_COLUMNS, COMBO_PAIR_ROWS, true, BODY_OF_INK);
-    assert_eq!(
-        pair.len(),
-        COMBO_LABEL_GLYPHS + COMBO_VALUE_GLYPHS,
-        "MAX COMBO and its five digits are not all drawn apart: the columns that carry ink are {pair:?}"
-    );
-    let apart = pair[COMBO_LABEL_GLYPHS].start - pair[COMBO_LABEL_GLYPHS - 1].end;
-    assert!(
-        apart >= LABEL_TO_VALUE_GAP,
-        "MAX COMBO touches the five digits of the combo beside it, {apart} px from them: the columns that carry ink are {pair:?}"
-    );
+    for CountPair { label, columns, rows, letters } in COUNT_PAIRS {
+        let pair = ink_runs(&pixels, columns, rows, true, BODY_OF_INK);
+        assert_eq!(pair.len(), letters + COUNT_VALUE_GLYPHS, "{label} and its five digits are not all drawn apart: the columns that carry ink are {pair:?}");
+        let apart = pair[letters].start - pair[letters - 1].end;
+        assert!(apart >= LABEL_TO_VALUE_GAP, "{label} touches the five digits beside it, {apart} px from them: the columns that carry ink are {pair:?}");
+    }
 }

@@ -170,7 +170,7 @@ theme.clear = {
     [4] = { key = "easy", name = "EASY CLEAR", color = theme.lamp.easy },
     [5] = { key = "normal", name = "CLEAR", color = theme.lamp.normal },
     [6] = { key = "hard", name = "HARD CLEAR", color = theme.lamp.hard },
-    [7] = { key = "exhard", name = "EX HARD CLEAR", color = theme.lamp.exhard },
+    [7] = { key = "exhard", name = "EX-HARD CLEAR", color = theme.lamp.exhard },
     [8] = { key = "fullcombo", name = "FULL COMBO", color = theme.lamp.fullcombo },
     [9] = { key = "perfect", name = "PERFECT", color = theme.lamp.perfect },
     [10] = { key = "max", name = "MAX", color = theme.lamp.max },
@@ -233,11 +233,11 @@ theme.gauge_name = {
     [1] = "EASY",
     [2] = "NORMAL",
     [3] = "HARD",
-    [4] = "EX HARD",
+    [4] = "EX-HARD",
     [5] = "HAZARD",
     [6] = "CLASS",
     [7] = "EX CLASS",
-    [8] = "EX HARD CLASS",
+    [8] = "EX-HARD CLASS",
 }
 
 theme.random_name = {
@@ -323,7 +323,6 @@ local RADAR_CENTER_DROP = 168
 
 theme.radar = {
     area = RADAR_AREA,
-    picture = RADAR_PICTURE,
     side = RADAR_SIDE,
     radius = RADAR_SIDE * RADAR_PICTURE.radius / RADAR_PICTURE.side,
     center = { x = RADAR_AREA.x + RADAR_AREA.width / 2, top = RADAR_AREA.top + RADAR_CENTER_DROP },

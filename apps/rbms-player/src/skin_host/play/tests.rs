@@ -737,7 +737,7 @@ fn the_run_s_own_texts_read_where_it_started_its_gauge_its_arrangement_and_its_a
 fn the_gauge_text_follows_the_gauge_the_run_is_on_now() {
     let timers = TimerState::new();
     let mut shown = shown();
-    for (kind, name) in [(0, "ASSIST EASY"), (4, "EX HARD"), (6, "CLASS"), (8, "EX HARD CLASS")] {
+    for (kind, name) in [(0, "ASSIST EASY"), (4, "EX-HARD"), (6, "CLASS"), (8, "EX-HARD CLASS")] {
         shown.gauge = GaugeReading { kind, ..shown.gauge };
         let host = host_over(&timers, &shown);
         assert_eq!(host.text(RBMS_TEXT_PLAY_GAUGE), name, "gauge {kind}");

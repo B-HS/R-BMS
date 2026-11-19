@@ -70,7 +70,7 @@ local SCORE = {
     small_sprite = "num32",
     digits = 5,
     progress = { height = 8, label_drop = 12, tick = 2, first_tick = 2 },
-    pairs = { sprite = "num24", digits = 5 },
+    pairs = { sprite = "num24", digits = 5, label_gap = 8, tiers = { { first = 1, last = 3 }, { first = 4, last = 4 }, { first = 5 } } },
     judges = { sprite = "num18", digits = 5 },
 }
 
@@ -529,24 +529,41 @@ local function progress(s, when)
     end
 end
 
+local function digits_within(main_state, ref, tier)
+    return function()
+        local digits = ui.digit_count(main_state.number(ref))
+        return digits >= tier.first and digits <= (tier.last or digits)
+    end
+end
+
 local function stats(s, main_state, when)
     local area = LAYOUT.score
     local row = ROWS.pairs
     local size = theme.type.label
-    local function place(column, line, label)
+    local function place(column, line)
         local x = area.x + column * (row.width + row.gap)
         local baseline = area.top + row.baseline_drop[line]
-        caption(s, label, { x = x, top = theme.text_top(baseline, theme.type.caption), w = row.width })
-        return { x = x, baseline = baseline, top = theme.text_top(baseline, size), w = row.width }
+        return { x = x, baseline = baseline, top = theme.text_top(baseline, size), w = row.width }, theme.text_top(baseline, theme.type.caption)
+    end
+    local function labelled(column, line, label)
+        local at, label_top = place(column, line)
+        caption(s, label, { x = at.x, top = label_top, w = row.width })
+        return at
     end
     local function count(column, line, label, ref, shown)
-        local at = place(column, line, label)
+        local at, label_top = place(column, line)
+        for _, tier in ipairs(SCORE.pairs.tiers) do
+            local digits = math.min(tier.last or SCORE.pairs.digits, SCORE.pairs.digits)
+            local spec = { sprite = SCORE.pairs.sprite, digit = digits }
+            local room = row.width - s:number_box(spec, { x = 0, baseline = 0 }).span - SCORE.pairs.label_gap
+            caption(s, label, { x = at.x, top = label_top, w = room }, { draw = digits_within(main_state, ref, tier) })
+        end
         local spec = { sprite = SCORE.pairs.sprite, ref = ref, digit = SCORE.pairs.digits, saturate = true, align = "right" }
         s:number(spec, at, kit.arriving(ui.merge({ color = theme.color.text }, shown.shown)))
         dash(s, size, at, shown, "right")
     end
     count(0, 1, "MAX COMBO", props.number.MAXCOMBO, when)
-    local rate_at = place(0, 2, i18n.t("common_rate"))
+    local rate_at = labelled(0, 2, i18n.t("common_rate"))
     local spec = { value = score_rate(main_state), size = size, align = "right", overflow = FIT }
     s:text(spec, rate_at, kit.arriving(ui.merge({ color = theme.color.text }, when.shown)))
     dash(s, size, rate_at, when, "right")
