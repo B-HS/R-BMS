@@ -33,7 +33,7 @@ local LAYOUT = {
     label = { x = 14, width = 100 },
     badge = { x = 118, width = 52, inset = 6 },
     ex = { x = 176, width = 80, sprite = "num24", digits = 5 },
-    miss = { x = 264, width = 48, sprite = "num18", digits = 4 },
+    miss = { x = 264, width = 48, sprite = "num18", digits = 4, wide_digits = 5 },
     place = { x = 14, width = 36, sprite = "num24", digits = 3 },
     name = { x = 60, width = 150, size = theme.type.label },
     ranking_ex = { x = 216, width = 96, sprite = "num24", digits = 5 },
@@ -87,10 +87,19 @@ local function ranking_graded(main_state, row)
 end
 
 local function centered_number(s, spec, box, opts)
-    local sprite = s:sprite(spec.sprite)
-    local rise = sprite.cell_h - sprite.pad * 2
+    local rise = s:number_box(spec, { x = box.x, baseline = 0, w = box.w }).rise
     local baseline = box.top + (box.h + rise) / 2
     s:number(spec, { x = box.x, baseline = baseline, w = box.w }, opts)
+end
+
+local function miss_fits_cell(main_state, row, fits)
+    local ref = props.extension_number.MY_RECORD_MISS_COUNT_FIRST + row
+    local limit = 10 ^ LAYOUT.miss.digits
+    return function()
+        local misses = main_state.number(ref)
+        local overflows = ui.has_value(misses) and misses >= limit
+        return overflows ~= fits
+    end
 end
 
 local function centered_text(s, spec, box, opts)
@@ -156,7 +165,9 @@ local function record_row(s, main_state, row)
     local ex = { sprite = LAYOUT.ex.sprite, ref = props.extension_number.MY_RECORD_EX_FIRST + row, digit = LAYOUT.ex.digits, align = "right" }
     centered_number(s, ex, cell(row, LAYOUT.ex), kit.arriving(ui.merge(on, { color = theme.color.text })))
     local miss = { sprite = LAYOUT.miss.sprite, ref = props.extension_number.MY_RECORD_MISS_COUNT_FIRST + row, digit = LAYOUT.miss.digits, align = "right" }
-    centered_number(s, miss, cell(row, LAYOUT.miss), kit.arriving(ui.merge(on, { color = theme.color.sub })))
+    local wide = ui.merge(miss, { digit = LAYOUT.miss.wide_digits, fit = LAYOUT.miss.width })
+    centered_number(s, miss, cell(row, LAYOUT.miss), kit.arriving(ui.merge(on, { color = theme.color.sub, draw = miss_fits_cell(main_state, row, true) })))
+    centered_number(s, wide, cell(row, LAYOUT.miss), kit.arriving(ui.merge(on, { color = theme.color.sub, draw = miss_fits_cell(main_state, row, false) })))
 end
 
 local function player_is(main_state, row, player)

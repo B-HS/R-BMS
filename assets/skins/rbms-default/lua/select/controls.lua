@@ -11,7 +11,17 @@ local HEAD = theme.select_layout.head
 local CONTROL = HEAD.control
 local FIT = props.text_overflow.SHRINK_CUT
 
-local PLACE = { trailing = "%s*>%s*$", joint = "  ·  " }
+local PLACE = {
+    trailing = "%s*>%s*$",
+    joint = "  ·  ",
+    separator = " > ",
+    elision = "… > ",
+    character = "[\1-\127\194-\244][\128-\191]*",
+    wide_bytes = 3,
+    narrow_weight = 10,
+    wide_weight = 16,
+    budget = 420,
+}
 local SEARCH = { id = "txt.search", opens = "Search : '" }
 local FILTERS = {
     { id = "btn.mode", name = i18n.t("bar_mode"), width = 176, name_width = 60, act = props.event.MODE, ref = props.text.MODE_FILTER, unnamed = "" },
@@ -92,9 +102,48 @@ local function screen_line(main_state)
     end
 end
 
+local function weight_of(text)
+    local weight = 0
+    for character in text:gmatch(PLACE.character) do
+        weight = weight + (#character >= PLACE.wide_bytes and PLACE.wide_weight or PLACE.narrow_weight)
+    end
+    return weight
+end
+
+local function folders_of(path)
+    local folders = {}
+    local from = 1
+    while true do
+        local at, to = path:find(PLACE.separator, from, true)
+        if at == nil then
+            table.insert(folders, path:sub(from))
+            return folders
+        end
+        table.insert(folders, path:sub(from, at - 1))
+        from = to + 1
+    end
+end
+
+function controls.path_tail(path)
+    local folders = folders_of(path)
+    local first = 1
+    while first < #folders do
+        local shown = (first > 1 and PLACE.elision or "") .. table.concat(folders, PLACE.separator, first)
+        if weight_of(shown) <= PLACE.budget then
+            break
+        end
+        first = first + 1
+    end
+    if first == 1 then
+        return path
+    end
+    return PLACE.elision .. table.concat(folders, PLACE.separator, first)
+end
+
 local function folder_path(main_state)
     return function()
-        return (main_state.text(props.text.DIRECTORY):gsub(PLACE.trailing, ""))
+        local path = main_state.text(props.text.DIRECTORY):gsub(PLACE.trailing, "")
+        return controls.path_tail(path)
     end
 end
 

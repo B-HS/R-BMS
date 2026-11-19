@@ -1,7 +1,7 @@
 //! The default pack's browser over charts whose texts and numbers are longer than the boxes of its
 //! info window: a title, a subtitle, an artist and a genre far past their widths, bars with long
 //! titles beside the cursor, and a chart of over six thousand notes whose best has five digits in
-//! its EX SCORE and MISS COUNT and a five-digit EX that its AAA target asks for.
+//! its EX SCORE, MISS COUNT and MAX COMBO and a five-digit EX that its AAA target asks for.
 //!
 //! Like the other captures of the default pack this saves frames for a person to look at and passes
 //! without drawing anything unless [`CAPTURE_DIR_ENV`] is set. The frames are drawn with the bundled
@@ -40,11 +40,12 @@ const LONG_MEASURES: u32 = 56;
 const OBJECTS_PER_LANE: usize = 16;
 const LONG_LANES: [&str; 7] = ["11", "12", "13", "14", "15", "18", "19"];
 
-/// What the best of the long chart is: its clear lamp (EX HARD), its EX, and its misses. The EX
-/// and the misses have five digits.
+/// What the best of the long chart is: its clear lamp (EX HARD), its EX, its misses and its combo.
+/// The EX, the misses and the combo have five digits.
 const LONG_BEST_CLEAR: u8 = 7;
 const LONG_BEST_EX: u32 = 12_000;
 const LONG_BEST_BREAKS: u32 = 12_345;
+const LONG_BEST_COMBO: u32 = 11_111;
 
 fn long_chart_text(title: &str, subtitle: &str, difficulty: u32, level: u32) -> String {
     let notes: String =
@@ -74,6 +75,7 @@ fn long_text_app(pack: &Path, tag: &str) -> Result<App, String> {
         app.shared.library.songs().iter().find(|entry| entry.title == LONG_TITLE && entry.subtitle == LONG_SUBTITLE).map(|entry| rbms_store::ScoreRecord {
             mode: entry.mode.name.to_owned(),
             counts: [LONG_BEST_EX / EX_PER_PGREAT, LONG_BEST_EX % EX_PER_PGREAT, 0, LONG_BEST_BREAKS, 0, 0],
+            max_combo: LONG_BEST_COMBO,
             ..record(&entry.md5, LONG_BEST_CLEAR, LONG_BEST_EX, LONG_BEST_BREAKS, BROWSER_RECORD_PLAYED_AT)
         });
     app.shared.scores = rbms_store::ScoreBook::from_records(best.into_iter().collect());
@@ -87,8 +89,10 @@ fn long_text_app(pack: &Path, tag: &str) -> Result<App, String> {
     Ok(app)
 }
 
-/// The browser over the long library with the cursor on [`LONG_TITLE`].
-fn capture_long_browser(pack: &Path) -> Result<Vec<String>, String> {
+/// The browser over the long library with the cursor on [`LONG_TITLE`], drawn at each of
+/// [`BROWSER_SHOTS_MS`]: the names the frames were saved under, and the canvas the last of them is
+/// left on.
+fn long_browser_drawn(pack: &Path) -> Result<(Vec<String>, HeadlessCanvas), String> {
     let mut app = long_text_app(pack, "long-browser")?;
     let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
@@ -102,7 +106,13 @@ fn capture_long_browser(pack: &Path) -> Result<Vec<String>, String> {
         .position(|item| matches!(item, crate::SelectItem::Song(index) if songs.get(*index).is_some_and(|entry| entry.title == LONG_TITLE && entry.subtitle == LONG_SUBTITLE)))
         .ok_or("the scan did not find the chart with the long texts")?;
     app.shared.sel = long.checked_sub(1).ok_or("the chart with the long texts is the first of the list")?;
-    capture_browser_view(&mut app, &mut pixels, size, LONG_BROWSER, SelectState::new())
+    let saved = capture_browser_view(&mut app, &mut pixels, size, LONG_BROWSER, SelectState::new())?;
+    Ok((saved, pixels))
+}
+
+/// The browser over the long library with the cursor on [`LONG_TITLE`], saved.
+fn capture_long_browser(pack: &Path) -> Result<Vec<String>, String> {
+    long_browser_drawn(pack).map(|(saved, _)| saved)
 }
 
 /// Captures the default pack's browser on a chart whose texts and numbers are longer than the boxes
@@ -120,4 +130,78 @@ fn the_default_packs_info_window_is_captured_with_texts_and_numbers_longer_than_
     let saved = capture_long_browser(&pack).unwrap_or_else(|reason| panic!("long texts: not drawn: {reason}"));
     println!("long texts: captured {}", saved.join(", "));
     assert_eq!(files_under(&pack), before, "capturing the default pack changed its folder");
+}
+
+/// What of the drawn frame the check below reads, in the pixels of the 1920 by 1080 document: the
+/// columns of the head where a song's four lines are written and the rows that hold them, and the
+/// cell of the MISS column of the best record of MY RECORDS with the rows of that record.
+const HEAD_TEXT_COLUMNS: Range<u32> = 224..1096;
+const HEAD_TEXT_ROWS: Range<u32> = 112..280;
+const BEST_MISS_COLUMNS: Range<u32> = 1046..1098;
+const BEST_RECORD_ROWS: Range<u32> = 618..656;
+const COMBO_PAIR_COLUMNS: Range<u32> = 352..552;
+const COMBO_PAIR_ROWS: Range<u32> = 764..790;
+
+/// How many lines the head of a chart writes, how many digits the misses of the best are, how many
+/// letters MAX COMBO has and how many digits the combo of the best has, and how many pixels apart
+/// the last letter and the first digit are to be read as two words.
+const HEAD_LINES: usize = 4;
+const BEST_MISS_DIGITS: usize = 5;
+const COMBO_LABEL_GLYPHS: usize = 8;
+const COMBO_VALUE_GLYPHS: usize = 5;
+const LABEL_TO_VALUE_GAP: u32 = 3;
+
+/// The brightest channel a pixel has to reach to be taken as part of a glyph: any trace of one for
+/// the rows between two lines, and a body of the glyph for the columns between two digits.
+const TRACE_OF_INK: u8 = 16;
+const BODY_OF_INK: u8 = 64;
+
+/// The runs of rows of `rows` of `pixels` that carry ink in `columns` -- of columns when `by_column`
+/// -- each as the range it covers.
+fn ink_runs(pixels: &HeadlessCanvas, columns: Range<u32>, rows: Range<u32>, by_column: bool, ink: u8) -> Vec<Range<u32>> {
+    let carries = |x: u32, y: u32| {
+        let color = pixels.pixel_at(x, y);
+        color.r.max(color.g).max(color.b) >= ink
+    };
+    let scanned = if by_column { columns.clone() } else { rows.clone() };
+    let mut runs: Vec<Range<u32>> = Vec::new();
+    for at in scanned {
+        let inked = if by_column { rows.clone().any(|y| carries(at, y)) } else { columns.clone().any(|x| carries(x, at)) };
+        match runs.last_mut() {
+            Some(run) if inked && run.end == at => run.end += 1,
+            _ if inked => runs.push(at..at + 1),
+            _ => {}
+        }
+    }
+    runs
+}
+
+/// The four lines of a chart's head leave blank pixel rows between them even where a letter that
+/// hangs below its line stands over one that rises above the next -- a title ending in `g`, `y` or
+/// `p` over a subtitle that opens with `[` -- the misses of a best that has five digits are drawn
+/// with all five, and the label MAX COMBO is clear of a combo that has five digits.
+///
+/// Runs wherever the tests do: it draws the default pack's browser and keeps nothing.
+#[test]
+fn the_default_packs_info_window_keeps_its_lines_apart_and_its_five_digit_numbers_whole_and_clear() {
+    let pack = Path::new(env!("CARGO_MANIFEST_DIR")).join(LONG_PACK);
+    let (_, pixels) = long_browser_drawn(&pack).unwrap_or_else(|reason| panic!("long texts: not drawn: {reason}"));
+
+    let lines = ink_runs(&pixels, HEAD_TEXT_COLUMNS, HEAD_TEXT_ROWS, false, TRACE_OF_INK);
+    assert_eq!(lines.len(), HEAD_LINES, "the head's lines run into one another: the rows that carry ink are {lines:?}");
+
+    let digits = ink_runs(&pixels, BEST_MISS_COLUMNS, BEST_RECORD_ROWS, true, BODY_OF_INK);
+    assert_eq!(digits.len(), BEST_MISS_DIGITS, "the misses of the best are not all drawn: the columns that carry ink are {digits:?}");
+
+    let pair = ink_runs(&pixels, COMBO_PAIR_COLUMNS, COMBO_PAIR_ROWS, true, BODY_OF_INK);
+    assert_eq!(
+        pair.len(),
+        COMBO_LABEL_GLYPHS + COMBO_VALUE_GLYPHS,
+        "MAX COMBO and its five digits are not all drawn apart: the columns that carry ink are {pair:?}"
+    );
+    let apart = pair[COMBO_LABEL_GLYPHS].start - pair[COMBO_LABEL_GLYPHS - 1].end;
+    assert!(
+        apart >= LABEL_TO_VALUE_GAP,
+        "MAX COMBO touches the five digits of the combo beside it, {apart} px from them: the columns that carry ink are {pair:?}"
+    );
 }

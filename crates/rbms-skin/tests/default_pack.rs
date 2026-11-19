@@ -748,3 +748,29 @@ fn a_template_puts_its_values_where_its_language_wants_them_and_lines_are_joined
     assert_eq!(read(Some(2)), expected(["5件中2番目", "ab", "x|", "no places"]));
     assert_eq!(read(None), expected(["2 OF 5", "a b", "x|", "no places"]), "a host that has no language on is read as English");
 }
+
+/// The path of the open folders that the browser's header writes is kept whole while it fits the
+/// place it is written in, and when it does not fit, the folders it ends with are kept and the ones
+/// it begins with are given up for a `…`, because the last folder is the one the list is of.
+#[test]
+fn a_folder_path_too_long_for_the_browsers_header_keeps_the_folders_it_ends_with() {
+    const PROBE: &str = "
+        local tail = require('lua.select.controls').path_tail
+        local table_name = 'A DIFFICULTY TABLE WITH A VERY LONG NAME THAT KEEPS GOING FOR A WHILE'
+        local deep = 'FIRST FOLDER OF THE PATH > SECOND FOLDER OF THE PATH > THIRD FOLDER OF THE PATH'
+        local wide = string.rep('ふ', 20)
+        local short = string.rep('ふ', 10)
+        return tail('ALL SONGS'), tail('TABLE > LV 12'), tail(table_name .. ' > LV 12'), tail(deep), tail(wide .. ' > ' .. wide), tail(short .. ' > ' .. string.rep('x', 18))
+    ";
+    let runtime = pack_runtime(LuaMode::Full);
+    let kept = eval_in_pack::<(String, String, String, String, String, String)>(&runtime, &MapHost::new(), PROBE).expect("the probe runs");
+    let wide = "ふ".repeat(20);
+    let short = "ふ".repeat(10);
+
+    assert_eq!(kept.0, "ALL SONGS", "a path that fits is left alone");
+    assert_eq!(kept.1, "TABLE > LV 12", "a path of two short folders is left alone");
+    assert_eq!(kept.2, "… > LV 12", "a long table name is given up for the level the list is of");
+    assert_eq!(kept.3, "… > THIRD FOLDER OF THE PATH", "folders are given up from the front until what is left fits");
+    assert_eq!(kept.4, format!("… > {wide}"), "a wide letter takes the room of more than one narrow one");
+    assert_eq!(kept.5, format!("{short} > {}", "x".repeat(18)), "a path of wide and narrow letters that fits is left alone");
+}
