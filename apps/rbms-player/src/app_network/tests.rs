@@ -492,3 +492,33 @@ fn a_token_the_app_takes_is_not_revoked() {
     drop(answer);
     assert!(revoked.recv_timeout(ANSWER_SETTLE).is_err(), "a token the app holds was revoked");
 }
+
+/// The key configuration another machine sent is taken as a file of it is read -- a controller
+/// tuning out of its range is pulled back into it -- and the keys held while it arrives stay held:
+/// letting go of the two keys of ESC still breaks ESC, so Escape comes up.
+#[test]
+fn a_key_configuration_downloaded_is_read_as_its_file_is_and_keeps_the_keys_held() {
+    use crate::keyconfig::{Bindable, ChordEvent, ControlAction, KeyBind};
+    use crate::stage::KeyInput;
+
+    const OUT_OF_RANGE_DEBOUNCE_MS: u32 = 60_000;
+    let mut f = Fixture::signed_in("download-keys");
+    let escape = Bindable::Control(ControlAction::Escape);
+    let two_keys = KeyBind::chord(KeyCode::ShiftRight, KeyCode::KeyQ).expect("two keys");
+    let mode = f.shared.mode;
+    f.shared.keyconfig.bind_keys(mode, escape, two_keys);
+    let mut sent = f.shared.keyconfig.clone();
+    sent.pad.debounce_ms = OUT_OF_RANGE_DEBOUNCE_MS;
+    let blob = build_blob(&SyncPayload { settings: f.shared.config.clone(), keyconfig: sent }, LOCK_STAMP, None).expect("a blob");
+    let note = |shared: &mut AppShared, code: KeyCode, pressed: bool| shared.note_key(&KeyInput { code, pressed, released: !pressed, text: None });
+    note(&mut f.shared, KeyCode::ShiftRight, true);
+    note(&mut f.shared, KeyCode::KeyQ, true);
+
+    f.shared.apply_downloaded_settings(&blob);
+
+    assert_eq!(f.shared.keyconfig.pad.debounce_ms, *crate::gamepad::DEBOUNCE_MS_RANGE.end(), "the controller's tuning was taken as it came");
+    assert!(f.shared.keyconfig.held.is_down(KeyCode::KeyQ), "a key held while the configuration arrived was let go of");
+    note(&mut f.shared, KeyCode::KeyQ, false);
+    let broke = f.shared.keyconfig.held.chord_event().cloned();
+    assert_eq!(broke, Some(ChordEvent { code: KeyCode::KeyQ, pressed: false, chords: vec![escape], keeps_lanes: true }), "ESC did not come up");
+}

@@ -80,12 +80,12 @@ fn a_capture_is_kept_once_newest_first_and_survives_its_file() {
     assert_eq!(path, dir.join(CAPTURED_LAYOUTS_FILE));
     let mut kept = CapturedLayouts::load(&path);
     assert!(kept.all().is_empty(), "a fresh install has captures");
-    assert_eq!(kept.keep(captured(NoteOption::Random, SEED_3517246), EARLIER_MS), Kept::Added);
-    assert_eq!(kept.keep(captured(NoteOption::Mirror, 1), LATER_MS), Kept::Added);
+    assert_eq!(kept.keep(captured(NoteOption::Random, SEED_3517246), EARLIER_MS), Keeping::Added);
+    assert_eq!(kept.keep(captured(NoteOption::Mirror, 1), LATER_MS), Keeping::Added);
     let again = CapturedLayout { ex_score: 1, md5: MD5.to_ascii_uppercase(), random_label: "random".to_string(), ..captured(NoteOption::Random, SEED_3517246) };
-    assert_eq!(kept.keep(again, LATER_MS), Kept::AlreadyKept, "the same layout of the chart was kept twice");
+    assert_eq!(kept.keep(again, LATER_MS), Keeping::AlreadyKept, "the same layout of the chart was kept twice");
     let other_chart = CapturedLayout { md5: OTHER_MD5.to_string(), ..captured(NoteOption::Random, SEED_3517246) };
-    assert_eq!(kept.keep(other_chart, LATER_MS), Kept::Added, "another chart's layout is its own");
+    assert_eq!(kept.keep(other_chart, LATER_MS), Keeping::Added, "another chart's layout is its own");
     let labels: Vec<(&str, i64)> = kept.all().iter().map(|capture| (capture.random_label.as_str(), capture.captured_at)).collect();
     assert_eq!(labels, [("RANDOM", LATER_MS), ("MIRROR", LATER_MS), ("RANDOM", EARLIER_MS)]);
     assert_eq!(kept.all()[2].ex_score, 1234, "the capture kept first was written over");
@@ -109,15 +109,15 @@ fn a_layout_kept_already_is_kept_once_whatever_seed_laid_it_out() {
     assert_ne!(captured(NoteOption::RRandom, alike).layout, captured(NoteOption::RRandom, RRANDOM_SEED_OTHERWISE).layout);
     let dir = temp_dir("alike");
     let mut kept = CapturedLayouts::load(&dir.join(CAPTURED_LAYOUTS_FILE));
-    assert_eq!(kept.keep(captured(NoteOption::Mirror, 1), EARLIER_MS), Kept::Added);
-    assert_eq!(kept.keep(captured(NoteOption::Mirror, 2), LATER_MS), Kept::AlreadyKept, "MIRROR from another seed");
-    assert_eq!(kept.keep(captured(NoteOption::Rotate, 1), EARLIER_MS), Kept::Added);
-    assert_eq!(kept.keep(captured(NoteOption::Rotate, 2), LATER_MS), Kept::AlreadyKept, "ROTATE from another seed");
-    assert_eq!(kept.keep(captured(NoteOption::RRandom, alike), EARLIER_MS), Kept::Added);
-    assert_eq!(kept.keep(captured(NoteOption::RRandom, also_alike), LATER_MS), Kept::AlreadyKept, "R-RANDOM shifted alike");
-    assert_eq!(kept.keep(captured(NoteOption::RRandom, RRANDOM_SEED_OTHERWISE), LATER_MS), Kept::Added, "R-RANDOM shifted otherwise");
+    assert_eq!(kept.keep(captured(NoteOption::Mirror, 1), EARLIER_MS), Keeping::Added);
+    assert_eq!(kept.keep(captured(NoteOption::Mirror, 2), LATER_MS), Keeping::AlreadyKept, "MIRROR from another seed");
+    assert_eq!(kept.keep(captured(NoteOption::Rotate, 1), EARLIER_MS), Keeping::Added);
+    assert_eq!(kept.keep(captured(NoteOption::Rotate, 2), LATER_MS), Keeping::AlreadyKept, "ROTATE from another seed");
+    assert_eq!(kept.keep(captured(NoteOption::RRandom, alike), EARLIER_MS), Keeping::Added);
+    assert_eq!(kept.keep(captured(NoteOption::RRandom, also_alike), LATER_MS), Keeping::AlreadyKept, "R-RANDOM shifted alike");
+    assert_eq!(kept.keep(captured(NoteOption::RRandom, RRANDOM_SEED_OTHERWISE), LATER_MS), Keeping::Added, "R-RANDOM shifted otherwise");
     let unwritten = CapturedLayout { layout: Vec::new(), ..captured(NoteOption::Mirror, 3) };
-    assert_eq!(kept.keep(unwritten, LATER_MS), Kept::Added, "a hand-written capture with no lane order is told apart by its seed");
+    assert_eq!(kept.keep(unwritten, LATER_MS), Keeping::Added, "a hand-written capture with no lane order is told apart by its seed");
     assert!(kept.remove(&captured(NoteOption::Mirror, 2)), "the layout kept is not the one removed");
     assert_eq!(kept.all().len(), 4);
 }
@@ -177,4 +177,25 @@ fn a_file_that_is_no_text_is_said_not_to_be_read() {
     let lines: Vec<&str> = said.iter().map(|(_, line)| line.as_str()).collect();
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].starts_with("captured layouts not loaded"), "{lines:?}");
+}
+
+/// A capture whose file cannot be written is kept while the app runs, and only the failure is said:
+/// no word that the layout was captured follows it.
+#[test]
+fn a_capture_whose_file_cannot_be_written_says_only_that_it_was_not_written() {
+    let dir = temp_dir("unwritable");
+    let in_the_way = dir.join("a-file");
+    std::fs::write(&in_the_way, b"").expect("a file is written");
+    let mut shared = crate::App::new(String::new(), crate::Config::default(), crate::LaunchOptions::default(), dir.join("settings.ron")).shared;
+    shared.captured_layouts = CapturedLayouts::load(&in_the_way.join(CAPTURED_LAYOUTS_FILE));
+    let said = crate::notify::exclusive(|| {
+        assert_eq!(shared.keep_captured_layout(captured(NoteOption::Random, SEED_3517246)), Keeping::NotWritten);
+        let mut said = Vec::new();
+        crate::notify::drain(&mut said);
+        said
+    });
+    let lines: Vec<&str> = said.iter().map(|(_, line)| line.as_str()).collect();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].starts_with("captured layouts save failed"), "{lines:?}");
+    assert_eq!(shared.captured_layouts.all().len(), 1, "the capture is not kept while the app runs");
 }

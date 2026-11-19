@@ -41,7 +41,7 @@ use rbms_judge::windows::JudgeWindowSet;
 use rbms_judge::{ClearType, assist_grade};
 use rbms_model::Mode;
 use rbms_model::translations::Catalog;
-use rbms_play::{PlayRecord, PlaySession};
+use rbms_play::{PlayRecord, PlaySession, ScratchDir};
 use rbms_render::result::{ResultExtras, TargetView};
 use rbms_render::skin_render::frame::{GAUGE_TYPES, GaugeScale};
 use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, JUDGEMENTS, TIMING_JUDGE_AREAS};
@@ -56,7 +56,7 @@ use crate::captured_layouts::{CaptureRefusal, CapturedLayout, CapturedRun, RunKi
 use crate::format::lamp_label_color;
 use crate::ir_outcome::IrLineKind;
 use crate::ir_ranking::RankingState;
-use crate::keyconfig::{KEY_INDEX_COUNT, Shortcut, ShortcutScreen};
+use crate::keyconfig::{KEY_INDEX_COUNT, Shortcut, ShortcutScreen, key_index_of};
 use crate::skin_host::options::{PlayedOptions, random_option_index};
 use crate::skin_host::overview::ChartOverview;
 use crate::skin_host::result::snapshot::{PreviousScore, REPLAY_SLOT_COUNT, ReplaySlot, ResultInput, ResultSnapshot};
@@ -188,6 +188,13 @@ fn key_assignment(mode: Mode) -> [Option<ResultKey>; KEY_INDEX_COUNT] {
     }
 }
 
+/// Whether a skin's result screen of `mode` reads the lane `lane` spun `dir` as a key of its table:
+/// one that confirms, runs the chart again or turns the graph. The blue keys START is pressed beside
+/// are among the keys that confirm.
+pub(crate) fn reads_lane(mode: Mode, lane: usize, dir: ScratchDir) -> bool {
+    key_index_of(mode, lane, dir).is_some_and(|index| key_assignment(mode)[index].is_some())
+}
+
 /// The last of the gauges a single chart is played on (`GrooveGauge.HAZARD`), how many of them
 /// there are, the first of the gauges a course is played on (`GrooveGauge.CLASS`) and how many of
 /// those there are.
@@ -263,6 +270,16 @@ pub(crate) fn held_key_indices(shared: &AppShared) -> [bool; KEY_INDEX_COUNT] {
     std::array::from_fn(|index| shared.key_index_pressed(index))
 }
 
+/// Note a key the scene keeps a press of (`waiting`) going down, which it waits on until a frame
+/// acts on it, or coming up, which takes back a press nothing acted on.
+fn wait_on(waiting: &mut bool, key: &KeyInput<'_>) {
+    if key.pressed {
+        *waiting = true;
+    } else if key.released {
+        *waiting = false;
+    }
+}
+
 /// Where a result screen can lead besides the browser, settled once as the screen is entered.
 ///
 /// Finding the chart that was played in the library, and the chart after it in the browser's list,
@@ -326,10 +343,6 @@ pub(crate) struct Scene {
     /// acted on it.
     start_was_down: bool,
     start_went_down: bool,
-    /// The keys the two above are read from: the ones the key configuration holds for
-    /// [`Shortcut::Retry`] and [`Shortcut::NextSong`], or none for one left without a key.
-    run_again_key: Option<KeyCode>,
-    follow_on_key: Option<KeyCode>,
     /// Where the run-again or the next-chart key said the scene leaves for, which the fade does not
     /// change.
     chosen: Option<Leave>,
@@ -366,19 +379,10 @@ impl Scene {
             blue_held_back: [false; KEY_INDEX_COUNT],
             start_was_down: false,
             start_went_down: false,
-            run_again_key: Some(Shortcut::Retry.default_key()),
-            follow_on_key: Some(Shortcut::NextSong.default_key()),
             chosen: None,
             gauge_type: DEFAULT_GAUGE_TYPE,
             next_gauge,
         }
-    }
-
-    /// Read the run-again and the next-chart key from where the key configuration has them now. A
-    /// scene nobody has told listens on the keys the two ship on.
-    pub(crate) fn listen_for(&mut self, run_again: Option<KeyCode>, follow_on: Option<KeyCode>) {
-        self.run_again_key = run_again;
-        self.follow_on_key = follow_on;
     }
 
     /// Take the run-again or the next-chart shortcut from a controller button, which is a press
@@ -420,20 +424,26 @@ impl Scene {
         went_down
     }
 
-    /// Take one keyboard event.
+    /// Take one keyboard event: Enter or Escape.
     pub(crate) fn key(&mut self, key: &KeyInput<'_>) {
         let waiting = match key.code {
             KeyCode::Enter | KeyCode::NumpadEnter => &mut self.enter,
             KeyCode::Escape => &mut self.escape,
-            code if self.run_again_key == Some(code) => &mut self.run_again,
-            code if self.follow_on_key == Some(code) => &mut self.follow_on,
             _ => return,
         };
-        if key.pressed {
-            *waiting = true;
-        } else if key.released {
-            *waiting = false;
-        }
+        wait_on(waiting, key);
+    }
+
+    /// Take one keyboard event that is a key of the run-again or the next-chart shortcut, as the
+    /// screen reads it from the key configuration ([`AppShared::is_shortcut`]): its own key, or one
+    /// of the two keys bound to it held together. Any other shortcut is not this scene's.
+    pub(crate) fn shortcut_key(&mut self, shortcut: Shortcut, key: &KeyInput<'_>) {
+        let waiting = match shortcut {
+            Shortcut::Retry => &mut self.run_again,
+            Shortcut::NextSong => &mut self.follow_on,
+            _ => return,
+        };
+        wait_on(waiting, key);
     }
 
     /// Note which key indices went down or came up since the last frame.
@@ -1278,7 +1288,11 @@ impl StageHandler for ResultState {
             SkinStatus::Gone => ResultState::built_in_key(ctx, &key),
             SkinStatus::Reading if key.pressed && key.code == KeyCode::Escape => ctx.shared.leave_play(),
             SkinStatus::Reading | SkinStatus::Ready => {
-                self.stage.scene.listen_for(ctx.shared.shortcut_key(Shortcut::Retry), ctx.shared.shortcut_key(Shortcut::NextSong));
+                for shortcut in [Shortcut::Retry, Shortcut::NextSong] {
+                    if ctx.shared.is_shortcut(shortcut, key.code) {
+                        self.stage.scene.shortcut_key(shortcut, &key);
+                    }
+                }
                 self.stage.scene.key(&key);
                 Transition::Stay
             }

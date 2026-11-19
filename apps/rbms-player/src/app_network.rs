@@ -406,7 +406,7 @@ impl AppShared {
         let mut merged = merge_downloaded(&self.config, payload.settings);
         merged.sanitise();
         self.config = merged;
-        self.keyconfig = payload.keyconfig;
+        self.keyconfig.take_bindings_of(payload.keyconfig);
         self.keyconfig.save(&self.keyconfig_path);
         self.active_keys = self.keyconfig.lane_keys(self.mode);
         self.active_reverse_keys = self.keyconfig.scratch_reverse_keys(self.mode);

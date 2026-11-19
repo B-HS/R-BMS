@@ -103,6 +103,16 @@ rbms_model::translations! {
             "{0}도 같은 키를 씁니다 - 선곡 화면에서는 둘 다 동작합니다",
             "{0}にも割り当て済みです - 選曲画面では両方が動作します",
         ),
+        AlsoLaneOnResult => (
+            "ALSO {0} - ON A SKIN'S RESULT SCREEN BOTH ACT",
+            "{0}도 같은 키를 씁니다 - 스킨 결과 화면에서는 둘 다 동작합니다",
+            "{0}にも割り当て済みです - スキンのリザルト画面では両方が動作します",
+        ),
+        TurntableInChord => (
+            "A TURNTABLE CANNOT BE PART OF A COMBINATION - PICK BUTTONS",
+            "턴테이블은 조합에 넣을 수 없습니다 - 버튼을 고르세요",
+            "ターンテーブルは組み合わせに使えません - ボタンを選んでください",
+        ),
         ChordTaken => (
             "THAT COMBINATION IS {0} - PICK ANOTHER, OR CLEAR THAT ROW FIRST",
             "이 조합은 {0}에 쓰이고 있습니다 - 다른 조합을 고르거나 먼저 그 줄을 해제하세요",

@@ -146,6 +146,26 @@ fn the_controllers_cell_tells_one_element_from_two() {
     assert_eq!(app.shared.keyconfig.pad.lane_binding(app.shared.kc_edit_mode, 0), Some(PadBinding::Button(7)));
 }
 
+/// A turntable moved while the controller's cell waits for two elements is no element of a pair:
+/// the pair is refused, the row keeps what it had, and the editor says why.
+#[test]
+fn the_controllers_cell_refuses_a_pair_with_a_turntable_in_it() {
+    const TURNTABLE_AXIS: u32 = 2;
+    let mut app = app("pad-turntable");
+    let mode = app.shared.kc_edit_mode;
+    app.shared.keyconfig.pad.set_lane(mode, mode.scratch[0], Some(PadBinding::AnalogScratch { axis: TURNTABLE_AXIS }));
+    let escape = Bindable::Control(ControlAction::Escape);
+    let spun = PadBinding::Axis { axis: TURNTABLE_AXIS, positive: true };
+    let mut state = KeyConfigState { capturing: true, column: Column::Pad, ..KeyConfigState::new() };
+    state.capture_elements(&mut app.shared, escape, &[(PadBinding::Button(4), true), (spun, true)]);
+    assert!(!state.capturing, "the capture stayed armed after the pair");
+    assert_eq!(state.notice, Notice::TurntableInChord);
+    let pad = &app.shared.keyconfig.pad;
+    assert_eq!((pad.control_binding(ControlAction::Escape), pad.control_chord(ControlAction::Escape)), (None, None));
+    let (said, color) = state.status(&app.shared, &Bindings::read(&app.shared.keyconfig, mode));
+    assert!(said.contains("TURNTABLE") && color == Color::RED, "{said}");
+}
+
 /// ESC is a line of the editor with a cell on each device.
 #[test]
 fn esc_is_a_line_of_the_editor_on_both_devices() {

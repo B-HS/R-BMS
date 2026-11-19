@@ -251,18 +251,19 @@ impl AppShared {
         }
     }
 
-    /// The key a control is read from right now. START and SELECT give way to a lane that has the
-    /// same key (see [`ControlAction::yields_to_lanes`]), so a key config that already plays a
-    /// column on the letter they ship on keeps playing it.
+    /// The key a control is read from right now ([`AppShared::control_bind_in_force`]).
     pub(crate) fn control_key_in_force(&self, action: ControlAction) -> Option<KeyCode> {
         self.control_bind_in_force(action).and_then(KeyBind::single)
     }
 
-    /// The key or the two keys a control is read from right now: its single key as
-    /// [`AppShared::control_key_in_force`] reads it, or its chord, which no lane takes.
+    /// The key or the two keys a control is read from right now: its chord, which no lane takes, or
+    /// its single key unless a lane of the mode that is up plays it. Every control gives way to such
+    /// a lane, so that no column is ever left dead: START, SELECT and the lane cover switch ship on
+    /// keys a key config written before they existed may already have given to a lane, and the key
+    /// editor keeps a control off the lanes of the mode it shows but not off those of another.
     pub(crate) fn control_bind_in_force(&self, action: ControlAction) -> Option<KeyBind> {
         match self.keyconfig.control_bind(action)? {
-            KeyBind::Single(code) if action.yields_to_lanes() && self.lane_on(code).is_some() => None,
+            KeyBind::Single(code) if self.lane_on(code).is_some() => None,
             bind => Some(bind),
         }
     }
@@ -1134,13 +1135,42 @@ mod tests {
         assert_eq!(app.shared.control_for(KeyCode::KeyW), Some(ControlAction::Select), "the other shipped key is unaffected");
     }
 
-    /// The older controls still win over a lane that shares their key, as they always did.
+    /// A key config that plays a lane on the key an older control has keeps playing the lane, as it
+    /// does for START: the control is left without that key in the mode.
     #[test]
-    fn an_older_control_still_wins_over_a_lane_on_its_key() {
+    fn a_lane_keeps_the_key_it_shares_with_an_older_control() {
         let mut app = app();
         app.shared.keyconfig.set_lane(Mode::BEAT_7K, 1, KeyCode::ArrowUp);
         app.shared.active_keys = app.shared.keyconfig.lane_keys(Mode::BEAT_7K);
-        assert_eq!(app.shared.control_for(KeyCode::ArrowUp), Some(ControlAction::HiSpeedUp));
+        assert_eq!(app.shared.control_for(KeyCode::ArrowUp), None, "the key plays a column, so it is not a control");
+        assert_eq!(app.shared.control_key_in_force(ControlAction::HiSpeedUp), None);
+        key_down(&mut app, KeyCode::ArrowUp);
+        assert_eq!(pressed_indices(&app), vec![1], "it is the column's index");
+    }
+
+    /// The key editor keeps a control off the lanes of the mode it shows, but a key that is no lane
+    /// there may be one of another mode. A run of that mode plays the lane on it, as it does for
+    /// ESC, rather than leaving the column dead; in the mode the key was given in it is the control.
+    #[test]
+    fn a_control_on_a_key_another_mode_plays_a_lane_on_gives_way_to_the_lane() {
+        use crate::keyconfig::Bindable;
+        const SECOND_SIDE_KEY: KeyCode = KeyCode::KeyM;
+        let shipped = crate::keyconfig::KeyConfig::default();
+        assert!(shipped.lane_keys(Mode::BEAT_7K).iter().all(|(code, _)| *code != SECOND_SIDE_KEY), "a lane of seven keys");
+        assert!(shipped.lane_keys(Mode::BEAT_14K).iter().any(|(code, _)| *code == SECOND_SIDE_KEY), "no lane of fourteen keys");
+        let up = Bindable::Control(ControlAction::HiSpeedUp);
+        assert_eq!(shipped.clash(Mode::BEAT_7K, up, SECOND_SIDE_KEY), None, "the editor showing seven keys refuses the key");
+
+        let mut fourteen = in_mode(Mode::BEAT_14K);
+        fourteen.shared.keyconfig.bind(Mode::BEAT_7K, up, Some(SECOND_SIDE_KEY));
+        assert_eq!(fourteen.shared.control_for(SECOND_SIDE_KEY), None, "the control took the key of a lane");
+        assert!(fourteen.shared.lane_input_for(SECOND_SIDE_KEY).is_some());
+        key_down(&mut fourteen, SECOND_SIDE_KEY);
+        assert!(!fourteen.shared.control_repeating(ControlAction::HiSpeedUp), "a lane being held is the control held");
+
+        let mut seven = in_mode(Mode::BEAT_7K);
+        seven.shared.keyconfig.bind(Mode::BEAT_7K, up, Some(SECOND_SIDE_KEY));
+        assert_eq!(seven.shared.control_for(SECOND_SIDE_KEY), Some(ControlAction::HiSpeedUp), "the key is not the control where no lane has it");
     }
 
     /// START and SELECT mean nothing to a run yet: handing them to the in-play control path moves

@@ -76,6 +76,17 @@ fn listening() -> (Scene, TimerState) {
     (scene, timers)
 }
 
+/// Hand the scene one key as the screen does on a key configuration as shipped: R is the run-again
+/// shortcut, N the next-chart one, and every other key is itself.
+fn as_shipped(scene: &mut Scene, key: &KeyInput<'_>) {
+    for shortcut in [Shortcut::Retry, Shortcut::NextSong] {
+        if shortcut.default_key() == key.code {
+            scene.shortcut_key(shortcut, key);
+        }
+    }
+    scene.key(key);
+}
+
 /// Run a fading scene to just past the end of its fade and answer the way it leaves.
 fn fade_out(scene: &mut Scene, timers: &mut TimerState, input: SceneInput) -> Option<Leave> {
     let began = timers.value_us(timer_id::FADEOUT);
@@ -113,9 +124,9 @@ fn a_scene_that_has_not_begun_neither_runs_nor_listens() {
 fn a_key_acts_only_once_the_scene_listens() {
     let (mut tapped, mut timers) = begun();
     for code in [KeyCode::Enter, KeyCode::Escape, KeyCode::KeyR, KeyCode::KeyN] {
-        tapped.key(&press(code));
+        as_shipped(&mut tapped, &press(code));
         tapped.step(&mut timers, at_ms(TIMES.input_ms / 2), holding(OK_INDICES[0]));
-        tapped.key(&release(code));
+        as_shipped(&mut tapped, &release(code));
     }
     assert_eq!(tapped.step(&mut timers, at_ms(TIMES.input_ms), IDLE), None);
     assert_eq!(tapped.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
@@ -292,23 +303,23 @@ fn a_run_again_key_still_down_when_the_fade_ends_starts_another_run() {
 fn the_players_own_run_again_keys_wait_for_the_scene_and_ride_its_fade() {
     for (code, leave) in [(KeyCode::KeyR, Leave::RunAgain), (KeyCode::KeyN, Leave::FollowOn)] {
         let (mut scene, mut timers) = begun();
-        scene.key(&press(code));
+        as_shipped(&mut scene, &press(code));
         assert_eq!(scene.step(&mut timers, at_ms(TIMES.input_ms), IDLE), None);
         assert!(!timers.is_on(timer_id::FADEOUT), "{code:?} acted before the scene took input");
         assert_eq!(scene.step(&mut timers, at_ms(LISTENING_MS), IDLE), None);
         assert!(timers.is_on(timer_id::FADEOUT), "{code:?} still down when input opened did not act");
-        scene.key(&release(code));
+        as_shipped(&mut scene, &release(code));
         assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(leave), "{code:?} did not decide the way out");
 
         let (mut scene, mut timers) = listening();
-        scene.key(&press(code));
+        as_shipped(&mut scene, &press(code));
         let unrepeatable = SceneInput { can_run_again: false, can_follow_on: false, ..IDLE };
         assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), unrepeatable), None);
         assert!(!timers.is_on(timer_id::FADEOUT), "{code:?} closed a screen it has nothing to start from");
     }
 
     let (mut scene, mut timers) = listening();
-    scene.key(&press(KeyCode::KeyN));
+    as_shipped(&mut scene, &press(KeyCode::KeyN));
     scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), SceneInput { can_follow_on: false, ..IDLE });
     assert!(!timers.is_on(timer_id::FADEOUT), "N closed the screen at the end of the list");
 }
@@ -320,7 +331,7 @@ fn the_screen_stays_open_while_the_score_is_being_submitted() {
     let (mut scene, mut timers) = listening();
     let submitting = SceneInput { submitting: true, ..holding(OK_INDICES[0]) };
     scene.key(&press(KeyCode::Enter));
-    scene.key(&press(KeyCode::KeyR));
+    as_shipped(&mut scene, &press(KeyCode::KeyR));
     assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), submitting), None);
     assert!(!timers.is_on(timer_id::FADEOUT), "the screen closed while the score was being submitted");
 
@@ -1361,24 +1372,49 @@ fn the_target_and_the_run_again_offer_are_carried_onto_the_screen() {
     assert_ne!(bare, paced, "the target and the run-again hint are not drawn");
 }
 
-/// The run-again and the next-chart key are read from where the key configuration has them: a scene
-/// told of a moved key acts on it and not on the key it shipped on, a key taken away acts on
-/// nothing, and the built-in screen reads the same two keys.
+/// A skin's screen over a run the player played, whose scene has begun and is listening.
+fn listening_on_a_run(tag: &str) -> (App, HeadlessCanvas) {
+    let mut app = app_with_result_skin(tag, SKIN);
+    let run = ResultRun::of(&finished_session(), &app.shared, standing(false));
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    enter(&mut app, state().played(run));
+    run_until_begun(&mut app, &mut pixels);
+    assert!(matches!(frame_after_ms(&mut app, &mut pixels, LISTENING_MS), Transition::Stay));
+    assert!(takes_input(&app.shared.skin_timers), "the scene is not listening past its input time");
+    (app, pixels)
+}
+
+/// Tap each of `codes` in turn through the path the window's keys take, a frame of the screen after
+/// each press.
+fn tap(app: &mut App, pixels: &mut HeadlessCanvas, codes: &[KeyCode]) {
+    for code in codes {
+        assert!(matches!(key(app, press(*code)), Transition::Stay), "{code:?} left the screen at once");
+        assert!(matches!(frame(app, pixels), Transition::Stay), "{code:?} left the screen without fading");
+    }
+    for code in codes.iter().rev() {
+        key(app, release(*code));
+    }
+}
+
+/// The run-again and the next-chart key are read from where the key configuration has them: a skin's
+/// scene acts on a moved key and not on the key it shipped on, a key taken away acts on nothing,
+/// and the built-in screen reads the same two keys.
 #[test]
 fn the_run_again_keys_are_read_from_where_the_key_configuration_has_them() {
     use crate::keyconfig::{Bindable, Shortcut};
 
-    let (mut scene, mut timers) = listening();
-    scene.listen_for(Some(KeyCode::F6), None);
-    scene.key(&press(KeyCode::KeyR));
-    scene.key(&press(KeyCode::KeyN));
-    assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
-    assert!(!timers.is_on(timer_id::FADEOUT), "a key the scene no longer listens on closed it");
-    scene.key(&press(KeyCode::F6));
-    assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
-    assert!(timers.is_on(timer_id::FADEOUT), "the moved run-again key did not act");
-    scene.key(&release(KeyCode::F6));
-    assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::RunAgain));
+    let (mut app, mut pixels) = listening_on_a_run("moved-keys-scene");
+    let mode = app.shared.mode;
+    app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::Retry), Some(KeyCode::F6));
+    app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::NextSong), None);
+    tap(&mut app, &mut pixels, &[KeyCode::KeyR]);
+    tap(&mut app, &mut pixels, &[KeyCode::KeyN]);
+    assert!(!app.shared.skin_timers.is_on(timer_id::FADEOUT), "a key the scene no longer listens on closed it");
+    tap(&mut app, &mut pixels, &[KeyCode::F6]);
+    assert!(app.shared.skin_timers.is_on(timer_id::FADEOUT), "the moved run-again key did not act");
+    let moved = frame_after_ms(&mut app, &mut pixels, TIMES.fadeout_ms + 1);
+    assert!(matches!(moved, Transition::To(Stage::Loading(_))), "the moved run-again key did not start a run when the fade ended");
+    assert_eq!(app.shared.sel, 0, "the moved run-again key started the chart after this one");
 
     let mut app = app_with_result_skin("broken-moved-keys", BROKEN_SKIN);
     let mut pixels = HeadlessCanvas::new(CW, CH);
@@ -1394,6 +1430,38 @@ fn the_run_again_keys_are_read_from_where_the_key_configuration_has_them() {
     app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::Retry), Some(KeyCode::F6));
     assert!(matches!(key(&mut app, press(KeyCode::KeyR)), Transition::Stay), "the key the run-again shipped on still starts a run");
     assert!(matches!(key(&mut app, press(KeyCode::F6)), Transition::To(Stage::Loading(_))), "the moved run-again key did not act on the built-in screen");
+}
+
+/// A skin's scene reads a run-again or a next-chart key bound to two keys held together as the
+/// built-in screen does: the press that makes the two is their shortcut and never the single key's
+/// own. With RETRY on R and NEXT SONG on LSHIFT + R, LSHIFT then R starts the chart after this one
+/// and does not run this one again; RETRY on two keys of its own runs it again.
+#[test]
+fn a_skins_scene_reads_the_run_again_keys_bound_to_two_keys_held_together() {
+    use crate::keyconfig::{Bindable, KeyBind, Shortcut};
+
+    let two_keys = |first, second| KeyBind::chord(first, second).expect("two keys");
+    let (mut app, mut pixels) = listening_on_a_run("chord-next");
+    let mode = app.shared.mode;
+    app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::Retry), Some(KeyCode::KeyR));
+    app.shared.keyconfig.bind_keys(mode, Bindable::Shortcut(Shortcut::NextSong), two_keys(KeyCode::ShiftLeft, KeyCode::KeyR));
+    tap(&mut app, &mut pixels, &[KeyCode::ShiftLeft, KeyCode::KeyR]);
+    assert!(app.shared.skin_timers.is_on(timer_id::FADEOUT), "the two keys of NEXT SONG did not act");
+    let moved = frame_after_ms(&mut app, &mut pixels, TIMES.fadeout_ms + 1);
+    assert!(matches!(moved, Transition::To(Stage::Loading(_))), "the two keys of NEXT SONG started nothing");
+    assert_eq!(app.shared.sel, 1, "the press that made NEXT SONG ran this chart again");
+    assert_eq!(app.shared.retry_seed, None);
+
+    let (mut app, mut pixels) = listening_on_a_run("chord-retry");
+    let mode = app.shared.mode;
+    app.shared.keyconfig.bind_keys(mode, Bindable::Shortcut(Shortcut::Retry), two_keys(KeyCode::ShiftLeft, KeyCode::KeyQ));
+    tap(&mut app, &mut pixels, &[KeyCode::ShiftLeft]);
+    assert!(!app.shared.skin_timers.is_on(timer_id::FADEOUT), "one of the two keys of RETRY acted alone");
+    tap(&mut app, &mut pixels, &[KeyCode::ShiftLeft, KeyCode::KeyQ]);
+    assert!(app.shared.skin_timers.is_on(timer_id::FADEOUT), "the two keys of RETRY did not act");
+    let moved = frame_after_ms(&mut app, &mut pixels, TIMES.fadeout_ms + 1);
+    assert!(matches!(moved, Transition::To(Stage::Loading(_))), "the two keys of RETRY did not run the chart again");
+    assert_eq!(app.shared.sel, 0, "RETRY started the chart after this one");
 }
 
 /// A controller button bound to the run-again shortcut does what its key does: through the scene

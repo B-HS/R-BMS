@@ -382,6 +382,30 @@ fn the_status_line_names_a_shared_lane_and_a_clash() {
     assert!(said.contains("HI-SPEED UP") && color == Color::RED, "{said}");
 }
 
+/// A shortcut of the result screen on a lane key is taken as a browser's is, and the editor says
+/// which lane has the key: a skin's result screen reads that lane as a key of the reference's table
+/// too, confirming or running the chart again. A lane the result screen of the mode reads nothing
+/// from -- the turntable of seven keys -- is not named.
+#[test]
+fn the_status_line_names_the_lane_a_shortcut_of_the_result_shares_its_key_with() {
+    let mut app = app("result-lane");
+    let mode = app.shared.kc_edit_mode;
+    assert_eq!(mode, Mode::BEAT_7K);
+    let first_lane = KeyConfig::default_key_of(mode, Bindable::Lane(0)).expect("the first lane has a key");
+    let turntable = KeyConfig::default_key_of(mode, Bindable::Lane(7)).expect("the turntable has a key");
+    for (shortcut, code) in [(Shortcut::CaptureLayout, first_lane), (Shortcut::Retry, turntable)] {
+        let mut state = on(&app, Bindable::Shortcut(shortcut));
+        rebind(&mut app, &mut state, code);
+        assert_eq!(key_of(&app, Bindable::Shortcut(shortcut)), Some(code), "{shortcut:?} was refused a lane key");
+    }
+    let said_of = |app: &App, shortcut: Shortcut| on(app, Bindable::Shortcut(shortcut)).status(&app.shared, &Bindings::read(&app.shared.keyconfig, mode));
+    let (said, color) = said_of(&app, Shortcut::CaptureLayout);
+    assert!(said.contains("LANE 1") && said.contains("RESULT"), "{said}");
+    assert_eq!(color, rbms_render::theme().text_dim);
+    let (said, _) = said_of(&app, Shortcut::Retry);
+    assert_eq!(said, "", "the turntable of seven keys does nothing on a result screen");
+}
+
 /// The editor names its lines, its groups and what it says of them in the language of the screens,
 /// and a line has the same name wherever the editor quotes it. The names of the keys are not words of
 /// a language and stay as the key config file writes them.

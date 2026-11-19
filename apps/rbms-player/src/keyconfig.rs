@@ -502,19 +502,6 @@ impl ControlAction {
         matches!(self, ControlAction::Start | ControlAction::Select)
     }
 
-    /// Whether a key that also plays a lane keeps playing it instead of acting as this control.
-    ///
-    /// START, SELECT and the lane cover switch ship bound to keys that a key config written before
-    /// they existed may already have given to a lane; the lane has to win, or loading an old file
-    /// would silently kill a column. The older controls are resolved before lanes, as they always
-    /// were.
-    ///
-    /// ESC gives way too: the key editor keeps it off the lanes of the mode it shows, but a key that
-    /// is no lane there may be one of another mode, and a lane key that left the run would end it.
-    pub fn yields_to_lanes(self) -> bool {
-        matches!(self, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle | ControlAction::Escape)
-    }
-
     /// The key token a control was given after it had shipped without one, and the generation of
     /// shipped keys ([`KEY_GENERATION`]) it was given it in, or `None` for a control that ships as
     /// it first did. A key config that has taken an older generation was written while the control
@@ -1661,17 +1648,23 @@ impl KeyConfig {
         overlap_among(&bound, target)
     }
 
-    /// The lane of `mode` that is on the same key as a shortcut of the browser, if one is. The two
-    /// are not kept apart ([`Bindable::read_with`]); the key editor says so beside the row.
+    /// The lane of `mode` that is on the same key as a shortcut of the browser or of the result
+    /// screen, if one is and that screen reads it. The two are not kept apart ([`Bindable::read_with`]);
+    /// the key editor says so beside the row. The browser reads every lane, and a result screen the
+    /// lanes its table gives a role ([`crate::stage::result::reads_lane`]).
     pub fn lane_sharing(&self, mode: Mode, target: Bindable) -> Option<usize> {
         let Bindable::Shortcut(shortcut) = target else {
             return None;
         };
-        if shortcut.screen() != ShortcutScreen::Browser {
-            return None;
-        }
+        let reads = |lane: usize, dir: ScratchDir| match shortcut.screen() {
+            ShortcutScreen::Browser => true,
+            ShortcutScreen::Result => crate::stage::result::reads_lane(mode, lane, dir),
+            ShortcutScreen::Replay => false,
+        };
         let code = self.shortcut_bind(shortcut)?.single()?;
-        self.lane_keys(mode).into_iter().chain(self.scratch_reverse_keys(mode)).find(|(key, _)| *key == code).map(|(_, lane)| lane)
+        let forward = self.lane_keys(mode).into_iter().map(|(key, lane)| (key, lane, ScratchDir::Forward));
+        let backward = self.scratch_reverse_keys(mode).into_iter().map(|(key, lane)| (key, lane, ScratchDir::Backward));
+        forward.chain(backward).find(|(key, lane, dir)| *key == code && reads(*lane, *dir)).map(|(_, lane, _)| lane)
     }
 
     /// Put every key and every controller binding back as shipped, leaving the controller's own
@@ -1704,6 +1697,16 @@ impl KeyConfig {
     #[cfg(test)]
     pub fn control_token(&self, action: ControlAction) -> &str {
         self.controls.token(action)
+    }
+
+    /// Take every binding of `read`, a configuration read from somewhere other than this machine's
+    /// file -- another machine's, sent through the score server -- tidied as a file read is
+    /// ([`PadConfig::sanitise`]). The keys held right now stay held ([`KeyConfig::held`]): a key let
+    /// go of after the bindings changed still comes up, breaking the chord it held.
+    pub fn take_bindings_of(&mut self, read: KeyConfig) {
+        let held = std::mem::take(&mut self.held);
+        *self = KeyConfig { held, ..read };
+        self.pad.sanitise();
     }
 
     pub fn load(path: &Path) -> KeyConfig {

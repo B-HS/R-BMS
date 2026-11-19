@@ -97,6 +97,8 @@ enum Notice {
     Unnamed,
     /// The row is the keyboard's alone.
     KeyboardOnly,
+    /// The two controller elements were refused: one of them is on a turntable.
+    TurntableInChord,
     /// A lane was cleared, which puts the key it ships with back.
     LaneKept,
     /// Enter once more puts everything back as shipped.
@@ -340,7 +342,8 @@ impl KeyConfigState {
     /// Elements of the controller going down (`true`) or up while its cell waits for a binding,
     /// oldest first. A lane takes the first that goes down, a turntable for a scratch lane while an
     /// algorithm reads one; a control or a shortcut takes an element once it is let go, or two once
-    /// the second goes down while the first is held.
+    /// the second goes down while the first is held -- unless one of the two is on a turntable,
+    /// which is refused and said.
     fn capture_elements(&mut self, shared: &mut AppShared, target: Bindable, changes: &[(PadBinding, bool)]) {
         let mode = shared.kc_edit_mode;
         for &(binding, pressed) in changes {
@@ -359,6 +362,9 @@ impl KeyConfigState {
                         _ => binding,
                     };
                     pad.bind(mode, target, Some(binding));
+                }
+                Some(Captured::Chord(first, second)) if pad.is_on_a_turntable(first) || pad.is_on_a_turntable(second) => {
+                    self.notice = Notice::TurntableInChord;
                 }
                 Some(Captured::Chord(first, second)) => pad.bind_chord(target, first, second),
             }
@@ -384,6 +390,7 @@ impl KeyConfigState {
             Notice::Fixed => return in_red(KeyEditorNoticeText::Fixed.get(language()).to_string()),
             Notice::Unnamed => return in_red(KeyEditorNoticeText::Unnamed.get(language()).to_string()),
             Notice::KeyboardOnly => return in_red(KeyEditorNoticeText::KeyboardOnly.get(language()).to_string()),
+            Notice::TurntableInChord => return in_red(KeyEditorNoticeText::TurntableInChord.get(language()).to_string()),
             Notice::LaneKept => return (KeyEditorNoticeText::LaneKept.get(language()).to_string(), theme.warn),
             Notice::RestoreArmed => return (KeyEditorNoticeText::RestoreArmed.get(language()).to_string(), theme.warn),
             Notice::Restored => return (KeyEditorNoticeText::Restored.get(language()).to_string(), theme.text_dim),
@@ -401,7 +408,7 @@ impl KeyConfigState {
             Some(Clash::Fixed) => in_red(KeyEditorNoticeText::FixedOnItsScreen.get(language()).to_string()),
             None => match (self.overlap(shared, bound, target), shared.keyconfig.lane_sharing(mode, target).filter(|_| self.column == Column::Keyboard)) {
                 (Some(said), _) => (said, theme.warn),
-                (None, Some(lane)) => (KeyEditorNoticeText::AlsoLane.fill(language(), &[&Bindable::Lane(lane).label(mode)]), theme.text_dim),
+                (None, Some(lane)) => (also_lane(target).fill(language(), &[&Bindable::Lane(lane).label(mode)]), theme.text_dim),
                 (None, None) => (String::new(), theme.text_dim),
             },
         }
@@ -424,6 +431,15 @@ impl KeyConfigState {
         };
         let words = if mine_is_chord { KeyEditorNoticeText::ChordKeyAlone } else { KeyEditorNoticeText::KeyInChord };
         Some(words.fill(language(), &[&shared_key, &other.label(mode)]))
+    }
+}
+
+/// What the editor says of a shortcut on the key of a lane ([`KeyConfig::lane_sharing`]): that the
+/// screen that reads it does what the lane does there too.
+fn also_lane(target: Bindable) -> KeyEditorNoticeText {
+    match target {
+        Bindable::Shortcut(shortcut) if shortcut.screen() == crate::keyconfig::ShortcutScreen::Result => KeyEditorNoticeText::AlsoLaneOnResult,
+        _ => KeyEditorNoticeText::AlsoLane,
     }
 }
 

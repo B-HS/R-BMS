@@ -704,14 +704,6 @@ fn start_and_select_collide_like_any_other_control() {
 }
 
 #[test]
-fn start_and_select_are_the_controls_that_give_way_to_a_lane() {
-    for action in ControlAction::ALL {
-        let yields = matches!(action, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle | ControlAction::Escape);
-        assert_eq!(action.yields_to_lanes(), yields, "{action:?}");
-    }
-}
-
-#[test]
 fn held_keys_follow_press_and_release() {
     let mut held = HeldKeys::default();
     assert!(!held.is_down(KeyCode::KeyZ));
@@ -1205,7 +1197,7 @@ fn a_browser_shortcut_on_a_lane_key_is_named_rather_than_refused() {
     assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::Favourite)), Some(5), "F stars a chart and plays key six");
     assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::OptionsHold)), Some(7), "left shift holds the overlay and is the turntable");
     assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::Search)), None);
-    assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::Retry)), None, "the result does not read the lanes as the browser does");
+    assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::Retry)), None, "R plays no lane");
     assert_eq!(keys.lane_sharing(Mode::BEAT_7K, control(ControlAction::Start)), None);
 }
 

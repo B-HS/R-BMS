@@ -177,11 +177,14 @@ impl CapturedRun<'_> {
 
 /// What keeping a capture came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kept {
+pub(crate) enum Keeping {
     /// It was added.
     Added,
     /// The same layout of the chart was kept already, and is left as it was.
     AlreadyKept,
+    /// It was added, but the file could not be written: it is kept only while the app runs, and the
+    /// failure has been said.
+    NotWritten,
 }
 
 /// The captures as the file holds them.
@@ -228,29 +231,31 @@ impl CapturedLayouts {
         CapturedLayouts::load(&captured_layouts_path(settings_path))
     }
 
-    /// Write the captures out, reporting a failed write rather than losing it silently.
-    fn save(&self) {
+    /// Write the captures out, reporting a failed write rather than losing it silently. `true` once
+    /// the file is written.
+    fn save(&self) -> bool {
         let text = match ron::ser::to_string_pretty(&self.file, ron::ser::PrettyConfig::default()) {
             Ok(text) => text,
             Err(e) => {
                 notify_text(Level::Error, CaptureText::SaveFailed, &[&e]);
-                return;
+                return false;
             }
         };
-        if let Err(e) = write_atomic(&self.path, &text) {
-            notify_text(Level::Error, CaptureText::SaveFailedAt, &[&self.path.display(), &e]);
+        let written = write_atomic(&self.path, &text);
+        if let Err(e) = &written {
+            notify_text(Level::Error, CaptureText::SaveFailedAt, &[&self.path.display(), e]);
         }
+        written.is_ok()
     }
 
     /// Keep `capture` dated `now_ms`, newest first, and write the file at once; a layout of the
     /// chart kept already is left as it was.
-    pub(crate) fn keep(&mut self, capture: CapturedLayout, now_ms: i64) -> Kept {
+    pub(crate) fn keep(&mut self, capture: CapturedLayout, now_ms: i64) -> Keeping {
         if self.file.layouts.iter().any(|kept| kept.same_layout(&capture)) {
-            return Kept::AlreadyKept;
+            return Keeping::AlreadyKept;
         }
         self.file.layouts.insert(0, CapturedLayout { captured_at: now_ms, ..capture });
-        self.save();
-        Kept::Added
+        if self.save() { Keeping::Added } else { Keeping::NotWritten }
     }
 
     /// Let go of the capture of the same layout as `capture`, and write the file at once. `false`
@@ -277,12 +282,17 @@ impl CapturedLayouts {
 }
 
 impl crate::AppShared {
-    /// Keep `capture`, now, and say what came of it.
-    pub(crate) fn keep_captured_layout(&mut self, capture: CapturedLayout) -> Kept {
+    /// Keep `capture`, now, and say what came of it. A capture whose file could not be written has
+    /// had the failure said, which is all there is to say of it.
+    pub(crate) fn keep_captured_layout(&mut self, capture: CapturedLayout) -> Keeping {
         let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default();
         let shown = format!("{} {}", capture.random_label, capture.layout_text());
         let kept = self.captured_layouts.keep(capture, now_ms);
-        let said = if kept == Kept::Added { CaptureText::Captured } else { CaptureText::AlreadyCaptured };
+        let said = match kept {
+            Keeping::Added => CaptureText::Captured,
+            Keeping::AlreadyKept => CaptureText::AlreadyCaptured,
+            Keeping::NotWritten => return kept,
+        };
         notify_text(Level::Info, said, &[&shown]);
         kept
     }

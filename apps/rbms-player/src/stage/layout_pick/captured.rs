@@ -9,6 +9,7 @@ use crate::CW;
 use crate::captured_layouts::{CapturedLayout, CapturedLayouts};
 use crate::format::fmt_datetime;
 use crate::stage::Canvas;
+use crate::stage::preview_menu::wrapped;
 use crate::text::menus::layout_pick::LayoutPickText;
 
 /// Where the list is drawn: right of the field, from the top of its lanes.
@@ -30,13 +31,27 @@ const BAND_PAD: f32 = 3.0;
 /// How many rows are in view at once.
 const VISIBLE_ROWS: usize = 10;
 
-/// What the list is drawn for: the chart on show, whether the list has the keys, the key a result
-/// screen captures a layout on, and the language on show.
+/// How many lines what an empty list says may take.
+const NOTHING_CAPTURED_LINES: usize = 2;
+
+/// What the list is drawn for: the chart on show, whether the list has the keys, the key or the two
+/// keys a result screen captures a layout on -- `None` while it has none -- and the language on show.
 pub(crate) struct ListView<'a> {
     pub(crate) md5: &'a str,
     pub(crate) focused: bool,
-    pub(crate) capture_key: &'a str,
+    pub(crate) capture_key: Option<&'a str>,
     pub(crate) language: Language,
+}
+
+impl ListView<'_> {
+    /// What the list says while it is empty: the key a result screen captures a layout on, or, while
+    /// that has no key, that one is given in the key editor.
+    pub(crate) fn nothing_captured(&self) -> String {
+        match self.capture_key {
+            Some(key) => LayoutPickText::CapturedNone.fill(self.language, &[&key]),
+            None => LayoutPickText::CapturedNoneWithoutKey.get(self.language).to_string(),
+        }
+    }
 }
 
 /// Which captures the list holds.
@@ -140,8 +155,9 @@ impl CapturedList {
         draw_text(canvas, LIST_X, LIST_TOP, HEADING_SCALE, heading_colour, &fit_text(&heading.fill(view.language, &[&entries.len()]), HEADING_SCALE, width));
         let first_row = LIST_TOP + FIRST_ROW_DROP;
         if entries.is_empty() {
-            let none = LayoutPickText::CapturedNone.fill(view.language, &[&view.capture_key]);
-            draw_text(canvas, LIST_X, first_row, DETAIL_SCALE, th.text_muted, &fit_text(&none, DETAIL_SCALE, width));
+            for (row, line) in wrapped(&view.nothing_captured(), DETAIL_SCALE, width, NOTHING_CAPTURED_LINES).iter().enumerate() {
+                draw_text(canvas, LIST_X, first_row + row as f32 * DETAIL_DROP, DETAIL_SCALE, th.text_muted, line);
+            }
             return;
         }
         let cursor = self.cursor(entries.len());

@@ -40,6 +40,13 @@ rbms_model::translations! {
             "저장한 배치 없음: 결과 화면에서 {0}",
             "保存した配置なし: リザルト画面で {0}",
         ),
+        /// The list has nothing in it, and no key of a result screen captures a layout: one is given in
+        /// the key editor, on the line [`CaptureText::ShortcutLabel`] names.
+        CapturedNoneWithoutKey => (
+            "NOTHING CAPTURED: GIVE CAPTURE LAYOUT A KEY IN KEY CONFIG",
+            "저장한 배치 없음: 키 설정에서 배치 저장 키를 지정하세요",
+            "保存した配置なし: キー設定で配置を保存のキーを指定してください",
+        ),
         /// The captured layout of another chart is played on that chart: Enter goes to it.
         CapturedElsewhere => ("ENTER GOES TO THIS CHART", "ENTER로 이 차트로 이동", "ENTERでこの譜面へ移動"),
         /// The first press of the key that removes a captured layout.

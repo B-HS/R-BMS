@@ -72,7 +72,7 @@ use crate::borrowed_layout::{LayoutRefusal, LayoutRequest};
 use crate::captured_layouts::CapturedLayout;
 use crate::format::fmt_datetime;
 use crate::gamepad::PadEvent;
-use crate::keyconfig::{ControlAction, Shortcut};
+use crate::keyconfig::{ControlAction, KeyBind, Shortcut};
 use crate::stage::play::BpmStats;
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::text::menus::layout_pick::LayoutPickText;
@@ -505,9 +505,29 @@ impl LayoutPickState {
     /// Whether `code` is a key that removes the capture under the list's cursor: Delete, or, while
     /// the list has the keys, the key of a side's fourth key lane. A removal waits for its second
     /// press through these and is taken back by any other key.
-    fn removes_a_capture(&self, code: KeyCode) -> bool {
+    fn removes_a_capture(&self, shared: &AppShared, code: KeyCode) -> bool {
         let removal_lane = |lane: usize| self.place_of(lane).is_some_and(|(_, at)| at == LIST_KEY_REMOVE);
-        code == KeyCode::Delete || (self.focus == Focus::Captured && self.lane_keys.iter().any(|(key, lane)| *key == code && removal_lane(*lane)))
+        code == KeyCode::Delete || (self.focus == Focus::Captured && self.lane_of(shared, code).is_some_and(|(lane, _)| removal_lane(lane)))
+    }
+
+    /// The lane of the chart's mode `code` plays and the way it spins it, or `None` for a key that
+    /// plays none. The press that made two keys held together plays none either: it is theirs, as
+    /// it is on every screen but a run ([`crate::keyconfig::HeldKeys::press_made_a_chord`]).
+    fn lane_of(&self, shared: &AppShared, code: KeyCode) -> Option<(usize, ScratchDir)> {
+        if shared.keyconfig.held.press_made_a_chord(code) {
+            return None;
+        }
+        let lane = self.lane_keys.iter().find(|(key, _)| *key == code).map(|(_, lane)| (*lane, ScratchDir::Forward));
+        lane.or_else(|| self.reverse_keys.iter().find(|(key, _)| *key == code).map(|(_, lane)| (*lane, ScratchDir::Backward)))
+    }
+
+    /// The menu button `code` is the key of alone, START or SELECT, or `None` for any other key and
+    /// for the press that made two keys held together.
+    fn menu_button_of(shared: &AppShared, code: KeyCode) -> Option<ControlAction> {
+        if shared.keyconfig.held.press_made_a_chord(code) {
+            return None;
+        }
+        [ControlAction::Start, ControlAction::Select].into_iter().find(|action| shared.keyconfig.control_key(*action) == Some(code))
     }
 
     /// A lane pressed while the list of captured layouts has the keys, `place` being where it is
@@ -745,9 +765,7 @@ impl LayoutPickState {
     /// A key that is neither a fixed key of the screen nor one that moves the preview: a lane of the
     /// chart's mode, a number, START or SELECT.
     fn other_key(&mut self, shared: &mut AppShared, code: KeyCode, now: Instant) -> Transition {
-        let lane = self.lane_keys.iter().find(|(key, _)| *key == code).map(|(_, lane)| (*lane, ScratchDir::Forward));
-        let lane = lane.or_else(|| self.reverse_keys.iter().find(|(key, _)| *key == code).map(|(_, lane)| (*lane, ScratchDir::Backward)));
-        if let Some((lane, dir)) = lane {
+        if let Some((lane, dir)) = self.lane_of(shared, code) {
             self.press_lane(shared, lane, dir, now);
             return Transition::Stay;
         }
@@ -755,9 +773,11 @@ impl LayoutPickState {
             Some(_) if self.focus == Focus::Captured => {}
             Some(0) => self.edit(self.side, SideRow::in_order),
             Some(number) => self.type_lane(self.side, number, now),
-            None if shared.keyconfig.control_key(ControlAction::Start) == Some(code) => return self.confirm(shared, now),
-            None if shared.keyconfig.control_key(ControlAction::Select) == Some(code) => self.next_focus(shared),
-            None => {}
+            None => match LayoutPickState::menu_button_of(shared, code) {
+                Some(ControlAction::Start) => return self.confirm(shared, now),
+                Some(ControlAction::Select) => self.next_focus(shared),
+                _ => {}
+            },
         }
         Transition::Stay
     }
@@ -860,10 +880,16 @@ impl LayoutPickState {
         render_lane_cover(canvas, &self.skin, LaneShade { cover: shared.effective_cover(), hidden: shared.effective_hidden() });
     }
 
+    /// The key or the two keys a result screen captures a layout on, as the list names them, or
+    /// `None` while the capture has no key.
+    fn capture_key(shared: &AppShared) -> Option<String> {
+        shared.keyconfig.shortcut_bind(Shortcut::CaptureLayout).map(KeyBind::label)
+    }
+
     /// The list of captured layouts, beside the field.
     fn draw_list(&self, shared: &AppShared, canvas: &mut Canvas<'_>, language: Language) {
-        let capture_key = shared.keyconfig.shortcut_bind(Shortcut::CaptureLayout).map(|bind| bind.label()).unwrap_or_default();
-        let view = ListView { md5: &self.md5, focused: self.focus == Focus::Captured, capture_key: &capture_key, language };
+        let capture_key = LayoutPickState::capture_key(shared);
+        let view = ListView { md5: &self.md5, focused: self.focus == Focus::Captured, capture_key: capture_key.as_deref(), language };
         self.list.draw(canvas, &shared.captured_layouts, &view);
     }
 }
@@ -891,7 +917,7 @@ impl StageHandler for LayoutPickState {
         if !key.pressed {
             return Transition::Stay;
         }
-        if !self.removes_a_capture(key.code) {
+        if !self.removes_a_capture(ctx.shared, key.code) {
             self.list.disarm();
         }
         match key.code {

@@ -230,12 +230,42 @@ impl Default for PadConfig {
 
 impl PadConfig {
     /// Pull every tunable back inside its range, so a hand-edited file cannot produce a controller
-    /// that never releases or never fires. Called on load, and mirrored by the accessors below so
-    /// an unsanitised config still behaves.
+    /// that never releases or never fires, and let go of every pair of elements with a direction of
+    /// a turntable in it ([`PadConfig::is_on_a_turntable`]), which a file written before such a pair
+    /// was refused may hold. Called whenever a config is read, and mirrored by the accessors below
+    /// so an unsanitised config still behaves.
     pub fn sanitise(&mut self) {
         self.debounce_ms = self.effective_debounce_ms();
         self.analog_threshold = self.effective_analog_threshold();
         self.axis_deadzone = self.effective_axis_deadzone();
+        self.forget_pairs_on_turntables();
+    }
+
+    /// The turntables a lane of some mode reads, each as [`PadBinding::AnalogScratch`].
+    fn turntables(&self) -> Vec<PadBinding> {
+        self.lanes.values().flatten().flatten().copied().filter(|binding| !binding.is_a_key()).collect()
+    }
+
+    /// Whether `binding` is an axis, or a direction of one, that a lane of some mode reads as a
+    /// turntable. Such an axis spins, and is never one of two elements held together: a pair is
+    /// bound for every mode, and in the mode whose turntable it is the axis would be read as both.
+    pub fn is_on_a_turntable(&self, binding: PadBinding) -> bool {
+        binding.as_analog_scratch().is_some_and(|axis| self.turntables().contains(&axis))
+    }
+
+    /// Let go of every control and shortcut bound to a pair one of whose elements is on a turntable:
+    /// both of its elements, so that it reads what it ships with.
+    fn forget_pairs_on_turntables(&mut self) {
+        let turntables = self.turntables();
+        let on_one = |binding: &PadBinding| binding.as_analog_scratch().is_some_and(|axis| turntables.contains(&axis));
+        for (firsts, seconds) in [(&mut self.controls, &mut self.control_chords), (&mut self.shortcuts, &mut self.shortcut_chords)] {
+            let broken: Vec<String> =
+                seconds.iter().filter(|(name, second)| on_one(second) || firsts.get(*name).is_some_and(on_one)).map(|(name, _)| name.clone()).collect();
+            for name in broken {
+                seconds.remove(&name);
+                firsts.remove(&name);
+            }
+        }
     }
 
     pub fn effective_debounce_ms(&self) -> u32 {
@@ -351,10 +381,11 @@ impl PadConfig {
         }
     }
 
-    /// Bind a control or a shortcut to two elements held together. Two of one element, a turntable,
-    /// a lane, a reverse spin and a shortcut a controller cannot be given are not bound at all.
+    /// Bind a control or a shortcut to two elements held together. Two of one element, a turntable
+    /// or a direction of one ([`PadConfig::is_on_a_turntable`]), a lane, a reverse spin and a
+    /// shortcut a controller cannot be given are not bound at all.
     pub fn bind_chord(&mut self, target: Bindable, first: PadBinding, second: PadBinding) {
-        if first == second || !first.is_a_key() || !second.is_a_key() {
+        if first == second || !first.is_a_key() || !second.is_a_key() || self.is_on_a_turntable(first) || self.is_on_a_turntable(second) {
             return;
         }
         let key = match target {

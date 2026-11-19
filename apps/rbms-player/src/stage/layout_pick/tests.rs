@@ -543,6 +543,88 @@ fn the_fourth_lane_key_pressed_twice_on_the_keyboard_removes_a_capture() {
     assert!(matches!(state.notice, Some((Notice::Says(LayoutPickText::Removed), _))), "{:?}", state.notice);
 }
 
+/// One key going down or up on the screen that is up, through the path the window's keys take.
+fn through(app: &mut App, code: KeyCode, pressed: bool) {
+    let input = KeyInput { code, pressed, released: !pressed, text: None };
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, input);
+}
+
+/// The LAYOUT PICK screen that is up.
+fn picked(app: &App) -> &LayoutPickState {
+    let Stage::LayoutPick(state) = &app.stage else {
+        panic!("the {:?} screen is up, not LAYOUT PICK", app.stage.id());
+    };
+    state
+}
+
+/// The press that makes two keys held together is the two keys', as it is on every screen but a
+/// run: a lane key, START or SELECT pressed so writes no lane, plays nothing and turns to nothing,
+/// and pressed alone each still does what it does.
+#[test]
+fn the_press_that_makes_two_keys_held_together_writes_no_lane_and_is_no_start_or_select() {
+    use crate::keyconfig::{Bindable, KeyBind};
+
+    let mut app = with_chart("chord", SEVEN_KEY_CHART, Mode::BEAT_7K, None);
+    let fifth = lane_key(&app, Mode::BEAT_7K, 4);
+    let start = app.shared.keyconfig.control_key(ControlAction::Start).expect("START has a key");
+    let select = app.shared.keyconfig.control_key(ControlAction::Select).expect("SELECT has a key");
+    let mode = app.shared.mode;
+    for (code, action) in [(fifth, ControlAction::HiSpeedUp), (start, ControlAction::CoverUp), (select, ControlAction::LiftUp)] {
+        app.shared.keyconfig.bind_keys(mode, Bindable::Control(action), KeyBind::chord(KeyCode::F7, code).expect("two keys"));
+    }
+    app.stage = Stage::LayoutPick(Box::new(LayoutPickState::open(&app.shared, 0)));
+    for code in [fifth, start, select] {
+        through(&mut app, KeyCode::F7, true);
+        through(&mut app, code, true);
+        through(&mut app, code, false);
+        through(&mut app, KeyCode::F7, false);
+    }
+    let state = picked(&app);
+    assert_eq!(rows_text(state), ["1234567"], "the press that made two keys typed its lane");
+    assert!(state.notice.is_none(), "the press that made two keys was START: {:?}", state.notice);
+    assert!(state.focus == Focus::Rows, "the press that made two keys was SELECT");
+
+    for code in [fifth, start, select] {
+        through(&mut app, code, true);
+        through(&mut app, code, false);
+    }
+    let state = picked(&app);
+    assert_eq!(rows_text(state), ["5123467"], "the lane key alone did not type its lane");
+    assert!(state.notice.is_some(), "START alone did not try to play the layout");
+    assert!(state.focus == Focus::Captured, "SELECT alone did not turn to the list");
+}
+
+/// An empty list names the key a result screen captures a layout on, two keys held together as the
+/// key editor names them; while the capture has no key it says to give it one in the key editor
+/// rather than naming a blank, and in every language what it says fits the two lines it is given.
+#[test]
+fn an_empty_list_names_the_key_that_captures_a_layout_or_where_to_give_it_one() {
+    use crate::keyconfig::Bindable;
+    use crate::stage::preview_menu::wrapped;
+
+    const LIST_WIDTH: f32 = 328.0;
+    const LIST_SCALE: f32 = 1.0;
+    const LINES: usize = 2;
+    let mut app = with_chart("nothing-captured", SEVEN_KEY_CHART, Mode::BEAT_7K, None);
+    let said = |app: &App, language: Language| {
+        let key = LayoutPickState::capture_key(&app.shared);
+        ListView { md5: "", focused: false, capture_key: key.as_deref(), language }.nothing_captured()
+    };
+    assert_eq!(said(&app, Language::English), "NOTHING CAPTURED: PRESS P ON A RESULT");
+    let mode = app.shared.mode;
+    let capture = Bindable::Shortcut(Shortcut::CaptureLayout);
+    app.shared.keyconfig.bind_keys(mode, capture, KeyBind::chord(KeyCode::ShiftLeft, KeyCode::KeyP).expect("two keys"));
+    assert_eq!(said(&app, Language::English), "NOTHING CAPTURED: PRESS LSHIFT + P ON A RESULT");
+    app.shared.keyconfig.bind(mode, capture, None);
+    rbms_render::font::use_embedded_fonts_only();
+    for language in Language::ALL {
+        let text = said(&app, language);
+        assert_eq!(text, LayoutPickText::CapturedNoneWithoutKey.get(language), "{language:?}");
+        assert!(!text.contains("  "), "{language:?} names a blank key: {text}");
+        assert_eq!(wrapped(&text, LIST_SCALE, LIST_WIDTH, LINES).join(" "), text, "{language:?} does not fit the list: {text}");
+    }
+}
+
 /// Where a test saves what it drew when asked to, and the name it saves the screen under.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 const CAPTURE_FILE: &str = "layout-pick-captured.png";
