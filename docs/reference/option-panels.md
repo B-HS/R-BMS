@@ -1,6 +1,6 @@
 # 선곡 옵션 패널 조사 (START, SELECT, 상세 패널과 플레이 옵션 전체)
 
-> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
+> 최종 갱신 2026-11-19 · 대응 커밋 `c4e75c2`·`e62240d`(2026-11-19 에 337행의 WINDOW MODE 값과 378행의 조작 종류만 고쳤다. 본문 조사는 2026-10-22 의 것) · 이전: 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
 
 조사로 시작해 구현을 따라 고친 살아 있는 문서다. 1절(현재 구현)과 6절(결정)은 구현 뒤의 코드 기준이고, 2~5절의 조사(원본, IIDX 이미지, Lua 가능성)는 조사 당시 그대로다. 구현으로 달라진 곳은 그 절 머리나 해당 줄에 적었다. 문서와 코드가 다르면 코드를 믿었다. 근거는 저장소 루트 기준 `파일:줄` 이다. "직접 확인"은 이 조사에서 실행하거나 화면으로 본 것, "읽기만"은 코드를 읽어 추론한 것이다.
 
@@ -334,7 +334,7 @@ IIDX 옵션 화면 참고 이미지(4절)의 구성을 따른다. 파일: `sheet
 | GUIDE SE (`audio.guide_se`) | OFF, ON | OFF | 없음 | 없음 | 없음 | AUDIO | 없음 | 없음 | 이벤트 343, 인덱스 343 |
 | 연습만(구간 START·END TIME, GAUGE VALUE, FREQUENCY 50~200%) | 연습 패널 9절 | | | | | | 연습 | | |
 
-- 화면 전용: WHITE NUMBER, JUDGE TEXT Y, 5KEYS LAYOUT 은 내장 화면만 읽는다(`settings.rs:732-744`). SCORE GRAPH, RESULT GRAPHS, REPLAY ANALYSIS, PREVIEW, LETTERBOX, RESOLUTION, WINDOW MODE, DEBUG MODE, FONT, SKIN 은 플레이 결과에 영향이 없는 표시 설정이다.
+- 화면 전용: WHITE NUMBER, JUDGE TEXT Y, 5KEYS LAYOUT 은 내장 화면만 읽는다(`settings.rs:732-744`). SCORE GRAPH, RESULT GRAPHS, REPLAY ANALYSIS, PREVIEW, LETTERBOX, RESOLUTION, WINDOW MODE(WINDOWED·BORDERLESS·FULLSCREEN. 2026-11-19 에 FULLSCREEN 을 더함, [ADR](../acknowledge/2026-11-19-adr-exclusive-fullscreen.md)), DEBUG MODE, FONT, SKIN 은 플레이 결과에 영향이 없는 표시 설정이다.
 - 불투명도, 레인 폭, 노트 색 등 스킨 옵션은 SKIN 메뉴와 PLAY 메뉴의 LANE·SKIN 묶음(`play_menu/rows.rs`)이 바꾼다. 이 문서의 범위 밖이다.
 
 ### 2.2 패널에서 바꿀 수 없는 것
@@ -375,7 +375,7 @@ IIDX 옵션 화면 참고 이미지(4절)의 구성을 따른다. 파일: `sheet
 | PLAY 메뉴 | 선곡에서 `F8` | SPEED(6행), LANE(7행), JUDGE(2행), CHART(RANDOM, GAUGE, LEGACY NOTE, TARGET, TARGET FALLBACK, TARGET RATE, AUTOPLAY, SCRATCH AUTO, AUTO REPLAY, ESCAPE 10행) + 미리 보는 플레이 스킨이 선언한 옵션과 오프셋. 왼쪽 목록과 오른쪽 미리보기 |
 | SETTINGS | 선곡에서 `Tab` | 탭 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT |
 | 연습 패널 | 선곡에서 `F4` | START TIME, END TIME, GAUGE TYPE, GAUGE CATEGORY, GAUGE VALUE, JUDGERANK, TOTAL, FREQUENCY, OPTION-1P (`docs/play-options.md` 9.1절). 패드는 받지 않는다 |
-| 플레이 중 키 | 키 설정(F5) | 조작 20종(HI-SPEED UP·DOWN, 레인 커버 UP·DOWN·ON/OFF, 리프트 UP·DOWN·ON/OFF, 히든 UP·DOWN·ON/OFF, GREEN UP·DOWN, KEEP GREEN ON/OFF, OFFSET ±1, AUTO ADJUST ON/OFF, FINE STEP, START, SELECT)(`keyconfig.rs:384-405`). 출하 키 UP/DOWN, RIGHT/LEFT, `\`, `[`/`]`, `9`/`0`, `A`, `W`. 나머지는 미지정. START·SELECT 조합은 `docs/play-options.md` 5.2절 |
+| 플레이 중 키 | 키 설정(F5) | 조작 21종(HI-SPEED UP·DOWN, 레인 커버 UP·DOWN·ON/OFF, 리프트 UP·DOWN·ON/OFF, 히든 UP·DOWN·ON/OFF, GREEN UP·DOWN, KEEP GREEN ON/OFF, OFFSET ±1, AUTO ADJUST ON/OFF, FINE STEP, START, SELECT, ESC. ESC 는 2026-11-19 에 더했다)(`keyconfig.rs` 의 `ControlAction`, `ControlAction::ALL`). 키·패드 버튼 하나 대신 두 개를 함께 누르는 조합으로도 묶는다([조합과 ESC ADR](../acknowledge/2026-11-19-adr-chord-bindings-and-escape.md)). 출하 키 UP/DOWN, RIGHT/LEFT, `\`, `[`/`]`, `9`/`0`, `A`, `W`. 나머지(FINE STEP, ESC 포함)는 미지정. START·SELECT 조합은 `docs/play-options.md` 5.2절 |
 | 사이드 메뉴 | 선곡에서 마우스 | 1.9절 QUICK SETTINGS 6행 |
 | 명령줄 | `rbms-player --help` | `--auto`, `--interactive`, `--sc-left`, `--sc-auto`, `--lift`, `--hispeed`, `--gauge`(`command_line.rs:125-148`) |
 

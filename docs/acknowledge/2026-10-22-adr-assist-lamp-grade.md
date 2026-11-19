@@ -1,6 +1,6 @@
 # ADR: SCRATCH AUTO 클리어의 어시스트 등급 (ASSIST EASY / CLEAR / HARD / EXHARD)
 
-> 최종 갱신 2026-10-23 · 대응 커밋 47a7f9c
+> 최종 갱신 2026-11-19 · 대응 커밋 `df80201`(4절 "표시"와 8절에 2026-11-19 의 확장 표시를 덧붙였다. 결정은 그대로) · 이전: 최종 갱신 2026-10-23 · 대응 커밋 47a7f9c
 > 상태: 일부 대체됨(6절의 `course_best.assist_grade` 항목만 [코스 제출 게이지](2026-10-23-adr-course-submission-gauge.md)가 대체함. 나머지는 유효, 사용자 확인 2026-10-23: "1-11 추천대로") · 결정일 2026-10-22 · 결정자 메인(사용자 지시 "끝까지 다 구현해놔"에 따라 추천안 채택, 사용자 미확인. 운영 DB 마이그레이션 적용만 사용자가 승인) · 커밋 4d57c2a(클라이언트 코어), 8d85b32(웹 마이그레이션 0011), 64c6120(웹 등급), 242397f(코스 스테이지), 47a7f9c(웹 AI 정렬·백필 액션)
 > 관계: [2026-10-14-adr-scratch-auto-rule.md](2026-10-14-adr-scratch-auto-rule.md) 결정 4(SCRATCH AUTO 클리어의 램프는 LIGHT ASSIST)를 대체하지 않고 확장한다. 램프 id 3 과 그 강등 규칙은 그대로이고, 그 안을 등급으로 나눈다.
 
@@ -45,7 +45,7 @@
 - 비교: `merge_best` 는 `best.lamp() < log.lamp()`(`RecordLamp` = 램프 id, 등급 순서)일 때 `clear`·`assist_grade`·`option`·`seed`·`gauge`·`assist` 를 그 판의 값으로 바꾼다(`crates/rbms-store/src/scoredb.rs:653-662`). 같은 id 3 안에서 등급이 오른 판도 따라간다. `ScoreDb::best` 는 `clear DESC, assist_grade DESC, EX DESC, minbp ASC`, `chart_best_many` 는 `MAX(clear * 5 + assist_grade)` 로 접는다(`scoredb.rs:482, 500`).
 - 저장: `score` 테이블에 `assist_grade INTEGER NOT NULL DEFAULT 0` 열(`schema.sql:40`, 기존 열 추가 방식 `ADDED_COLUMNS` `schema.rs:68`). `SCORE_DB_SCHEMA_VERSION` 은 1 그대로, 규칙 세대 `SCORE_RULE_VERSION` 도 4 그대로다. `ScoreRecord` 에 `assist`(serde 기본값 -1 = 기록 안 됨)를 더했다.
 - 소급: `refold_assist_grades` 가 DB 를 열 때마다(`schema::migrate`, `schema.rs:50`) 돈다. 램프 id 3 의 `scorelog` 판 가운데 같은 차트·모드·LN 방식의 최고 등급을 고르고(동률이면 먼저 친 판), 등급이 다를 때만 `score.assist_grade` 를 쓰며 등급이 0 보다 크면 그 판의 `gauge`·`assist` 도 쓴다. 규칙 세대 2 미만 행과 `assist = -1` 행은 등급이 없다. id 3 이 아닌 행은 0 으로 정리한다. 멱등이며 구 빌드가 행을 다시 써서 0 이 되어도 다음 실행에서 복구된다. 내부 스캔은 `WHERE l.clear = ?1`(LIGHT ASSIST 행)로 좁혔다(`scoredb.rs:783`).
-- 표시: 결과 화면·선곡 상세·기록 목록·기록 모달·내장 선곡 막대 LED 가 등급 이름과 색을 쓴다. 선곡 정렬 Clear 는 `(clear, 등급)` 순이다. 선곡 `CLEARED` 필터는 NO PLAY·FAILED 가 아닌 모든 램프(`ClearType::is_cleared`, id 2 이상)로 맞췄다. 웹의 2026-10-19 기준([웹 ADR](2026-10-19-adr-web-clear-and-play-history.md))과 같아졌다.
+- 표시: 결과 화면·선곡 상세·기록 목록·기록 모달·내장 선곡 막대 LED 가 등급 이름과 색을 쓴다. (2026-11-19 추가: 기본 스킨의 선곡 목록 막대, MY RECORDS 줄, 랭킹 줄도 같은 등급 색을 쓴다. [등급 램프 목록 ADR](2026-11-19-adr-assist-grade-lamps-in-lists.md).) 선곡 정렬 Clear 는 `(clear, 등급)` 순이다. 선곡 `CLEARED` 필터는 NO PLAY·FAILED 가 아닌 모든 램프(`ClearType::is_cleared`, id 2 이상)로 맞췄다. 웹의 2026-10-19 기준([웹 ADR](2026-10-19-adr-web-clear-and-play-history.md))과 같아졌다.
 - IR 순위 패널은 서버 응답의 `assist_grade` 를 읽어 `RankingRow.record_lamp` 에 담고 램프 분포를 라벨 문자열이 아닌 램프 id 로 센다(`apps/rbms-player/src/ir_ranking.rs`, `skin_host/ir.rs`).
 
 ### 5) 코스 스테이지는 실제로 끝난 CLASS 계열 게이지로 저장·전송한다
@@ -74,6 +74,7 @@
 
 - 외부 스킨이 받는 램프 값(이미지 인덱스 370·371, 막대 램프, 폴더 분포 11칸, 옵션 1100~1104)은 그대로다. 등급이 있는 클리어도 id 3 이다. `SelectBar.lamp` 는 `Option<u8>` 그대로이고 등급은 `SelectBar.assist_grade` 에 따로 있다.
 - 기본 스킨만 확장 옵션 21110~21134 로 등급을 읽는다([확장 id ADR](2026-10-22-adr-rbms-extension-ids.md)). 이 id 를 모르는 스킨은 아무 영향이 없고 새 번역 계층도 필요 없다.
+- (2026-11-19 추가) 기본 스킨은 선곡 목록 막대의 등급을 `songlist` 확장 키 `lamp_graded`(등급 1~4 의 그림 넷)로, MY RECORDS 줄과 랭킹 줄의 등급을 확장 숫자 21087~21092·21093~21102 로 읽는다. 두 가지 모두 키·id 를 모르는 스킨에는 영향이 없다. 폴더 램프 분포와 스크롤 막대 분포는 여전히 11칸이다. 배정은 [확장 id 공간 ADR](2026-10-24-adr-rbms-extension-id-spaces.md)의 표.
 
 ## 이유
 

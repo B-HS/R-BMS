@@ -1,6 +1,6 @@
 # 스킨 색·불투명도 조절 조사 (레인·노트 색, 부위별 불투명도, 스킨 세부 조절)
 
-> 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
+> 최종 갱신 2026-11-19 · 대응 커밋 `1eb4768`(2026-11-19 에 `skin_screen.rs`·`skin_host/mod.rs` 줄 번호와 오프셋 단위 서술만 고쳤다. 본문 조사는 2026-10-22 의 것) · 이전: 최종 갱신 2026-10-22 · 대응 커밋 47a7f9c
 
 사용자 요청 4(레인·노트 색상을 각각 조절, 불투명도 조절, 스킨 세부 조절 확대)를 위해 기본 스킨 `rbms-default` 와 엔진이 색을 어떻게 다루는지 조사하고, 같은 날 구현한 뒤 현재 상태로 고친 살아 있는 문서다. 0절(결론), 6.3절의 상태 표시, 6.9절(구현 결과), 7절의 구현 뒤 상태, 8절 결정이 구현 뒤의 코드 기준이고, 1~5절의 조사(부위 표, 팔레트, 곱셈 실측, 엔진 능력)는 조사 당시 그대로다(코드를 한 줄도 고치지 않은 상태의 관찰이므로 "조사 때" 로 읽는다). 근거는 `파일:줄` 이다. 문서와 코드가 다른 곳은 1.2절에 모았다. 원본(beatoraja)은 HEAD `8320241d`, 외부 스킨 ModernChic 은 읽기만 했고 내용을 복사하지 않았다.
 
@@ -247,7 +247,7 @@ skin: (custom: { "<설정 폴더>/skin/rbms-default/play7.luaskin": (
 | 값 | 반영 |
 | --- | --- |
 | 옵션, 파일, RELOAD, RESET | 문서를 다시 읽는다(`step_for`, `skin_select.rs:1101-1148`이 `stale` 에 올린다). 미리보기는 몇 프레임 어둡게 둔다(`skin_preview.rs` 의 "Waiting in the dark") |
-| 오프셋, 불투명도 | 읽지 않는다. 저장값을 프레임마다 읽는다(`DocumentOffsets`, `skin_screen.rs:272`, `ScreenHost::offset`, `skin_host/mod.rs:914`) |
+| 오프셋, 불투명도 | 읽지 않는다. 저장값을 프레임마다 읽는다(`DocumentOffsets`, `skin_screen.rs:248-268`, `ScreenHost::offset`, `skin_host/mod.rs:970`). 2026-11-19 부터 길이 오프셋도 환산 없이 스킨 문서 단위 그대로 돌려준다([ADR](../acknowledge/2026-11-19-adr-user-offsets-in-document-units.md)) |
 
 문서를 읽는 비용은 `target/release/rbms-cli skin-dump assets/skins/rbms-default --frames 0`(10-20 빌드)에서 play7 이 3.7ms, play14 4.4ms, select 5.9ms 였다(Lua 두 패스와 조립, 텍스처 디코드 제외). 슬라이더를 끄는 동안 매 프레임 다시 읽는 것은 시간상 가능하지만 미리보기가 계속 어두워지는 문제가 남는다. PLAY 메뉴의 미리보기가 같은 이유로 샘플 장면을 다시 시작하지 않게 만들어진 것이 그 증거다(`skin_preview.rs` 머리말의 "The play menu's preview is the exception"). 이 어두워짐의 정도는 실제 창에서 보지 못했다(조사하지 않은 것, 7절).
 
@@ -328,7 +328,7 @@ beatoraja 도 같다: `SkinObject.java:485, 515` 가 `color.a += off.a / 255.0f`
 | 노트 | `NoteSet.tint: Vec<i32>`(레인과 나란한 색 id, `size` 목록 선례). `NoteLane.tint` 로 옮기고 `Field::put` 이 `BATCH_WHITE` 에 곱한다. 지뢰·hidden·processed·`hcnreactive`(닳는 중)는 틴트에서 뺀다 | `objects.rs:367-370`, `notes.rs:474, 659, 911` |
 | 저장 | `SkinCustomisation.colors: BTreeMap<i32, [u8; 4]>`(구현은 `SkinColor` 구조체, 6.9절). 내보내기는 이름 기준(`documents[이름].colors[이름] = "#RRGGBBAA"`)이고 `ADJUSTMENTS_VERSION` 은 1 그대로(없는 키는 이전 빌드가 무시) | `schema.rs:314`, `adjustments.rs:62` |
 | Lua 발행 | `skin_config.color[이름] = {r,g,b,a}` 도 발행(기본값 계산용). 확장 키가 없는 beatoraja 에서는 `nil` 이라 `(skin_config.color or {})` 로 막는다 | `env.rs:231, 383` |
-| 앱 읽기 | `DocumentOffsets`, `ScreenHost::offset` 처럼 `color` 를 구현 | `skin_screen.rs:272`, `skin_host/mod.rs:914` |
+| 앱 읽기 | `DocumentOffsets`, `ScreenHost::offset` 처럼 `color` 를 구현 | `skin_screen.rs:260-266`, `skin_host/mod.rs:970-979` |
 | 메뉴 | 새 `SkinRow::Color(i)`, `SkinRowKind::Color`. SKIN 메뉴는 옵션 행들 뒤, PLAY 메뉴는 새 접이 `COLOR`(또는 LANE 묶음 끝) | `skin_select.rs:281-309, 930-945`, `skin_menu.rs:716-743`, `play_menu/rows.rs:92-139` |
 | 입력 | `HexEdit`(또는 `NumberEdit` 에 종류 추가): 16진 6자리·8자리, `#` 생략, Enter 확정, Esc 취소. 숫자 행(0~255)은 `NumberSpec::whole(0, 255, "")` 로 그대로 | `number_row.rs:236-300` |
 | 기본 스킨 | 노트 시트를 순백 바탕으로 재생성(색 8종을 `note`, `long`, `held`, `hell`, `hell_held` 다섯 장으로 줄이고 지뢰·`hell_drain` 은 유지), Lua 가 `tint` 를 건다 | `tools/sections/play.py`, `lua/play/{layout,field,main}.lua`, `lua/theme.lua` |
@@ -399,7 +399,7 @@ C 안을 6.8절의 3단계로 구현했고 리뷰 수리(colors-1, colors-2, LN 
 
 앱 층(`apps/rbms-player`, `7459bf7`):
 
-- 실시간 읽기: `DocumentOffsets::color(id)`(`skin_screen.rs:283`)와 `ScreenHost::color(id)`(`skin_host/mod.rs:946`)가 저장값을 그대로 돌려준다(길이가 아니라 `units_per_pixel` 스케일 없음). 둘 중 하나가 빠지면 trait 기본 `None` 이라 컴파일 오류 없이 색이 안 먹는다. 종단 테스트 `a_stored_colour_tints_the_next_frame_through_the_host`(`skin_host/tests.rs`).
+- 실시간 읽기: `DocumentOffsets::color(id)`(`skin_screen.rs:265`)와 `ScreenHost::color(id)`(`skin_host/mod.rs:979`)가 저장값을 그대로 돌려준다(색은 길이가 아니라 처음부터 `units_per_pixel` 스케일이 없었고, 길이 오프셋의 `units_per_pixel` 환산은 2026-11-19 에 `DocumentOffsets` 가 환산을 없애면서 함께 사라졌다). 둘 중 하나가 빠지면 trait 기본 `None` 이라 컴파일 오류 없이 색이 안 먹는다. 종단 테스트 `a_stored_colour_tints_the_next_frame_through_the_host`(`skin_host/tests.rs`).
 - 메뉴 행: `SkinRow::Color(usize)`, `ColorChannel(usize, ColorChannel)`, `ColorChannels`(접이 메타 행). `rows_for` 순서는 property, file, Color(0..n), 채널(0:R,G,B,A), (1:R..A)..., offset(이동), offset(불투명도). 키: `←→` 는 16색 프리셋 순환(`COLOR_PRESETS` `skin_select.rs:175`: FFFFFF C0C0C0 808080 404040 000000 FF4040 FF9020 FFE040 A0FF40 30E050 40E0FF 40A0FF 4060FF A060FF FF40C0 FF90C0, 알파 유지, 목록 밖 색은 오른쪽이 첫 항목 왼쪽이 끝 항목), `Enter` 는 16진 입력(`NumberEdit::hex`, `begin_hex_edit`, 잘못된 입력은 `NOT A COLOR` 1.5초), `0` 은 DEFAULT(저장값 지움), `A` 는 같은 이름의 `ColorDef` 를 가진 다른 화면에 적용(DEFAULT 를 적용하면 상대 저장값을 지운다). 채널 행은 0~255 숫자 행(슬라이더 + 입력 + 0 키). 행 줄은 `labelled(category, display_name())` 에 저장값이 있으면 `#RRGGBBAA`, 없으면 `DEFAULT`. 견본은 16 px 사각형(`preview_menu.rs`의 `ColorCell`).
 - SKIN 메뉴: 색 행은 property/file 뒤에 평평하게, 채널 행 자리에 접이 행 `COLOR CHANNELS`(`HIDDEN`/`SHOWN (n)`, `Enter`·좌우·클릭으로 토글, 저장 안 함). PLAY 메뉴: SKIN 그룹 맨 앞(Opacity, Place 앞)에 접이 `COLOR`, `COLOR CHANNELS` 가 있고 둘 다 닫힌 채 시작한다. 색 행이나 채널 행을 바꾼 뒤 `reread_skin` 이 stale 일 때만 다시 읽는다. 색 행 마우스 클릭은 프리셋 한 칸 이동이고 값 영역 클릭으로 16진 입력을 열지는 않는다.
 - 재로드 규칙(`put_color`): 효과 맞춤값(플레이어 값 위에 팩 조절값을 깐 것)에서 그 id 의 "있음" 여부가 바뀔 때만 `stale` 에 올린다. 있음 → 다른 값은 재로드 없음, 없음 → 있음과 있음 → 없음(0 키)은 재로드 1회, 지운 뒤 맞춤값이 비면 `config.skin.forget(path)`. 이유: 기본 스킨은 저장값이 없으면 프리셋 색을 dst 에 구워 tint 를 걸지 않고, 있으면 dst 기본색을 흰색으로 두고 tint 를 건다.

@@ -2,6 +2,7 @@
 
 > 최종 갱신 2026-10-29 · 대응 커밋 `c38a7ea`
 > 상태: 유효(D1·D4·D6 은 사용자 확인 2026-10-29. M1~M4 와 "세부" 절은 메인 추천 또는 구현 단위의 결정, 사용자 미확인) · 결정일 2026-10-29 · 결정자 사용자(요청과 D1·D4·D6)와 메인(M1~M4), 구현 단위 U1(세부) · 커밋 `c38a7ea`
+> 일부 대체됨(2026-11-19): "4) 화면과 시작" 의 미리보기 항목(내장 플레이필드를 네 마디 고정 하이스피드 0.25 로 그린 정지 화면)은 [LAYOUT PICK 재생과 capture ADR](2026-11-19-adr-layout-pick-playback-and-capture.md)가 실시간 재생으로 대체했다. 문자열 규칙·시드 역탐색·기록·시작 거절·기억은 그대로다. 이 파일의 문장은 고치지 않았다.
 > 관계: 판이 도는 동안 배치를 빌리는 길은 [배치 플레이 ADR](2026-10-24-adr-layout-play.md)을 그대로 쓴다. 시드 범위는 [배치 시드 ADR](2026-10-14-adr-layout-seed-range.md), 같은 배치 재시도는 [같은 배치 재시도 ADR](2026-10-14-adr-same-layout-retry.md). 설계 [plan/2026-10-29-feature-upgrade.md](../plan/2026-10-29-feature-upgrade.md), 조사 [reference/2026-10-29-feature-upgrade/layout-pick.md](../reference/2026-10-29-feature-upgrade/layout-pick.md).
 
 ## 배경

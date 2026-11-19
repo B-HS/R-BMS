@@ -3,6 +3,7 @@
 > 최종 갱신 2026-10-29 · 대응 커밋 `cf8afe5`
 > 상태: 유효(D5 는 사용자 확인 2026-10-29. M10 과 "세부" 절은 메인 추천 또는 구현 단위의 결정, 사용자 미확인. 한국어·일본어 모습은 실창 확인 전) · 결정일 2026-10-29 · 결정자 사용자(요청과 D5)와 메인(M10), 구현 단위 U3(세부) · 커밋 `cf8afe5`
 > 부분 변경하는 결정: [선곡 IIDX 식 ADR](2026-10-24-adr-select-iidx-layout.md)의 메인 결정 3 중 "곡 머리의 큰 BPM(BPM 은 CHART DATA 에만)을 뺐다"를 되돌린다(아래 3절). 그 ADR 의 나머지, 곧 IIDX 식 구성과 모노톤 + 강조색 넷(난이도색·등급·램프·메달·레이더 외 새 색 없음)은 그대로다.
+> 일부 대체됨(2026-11-19): 4절 표 중 곡 머리 LEVEL·BPM 의 위치와 크기(오른쪽 열 폭 168 → 색 막대 옆 폭 104, LEVEL `num64` → `num44`), 제목 크기(title 64 → heading 44), 제목 블록 높이, MY SCORE 칸 폭(MISS 96 → 112, 등급 상자 128 → 112), SCORE TARGETS 머리 간격, 레이더 중심(영역 위에서 144 → 168 아래)은 [선곡 화면 개편 ADR](2026-11-19-adr-select-screen-refresh.md)이 바꿨다. overflow 3 규칙과 NPS 평균·최고 정의는 그대로다. 이 파일의 문장은 고치지 않았다.
 > 관계: 글자 래스터는 [UI 글자 장치 화소 ADR](2026-10-22-adr-ui-text-device-pixels.md), 언어와 용어는 [UI 다국어 ADR](2026-10-24-adr-ui-language.md)·[용어집](../reference/2026-10-24-i18n-glossary.md). 설계 [plan/2026-10-29-feature-upgrade.md](../plan/2026-10-29-feature-upgrade.md), 조사 [reference/2026-10-29-feature-upgrade/select-info-density.md](../reference/2026-10-29-feature-upgrade/select-info-density.md).
 
 ## 배경
