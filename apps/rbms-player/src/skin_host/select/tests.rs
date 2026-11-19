@@ -297,8 +297,9 @@ fn the_assist_grade_of_the_best_lamp_switches_on_its_own_option_only() {
 }
 
 /// This player's own four options of the grade the best lamp is split with: the one of the grade is
-/// on where a clear without assists stands over a SCRATCH AUTO clear on a stronger gauge, through
-/// the host as a skin asks, and none where the lamp is shown whole or the bar holds no best.
+/// on where a clear without assists stands beside a SCRATCH AUTO clear, whichever was on the stronger
+/// gauge, through the host as a skin asks, and none where the lamp is shown whole or the bar holds
+/// no best.
 #[test]
 fn the_grade_the_best_lamp_is_split_with_switches_on_its_own_option_only() {
     use crate::skin_host::extension::{RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST, RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST};
@@ -312,13 +313,14 @@ fn the_grade_the_best_lamp_is_split_with_switches_on_its_own_option_only() {
         split_options.clone().filter(|id| host.boolean(*id) == Some(true)).collect()
     };
     let easy = best(ClearType::Easy);
-    for grade in [AssistGrade::Clear, AssistGrade::Hard, AssistGrade::ExHard] {
+    for grade in [AssistGrade::Easy, AssistGrade::Clear, AssistGrade::Hard, AssistGrade::ExHard] {
         let split = BestScore { best_assist_grade: grade.id(), ..easy.clone() };
-        assert_eq!(on_for(&split), [RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST + i32::from(grade.id()) - 1], "EASY CLEAR over {grade:?}");
+        assert_eq!(on_for(&split), [RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST + i32::from(grade.id()) - 1], "EASY CLEAR beside {grade:?}");
     }
+    let over_exhard = BestScore { best_assist_grade: AssistGrade::ExHard.id(), ..best(ClearType::ExHard) };
+    assert_eq!(on_for(&over_exhard), [RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST], "an EX HARD CLEAR beside ASSIST EXHARD");
     let whole = [
-        BestScore { best_assist_grade: AssistGrade::Easy.id(), ..easy.clone() },
-        BestScore { best_assist_grade: AssistGrade::ExHard.id(), ..best(ClearType::ExHard) },
+        BestScore { best_assist_grade: AssistGrade::None.id(), ..easy.clone() },
         BestScore { assist_grade: AssistGrade::Hard.id(), best_assist_grade: AssistGrade::Hard.id(), ..best(ClearType::LightAssistEasy) },
     ];
     for record in &whole {

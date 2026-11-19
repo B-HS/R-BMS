@@ -1084,21 +1084,14 @@ const LAMP_MAX: u8 = 10;
 /// One past the highest assist grade id, which no play is ever graded.
 const ASSIST_GRADE_PAST_EXHARD: u8 = crate::ASSIST_GRADE_COUNT;
 
-/// The grades each lamp is split by, the lamps left out split by none: EASY by the grades of the
-/// gauges above it, CLEAR by ASSIST HARD and ASSIST EXHARD, HARD by ASSIST EXHARD alone.
-const SPLIT_BY: [(u8, &[u8]); 3] = [
-    (LAMP_EASY, &[crate::ASSIST_GRADE_CLEAR, crate::ASSIST_GRADE_HARD, crate::ASSIST_GRADE_EXHARD]),
-    (LAMP_NORMAL, &[crate::ASSIST_GRADE_HARD, crate::ASSIST_GRADE_EXHARD]),
-    (LAMP_HARD, &[crate::ASSIST_GRADE_EXHARD]),
-];
-
-/// The lamp is split only where the assisted clear was on a stronger gauge than the clear without
-/// assists that stands above it, for every lamp and every grade, one past the last included.
+/// The lamp is split wherever the chart holds both a clear without assists, EASY or better, and a
+/// graded assisted clear, whichever was on the stronger gauge, for every lamp and every grade, one
+/// past the last included. A lamp under EASY and a chart with no graded assisted clear are whole.
 #[test]
-fn a_lamp_is_split_only_by_an_assist_grade_of_a_stronger_gauge() {
+fn a_lamp_is_split_by_any_assist_grade_beside_a_clear_without_assists() {
     for clear in 0..=LAMP_MAX {
         for grade in ASSIST_GRADE_NONE..=ASSIST_GRADE_PAST_EXHARD {
-            let splits = SPLIT_BY.iter().any(|(lamp, grades)| *lamp == clear && grades.contains(&grade));
+            let splits = clear >= LAMP_EASY && (crate::ASSIST_GRADE_EASY..=crate::ASSIST_GRADE_EXHARD).contains(&grade);
             let wanted = if splits { grade } else { ASSIST_GRADE_NONE };
             let best = RecordLamp { clear, assist_grade: ASSIST_GRADE_NONE };
             assert_eq!(crate::split_assist_grade(best, grade), wanted, "lamp {clear} beside grade {grade}");
@@ -1106,8 +1099,14 @@ fn a_lamp_is_split_only_by_an_assist_grade_of_a_stronger_gauge() {
     }
     let graded = RecordLamp { clear: LAMP_LIGHT_ASSIST, assist_grade: crate::ASSIST_GRADE_HARD };
     assert_eq!(crate::split_assist_grade(graded, crate::ASSIST_GRADE_EXHARD), ASSIST_GRADE_NONE, "a light-assist best is drawn in its own grade");
+    let hard = RecordLamp { clear: LAMP_HARD, assist_grade: ASSIST_GRADE_NONE };
+    assert_eq!(crate::split_assist_grade(hard, crate::ASSIST_GRADE_EASY), crate::ASSIST_GRADE_EASY, "a weaker assisted clear is shown beside a HARD CLEAR too");
     let exhard = RecordLamp { clear: LAMP_EXHARD, assist_grade: ASSIST_GRADE_NONE };
-    assert_eq!(crate::split_assist_grade(exhard, crate::ASSIST_GRADE_EXHARD), ASSIST_GRADE_NONE, "EX HARD stands over every grade");
+    assert_eq!(
+        crate::split_assist_grade(exhard, crate::ASSIST_GRADE_EXHARD),
+        crate::ASSIST_GRADE_EXHARD,
+        "an EX HARD CLEAR is split by its assisted clear as well"
+    );
 }
 
 /// A clear without assists takes the lamp from an assisted one of the same chart, and the row keeps
