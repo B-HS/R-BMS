@@ -800,6 +800,23 @@ mod tests {
         assert_eq!(active, 1);
     }
 
+    /// A second play of a key handed over before the first has reached its frame drops the first:
+    /// the play stops the key, and a voice still waiting has nothing to fade out, so it never
+    /// sounds. This is why a host must not book further ahead than the engine's lead asks for.
+    #[test]
+    fn a_play_of_a_key_drops_an_earlier_play_of_it_still_waiting_for_its_frame() {
+        const RATE: u32 = 48_000;
+        const FIRST_AT_FRAME: u64 = 480;
+        const SECOND_AT_FRAME: u64 = 4_800;
+        const KEY: u32 = 7;
+        let mut m = Mixer::new(RATE, 1, 16);
+        m.play(flat(8192, 1, RATE, 0.5), 1.0, 0.0, 1.0, KEY, FIRST_AT_FRAME);
+        m.play(flat(8192, 1, RATE, 0.5), 1.0, 0.0, 1.0, KEY, SECOND_AT_FRAME);
+        let mut out = vec![0.0f32; SECOND_AT_FRAME as usize];
+        m.mix(&mut out);
+        assert!(out.iter().all(|&s| s == 0.0), "the first play sounded before the second one's frame");
+    }
+
     #[test]
     fn voice_deactivates_at_end() {
         let mut m = Mixer::new(48000, 2, 16);

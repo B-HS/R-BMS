@@ -1699,7 +1699,9 @@ mod tests {
 
     /// How many of a run's sounds the mixer is handed too late, for a run that starts on a device
     /// with `latency` of its own and books its sounds against the engine's clocks once per display
-    /// frame, anchoring its song position zero with `anchor` at the frame it starts on.
+    /// frame, anchoring its song position zero with `anchor` at the frame it starts on. It books from
+    /// the audible axis rebased on the anchor, not from a song position held at zero while the
+    /// device catches up, as the player does.
     fn late_onsets_of_a_run(latency: Duration, anchor: fn(&AudioClocks) -> i64) -> (u64, usize) {
         const RATE: u32 = 48_000;
         const BUFFER: u32 = 512;
@@ -1720,7 +1722,7 @@ mod tests {
         let mut out = vec![0.0f32; BUFFER as usize];
         let onsets: Vec<i64> = (0..).map(|i| i * ONSET_SPACING_US).take_while(|at| *at < SONG_US).collect();
         let (mut next_onset, mut queued, mut frame) = (0usize, Vec::new(), 0u64);
-        let (mut anchor_us, mut song_us): (Option<i64>, i64) = (None, 0);
+        let mut anchor_us: Option<i64> = None;
 
         for callback in 0..RUN_CALLBACKS {
             let callback_at = epoch + period * callback as u32;
@@ -1744,8 +1746,7 @@ mod tests {
                 }
                 let clocks = clocks_from(&snap, now, RATE);
                 let anchor = *anchor_us.get_or_insert_with(|| anchor(&clocks));
-                song_us = monotonic_us(song_us, clocks.audible_us - anchor);
-                let sched = song_us + clocks.lookahead_us + poll_us;
+                let sched = clocks.audible_us - anchor + clocks.lookahead_us + poll_us;
                 while next_onset < onsets.len() && onsets[next_onset] <= sched {
                     let at_frame = ((anchor + onsets[next_onset]) as i128 * RATE as i128 / 1_000_000) as u64;
                     queued.push(Command::Play { sample: Arc::clone(&sample), gain: 1.0, pan: 0.0, pitch: 1.0, key: next_onset as u32, at_frame, bus: Bus::Bg });

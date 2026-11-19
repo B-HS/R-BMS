@@ -392,6 +392,21 @@ pub(crate) fn song_position_us(audio_clock_us: i64, anchor_us: i64, previous_us:
     rbms_audio::monotonic_us(previous_us, audio_clock_us - anchor_us)
 }
 
+/// The song position a frame reads ([`song_position_us`]), and how far past it the frame books its
+/// sounds: the engine's lead from the audible axis, less whatever the clamp holds the position
+/// above that axis.
+///
+/// The clamp binds for a whole device delay at the start of a compensating run, whose position
+/// waits at zero while the device catches up ([`rbms_audio::AudioClocks::run_anchor_us`]).
+/// Booking from the held position would reach that delay further into the chart than the engine
+/// asks for, and a sound booked that early cuts short the same sound booked before it: the mixer
+/// stops a key the moment it is handed a new play of it, and the earlier one, still waiting for its
+/// frame, never sounds.
+pub(crate) fn song_and_booking_lead_us(audible_us: i64, lookahead_us: i64, anchor_us: i64, previous_us: i64) -> (i64, i64) {
+    let song_us = song_position_us(audible_us, anchor_us, previous_us);
+    (song_us, lookahead_us + (audible_us - anchor_us - song_us))
+}
+
 pub(crate) fn timing_quantized_us(audio_clock_us: i64, anchor_us: i64, clock: crate::practice::PracticeClock) -> i64 {
     clock.chart_time_us(audio_clock_us.saturating_sub(anchor_us))
 }
@@ -1142,14 +1157,14 @@ impl AppShared {
     }
 
     /// Current song position on the audible axis — what the player is hearing — clamped so it can
-    /// never step backwards, together with the engine's scheduling lead read from the same snapshot.
-    /// Judgement, note rendering and replay recording use the position only; sound scheduling adds
-    /// the lead and this loop's polling interval on top.
+    /// never step backwards, together with the scheduling lead from that position, read from the same
+    /// snapshot ([`song_and_booking_lead_us`]). Judgement, note rendering and replay recording use
+    /// the position only; sound scheduling adds the lead and this loop's polling interval on top.
     pub(crate) fn song_and_lookahead_us(&self) -> (i64, i64) {
         let (audible, lookahead) = self.audio_clocks();
-        let value = song_position_us(audible, self.anchor_us, self.song_us_last.get());
+        let (value, lead) = song_and_booking_lead_us(audible, lookahead, self.anchor_us, self.song_us_last.get());
         self.song_us_last.set(value);
-        (value, lookahead)
+        (value, lead)
     }
 
     /// The song position an input that happened at `at` is judged at: the audible axis read at that
@@ -1663,6 +1678,34 @@ mod tests {
     #[test]
     fn an_audio_clock_behind_the_anchor_is_clamped_to_the_start() {
         assert_eq!(song_position_us(499_000, 500_000, 0), 0);
+    }
+
+    /// What an AirPods Pro 2 adds before a frame is heard, which a compensating run waits out at
+    /// song position zero.
+    const AIRPODS_DELAY_US: i64 = 160_000;
+
+    /// A run on a delayed device starts with its song position held at zero while the device
+    /// catches up ([`rbms_audio::AudioClocks::run_anchor_us`]). Its sounds still have to be booked
+    /// from the audible axis: booked from the held position, the first frames reach the delay
+    /// further into the chart than a run on a device without one does, and a sound booked that early
+    /// cuts the same sound booked before it short, because the mixer stops a key the moment it is
+    /// handed a new play of it. Two hits of one drum sample 100 ms apart at the start of a run or a
+    /// practice slice were booked in the same frame, and the first was stopped before its frame.
+    #[test]
+    fn a_run_waiting_out_the_device_delay_books_as_far_ahead_as_a_run_on_a_device_without_one() {
+        const AUDIBLE_AT_START_US: i64 = 10_000_000;
+        const LATER_US: i64 = 50_000;
+        for latency_us in [0, AIRPODS_DELAY_US] {
+            let anchor = AUDIBLE_AT_START_US + latency_us;
+            let lookahead = latency_us + BUFFER_US_512_AT_48K;
+            let mut song = 0;
+            for elapsed in [0, latency_us / 2, latency_us, latency_us + LATER_US] {
+                let (read, lead) = song_and_booking_lead_us(AUDIBLE_AT_START_US + elapsed, lookahead, anchor, song);
+                song = read;
+                assert_eq!(read, (elapsed - latency_us).max(0), "{latency_us} us device, {elapsed} us in: the song position");
+                assert_eq!(read + lead, elapsed + BUFFER_US_512_AT_48K, "{latency_us} us device, {elapsed} us in: the booking position");
+            }
+        }
     }
 
     #[test]
