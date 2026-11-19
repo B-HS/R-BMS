@@ -12,10 +12,16 @@
 
 use std::sync::OnceLock;
 use std::sync::mpsc::{Sender, channel};
+use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 
-use crate::latency::{OutputLatency, read_output_latency};
+use crate::latency::{DeviceLatency, LatencyTarget, read_output_latency};
+
+/// The longest a caller waits for a device to say how long it holds a frame back. The development
+/// machine answers in well under a tenth of a second; a device that is still connecting can keep
+/// CoreAudio busy far longer, and a chart loading behind the question should not wait on it.
+const LATENCY_QUESTION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// The name the host thread carries, so a stack trace and a panic message both name it.
 const HOST_THREAD_NAME: &str = "rbms-audio-host";
@@ -53,6 +59,15 @@ fn ask<T: Default + Send + 'static>(question: impl FnOnce() -> T + Send + 'stati
     receive.recv().unwrap_or_default()
 }
 
+/// Asks the host thread one question and waits at most `timeout` for its answer: `None` when it
+/// did not come in time. The question is left to finish on the host thread, which answers it to
+/// nobody, and every question asked after it waits behind it as before.
+fn ask_within<T: Send + 'static>(timeout: Duration, question: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (send, receive) = channel::<T>();
+    questions().send(Box::new(move || drop(send.send(question())))).ok()?;
+    receive.recv_timeout(timeout).ok()
+}
+
 /// Every output device the host offers, named as [`AudioOptions::device_name`] is matched against.
 ///
 /// A device whose description cannot be read is left out rather than offered under a name the
@@ -72,16 +87,17 @@ pub fn output_device_names() -> Vec<String> {
     })
 }
 
-/// The delay the output device named `device_name` adds before a frame is heard, its frames
-/// turned into time at `stream_rate`, or `None` where the device does not say or cannot be asked
-/// (every platform but macOS).
+/// The delay the output device `target` names adds before a frame is heard, with the name of the
+/// device that answered, its frames turned into time at the rate the device runs at (`stream_rate`
+/// when it does not say). `Some(None)` where the device does not say or cannot be asked (every
+/// platform but macOS), and `None` when it did not answer within [`LATENCY_QUESTION_TIMEOUT`].
 ///
 /// Asked on the host thread like every other question about the host, and never from the audio
 /// callback: opening a unit on the device to ask it takes milliseconds. A caller asks when the
 /// stream opens and before a run starts, never while one is running.
-pub fn output_device_latency(device_name: &str, stream_rate: u32) -> Option<OutputLatency> {
-    let device_name = device_name.to_owned();
-    ask(move || read_output_latency(&device_name, stream_rate))
+pub fn output_device_latency(target: &LatencyTarget, stream_rate: u32) -> Option<Option<DeviceLatency>> {
+    let target = target.clone();
+    ask_within(LATENCY_QUESTION_TIMEOUT, move || read_output_latency(&target, stream_rate))
 }
 
 #[cfg(test)]
@@ -111,5 +127,20 @@ mod tests {
             .map(|_| std::thread::spawn(|| ask(|| std::thread::current().name().map(str::to_owned))).join().expect("the asking thread finished"))
             .collect();
         assert!(answered_on.iter().all(|name| name.as_deref() == Some(HOST_THREAD_NAME)), "a question was answered off the host thread: {answered_on:?}");
+    }
+
+    /// How long the asker waits on a question that is held from answering, in the test below.
+    const HELD_QUESTION_TIMEOUT: Duration = Duration::from_millis(10);
+
+    /// A question the host thread is still busy with when the wait runs out leaves the asker with
+    /// no answer instead of holding it: the question here is held until the asker has given up, so
+    /// the outcome does not depend on how fast the machine is.
+    #[test]
+    fn a_question_that_is_not_answered_in_time_leaves_the_asker_without_an_answer() {
+        let (release, held) = channel::<()>();
+        let answer = ask_within(HELD_QUESTION_TIMEOUT, move || held.recv().is_ok());
+        drop(release);
+        assert_eq!(answer, None);
+        assert!(ask(|| true), "the host thread answers again once it is free");
     }
 }

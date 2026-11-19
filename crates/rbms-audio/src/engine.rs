@@ -10,7 +10,7 @@ use cpal::{BufferSize, FromSample, SampleFormat, SizedSample, StreamConfig, Supp
 use crate::AudioError;
 use crate::decode::{DecodedAudio, decode_bytes};
 use crate::host::output_device_latency;
-use crate::latency::OutputLatency;
+use crate::latency::{DeviceLatency, LatencyTarget, OutputLatency};
 use crate::mixer::{Bus, CHANNELS_PER_SAMPLE_ID, Command, MixStats, Mixer, SampleData, channel_key, effect_key};
 
 /// Default polyphony. The reference implementation's `deviceSimultaneousSources` default is 256
@@ -150,14 +150,20 @@ pub struct AudioClocks {
 }
 
 impl AudioClocks {
-    /// Where a run starting now puts its song position zero on the engine's axis.
+    /// Where a run starting now puts its song position zero on the engine's axis: the position a
+    /// host that books its sounds once per display frame books against, which is
+    /// [`scheduled_us`](Self::scheduled_us) plus that host's `poll_interval_us`.
     ///
-    /// The audible position runs the device delay behind what the mixer has already rendered, so a
-    /// run anchored on it would ask for its opening sounds at frames that are gone. Anchoring the
-    /// device delay later leaves exactly the lead a device without one has: the song position waits
-    /// at zero for that long, and the opening sounds are booked in time.
-    pub fn run_anchor_us(&self) -> i64 {
-        self.audible_us + self.output_latency_us
+    /// Everything before the booking position has been rendered already, or will be before a
+    /// command pushed now is seen, so a run anchored any earlier would ask for its opening sounds
+    /// at frames that are gone: the mixer starts such a sound whole, from its first sample, as late
+    /// as it came, and a song-long background sound that starts with the chart would sound that
+    /// much behind the chart for the whole run. Anchored here, the first sounds are booked in time
+    /// even when the host only books them on its next frame, and the song position waits at zero
+    /// until the audible position reaches the anchor. The booking position does not move with the
+    /// device delay, so neither does the anchor.
+    pub fn run_anchor_us(&self, poll_interval_us: i64) -> i64 {
+        self.scheduled_us + poll_interval_us.max(0)
     }
 }
 
@@ -289,7 +295,8 @@ pub struct AudioEngine {
     instance: u64,
     effect_serial: u8,
     device_name: String,
-    device_latency: Option<OutputLatency>,
+    latency_target: LatencyTarget,
+    device_latency: Option<DeviceLatency>,
     compensate_output_latency: bool,
     output_latency: Duration,
 }
@@ -311,6 +318,8 @@ impl AudioEngine {
         let host = cpal::default_host();
         let mut notes: Vec<String> = Vec::new();
         let mut saw_device = false;
+        let system_default = host.default_output_device().and_then(|device| device.id().ok());
+        let opening = Opening { max_voices: opts.max_voices, system_default: system_default.as_ref() };
 
         let named = match opts.device_name.as_deref() {
             Some(name) => {
@@ -329,7 +338,7 @@ impl AudioEngine {
         if let Some(device) = named.or_else(|| host.default_output_device()) {
             saw_device = true;
             if let Some((format, rungs)) = requested_rungs(&device, opts, &mut notes)
-                && let Some(opened) = open_first_rung(&device, rungs, format, opts, floor, &mut notes)
+                && let Some(opened) = open_first_rung(&device, rungs, format, &opening, floor, &mut notes)
             {
                 return Ok(opened);
             }
@@ -338,7 +347,7 @@ impl AudioEngine {
         if used_named && let Some(device) = host.default_output_device() {
             saw_device = true;
             if let Some((format, rungs)) = default_config_rung(&device, STEP_DEFAULT_DEVICE)
-                && let Some(opened) = open_first_rung(&device, rungs, format, opts, STEP_DEFAULT_DEVICE, &mut notes)
+                && let Some(opened) = open_first_rung(&device, rungs, format, &opening, STEP_DEFAULT_DEVICE, &mut notes)
             {
                 return Ok(opened);
             }
@@ -348,7 +357,7 @@ impl AudioEngine {
             for device in devices {
                 saw_device = true;
                 if let Some((format, rungs)) = default_config_rung(&device, STEP_ANY_DEVICE)
-                    && let Some(opened) = open_first_rung(&device, rungs, format, opts, STEP_ANY_DEVICE, &mut notes)
+                    && let Some(opened) = open_first_rung(&device, rungs, format, &opening, STEP_ANY_DEVICE, &mut notes)
                 {
                     return Ok(opened);
                 }
@@ -394,13 +403,19 @@ impl AudioEngine {
     /// Ask the device this stream plays on again how long it holds a frame back, and compensate for
     /// the new figure if compensation is on. The answer is kept and returned.
     ///
+    /// A stream on the system default plays on whatever the default is now, so that is the device
+    /// asked ([`LatencyTarget::of_stream`]). A device that does not answer in time leaves the figure
+    /// it last gave in place.
+    ///
     /// The question goes to the audio host thread and takes milliseconds, so a host asks when the
     /// stream opens and before a run starts, never while one is running: the audible position moves
     /// by however much the figure changed.
     pub fn refresh_output_latency(&mut self) -> Option<OutputLatency> {
-        self.device_latency = output_device_latency(&self.device_name, self.out_rate);
-        self.output_latency = compensated_output_latency(self.compensate_output_latency, self.device_latency);
-        self.device_latency
+        if let Some(answer) = output_device_latency(&self.latency_target, self.out_rate) {
+            self.device_latency = answer;
+        }
+        self.output_latency = compensated_output_latency(self.compensate_output_latency, self.device_output_latency());
+        self.device_output_latency()
     }
 
     /// Turn compensation for the device's own delay on or off. On, the audible position runs that
@@ -408,12 +423,23 @@ impl AudioEngine {
     /// backend's alone. Cheap: it asks the device nothing.
     pub fn set_output_latency_compensation(&mut self, compensate: bool) {
         self.compensate_output_latency = compensate;
-        self.output_latency = compensated_output_latency(compensate, self.device_latency);
+        self.output_latency = compensated_output_latency(compensate, self.device_output_latency());
     }
 
     /// The delay the device reported when it was last asked, compensated for or not.
     pub fn device_output_latency(&self) -> Option<OutputLatency> {
-        self.device_latency
+        self.device_latency.as_ref().map(|reading| reading.latency)
+    }
+
+    /// The device that answered when it was last asked about its delay, with what it said. For a
+    /// stream on the system default it can be another device than the one the stream opened on.
+    pub fn output_latency_reading(&self) -> Option<&DeviceLatency> {
+        self.device_latency.as_ref()
+    }
+
+    /// The device a question about the delay goes to.
+    pub fn output_latency_target(&self) -> &LatencyTarget {
+        &self.latency_target
     }
 
     /// The device delay the clock is compensating for right now: nothing when compensation is off
@@ -981,19 +1007,36 @@ fn default_config_rung(device: &cpal::Device, step: u8) -> Option<(SampleFormat,
     Some((config.sample_format(), vec![(step, config.config())]))
 }
 
+/// What every rung of one open shares: the polyphony asked for, and the device the system called
+/// its default output when the open began.
+struct Opening<'a> {
+    max_voices: usize,
+    system_default: Option<&'a cpal::DeviceId>,
+}
+
+/// Whether a stream on `opened` is on the system default output, which cpal opens as CoreAudio's
+/// default output unit (cpal `host/coreaudio/macos/device.rs`, `audio_unit_from_device`): that unit
+/// moves to the new default when the system default changes. A device without an id is never
+/// taken for the default.
+fn opened_on_system_default(opened: Option<&cpal::DeviceId>, system_default: Option<&cpal::DeviceId>) -> bool {
+    opened.is_some() && opened == system_default
+}
+
 /// Try each rung in order, returning the first stream that opens together with the report describing
 /// it. Failures are appended to `notes` so the user can see why a rung was skipped.
 fn open_first_rung(
     device: &cpal::Device,
     rungs: Vec<(u8, StreamConfig)>,
     sample_format: SampleFormat,
-    opts: &AudioOptions,
+    opening: &Opening<'_>,
     step_floor: u8,
     notes: &mut Vec<String>,
 ) -> Option<(AudioEngine, AudioOpenReport)> {
+    let on_system_default = opened_on_system_default(device.id().ok().as_ref(), opening.system_default);
     for (step, config) in rungs {
-        match open_stream(device, &config, sample_format, opts.max_voices) {
+        match open_stream(device, &config, sample_format, opening.max_voices) {
             Ok(mut engine) => {
+                engine.latency_target = LatencyTarget::of_stream(&engine.device_name, on_system_default);
                 let output_latency = engine.refresh_output_latency();
                 let report = AudioOpenReport {
                     device_name: engine.device_name.clone(),
@@ -1054,6 +1097,7 @@ fn open_stream(device: &cpal::Device, config: &StreamConfig, sample_format: Samp
         instance: NEXT_ENGINE_INSTANCE.fetch_add(1, Ordering::Relaxed),
         effect_serial: 0,
         device_name: device_display_name(device),
+        latency_target: LatencyTarget::Named(device_display_name(device)),
         device_latency: None,
         compensate_output_latency: false,
         output_latency: Duration::ZERO,
@@ -1632,6 +1676,7 @@ mod tests {
     fn the_output_latency_holds_the_audible_position_back_and_leaves_the_booking_position_where_it_was() {
         const RATE: u32 = 48_000;
         const BUFFER: u32 = 512;
+        const POLL_US: i64 = 16_666;
         let epoch = Instant::now();
         let period = frames_to_duration(BUFFER, RATE);
         let state = ClockState {
@@ -1651,7 +1696,12 @@ mod tests {
             assert_eq!(clocks.lookahead_us, without.lookahead_us + latency_us, "{latency_ms} ms: the lead grows by the delay");
             assert_eq!(clocks.scheduled_us, without.scheduled_us, "{latency_ms} ms: the booking position moved");
             assert_eq!(clocks.output_latency_us, latency_us);
-            assert_eq!(clocks.run_anchor_us(), without.audible_us, "{latency_ms} ms: a run starting now anchors where it would without a delay");
+            assert_eq!(
+                clocks.run_anchor_us(POLL_US),
+                without.run_anchor_us(POLL_US),
+                "{latency_ms} ms: a run starting now anchors where it would without a delay"
+            );
+            assert_eq!(clocks.run_anchor_us(POLL_US), without.scheduled_us + POLL_US, "{latency_ms} ms: a run anchors on the booking position");
         }
     }
 
@@ -1697,36 +1747,67 @@ mod tests {
         assert_eq!(compensated_output_latency(true, Some(absurd)), Duration::from_millis(MAX_OUTPUT_LATENCY_MS));
     }
 
-    /// How many of a run's sounds the mixer is handed too late, for a run that starts on a device
-    /// with `latency` of its own and books its sounds against the engine's clocks once per display
-    /// frame, anchoring its song position zero with `anchor` at the frame it starts on. It books from
-    /// the audible axis rebased on the anchor, not from a song position held at zero while the
-    /// device catches up, as the player does.
-    fn late_onsets_of_a_run(latency: Duration, anchor: fn(&AudioClocks) -> i64) -> (u64, usize) {
-        const RATE: u32 = 48_000;
+    /// How the opening of one simulated run went ([`late_onsets_of_a_run`]).
+    #[derive(Debug)]
+    struct RunOpening {
+        /// Sounds the mixer was handed after their frame had been reached.
+        late: u64,
+        /// Sounds booked in all.
+        booked: usize,
+        /// How far behind its frame the latest sound started, in µs.
+        most_late_us: i64,
+        /// How long the song position waits at zero: the anchor less the audible position at the
+        /// frame the run started on, in µs.
+        hold_us: i64,
+        /// The largest gap between the song position at which a sound booked in time is heard and
+        /// the chart time it was booked for, in µs.
+        worst_heard_gap_us: i64,
+    }
+
+    /// The frame and display rates [`late_onsets_of_a_run`] runs at, which the player's own polling
+    /// interval follows.
+    const SIM_RATE: u32 = 48_000;
+    const SIM_FRAME_HZ: u64 = 60;
+
+    /// A run that starts on a device with `latency` of its own and books its sounds against the
+    /// engine's clocks once per display frame, as the player does: its song position zero is
+    /// anchored with `anchor` on the frame it starts on, the first booking happens on the next
+    /// frame, and every booking reaches from the audible axis rebased on the anchor plus the lead
+    /// and the polling interval. Every sound is a short sample on its own key.
+    fn late_onsets_of_a_run(latency: Duration, anchor: fn(&AudioClocks, i64) -> i64) -> RunOpening {
         const BUFFER: u32 = 512;
-        const FRAME_HZ: u64 = 60;
         const START_CALLBACK: u64 = 20;
         const ONSET_SPACING_US: i64 = 7_000;
         const SONG_US: i64 = 2_000_000;
         const RUN_CALLBACKS: u64 = 300;
         const SAMPLE_FRAMES: usize = 96;
 
-        let period = frames_to_duration(BUFFER, RATE);
-        let frame_period = Duration::from_micros(1_000_000 / FRAME_HZ);
+        let period = frames_to_duration(BUFFER, SIM_RATE);
+        let frame_period = Duration::from_micros(1_000_000 / SIM_FRAME_HZ);
         let poll_us = frame_period.as_micros() as i64;
         let epoch = Instant::now();
         let start_at = epoch + period * START_CALLBACK as u32;
-        let sample = Arc::new(SampleData { pcm: vec![0.25f32; SAMPLE_FRAMES].into(), channels: 1, rate: RATE });
-        let mut mixer = Mixer::new(RATE, 1, 64);
+        let sample = Arc::new(SampleData { pcm: vec![0.25f32; SAMPLE_FRAMES].into(), channels: 1, rate: SIM_RATE });
+        let mut mixer = Mixer::new(SIM_RATE, 1, 64);
         let mut out = vec![0.0f32; BUFFER as usize];
         let onsets: Vec<i64> = (0..).map(|i| i * ONSET_SPACING_US).take_while(|at| *at < SONG_US).collect();
-        let (mut next_onset, mut queued, mut frame) = (0usize, Vec::new(), 0u64);
+        let (mut next_onset, mut frame) = (0usize, 0u64);
+        let mut queued: Vec<(Command, i64)> = Vec::new();
         let mut anchor_us: Option<i64> = None;
+        let mut opening = RunOpening { late: 0, booked: 0, most_late_us: 0, hold_us: 0, worst_heard_gap_us: 0 };
 
         for callback in 0..RUN_CALLBACKS {
             let callback_at = epoch + period * callback as u32;
-            for cmd in queued.drain(..) {
+            let clock_us = frames_to_us(callback * BUFFER as u64, SIM_RATE);
+            for (cmd, onset_us) in queued.drain(..) {
+                if let Command::Play { at_frame, .. } = &cmd {
+                    let at_us = frames_to_us(*at_frame, SIM_RATE);
+                    opening.most_late_us = opening.most_late_us.max(clock_us - at_us);
+                    if at_us > clock_us {
+                        let heard_song_us = at_us - anchor_us.unwrap_or_default();
+                        opening.worst_heard_gap_us = opening.worst_heard_gap_us.max((heard_song_us - onset_us).abs());
+                    }
+                }
                 mixer.apply(cmd);
             }
             let state = ClockState {
@@ -1744,33 +1825,83 @@ mod tests {
                 if now < start_at {
                     continue;
                 }
-                let clocks = clocks_from(&snap, now, RATE);
-                let anchor = *anchor_us.get_or_insert_with(|| anchor(&clocks));
+                let clocks = clocks_from(&snap, now, SIM_RATE);
+                let Some(anchor) = anchor_us else {
+                    let anchored = anchor(&clocks, poll_us);
+                    opening.hold_us = anchored - clocks.audible_us;
+                    anchor_us = Some(anchored);
+                    continue;
+                };
                 let sched = clocks.audible_us - anchor + clocks.lookahead_us + poll_us;
                 while next_onset < onsets.len() && onsets[next_onset] <= sched {
-                    let at_frame = ((anchor + onsets[next_onset]) as i128 * RATE as i128 / 1_000_000) as u64;
-                    queued.push(Command::Play { sample: Arc::clone(&sample), gain: 1.0, pan: 0.0, pitch: 1.0, key: next_onset as u32, at_frame, bus: Bus::Bg });
+                    let at_frame = ((anchor + onsets[next_onset]) as i128 * SIM_RATE as i128 / 1_000_000) as u64;
+                    let cmd = Command::Play { sample: Arc::clone(&sample), gain: 1.0, pan: 0.0, pitch: 1.0, key: next_onset as u32, at_frame, bus: Bus::Bg };
+                    queued.push((cmd, onsets[next_onset]));
                     next_onset += 1;
                 }
             }
         }
-        (mixer.stats().late_schedules, next_onset)
+        opening.late = mixer.stats().late_schedules;
+        opening.booked = next_onset;
+        opening
     }
 
-    /// A run that starts on a delayed device anchors its song position zero the delay later than
-    /// the audible position, and so books its opening sounds exactly as a run on a device without a
-    /// delay does. Anchored on the bare audible position, every sound in the first delay's worth of
-    /// the chart would be handed to the mixer after its frame had gone, and start late.
+    /// Where the player anchored a run before the anchor moved onto the booking position: the
+    /// audible position, the compensated device delay later.
+    fn audible_anchor_past_the_delay(clocks: &AudioClocks, _poll_interval_us: i64) -> i64 {
+        clocks.audible_us + clocks.output_latency_us
+    }
+
+    /// One frame at [`SIM_RATE`], in µs, rounded up: the most a frame position and the µs it was
+    /// worked out from can differ by.
+    const ONE_SIM_FRAME_US: i64 = (1_000_000 + SIM_RATE as i64 - 1) / SIM_RATE as i64;
+
+    /// A run anchored on the booking position hands the mixer every sound in time on any device,
+    /// its first sound included, though it only books on the frame after the one it started on.
     #[test]
-    fn a_run_anchored_past_the_device_delay_books_its_opening_as_a_run_without_one_does() {
-        let (late_without, booked_without) = late_onsets_of_a_run(Duration::ZERO, AudioClocks::run_anchor_us);
-        assert!(booked_without > 100, "the run must actually book its sounds, booked {booked_without}");
+    fn a_run_anchored_on_the_booking_position_books_its_opening_in_time_on_any_device() {
+        let without = late_onsets_of_a_run(Duration::ZERO, AudioClocks::run_anchor_us);
+        assert!(without.booked > 100, "the run must actually book its sounds, booked {}", without.booked);
         for latency_ms in OUTPUT_LATENCIES_MS {
-            let latency = Duration::from_millis(latency_ms);
-            assert_eq!(late_onsets_of_a_run(latency, AudioClocks::run_anchor_us), (late_without, booked_without), "{latency_ms} ms");
+            let opening = late_onsets_of_a_run(Duration::from_millis(latency_ms), AudioClocks::run_anchor_us);
+            assert_eq!((opening.late, opening.most_late_us), (0, 0), "{latency_ms} ms: {opening:?}");
+            assert_eq!(opening.booked, without.booked, "{latency_ms} ms");
         }
-        let (late_on_audible, _) = late_onsets_of_a_run(Duration::from_millis(160), |clocks| clocks.audible_us);
-        assert!(late_on_audible > late_without, "anchored on the audible position a 160 ms device loses no more of the opening: {late_on_audible}");
+    }
+
+    /// The defect the booking-position anchor removes, which was there with no device delay at all:
+    /// anchored on the audible position, the first sounds of a run are handed to the mixer after
+    /// their frame has gone, and the mixer starts them whole and late.
+    #[test]
+    fn a_run_anchored_on_the_audible_position_starts_its_first_sounds_late_on_any_device() {
+        for latency_ms in OUTPUT_LATENCIES_MS {
+            let opening = late_onsets_of_a_run(Duration::from_millis(latency_ms), audible_anchor_past_the_delay);
+            assert!(opening.late > 0 && opening.most_late_us > 0, "{latency_ms} ms: {opening:?}");
+            println!("audible anchor, {latency_ms} ms device: {opening:?}");
+        }
+    }
+
+    /// Moving the anchor moves when the song position starts and nothing else: a sound booked in
+    /// time is heard at the song position that is its chart time, to the frame, on either anchor
+    /// and on any device, so judgement and note drawing, which read the song position, keep their
+    /// relation to what is heard. What it costs is how long the song position waits at zero at the
+    /// start: the booking position's lead over the audible one, and one polling interval.
+    #[test]
+    fn a_sound_booked_in_time_is_heard_at_its_chart_time_whichever_anchor_the_run_took() {
+        for latency_ms in OUTPUT_LATENCIES_MS {
+            let latency_us = latency_ms as i64 * 1_000;
+            let booking = late_onsets_of_a_run(Duration::from_millis(latency_ms), AudioClocks::run_anchor_us);
+            let audible = late_onsets_of_a_run(Duration::from_millis(latency_ms), audible_anchor_past_the_delay);
+            assert!(booking.worst_heard_gap_us < ONE_SIM_FRAME_US, "{latency_ms} ms, booking anchor: {booking:?}");
+            assert!(audible.worst_heard_gap_us < ONE_SIM_FRAME_US, "{latency_ms} ms, audible anchor: {audible:?}");
+            assert_eq!(audible.hold_us, latency_us, "{latency_ms} ms: the audible anchor waits out the device delay");
+            assert!(booking.hold_us > audible.hold_us, "{latency_ms} ms: {booking:?} {audible:?}");
+            println!(
+                "{latency_ms} ms device: the song position waits {} us at zero, {} us longer than on the audible anchor",
+                booking.hold_us,
+                booking.hold_us - audible.hold_us
+            );
+        }
     }
 
     #[test]
@@ -1786,6 +1917,21 @@ mod tests {
         assert!(stream_error_is_fatal(&cpal::StreamError::DeviceNotAvailable));
         assert!(stream_error_is_fatal(&cpal::StreamError::StreamInvalidated));
         assert!(stream_error_is_fatal(&cpal::StreamError::BackendSpecific { err: cpal::BackendSpecificError { description: "driver reset".to_string() } }));
+    }
+
+    /// The streams cpal puts on the default output unit, and so the ones that move with the system
+    /// default: one on the device that was the default when it opened, however it came to be
+    /// picked. A device that could not say its id, or a system without a default, is never taken
+    /// for one.
+    #[test]
+    fn a_stream_is_on_the_system_default_when_its_device_was_the_default_as_it_opened() {
+        let device = |uid: &str| cpal::DeviceId(cpal::default_host().id(), uid.to_owned());
+        let (speakers, airpods) = (device("BuiltInSpeakerDevice"), device("AirPods-UID"));
+        assert!(opened_on_system_default(Some(&speakers), Some(&speakers)));
+        assert!(!opened_on_system_default(Some(&airpods), Some(&speakers)), "a named device that was not the default stays where it was opened");
+        assert!(!opened_on_system_default(None, Some(&speakers)));
+        assert!(!opened_on_system_default(Some(&speakers), None));
+        assert!(!opened_on_system_default(None, None));
     }
 
     #[test]

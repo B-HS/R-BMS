@@ -861,6 +861,9 @@ struct AppShared {
     /// When the pending audio-setting change is due to be applied, armed by the settings screen and
     /// debounced by [`AUDIO_REOPEN_DEBOUNCE`].
     audio_reopen_at: Option<Instant>,
+    /// The device delay the player was last told is being compensated for, so the same device and
+    /// figure are not announced again ([`app_play::output_latency_notice_to_give`]).
+    output_latency_noticed: Option<app_play::OutputLatencyNotice>,
     /// `#VOLWAV` of the loaded chart as a gain. Kept so a stream reopened mid-session is handed the
     /// chart's own level again instead of the neutral default.
     chart_gain: f32,
@@ -1193,6 +1196,7 @@ impl App {
                 audio_opened_with: None,
                 audio_failed: false,
                 audio_reopen_at: None,
+                output_latency_noticed: None,
                 chart_gain: rbms_chart::chart_gain(rbms_chart::VOLWAV_DEFAULT_PERCENT),
                 schedule_poll_us: 0,
                 skin: Skin::default_for(MODE, CW as f32, CH as f32),

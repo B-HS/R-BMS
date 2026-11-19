@@ -16,7 +16,7 @@ pub use engine::{
     AudioClocks, AudioEngine, AudioOpenReport, AudioOptions, ClockSnapshot, DEFAULT_MAX_VOICES, IdNamespace, MAX_OUTPUT_LATENCY_MS, monotonic_us,
 };
 pub use host::{output_device_latency, output_device_names};
-pub use latency::OutputLatency;
+pub use latency::{DeviceLatency, LatencyTarget, OutputLatency};
 pub use mixer::{Bus, Command, MixStats, Mixer, SampleData};
 /// Re-exported so callers can build the retirement ring [`Mixer::set_retire`] expects without
 /// pinning the same rtrb version themselves.
