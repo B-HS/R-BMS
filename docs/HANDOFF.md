@@ -90,7 +90,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 1. **메인 결정 M1~M21 의 확인**: [acknowledge/README.md](acknowledge/README.md) 미확인 39~51. 특히 "지금 R-BMS 대비 바뀐" 둘: 판 시작 직후 정지가 약 38 ms 길어짐(49), 레인 키와 같은 키의 조작은 그 모드에서 듣지 않음(50). 그리고 오프셋 저장값의 뜻 변화(1920x1080 이 아닌 화면에서 맞춘 JUDGE POSITION 등은 다시 맞춰야 함).
 2. **실기 결과**: QA 3.29(G1~G17). AirPods AUTO/OFF 체감, 실행 중 장치 바꾸기, Game Mode(BORDERLESS 전체 화면) 전후, FULLSCREEN(Windows 포함), 패드 ESC·조합, 램프 색과 반 쪼개기(GPU), 플레이 화면 표시, LAYOUT PICK 재생·capture, 선곡 화면 세 언어.
-3. **v0.1.12 는 draft 다**: release run 44529321802(사용자 `!` 실행, 첫 시도는 Apple 약관 동의 문제로 macOS 잡이 실패했고 동의 뒤 실패한 잡만 다시 실행), 버전 커밋 `039d21a`, 메인이 산출물 점검과 한글 노트 교체까지 끝냈다. 게시는 사용자가 한다. [ci-release.md](ci-release.md) 2.3절.
+3. **릴리스**: v0.1.12 는 draft 로 있지만(release run 44529321802, 산출물 점검과 한글 노트 완료) 램프 반 쪼개기의 처음 조건(어시스트 쪽이 더 높을 때만)으로 빌드돼 있다. 사용자 보고로 조건을 "둘 다 있으면 쪼갬"으로 넓혔으므로 v0.1.13 으로 다시 릴리스해야 한다(사용자 `! gh workflow run release.yml --ref dev -f bump=patch`, 노트 초안 `history/2026-11-19-release-notes-v0.1.13-draft.md`). v0.1.12 draft 는 게시하지 않고 두거나 사용자 요청이 있으면 지운다. [ci-release.md](ci-release.md) 2.3절.
 4. **웹**: 램프 반 쪼개기와 게이지 표기 `EX-HARD` 는 클라이언트만 바꿨다. 웹까지 할지.
 5. 이전 세션의 열린 것: Vercel `CRON_SECRET`, 곡 미러(보류), QA 3.20~3.28 실기, 일본어 감수, v0.1.11 게시 여부.
 
