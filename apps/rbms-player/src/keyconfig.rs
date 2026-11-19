@@ -508,8 +508,11 @@ impl ControlAction {
     /// they existed may already have given to a lane; the lane has to win, or loading an old file
     /// would silently kill a column. The older controls are resolved before lanes, as they always
     /// were.
+    ///
+    /// ESC gives way too: the key editor keeps it off the lanes of the mode it shows, but a key that
+    /// is no lane there may be one of another mode, and a lane key that left the run would end it.
     pub fn yields_to_lanes(self) -> bool {
-        matches!(self, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle)
+        matches!(self, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle | ControlAction::Escape)
     }
 
     /// The key token a control was given after it had shipped without one, and the generation of
@@ -1065,10 +1068,12 @@ impl Bindable {
 
     /// The keys the screen that reads this keeps for itself, which it cannot be bound to: Escape
     /// for a lane or a control of a run, and for a shortcut the fixed keys of its screen
-    /// ([`fixed_keys_of`]).
+    /// ([`fixed_keys_of`]). ESC is read on every screen, and its key reaches each of them as
+    /// Escape, so it keeps off the fixed keys of every one: the browser's, which hold the others'.
     pub fn fixed_keys(self) -> &'static [KeyCode] {
         match self {
             Bindable::Shortcut(shortcut) => fixed_keys_of(shortcut.screen()),
+            Bindable::Control(ControlAction::Escape) => fixed_keys_of(ShortcutScreen::Browser),
             Bindable::Lane(_) | Bindable::ScratchReverse(_) | Bindable::Control(_) => &[KeyCode::Escape],
         }
     }
@@ -1177,9 +1182,14 @@ pub fn key_index_of(mode: Mode, lane: usize, dir: ScratchDir) -> Option<usize> {
 ///
 /// Beside the keys it holds one thing that lasts only while a key is handed to the screen that is
 /// up: what that key did to the chords bound on the keyboard ([`ChordEvent`]).
+///
+/// It also holds every key that has been one of two keys held together as a chord since it went
+/// down. Such a key stays the chord's until it is let go, so breaking a chord by letting go of its
+/// other key does not read as a second press of what the key left down is bound to alone.
 #[derive(Clone, Debug, Default)]
 pub struct HeldKeys {
     down: HashSet<KeyCode>,
+    kept_for_chords: HashSet<KeyCode>,
     chord_event: Option<ChordEvent>,
 }
 
@@ -1190,6 +1200,17 @@ impl HeldKeys {
 
     pub fn release(&mut self, code: KeyCode) {
         self.down.remove(&code);
+        self.kept_for_chords.remove(&code);
+    }
+
+    /// Keep `keys`, the keys of chords that are held, as the chords' until each is let go.
+    pub fn keep_for_chords(&mut self, keys: impl IntoIterator<Item = KeyCode>) {
+        self.kept_for_chords.extend(keys);
+    }
+
+    /// Every key that is down and has been one of two keys held together since it went down.
+    pub fn kept_for_chords(&self) -> impl Iterator<Item = KeyCode> + '_ {
+        self.kept_for_chords.iter().copied()
     }
 
     pub fn is_down(&self, code: KeyCode) -> bool {
@@ -1204,6 +1225,7 @@ impl HeldKeys {
     /// them every chord they held.
     pub fn clear(&mut self) {
         self.down.clear();
+        self.kept_for_chords.clear();
         self.chord_event = None;
     }
 

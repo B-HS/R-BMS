@@ -706,7 +706,7 @@ fn start_and_select_collide_like_any_other_control() {
 #[test]
 fn start_and_select_are_the_controls_that_give_way_to_a_lane() {
     for action in ControlAction::ALL {
-        let yields = matches!(action, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle);
+        let yields = matches!(action, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle | ControlAction::Escape);
         assert_eq!(action.yields_to_lanes(), yields, "{action:?}");
     }
 }
@@ -1164,6 +1164,24 @@ fn a_screens_fixed_keys_cannot_be_given_to_what_it_reads() {
     assert_eq!(keys.clash(mode, control(ControlAction::CoverToggle), KeyCode::Enter), None, "Enter is not a run's");
     assert_eq!(keys.clash(mode, control(ControlAction::CoverToggle), KeyCode::Escape), Some(Clash::Fixed));
     assert_eq!(keys.clash(mode, Bindable::Lane(0), KeyCode::Escape), Some(Clash::Fixed));
+}
+
+/// ESC is read on every screen, and the key given to it reaches each of them as Escape: it cannot
+/// be a key any screen keeps for itself, alone or held with another.
+#[test]
+fn esc_cannot_take_a_key_any_screen_keeps_for_itself() {
+    let mode = Mode::BEAT_7K;
+    let keys = KeyConfig::default();
+    let esc = control(ControlAction::Escape);
+    for screen in [ShortcutScreen::Browser, ShortcutScreen::Result, ShortcutScreen::Replay] {
+        for code in fixed_keys_of(screen) {
+            assert_eq!(keys.clash(mode, esc, *code), Some(Clash::Fixed), "ESC onto {code:?}");
+            if let Some(held_with) = KeyBind::chord(KeyCode::ShiftRight, *code) {
+                assert_eq!(keys.clash_of(mode, esc, held_with), Some(Clash::Fixed), "ESC onto RSHIFT with {code:?}");
+            }
+        }
+    }
+    assert_eq!(keys.clash(mode, esc, KeyCode::F7), None, "a key no screen keeps is free");
 }
 
 /// As shipped nothing clashes in any mode, so a fresh install opens the key editor with no row in

@@ -15,8 +15,9 @@ use crate::gamepad::{PadBinding, PadChange, PadConfig, PadMapper, PadMark, PadSn
 use crate::keyconfig::{Bindable, ChordEvent, KeyBind, Shortcut, ShortcutScreen};
 use crate::{App, Config, LaunchOptions};
 
-/// A one-measure 7-key chart, enough for a run with real lanes.
-const CHART: &str = "#PLAYER 1\n#TITLE t\n#BPM 120\n#WAV01 a.wav\n#00111:0101\n";
+/// A 7-key chart with real lanes whose last note is minutes away, so a run on it is still playing
+/// however long the machine takes to get to its next frame.
+const CHART: &str = "#PLAYER 1\n#TITLE t\n#BPM 120\n#WAV01 a.wav\n#00111:0101\n#09911:01\n";
 
 /// Two keys no shipped layout gives anything, and the key the first lane ships on.
 const F7: KeyCode = KeyCode::F7;
@@ -126,7 +127,58 @@ fn a_chord_is_held_while_both_keys_are_and_takes_its_keys_from_what_they_hold_al
     assert!(!app.shared.keyboard_index_pressed(0), "and its lane key is no key of the table while it is held");
     assert!(app.shared.shortcut_held(Shortcut::Folders));
     up(&mut app, LANE_KEY);
-    assert!(app.shared.start_pressed(), "START is START again once the chord is broken");
+    assert!(!app.shared.start_pressed(), "START held on through the chord would read as START pressed a second time");
+    up(&mut app, KeyCode::KeyA);
+    down(&mut app, KeyCode::KeyA);
+    assert!(app.shared.start_pressed(), "START is START again once its key goes down again");
+
+    down(&mut app, LANE_KEY);
+    up(&mut app, KeyCode::KeyA);
+    assert!(!app.shared.keyboard_index_pressed(0), "the lane key left down is the chord's until it is let go");
+    up(&mut app, LANE_KEY);
+    down(&mut app, LANE_KEY);
+    assert!(app.shared.keyboard_index_pressed(0));
+}
+
+/// While a search word is typed, a key that types a character is the word's: two keys held together
+/// one of which types are no chord, whichever goes down second.
+#[test]
+fn a_chord_with_a_key_of_the_word_is_no_chord_while_a_word_is_typed() {
+    let mut app = fresh_app();
+    bind(&mut app, Bindable::Control(ControlAction::Escape), chord(KeyCode::ShiftLeft, KeyCode::KeyQ));
+    app.stage = Stage::Select(Box::new(SelectState::new()));
+    app.shared.searching = true;
+    let now = Instant::now();
+    key(&mut app, KeyCode::Escape, true, now);
+    key(&mut app, KeyCode::Escape, false, now);
+    assert!(!app.shared.searching, "Escape ends the typing");
+
+    app.shared.searching = true;
+    key(&mut app, KeyCode::KeyQ, true, now);
+    key(&mut app, KeyCode::ShiftLeft, true, now);
+    assert!(app.shared.searching, "the shift key that went down under a letter being typed made ESC of the two");
+    key(&mut app, KeyCode::KeyQ, false, now);
+    key(&mut app, KeyCode::ShiftLeft, false, now);
+    assert!(app.shared.searching);
+}
+
+/// The key given to ESC gives way to a lane of the mode that is up, as START and SELECT do: a key
+/// that is no lane of the mode the editor shows may be one of another.
+#[test]
+fn the_key_given_to_esc_plays_a_lane_that_has_it() {
+    let shipped = crate::keyconfig::KeyConfig::default();
+    let fourteen = shipped.lane_keys(Mode::BEAT_14K);
+    let other_side = fourteen.iter().map(|(code, _)| *code).find(|code| shipped.lane_keys(Mode::BEAT_7K).iter().all(|(seven, _)| seven != code));
+    let other_side = other_side.expect("a key of the second side");
+    assert_eq!(shipped.clash(Mode::BEAT_7K, Bindable::Control(ControlAction::Escape), other_side), None, "the editor showing seven keys gives it to ESC");
+
+    let mut app = fresh_app();
+    app.shared.keyconfig.set_control(ControlAction::Escape, LANE_KEY);
+    running(&mut app);
+    let now = Instant::now();
+    assert!(!leaves(&key(&mut app, LANE_KEY, true, now)), "a lane key left the run");
+    key(&mut app, LANE_KEY, false, now + STEP);
+    assert_eq!(lane_presses(&app), [true, false]);
 }
 
 /// The press that makes a chord reads the chord's shortcut on the screen that reads it and never

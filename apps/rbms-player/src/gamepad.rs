@@ -42,7 +42,7 @@ mod chord_tests;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -636,6 +636,10 @@ pub struct PadMapper {
     /// How many ticks the turntables have travelled since the count was last taken, a tick towards
     /// the plus end of an axis counted up ([`PadMapper::take_turn`]).
     turned: i32,
+    /// Every element handed over as down that has been one of two held together since it went
+    /// down. It is the pair's until it is let go, so breaking a pair by letting go of its other
+    /// element does not read as a second press of what it drives alone ([`PadMapper::held`]).
+    kept_for_pairs: BTreeSet<PadElement>,
 }
 
 impl PadMapper {
@@ -768,6 +772,18 @@ impl PadMapper {
         events
     }
 
+    /// [`PadMapper::events_of`], after which every element of a pair that is held is kept as the
+    /// pair's and every element let go is no longer ([`PadMapper::kept_for_pairs`]).
+    fn take_events_of(&mut self, plan: &PadPlan, fired: &BTreeMap<PadElement, bool>) -> Vec<(PadEvent, PadMark)> {
+        let events = self.events_of(plan, fired);
+        let together: Vec<PadElement> =
+            plan.chords.iter().filter(|(pair, _)| pair.iter().all(|element| self.handed(*element))).flat_map(|(pair, _)| *pair).collect();
+        self.kept_for_pairs.extend(together);
+        let gates = &self.gates;
+        self.kept_for_pairs.retain(|element| gates.get(element).is_some_and(Lr2Debounce::handed));
+        events
+    }
+
     /// Offer every button and two-key axis direction of `plan` to its debounce at `at_us`, as it
     /// reads in `snapshot`. What is taken is handed back as the plan's events ([`PadMapper::events_of`]).
     fn read_keys(&mut self, at_us: i64, cfg: &PadConfig, plan: &PadPlan, snapshot: &PadSnapshot) -> Vec<(PadEvent, PadMark)> {
@@ -780,7 +796,7 @@ impl PadMapper {
                 fired.insert(element, raw);
             }
         }
-        self.events_of(plan, &fired)
+        self.take_events_of(plan, &fired)
     }
 
     /// Read every turntable direction of `plan` at `at_us`: each at most once, and only once the
@@ -800,7 +816,7 @@ impl PadMapper {
                 fired.insert(element, raw);
             }
         }
-        self.events_of(plan, &fired)
+        self.take_events_of(plan, &fired)
     }
 
     /// Take every release of a button or two-key axis direction the debounce kept out and has let
@@ -818,7 +834,7 @@ impl PadMapper {
                 gate.hand_over(false, opens_us);
             }
             let released = BTreeMap::from([(element, false)]);
-            events.extend(self.events_of(plan, &released).into_iter().map(|(event, mark)| (event, opens_us, mark)));
+            events.extend(self.take_events_of(plan, &released).into_iter().map(|(event, mark)| (event, opens_us, mark)));
         }
     }
 
@@ -828,14 +844,15 @@ impl PadMapper {
     ///
     /// A control or a shortcut bound to two elements is held while both are. An element that is
     /// one of two held together that way does not hold what it drives alone, but for a lane: the
-    /// pair the player bound wins over START or SELECT held with a key of the key table.
+    /// pair the player bound wins over START or SELECT held with a key of the key table. Nor does
+    /// one that was until it is let go ([`PadMapper::kept_for_pairs`]).
     pub fn held(&self, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
         if !cfg.enabled {
             return Vec::new();
         }
         let plan = cfg.plan(mode);
         let together: Vec<&([PadElement; 2], PadTarget)> = plan.chords.iter().filter(|(pair, _)| pair.iter().all(|element| self.handed(*element))).collect();
-        let taken: Vec<PadElement> = together.iter().flat_map(|(pair, _)| *pair).collect();
+        let taken: Vec<PadElement> = together.iter().flat_map(|(pair, _)| *pair).chain(self.kept_for_pairs.iter().copied()).collect();
         let alone = plan
             .singles
             .iter()
@@ -928,11 +945,14 @@ const CAPTURE_EVENTS_KEPT: usize = 16;
 /// let go by its native code, and each direction of an axis pressed once the axis passes
 /// [`CAPTURE_AXIS_THRESHOLD`] that way and let go once it comes back inside it. Two elements held
 /// together are told apart from one pressed and let go by the order of these
-/// ([`crate::keyconfig::ChordCapture`]).
+/// ([`crate::keyconfig::ChordCapture`]). A controller that goes away lets go of every button and
+/// axis direction it held.
 #[derive(Debug, Default)]
 pub struct PadCapture {
     /// The direction each axis is counted as pressed in.
     axes: BTreeMap<u32, bool>,
+    /// The buttons counted as pressed.
+    buttons: BTreeSet<u32>,
     events: std::collections::VecDeque<(PadBinding, bool)>,
 }
 
@@ -940,7 +960,14 @@ impl PadCapture {
     /// Take in one change of the controller.
     pub fn note(&mut self, change: PadChange) {
         match change {
-            PadChange::Button { code, pressed, .. } => self.push(PadBinding::Button(code), pressed),
+            PadChange::Button { code, pressed, .. } => {
+                if pressed {
+                    self.buttons.insert(code);
+                } else {
+                    self.buttons.remove(&code);
+                }
+                self.push(PadBinding::Button(code), pressed);
+            }
             PadChange::Axis { code, value } => {
                 let now = (value.abs() >= CAPTURE_AXIS_THRESHOLD).then_some(value > 0.0);
                 let was = self.axes.get(&code).copied();
@@ -960,7 +987,13 @@ impl PadCapture {
                     }
                 }
             }
-            PadChange::Disconnected => self.axes.clear(),
+            PadChange::Disconnected => {
+                let buttons = std::mem::take(&mut self.buttons).into_iter().map(PadBinding::Button);
+                let axes = std::mem::take(&mut self.axes).into_iter().map(|(axis, positive)| PadBinding::Axis { axis, positive });
+                for binding in buttons.chain(axes) {
+                    self.push(binding, false);
+                }
+            }
         }
     }
 

@@ -285,7 +285,8 @@ impl AppShared {
     /// Record one keyboard event in the held-key set the START, SELECT and key-index queries read,
     /// with what it did to the chords bound on the keyboard: the ones its press made or its release
     /// broke ([`HeldKeys::chord_event`]), which lasts until the key has been handled. A repeat of a
-    /// key already down changes nothing.
+    /// key already down changes nothing. The keys of every chord held after a press stay the
+    /// chords' until each is let go ([`HeldKeys::keep_for_chords`]).
     pub(crate) fn note_key(&mut self, key: &KeyInput<'_>) {
         let chords = self.keyconfig.chords();
         let held = &mut self.keyconfig.held;
@@ -293,6 +294,8 @@ impl AppShared {
         if key.pressed {
             held.press(key.code);
             let made = held_chords_with(&chords, held, key.code);
+            let kept = keys_in_held_chords(&chords, held);
+            held.keep_for_chords(kept);
             held.note_chord_event(ChordEvent { code: key.code, pressed: true, chords: made, keeps_lanes: true });
         } else if key.released {
             let broken = held_chords_with(&chords, held, key.code);
@@ -306,9 +309,13 @@ impl AppShared {
         self.control_key_in_force(ControlAction::Escape)
     }
 
-    /// Every key that is one of two keys of a chord that is held ([`keys_in_held_chords`]).
+    /// Every key that is one of two keys of a chord that is held ([`keys_in_held_chords`]), or that
+    /// has been since it went down ([`HeldKeys::kept_for_chords`]).
     fn keys_in_chords(&self) -> std::collections::HashSet<KeyCode> {
-        keys_in_held_chords(&self.keyconfig.chords(), &self.keyconfig.held)
+        let held = &self.keyconfig.held;
+        let mut keys = keys_in_held_chords(&self.keyconfig.chords(), held);
+        keys.extend(held.kept_for_chords());
+        keys
     }
 
     /// Whether `bind` is down: a single key that is down and is not one of two keys of a chord that

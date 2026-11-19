@@ -151,6 +151,16 @@ fn escape_input(pressed: bool) -> KeyInput<'static> {
     KeyInput { code: KeyCode::Escape, pressed, released: !pressed, text: None }
 }
 
+/// Whether `target` is bound to two keys one of which is a key of a line being typed.
+fn chord_has_a_key_of_the_word(shared: &AppShared, target: Bindable) -> bool {
+    let bind = match target {
+        Bindable::Control(action) => shared.keyconfig.control_bind(action),
+        Bindable::Shortcut(shortcut) => shared.keyconfig.shortcut_bind(shortcut),
+        Bindable::Lane(_) | Bindable::ScratchReverse(_) => None,
+    };
+    bind.is_some_and(|bind| bind.keys().into_iter().any(crate::keyconfig::belongs_to_a_typed_line))
+}
+
 /// Whether a mouse event is the left button going down, the one thing the built-in screens act on.
 pub(crate) const fn is_left_press(button: MouseButton, pressed: bool) -> bool {
     pressed && matches!(button, MouseButton::Left)
@@ -356,22 +366,24 @@ impl Stage {
     /// * The key that is ESC's own reaches the screen as Escape, going down and coming up.
     ///
     /// The key editor reads every key as it is ([`StageHandler::reads_keys_as_they_are`]), and a
-    /// key of a search word that is being typed is a letter of the word.
+    /// key of a search word that is being typed is a letter of the word: so long as the word is
+    /// typed, two keys one of which is the word's are no chord.
     pub(crate) fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if ctx.shared.skin_text_key(&key) {
             return Transition::Stay;
         }
         ctx.shared.note_key(&key);
-        let typed = self.takes_composed_text(ctx.shared) && crate::keyconfig::belongs_to_a_typed_line(key.code);
-        if typed || self.view().reads_keys_as_they_are() {
+        let typing = self.takes_composed_text(ctx.shared);
+        if (typing && crate::keyconfig::belongs_to_a_typed_line(key.code)) || self.view().reads_keys_as_they_are() {
             ctx.shared.keyconfig.held.forget_chord_event();
             return self.deliver_key(ctx, key);
         }
         let keeps_lanes = self.id() == StageId::Play;
-        let event = ctx.shared.keyconfig.held.chord_event().cloned().map(|event| crate::keyconfig::ChordEvent { keeps_lanes, ..event });
-        if let Some(event) = event.clone() {
-            ctx.shared.keyconfig.held.note_chord_event(event);
+        if let Some(mut event) = ctx.shared.keyconfig.held.chord_event().cloned() {
+            event.chords.retain(|target| !typing || !chord_has_a_key_of_the_word(ctx.shared, *target));
+            ctx.shared.keyconfig.held.note_chord_event(crate::keyconfig::ChordEvent { keeps_lanes, ..event });
         }
+        let event = ctx.shared.keyconfig.held.chord_event().cloned();
         let transition = self.key_through_bindings(ctx, key, event);
         ctx.shared.keyconfig.held.forget_chord_event();
         transition

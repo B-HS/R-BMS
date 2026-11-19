@@ -81,7 +81,30 @@ fn a_pair_is_held_while_both_are_down_and_takes_its_elements_from_what_they_hold
     assert_eq!(mapper.held(&cfg, seven_key()), [lane(true), PadEvent::Control(ControlAction::LiftUp)], "START is the pair's while the pair is held");
     snapshot.set_button(SECOND, false);
     mapper.resolve(MS * 2, &cfg, seven_key(), &snapshot);
-    assert_eq!(mapper.held(&cfg, seven_key()), [PadEvent::Control(ControlAction::Start)], "and START's again once it is broken");
+    assert!(mapper.held(&cfg, seven_key()).is_empty(), "START held on through the pair would read as START pressed a second time");
+    snapshot.set_standard(StandardButton::Start, false);
+    mapper.resolve(MS * 3, &cfg, seven_key(), &snapshot);
+    snapshot.set_standard(StandardButton::Start, true);
+    mapper.resolve(MS * 4, &cfg, seven_key(), &snapshot);
+    assert_eq!(mapper.held(&cfg, seven_key()), [PadEvent::Control(ControlAction::Start)], "and START's again once it goes down again");
+}
+
+/// A controller that goes away lets go of everything it held, for the key editor as for play: a
+/// button held when it went is not the first of two with one pressed once it is back.
+#[test]
+fn a_capture_lets_go_of_what_a_controller_held_when_it_went_away() {
+    let mut capture = PadCapture::default();
+    capture.note(PadChange::Button { code: FIRST, standard: None, pressed: true });
+    capture.note(PadChange::Axis { code: AXIS, value: -0.9 });
+    capture.note(PadChange::Disconnected);
+    capture.note(PadChange::Button { code: SECOND, standard: None, pressed: true });
+    let minus = PadBinding::Axis { axis: AXIS, positive: false };
+    assert_eq!(
+        capture.take(),
+        [(PadBinding::Button(FIRST), true), (minus, true), (PadBinding::Button(FIRST), false), (minus, false), (PadBinding::Button(SECOND), true)]
+    );
+    capture.note(PadChange::Disconnected);
+    assert_eq!(capture.take(), [(PadBinding::Button(SECOND), false)], "only what is still held is let go");
 }
 
 /// ESC goes up as well as down, alone or as a pair, and the mark says which.
