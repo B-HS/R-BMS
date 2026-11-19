@@ -9,23 +9,24 @@ rbms_model::translations! {
         /// The key that opens the screen, as the key editor and the key guide name it, and the
         /// screen's heading.
         ShortcutLabel => ("LAYOUT PICK", "배치 지정", "配置指定"),
-        /// The keys that write the layout.
+        /// The keys that write the layout, and the up and down keys that move the preview while the rows have the keys:
+        /// while the list of captured layouts has them, up and down move its cursor ([`LayoutPickText::HintCaptured`]).
         HintTyping => (
-            "1-9 OR LANE KEYS TYPE THE LANE FOR THE NEXT PLACE   BACKSPACE ERASE   DELETE CLEAR   0 IN ORDER   TAB SIDE   RIGHT OR SELECT CAPTURED",
-            "1-9 또는 레인 키로 다음 자리에 올 레인 입력   BACKSPACE 지우기   DELETE 비우기   0 순서대로   TAB 쪽 전환   RIGHT 또는 SELECT 저장한 배치",
-            "1-9 またはレーンキーで次の位置のレーンを入力   BACKSPACE 消去   DELETE 空にする   0 順番どおり   TAB サイド切替   RIGHT または SELECT 保存した配置",
+            "1-9 OR LANE KEYS TYPE THE LANE FOR THE NEXT PLACE   BACKSPACE ERASE   DELETE CLEAR   0 IN ORDER   TAB SIDE   UP DOWN MEASURE   RIGHT OR SELECT CAPTURED",
+            "1-9 또는 레인 키로 다음 자리에 올 레인 입력   BACKSPACE 지우기   DELETE 비우기   0 순서대로   TAB 쪽 전환   UP DOWN 한 마디   RIGHT 또는 SELECT 저장한 배치",
+            "1-9 またはレーンキーで次の位置のレーンを入力   BACKSPACE 消去   DELETE 空にする   0 順番どおり   TAB サイド切替   UP DOWN 1小節   RIGHT または SELECT 保存した配置",
         ),
         /// The keys of the list of captured layouts, while it is the one the keys go to.
         HintCaptured => (
             "UP DOWN OR KEY 1 KEY 2 CHOOSE   TAB OR KEY 3 THIS CHART / ALL   DELETE TWICE OR KEY 4 TWICE REMOVE   LEFT OR SELECT BACK TO THE LAYOUT",
             "UP DOWN 또는 KEY 1 KEY 2 고르기   TAB 또는 KEY 3 이 차트 / 전체   DELETE 또는 KEY 4 두 번 삭제   LEFT 또는 SELECT 배치 입력으로",
-            "UP DOWN または KEY 1 KEY 2 選択   TAB または KEY 3 この譜面 / すべて   DELETE または KEY 4 を2回で削除   LEFT または SELECT 配置入力へ",
+            "UP DOWN または KEY 1 KEY 2 選択   TAB または KEY 3 この譜面 / すべて   DELETE または KEY 4 を2回押して削除   LEFT または SELECT 配置入力へ",
         ),
-        /// The keys that move the preview and leave the screen.
+        /// The keys that move the preview and leave the screen, which work whichever of the rows and the list has the keys.
         HintMoving => (
-            "SPACE PLAY / STOP   UP DOWN MEASURE   PAGE UP PAGE DOWN 4 MEASURES   HOME END START END   ENTER PLAY   ESC BACK",
-            "SPACE 재생 / 정지   UP DOWN 한 마디   PAGE UP PAGE DOWN 네 마디   HOME END 처음 끝   ENTER 플레이   ESC 뒤로",
-            "SPACE 再生 / 停止   UP DOWN 1小節   PAGE UP PAGE DOWN 4小節   HOME END 最初 最後   ENTER プレー   ESC 戻る",
+            "SPACE PLAY / STOP   PAGE UP PAGE DOWN 4 MEASURES   HOME END START END   ENTER PLAY   ESC BACK",
+            "SPACE 재생 / 정지   PAGE UP PAGE DOWN 네 마디   HOME END 처음 끝   ENTER 플레이   ESC 뒤로",
+            "SPACE 再生 / 停止   PAGE UP PAGE DOWN 4小節   HOME END 最初 最後   ENTER プレー   ESC 戻る",
         ),
         /// The preview is stopped where it stands.
         Stopped => ("STOPPED", "정지", "停止中"),
@@ -40,7 +41,7 @@ rbms_model::translations! {
             "保存した配置なし: リザルト画面で {0}",
         ),
         /// The captured layout of another chart is played on that chart: Enter goes to it.
-        CapturedElsewhere => ("ENTER GOES TO THIS CHART", "ENTER 로 이 차트로 이동", "ENTERでこの譜面へ移動"),
+        CapturedElsewhere => ("ENTER GOES TO THIS CHART", "ENTER로 이 차트로 이동", "ENTERでこの譜面へ移動"),
         /// The first press of the key that removes a captured layout.
         RemoveArmed => (
             "press it again to remove this captured layout",
@@ -119,7 +120,7 @@ rbms_model::translations! {
         /// The screen was built without a run.
         RefusedNoRun => ("layout not captured: there is no run on this screen", "배치를 저장하지 않음: 이 화면에는 저장할 플레이가 없음", "配置を保存しません: この画面には保存するプレーがありません"),
         /// AUTOPLAY played the run.
-        RefusedAutoplay => ("layout not captured: AUTOPLAY played this run", "배치를 저장하지 않음: AUTOPLAY 가 친 플레이", "配置を保存しません: AUTOPLAYのプレーです"),
+        RefusedAutoplay => ("layout not captured: AUTOPLAY played this run", "배치를 저장하지 않음: AUTOPLAY가 친 플레이", "配置を保存しません: AUTOPLAYのプレーです"),
         /// The run is a replay being watched.
         RefusedReplay => ("layout not captured: this is a replay being watched", "배치를 저장하지 않음: 보고 있는 리플레이", "配置を保存しません: 再生中のリプレイです"),
         /// The run is a stage of a course or a practice slice.
@@ -129,7 +130,7 @@ rbms_model::translations! {
             "配置を保存しません: コースのステージと練習のプレーは保存しません",
         ),
         /// The run was played on OFF.
-        RefusedOff => ("layout not captured: the run was played on OFF", "배치를 저장하지 않음: OFF 로 친 플레이", "配置を保存しません: OFFのプレーです"),
+        RefusedOff => ("layout not captured: the run was played on OFF", "배치를 저장하지 않음: OFF로 친 플레이", "配置を保存しません: OFFのプレーです"),
         /// The arrangement lays the notes out one by one.
         RefusedNoteByNote => (
             "layout not captured: {0} lays the notes out one by one, not as a lane order",
@@ -161,7 +162,8 @@ rbms_model::translations! {
 
 #[cfg(test)]
 mod tests {
-    use rbms_model::translations::catalog_problems;
+    use rbms_model::Language;
+    use rbms_model::translations::{Catalog, catalog_problems};
 
     use super::*;
 
@@ -169,5 +171,41 @@ mod tests {
     fn every_entry_is_written_in_every_language() {
         assert_eq!(catalog_problems(LayoutPickText::ALL), Vec::<String>::new());
         assert_eq!(catalog_problems(CaptureText::ALL), Vec::<String>::new());
+    }
+
+    /// Where the lines of keys over the field start, how large they are drawn, and how wide a
+    /// character outside ASCII is in them, in pixels: `TEXT_X`, `HINT_SCALE` and `round(8.5 *
+    /// HINT_SCALE)` of `stage::layout_pick`. The fonts of the tests have no Korean or Japanese to
+    /// measure them with, so such a character counts as a whole em, which is as wide as the widest
+    /// of them is.
+    const HINT_LEFT_PX: f32 = 40.0;
+    const HINT_SCALE: f32 = 1.0;
+    const HINT_FULL_WIDTH_PX: f32 = 9.0;
+
+    fn hint_width(text: &str) -> f32 {
+        let latin: String = text.chars().filter(char::is_ascii).collect();
+        let full_width = text.chars().filter(|ch| !ch.is_ascii()).count() as f32;
+        rbms_render::text_width(&latin, HINT_SCALE) + full_width * HINT_FULL_WIDTH_PX
+    }
+
+    #[test]
+    fn every_line_of_keys_fits_between_the_margins_of_the_screen_in_every_language() {
+        rbms_render::font::use_embedded_fonts_only();
+        for language in Language::ALL {
+            for line in [LayoutPickText::HintTyping, LayoutPickText::HintCaptured, LayoutPickText::HintMoving] {
+                let width = hint_width(line.get(language));
+                assert!(width <= crate::CW as f32 - HINT_LEFT_PX * 2.0, "{line:?} {language:?} is {width} wide");
+            }
+        }
+    }
+
+    #[test]
+    fn the_second_line_of_keys_names_no_key_the_list_of_captured_layouts_takes_for_itself() {
+        for language in Language::ALL {
+            assert!(!LayoutPickText::HintMoving.get(language).contains("UP DOWN"), "{language:?}: the second line is drawn while the list has the keys too");
+            for line in [LayoutPickText::HintTyping, LayoutPickText::HintCaptured] {
+                assert!(line.get(language).contains("UP DOWN"), "{line:?} {language:?} does not say what up and down do");
+            }
+        }
     }
 }

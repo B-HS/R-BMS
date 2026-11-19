@@ -165,16 +165,14 @@ rbms_model::translations! {
             "オーディオストリームが停止しました — システム時計に切り替えます",
         ),
         OutputLatencyCompensated => (
-            "audio: {0} plays {1} ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). If you moved JUDGE OFFSET for this device, set it back",
-            "오디오: {0}의 소리가 {1} ms 늦게 나와 노트와 판정을 그만큼 늦춥니다(출력 지연 AUTO). 이 장치 때문에 판정 오프셋을 옮겨 두었다면 되돌려 주세요",
-            "オーディオ: {0} は音が {1} ms 遅れて出るため、ノーツと判定をその分遅らせます（出力遅延 AUTO）。このデバイスのために判定オフセットを動かしていたら戻してください",
+            "audio: {1} ms output delay is compensated (OUTPUT LATENCY AUTO). Set JUDGE OFFSET back if you moved it for {0}",
+            "오디오: 소리가 {1} ms 늦게 나오는 것을 보정합니다(출력 지연 AUTO). {0} 때문에 판정 오프셋을 옮겨 두었다면 되돌려 주세요",
+            "オーディオ: 音が {1} ms 遅れて出るのを補正します（出力遅延 AUTO）。{0} のために判定オフセットを動かしていたら戻してください",
         ),
         OutputLatencyCompensatedBluetooth => (
-            "audio: {0} is a Bluetooth device that plays {1} ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). \
-             If you moved JUDGE OFFSET for this device, set it back",
-            "오디오: 블루투스 장치 {0}의 소리가 {1} ms 늦게 나와 노트와 판정을 그만큼 늦춥니다(출력 지연 AUTO). 이 장치 때문에 판정 오프셋을 옮겨 두었다면 되돌려 주세요",
-            "オーディオ: Bluetoothデバイス {0} は音が {1} ms 遅れて出るため、ノーツと判定をその分遅らせます（出力遅延 AUTO）。\
-             このデバイスのために判定オフセットを動かしていたら戻してください",
+            "audio: {1} ms Bluetooth delay is compensated (OUTPUT LATENCY AUTO). Set JUDGE OFFSET back if you moved it for {0}",
+            "오디오: 블루투스로 소리가 {1} ms 늦게 나오는 것을 보정합니다(출력 지연 AUTO). {0} 때문에 판정 오프셋을 옮겨 두었다면 되돌려 주세요",
+            "オーディオ: Bluetoothで音が {1} ms 遅れて出るのを補正します（出力遅延 AUTO）。{0} のために判定オフセットを動かしていたら戻してください",
         ),
         TokenNotRevoked => (
             "logged out, but the server did not revoke the token (delete it on the web site): {0}",
@@ -247,7 +245,7 @@ rbms_model::translations! {
             "フォントを読み込めませんでした（{0}）: {1}",
         ),
         FullscreenFellBackToBorderless => (
-            "FULLSCREEN cannot change the video mode here: the window covers the monitor as BORDERLESS instead",
+            "FULLSCREEN cannot set the video mode here: the window covers the monitor as BORDERLESS",
             "이 환경에서는 FULLSCREEN이 화면 모드를 바꿀 수 없어 창이 BORDERLESS로 모니터를 덮습니다",
             "この環境ではFULLSCREENで画面モードを変えられないため、ウィンドウはBORDERLESSでモニターを覆います",
         ),
@@ -895,13 +893,12 @@ mod tests {
             (
                 NoticeText::OutputLatencyCompensated,
                 vec![&"USB DAC", &"35"],
-                "audio: USB DAC plays 35 ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). If you moved JUDGE OFFSET for this device, set it back",
+                "audio: 35 ms output delay is compensated (OUTPUT LATENCY AUTO). Set JUDGE OFFSET back if you moved it for USB DAC",
             ),
             (
                 NoticeText::OutputLatencyCompensatedBluetooth,
                 vec![&"AirPods", &"160"],
-                "audio: AirPods is a Bluetooth device that plays 160 ms late, and notes and judgement now wait for it (OUTPUT LATENCY AUTO). \
-                 If you moved JUDGE OFFSET for this device, set it back",
+                "audio: 160 ms Bluetooth delay is compensated (OUTPUT LATENCY AUTO). Set JUDGE OFFSET back if you moved it for AirPods",
             ),
             (NoticeText::TokenNotRevoked, vec![&"timeout"], "logged out, but the server did not revoke the token (delete it on the web site): timeout"),
             (
@@ -929,11 +926,7 @@ mod tests {
             (NoticeText::SettingsNotLoaded, vec![&"bad ron"], "settings not loaded (bad ron); running on defaults and leaving the file alone"),
             (NoticeText::FontNotFound, vec![&"f.ttf", &"no such file"], "font not found: f.ttf (no such file)"),
             (NoticeText::FontNotRead, vec![&"f.ttf", &"denied"], "font read failed (f.ttf): denied"),
-            (
-                NoticeText::FullscreenFellBackToBorderless,
-                vec![],
-                "FULLSCREEN cannot change the video mode here: the window covers the monitor as BORDERLESS instead",
-            ),
+            (NoticeText::FullscreenFellBackToBorderless, vec![], "FULLSCREEN cannot set the video mode here: the window covers the monitor as BORDERLESS"),
             (NoticeText::ReplayLoadFailed, vec![&"truncated"], "replay load failed: truncated"),
             (NoticeText::ChartNotFound, vec![&"a.bms", &"no such file"], "chart not found: a.bms (no such file)"),
             (NoticeText::ReplayNotSaved, vec![&"disk full", &"r.ron"], "replay not saved: disk full (r.ron)"),
@@ -1118,6 +1111,35 @@ mod tests {
                     assert!(notice.get(language).contains(row_label(row)), "{notice:?} {language:?} does not name the row as {:?}", row_label(row));
                 }
             }
+        }
+    }
+
+    /// A device name of the longer kind, and the longest delay a device is compensated for.
+    const LONG_DEVICE_NAME: &str = "Galaxy Buds2 Pro";
+    const LONGEST_COMPENSATION_MS: u32 = 1000;
+
+    #[test]
+    fn the_output_latency_notice_names_both_rows_before_a_toast_cuts_it_short() {
+        for language in Language::ALL {
+            let _installed = InstalledLanguage::new(language);
+            for notice in [NoticeText::OutputLatencyCompensated, NoticeText::OutputLatencyCompensatedBluetooth] {
+                let said = notice.fill(language, &[&LONG_DEVICE_NAME, &LONGEST_COMPENSATION_MS]);
+                let shown: String = match said.chars().count() > crate::toast::TOAST_TEXT_CHARS {
+                    true => said.chars().take(crate::toast::TOAST_TEXT_CHARS - 1).collect(),
+                    false => said.clone(),
+                };
+                for row in [SettingId::OutputLatency, SettingId::JudgeOffset] {
+                    assert!(shown.contains(row_label(row)), "{notice:?} {language:?} loses the row {:?} to the cut of a toast: {said}", row_label(row));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_fullscreen_notice_is_not_cut_short_by_a_toast() {
+        for language in Language::ALL {
+            let said = NoticeText::FullscreenFellBackToBorderless.get(language);
+            assert!(said.chars().count() <= crate::toast::TOAST_TEXT_CHARS, "{language:?}: {said}");
         }
     }
 }

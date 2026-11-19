@@ -21,11 +21,11 @@ rbms_model::translations! {
         GaugeValue => ("GAUGE {0}%", "게이지 {0}%", "ゲージ {0}%"),
         /// The keys of a result that cannot be run again.
         HintSelect => ("ENTER / ESC  SELECT", "ENTER / ESC  선곡", "ENTER / ESC  選曲"),
-        /// The keys of a result that can be retried or followed on: each key, then what it does.
+        /// The keys of a result that can be retried, followed on or have its layout captured: each key, then what it does.
         HintSelectRetryNext => (
-            "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG",
-            "ENTER / ESC  선곡    R  재도전    N  다음 곡",
-            "ENTER / ESC  選曲    R  リトライ    N  次の曲"
+            "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG    P  CAPTURE LAYOUT",
+            "ENTER / ESC  선곡    R  재도전    N  다음 곡    P  배치 저장",
+            "ENTER / ESC  選曲    R  リトライ    N  次の曲    P  配置を保存"
         ),
         /// The title of the panel plotting the gauge through the run.
         GraphGauge => ("GAUGE", "게이지", "ゲージ"),
@@ -65,7 +65,7 @@ mod tests {
         );
         assert_eq!(ResultText::GaugeValue.fill(english, &[&88]), "GAUGE 88%");
         assert_eq!(ResultText::HintSelect.get(english), "ENTER / ESC  SELECT");
-        assert_eq!(ResultText::HintSelectRetryNext.get(english), "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG");
+        assert_eq!(ResultText::HintSelectRetryNext.get(english), "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG    P  CAPTURE LAYOUT");
         assert_eq!(
             [ResultText::GraphGauge, ResultText::GraphTiming, ResultText::GraphJudge, ResultText::NoData, ResultText::Early, ResultText::Late]
                 .map(|entry| entry.get(english)),
@@ -77,9 +77,31 @@ mod tests {
     fn the_keys_of_a_hint_are_the_same_in_every_language() {
         for language in Language::ALL {
             let hint = ResultText::HintSelectRetryNext.get(language);
-            for key in ["ENTER / ESC  ", "  R  ", "  N  "] {
+            for key in ["ENTER / ESC  ", "  R  ", "  N  ", "  P  "] {
                 assert!(hint.contains(key), "{language:?}: the hint lost the key {key:?}: {hint:?}");
             }
+        }
+    }
+
+    /// How wide the screen is and how far its content keeps from either edge, how large the hint is
+    /// drawn, and how wide a character outside ASCII is in it, in pixels: the screen of
+    /// `render_result`, its `CONTENT_X`, its `HINT_SCALE` and `round(8.5 * HINT_SCALE)`. The fonts
+    /// of the tests have no Korean or Japanese to measure them with, so such a character counts as
+    /// a whole em, which is as wide as the widest of them is.
+    const SCREEN_PX: f32 = 1280.0;
+    const SIDE_MARGIN_PX: f32 = 44.0;
+    const HINT_SCALE: f32 = 1.2;
+    const HINT_FULL_WIDTH_PX: f32 = 10.0;
+
+    #[test]
+    fn the_hint_that_offers_a_retry_fits_between_the_margins_of_the_screen_in_every_language() {
+        crate::font::use_embedded_fonts_only();
+        for language in Language::ALL {
+            let hint = ResultText::HintSelectRetryNext.get(language);
+            let latin: String = hint.chars().filter(char::is_ascii).collect();
+            let full_width = hint.chars().filter(|ch| !ch.is_ascii()).count() as f32;
+            let width = crate::font::text_width(&latin, HINT_SCALE) + full_width * HINT_FULL_WIDTH_PX;
+            assert!(width <= SCREEN_PX - SIDE_MARGIN_PX * 2.0, "{language:?}: the hint is {width} wide: {hint:?}");
         }
     }
 

@@ -223,6 +223,73 @@ mod tests {
         assert_eq!(catalog_problems(ShortcutGroupText::ALL), Vec::<String>::new());
     }
 
+    /// How wide the editor's line of hints and its line of notices may be, how large they are drawn
+    /// and how wide a character outside ASCII is in them, in pixels: `PANEL_W`, `HINT_SCALE` and
+    /// `round(8.5 * HINT_SCALE)` of `stage::keyconfig`. The fonts of the tests have no Korean or
+    /// Japanese to measure them with, so such a character counts as a whole em, which is as wide
+    /// as the widest of them is. The editor cuts a line wider than its panel short.
+    const PANEL_PX: f32 = 1080.0;
+    const LINE_SCALE: f32 = 1.1;
+    const LINE_FULL_WIDTH_PX: f32 = 9.0;
+
+    fn line_width(text: &str) -> f32 {
+        let latin: String = text.chars().filter(char::is_ascii).collect();
+        let full_width = text.chars().filter(|ch| !ch.is_ascii()).count() as f32;
+        rbms_render::text_width(&latin, LINE_SCALE) + full_width * LINE_FULL_WIDTH_PX
+    }
+
+    #[test]
+    fn the_hints_of_a_capture_fit_the_panel_of_the_editor_in_every_language() {
+        rbms_render::font::use_embedded_fonts_only();
+        for language in rbms_model::Language::ALL {
+            for hint in [
+                KeyEditorText::KeysHint,
+                KeyEditorText::CaptureKeyHint,
+                KeyEditorText::CapturePadHint,
+                KeyEditorText::CaptureChordKeyHint,
+                KeyEditorText::CaptureChordPadHint,
+            ] {
+                let width = line_width(hint.get(language));
+                assert!(width <= PANEL_PX, "{hint:?} {language:?} is {width} wide");
+            }
+        }
+    }
+
+    #[test]
+    fn the_notices_about_a_combination_fit_the_panel_of_the_editor_with_the_longest_names_in_every_language() {
+        rbms_render::font::use_embedded_fonts_only();
+        const LONGEST_KEY: &str = "BACKSPACE";
+        for language in rbms_model::Language::ALL {
+            let controls = ControlLabelText::ALL.iter().map(|entry| entry.get(language));
+            let shortcuts = ShortcutLabelText::ALL.iter().map(|entry| entry.get(language));
+            let longest = controls.chain(shortcuts).max_by(|a, b| line_width(a).total_cmp(&line_width(b))).expect("the editor names lines");
+            for notice in [KeyEditorNoticeText::ChordTaken, KeyEditorNoticeText::ChordKeyAlone, KeyEditorNoticeText::KeyInChord] {
+                let said = match notice {
+                    KeyEditorNoticeText::ChordTaken => notice.fill(language, &[&longest]),
+                    _ => notice.fill(language, &[&LONGEST_KEY, &longest]),
+                };
+                let width = line_width(&said);
+                assert!(width <= PANEL_PX, "{notice:?} {language:?} is {width} wide: {said}");
+            }
+        }
+    }
+
+    const RESULT_SKIN_TEXTS: &str = include_str!("../../../../../assets/skins/rbms-default/lua/i18n/result.lua");
+
+    #[test]
+    fn the_hint_of_the_default_result_skin_names_the_keys_the_result_shortcuts_ship_on_in_every_language() {
+        use crate::keyconfig::{Shortcut, key_name};
+        let [retry, next, capture] = [Shortcut::Retry, Shortcut::NextSong, Shortcut::CaptureLayout].map(|shortcut| key_name(shortcut.default_key()));
+        for said in [
+            format!("({retry}, {next} AND {capture} AS SHIPPED)"),
+            format!("(기본 {retry}, {next}, {capture})"),
+            format!("（初期設定は{retry}、{next}、{capture}）"),
+        ] {
+            assert!(RESULT_SKIN_TEXTS.contains(&said), "result.lua does not say {said}");
+        }
+        assert_eq!([retry, next, capture], ["R", "N", "P"]);
+    }
+
     #[test]
     fn a_name_the_editor_gives_a_line_is_not_given_to_two_lines_of_one_kind() {
         for language in rbms_model::Language::ALL {

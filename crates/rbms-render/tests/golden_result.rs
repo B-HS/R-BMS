@@ -8,7 +8,7 @@ use rbms_render::{Color, ResultPalette, ResultView, SkinConfig, render_result, r
 
 const GOLDEN_RESULT: u64 = 0x59a0_f2e8_6f9d_3fd7;
 const GOLDEN_RESULT_SKIN: u64 = 0xbf12_849e_17ea_7366;
-const GOLDEN_RESULT_PACED: u64 = 0x6cf4_e076_079e_6f28;
+const GOLDEN_RESULT_PACED: u64 = 0x6c9a_a722_9ff8_67c7;
 
 fn result_view() -> ResultView {
     ResultView {
