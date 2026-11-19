@@ -233,6 +233,7 @@ Notes:
 | --- | --- | --- |
 | arboard | 3.6.1 | MIT OR Apache-2.0 |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT |
+| coreaudio-rs | 0.14.2 | MIT/Apache-2.0 |
 | cosmic-text | 0.19.0 | MIT OR Apache-2.0 |
 | cpal | 0.17.3 | Apache-2.0 |
 | encoding_rs | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
