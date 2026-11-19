@@ -2948,7 +2948,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-audio"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "coreaudio-rs",
  "cpal",
@@ -2958,7 +2958,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-chart"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rbms-model",
  "rbms-parser",
@@ -2966,7 +2966,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-cli"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "encoding_rs",
  "md-5",
@@ -2988,7 +2988,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-config"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rbms-chart",
  "rbms-judge",
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-course"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -3010,7 +3010,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-download"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "encoding_rs",
  "reqwest",
@@ -3020,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-ir"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rbms-chart",
  "rbms-judge",
@@ -3032,7 +3032,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-judge"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rbms-model",
  "ron",
@@ -3042,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-library"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rbms-chart",
  "rbms-model",
@@ -3052,11 +3052,11 @@ dependencies = [
 
 [[package]]
 name = "rbms-model"
-version = "0.1.12"
+version = "0.1.13"
 
 [[package]]
 name = "rbms-parser"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "encoding_rs",
  "md-5",
@@ -3067,7 +3067,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-play"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rbms-chart",
  "rbms-judge",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-player"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -3114,7 +3114,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-render"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "cosmic-text",
  "png",
@@ -3130,7 +3130,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-skin"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "json5",
  "mlua",
@@ -3142,7 +3142,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-store"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "ron",
  "rusqlite",
@@ -3152,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-table"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "encoding_rs",
  "reqwest",
@@ -3163,7 +3163,7 @@ dependencies = [
 
 [[package]]
 name = "rbms-video"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "openh264",
  "re_mp4",
