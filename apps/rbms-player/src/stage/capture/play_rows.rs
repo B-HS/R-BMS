@@ -59,8 +59,9 @@ const CAPTURED_COURSE: &str = "Capture Course";
 const CAPTURED_COURSE_STAGES: usize = 2;
 
 /// The folders of the song browser a captured run is picked in, outermost first, so its head names
-/// where it was started: the last two of them, a table and its level.
-const CAPTURED_FOLDERS: [&str; 3] = ["TABLES", "発狂BMS", "★8"];
+/// where it was started: the last two of them, a table and its level. They are written in letters
+/// the capture's built-in font holds, so the head reads in a capture as it does in the window.
+const CAPTURED_FOLDERS: [&str; 3] = ["TABLES", "INSANE BMS", "★8"];
 
 /// The shares of the field the three covers take in the captures that draw them.
 const CAPTURED_COVER: f32 = 0.3;
