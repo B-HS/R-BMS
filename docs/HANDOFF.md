@@ -1,8 +1,8 @@
-# HANDOFF — 2026-10-24 세션 스냅샷
+# HANDOFF — 2026-11-19 세션 스냅샷
 
-최종 갱신 2026-10-24 · 대응 커밋 `0621e2f`(이 문서와 함께 커밋되는 문서 정리 커밋이 바로 뒤에 온다). 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-10-24-handoff-snapshot.md`(바로 앞 판, 2026-10-23 작업과 그 결정 표가 그대로 있다), 그 앞 `2026-10-23-`, `2026-10-22-`, `2026-10-14-`, `2026-10-11-`, `2026-10-09-handoff-snapshot.md`.
+최종 갱신 2026-11-19 · 대응 커밋 `c29c407`(코드)과 이 문서와 함께 커밋되는 문서 커밋. 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-11-19-handoff-snapshot.md`(바로 앞 판, 2026-10-24 작성에 2026-11-04 TODO 가 덧붙은 것), 그 앞 `2026-10-24-`, `2026-10-23-`, `2026-10-22-`, `2026-10-14-`, `2026-10-11-`, `2026-10-09-handoff-snapshot.md`.
 
-복기 신뢰도: 2026-10-24 세션은 clear 뒤 재개로 시작했고, 중간에 세션 한도로 한 번 끊겼다(W6 첫 실행). 결정·사용자 원문·커밋·운영 run 번호는 대화와 `git log`·`gh run` 으로 확인한 값이다. 하위 에이전트 보고서 원본은 세션 scratch(저장소 밖)에 있어 새 세션에서는 읽을 수 없고, 필요한 내용은 계획서·ADR·조사 문서·QA·테스트 부채에 옮겨 두었다. 사실이 의심되면 이 문서보다 코드와 `git log` 를 믿는다.
+복기 신뢰도: 2026-11-19 세션은 한 번 요약(compact)을 거쳤고, 도중에 세션 임시 폴더가 사라졌으며, 테스트 웨이브 첫 실행이 5시간 사용량 한도로 끊겼다. 결정·사용자 원문·커밋·CI run 번호는 대화와 `git log`·`gh run` 으로 확인한 값이다. 구현·테스트·수리 단위의 보고 원문은 `docs/history/2026-11-19-feature-upgrade-unit-reports/` 에 있다. 사실이 의심되면 이 문서보다 코드와 `git log` 를 믿는다.
 
 ## 1. 프로젝트 한 줄 정의
 
@@ -10,49 +10,38 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 2. 현재 목표
 
-- 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹(순위, 난이도표, 내 폴더, 코스·단위). 사용자는 남은 일을 정확히 끝내길 원하고, 가끔 실패하는 테스트도 없어야 한다고 했다.
-- 현재 마일스톤: 2026-10-24 "다국어·리플레이 대전·랭킹 보기·NOTES RADAR·선곡 UI"(요구 5개)와 "어시스트 단위 A-단위" 를 끝내고 **클라이언트 v0.1.9 를 사용자가 게시했다**(Latest, 2026-10-24 03:59 UTC). 웹은 `dev` 푸시로 운영에 배포됐다. 사용자 원문 "배포다했고 뭐 draft -> release로 해놨고 잘 다되네". 진행 중인 구현 작업은 없다.
-- 직전 작업(2026-10-24 세션, 시간 순):
-  1. 컨텍스트 복원과 문서-코드 대조(동작 불일치 0, 표현 불일치 10건 수리 `bae5d86`), 이전 세션의 인수인계 커밋 `9fed3c0`.
-  2. 요구 5개 조사(`docs/reference/2026-10-24-*.md`, `d2a636c`)와 통합 계획(`docs/plan/2026-10-24-five-features-plan.md`, `bca5306`), 결정 21개 사용자 답(`d6da51e`).
-  3. 구현 웨이브 W1~W6(`72726c7`~`0434628`), CI 에서만 드러난 시험 수리 `69d86a7`.
-  4. v0.1.9 릴리스(메인 실행 run 40055763447, 버전 커밋 `49fe493`, 한글 노트, 사용자가 받아 확인 뒤 게시).
-  5. 추가 요청 A-단위: 설계 `53804d5`, 마이그레이션 0013 `35f77ae`, 서버 `bfb4078`, 웹 `34e21d1`, 문서 `0a73e87`, 운영 반영 기록 `0621e2f`.
-  6. 이 인수인계.
+- 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹. 사용자는 남은 일을 정확히 끝내길 원하고, 가끔 실패하는 테스트도 없어야 한다고 했다.
+- 현재 마일스톤: 2026-11-19 "기능 고도화 12건"과 추가 요청 "램프 반 쪼개기"의 구현·테스트·수리·문서가 끝났다. 클라이언트만 바뀌었고 웹·DB·릴리스는 하지 않았다. **이 변경은 아직 릴리스되지 않았다**(Cargo 버전 0.1.11 그대로, v0.1.11 draft 이후의 커밋이다). 진행 중인 구현 작업은 없다.
+- 직전 작업(2026-11-19 세션, 시간 순): 조사·계획·검토(`cac3795`) → 웨이브 1(`df80201`~`4cbb323`) → 웨이브 2(`51f4884`~`b4444b1`) → 테스트 웨이브와 램프 반 쪼개기(`4874930`~`5f61681`) → 수리 웨이브(`864ef42`~`c29c407`) → 문서.
 
 ## 3. 완료 / 진행 중 / 미착수
 
-### 3.0 완료(2026-10-24 세션)
+### 3.0 완료(2026-11-19 세션)
 
-결정의 "왜"는 [acknowledge/README.md](acknowledge/README.md) 의 2026-10-24 절 ADR 8건, 체크리스트는 [PROCESS.md](PROCESS.md) 첫 두 체크리스트.
+계획·결정·웨이브 결과의 정본은 [plan/2026-11-19-feature-upgrade-12.md](plan/2026-11-19-feature-upgrade-12.md)(M1~M21, U1~U10, 6~10절), ADR 은 [acknowledge/README.md](acknowledge/README.md) 의 2026-11-19 절 9건.
 
-| 묶음 | 내용 | 커밋 | 주요 파일 |
+| 요구 | 내용 | 커밋 | 주요 파일 |
 | --- | --- | --- | --- |
-| 확장 id | 정수·Float·Rate·텍스트·참조 이미지 공간 개방, 다섯 기능의 id 배정 | `72726c7` | `crates/rbms-skin/src/property/extension.rs`, `apps/rbms-player/src/skin_host/extension.rs`, `lua/props.lua` |
-| 다국어 기반 | LANGUAGE(AUTO·영어·한국어·일본어, DISPLAY 맨 위), `translations!` 카탈로그, 용어집 | `b7efac1` | `crates/rbms-model/src/{language,translations}.rs`, `apps/rbms-player/src/{app_language.rs,text/**}`, `docs/reference/2026-10-24-i18n-glossary.md` |
-| NOTES RADAR | 6축 계산(`rbms-chart`), 곡 DB `song_radar`, 참조 이미지 `-21020` 육각형 | `0e74d08`, `54ff02c` | `crates/rbms-chart/src/radar.rs`, `crates/rbms-library/src/songdb/**`, `crates/rbms-render/src/skin_render/graphs/radar.rs` |
-| 랭킹 보기 | 쪽 받기·만료·무효화(RK-D), 웹 순위 `extra.dans`(RK-W), 파란 건반 300 ms 길게 = 랭킹 모드, RANKING KEYS, 오버레이, 외부 스킨 순위 슬롯 | `d727923`, `d74794b`, `423484b` | `apps/rbms-player/src/{ir_ranking,app_ranking,ir_ranking_view}.rs`, `stage/select/ranking_mode.rs` |
-| 리플레이 배치 플레이 | 보는 중 J 키, 기록 모달·랭킹 줄의 PLAY THIS LAYOUT, 로컬 기록 고스트, 배치 골든 | `30264b8`, `eba8a73` | `apps/rbms-player/src/borrowed_layout.rs`, `stage/select/layout_play.rs`, `ghost.rs` |
-| 선곡 값 | 커서 차트 분석 작업자(레이더·레인별 노트·그래프), 막대 등급 배지·썸네일, 형제 난이도·폴더 램프 분포·내 기록 6줄·순위 스크롤 | `d75b819`, `b5f15df` | `stage/select/{analysis,thumbs,browse_facts,ranking_scroll}.rs` |
-| 기본 스킨 선곡 | IIDX 식 배치·토큰, 목록·머리·바닥, 정보창(CHART DATA, NOTES RADAR, MY SCORE, SCORE TARGETS, CLEAR RATE, MY RECORDS/IR RANKING) | `038481b`, `c0bebfa`, `90d57d1` | `assets/skins/rbms-default/lua/select/**`, `lua/theme.lua` |
-| 번역 | 설정·렌더·메뉴·알림(`7c9bb0d`), 선곡·코스 막대 PRACTICE 키(`5014bb6`), 기본 스킨·확장 불린 `op` 로더 수리(`eadde84`), 남은 문구(`f82e6a9`) | 여러 | `apps/rbms-player/src/text/**`, `lua/i18n/**`, `crates/rbms-skin/src/loader/track.rs` |
-| 웹 다국어 | next-intl 4.14.9 쿠키 방식(`eb5ddbb`), 화면 문구(`8d01908`, `c9404f7`, `b0cf509`), AI 결과 언어·오류 코드 번역(`0405496`) | 여러 | `web/src/shared/i18n/**`, `web/messages/{ko,en,ja}/*.json` |
-| 문서 | ADR 7건, 사용자·스킨·웹 문서, QA 3.23, 테스트 부채 3.112~3.126, README 선곡 캡처 | `0434628` | `docs/**` |
-| 릴리스 v0.1.9 | 메인 실행, 로그로 서명·공증 확인, 한글 노트, 사용자 게시 | `49fe493` | `docs/ci-release.md` 2.3 |
-| A-단위 | 0013(`user_dan.assisted`, 기본 키 확장), 판정·표시·소급, 점선 배지, 마이페이지 선택, ADR·QA 3.24·부채 3.127~3.129 | `35f77ae`, `bfb4078`, `34e21d1`, `0a73e87` | `web/drizzle/0013_assisted_dan.sql`, `web/src/server/service/domain/dan/**`, `web/src/features/dan/**` |
+| 1 블루투스 | 장치가 보고하는 출력 지연을 오디오 시계에 보정(macOS, AUDIO 탭 OUTPUT LATENCY AUTO/OFF), 기본 출력 장치를 판마다 다시 물음, 판 기준점을 예약 축으로, 번들에 Game Mode 키 | `b47398a`, `d0bff5c`, `4d1ce8e` | `crates/rbms-audio/src/{latency,engine,host}.rs`, `apps/rbms-player/src/app_play.rs`, `scripts/macos-app.sh` |
+| 2·3·11 플레이 화면 | 출발 폴더, 그 판의 게이지·배치·어시스트, NPS(스킨 옵션 `NPS Display`) | `3c546d3`, `ee59b33`, `c29c407` | `apps/rbms-player/src/stage/play/run_setup.rs`, `skin_host/play/**`, `lua/play/**` |
+| 4·13 램프 | 목록 막대·MY RECORDS·랭킹 줄의 어시스트 등급 색, 어시스트 없는 램프와 더 높은 어시스트 등급을 위아래로 나눠 표시 | `df80201`, `4874930` | `crates/rbms-render/src/skin_render/songlist*`, `crates/rbms-store/src/scoredb.rs`, `lua/select/{list,records,info}.lua` |
+| 5 창 모드 | WINDOW MODE 에 FULLSCREEN(독점) | `e62240d`, `fe9d387` | `crates/rbms-config/src/window.rs`, `apps/rbms-player/src/window_mode.rs` |
+| 6·7 입력 | 조작 `ESC`(패드·보조 키), 조작·단축키의 2키 조합 | `c4e75c2`, `1141d41`, `733ba62` | `apps/rbms-player/src/{keyconfig.rs,keyconfig/chord.rs,gamepad.rs,app_input.rs}`, `stage/{mod.rs,keyconfig.rs}` |
+| 8·9 LAYOUT PICK | 실시간 미리보기, 결과 화면 `P` 로 배치 저장, CAPTURED 목록에서 같은 배치·시드로 플레이 | `37e8ddd`, `a23074f`, `733ba62` | `apps/rbms-player/src/{captured_layouts.rs,stage/layout_pick.rs,stage/layout_pick/**,stage/result.rs}` |
+| 10 판정 위치 | 사용자 오프셋을 스킨 문서 단위로 읽음(원인: 화면 물리 화소 단위였음) | `80ca8d5`, `1eb4768` | `apps/rbms-player/src/skin_screen.rs`, `stage/capture/play_parts/judge_sizes.rs` |
+| 12 선곡 화면 | 머리 한 띠와 경로, 제목 축소, 바닥 한 줄, 정보창 구획 통일 | `51f4884`, `88bfbd4`, `c29c407` | `assets/skins/rbms-default/lua/select/**`, `lua/theme.lua` |
+| 이전부터의 결함 | 빌린 배치 판의 재시도가 사용자 배치 옵션으로 기록되던 것, 연습 화면에서 스트림이 다시 열리던 것, 설정 동기화가 눌린 키 상태를 버리던 것 | `864ef42`, `4d1ce8e`, `733ba62` | [bug/2026-11-19-borrowed-layout-retry-recorded-with-own-option.md](bug/2026-11-19-borrowed-layout-retry-recorded-with-own-option.md) |
 
-운영 반영(2026-10-24): 마이그레이션 0013(사용자 `!` run 40074383695, status run 40074421795 최신), 소급 `dan-recompute`(사용자 `!` run 40074842429, A-단위 1개, 정식 0). 다섯 기능은 마이그레이션이 없었다.
-
-마지막 게이트: Rust 7,129 통과·0 실패·6 무시(W5 병합 뒤, W6·A-단위는 Rust 무변경), 웹 1,981 통과·0 실패, DB 통합 161 통과(0013 포함), 스킨 덤프 세 언어 통과, 시트 검사 통과, ci 3 OS·web CI 통과(마지막 `0621e2f` 까지).
+마지막 게이트(수리 웨이브 병합 뒤): `cargo fmt`·`clippy` 통과, Rust 7,347 통과·0 실패·6 무시, 스킨 덤프·시트 검사 통과, 설정 계약 재생성 뒤 웹 DTO 시험 234 통과(웨이브 1). CI 는 테스트 웨이브 푸시까지 3 OS 통과(run 44476099005). 마지막 푸시의 CI 는 [PROCESS.md](PROCESS.md) 맨 위 체크리스트의 진행 기록을 본다.
 
 ### 3.1 이전 세션(요약, 상세는 이전 스냅샷)
 
-- 2026-10-23: Stella·코스·단위와 클라이언트 보완, Discord, v0.1.8(`docs/history/2026-10-24-handoff-snapshot.md` 3.0절).
-- 2026-10-22 이전: `docs/history/2026-10-23-handoff-snapshot.md` 와 그 앞.
+- 2026-11-04: AI 훈련곡·분석 v3·로그인 대시보드, 훈련곡 난이도 강화, v0.1.11 draft(게시는 사용자 몫이었다. 게시 여부는 확인하지 않았다).
+- 2026-10-29 이전: `docs/history/2026-11-19-handoff-snapshot.md` 와 그 앞.
 
 ### 3.2 진행 중
 
-없음(2026-10-24). 남은 것은 사용자 실기 결과와 아래 8절.
+없음.
 
 ### 3.3 미착수
 
@@ -60,20 +49,18 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 4. 의사결정 요약
 
-정본은 [acknowledge/README.md](acknowledge/README.md). 2026-10-23 이전 결정 표는 이전 스냅샷 4절에 있다. 2026-10-24 결정(사용자 원문 "18번까지 전부 추천안대로 19번은 그럼 보류 20,21도 추천대로", A-단위는 "전부 추천대로 그리고 workflow도 사용"):
+정본은 [acknowledge/README.md](acknowledge/README.md). 2026-11-19 에 사용자가 정한 것은 요구 12개와 추가 요청 1개, 진행 방식, 그리고 열린 세 건의 처리("2. 그럼 수리지 3. 이것도 그럼 지금 수정인가 ? 남은것도 다 잘 처리하고 다 잘 처리해놔")다. 그 밖의 M1~M21 은 메인이 정했고 **사용자 확인 전**이다(미확인 목록 39~51).
 
-| 결정 | 채택 | 기각된 대안과 이유 | ADR |
-| --- | --- | --- | --- |
-| 다국어 | 앱·기본 스킨·웹 모두, 기본 AUTO, 게임 용어 원어, 한국어 chart = 차트, 일본어는 초안 + 감수 요청 | 웹 제외, 용어까지 번역 | `ui-language`, `web-i18n` |
-| 웹 다국어 방식 | next-intl 쿠키 방식(경로 접두사 없음), 기본 한국어. 대가: 전 페이지 요청마다 렌더(메인 결정) | `app/[locale]` 라우트 이동(전체 이동이 커서 보류, 되돌리는 길로 ADR 에 기록) | `web-i18n` |
-| 배치 플레이 | 옵션+시드만 빌림, 같은 배치 재시도에서만 유지, 일반 판으로 저장·전송, 로컬 기록은 고스트 | 게이지·SCRATCH AUTO·LN MODE 까지 복사, "배치 빌림" 표지 | `layout-play` |
-| 랭킹 모드 | 2·4·6 길게(300 ms), 짧게는 지금 동작, 9키 버튼 2·8, 키보드 S·D, 오버레이 | 짧게 누르면 랭킹(컨트롤러로 폴더를 못 나옴), 별도 화면 | `ranking-mode` |
-| NOTES RADAR | 공개 역산 자료(NOTES·PEAK) + 추정 3축(임시 스케일), 5·7키 SP·10·14키 DP, 9·24키 없음, 스캔 때 계산·저장 | 확실한 3축만, 9키 계산 | `notes-radar` |
-| 선곡 UI | IIDX 식 구조, 바탕 모노톤 유지·강조색은 등급·램프·메달·레이더만, RIVAL 자리 = 내 기록 6줄(랭킹 모드에서는 IR 순위) | 전면 채색, 두 화면 유지 | `select-iidx-layout` |
-| 곡 미러 | 보류(업로드·서버·버튼 만들지 않음) | 진행 | `song-mirror-prep` |
-| 2026-10-23 미확인 13~18 | 지금대로 확정 | 바꿈 | 각 2026-10-23 ADR |
-| 표 코스 막대 PRACTICE 키 | 원본처럼 코스 시작 | 그대로 둠 | `reference-divergences.md` |
-| A-단위 | 어시스트 판(SCRATCH AUTO, ASSIST·LIGHT ASSIST 램프, 어시스트 옵션)을 따로 기록, 정식이 같거나 높으면 정식만, 더 높으면 둘 다, 마이페이지 선택 가능, 스테이지 정보 있는 판 소급, 서버가 `A-` 를 붙여 클라이언트 무변경 | SCRATCH AUTO 만, 항상 둘 다 | `assisted-dan` |
+| 결정 | 채택 | ADR |
+| --- | --- | --- |
+| 블루투스 | 지연 보정 + Game Mode 자격. 키음 지연은 소프트웨어로 못 없앤다. macOS 만 자동, 그 밖은 JUDGE OFFSET | `output-latency-compensation` |
+| 창 모드 | FULLSCREEN 은 일반 창으로 열고 첫 동기화에 독점으로, 못 얻으면 BORDERLESS | `exclusive-fullscreen` |
+| 조합키·ESC | 2키까지, 조작·단축키만, 조합 완성 누름은 단일 동작을 억제, 레인이 조작 키를 이김 | `chord-bindings-and-escape` |
+| 램프 | 기존 등급 색 4개를 목록에, 어시스트 쪽이 더 높을 때만 위아래로 쪼갬, 범위는 클라이언트 | `assist-grade-lamps-in-lists`, `split-clear-lamp` |
+| 오프셋 | 모든 사용자 오프셋을 스킨 문서 단위로(저장값의 뜻이 바뀜) | `user-offsets-in-document-units` |
+| 플레이 화면 | 값은 설정이 아니라 그 판의 것, NPS 는 직전 1초의 노트 수 | `play-screen-run-facts` |
+| LAYOUT PICK | 미리보기는 내장 플레이필드 실시간(소리 없음), capture 는 LAYOUT PICK 에 통합, 기본 키 `P` | `layout-pick-playback-and-capture` |
+| 선곡 | 스킨만 개편 | `select-screen-refresh` |
 
 ## 5. 사용자 방향성 & 작업 규칙
 
@@ -87,7 +74,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 - 근본 원인 수정, 떠는 테스트 0, 실제 측정·캡처·산출물로 확인한 뒤 됐다고 말한다. 판정·점수 의미가 원본과 달라지는 수정은 고치기 전에 확인한다(원본과 같아지는 수정은 진행하되 "지금 R-BMS 대비 바뀜" 으로 보고).
 - 사람이 친 판은 전부 저장·전송(노트를 하나도 치지 않은 판만 제외), 메인이 제외 조건을 추천하지 않는다.
 - Git: Conventional Commits, 한국어 설명, author 사용자 단독, AI 트레일러 금지(세션 링크 트레일러도 넣지 않는다), 선별 스테이징, force push 금지, 논리 단위 커밋, 푸시 뒤 `gh run list` 로 3 OS ci 와 web CI 확인. 진행 중인 ci 가 있으면 새 푸시가 그것을 취소하므로 끝난 뒤 푸시한다.
-- Rust: `//` 주석 금지(`///`·`//!` 영어만), 매직넘버·새 `#[allow]`·`unsafe`·`todo!()`·새 의존성 금지(예외 승인: zip·typed-path, 웹 next-intl), rustfmt 160, `--locked`. 웹은 `web/AGENTS.md`. 설정에는 `#[serde(default)]`, `skip_serializing_if` 를 새로 쓰지 않는다.
+- Rust: `//` 주석 금지(`///`·`//!` 영어만), 매직넘버·새 `#[allow]`·`unsafe`·`todo!()`·새 의존성 금지(예외 승인: zip·typed-path, 웹 next-intl. 2026-11-19 메인이 정한 예외, 사용자 확인 전: `rbms-audio` 의 macOS 한정 `coreaudio-rs` 직접 의존, cpal 의 전이 의존성이라 새 크레이트는 없음), 표준 오류에 직접 쓰지 않음(`eprintln!` 을 막는 시험이 있다), rustfmt 160, `--locked`. 웹은 `web/AGENTS.md`. 설정에는 `#[serde(default)]`, `skip_serializing_if` 를 새로 쓰지 않는다.
 - 새 사용자 표시 문구는 처음부터 세 언어 카탈로그로(앱 `translations!`, 스킨 `lua/i18n/*.lua`, 웹 `web/messages/{ko,en,ja}`), 용어집을 따른다. 영어 문구를 바꾸면 기존 골든이 깨진다.
 - 비밀 파일(.env*, `~/.config/rbms/settings.ron` 등) 접근 금지, 시크릿 값이 대화에 남는 방법 금지. ModernChic·beatoraja 폴더는 읽기만. 외부 게시(다른 저장소 이슈·댓글·PR)는 초안 승인 뒤에만.
 - 사용자가 직접 하라고 한 외부 계정 작업은 Claude in Chrome 으로 하고 결과를 화면으로 확인해 보고한다.
@@ -95,49 +82,48 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 - 지우라는 요청은 무엇이 함께 사라지는지 개수를 보여 확인하고 지운다.
 - README 는 TAIDE·raw-viewer README 처럼 짧게. 릴리스 노트는 한글.
 
+
+- (2026-11-19 추가) 이 세션의 진행 방식(사용자 원문): "모든 계획 및 검토는 Fable 로 하고 계획 -> 검토 -> 구현(opus + workflow) -> 테스트(sonnet + opus, 여기서는 Fable이 workflow에 필요한 모델선정해서 사용)", "workflow는 사용해도 subagent는 사용하지 말도록". 다음 작업에도 그대로인지는 묻는다.
+- (2026-11-19 추가) Workflow 운용에서 배운 것: worktree 는 `origin/dev` 에서 만들어지므로 웨이브 사이에 푸시한다. 세션 임시 폴더는 사라질 수 있으니 단위 보고는 `docs/history/` 에 저장한다. 사용량 한도로 끊긴 실행은 변경이 없으면 같은 스크립트로 다시 띄운다. 기본 스킨 파일을 고친 뒤에는 다시 빌드해야 "포함된 표 = 폴더" 시험이 맞는다. 결과 화면은 레인 키를 키 표로 읽으므로 기본 레인 키를 새 단축키의 기본 키로 쓰지 않는다.
+
 ## 6. 미해결 질문 / 사용자 확인 필요
 
-1. **Vercel `CRON_SECRET`**: 2026-10-24 아침에 다시 확인을 부탁했고 답을 받지 못했다. 없으면 매일 KST 0시 Cron 이 503 으로 끝난다(사이트는 정상). 1~15자면 첫 `getEnv()` 호출이 던져 DB·인증 요청이 실패한다.
-2. **곡 미러(결정 17)**: 2026-10-24 보류. 질문 Q-R1~R5·Q-C1~C3 는 `docs/plan/2026-10-23-song-mirror-prep.md` 3.3·11절.
-3. **실기 결과**: QA 3.23(Y1~Y17, 다섯 기능), 3.24(Z1~Z7, A-단위), 3.20~3.22(v0.1.7·v0.1.8). 사용자는 "아마 다 문제없을거야", "잘 다되네" 라고 했지만 항목별 결과는 받지 않았다.
-4. **일본어 감수**: 앱·스킨·웹 일본어는 모델 초안이다. 원어민 감수 요청은 하지 않았다(외부 게시는 초안 승인 뒤).
-5. 이전 세션의 열린 질문(이전 스냅샷 6절 4·6): 표 코스 등록 수 숫자 확인, 순위 `lnmode` 필터 뜻 등 미확인 목록 1~12(`docs/acknowledge/README.md`).
+1. **메인 결정 M1~M21 의 확인**: [acknowledge/README.md](acknowledge/README.md) 미확인 39~51. 특히 "지금 R-BMS 대비 바뀐" 둘: 판 시작 직후 정지가 약 38 ms 길어짐(49), 레인 키와 같은 키의 조작은 그 모드에서 듣지 않음(50). 그리고 오프셋 저장값의 뜻 변화(1920x1080 이 아닌 화면에서 맞춘 JUDGE POSITION 등은 다시 맞춰야 함).
+2. **실기 결과**: QA 3.29(G1~G17). AirPods AUTO/OFF 체감, 실행 중 장치 바꾸기, Game Mode(BORDERLESS 전체 화면) 전후, FULLSCREEN(Windows 포함), 패드 ESC·조합, 램프 색과 반 쪼개기(GPU), 플레이 화면 표시, LAYOUT PICK 재생·capture, 선곡 화면 세 언어.
+3. **릴리스**: 이번 변경을 내려면 `release.yml` 을 돌려야 한다(사용자 `!` 또는 지시). 릴리스 노트에 넣을 것: 오프셋 단위 변화, capture 키 `P`, OUTPUT LATENCY.
+4. **웹**: 램프 반 쪼개기와 게이지 표기 `EX-HARD` 는 클라이언트만 바꿨다. 웹까지 할지.
+5. 이전 세션의 열린 것: Vercel `CRON_SECRET`, 곡 미러(보류), QA 3.20~3.28 실기, 일본어 감수, v0.1.11 게시 여부.
 
 ## 7. 환경 & 전제
 
-- 저장소 `/Users/hyunseokbyun/development/R-BMS`, 브랜치 `dev`, 원격 `B-HS/R-BMS`(공개). 릴리스는 `dev` 에서 `gh workflow run release.yml --ref dev -f bump=patch`. Rust 1.95.0, 웹 bun 1.4.0(설치본 1.4.2), Cargo 버전 0.1.9. 게시: v0.1.4·v0.1.6·v0.1.7·v0.1.8·v0.1.9(Latest), draft: v0.1.0·v0.1.3·v0.1.5(그대로 둠).
-- 게이트: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --no-fail-fast --locked`(마지막 7,129 통과), 웹 `cd web && bun run verify && bun run format:check && bun run build`(마지막 1,981 통과), DB 통합 `RBMS_DB_E2E=1 bun test tests/db`(Docker `mysql:8.4.11`, 3306 은 다른 컨테이너가 쓰므로 3317 같은 포트로, 끝나면 컨테이너 삭제, 마지막 161 통과), 스킨 `cargo run -q -p rbms-cli --locked -- skin-dump assets/skins/rbms-default --strict --frames 120`(언어는 시나리오 `base.json` 의 불린 21150~21152), 시트 `uv run assets/skins/rbms-default/tools/generate-images.py --check`, 아이콘 `uv run assets/icon/tools/generate-icon.py --check`, 계약 `RBMS_UPDATE_CONTRACT=1 cargo test --locked -p rbms-player --lib a_settings_upload` + `bun test tests/dto/client-requests.test.ts`.
-- 선곡 캡처: `RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib --locked the_browser_of_a_skin_pack_named_by_the_environment_is_captured_over_a_scanned_library`(캡처 하니스는 CJK 를 그리지 못한다), README 용은 `sips -s format jpeg`.
-- 이 Mac 의 `python3` 는 3.9 라 긴 한글 줄 스크립트는 파일로 쓰고 `uv run -q --python 3.13 python -I <파일>` 로 돌린다. 자동 모드가 `rm -rf` 가 든 긴 명령을 거부한 적이 있어 임시 폴더는 새 이름으로 만든다.
-- CI: `ci.yml`(Rust 3 OS), `web.yml`, `release.yml`, `signing-check.yml`, `web-db.yml`(`status|migrate|cleanup-*|chart-notes-*|admin-seed-count|assist-grade-backfill*|chart-purge-*|courses-seed*|tables-refresh-*|dan-recompute*`). web 시험은 bun 이 한 프로세스에서 파일을 돌려 sonner 토스트 같은 전역 상태가 파일 사이로 샌다(시험 시작 때도 비울 것, `69d86a7`).
-- 운영 DB 마이그레이션 0000~0013. Vercel 프로젝트 `rbms-web`, Production `dev`, 웹은 언어 쿠키 때문에 전 페이지 요청마다 렌더(`instant = false`), Cron `0 15 * * *` → `GET /api/cron/tables`(`CRON_SECRET` Bearer).
-- 클라이언트 값: 기록 규칙 세대 4, `PARSER_VERSION` 5, 설정 스키마 6, `SETTING_COUNT` 99, 단축키 32, `RADAR_VERSION` 1, 확장 id 공간(이벤트 21000~21099, 불린 21100~21199, 값 공간 21000~21199), Discord Application ID `1563156237539999865`. 정리: [memory/client-versions-and-run-rules.md](memory/client-versions-and-run-rules.md).
-- 차트 라이브러리 `/Volumes/SSD/bms`(자주 빠짐). 앱을 띄우면 기본 표 주소(`bms.hyuns.uk`, `stellabms.xyz`)를 GET 한다.
-- 이름 주의: `apps/rbms-player/src/ir_sync.rs` 는 설정 동기화, DB 표 `ir_sync` 는 기록 동기화.
+- 저장소 `/Users/hyunseokbyun/development/R-BMS`, 브랜치 `dev`, 원격 `B-HS/R-BMS`(공개). 릴리스는 `dev` 에서 `gh workflow run release.yml --ref dev -f bump=patch`(자동 모드가 거부하면 사용자 `!`). Rust 1.95.0, 웹 bun 1.4.x, Cargo 버전 0.1.11.
+- 게이트: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --no-fail-fast --locked`(마지막 7,347 통과), 스킨 `cargo run -q -p rbms-cli --locked -- skin-dump assets/skins/rbms-default --strict --frames 120`, 시트 `uv run assets/skins/rbms-default/tools/generate-images.py --check`, 계약 `RBMS_UPDATE_CONTRACT=1 cargo test --locked -p rbms-player --lib a_settings_upload` + `cd web && bun test tests/dto/client-requests.test.ts`. 웹 게이트는 이전과 같다(`cd web && bun run verify && bun run format:check && bun run build`).
+- 캡처: 선곡 `RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib --locked the_browser_of_a_skin_pack_named_by_the_environment_is_captured_over_a_scanned_library`, 플레이 `RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib --locked the_play_scene_of_the_default_pack_is_captured_with_its_rows_switched`(약 4분), 쪼개진 램프 `... the_browser_splits_the_lamp_of_a_chart_cleared_without_assists_and_with_scratch_auto_on_a_stronger_gauge`, 판정 위치 측정 `cargo test -p rbms-player --lib --locked judge_sizes -- --nocapture`. 캡처 하니스는 CJK 를 그리지 못한다. README 용은 `sips -s format jpeg`.
+- 이 Mac 의 `python3` 는 3.9 라 긴 한글 줄 스크립트는 `uv run -q --python 3.13 python -I` 로 돌린다. 임시 파일은 저장소의 `target/tmp-claude/`(git 이 무시)에 둔다.
+- CI: `ci.yml`(Rust 3 OS, 문서만 바꾼 푸시에도 돈다, 14~18분), `web.yml`, `release.yml`, `signing-check.yml`, `web-db.yml`. 진행 중인 ci 가 있으면 새 푸시가 그것을 취소하므로 끝난 뒤 푸시한다.
+- 운영 DB 마이그레이션 0000~0014. 이번 작업은 웹·DB 를 바꾸지 않았다.
+- 클라이언트 값: 기록 규칙 세대 4, 설정 행 `SETTING_COUNT` 101(새 행 OUTPUT LATENCY), `ControlAction` 21(새 `Escape`), `Shortcut` 34(새 `CaptureLayout`, 기본 `P`), WINDOW MODE 3값, 확장 id(숫자 21085 NPS, 21087~21092 MY RECORDS 등급, 21093~21102 랭킹 등급, 텍스트 21010~21014 출발 폴더·게이지·배치 1P·2P·어시스트, 불린 21160~21163 쪼개진 등급, 플레이 스킨 옵션 916·917 `NPS Display`), `songlist` 확장 키 `lamp_graded`, 점수 DB 열 `score.best_assist_grade`(열 추가 방식, 스키마 버전 그대로), 새 파일 `captured_layouts.ron`(설정 폴더), 키 설정의 조합 토큰 `A+B` 와 `pad.control_chords`·`shortcut_chords`. 정리: [memory/client-versions-and-run-rules.md](memory/client-versions-and-run-rules.md).
+- `rbms-audio` 는 macOS 에서 `coreaudio-rs` 를 직접 의존한다(장치 지연 조회, `unsafe` 없음).
+- 차트 라이브러리 `/Volumes/SSD/bms`(자주 빠짐). 남은 worktree: `.claude/worktrees/wf_*`(이번 세션의 것 포함, 패치는 모두 반영됨. 지워도 된다).
 
 ## 8. 다음 세션 TODO(우선순위)
 
-- (2026-11-04 추가, 최우선) AI 훈련곡·분석 고도화·로그인 대시보드: 구현·게이트·문서는 끝났고 운영 반영이 남았다. 순서와 `!` 명령은 [PROCESS.md](PROCESS.md) 맨 위 체크리스트 T5. 0014 를 운영에 적용하기 전에는 로컬 보류 커밋(분석 v3 부터)을 푸시하지 않는다(`dev` 푸시는 곧 운영 배포다). 설계 [plan/2026-11-04-ai-training-dashboard.md](plan/2026-11-04-ai-training-dashboard.md), ADR 5건은 acknowledge/README.md 의 2026-11-04 절. 이 세션에서 알게 된 것: Workflow 의 `isolation: 'worktree'` 는 `origin/dev` 에서 만들어져 푸시하지 않은 커밋이 들어 있지 않다. 그리고 자동 모드는 web-db `status` 같은 읽기 action 도 거부할 수 있다.
-
-0. 사용자 몫 확인: (a) `CRON_SECRET` 등록과 첫 Cron 결과, (b) 실기 QA 3.23·3.24(특히 한글·일본어 글꼴 모양, 2·4·6 길게 누르기 손맛, 고스트, 레이더 값, 썸네일·휠 속도, 웹 세 언어, A-단위 배지), (c) 일본어 감수를 누구에게 맡길지. 결과를 받으면 PROCESS 에 새 R 항목으로 고친다.
-1. 실기에서 나온 문제 수리(관련 파일은 QA 항목마다 ADR 에 있다).
-2. 테스트 부채 3.112~3.129(`docs/quality-assurance/2026-10-14-test-debt.md`): CJK 하니스 골든 없음, 레이더 3축 스케일·IIDX 대조, 썸네일·분석·형제 탐색 프레임 비용, 랭킹 모드에서 앱 오버레이가 정보창 IR RANKING 을 덮음, 순위 응답 크기, 서버 리플레이 고스트(보류), 0013 이전 판 추정, 플레이어 순위 배지 2개 제한.
-3. 웹 정적 셸을 되찾을지(`app/[locale]` 이동, `acknowledge/2026-10-24-adr-web-i18n.md`).
-4. 곡 미러 보류 해제 여부와 이전 세션 TODO(이전 스냅샷 8절 3·4).
-5. (2026-11-02 추가, 완료) 발광 표에서 뺀 PopCoRian -EX- 의 운영 기록 삭제는 run 41333488160 으로 끝남( [ADR](acknowledge/2026-11-02-adr-popcorian-ex-removed.md)). 그 밖의 2026-11-02 작업 상태는 [PROCESS.md](PROCESS.md) 맨 위 체크리스트.
+0. 사용자 몫 확인: 6절 1~4. 결과를 받으면 PROCESS 에 새 R 항목으로 고친다.
+1. 실기에서 나온 문제 수리(QA 3.29 항목마다 ADR 과 테스트 부채 3.163~3.187 에 관련 파일이 있다).
+2. 릴리스(v0.1.12): 사용자 지시가 있으면 `release.yml`, 노트는 한글.
+3. 테스트 부채 3.182~3.187: GPU 에서의 램프 반쪽, 기본 장치 따라가기 실기, 판 시작 체감, 옛 잘못 기록된 재시도 행, 검색 입력의 누르는 영역(엔진에 입력 영역 필드 필요), 조작 키와 다른 모드 레인의 편집기 안내.
+4. 후속 후보: LAYOUT PICK 미리보기의 소리(M13 에서 뺌), 웹의 램프 반 쪼개기와 `EX-HARD` 표기, Windows·Linux 의 출력 지연 자동 조회(안전한 API 가 생기면).
+5. 이전 세션 TODO: `docs/history/2026-11-19-handoff-snapshot.md` 8절.
 
 ## 9. 문서 지도
 
 - [HANDOFF.md](HANDOFF.md) — 이 문서, 새 세션의 진입점(항상 덮어씀).
-- [PROCESS.md](PROCESS.md) — 체크리스트와 상태. 첫 체크리스트가 2026-10-24 "어시스트 단위 A-단위", 둘째가 "다국어·리플레이 대전·랭킹 보기·NOTES RADAR·선곡 UI"(결정과 웨이브 W1~W6 진행 기록).
-- [README.md](README.md) — docs 색인(영어). 루트 [README](../README.md) 는 사용자용 짧은 소개.
-- [architecture.md](architecture.md), [crates.md](crates.md), [development.md](development.md) — 구조, 크레이트, 개발 명령(`RBMS_LANGUAGE` 포함).
-- [play-options.md](play-options.md) — 플레이 옵션과 조작(언어, 배치 플레이, 랭킹 모드, 선곡 화면 포함).
-- [skin.md](skin.md), [theme.md](theme.md), [font-cjk-support.md](font-cjk-support.md) — 스킨(확장 id 표, `songlist` 의 `rank`·`thumb`, `t(key)`), 앱 테마, 글꼴.
-- [ci-release.md](ci-release.md) — CI, 릴리스 이력 2.3(v0.1.9 까지), 서명·공증, web-db 액션과 운영 실행 기록.
-- [acknowledge/README.md](acknowledge/README.md) — 결정 색인(2026-10-24 ADR 8건 포함)과 미확인 목록.
-- [plan/](plan/) — `2026-10-24-five-features-plan.md`(확장 id 배정표·소유권·웨이브), `2026-10-24-assist-dan.md`, 이전 설계서들.
-- [reference/](reference/) — `2026-10-24-*-survey.md` 조사 5건, `2026-10-24-i18n-glossary.md`(세 언어 용어집), `ir-api.md`, 이전 조사.
-- [backend/](backend/), [web/](web/) — API 명세·데이터 모델(0013, 단위 `assisted`), 웹 구조(§16 다국어).
-- [quality-assurance/](quality-assurance/) — 실기 점검표(3.23 다섯 기능, 3.24 A-단위, 3.20~3.22), 테스트 부채(3.112~3.129 가 2026-10-24).
-- [feedback/](feedback/), [memory/](memory/), [bug/](bug/), [history/](history/), [utils/](utils/), [assets/](assets/).
+- [PROCESS.md](PROCESS.md) — 체크리스트와 상태. 첫 체크리스트가 2026-11-19 "기능 고도화 12건".
+- [plan/2026-11-19-feature-upgrade-12.md](plan/2026-11-19-feature-upgrade-12.md) — 결정 M1~M21, 단위 U1~U10, 검토 기록(6절), 웨이브 결과(7~10절).
+- [reference/2026-11-19-feature-upgrade-12/README.md](reference/2026-11-19-feature-upgrade-12/README.md) — 조사(블루투스 지연 실측 포함)와 구현 결과.
+- [history/2026-11-19-feature-upgrade-unit-reports/](history/2026-11-19-feature-upgrade-unit-reports/README.md) — 구현(U1~U9)·테스트(`test-*`)·수리(`fix-*`) 단위의 보고 원문.
+- [acknowledge/README.md](acknowledge/README.md) — 결정 색인(2026-11-19 ADR 9건)과 미확인 목록(39~51 이 이번 것).
+- [bug/2026-11-19-borrowed-layout-retry-recorded-with-own-option.md](bug/2026-11-19-borrowed-layout-retry-recorded-with-own-option.md) — 이번에 고친 이전부터의 기록 결함.
+- [play-options.md](play-options.md), [skin.md](skin.md), [crates.md](crates.md), [architecture.md](architecture.md) — 사용자·스킨·크레이트·구조 문서(2026-11-19 반영).
+- [quality-assurance/](quality-assurance/) — 실기 점검표(3.29 가 이번 것), 테스트 부채(3.163~3.187 이 이번 것).
+- [ci-release.md](ci-release.md), [backend/](backend/), [web/](web/), [feedback/](feedback/), [memory/](memory/), [history/](history/), [utils/](utils/), [assets/](assets/) — 이전과 같다.
