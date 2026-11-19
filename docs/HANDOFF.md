@@ -1,6 +1,6 @@
 # HANDOFF — 2026-11-19 세션 스냅샷
 
-최종 갱신 2026-11-19 · 대응 커밋 `c29c407`(코드), `039d21a`(release: v0.1.12)와 이 문서와 함께 커밋되는 문서 커밋. 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-11-19-handoff-snapshot.md`(바로 앞 판, 2026-10-24 작성에 2026-11-04 TODO 가 덧붙은 것), 그 앞 `2026-10-24-`, `2026-10-23-`, `2026-10-22-`, `2026-10-14-`, `2026-10-11-`, `2026-10-09-handoff-snapshot.md`.
+최종 갱신 2026-11-19 · 대응 커밋 `ee300cf`(코드), `cd82edb`(release: v0.1.13)와 이 문서와 함께 커밋되는 문서 커밋. 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-11-19-handoff-snapshot.md`(바로 앞 판, 2026-10-24 작성에 2026-11-04 TODO 가 덧붙은 것), 그 앞 `2026-10-24-`, `2026-10-23-`, `2026-10-22-`, `2026-10-14-`, `2026-10-11-`, `2026-10-09-handoff-snapshot.md`.
 
 복기 신뢰도: 2026-11-19 세션은 한 번 요약(compact)을 거쳤고, 도중에 세션 임시 폴더가 사라졌으며, 테스트 웨이브 첫 실행이 5시간 사용량 한도로 끊겼다. 결정·사용자 원문·커밋·CI run 번호는 대화와 `git log`·`gh run` 으로 확인한 값이다. 구현·테스트·수리 단위의 보고 원문은 `docs/history/2026-11-19-feature-upgrade-unit-reports/` 에 있다. 사실이 의심되면 이 문서보다 코드와 `git log` 를 믿는다.
 
@@ -11,7 +11,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 ## 2. 현재 목표
 
 - 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹. 사용자는 남은 일을 정확히 끝내길 원하고, 가끔 실패하는 테스트도 없어야 한다고 했다.
-- 현재 마일스톤: 2026-11-19 "기능 고도화 12건"과 추가 요청 "램프 반 쪼개기"의 구현·테스트·수리·문서가 끝났다. 클라이언트만 바뀌었고 웹·DB·릴리스는 하지 않았다. 이 변경은 **v0.1.12 draft** 로 올라가 있고 게시는 사용자 몫이다(6절 3). 진행 중인 구현 작업은 없다.
+- 현재 마일스톤: 2026-11-19 "기능 고도화 12건"과 추가 요청 "램프 반 쪼개기"의 구현·테스트·수리·문서가 끝났다. 클라이언트만 바뀌었고 웹·DB·릴리스는 하지 않았다. 이 변경은 **v0.1.12 로 게시**됐고, 게시 뒤 고친 램프 조건은 **v0.1.13 draft** 에 있다(6절 3). 진행 중인 구현 작업은 없다.
 - 직전 작업(2026-11-19 세션, 시간 순): 조사·계획·검토(`cac3795`) → 웨이브 1(`df80201`~`4cbb323`) → 웨이브 2(`51f4884`~`b4444b1`) → 테스트 웨이브와 램프 반 쪼개기(`4874930`~`5f61681`) → 수리 웨이브(`864ef42`~`c29c407`) → 문서.
 
 ## 3. 완료 / 진행 중 / 미착수
@@ -90,13 +90,13 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 1. **메인 결정 M1~M21 의 확인**: [acknowledge/README.md](acknowledge/README.md) 미확인 39~51. 특히 "지금 R-BMS 대비 바뀐" 둘: 판 시작 직후 정지가 약 38 ms 길어짐(49), 레인 키와 같은 키의 조작은 그 모드에서 듣지 않음(50). 그리고 오프셋 저장값의 뜻 변화(1920x1080 이 아닌 화면에서 맞춘 JUDGE POSITION 등은 다시 맞춰야 함).
 2. **실기 결과**: QA 3.29(G1~G17). AirPods AUTO/OFF 체감, 실행 중 장치 바꾸기, Game Mode(BORDERLESS 전체 화면) 전후, FULLSCREEN(Windows 포함), 패드 ESC·조합, 램프 색과 반 쪼개기(GPU), 플레이 화면 표시, LAYOUT PICK 재생·capture, 선곡 화면 세 언어.
-3. **릴리스**: v0.1.12 는 draft 로 있지만(release run 44529321802, 산출물 점검과 한글 노트 완료) 램프 반 쪼개기의 처음 조건(어시스트 쪽이 더 높을 때만)으로 빌드돼 있다. 사용자 보고로 조건을 "둘 다 있으면 쪼갬"으로 넓혔으므로 v0.1.13 으로 다시 릴리스해야 한다(사용자 `! gh workflow run release.yml --ref dev -f bump=patch`, 노트 초안 `history/2026-11-19-release-notes-v0.1.13-draft.md`). v0.1.12 draft 는 게시하지 않고 두거나 사용자 요청이 있으면 지운다. [ci-release.md](ci-release.md) 2.3절.
+3. **릴리스**: v0.1.12 는 사용자가 게시했다(2026-11-19 13:40 UTC, Latest). 게시 뒤 사용자 보고("어시스트 / 일반플레이 램프가 나눠서 표시안되는느낌")로 램프 반 쪼개기 조건을 "둘 다 있으면 쪼갬"으로 넓혔고(`ee300cf`), 그 패치가 **v0.1.13 draft** 다(release run 44547568815, 버전 커밋 `cd82edb`, 메인이 산출물 점검과 한글 노트 교체 완료). 게시는 사용자가 한다. [ci-release.md](ci-release.md) 2.3절.
 4. **웹**: 램프 반 쪼개기와 게이지 표기 `EX-HARD` 는 클라이언트만 바꿨다. 웹까지 할지.
 5. 이전 세션의 열린 것: Vercel `CRON_SECRET`, 곡 미러(보류), QA 3.20~3.28 실기, 일본어 감수, v0.1.11 게시 여부.
 
 ## 7. 환경 & 전제
 
-- 저장소 `/Users/hyunseokbyun/development/R-BMS`, 브랜치 `dev`, 원격 `B-HS/R-BMS`(공개). 릴리스는 `dev` 에서 `gh workflow run release.yml --ref dev -f bump=patch`(자동 모드가 거부하면 사용자 `!`). Rust 1.95.0, 웹 bun 1.4.x, Cargo 버전 0.1.12.
+- 저장소 `/Users/hyunseokbyun/development/R-BMS`, 브랜치 `dev`, 원격 `B-HS/R-BMS`(공개). 릴리스는 `dev` 에서 `gh workflow run release.yml --ref dev -f bump=patch`(자동 모드가 거부하면 사용자 `!`). Rust 1.95.0, 웹 bun 1.4.x, Cargo 버전 0.1.13.
 - 게이트: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --no-fail-fast --locked`(마지막 7,347 통과), 스킨 `cargo run -q -p rbms-cli --locked -- skin-dump assets/skins/rbms-default --strict --frames 120`, 시트 `uv run assets/skins/rbms-default/tools/generate-images.py --check`, 계약 `RBMS_UPDATE_CONTRACT=1 cargo test --locked -p rbms-player --lib a_settings_upload` + `cd web && bun test tests/dto/client-requests.test.ts`. 웹 게이트는 이전과 같다(`cd web && bun run verify && bun run format:check && bun run build`).
 - 캡처: 선곡 `RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib --locked the_browser_of_a_skin_pack_named_by_the_environment_is_captured_over_a_scanned_library`, 플레이 `RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib --locked the_play_scene_of_the_default_pack_is_captured_with_its_rows_switched`(약 4분), 쪼개진 램프 `... the_browser_splits_the_lamp_of_a_chart_cleared_without_assists_and_with_scratch_auto_on_a_stronger_gauge`, 판정 위치 측정 `cargo test -p rbms-player --lib --locked judge_sizes -- --nocapture`. 캡처 하니스는 CJK 를 그리지 못한다. README 용은 `sips -s format jpeg`.
 - 이 Mac 의 `python3` 는 3.9 라 긴 한글 줄 스크립트는 `uv run -q --python 3.13 python -I` 로 돌린다. 임시 파일은 저장소의 `target/tmp-claude/`(git 이 무시)에 둔다.
@@ -110,7 +110,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 0. 사용자 몫 확인: 6절 1~4. 결과를 받으면 PROCESS 에 새 R 항목으로 고친다.
 1. 실기에서 나온 문제 수리(QA 3.29 항목마다 ADR 과 테스트 부채 3.163~3.187 에 관련 파일이 있다).
-2. v0.1.12 게시 여부 확인(사용자). 게시 뒤 문제가 보고되면 다음 패치 릴리스로.
+2. v0.1.13 게시 여부 확인(사용자). 게시 뒤 문제가 보고되면 다음 패치 릴리스로.
 3. 테스트 부채 3.182~3.187: GPU 에서의 램프 반쪽, 기본 장치 따라가기 실기, 판 시작 체감, 옛 잘못 기록된 재시도 행, 검색 입력의 누르는 영역(엔진에 입력 영역 필드 필요), 조작 키와 다른 모드 레인의 편집기 안내.
 4. 후속 후보: LAYOUT PICK 미리보기의 소리(M13 에서 뺌), 웹의 램프 반 쪼개기와 `EX-HARD` 표기, Windows·Linux 의 출력 지연 자동 조회(안전한 API 가 생기면).
 5. 이전 세션 TODO: `docs/history/2026-11-19-handoff-snapshot.md` 8절.
