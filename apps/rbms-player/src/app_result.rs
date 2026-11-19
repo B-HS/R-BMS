@@ -894,6 +894,25 @@ pub(crate) fn retry(shared: &mut AppShared) -> Transition {
     start_song(shared, index)
 }
 
+/// Keep the run `state` that has just failed and start its chart again at once, which is what START
+/// or SELECT does to it (`BMSPlayer.java:696-710`): SELECT keeps the layout the run was played on
+/// (`same_layout`), START lays the chart out afresh on the player's own options ([`retry`]). `None`
+/// when there is no chart to start again -- one that is not in the library -- and nothing is kept
+/// here: the failure closes on its result screen, which keeps the run.
+///
+/// The run is kept before the chart is started again ([`record_retried_run`]), while the settings
+/// still hold the arrangement it was laid out with: starting afresh lets go of a borrowed layout,
+/// which puts the player's own arrangement back ([`AppShared::hand_borrowed_layout_on`]), and a run
+/// kept after that would name the player's arrangement beside the borrowed seed.
+pub(crate) fn retry_failed_run(state: &PlayState, shared: &mut AppShared, same_layout: bool) -> Option<Transition> {
+    played_song_index(shared)?;
+    record_retried_run(state, shared);
+    shared.retry_seed = same_layout.then(|| state.session.seed());
+    let again = retry(shared);
+    shared.save_settings();
+    Some(again)
+}
+
 /// Start the chart after this one in the browser's current order. At the end of the list there is
 /// nothing to start, so the key does nothing rather than wrapping around to the top.
 pub(crate) fn next_song(shared: &mut AppShared) -> Transition {
@@ -1224,5 +1243,99 @@ mod tests {
         assert_eq!(log.random, rbms_store::scoredb::random_id(rbms_chart::shuffle::NoteOption::RRandom.label()));
         assert_eq!(log.seed, i64::try_from(REPLAY_SEED).expect("the seed is an exact integer"));
         assert_eq!(shared.settings_to_save().play.random, rbms_chart::shuffle::NoteOption::Mirror, "the settings file would keep the borrowed arrangement");
+    }
+
+    /// Which lanes hold a note on each line of the chart `state` is played on, which is the lane
+    /// order its arrangement laid out.
+    fn lanes_laid_out(state: &PlayState) -> Vec<Vec<bool>> {
+        state.session.model().timelines.iter().map(|line| line.notes.iter().map(Option::is_some).collect()).collect()
+    }
+
+    /// The account a walk of the score database's runs is made under: nobody is signed in to the
+    /// test's app, and a run kept for whoever signs in is walked under any account.
+    const WALKING_ACCOUNT: &str = "player";
+
+    /// A failed run on a borrowed layout started again at once is kept with the layout it was played
+    /// on, whether START lays the chart out afresh -- and so lets go of the layout, the player's own
+    /// arrangement back in the settings -- or SELECT keeps it: the score database's row, the body it
+    /// is to be sent with and the replay it saved all name the borrowed arrangement and seed, and the
+    /// replay, watched, lays the chart out as the run had it.
+    #[test]
+    fn a_run_on_a_borrowed_layout_started_again_is_recorded_with_the_layout_it_was_played_on() {
+        use crate::borrowed_layout::tests::{REPLAY_SEED, a_library_of_one_chart, next_run, play_through, request};
+        use rbms_chart::shuffle::NoteOption;
+        for same_layout in [false, true] {
+            let mut shared = a_library_of_one_chart(&format!("retried-borrowed-{same_layout}"));
+            shared.config.play.random = NoteOption::Mirror;
+            shared.borrow_layout(request("R-RANDOM", REPLAY_SEED), 0).expect("the layout is borrowed");
+            let mut played = next_run(&mut shared);
+            play_through(&mut played);
+            let again = retry_failed_run(&played, &mut shared, same_layout);
+            assert!(matches!(again, Some(Transition::To(Stage::Loading(_)))), "same layout {same_layout}: the chart did not start again");
+            let held = if same_layout { NoteOption::RRandom } else { NoteOption::Mirror };
+            assert_eq!(shared.config.play.random, held, "same layout {same_layout}: the run started again is laid out on the wrong arrangement");
+            assert_eq!(shared.borrowed_layout().is_some(), same_layout, "same layout {same_layout}: the layout was handed on wrongly");
+            shared.finish_saves();
+
+            let db = shared.scoredb.as_ref().expect("the score database opened in the test's folder");
+            let [log] = db.all_plays().expect("the history reads").try_into().expect("one run was started again and one row stored");
+            assert_eq!(log.random, rbms_store::scoredb::random_id(NoteOption::RRandom.label()), "same layout {same_layout}: the row's arrangement");
+            assert_eq!(log.seed, i64::try_from(REPLAY_SEED).expect("the seed is an exact integer"), "same layout {same_layout}: the row's seed");
+            let walk = rbms_store::scoredb::SyncWalk { server: "http://elsewhere.invalid", login_id: WALKING_ACCOUNT, ..Default::default() };
+            let candidates = db.sync_candidates(&walk).expect("the runs to send read");
+            let body =
+                candidates.first().and_then(|run| run.body.as_deref()).and_then(ScoreSubmission::from_json).expect("the body the run is sent with is kept");
+            assert_eq!((body.options.random, body.seed), (ir_random(NoteOption::RRandom), REPLAY_SEED), "same layout {same_layout}: the body's layout");
+
+            let file = log.replay_file.as_deref().expect("the run names its replay");
+            let replay = Replay::load(&shared.replay_dir.join(file)).expect("the replay was written");
+            assert_eq!((replay.random.as_str(), replay.seed), (NoteOption::RRandom.label(), REPLAY_SEED), "same layout {same_layout}: the replay's layout");
+            shared.replay = Some(replay);
+            let watched = next_run(&mut shared);
+            assert_eq!(
+                lanes_laid_out(&watched),
+                lanes_laid_out(&played),
+                "same layout {same_layout}: the replay lays the chart out otherwise than it was played"
+            );
+        }
+    }
+
+    /// The layout the result screen captures is the one its run was played on: a run on a borrowed
+    /// layout, the run started again from its result screen laid out as it was, and the run started
+    /// again afresh, which is laid out on the player's own arrangement from a seed of its own.
+    #[test]
+    fn the_result_screen_captures_the_layout_its_run_was_played_on() {
+        use crate::borrowed_layout::tests::{REPLAY_SEED, a_library_of_one_chart, next_run, play_through, request};
+        use crate::keyconfig::Shortcut;
+        use crate::stage::{FrameCtx, KeyInput, StageHandler};
+        use rbms_chart::shuffle::NoteOption;
+        let captured = |shared: &mut AppShared, played: &mut PlayState| {
+            play_through(played);
+            let Transition::To(Stage::Result(mut screen)) = enter_result(played, shared) else {
+                panic!("the run did not reach its result screen");
+            };
+            let key = KeyInput { code: Shortcut::CaptureLayout.default_key(), pressed: true, released: false, text: None };
+            screen.handle_key(&mut FrameCtx { shared, now: std::time::Instant::now(), dt: 0.0 }, key);
+            let newest = shared.captured_layouts.all().first().cloned().expect("the run's layout was captured");
+            (newest.random_label, newest.seed, played.session.seed())
+        };
+        let mut shared = a_library_of_one_chart("captured-borrowed");
+        shared.config.play.random = NoteOption::Mirror;
+        shared.borrow_layout(request("R-RANDOM", REPLAY_SEED), 0).expect("the layout is borrowed");
+        let mut borrowed = next_run(&mut shared);
+        let r_random = NoteOption::RRandom.label().to_string();
+        assert_eq!(captured(&mut shared, &mut borrowed), (r_random.clone(), REPLAY_SEED, REPLAY_SEED), "the run on the borrowed layout");
+
+        shared.retry_seed = Some(borrowed.session.seed());
+        retry(&mut shared);
+        let mut kept = next_run(&mut shared);
+        assert_eq!(captured(&mut shared, &mut kept), (r_random, REPLAY_SEED, REPLAY_SEED), "the run started again laid out as it was");
+
+        shared.retry_seed = None;
+        retry(&mut shared);
+        let mut afresh = next_run(&mut shared);
+        let (label, seed, played_seed) = captured(&mut shared, &mut afresh);
+        assert_eq!((label.as_str(), seed), (NoteOption::Mirror.label(), played_seed), "the run started again afresh");
+        assert_ne!(seed, REPLAY_SEED, "the run started again afresh kept the borrowed seed");
     }
 }

@@ -1513,21 +1513,10 @@ impl PlayState {
     /// SELECT keeps the layout the failed run was played on. `None` when there is no chart to start
     /// -- one that is not in the library -- and the failure closes as it would have.
     ///
-    /// The failed run is kept and sent before the chart starts again
-    /// ([`crate::app_result::record_retried_run`]), as its result screen would have kept it.
+    /// The failed run is kept and sent before the chart starts again, on the layout it was played
+    /// on, as its result screen would have kept it ([`crate::app_result::retry_failed_run`]).
     fn retry(&mut self, shared: &mut AppShared, same_layout: bool) -> Option<Transition> {
-        shared.retry_seed = same_layout.then(|| self.session.seed());
-        match crate::app_result::retry(shared) {
-            Transition::Stay => {
-                shared.retry_seed = None;
-                None
-            }
-            again => {
-                crate::app_result::record_retried_run(self, shared);
-                shared.save_settings();
-                Some(again)
-            }
-        }
+        crate::app_result::retry_failed_run(self, shared, same_layout)
     }
 
     /// Escape on a run a scene is run over. A run that is closing skips what is left of its
