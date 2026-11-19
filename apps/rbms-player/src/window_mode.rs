@@ -75,9 +75,13 @@ fn borderless_or_none(mode: WindowMode) -> Option<Fullscreen> {
 /// Which of `modes` exclusive full screen takes for a RESOLUTION of `wanted`: one of that size if
 /// the monitor has it and the nearest one otherwise, the larger of two equally near, and of one
 /// size the highest refresh rate, then the deepest colour. None when there is no mode to take.
+///
+/// A mode is compared with `wanted` turned the way the mode is: a monitor stood on its side lists
+/// 1080x1920 for the 1920x1080 that RESOLUTION names, and counts it the same size.
 fn nearest_video_mode(modes: &[VideoModeShape], wanted: (u32, u32)) -> Option<usize> {
-    let (wanted_width, wanted_height) = wanted;
+    let (wanted_long, wanted_short) = (wanted.0.max(wanted.1), wanted.0.min(wanted.1));
     let preference = |&(width, height, refresh_millihertz, bit_depth): &VideoModeShape| {
+        let (wanted_width, wanted_height) = if height > width { (wanted_short, wanted_long) } else { (wanted_long, wanted_short) };
         let distance = u64::from(width.abs_diff(wanted_width)) + u64::from(height.abs_diff(wanted_height));
         (distance, Reverse(u64::from(width) * u64::from(height)), Reverse(refresh_millihertz), Reverse(bit_depth))
     };
@@ -94,16 +98,23 @@ fn runs_on_wayland(window: &Window) -> bool {
     window.window_handle().is_ok_and(|handle| matches!(handle.as_raw(), RawWindowHandle::Wayland(_)))
 }
 
+/// Which of the video modes of the monitor a window is on exclusive full screen takes at `size`, or
+/// why none can be taken: `modes` is none when the window is on no monitor.
+fn exclusive_choice(on_wayland: bool, modes: Option<&[VideoModeShape]>, size: (u32, u32)) -> Result<usize, &'static str> {
+    if on_wayland {
+        return Err("Wayland lets no program change the video mode");
+    }
+    let modes = modes.ok_or("the window is on no monitor")?;
+    nearest_video_mode(modes, size).ok_or("the monitor lists no video modes")
+}
+
 /// The video mode of the monitor the window is on that exclusive full screen at `size` takes, or
 /// why there is none.
 fn exclusive_video_mode(window: &Window, size: (u32, u32)) -> Result<VideoModeHandle, &'static str> {
-    if runs_on_wayland(window) {
-        return Err("Wayland lets no program change the video mode");
-    }
-    let monitor = window.current_monitor().or_else(|| window.primary_monitor()).ok_or("the window is on no monitor")?;
-    let mut modes: Vec<VideoModeHandle> = monitor.video_modes().collect();
+    let monitor = window.current_monitor().or_else(|| window.primary_monitor());
+    let mut modes: Vec<VideoModeHandle> = monitor.iter().flat_map(|monitor| monitor.video_modes()).collect();
     let shapes: Vec<VideoModeShape> = modes.iter().map(shape_of).collect();
-    let at = nearest_video_mode(&shapes, size).ok_or("the monitor lists no video modes")?;
+    let at = exclusive_choice(runs_on_wayland(window), monitor.as_ref().map(|_| shapes.as_slice()), size)?;
     Ok(modes.swap_remove(at))
 }
 
@@ -326,7 +337,33 @@ mod tests {
     }
 
     #[test]
+    fn a_monitor_stood_on_its_side_takes_the_mode_of_the_chosen_size_turned() {
+        let upright = [
+            (1080, 1920, HZ_60, DEPTH_32),
+            (900, 1600, HZ_60, DEPTH_32),
+            (768, 1366, HZ_60, DEPTH_32),
+            (720, 1280, HZ_60, DEPTH_32),
+            (600, 1024, HZ_60, DEPTH_32),
+        ];
+        assert_eq!(nearest_video_mode(&upright, (1920, 1080)), Some(0), "1080x1920 is the 1920x1080 of that monitor");
+        assert_eq!(nearest_video_mode(&upright, (1280, 720)), Some(3));
+        assert_eq!(nearest_video_mode(&upright, (3840, 2160)), Some(0), "nothing larger than the largest");
+    }
+
+    #[test]
     fn a_monitor_that_lists_no_video_modes_has_none_to_take() {
         assert_eq!(nearest_video_mode(&[], (1920, 1080)), None);
+    }
+
+    /// Every way exclusive full screen cannot be had answers a reason, which is what has the window
+    /// cover the monitor borderless and the player told; where it can, the mode is the nearest one.
+    #[test]
+    fn exclusive_full_screen_that_cannot_be_had_gives_the_reason_and_the_one_that_can_gives_its_mode() {
+        let monitor = [(2560, 1600, HZ_60, DEPTH_32), (1920, 1200, HZ_120, DEPTH_32)];
+        assert_eq!(exclusive_choice(false, Some(&monitor), (1920, 1080)), Ok(1));
+        assert!(exclusive_choice(true, Some(&monitor), (1920, 1080)).is_err(), "Wayland takes no video mode, whatever the monitor lists");
+        assert!(exclusive_choice(false, None, (1920, 1080)).is_err(), "a window on no monitor has none to take");
+        assert!(exclusive_choice(false, Some(&[]), (1920, 1080)).is_err(), "a monitor that lists nothing has none to take");
+        assert!(exclusive_choice(true, None, (1920, 1080)).is_err());
     }
 }

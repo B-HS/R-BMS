@@ -928,6 +928,36 @@ fn exclusive_full_screen_is_stored_under_its_token() {
     assert_eq!(config.display.window_mode, WindowMode::Fullscreen);
 }
 
+/// A file written before FULLSCREEN stores one of the two earlier tokens, and the file this build
+/// writes one of three: each reads back as the mode it names whatever the case or the spaces, the
+/// rows beside it are read as stated, and a whole configuration holding it survives a write and a
+/// read.
+#[test]
+fn every_stored_window_mode_token_reads_back_as_the_mode_it_names() {
+    let stored = [
+        ("WINDOWED", WindowMode::Windowed),
+        ("BORDERLESS", WindowMode::Borderless),
+        ("FULLSCREEN", WindowMode::Fullscreen),
+        ("borderless", WindowMode::Borderless),
+        (" FullScreen ", WindowMode::Fullscreen),
+    ];
+    for (token, mode) in stored {
+        let text =
+            format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, display: (window_resolution: "1920x1080", window_mode: "{token}", letterbox: false))"#);
+        let (config, from) = migrate(&text).expect("a file stating the mode parses");
+        assert_eq!(from, None, "{token:?} needed no new schema version");
+        assert_eq!(config.display.window_mode, mode, "{token:?}");
+        assert_eq!(config.display.window_resolution, WindowResolution::FullHd1080, "{token:?}: the row beside it was not read as stated");
+        assert!(!config.display.letterbox, "{token:?}: LETTERBOX was not read as stated");
+    }
+    for mode in WindowMode::ALL {
+        let mut written = Config::default();
+        written.display.window_mode = mode;
+        let (read, _) = migrate(&ron_of(&written)).expect("the file this build writes parses");
+        assert_eq!(read.display.window_mode, mode, "{mode:?} did not survive a write and a read");
+    }
+}
+
 /// A skin is authored for one shape, so a fresh install keeps that shape inside an ordinary window
 /// instead of stretching it to whatever the window is.
 #[test]

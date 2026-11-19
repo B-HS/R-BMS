@@ -1136,3 +1136,80 @@ fn an_opacity_and_a_nudge_set_on_the_skin_tab_are_drawn_with_on_the_next_frame()
     );
     assert_eq!(app.shared.skins.build_of(screen), build, "a nudge had the document read again");
 }
+
+/// A target half as large again as the fading play document, which is authored at 1280x720, and how
+/// many of its pixels one unit of the document is drawn across there.
+const LARGE_TARGET: (u32, u32) = (1920, 1080);
+const LARGE_SCALE: f32 = 1.5;
+
+/// Where the skin menu's preview is drawn on [`LARGE_TARGET`]: a rectangle the middle of the screen
+/// at half its size, given in [`UI_SIZE`] coordinates, which starts 480 pixels across and 270 down
+/// and draws a unit of the document across 0.75 of a pixel.
+const PREVIEW_RECT: rbms_render::Rect = rbms_render::Rect { x: 320.0, y: 180.0, w: 640.0, h: 360.0 };
+const PREVIEW_ORIGIN: (f32, f32) = (480.0, 270.0);
+const PREVIEW_SCALE: f32 = 0.75;
+
+/// How many rows a pixel row is told from the middle of a part, so a row is clear of its edges.
+const CLEAR_OF_THE_EDGE: f32 = 4.0;
+
+/// One frame of the seven-key play screen of `app` as the skin menu's preview draws it into
+/// [`PREVIEW_RECT`], answering whether the document was drawn.
+fn preview_play_frame(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas, shown: &PlayShown) -> bool {
+    use preview::{PreviewDrawn, PreviewFrame, PreviewScene};
+    let offsets = PlayOffsets::default();
+    let chart = ChartMeta { title: TITLE, ..ChartMeta::default() };
+    let mut canvas = Canvas::Headless(pixels);
+    app.shared.prepare_skin_preview(&mut canvas, SKIN_TYPE_PLAY_7KEYS);
+    let at = PreviewFrame { screen: SKIN_TYPE_PLAY_7KEYS, now_us: 0, rect: PREVIEW_RECT };
+    let scene = PreviewScene::Play(PlayDraw { chart: &chart, shown, offsets: &offsets, paced_by: "", data: FrameData::default() });
+    let drawn = app.shared.draw_skin_preview(&mut canvas, at, scene) == PreviewDrawn::Drawn;
+    app.shared.finish_skin_frame(&mut canvas);
+    drawn
+}
+
+/// Draws `frame` until the play skin of `app` has compiled and the frame is the document's.
+fn draw_play_until_drawn(
+    app: &mut crate::App,
+    pixels: &mut crate::stage::HeadlessCanvas,
+    frame: fn(&mut crate::App, &mut crate::stage::HeadlessCanvas, &PlayShown) -> bool,
+) {
+    let shown = unplayed_run();
+    let began = Instant::now();
+    while !frame(app, pixels, &shown) {
+        assert!(began.elapsed() < DECODE_WAIT, "the play skin never drew: {:?}", app.shared.skin_failure(SKIN_TYPE_PLAY_7KEYS));
+        std::thread::sleep(DECODE_FRAME_PAUSE);
+    }
+}
+
+/// A nudge is so many units of the document, so it moves a part of the document by the same share of
+/// the screen wherever the document is drawn: on a target half as large again as the document, and
+/// in the skin menu's preview, which is the whole screen shrunk into a rectangle. Read in the pixels
+/// of the target instead, a nudge of 30 would move the part 30 of them on the first, and 20 units of
+/// the document, which is 15 pixels, on the second.
+#[test]
+fn a_nudge_moves_a_part_by_the_same_share_of_the_screen_on_a_larger_target_and_in_the_preview() {
+    use crate::skin_select::fixtures::FADING_JUDGE_PART;
+    const RAISED: f32 = 30.0;
+    let ((_, bottom, _, part_height), colour) = (FADING_JUDGE_PART.0, tint_of(FADING_JUDGE_PART.1));
+    let (middle_x, _) = middle_of(FADING_JUDGE_PART.0);
+    let (top, part_height) = ((UI_SIZE.1 as i32 - (bottom + part_height)) as f32, part_height as f32);
+    let (raised_in, old_rule_in, unraised_in) =
+        (top - RAISED + CLEAR_OF_THE_EDGE, top + part_height - RAISED / LARGE_SCALE - CLEAR_OF_THE_EDGE, top + part_height - CLEAR_OF_THE_EDGE);
+    let mut app = fading_play_app("nudge-share");
+    step_play_row(&mut app, "JUDGE OFFSET Y", RAISED as i32);
+
+    let mut screen = crate::stage::HeadlessCanvas::new(LARGE_TARGET.0, LARGE_TARGET.1);
+    draw_play_until_drawn(&mut app, &mut screen, play_frame);
+    let across = (middle_x as f32 * LARGE_SCALE) as u32;
+    let row = |document_row: f32| (document_row * LARGE_SCALE) as u32;
+    assert_eq!(screen.pixel_at(across, row(raised_in)), colour, "the part is not raised by 30 units of its document, 45 pixels of the target");
+    assert_ne!(screen.pixel_at(across, row(old_rule_in)), colour, "the part stands where a nudge of 30 pixels of the target puts it");
+    assert_ne!(screen.pixel_at(across, row(unraised_in)), colour, "the part was also left where it had been");
+
+    draw_play_until_drawn(&mut app, &mut screen, preview_play_frame);
+    let across = (PREVIEW_ORIGIN.0 + middle_x as f32 * PREVIEW_SCALE) as u32;
+    let row = |document_row: f32| (PREVIEW_ORIGIN.1 + document_row * PREVIEW_SCALE) as u32;
+    assert_eq!(screen.pixel_at(across, row(raised_in)), colour, "the preview does not raise the part by 30 units of the document it shows");
+    assert_ne!(screen.pixel_at(across, row(old_rule_in)), colour, "the preview stands the part where a nudge of 30 pixels of the target puts it");
+    assert_ne!(screen.pixel_at(across, row(unraised_in)), colour, "the preview also left the part where it had been");
+}

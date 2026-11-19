@@ -792,7 +792,7 @@ pub(crate) fn automatic_offset_help(axis: OffsetAxis) -> &'static str {
 /// What is said of a row a skin document declares, by the kind of row it is: a row of the settings
 /// table says what it is for itself (`rbms_config::SettingDescriptor::help`).
 ///
-/// An offset is said by its axis. A place and a size are counted in pixels of the screen, except for
+/// An offset is said by its axis. A place and a size are counted in pixels of the skin, except for
 /// the one offset that moves a whole play screen, which is a share of it; a row is not told which
 /// offset it is of, so both are said. An offset the player may move along its alpha alone is an
 /// opacity, and is said as one: it reads in percent, a hundred being no offset at all. Its slider
