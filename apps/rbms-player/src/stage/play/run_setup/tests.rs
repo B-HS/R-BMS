@@ -16,6 +16,7 @@ use crate::borrowed_layout::tests::{REPLAY_SEED, a_library_of_one_chart, next_ru
 use crate::select_tree::{OpenedFolder, SelectFolder};
 use crate::skin_host::play::{GAUGE_NAMES, PlayLive, PlayShown};
 use crate::stage::PlayState;
+use crate::stage::play::skin_preview::PlaySample;
 
 /// The folders a test opens in the browser, outermost first, and what a run picked in the last of
 /// them names as where it was started.
@@ -46,6 +47,11 @@ fn shown_of(state: &mut PlayState, shared: &AppShared) -> PlayShown {
 /// The name of the gauge `shown` is on, as the skin is told it.
 fn gauge_name(shown: &PlayShown) -> &'static str {
     GAUGE_NAMES[usize::try_from(shown.gauge.kind).expect("a gauge number")]
+}
+
+/// What the sample run the menus draw for the play screen `screen` tells the skin of its setup.
+fn sample_setup(shared: &AppShared, screen: i32) -> RunSetup {
+    PlaySample::new(screen, &shared.config).expect("a sample is written for the screen").run_setup(shared)
 }
 
 /// Opens [`OPEN_FOLDERS`] in the browser of `shared`.
@@ -202,4 +208,27 @@ fn a_run_that_left_its_long_notes_to_the_ln_mode_is_known_by_the_key_its_record_
         PlayState::new(PlaySession::new(to_model(&parse(MANY_NOTES), Mode::BEAT_7K), SessionOptions::default()), HashMap::new(), 0, "CN".to_string());
     decided.session.set_judge_setup(JudgeSetup { ln_mode: LnMode::ChargeNote, ..decided.session.judge_setup() });
     assert_eq!(&*shown_of(&mut decided, &shared).live.setup.assists, "CN");
+}
+
+/// The sample run the skin menu and the play options draw is played with none of the player's
+/// assists, and is shown with the ones the settings hold, as a run started now would be: the
+/// option figures beside it are the settings' too.
+#[test]
+fn the_sample_run_of_the_menus_names_the_arrangement_and_the_assists_the_settings_hold() {
+    let mut shared = a_library_of_one_chart("setup-sample");
+    shared.config.play.random = NoteOption::Mirror;
+    shared.config.play.scratch_auto = true;
+    shared.config.judge.ln_mode = LnMode::ChargeNote;
+    shared.config.judge.judge_rate_key = [rbms_config::JUDGE_RATE_DEFAULT_PERCENT * 2; rbms_config::JUDGE_WIDTH_TIER_COUNT];
+    let seven = sample_setup(&shared, rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS);
+    assert_eq!((seven.arrangements, &*seven.assists), (["MIRROR", ""], "SCRATCH AUTO · CN · EX JUDGE"));
+    let fourteen = sample_setup(&shared, rbms_skin::loader::SKIN_TYPE_PLAY_14KEYS);
+    assert_eq!(fourteen.arrangements, ["MIRROR", "MIRROR"], "a double play sample names both sides");
+    let nine = sample_setup(&shared, rbms_skin::loader::SKIN_TYPE_PLAY_9KEYS);
+    assert_eq!(&*nine.assists, "CN · EX JUDGE", "SCRATCH AUTO plays nothing of a mode with no turntable");
+
+    shared.config.play.scratch_auto = false;
+    shared.config.judge = rbms_config::JudgeOptions::default();
+    shared.config.play.constant_speed = true;
+    assert_eq!(&*sample_setup(&shared, rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).assists, "CONSTANT", "the line follows the settings as they are moved");
 }

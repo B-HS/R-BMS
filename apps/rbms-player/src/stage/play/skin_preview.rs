@@ -64,7 +64,7 @@ use super::{BpmStats, LOADED, MICROS_PER_MILLI, whole_ms};
 use crate::AppShared;
 use crate::app_play::scratch_auto_color;
 use crate::skin_host::options::SettingsView;
-use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
+use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, RunSetup, Scroll, travel_region_ms};
 use crate::skin_host::play_timers::{FieldOffsets, PlayingFrame, SceneEvent};
 use crate::skin_host::score::standing::PacedScores;
 use crate::skin_preview::SampleStep;
@@ -554,6 +554,12 @@ impl PlaySample {
         (kind, settled.ex, legend)
     }
 
+    /// What the sample tells the skin it was started with and from: what a run of its mode started
+    /// now would be, by the settings ([`super::run_setup::settings_setup`]).
+    pub(crate) fn run_setup(&self, shared: &AppShared) -> RunSetup {
+        super::run_setup::settings_setup(shared, self.session.model().mode, SAMPLE_LN_MODE_DECIDES)
+    }
+
     /// The scores the run is held against at `now_us`, as the skin's timers read them: no best of
     /// the player's, and the target the run is paced against.
     fn held_against(&self, config: &Config, now_us: i64) -> Standing {
@@ -765,7 +771,7 @@ impl PlaySample {
             played: settings.played,
             load_progress: LOADED,
             changed_playback_percent: None,
-            setup: super::run_setup::run_setup(shared, &self.session, play.random, SAMPLE_LN_MODE_DECIDES),
+            setup: self.run_setup(shared),
         };
         let shown = PlayShown::of(&self.session, &live);
         let (lift, lanecover, hidden) =
