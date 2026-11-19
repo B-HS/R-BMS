@@ -36,7 +36,10 @@
 //! has an image under draws that image in the lamp pass instead of its `lamp` entry. A wheel drawn
 //! with a rival picked draws the player's lamp from `playerlamp`, which the list does not stand in
 //! for. It is prepared last, after the rank badges, so a document that leaves it out is drawn and
-//! asked exactly as before.
+//! asked exactly as before. The same list splits a lamp: a bar that carries a split grade
+//! ([`SongBar::split_assist_grade`]) the list has an image under draws the upper half of its lamp
+//! over the lower half of that graded lamp, each cut out of its image drawn whole rather than
+//! squeezed into the half.
 //!
 //! A frame is settled while it is prepared. The reference asks a slot's conditions twice in a
 //! frame, once as it prepares the wheel and once as it draws the bar, and asks a level's again for
@@ -559,6 +562,37 @@ fn whole_pixel(value: f32, scale: f32) -> f32 {
     if scale > 0.0 { (value * scale) as i32 as f32 / scale } else { value as i32 as f32 }
 }
 
+/// The share of a lamp's height each half of a split lamp takes.
+const LAMP_HALF_SHARE: f32 = 0.5;
+
+/// How many of its own widths across the cut of a split lamp reaches, the lamp's and one on each
+/// side, and how many of its heights up or down from the middle line.
+const CUT_WIDTHS: f32 = 3.0;
+const CUT_HEIGHTS: f32 = 2.0;
+
+/// Which half of a lamp's rectangle a split lamp draws an image in: the upper half holds the lamp
+/// the chart holds, the lower half the graded lamp of the assisted clear beneath it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LampHalf {
+    Upper,
+    Lower,
+}
+
+impl LampHalf {
+    /// What an image drawn at `rect`, a rectangle of the document whose `y` runs up the screen, is
+    /// cut to for this half: everything on this side of the line through the middle of `rect`. The
+    /// cut is that line alone; the other three sides reach a whole `rect` past its own, so an edge
+    /// the screen rounds loses no row the lamp drawn whole would have.
+    fn of(self, rect: SkinRect) -> SkinRect {
+        let middle = rect.y + rect.h * LAMP_HALF_SHARE;
+        let (x, w, reach) = (rect.x - rect.w.abs(), rect.w.abs() * CUT_WIDTHS, rect.h.abs() * CUT_HEIGHTS);
+        match self {
+            LampHalf::Upper => SkinRect::new(x, middle, w, reach),
+            LampHalf::Lower => SkinRect::new(x, middle - reach, w, reach),
+        }
+    }
+}
+
 /// Everything drawing one wheel is done with.
 struct Painter<'a, 'c, R: Renderer> {
     ctx: &'a mut RenderCtx<'c>,
@@ -616,6 +650,19 @@ impl<R: Renderer> Painter<'_, '_, R> {
     fn kept(&mut self, image: &ImagePart, corner: (f32, f32)) {
         let kept = image.kept.get();
         self.image(&image.object, &image.sprite, image.cell.get(), kept.moved(corner), kept);
+    }
+
+    /// Draws `half` of an image where its destination last put it, moved onto the bar at `corner`:
+    /// the image is drawn whole, as [`Self::kept`] draws it, and cut to that half of its own
+    /// rectangle, so neither half is squeezed, its stretch and its angle are what they always are,
+    /// and an animated image shows the frame it is on. The two halves of one rectangle meet on one
+    /// line however the screen rounds it, so a lamp of an odd height is cut with no gap and no
+    /// overlap.
+    fn kept_half(&mut self, image: &ImagePart, corner: (f32, f32), half: LampHalf) {
+        let rect = image.kept.get().moved(corner);
+        self.r.push_clip(self.viewport.place(half.of(rect)));
+        self.kept(image, corner);
+        self.r.pop_clip();
     }
 
     /// Draws a folder's graph on the bar at `corner` (`SkinDistributionGraph.draw`): one segment
@@ -750,14 +797,26 @@ pub(crate) fn draw_songlist<R: Renderer>(
     for area in areas.iter().filter(on_show) {
         let shown = &list.bars[area.bar];
         let corner = painter.corner(area.at);
-        let lamps = if list.rival {
-            [numbered(&body.player_lamp, shown.lamp), numbered(&body.rival_lamp, shown.rival_lamp)]
-        } else {
-            let graded = shown.graded_lamp_index().and_then(|index| part(&body.lamp_graded, index));
-            [graded.or_else(|| numbered(&body.lamp, shown.lamp)), None]
-        };
-        for lamp in lamps.into_iter().flatten() {
-            painter.kept(lamp, corner);
+        if list.rival {
+            for lamp in [numbered(&body.player_lamp, shown.lamp), numbered(&body.rival_lamp, shown.rival_lamp)].into_iter().flatten() {
+                painter.kept(lamp, corner);
+            }
+            continue;
+        }
+        let graded = shown.graded_lamp_index().and_then(|index| part(&body.lamp_graded, index));
+        let whole = graded.or_else(|| numbered(&body.lamp, shown.lamp));
+        match shown.split_lamp_index().and_then(|index| part(&body.lamp_graded, index)) {
+            Some(lower) => {
+                if let Some(upper) = whole {
+                    painter.kept_half(upper, corner, LampHalf::Upper);
+                }
+                painter.kept_half(lower, corner, LampHalf::Lower);
+            }
+            None => {
+                if let Some(lamp) = whole {
+                    painter.kept(lamp, corner);
+                }
+            }
         }
     }
 

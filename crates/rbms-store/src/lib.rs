@@ -26,5 +26,5 @@ pub use replay::{
 pub use score::{
     ASSIST_GRADE_CLEAR, ASSIST_GRADE_COUNT, ASSIST_GRADE_EASY, ASSIST_GRADE_EXHARD, ASSIST_GRADE_HARD, ASSIST_GRADE_NONE, LIGHT_ASSIST_CLEAR_ID,
     REFERENCE_RECORD_RULE_VERSION, RecordLamp, SCORE_LN_MODE_FROM_CHART, SCORE_RULE_VERSION, SCRATCH_AUTO_ASSIST,
-    SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION, ScoreBook, ScoreRecord, assist_grade_of, is_stale_rule_version, sets_best,
+    SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION, ScoreBook, ScoreRecord, assist_grade_of, is_stale_rule_version, sets_best, split_assist_grade,
 };

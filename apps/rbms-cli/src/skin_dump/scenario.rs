@@ -26,7 +26,10 @@
 //!   sliders index the table `adjustedCover()` returns for modes 2 to 4 and fail on a nil without
 //!   it. The cover amount and the current BPM are filled in for the same functions.
 //! - `select.json`: the song bar option on, the start-input timer running, and the song browser's
-//!   static classification, which decides which conditions the loader settles once.
+//!   static classification, which decides which conditions the loader settles once. One record row
+//!   and one ranking row hold the light-assist lamp with an assist grade (the numbers 21087 to
+//!   21102), and the best lamp under the cursor is split by ASSIST HARD (the option 21162), so the
+//!   functions that draw the grade blocks are called past the lamp they first ask about.
 //! - `decide.json`: the start-input timer running.
 //! - `result.json`: a cleared result, a clear type (the result body connects a function on it, and
 //!   without it the connection is nil), and the result screen's static classification. It has no

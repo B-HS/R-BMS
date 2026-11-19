@@ -58,6 +58,8 @@ local CLEAR_OPTIONS = {
     props.option.BAR_MAX,
 }
 
+local SPLIT = { first_clear = 4, last_clear = 6, halves = 2 }
+
 local CHART = {
     tabs = { width = 64, gap = 4, top_drop = 8, height = 32, band = 3, sprite = "num24", digits = 3, fill_share = 0.35 },
     lanes = { slots = 8, bar_width = 23, sprite = "num18", digits = 4, number_gap = 6, inset = 6 },
@@ -460,13 +462,22 @@ local function lamp_row_top(size)
     return theme.text_top(LAYOUT.score.top + ROWS.lamp_baseline_drop, size)
 end
 
+local function split_option(grade)
+    return props.extension.SELECTED_BEST_SPLIT_GRADE_FIRST + grade - 1
+end
+
 local function clear(s)
     local area = LAYOUT.score
     local size = theme.type.label
     local box = { x = area.x, top = lamp_row_top(size), w = area.width - ROWS.badge_width - LAYOUT.gap }
-    local function place(name, color, op, graded)
+    local half = (box.w - LAYOUT.gap) / SPLIT.halves
+    local halves = { { x = box.x, top = box.top, w = half }, { x = box.x + half + LAYOUT.gap, top = box.top, w = half } }
+    local function place_in(where, name, color, ops)
         local spec = { text = name, size = size, overflow = FIT }
-        s:text(spec, box, kit.arriving({ color = color, op = { ON_CHART, op, table.unpack(graded or {}) } }))
+        s:text(spec, where, kit.arriving({ color = color, op = ops }))
+    end
+    local function place(name, color, op, graded)
+        place_in(box, name, color, { ON_CHART, op, table.unpack(graded or {}) })
     end
     for index = 0, theme.clear_last do
         local lamp = theme.clear[index]
@@ -474,6 +485,15 @@ local function clear(s)
             parts.lamp_names(props.extension.SELECTED_BEST_ASSIST_GRADE_FIRST, function(name, color, graded)
                 place(name, color, CLEAR_OPTIONS[index], graded)
             end)
+        elseif index >= SPLIT.first_clear and index <= SPLIT.last_clear then
+            local whole = {}
+            for grade = 1, theme.assist_grade_last do
+                local ops = { ON_CHART, CLEAR_OPTIONS[index], split_option(grade) }
+                place_in(halves[1], lamp.name, theme.clear_text(lamp), ops)
+                place_in(halves[2], theme.assist_grade[grade].name, theme.assist_grade[grade].color, ops)
+                table.insert(whole, -split_option(grade))
+            end
+            place(lamp.name, theme.clear_text(lamp), CLEAR_OPTIONS[index], whole)
         else
             place(lamp.name, theme.clear_text(lamp), CLEAR_OPTIONS[index])
         end

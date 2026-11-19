@@ -296,6 +296,38 @@ fn the_assist_grade_of_the_best_lamp_switches_on_its_own_option_only() {
     assert!(grade_options.clone().all(|id| state_of(&folder).boolean(id) == Some(false)), "a folder has a grade");
 }
 
+/// This player's own four options of the grade the best lamp is split with: the one of the grade is
+/// on where a clear without assists stands over a SCRATCH AUTO clear on a stronger gauge, through
+/// the host as a skin asks, and none where the lamp is shown whole or the bar holds no best.
+#[test]
+fn the_grade_the_best_lamp_is_split_with_switches_on_its_own_option_only() {
+    use crate::skin_host::extension::{RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST, RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST};
+    use rbms_judge::AssistGrade;
+    let split_options = RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST..=RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST;
+    let on_for = |record: &BestScore| -> Vec<i32> {
+        let shown = shown_on(song(), Some(chart_with(Some(record))));
+        let timers = TimerState::new();
+        let mut host = ScreenHost::new(0, &timers);
+        host.show_select(&shown);
+        split_options.clone().filter(|id| host.boolean(*id) == Some(true)).collect()
+    };
+    let easy = best(ClearType::Easy);
+    for grade in [AssistGrade::Clear, AssistGrade::Hard, AssistGrade::ExHard] {
+        let split = BestScore { best_assist_grade: grade.id(), ..easy.clone() };
+        assert_eq!(on_for(&split), [RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST + i32::from(grade.id()) - 1], "EASY CLEAR over {grade:?}");
+    }
+    let whole = [
+        BestScore { best_assist_grade: AssistGrade::Easy.id(), ..easy.clone() },
+        BestScore { best_assist_grade: AssistGrade::ExHard.id(), ..best(ClearType::ExHard) },
+        BestScore { assist_grade: AssistGrade::Hard.id(), best_assist_grade: AssistGrade::Hard.id(), ..best(ClearType::LightAssistEasy) },
+    ];
+    for record in &whole {
+        assert_eq!(on_for(record), Vec::<i32>::new(), "a lamp shown whole: {:?} beside grade {}", record.lamp(), record.best_assist_grade);
+    }
+    let unplayed = shown_on(song(), Some(chart_with(None)));
+    assert!(split_options.clone().all(|id| state_of(&unplayed).boolean(id) == Some(false)), "a bar with no best is split");
+}
+
 /// The key indices no lane of a mode is on: none in a mode with seven keys or nine buttons, and
 /// the indices of keys six and seven in a mode with five.
 #[test]

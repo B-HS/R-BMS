@@ -155,6 +155,31 @@ fn the_best_and_the_five_latest_plays_make_the_rows_and_the_best_is_dated_by_the
     assert_eq!((latest.lamp, latest.miss_count), (5, 9), "a later row is the play it names");
 }
 
+/// Each row reads the assist grade of the play it names beside that play's lamp: the best row the
+/// grade of the best lamp, a later row its own run's, and a row of no light-assist clear none,
+/// whatever the plays around it were graded.
+#[test]
+fn every_record_row_reads_the_assist_grade_of_the_play_it_names() {
+    let light_assist = rbms_store::LIGHT_ASSIST_CLEAR_ID;
+    let scratch_auto = |date: i64, gauge: &str| PlayLog {
+        gauge: rbms_store::scoredb::gauge_id(gauge),
+        assist: rbms_store::SCRATCH_AUTO_ASSIST,
+        ..play(date, 40, light_assist, 5)
+    };
+    let plays = [scratch_auto(500, "exhard"), play(400, 50, 5, 3), scratch_auto(300, "easy"), play(200, 60, 4, 2), scratch_auto(100, "hard")];
+    let graded_best = BestScore { assist_grade: rbms_store::ASSIST_GRADE_EXHARD, ..best(40, light_assist, 5) };
+    let rows = record_rows(&plays, Some(&graded_best));
+    let held: Vec<_> = rows.iter().map(|row| row.as_ref().map(|row| (row.lamp, row.assist_grade))).collect();
+    let (la, exhard, easy) = (i32::from(light_assist), i32::from(rbms_store::ASSIST_GRADE_EXHARD), i32::from(rbms_store::ASSIST_GRADE_EASY));
+    assert_eq!(
+        held,
+        [Some((la, exhard)), Some((la, exhard)), Some((5, 0)), Some((la, easy)), Some((4, 0)), Some((la, i32::from(rbms_store::ASSIST_GRADE_HARD)))]
+    );
+
+    let rows = record_rows(&plays, Some(&best(60, 4, 2)));
+    assert_eq!(rows[0].as_ref().map(|row| (row.lamp, row.assist_grade)), Some((4, 0)), "a best of another lamp has no grade, whatever a play reached");
+}
+
 #[test]
 fn a_chart_played_fewer_times_than_there_are_rows_leaves_the_rows_after_them_empty() {
     let rows = record_rows(&[play(200, 40, 1, 12), play(100, 20, 1, 30)], Some(&best(40, 1, 12)));

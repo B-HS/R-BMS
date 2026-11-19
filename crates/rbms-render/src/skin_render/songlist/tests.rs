@@ -287,6 +287,11 @@ struct Wheel<'a> {
     /// Members added to every destination of the lists they are named for.
     bar_extra: &'a str,
     lamp_extra: &'a str,
+    /// Where every lamp of the `lamp` list sits on its bar.
+    lamp_at: (i32, i32, i32, i32),
+    /// How many frames each lamp image animates through, one cell of the sheet a frame, side by
+    /// side, every [`LAMP_FRAME_MS`].
+    lamp_frames: i32,
     level_extra: &'a str,
     /// The graph definition's `type`.
     graph_type: i32,
@@ -305,6 +310,8 @@ impl Default for Wheel<'_> {
             off_tint: "",
             bar_extra: "",
             lamp_extra: "",
+            lamp_at: LAMP_AT,
+            lamp_frames: 1,
             level_extra: "",
             graph_type: -1,
             over: "",
@@ -326,6 +333,18 @@ fn images(name: &str, count: usize, band: i32, cell: (i32, i32)) -> String {
 /// One nested destination naming `id` at `at`, with `extra` added to the destination itself.
 fn nested(id: &str, at: (i32, i32, i32, i32), extra: &str) -> String {
     format!(r#"{{"id":"{id}","dst":[{{"x":{},"y":{},"w":{},"h":{}}}]{extra}}}"#, at.0, at.1, at.2, at.3)
+}
+
+/// The lamp images, each animating through `frames` cells side by side from its own: with one
+/// frame, exactly the cells [`images`] cuts.
+fn lamp_images(frames: i32) -> String {
+    if frames == 1 {
+        return images("lamp", BAR_LAMPS, LAMP_BAND, (SMALL_CELL, SMALL_CELL));
+    }
+    records(BAR_LAMPS, |index| {
+        let (x, w, cycle) = (SMALL_CELL * index as i32, SMALL_CELL * frames, LAMP_FRAME_MS * i64::from(frames));
+        format!(r#"{{"id":"lamp-{index}","src":"sheet","x":{x},"y":{LAMP_BAND},"w":{w},"h":{SMALL_CELL},"divx":{frames},"cycle":{cycle}}}"#)
+    })
 }
 
 /// Where slot `slot`'s bar starts across the document when nothing is sliding.
@@ -383,7 +402,7 @@ fn document(wheel: &Wheel<'_>) -> String {
         DOC.0,
         DOC.1,
         bars = images("bar", BAR_IMAGES, BAR_BAND, BAR_CELL),
-        lamp_images = images("lamp", BAR_LAMPS, LAMP_BAND, (SMALL_CELL, SMALL_CELL)),
+        lamp_images = lamp_images(wheel.lamp_frames),
         trophies = images("trophy", BAR_TROPHIES, TROPHY_BAND, (SMALL_CELL, SMALL_CELL)),
         label_images = images("label", BAR_LABELS, LABEL_BAND, (SMALL_CELL, SMALL_CELL)),
         rank_images = images("rank", BAR_RANKS, RANK_BAND, (SMALL_CELL, SMALL_CELL)),
@@ -393,7 +412,7 @@ fn document(wheel: &Wheel<'_>) -> String {
         on = bar(ON_X, ""),
         off = bar(OFF_X, wheel.off_tint),
         level = records(BAR_LEVELS, |index| nested(&format!("level-{index}"), LEVEL_AT, wheel.level_extra)),
-        lamp = lamps(LAMP_AT),
+        lamp = lamps(wheel.lamp_at),
         player_lamp = lamps(PLAYER_LAMP_AT),
         rival_lamp = lamps(RIVAL_LAMP_AT),
         trophy = records(BAR_TROPHIES, |index| nested(&format!("trophy-{index}"), TROPHY_AT, "")),
@@ -450,9 +469,14 @@ impl Rig {
     /// Draws one frame over `list` onto a cleared canvas and answers the quads it came to, in the
     /// order they were submitted.
     fn draw(&mut self, list: &SongBars<'_>) -> Vec<Quad> {
+        self.draw_at(list, 0)
+    }
+
+    /// [`Rig::draw`], `now_ms` into the scene.
+    fn draw_at(&mut self, list: &SongBars<'_>, now_ms: i64) -> Vec<Quad> {
         let timers = TimerState::new();
         let data = FrameData { bars: Some(list), ..FrameData::default() };
-        let frame = SkinFrame { now_us: 0, timers: &timers, state: &self.host, lua: None, mouse: None, data };
+        let frame = SkinFrame { now_us: now_ms * MICROS_PER_MILLI, timers: &timers, state: &self.host, lua: None, mouse: None, data };
         self.canvas.clear(Color::BLACK);
         self.canvas.quads.clear();
         let mut ctx = RenderCtx::new(crate::theme::theme(), &mut self.text);
@@ -1267,7 +1291,12 @@ const ASSIST_GRADE_EXHARD: u8 = 4;
 
 /// A wheel that declares this player's graded lamps, one per assist grade, where the lamp goes.
 fn graded_wheel() -> String {
-    let graded = records(BAR_ASSIST_GRADES, |index| nested(&format!("graded-{index}"), LAMP_AT, ""));
+    graded_wheel_at(LAMP_AT)
+}
+
+/// The same with the graded lamps at `at`.
+fn graded_wheel_at(at: (i32, i32, i32, i32)) -> String {
+    let graded = records(BAR_ASSIST_GRADES, |index| nested(&format!("graded-{index}"), at, ""));
     format!(r#","lamp_graded":[{graded}]"#)
 }
 
@@ -1341,4 +1370,138 @@ fn a_wheel_without_graded_lamps_draws_every_grade_as_the_light_assist_lamp() {
     assert!(kinds(&graded_pieces).iter().all(|piece| !matches!(piece, Piece::Graded(_))), "{graded_pieces:?}");
     assert_eq!(kinds(&graded_pieces), kinds(&plain_pieces));
     assert!(rig.canvas.inner.pixels() == plain_pixels.as_slice(), "not one pixel differs");
+}
+
+/// How long each frame of an animated lamp stays up.
+const LAMP_FRAME_MS: i64 = 100;
+
+/// The lamps a split lamp can stand under, as the browser numbers lamps.
+const LAMP_EASY: i32 = 4;
+const LAMP_NORMAL: i32 = 5;
+const LAMP_HARD: i32 = 6;
+
+/// The blue of every texel of the sheet, which no background pixel has.
+const SHEET_BLUE: u8 = u8::MAX / 2;
+
+/// What one pixel of a lamp was drawn from: the row and column of the sheet its texel sits on, for a
+/// pixel of the lamp band or of the graded band, or nothing the sheet drew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ink {
+    Lamp { x: i32, y: i32 },
+    Graded { x: i32, y: i32 },
+    Other,
+}
+
+impl Ink {
+    fn of(colour: Color) -> Ink {
+        if colour.b != SHEET_BLUE {
+            return Ink::Other;
+        }
+        let (x, y) = (i32::from(colour.r) / TEXEL_GREEN_STEP as i32, i32::from(colour.g) / TEXEL_GREEN_STEP as i32);
+        match y {
+            _ if (LAMP_BAND..LAMP_BAND + SMALL_CELL).contains(&y) => Ink::Lamp { x, y: y - LAMP_BAND },
+            _ if (GRADED_BAND..GRADED_BAND + SMALL_CELL).contains(&y) => Ink::Graded { x, y: y - GRADED_BAND },
+            _ => Ink::Other,
+        }
+    }
+}
+
+/// What every row of screen pixels whose centre lies inside the lamp at `at` of the bar on `slot`
+/// was drawn from, top to bottom, read down the middle of the lamp, on a canvas `scale` times the
+/// document.
+fn lamp_rows(rig: &Rig, slot: usize, at: (i32, i32, i32, i32), scale: f32) -> Vec<Ink> {
+    let x = (bar_x(slot) + at.0) as f32 * scale + at.2 as f32 * scale / 2.0;
+    let top = (DOC.1 as i32 - (slot_y(slot, PITCH) + at.1 + at.3)) as f32 * scale;
+    let bottom = top + at.3 as f32 * scale;
+    let first = (top - 0.5).ceil() as u32;
+    let last = (bottom - 0.5).ceil() as u32;
+    (first..last).map(|y| Ink::of(rig.canvas.inner.pixel_at(x as u32, y))).collect()
+}
+
+/// A chart whose `lamp` is split by `grade`.
+fn split(lamp: i32, grade: u8) -> SongBar {
+    SongBar { lamp, split_assist_grade: grade, ..song("SPLIT") }
+}
+
+/// A split lamp draws the upper half of its own lamp over the lower half of the graded lamp of its
+/// grade: each half is the matching half of its image, cut and not squeezed, row for row. A grade of
+/// none draws the lamp whole.
+#[test]
+fn a_split_lamp_draws_the_upper_half_of_its_lamp_over_the_lower_half_of_the_graded_lamp() {
+    let extra = graded_wheel();
+    let mut rig = Rig::with("split", &Wheel { wheel_extra: &extra, ..Wheel::default() }, DOC);
+    let bars =
+        [split(LAMP_NORMAL, 3), split(LAMP_EASY, ASSIST_GRADE_EXHARD), split(LAMP_HARD, ASSIST_GRADE_EXHARD), split(LAMP_NORMAL, 0), split(LAMP_EASY, 2)];
+    rig.draw(&SongBars::new(&bars, CENTER));
+
+    let rows_per_texel = LAMP_AT.3 / SMALL_CELL;
+    let column = LAMP_AT.2 / 2 * SMALL_CELL / LAMP_AT.2;
+    for (slot, bar) in bars.iter().enumerate() {
+        let wanted: Vec<Ink> = (0..LAMP_AT.3)
+            .map(|row| {
+                let y = row / rows_per_texel;
+                match bar.split_lamp_index() {
+                    Some(grade) if row >= LAMP_AT.3 / 2 => Ink::Graded { x: grade as i32 * SMALL_CELL + column, y },
+                    _ => Ink::Lamp { x: bar.lamp * SMALL_CELL + column, y },
+                }
+            })
+            .collect();
+        assert_eq!(lamp_rows(&rig, slot, LAMP_AT, 1.0), wanted, "the lamp of slot {slot}, {bar:?}");
+    }
+}
+
+/// A lamp of an odd height on a screen larger than the document is cut where its middle lands: the
+/// upper half is the lamp and the lower the graded lamp, with no row of neither and none of both,
+/// each half reads only its own half of its image, and an animated lamp shows the frame it is on.
+#[test]
+fn a_split_lamp_of_an_odd_height_drawn_larger_meets_in_the_middle_and_keeps_its_frame() {
+    const ODD_LAMP_AT: (i32, i32, i32, i32) = (-10, 0, 8, 21);
+    const FRAMES: i32 = 2;
+    const SCALE: f32 = 1.5;
+    let extra = graded_wheel_at(ODD_LAMP_AT);
+    let wheel = Wheel { wheel_extra: &extra, lamp_at: ODD_LAMP_AT, lamp_frames: FRAMES, ..Wheel::default() };
+    let size = ((DOC.0 as f32 * SCALE) as u32, (DOC.1 as f32 * SCALE) as u32);
+    let mut rig = Rig::with("split-odd", &wheel, size);
+    let bars = [split(LAMP_NORMAL, 3)];
+    let graded_cell = 2 * SMALL_CELL;
+
+    for frame in 0..FRAMES {
+        rig.draw_at(&SongBars::new(&bars, 0), LAMP_FRAME_MS * i64::from(frame));
+        let rows = lamp_rows(&rig, CENTER, ODD_LAMP_AT, SCALE);
+        let upper = rows.iter().take_while(|ink| matches!(ink, Ink::Lamp { .. })).count();
+        let lower = rows[upper..].iter().take_while(|ink| matches!(ink, Ink::Graded { .. })).count();
+        assert_eq!(upper + lower, rows.len(), "frame {frame}: every row is the lamp above or the graded lamp below: {rows:?}");
+        assert!(upper.abs_diff(lower) <= 1, "frame {frame}: the cut is in the middle, {upper} rows over {lower}");
+        let cell = (LAMP_NORMAL + frame) * SMALL_CELL;
+        let half = SMALL_CELL / 2;
+        for ink in &rows {
+            match *ink {
+                Ink::Lamp { x, y } => assert!((cell..cell + SMALL_CELL).contains(&x) && y < half, "frame {frame}: {ink:?} is the upper half of its frame"),
+                Ink::Graded { x, y } => assert!((graded_cell..graded_cell + SMALL_CELL).contains(&x) && y >= half, "frame {frame}: {ink:?}"),
+                Ink::Other => unreachable!("every row was matched above"),
+            }
+        }
+    }
+}
+
+/// A split grade draws the lamp whole, to the pixel, on a wheel that declares no graded lamps, on a
+/// wheel drawn against a rival, and for a grade the wheel has no graded lamp under.
+#[test]
+fn a_split_lamp_is_drawn_whole_where_the_wheel_has_nothing_to_split_it_with() {
+    let splits: Vec<SongBar> = [LAMP_EASY, LAMP_NORMAL, LAMP_HARD].into_iter().map(|lamp| split(lamp, ASSIST_GRADE_EXHARD)).collect();
+    let whole: Vec<SongBar> = splits.iter().map(|bar| SongBar { split_assist_grade: 0, ..bar.clone() }).collect();
+    let past_exhard: Vec<SongBar> = whole.iter().map(|bar| SongBar { split_assist_grade: ASSIST_GRADE_EXHARD + 1, ..bar.clone() }).collect();
+    let same_pixels = |rig: &mut Rig, drawn: &[SongBar], rival: bool, what: &str| {
+        let list = |bars| SongBars { rival, ..SongBars::new(bars, CENTER) };
+        let whole_pieces = kinds(&rig.pieces(&list(&whole)));
+        let whole_pixels = rig.canvas.inner.pixels().to_vec();
+        let drawn_pieces = kinds(&rig.pieces(&list(drawn)));
+        assert_eq!(drawn_pieces, whole_pieces, "{what}");
+        assert!(rig.canvas.inner.pixels() == whole_pixels.as_slice(), "{what}: not one pixel differs");
+    };
+    same_pixels(&mut Rig::new("split-no-graded"), &splits, false, "no graded lamps");
+    let extra = graded_wheel();
+    let mut graded = Rig::with("split-rival", &Wheel { wheel_extra: &extra, ..Wheel::default() }, DOC);
+    same_pixels(&mut graded, &splits, true, "against a rival");
+    same_pixels(&mut graded, &past_exhard, false, "a grade past ASSIST EXHARD");
 }

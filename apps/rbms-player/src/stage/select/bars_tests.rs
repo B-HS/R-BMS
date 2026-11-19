@@ -298,6 +298,7 @@ fn row_as_it_was_drawn(shared: &AppShared, index: usize) -> SelectRow {
         level: entry.level.clone(),
         difficulty_color: difficulty_color(entry.difficulty),
         lamp,
+        split_lamp: None,
         folder_count: None,
         dj_level: best.filter(|_| shared.config.display.score_graph).map(|best| RANK_BANDS[dj_rank(best.ex_score, best.max_ex)].0),
         favorite: shared.favorites.contains(&entry.md5),
@@ -384,6 +385,43 @@ fn a_graded_light_assist_clear_lights_the_built_in_row_in_its_grade() {
     let (_, assist_hard) = crate::format::lamp_label_color(ClearType::LightAssistEasy, rbms_judge::AssistGrade::Hard);
     assert_eq!(row.lamp, assist_hard);
     assert_ne!(row.lamp, clear_label_color(ClearType::LightAssistEasy).1, "not the colour of the lamp without its grade");
+}
+
+/// A chart cleared on EASY without assists and on HARD with SCRATCH AUTO has its lamp split: the
+/// bar holds the EASY lamp and the ASSIST HARD grade beneath it, a skin's wheel is handed both, and
+/// the built-in row lights the lower half of its LEDs in the grade. A SCRATCH AUTO clear on a gauge
+/// no stronger than the lamp's splits nothing.
+#[test]
+fn a_clear_without_assists_over_a_stronger_assisted_clear_splits_the_lamp_of_the_bar() {
+    let mut app = fixture_app();
+    let assisted = |md5: &str, gauge: &str| rbms_store::ScoreRecord {
+        gauge: gauge.into(),
+        assist: rbms_store::SCRATCH_AUTO_ASSIST,
+        ..record(md5, rbms_store::LIGHT_ASSIST_CLEAR_ID, 500, 0, 3_000)
+    };
+    let easy = rbms_judge::clear_type_id(ClearType::Easy);
+    app.shared.scores.push(assisted("md5-b.bms", "hard"));
+    app.shared.scores.push(rbms_store::ScoreRecord { gauge: "easy".into(), assist: 0, ..record("md5-b.bms", easy, 400, 0, 4_000) });
+    app.shared.scores.push(assisted("md5-e.bms", "easy"));
+    app.shared.scores.push(rbms_store::ScoreRecord { gauge: "easy".into(), assist: 0, ..record("md5-e.bms", easy, 400, 0, 4_000) });
+    app.shared.scores.push(assisted("md5-a.bms", "exhard"));
+    let bars = app.shared.select_bars(&facts_of(&app), None, false);
+    let beta = bar_titled(&bars, "beta");
+    assert_eq!((beta.lamp, beta.assist_grade, beta.split_assist_grade), (Some(easy), rbms_store::ASSIST_GRADE_NONE, rbms_store::ASSIST_GRADE_HARD));
+    let wheel = wheel_bar(beta, ADDED_AT);
+    assert_eq!((wheel.lamp, wheel.split_assist_grade), (i32::from(easy), rbms_store::ASSIST_GRADE_HARD), "a skin reads the lamp and the grade it is split by");
+    let zeta = bar_titled(&bars, "zeta");
+    assert_eq!((zeta.lamp, zeta.split_assist_grade), (Some(easy), rbms_store::ASSIST_GRADE_NONE), "ASSIST EASY is no stronger than EASY");
+    let alpha = bar_titled(&bars, "alpha");
+    assert_eq!(alpha.split_assist_grade, rbms_store::ASSIST_GRADE_NONE, "an EX HARD CLEAR stands over ASSIST EXHARD");
+
+    let mut state = SelectState::new();
+    state.refresh_bars(&app.shared);
+    let scene = state.build_scene(&app.shared);
+    let row = |title: &str| scene.rows.iter().find(|row| row.title == title).expect("the chart has a row");
+    let (_, assist_hard) = crate::format::lamp_label_color(ClearType::LightAssistEasy, rbms_judge::AssistGrade::Hard);
+    assert_eq!((row("beta").lamp, row("beta").split_lamp), (clear_label_color(ClearType::Easy).1, Some(assist_hard)));
+    assert_eq!((row("zeta").split_lamp, row("alpha").split_lamp), (None, None), "lamps drawn whole");
 }
 
 /// The same for the course tab, whose rows are folders that carry the constraint badges as their

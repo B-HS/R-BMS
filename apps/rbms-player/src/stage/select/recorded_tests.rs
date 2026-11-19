@@ -10,8 +10,9 @@
 //!
 //! With `RBMS_SKIN_CAPTURE_DIR` set the frame is drawn at the size the pack was authored at and
 //! saved there as `select-recorded.png`, the frame of a chart played with SCRATCH AUTO on as
-//! `select-recorded-scratch-auto.png`, and that of a chart played only with the judge widened as
-//! `select-recorded-widened.png`.
+//! `select-recorded-scratch-auto.png`, that of a chart played only with the judge widened as
+//! `select-recorded-widened.png`, and that of a chart cleared without assists and with SCRATCH
+//! AUTO on a stronger gauge, whose lamp is split, as `select-recorded-split-lamp.png`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -23,7 +24,7 @@ use rbms_store::scoredb::UNSET_MINIMUM;
 
 use super::tests::{entry, press, release};
 use super::*;
-use crate::app_result::record_tests::{HAND_OFFSETS_US, end_run, played_by_hand, played_widened, recorded_model};
+use crate::app_result::record_tests::{HAND_OFFSETS_US, end_run, played_by_hand, played_on, played_widened, recorded_model};
 use crate::skin_host::select::SelectShown;
 use crate::stage::HeadlessCanvas;
 use crate::stage::capture::{app_in, scene_frame_at, settings_of};
@@ -214,6 +215,40 @@ fn the_browser_shows_the_score_of_a_chart_played_with_scratch_auto() {
     assert_eq!(summary.total_notes + 1, played_by_hand(&HAND_OFFSETS_US, false).summary().total_notes, "the turntable note was counted");
     assert_eq!(shown.standing.now_ex, i32::try_from(summary.ex_score).expect("an EX score fits"), "the EX the rank is read off");
     assert_eq!(shown.bar.as_ref().and_then(|bar| bar.replays), Some([true, false, false, false]), "the run's replay is kept");
+}
+
+/// A chart cleared by hand on the gauge a fresh install plays on, and then with SCRATCH AUTO on the
+/// HARD gauge, holds the lamp of the clear without assists and the ASSIST HARD grade beneath it: the
+/// wheel is handed the lamp split by that grade, and the score window is lent the same split, which
+/// the default pack's MY SCORE line names beside the lamp.
+#[test]
+fn the_browser_splits_the_lamp_of_a_chart_cleared_without_assists_and_with_scratch_auto_on_a_stronger_gauge() {
+    let mut app = browsing_app("recorded-split-lamp");
+    let plain = play_a_run(&mut app, played_by_hand(&HAND_OFFSETS_US, false));
+    app.shared.config.play.scratch_auto = true;
+    let assisted = play_a_run(&mut app, played_on(rbms_judge::GaugeKind::Hard, &HAND_OFFSETS_US, true));
+    assert_eq!(assisted.clear_lamp, rbms_judge::ClearType::Hard, "the SCRATCH AUTO run cleared the HARD gauge, which its record is demoted from");
+    let lamp = rbms_judge::clear_type_id(plain.clear_lamp);
+    let grade = rbms_judge::AssistGrade::Hard.id();
+    assert_eq!(
+        rbms_store::split_assist_grade(rbms_store::RecordLamp { clear: lamp, assist_grade: rbms_store::ASSIST_GRADE_NONE }, grade),
+        grade,
+        "the fixture run is a lamp ASSIST HARD splits: {lamp}"
+    );
+    let (width, height) = frame_size();
+    let mut pixels = HeadlessCanvas::new(width, height);
+    browse_to_the_recorded_chart(&mut app, &mut pixels);
+    save_frame("select-recorded-split-lamp", &pixels);
+
+    let shown = shown(&mut app);
+    let record = shown.bar.as_ref().and_then(|bar| bar.record.as_ref()).expect("the bar under the cursor has a record");
+    assert_eq!((record.sheet.clear, record.assist_grade, record.split_assist_grade), (lamp, rbms_store::ASSIST_GRADE_NONE, grade), "the score window's lamp");
+    let Stage::Select(state) = &mut app.stage else {
+        panic!("the browser is not up");
+    };
+    let cursor = state.cursor(&app.shared);
+    let bar = &state.bars.wheel(0)[cursor];
+    assert_eq!((bar.lamp, bar.split_assist_grade), (i32::from(lamp), grade), "the wheel's bar");
 }
 
 /// A chart played only with the judge widened past its own shows its lamp and its play count and no

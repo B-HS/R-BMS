@@ -56,7 +56,9 @@ use rbms_render::skin_render::frame::{BarKind, LAMP_KINDS};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT};
 
-use super::extension::{RBMS_OPTION_RANKING_MODE_ON, RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_asked, unreachable_key_asked};
+use super::extension::{
+    RBMS_OPTION_RANKING_MODE_ON, RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST, assist_grade_asked, split_grade_asked, unreachable_key_asked,
+};
 use super::score::standing::{CUMULATIVE_RANK_STEPS, RANK_COUNT};
 use super::score::{BAD, GREAT, JUDGE_KINDS, MISS, POOR, SIDES_PER_JUDGEMENT, whole};
 use super::{ClusterState, INDEX_CLEAR, INDEX_DIFFICULTY_FILTER, INDEX_TARGET_CLEAR, STRING_DIFFICULTY_FILTER, STRING_MODE_FILTER, STRING_SORT};
@@ -296,6 +298,9 @@ impl ClusterState for SelectState<'_> {
         }
         if let Some(grade) = assist_grade_asked(id, RBMS_OPTION_SELECTED_BEST_ASSIST_GRADE_FIRST) {
             return Some(self.record().is_some_and(|record| record.assist_grade == grade));
+        }
+        if let Some(grade) = split_grade_asked(id) {
+            return Some(self.record().is_some_and(|record| record.split_assist_grade == grade));
         }
         if let Some(index) = unreachable_key_asked(id) {
             return shown.unreachable_keys.get(index).copied();

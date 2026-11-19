@@ -223,7 +223,7 @@ fn replay_inputs(mut session: PlaySession, inputs: &[Input]) -> PlaySession {
 
 /// Play the recorded chart by hand on `gauge`, the turntable note left to the engine when
 /// `scratch_auto` is set, as SCRATCH AUTO has it played.
-fn played_on(gauge: rbms_judge::GaugeKind, offsets_us: &[Option<i64>], scratch_auto: bool) -> PlaySession {
+pub(crate) fn played_on(gauge: rbms_judge::GaugeKind, offsets_us: &[Option<i64>], scratch_auto: bool) -> PlaySession {
     let model = recorded_model();
     let mode = model.mode;
     let auto_lanes = if scratch_auto { (0..mode.key).map(|lane| mode.is_scratch(lane)).collect() } else { Vec::new() };

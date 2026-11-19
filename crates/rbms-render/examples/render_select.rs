@@ -22,6 +22,7 @@ fn row(folder: bool, title: &str, badges: RowBadges, lamp: Color, count: Option<
         level: badges.level.into(),
         difficulty_color: badges.difficulty_color,
         lamp,
+        split_lamp: None,
         folder_count: count,
         dj_level: (!folder).then_some("AA"),
         favorite: !folder,

@@ -597,6 +597,11 @@ pub(crate) struct SelectBar {
     /// the built-in row colours its lamp by; a skin is handed the lamp alone. Zero for no grade, and
     /// for every bar that is not a chart.
     pub(crate) assist_grade: u8,
+    /// The assist grade a chart's `lamp` is split with ([`rbms_store::split_assist_grade`]): the
+    /// grade of a SCRATCH AUTO clear on a stronger gauge than the clear without assists the lamp
+    /// is. The built-in row and a skin's wheel draw the upper half of the lamp over the lower half
+    /// of the grade. Zero for a lamp drawn whole, and for every bar that is not a chart.
+    pub(crate) split_assist_grade: u8,
     /// The same for the rival that is picked.
     pub(crate) rival_lamp: Option<u8>,
     /// The medal of a course (`GradeBar.getTrophy`).
@@ -617,6 +622,7 @@ impl SelectBar {
             missing: None,
             lamp: None,
             assist_grade: rbms_store::ASSIST_GRADE_NONE,
+            split_assist_grade: rbms_store::ASSIST_GRADE_NONE,
             rival_lamp: None,
             trophy: None,
             distribution: None,

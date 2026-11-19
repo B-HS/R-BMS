@@ -66,6 +66,7 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("ir_sync", "trace_error", "TEXT"),
     ("ir_sync", "trace_refused_under", "TEXT"),
     ("score", "assist_grade", "INTEGER NOT NULL DEFAULT 0"),
+    ("score", "best_assist_grade", "INTEGER NOT NULL DEFAULT 0"),
 ];
 
 /// Add every [`ADDED_COLUMNS`] entry its table does not have yet.

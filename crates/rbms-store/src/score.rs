@@ -126,6 +126,27 @@ pub fn assist_grade_of(clear: u8, gauge: i32, assist: i32, rule_version: u32) ->
     usize::try_from(gauge).ok().and_then(|index| ASSIST_GRADE_OF_GAUGE.get(index)).copied().unwrap_or(ASSIST_GRADE_NONE)
 }
 
+/// Lamp id of `rbms_judge::ClearType::Easy`, the lowest lamp a chart's lamp can be split under.
+const EASY_CLEAR_ID: u8 = 4;
+/// Lamp id of `rbms_judge::ClearType::Hard`, the highest lamp a chart's lamp can be split under: an
+/// EX HARD clear and every lamp above it already stand at or over ASSIST EXHARD.
+const HARD_CLEAR_ID: u8 = 6;
+
+/// The assist grade a chart's lamp is split with, or [`ASSIST_GRADE_NONE`] when it is drawn whole.
+///
+/// `best` is the chart's best lamp and `best_assist_grade` the highest assist grade any of its
+/// light-assist clears reached, which the best lamp hides once a clear without assists stands above
+/// it. Grade `g` is a clear the gauge of lamp id `LIGHT_ASSIST_CLEAR_ID + g` would have awarded
+/// (ASSIST EASY for EASY up to ASSIST EXHARD for EX HARD), so the lamp is split only when that is
+/// the stronger gauge: the best lamp is EASY, CLEAR or HARD and the grade's gauge is above it. A
+/// light-assist best is drawn in its own grade, and a lamp from EX HARD up, whole.
+pub fn split_assist_grade(best: RecordLamp, best_assist_grade: u8) -> u8 {
+    let splits = (EASY_CLEAR_ID..=HARD_CLEAR_ID).contains(&best.clear)
+        && (ASSIST_GRADE_EASY..=ASSIST_GRADE_EXHARD).contains(&best_assist_grade)
+        && LIGHT_ASSIST_CLEAR_ID + best_assist_grade > best.clear;
+    if splits { best_assist_grade } else { ASSIST_GRADE_NONE }
+}
+
 /// A best lamp as it is compared: the lamp id first and the assist grade inside it, so an ASSIST
 /// HARD clear outranks an ASSIST CLEAR one and both stay below an EASY clear.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -396,6 +417,14 @@ impl ScoreBook {
     /// Best lamp among the records of a chart that were played under `ln_mode`.
     pub fn best_lamp_for_md5_in_ln_mode(&self, md5: &str, ln_mode: &str) -> Option<RecordLamp> {
         self.lamp_records(md5).filter(|r| Self::comparable_ln_mode(r, ln_mode)).map(ScoreRecord::lamp).max()
+    }
+
+    /// The highest assist grade any record of a chart reached ([`ScoreRecord::assist_grade`]), counting
+    /// the records [`ScoreBook::best_lamp_for_md5`] counts: the grade a clear without assists above
+    /// it hides from the best lamp, which [`split_assist_grade`] reads beside that lamp.
+    /// [`ASSIST_GRADE_NONE`] for a chart with no graded clear.
+    pub fn best_assist_grade_for_md5(&self, md5: &str) -> u8 {
+        self.lamp_records(md5).map(ScoreRecord::assist_grade).max().unwrap_or(ASSIST_GRADE_NONE)
     }
 
     /// Records of a chart whose lamp counts, as [`ScoreBook::best_lamp_for_md5`] describes.

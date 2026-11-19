@@ -111,6 +111,7 @@ fn the_score_table_carries_every_column_the_spec_lists() {
         "rule_version",
         "replay_file",
         "assist_grade",
+        "best_assist_grade",
     ];
     assert_eq!(columns, want, "the score row is exactly the columns the DDL declares");
 }
@@ -1074,4 +1075,113 @@ fn a_record_written_before_the_assist_level_existed_reads_it_as_unrecorded() {
     let read: ScoreRecord = ron::from_str(&without_assist).expect("an older record reads");
     assert_eq!(read.assist, ASSIST_UNRECORDED);
     assert_eq!(read.assist_grade(), ASSIST_GRADE_NONE);
+}
+
+/// `ClearType::ExHard`, the lowest lamp that stands at or over every assist grade.
+const LAMP_EXHARD: u8 = 7;
+/// `ClearType::Max`, the highest lamp.
+const LAMP_MAX: u8 = 10;
+/// One past the highest assist grade id, which no play is ever graded.
+const ASSIST_GRADE_PAST_EXHARD: u8 = crate::ASSIST_GRADE_COUNT;
+
+/// The grades each lamp is split by, the lamps left out split by none: EASY by the grades of the
+/// gauges above it, CLEAR by ASSIST HARD and ASSIST EXHARD, HARD by ASSIST EXHARD alone.
+const SPLIT_BY: [(u8, &[u8]); 3] = [
+    (LAMP_EASY, &[crate::ASSIST_GRADE_CLEAR, crate::ASSIST_GRADE_HARD, crate::ASSIST_GRADE_EXHARD]),
+    (LAMP_NORMAL, &[crate::ASSIST_GRADE_HARD, crate::ASSIST_GRADE_EXHARD]),
+    (LAMP_HARD, &[crate::ASSIST_GRADE_EXHARD]),
+];
+
+/// The lamp is split only where the assisted clear was on a stronger gauge than the clear without
+/// assists that stands above it, for every lamp and every grade, one past the last included.
+#[test]
+fn a_lamp_is_split_only_by_an_assist_grade_of_a_stronger_gauge() {
+    for clear in 0..=LAMP_MAX {
+        for grade in ASSIST_GRADE_NONE..=ASSIST_GRADE_PAST_EXHARD {
+            let splits = SPLIT_BY.iter().any(|(lamp, grades)| *lamp == clear && grades.contains(&grade));
+            let wanted = if splits { grade } else { ASSIST_GRADE_NONE };
+            let best = RecordLamp { clear, assist_grade: ASSIST_GRADE_NONE };
+            assert_eq!(crate::split_assist_grade(best, grade), wanted, "lamp {clear} beside grade {grade}");
+        }
+    }
+    let graded = RecordLamp { clear: LAMP_LIGHT_ASSIST, assist_grade: crate::ASSIST_GRADE_HARD };
+    assert_eq!(crate::split_assist_grade(graded, crate::ASSIST_GRADE_EXHARD), ASSIST_GRADE_NONE, "a light-assist best is drawn in its own grade");
+    let exhard = RecordLamp { clear: LAMP_EXHARD, assist_grade: ASSIST_GRADE_NONE };
+    assert_eq!(crate::split_assist_grade(exhard, crate::ASSIST_GRADE_EXHARD), ASSIST_GRADE_NONE, "EX HARD stands over every grade");
+}
+
+/// A clear without assists takes the lamp from an assisted one of the same chart, and the row keeps
+/// the grade the assisted clear reached beside it, whichever came first; a lower grade does not
+/// lower it, and the folded bests keep it across the long-note flavours.
+#[test]
+fn the_best_row_keeps_the_highest_assist_grade_a_clear_without_assists_hides() {
+    let mut db = fresh();
+    let mode = mode_id("BEAT_7K");
+    db.record_play(&scratch_auto_clear("aa", 10, 100, "hard"), true).expect("an ASSIST HARD");
+    db.record_play(&PlayLog { clear: LAMP_EASY, gauge: gauge_id("easy"), ..play("aa", 20, 50) }, true).expect("then an EASY CLEAR");
+    db.record_play(&scratch_auto_clear("aa", 30, 50, "normal"), true).expect("then an ASSIST CLEAR");
+    let best = db.best("aa", mode).expect("reads").expect("exists");
+    let easy = RecordLamp { clear: LAMP_EASY, assist_grade: ASSIST_GRADE_NONE };
+    assert_eq!((best.lamp(), best.best_assist_grade), (easy, crate::ASSIST_GRADE_HARD));
+    assert_eq!(crate::split_assist_grade(best.lamp(), best.best_assist_grade), crate::ASSIST_GRADE_HARD, "EASY CLEAR over ASSIST HARD");
+
+    db.record_play(&PlayLog { clear: LAMP_NORMAL, ..play("bb", 10, 50) }, true).expect("a CLEAR");
+    db.record_play(&PlayLog { ln_mode: "CN".into(), ..scratch_auto_clear("bb", 20, 50, "exhard") }, true).expect("an ASSIST EXHARD in another flavour");
+    let best = db.best("bb", mode).expect("reads").expect("exists");
+    assert_eq!((best.ln_mode.as_str(), best.clear, best.best_assist_grade), (SCORE_LN_MODE_FROM_CHART, LAMP_NORMAL, crate::ASSIST_GRADE_EXHARD));
+    let in_its_flavour = db.best_in_ln_mode("bb", mode, SCORE_LN_MODE_FROM_CHART).expect("reads").expect("exists");
+    assert_eq!(in_its_flavour.best_assist_grade, ASSIST_GRADE_NONE, "the row itself holds only its own plays");
+    let folded = db.chart_best_many(&["aa".to_string(), "bb".to_string()]).expect("queried");
+    assert_eq!(folded["aa"].best_assist_grade, crate::ASSIST_GRADE_HARD);
+    assert_eq!((folded["bb"].clear, folded["bb"].best_assist_grade), (LAMP_NORMAL, crate::ASSIST_GRADE_EXHARD));
+}
+
+/// A database written before the highest grade was kept, or rewritten since by a build that
+/// predates it, holds none. Opening it folds the grade from the plays, as the grade of the lamp is
+/// folded: an imported play and one of an old rule have none, a row with no graded play is put back
+/// to none, a course stage moved onto its course gauge grades again, and a grade that stands is not
+/// written.
+#[test]
+fn opening_the_database_folds_the_highest_assist_grade_from_the_plays() {
+    let mut db = fresh();
+    let mode = mode_id("BEAT_7K");
+    db.record_play(&scratch_auto_clear("aa", 10, 100, "hard"), true).expect("an ASSIST HARD");
+    db.record_play(&PlayLog { clear: LAMP_EASY, gauge: gauge_id("easy"), ..play("aa", 20, 100) }, true).expect("an EASY CLEAR");
+    db.record_play(&PlayLog { assist: ASSIST_UNRECORDED, ..scratch_auto_clear("bb", 10, 100, "exhard") }, false).expect("an imported assisted clear");
+    db.record_play(&PlayLog { rule_version: RULE_BEFORE_JUDGE_PARITY, assist: 0, ..scratch_auto_clear("cc", 10, 100, "hard") }, true).expect("an old clear");
+    db.record_play(&PlayLog { clear: LAMP_NORMAL, ..play("dd", 10, 100) }, true).expect("a CLEAR and no assisted clear");
+    let stage = db.record_play(&scratch_auto_clear("ee", 10, 100, "exhard"), true).expect("a stage stored on EX-HARD");
+    db.record_play(&PlayLog { clear: LAMP_NORMAL, ..play("ee", 20, 100) }, true).expect("then a CLEAR");
+
+    db.conn.execute("UPDATE score SET best_assist_grade = 0", []).expect("an older build rewrote the rows");
+    db.conn.execute("UPDATE score SET best_assist_grade = ?1 WHERE chart_key = 'dd'", [crate::ASSIST_GRADE_EXHARD]).expect("a stray grade");
+    db.migrate().expect("this build opens the database again");
+    let highest = |db: &ScoreDb, key: &str| db.best(key, mode).expect("reads").expect("exists").best_assist_grade;
+    assert_eq!(highest(&db, "aa"), crate::ASSIST_GRADE_HARD, "the ASSIST HARD the EASY CLEAR hides");
+    assert_eq!(highest(&db, "bb"), ASSIST_GRADE_NONE, "an imported run never said its assist");
+    assert_eq!(highest(&db, "cc"), ASSIST_GRADE_NONE, "an old rule has no grade");
+    assert_eq!(highest(&db, "dd"), ASSIST_GRADE_NONE, "a chart with no graded play has none");
+    assert_eq!(highest(&db, "ee"), crate::ASSIST_GRADE_EXHARD);
+
+    assert_eq!(db.put_course_stages_on_class(&[stage]).expect("the stage moves"), 1);
+    assert_eq!(highest(&db, "ee"), crate::ASSIST_GRADE_CLEAR, "the stage is the ASSIST CLEAR it was");
+
+    let changes_before = db.conn.total_changes();
+    refold_assist_grades(&db.conn).expect("folds again");
+    assert_eq!(db.conn.total_changes(), changes_before, "a grade that stands is not written again");
+}
+
+/// The score book folds the highest grade of a chart's records the way the best row keeps it, so a
+/// browser reading the book splits a lamp where one reading the database does.
+#[test]
+fn the_score_book_folds_the_highest_assist_grade_beside_the_lamp() {
+    let graded = |clear: u8, gauge: &str, assist: i32| ScoreRecord { gauge: gauge.into(), assist, ..record("aa", 1, clear, [10, 0, 0, 0, 0, 0], false) };
+    let mut book = ScoreBook::default();
+    assert_eq!(book.best_assist_grade_for_md5("AA"), ASSIST_GRADE_NONE, "a chart with no record");
+    book.push(graded(LAMP_LIGHT_ASSIST, "HARD", crate::SCRATCH_AUTO_ASSIST));
+    book.push(graded(LAMP_LIGHT_ASSIST, "EXHARD", ASSIST_UNRECORDED));
+    book.push(graded(LAMP_EASY, "EASY", 0));
+    let lamp = book.best_lamp_for_md5("AA").expect("the chart has a lamp");
+    assert_eq!((lamp.clear, book.best_assist_grade_for_md5("aa")), (LAMP_EASY, crate::ASSIST_GRADE_HARD), "an imported record has no grade");
+    assert_eq!(crate::split_assist_grade(lamp, book.best_assist_grade_for_md5("aa")), crate::ASSIST_GRADE_HARD);
 }

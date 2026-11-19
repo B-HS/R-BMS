@@ -33,6 +33,10 @@ pub struct SelectRow {
     pub level: String,
     pub difficulty_color: Color,
     pub lamp: Color,
+    /// The colour of the lower half of the clear lamp, for a chart whose lamp is split by the assist
+    /// grade of a SCRATCH AUTO clear on a stronger gauge beneath it; `None` for a lamp drawn whole
+    /// in [`SelectRow::lamp`].
+    pub split_lamp: Option<Color>,
     pub folder_count: Option<usize>,
     /// DJ rank of the chart's best run (`AAA`, `A` …), or `None` when nothing has been recorded on
     /// it or the app is not showing ranks.
@@ -260,6 +264,21 @@ fn badge<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, chip: &Badge, text: &s
     ctx.draw_text_centered(r, rect.x + rect.w * 0.5, rect.y + (rect.h - scale * 14.0) * 0.5, scale, text_color, text);
 }
 
+/// The share of a clear lamp's height the upper half of a split lamp takes.
+const SPLIT_LAMP_UPPER_SHARE: f32 = 0.5;
+
+/// Fills one clear lamp LED of a row at `rect`: whole in `lamp`, or, for a split lamp, its upper half
+/// in `lamp` and its lower half in `split`, the two halves meeting on one line with no gap.
+fn fill_lamp<R: Renderer>(r: &mut R, rect: Rect, lamp: Color, split: Option<Color>) {
+    let Some(lower) = split else {
+        r.fill_rect(rect, lamp);
+        return;
+    };
+    let upper = rect.h * SPLIT_LAMP_UPPER_SHARE;
+    r.fill_rect(Rect::new(rect.x, rect.y, rect.w, upper), lamp);
+    r.fill_rect(Rect::new(rect.x, rect.y + upper, rect.w, rect.h - upper), lower);
+}
+
 fn select_panel_color(color: Color, alpha: u8) -> Color {
     Color { a: alpha, ..color }
 }
@@ -403,8 +422,9 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
             r.fill_rect(Rect::new(list.x + list.w - 2.0, y, 2.0, h), th.focus);
         }
         if !row.missing {
-            r.fill_rect(Rect::new(list.x, y, 6.0, h), row.lamp);
-            r.fill_rect(Rect::new(list.x + list.w - 10.0, y, 8.0, h), row.lamp);
+            for led in [Rect::new(list.x, y, 6.0, h), Rect::new(list.x + list.w - 10.0, y, 8.0, h)] {
+                fill_lamp(r, led, row.lamp, row.split_lamp);
+            }
         }
         if row.favorite {
             r.fill_rect(Rect::new(list.x + 6.0, y, FAVORITE_W, h), th.accent);
@@ -760,6 +780,7 @@ mod tests {
                 level: String::new(),
                 difficulty_color: Color::BLACK,
                 lamp: Color::GRAY,
+                split_lamp: None,
                 folder_count: Some(1),
                 dj_level: None,
                 favorite: false,
@@ -865,6 +886,31 @@ mod tests {
         assert!(hot.iter().all(|(rect, _)| rect.x + rect.w <= 1280.0));
         assert_eq!(cover_rect(), Rect::new(48.0, 78.0, 160.0, 160.0));
         set_theme(crate::Theme::default());
+    }
+
+    /// How far inside a lamp LED, and inside each half of it, a pixel is read.
+    const LED_INSET: f32 = 2.0;
+
+    /// How far in from the right edge of a row its right LED starts.
+    const RIGHT_LED_FROM_EDGE: f32 = 10.0;
+
+    /// A chart whose lamp is split lights the upper half of both of its LEDs in its lamp and the
+    /// lower half in the grade beneath it; one drawn whole lights both halves in its lamp.
+    #[test]
+    fn a_split_lamp_lights_the_upper_half_of_each_led_in_its_lamp_and_the_lower_half_in_the_grade() {
+        let (lamp, grade) = (Color::rgb(200, 40, 40), Color::rgb(40, 200, 40));
+        for split in [Some(grade), None] {
+            let mut drawn = view();
+            drawn.rows[0] = SelectRow { folder: false, lamp, split_lamp: split, folder_count: None, ..view().rows.remove(0) };
+            let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+            let hot = render_select(&mut canvas, &drawn);
+            let row = region_of(&hot, SelectHot::Row(0)).expect("the row is drawn");
+            for x in [row.x + LED_INSET, row.x + row.w - RIGHT_LED_FROM_EDGE + LED_INSET] {
+                let upper = canvas.pixel_at(x as u32, (row.y + LED_INSET) as u32);
+                let lower = canvas.pixel_at(x as u32, (row.y + row.h - LED_INSET) as u32);
+                assert_eq!((upper, lower), (lamp, split.unwrap_or(lamp)), "the LED at {x} of a lamp split by {split:?}");
+            }
+        }
     }
 
     fn translated() -> impl Iterator<Item = Language> {

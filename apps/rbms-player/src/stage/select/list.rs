@@ -779,6 +779,8 @@ impl AppShared {
             }),
             lamp: lamp.map(|lamp| lamp.clear),
             assist_grade: lamp.map_or(rbms_store::ASSIST_GRADE_NONE, |lamp| lamp.assist_grade),
+            split_assist_grade: lamp
+                .map_or(rbms_store::ASSIST_GRADE_NONE, |lamp| rbms_store::split_assist_grade(lamp, self.scores.best_assist_grade_for_md5(&entry.md5))),
             ..SelectBar::new(BarKind::Song { exists: true }, entry.title.as_str())
         }
     }

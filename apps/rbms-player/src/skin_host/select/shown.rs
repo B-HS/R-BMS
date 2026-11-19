@@ -59,6 +59,10 @@ pub struct BarRecord {
     pub last_played_clock: Option<LocalTime>,
     /// The assist grade inside the best lamp, 0 to 4 (`rbms_judge::AssistGrade::id`).
     pub assist_grade: u8,
+    /// The assist grade the best lamp is split with ([`rbms_store::split_assist_grade`]): 1 to 4
+    /// for a clear without assists over a SCRATCH AUTO clear on a stronger gauge, 0 for a lamp
+    /// shown whole.
+    pub split_assist_grade: u8,
 }
 
 impl BarRecord {
@@ -80,6 +84,7 @@ impl BarRecord {
             last_played: best.date,
             last_played_clock: Some(best.date).filter(|date| *date > 0).and_then(local_time),
             assist_grade: best.assist_grade,
+            split_assist_grade: rbms_store::split_assist_grade(best.lamp(), best.best_assist_grade),
         }
     }
 }

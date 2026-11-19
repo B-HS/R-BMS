@@ -94,6 +94,7 @@ pub(super) fn wheel_bar(bar: &SelectBar, now_secs: i64) -> SongBar {
         distribution: bar.distribution.map(Box::new),
         rank: chart.and_then(|chart| chart.best).and_then(|best| u8::try_from(dj_rank(best.ex, best.max_ex)).ok()),
         assist_grade: bar.assist_grade,
+        split_assist_grade: bar.split_assist_grade,
     }
 }
 
@@ -108,6 +109,7 @@ fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
         level: String::new(),
         difficulty_color: Color::GRAY,
         lamp: theme().lamp_default,
+        split_lamp: None,
         folder_count: None,
         dj_level: None,
         favorite: false,
@@ -137,6 +139,10 @@ fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
         lamp: bar
             .lamp
             .map_or(theme().lamp_default, |clear| crate::format::stored_lamp_label_color(rbms_store::RecordLamp { clear, assist_grade: bar.assist_grade }).1),
+        split_lamp: (bar.split_assist_grade != rbms_store::ASSIST_GRADE_NONE).then(|| {
+            let graded = rbms_store::RecordLamp { clear: rbms_store::LIGHT_ASSIST_CLEAR_ID, assist_grade: bar.split_assist_grade };
+            crate::format::stored_lamp_label_color(graded).1
+        }),
         dj_level: chart.best.filter(|_| score_graph).map(|best| RANK_BANDS[dj_rank(best.ex, best.max_ex)].0),
         favorite: chart.favorite,
         ..opens

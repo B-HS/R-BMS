@@ -297,6 +297,12 @@ pub struct BestScore {
     pub assist: i32,
     /// Assist grade of the row's lamp ([`crate::assist_grade_of`] of the run that set it).
     pub assist_grade: u8,
+    /// The highest assist grade any play of the row reached, whatever lamp the row holds now: the
+    /// grade a clear without assists above it hides from [`BestScore::assist_grade`], which
+    /// [`crate::split_assist_grade`] reads beside the lamp. On a row read by [`ScoreDb::best`] it
+    /// is the highest of every row of the chart in that play mode, as the lamp there stands for the
+    /// chart.
+    pub best_assist_grade: u8,
     pub rule_version: u32,
     pub replay_file: Option<String>,
 }
@@ -347,6 +353,7 @@ impl BestScore {
             gauge: row.get("gauge")?,
             assist: row.get("assist")?,
             assist_grade: row.get("assist_grade")?,
+            best_assist_grade: row.get("best_assist_grade")?,
             rule_version: row.get("rule_version")?,
             replay_file: row.get("replay_file")?,
         })
@@ -361,6 +368,8 @@ pub struct ChartBest {
     pub clear: u8,
     /// Assist grade inside that lamp: the best of the rows that hold it.
     pub assist_grade: u8,
+    /// The highest assist grade any play of the chart reached ([`BestScore::best_assist_grade`]).
+    pub best_assist_grade: u8,
     pub ex_score: u32,
     pub minbp: i64,
     pub combo: u32,
@@ -475,13 +484,20 @@ impl ScoreDb {
     /// The chart's strongest stored row in this play mode: the highest lamp, among equal lamps the
     /// highest assist grade, then the highest EX and the fewest bad-poors. This is how the reference
     /// picks one row out of several (`ScoreDatabaseAccessor.java:127-135`), with the grade rbms adds
-    /// inside a lamp.
+    /// inside a lamp. Its [`BestScore::best_assist_grade`] is the highest of every row of the chart in
+    /// the play mode, since a grade reached in one long-note flavour is the chart's as much as the
+    /// lamp the row brings from its own.
     pub fn best(&self, chart_key: &str, mode: i32) -> Result<Option<BestScore>, ScoreDbError> {
         let sql = format!(
             "SELECT {BEST_COLUMNS} FROM score WHERE chart_key = ?1 AND mode = ?2 \
              ORDER BY clear DESC, assist_grade DESC, (epg + lpg) * 2 + egr + lgr DESC, minbp ASC LIMIT 1"
         );
-        Ok(self.conn.query_row(&sql, params![chart_key, mode], BestScore::from_row).optional()?)
+        let Some(mut best) = self.conn.query_row(&sql, params![chart_key, mode], BestScore::from_row).optional()? else {
+            return Ok(None);
+        };
+        best.best_assist_grade =
+            self.conn.query_row("SELECT MAX(best_assist_grade) FROM score WHERE chart_key = ?1 AND mode = ?2", params![chart_key, mode], |row| row.get(0))?;
+        Ok(Some(best))
     }
 
     /// A chart's bests folded across every mode and flavour it was played in.
@@ -497,7 +513,8 @@ impl ScoreDb {
         }
         let placeholders = std::iter::repeat_n("?", chart_keys.len()).collect::<Vec<_>>().join(", ");
         let sql = format!(
-            "SELECT chart_key, MAX(clear * {ASSIST_GRADE_COUNT} + assist_grade) AS lamp_rank, MAX((epg + lpg) * 2 + egr + lgr) AS ex, \
+            "SELECT chart_key, MAX(clear * {ASSIST_GRADE_COUNT} + assist_grade) AS lamp_rank, MAX(best_assist_grade) AS best_assist_grade, \
+             MAX((epg + lpg) * 2 + egr + lgr) AS ex, \
              MIN(minbp) AS minbp, MAX(combo) AS combo, SUM(playcount) AS playcount, SUM(clearcount) AS clearcount, MAX(date) AS date \
              FROM score WHERE chart_key IN ({placeholders}) GROUP BY chart_key"
         );
@@ -509,6 +526,7 @@ impl ScoreDb {
                 chart_key: row.get("chart_key")?,
                 clear: u8::try_from(lamp_rank / span).unwrap_or_default(),
                 assist_grade: u8::try_from(lamp_rank % span).unwrap_or_default(),
+                best_assist_grade: row.get("best_assist_grade")?,
                 ex_score: row.get("ex")?,
                 minbp: row.get("minbp")?,
                 combo: row.get("combo")?,
@@ -652,6 +670,9 @@ impl ScoreDb {
 /// assist level although its lamp id is the same.
 fn merge_best(mut best: BestScore, log: &PlayLog, updates_best: bool) -> BestScore {
     let lamp_counts = updates_best || !crate::is_stale_rule_version(log.rule_version);
+    if lamp_counts {
+        best.best_assist_grade = best.best_assist_grade.max(log.assist_grade());
+    }
     if lamp_counts && best.lamp() < log.lamp() {
         best.clear = log.clear;
         best.assist_grade = log.assist_grade();
@@ -787,6 +808,33 @@ pub(super) fn refold_assist_grades(conn: &Connection) -> Result<(), ScoreDbError
     );
     conn.execute(&sql, params![LIGHT_ASSIST_CLEAR_ID, ASSIST_UNRECORDED, JUDGE_PARITY_RULE_VERSION])?;
     conn.execute("UPDATE score SET assist_grade = ?1 WHERE clear <> ?2 AND assist_grade <> ?1", params![ASSIST_GRADE_NONE, LIGHT_ASSIST_CLEAR_ID])?;
+    refold_best_assist_grades(conn)
+}
+
+/// Fold every row's highest assist grade ([`BestScore::best_assist_grade`]) afresh from its plays:
+/// the highest grade of any play of the row, whatever lamp the row holds now, and none for a row
+/// with no graded play. A row whose value already stands is not written.
+///
+/// It runs wherever [`refold_assist_grades`] does and for the same reasons: a database written
+/// before the column holds none, a build that predates it rewrites a row without one, and a play's
+/// gauge moved onto its course gauge grades it again. Grades are read as [`assist_grade_sql`] reads
+/// them, so a play of an old rule or one imported without its assist level has none, and only the
+/// light-assist plays, the only ones with a grade, are ranked.
+fn refold_best_assist_grades(conn: &Connection) -> Result<(), ScoreDbError> {
+    let grade = assist_grade_sql();
+    let sql = format!(
+        "UPDATE score SET best_assist_grade = f.grade \
+         FROM (SELECT l.chart_key, l.mode, l.ln_mode, MAX({grade}) AS grade FROM scorelog l WHERE l.clear = ?1 \
+               GROUP BY l.chart_key, l.mode, l.ln_mode) AS f \
+         WHERE score.chart_key = f.chart_key AND score.mode = f.mode AND score.ln_mode = f.ln_mode \
+           AND score.best_assist_grade <> f.grade"
+    );
+    conn.execute(&sql, params![LIGHT_ASSIST_CLEAR_ID, ASSIST_UNRECORDED, JUDGE_PARITY_RULE_VERSION])?;
+    conn.execute(
+        "UPDATE score SET best_assist_grade = ?1 WHERE best_assist_grade <> ?1 AND NOT EXISTS \
+         (SELECT 1 FROM scorelog l WHERE l.chart_key = score.chart_key AND l.mode = score.mode AND l.ln_mode = score.ln_mode AND l.clear = ?2)",
+        params![ASSIST_GRADE_NONE, LIGHT_ASSIST_CLEAR_ID],
+    )?;
     Ok(())
 }
 

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS score (
     rule_version INTEGER NOT NULL DEFAULT 0,
     replay_file  TEXT,
     assist_grade INTEGER NOT NULL DEFAULT 0,
+    best_assist_grade INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (chart_key, mode, ln_mode)
 );
 

@@ -253,6 +253,12 @@ pub struct SongBar {
     /// the lamp, which only a document for this player declares; a grade the wheel has no lamp
     /// under draws the lamp as it is.
     pub assist_grade: u8,
+    /// The assist grade the player's lamp is split with: zero for a lamp drawn whole, one to four
+    /// for a chart whose clear without assists stands above a SCRATCH AUTO clear of that grade on a
+    /// stronger gauge (`rbms_store::split_assist_grade`). A wheel that has a graded lamp under the
+    /// grade draws the upper half of the lamp over the lower half of that graded lamp; one that has
+    /// none, and a wheel drawn against a rival, draw the lamp whole.
+    pub split_assist_grade: u8,
 }
 
 impl SongBar {
@@ -284,6 +290,7 @@ impl SongBar {
             distribution: None,
             rank: None,
             assist_grade: ASSIST_GRADE_NONE,
+            split_assist_grade: ASSIST_GRADE_NONE,
         }
     }
 
@@ -336,6 +343,12 @@ impl SongBar {
             return None;
         }
         usize::from(self.assist_grade).checked_sub(1)
+    }
+
+    /// Which graded lamp the lower half of the bar's lamp is drawn from, or `None` for a lamp drawn
+    /// whole.
+    pub(crate) fn split_lamp_index(&self) -> Option<usize> {
+        usize::from(self.split_assist_grade).checked_sub(1)
     }
 
     /// Which trophy a course draws, or `None` for a bar that is not a course or has no medal.

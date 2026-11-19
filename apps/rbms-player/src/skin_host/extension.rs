@@ -153,6 +153,19 @@ pub const RBMS_OPTION_LANGUAGE_FIRST: i32 = 21_150;
 /// The last option of the run that starts at [`RBMS_OPTION_LANGUAGE_FIRST`].
 pub const RBMS_OPTION_LANGUAGE_LAST: i32 = run_last(RBMS_OPTION_LANGUAGE_FIRST, LANGUAGE_OPTIONS);
 
+/// How many grades a lamp can be split with: ASSIST EASY to ASSIST EXHARD, none left out.
+pub const SPLIT_ASSIST_GRADE_OPTIONS: i32 = ASSIST_GRADE_OPTIONS - 1;
+
+/// The first of four options, one for each assist grade id 1 to 4, of the best lamp of the chart
+/// under the browser's cursor split by that grade: the option `first + k - 1` is on when the chart's
+/// clear without assists (EASY, CLEAR or HARD) stands over a SCRATCH AUTO clear of grade `k` on a
+/// stronger gauge, which the wheel draws as the lower half of the lamp. At most one of the run is
+/// on, and all four are off on a lamp shown whole and on a bar with no best.
+pub const RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST: i32 = 21_160;
+
+/// The last option of the run that starts at [`RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST`].
+pub const RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST: i32 = run_last(RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST, SPLIT_ASSIST_GRADE_OPTIONS);
+
 /// How many lanes a per-lane value of the chart under the cursor is kept for: the lanes of the widest
 /// mode it is given for, fourteen keys and their two turntables, in the mode's own lane order. A lane
 /// the chart's mode does not have, and every lane of a nine-key or a twenty-four-key chart, reads as
@@ -316,6 +329,13 @@ pub fn assist_grade_asked(id: i32, first: i32) -> Option<u8> {
     if (0..ASSIST_GRADE_OPTIONS).contains(&place) { u8::try_from(place).ok() } else { None }
 }
 
+/// Which assist grade id, 1 to 4, the option `id` asks a split lamp about in the run of
+/// [`RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST`], or `None` for an id outside the run.
+pub fn split_grade_asked(id: i32) -> Option<u8> {
+    let place = id.checked_sub(RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST)?;
+    if (0..SPLIT_ASSIST_GRADE_OPTIONS).contains(&place) { u8::try_from(place + 1).ok() } else { None }
+}
+
 #[cfg(test)]
 mod tests {
     use rbms_skin::property::extension::implements;
@@ -333,7 +353,7 @@ mod tests {
     ];
 
     /// Every option this player keeps for itself, as runs of ids.
-    const OPTION_RUNS: [(i32, i32); 13] = [
+    const OPTION_RUNS: [(i32, i32); 14] = [
         (RBMS_OPTION_SCRATCH_AUTO_ON, RBMS_OPTION_SCRATCH_AUTO_ON),
         (RBMS_OPTION_KEEP_GREEN_NUMBER_ON, RBMS_OPTION_KEEP_GREEN_NUMBER_ON),
         (RBMS_OPTION_LANE_COVER_ON, RBMS_OPTION_LANE_COVER_ON),
@@ -347,6 +367,7 @@ mod tests {
         (RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST, assist_grade_options_last(RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST)),
         (RBMS_OPTION_UNREACHABLE_KEY_FIRST, RBMS_OPTION_UNREACHABLE_KEY_LAST),
         (RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST),
+        (RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST, RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST),
     ];
 
     /// Every number this player keeps for itself, as runs of ids.
@@ -474,5 +495,16 @@ mod tests {
             assert_eq!(assist_grade_asked(assist_grade_options_last(first) + 1, first), None);
         }
         assert_eq!(assist_grade_asked(i32::MIN, RBMS_OPTION_RESULT_ASSIST_GRADE_FIRST), None, "an id far below the run does not wrap round");
+    }
+
+    #[test]
+    fn a_split_grade_option_names_the_grades_from_assist_easy_to_assist_exhard() {
+        let graded: Vec<u8> = AssistGrade::ALL.iter().map(|grade| grade.id()).filter(|id| *id != AssistGrade::None.id()).collect();
+        let asked: Vec<Option<u8>> =
+            (RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST..=RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST).map(split_grade_asked).collect();
+        assert_eq!(asked, graded.into_iter().map(Some).collect::<Vec<_>>(), "one option a grade, ASSIST EASY first");
+        assert_eq!(split_grade_asked(RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST - 1), None);
+        assert_eq!(split_grade_asked(RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST + 1), None);
+        assert_eq!(split_grade_asked(i32::MIN), None, "an id far below the run does not wrap round");
     }
 }

@@ -537,6 +537,7 @@ fn this_players_own_values_are_routed_and_read_absent_until_a_cluster_knows_them
         (IdSpace::Boolean, RBMS_OPTION_RANKING_MODE_ON, RBMS_OPTION_RANKING_MODE_ON, Cluster::Select),
         (IdSpace::Boolean, RBMS_OPTION_SIBLING_CHART_FIRST, RBMS_OPTION_SIBLING_CHART_LAST, Cluster::Select),
         (IdSpace::Boolean, RBMS_OPTION_LANGUAGE_FIRST, RBMS_OPTION_LANGUAGE_LAST, Cluster::System),
+        (IdSpace::Boolean, RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST, RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_LAST, Cluster::Select),
     ];
     let timers = TimerState::new();
     let host = ScreenHost::new(NOW_US, &timers);
@@ -564,7 +565,7 @@ fn the_default_skin_names_this_players_own_ids_by_the_numbers_answered() {
         .find(|file| file.name == "lua/props.lua")
         .map(|file| std::str::from_utf8(file.bytes).expect("the script is text"))
         .expect("the pack ships its property table");
-    let named: [(&str, &str, i32); 33] = [
+    let named: [(&str, &str, i32); 34] = [
         ("extension", "SCRATCH_AUTO_ON", RBMS_OPTION_SCRATCH_AUTO_ON),
         ("extension", "KEEP_GREEN_NUMBER_ON", RBMS_OPTION_KEEP_GREEN_NUMBER_ON),
         ("extension", "LANE_COVER_ON", RBMS_OPTION_LANE_COVER_ON),
@@ -577,6 +578,7 @@ fn the_default_skin_names_this_players_own_ids_by_the_numbers_answered() {
         ("extension", "RESULT_PREVIOUS_ASSIST_GRADE_FIRST", RBMS_OPTION_RESULT_PREVIOUS_ASSIST_GRADE_FIRST),
         ("extension", "UNREACHABLE_KEY_FIRST", RBMS_OPTION_UNREACHABLE_KEY_FIRST),
         ("extension", "LANGUAGE_FIRST", RBMS_OPTION_LANGUAGE_FIRST),
+        ("extension", "SELECTED_BEST_SPLIT_GRADE_FIRST", RBMS_OPTION_SELECTED_BEST_SPLIT_GRADE_FIRST),
         ("extension_event", "SCRATCH_AUTO", RBMS_EVENT_SCRATCH_AUTO),
         ("extension_event", "KEEP_GREEN_NUMBER", RBMS_EVENT_KEEP_GREEN_NUMBER),
         ("extension_event", "RANKING_MODE", RBMS_EVENT_RANKING_MODE),
