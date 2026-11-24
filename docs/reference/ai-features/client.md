@@ -84,7 +84,7 @@
 
 계약 교차 테스트가 아는 종류는 `score`, `course`, `replay`, `settings`(`web/tests/dto/client-requests.test.ts:25`)이고 파일은 15개(`contract/client-requests/`: 점수 10, 코스 2, 리플레이 2, 설정 1; Rust 쪽 목록 `contract_requests.rs:35`).
 - 점수 본문 `ScoreSubmission`(`crates/rbms-ir/src/dto/score.rs:50-93`)은 약 1.9 KB(`score-normal.json` 1,905 B). 서버 스키마 `scoreSubmissionSchema`(`web/src/server/dto/score.ts:48-72`). 본문 한도 `SUBMISSION_MAX_BYTES = 256 * 1024`(`web/src/server/route/score.ts:16`), 분당 60회(`web/src/server/lib/with-rate-limit.ts:6`). `extra` 는 `HashMap<String, Value>` 이고 서버는 깊이만 검사해 `score.extra` JSON 컬럼에 그대로 저장한다(`dto/common.ts:114-117`, `score.service.ts:202`).
-- 리플레이 `POST /charts/{hash}/replays`(`crates/rbms-ir/src/http.rs:184-187`)는 입력 이벤트만 싣는다. 이벤트 한 개 minified JSON 이 평균 40.4 B(`replay-long.json` 1,596 이벤트에서 측정, 파일은 들여쓰기 포함 90,711 B). 본문 한도 `REPLAY_MAX_BYTES` 기본 4 MiB(`web/src/server/lib/env.ts:4, 17`), 사용자당 2,000개·512 MiB(`web/src/server/dto/replay.ts:13`), 분당 10회(`with-rate-limit.ts:7`), 저장은 `replay.data` mediumtext 의 JSON 문자열(`web/src/server/db/schema.ts` replay). 요청 스키마는 `extra` 를 받지만 서비스가 저장하지 않고 응답에서 `extra: {}` 로 돌려준다(`replay.service.ts:104`). 즉 `ReplayData.extra` 에 담아 보내도 쓸모없다.
+- 리플레이 `POST /charts/{hash}/replays`(`crates/rbms-ir/src/http.rs:184-187`)는 입력 이벤트만 싣는다. 이벤트 한 개 minified JSON 이 평균 40.4 B(`replay-long.json` 1,596 이벤트에서 측정, 파일은 들여쓰기 포함 90,711 B). 본문 한도 `REPLAY_MAX_BYTES` 기본 4 MiB(`web/src/server/lib/env.ts:4, 17`), 사용자당 20,000개·4 GiB(`web/src/server/dto/replay.ts:13`, 2026-11-24 에 2,000개·512 MiB 에서 올림), 분당 10회(`with-rate-limit.ts:7`), 저장은 `replay.data` mediumtext 의 JSON 문자열(`web/src/server/db/schema.ts` replay). 요청 스키마는 `extra` 를 받지만 서비스가 저장하지 않고 응답에서 `extra: {}` 로 돌려준다(`replay.service.ts:104`). 즉 `ReplayData.extra` 에 담아 보내도 쓸모없다.
 - 리플레이는 점수가 수락돼 `score_id` 를 받은 뒤 같은 `score_id` 로 업로드한다(`crates/rbms-ir/src/worker.rs:91-111`, 기록 동기화는 `apps/rbms-player/src/record_sync.rs:559-606`, 상태는 `ir_sync.replay_state`, `crates/rbms-store/src/scoredb/schema.sql:130`). 또 `wire_carries_judge`가 거짓이면(균일하지 않은 판정 폭, LN MARGIN, TOTAL 직접 설정) 리플레이는 올리지 않는다(`ir_replay.rs:98-103`). 노트별 데이터는 이 조건에 묶이면 안 된다.
 - 요청 제한 시간은 5초(`crates/rbms-ir/src/http.rs:14`), 폴더 요청만 30초(`:19`).
 
@@ -307,7 +307,7 @@
 4. 운영 MySQL 의 호스팅·용량·max_allowed_packet 과 Vercel 요금제(Hobby/Pro)를 확인하지 못했다. 함수 실행 시간(Hobby 300초 기본·최대, Pro 최대 800초)과 메모리가 AI 호출·서버 쪽 집계에 영향을 준다. web/vercel.json 은 리전 icn1 만 말한다.
 5. 점수 순위·상세 질의가 score 행의 extra JSON 컬럼을 읽는지(즉 크기가 늘면 읽기 비용이 느는지)는 compose 쿼리를 끝까지 읽지 않아 확인하지 못했다. 이 조사는 노트별 데이터를 score.extra 에 두지 않는 쪽을 권하므로 영향은 없다.
 6. 노트별 부속 업로드를 기본 켬으로 할지 설정 옵트인으로 할지는 결정되지 않았다(설정 스키마 6, 새 행은 rbms-config 의 SETTINGS 표에 한 줄이다). 개인 정보와 서버 용량 측면의 결정이 필요하다.
-7. 부속 업로드의 속도 제한·본문 한도·사용자당 보존량(리플레이는 2,000개·512 MiB)을 정하지 않았다. 부속을 점수와 같은 속도로 보낼지 리플레이 업로드처럼 더 느린 몫으로 보낼지 정해야 한다.
+7. 부속 업로드의 속도 제한·본문 한도·사용자당 보존량(리플레이는 20,000개·4 GiB)을 정하지 않았다. 부속을 점수와 같은 속도로 보낼지 리플레이 업로드처럼 더 느린 몫으로 보낼지 정해야 한다.
 8. 곡별 패턴을 올리는 주체와 경로(CLI 가 파일을 쓰고 웹 스크립트가 올릴지, CLI 가 rbms-ir 를 의존해 직접 올릴지, API 토큰의 관리자 권한을 쓸지)를 정하지 않았다. 기존 관리자 라우트는 세션 쿠키 방식이다.
 9. 과거 판의 소급 생성은 가능하지만(저장된 리플레이 재판정) 범위·방법을 정하지 않았다. rejudge 용 lay_out_notes·replay_judge_setup 이 rbms-player 앱 안에 있어 CLI 로 쓰려면 라이브러리 크레이트로 옮겨야 하고, 옛 FRAME 시계 리플레이는 쓸 수 없다. 사용자가 실제 몇 판을 로컬에 가졌는지 모른다.
 10. 게이지 이력을 선택 게이지 하나만 올릴지 9개 전부 올릴지(약 21.6 KB 차이) 정하지 않았다. 게이지가 판정 규칙(gauge.ron)에서 나오므로 서버가 다른 게이지를 가정 계산할 수 없다. 게이지·옵션 조언(8번)이 다른 게이지를 가정하려면 9개 전부가 필요하다.

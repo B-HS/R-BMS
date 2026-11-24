@@ -1,10 +1,10 @@
 # 리플레이 업로드가 413 "요청 본문이 허용 크기를 초과했습니다" 로 전부 거절됨 (사용자별 개수 한도 도달)
 
-최종 갱신 2026-11-24 · 상태: 원인 확정, 수리 방향은 사용자 결정 대기
+최종 갱신 2026-11-24 · 상태: 수리함(한도 상향, [ADR](../acknowledge/2026-11-24-adr-replay-user-quota-raised.md))
 
 ## 대상 파일
 
-- `web/src/server/dto/replay.ts` (`REPLAY_USER_QUOTA = { COUNT_MAX: 2000, TOTAL_BYTES_MAX: 512MiB }`)
+- `web/src/server/dto/replay.ts` (`REPLAY_USER_QUOTA`. 진단 때 값은 `{ COUNT_MAX: 2000, TOTAL_BYTES_MAX: 512MiB }`)
 - `web/src/server/service/domain/replay/replay.service.ts` (`findReplayQuotaExceeded`, `upload`)
 - `web/src/server/route/replay.ts` (`result.quotaExceeded` 를 `IR_PAYLOAD_TOO_LARGE` 로 던지는 줄)
 - `web/src/server/lib/error-message.ts` (`IR_PAYLOAD_TOO_LARGE` 문구)
@@ -44,7 +44,9 @@
 
 ## 해결
 
-미정. 한도 값과 보관 정책은 사용자가 정한다. 후보:
+사용자가 한도 상향을 골랐다(2026-11-24, "1"). `REPLAY_USER_QUOTA` 를 20,000개·4GiB 로 올렸다. 마이그레이션은 없다. 결정 기록: [ADR](../acknowledge/2026-11-24-adr-replay-user-quota-raised.md).
+
+진단 때 낸 세 안:
 
 | 안 | 내용 | 결과 |
 | --- | --- | --- |
@@ -52,7 +54,7 @@
 | 서버 순환 삭제 | 한도에 닿으면 차트별 최고 기록·최근 N개 밖의 오래된 리플레이를 지움(클라이언트 `ReplayPolicy` 와 같은 방식) | 다시 막히지 않는다. 서버의 옛 리플레이가 지워진다 |
 | 개수 한도만 제거 | 512MiB 는 유지 | 약 3,600개(현재 속도로 약 2개월 뒤)에서 `replay_bytes` 로 다시 막힌다 |
 
-어느 안이든 함께 볼 것: 저장 한도 거절에 본문 크기 초과와 다른 문구를 쓰는 일(지금 문구가 원인을 가린다).
+고치지 않고 남긴 것: 저장 한도 거절이 본문 크기 초과와 같은 문구를 쓴다(원인을 가린다. 요청 범위 밖이라 다음 작업 후보로만 둔다).
 
 ## 수리 뒤 거절된 62건
 

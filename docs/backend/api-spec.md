@@ -430,7 +430,7 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 ```
 > **열 범위**(S19 리뷰): `lntype`·`offset_ms`·`judge_rate` 는 INT 범위, `event_count`·`size` 는 0~INT 최대, `duration_us`·`events[].t_us` 는 JavaScript 와 BIGINT 가 정확히 담는 범위(절댓값 2^53-1, `duration_us` 는 0 이상), `score_id` 는 36자 이하다. 넘으면 400 이다(전에는 DB 범위 오류로 500). `format` 32자, `mode` 16자는 거절하지 않고 열 길이로 자른다. 계약 본문(`replay-long.json`·`replay-random.json`)은 그대로 받는다.
 
-> **사용자별 저장 한도**(S19, 메인이 정한 값 — 바꾸려면 `REPLAY_USER_QUOTA`): 사용자당 리플레이 2,000개, 저장 크기 합계 512MiB. 새 리플레이를 만들 때만 센다(이미 연결된 리플레이를 다시 올리는 멱등 200 은 세지 않는다). 확인과 저장 사이는 원자적이지 않아 동시에 올리면 한 건 분량까지 넘을 수 있다(업로드는 사용자당 10/min 이다). `replay.size` 는 클라이언트가 보낸 `size` 와 실제 저장 길이 가운데 큰 값이다(작게 속여 한도를 피할 수 없다). `replay.user_id` 색인(`replay_user_idx`, 마이그레이션 0003)으로 합계를 읽는다.
+> **사용자별 저장 한도**(`REPLAY_USER_QUOTA`, 2026-11-24 사용자 결정으로 2,000개·512MiB 에서 올림. [ADR](../acknowledge/2026-11-24-adr-replay-user-quota-raised.md)): 사용자당 리플레이 20,000개, 저장 크기 합계 4GiB. 새 리플레이를 만들 때만 센다(이미 연결된 리플레이를 다시 올리는 멱등 200 은 세지 않는다). 확인과 저장 사이는 원자적이지 않아 동시에 올리면 한 건 분량까지 넘을 수 있다(업로드는 사용자당 10/min 이다). `replay.size` 는 클라이언트가 보낸 `size` 와 실제 저장 길이 가운데 큰 값이다(작게 속여 한도를 피할 수 없다). `replay.user_id` 색인(`replay_user_idx`, 마이그레이션 0003)으로 합계를 읽는다.
 > **멱등**: `score_id` 가 있고 그 점수(같은 사용자)에 이미 `replay_id` 로 연결된 리플레이가 있으면 `replay` 행을 만들지 않고 200 으로 기존 `{ id, url, event_count }` 를 돌려준다(캐시 무효화도 하지 않는다). 기록 동기화가 같은 판의 리플레이를 다시 올려도 행이 쌓이지 않게 하기 위함이다. 먼저 `score_id` 의 점수가 있어야 연결이 생기므로 점수 제출(§5)이 앞선다. `score_id` 가 없는 업로드는 지금처럼 올릴 때마다 새 행이다. rate-limit(사용자당 10/min)은 200 응답에도 한 번 센다.
 ### `GET /api/replays/{id}` → `ReplayData`(events µs 포함) — 다운로드(고스트·관전·**핵분석**·검증)
 ### `GET /api/charts/{hash}/replays?player={id}&limit=` → `ReplayMeta[]`(events 제외 목록)

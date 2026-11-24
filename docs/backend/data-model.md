@@ -98,7 +98,7 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 
 ### `replay` (µs 정밀)
 | id varchar(36) PK · user_id varchar(36) idx · chart_sha256 idx · score_id null idx · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) null · `data` mediumtext null · created_at |
-- 현재 `REPLAY_STORAGE=db`는 events JSON을 `data`에 저장하고 `storage_key`는 null입니다. 외부 object storage와 `REPLAY_STORAGE=blob`은 미구현입니다. 한 건의 상한은 `REPLAY_MAX_BYTES`, 사용자별 합계 상한은 2,000개·512MiB(`REPLAY_USER_QUOTA`, S19)이며 합계는 `replay_user_idx(user_id)`(마이그레이션 `0003_replay_user_quota`)로 읽는다. `size` 는 실제 저장 길이보다 작게 기록되지 않는다.
+- 현재 `REPLAY_STORAGE=db`는 events JSON을 `data`에 저장하고 `storage_key`는 null입니다. 외부 object storage와 `REPLAY_STORAGE=blob`은 미구현입니다. 한 건의 상한은 `REPLAY_MAX_BYTES`, 사용자별 합계 상한은 20,000개·4GiB(`REPLAY_USER_QUOTA`, 2026-11-24 에 S19 의 2,000개·512MiB 에서 올림)이며 합계는 `replay_user_idx(user_id)`(마이그레이션 `0003_replay_user_quota`)로 읽는다. `size` 는 실제 저장 길이보다 작게 기록되지 않는다.
 - **µs 보존**: 이벤트 타임스탬프 `t_us`(i64)를 라운딩 없이 저장 → 핵분석(등간격·반응속도·동시성)·재시뮬 가능.
 
 ### `client_build` (빌드 allowlist — 변조 탐지)

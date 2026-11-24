@@ -151,6 +151,12 @@
 | [2026-11-19-adr-layout-pick-playback-and-capture.md](2026-11-19-adr-layout-pick-playback-and-capture.md) | LAYOUT PICK 미리보기가 실시간(`PreviewClock`, 사용자 HI-SPEED·커버·리프트, Space·PageUp/Down·Home, 소리 없음, `PlaySample` 일반화는 버림)이고 결과 화면 `P`(처음 계획 `C` 는 5번째 레인 키라 정정)로 저장한 배치(`captured_layouts.ron`, RANDOM·R-RANDOM·MIRROR·ROTATE)를 CAPTURED 목록에서 골라 같은 시드로 플레이 | 2026-11-19 | 유효(M13~M15 와 세부는 미확인 46). [LAYOUT PICK ADR](2026-10-29-adr-layout-pick.md)의 미리보기 항목을 대체 |
 | [2026-11-19-adr-select-screen-refresh.md](2026-11-19-adr-select-screen-refresh.md) | 기본 스킨 선곡 화면 개편(스킨만): 머리 한 띠(기준선 77, 칩과 칸), 제목 title 64 → heading 44·LEVEL·BPM 붙임, 바닥 한 줄(중심선 1040), 정보창 구획 머리 `kit.section` 통일, 이중선 원인은 칩 아랫변, 검색 강조는 `DIRECTORY` 형식으로 판단, LN MODE 칩은 약어 | 2026-11-19 | 유효(M18 과 세부는 미확인 47). [선곡 IIDX 식 ADR](2026-10-24-adr-select-iidx-layout.md)의 머리·바닥과 [선곡 정보창 ADR](2026-10-29-adr-select-info-overflow.md) 4절 일부를 대체 |
 
+## 2026-11-24 세션의 ADR
+
+| 파일 | 한 줄 요약 | 결정일 | 상태 |
+| --- | --- | --- | --- |
+| [2026-11-24-adr-replay-user-quota-raised.md](2026-11-24-adr-replay-user-quota-raised.md) | 리플레이 사용자별 저장 한도를 2,000개·512MiB 에서 20,000개·4GiB 로 올림(개수 한도 도달로 업로드가 전부 413 이던 것의 수리, 서버 순환 삭제와 개수 한도만 제거는 기각) | 2026-11-24 | 유효(사용자 결정) |
+
 ## 그 전의 결정 파일
 
 | 파일 | 한 줄 요약 | 날짜 | 상태 |

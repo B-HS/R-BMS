@@ -79,7 +79,7 @@ DB 는 MySQL + Drizzle(mysql2), 마이그레이션 0000~0004(`web/drizzle/`)가 
 | 저장 위치 | **MySQL `replay.data`(mediumtext)에 `JSON.stringify(events)` 인라인**. 외부 저장소 없음 | `replay.service.ts:128,154-155`, `web/src/server/service/shared/storage/replay-storage.ts:12-16`, `compose/replay.ts:44-48` |
 | `REPLAY_STORAGE=blob` | 구현 없음. 설정하면 compose 가 즉시 던짐 | compose/replay.ts:44-48, architecture.md:434 |
 | 1건 상한 | `REPLAY_MAX_BYTES` 기본 4 MB (`content-length` + 스트림 바이트 둘 다 검사) | env.ts:17, parse-request.ts `guardBodySize`·`readLimitedText` |
-| 사용자 총량 | **2,000건 / 512 MiB** | replay.ts:13 `REPLAY_USER_QUOTA`, `findReplayQuotaExceeded`(replay.service.ts:113-120), `sumUserReplays`(compose/replay.ts:96-102) |
+| 사용자 총량 | **20,000건 / 4 GiB**(2026-11-24 에 2,000건 / 512 MiB 에서 올림) | replay.ts:13 `REPLAY_USER_QUOTA`, `findReplayQuotaExceeded`(replay.service.ts:113-120), `sumUserReplays`(compose/replay.ts:96-102) |
 | 이벤트 크기 | 압축 없는 JSON 으로 이벤트 1개 약 40 바이트(fixture `contract/client-requests/replay-long.json`: 1,596이벤트, 64,489바이트) | 직접 계산 |
 | 읽기 | 공개, 무인증. `getReplayCached` 는 `cacheLife('max')` + 태그 `replay:{id}` | `web/src/server/service/read-cache.ts:132-136` |
 

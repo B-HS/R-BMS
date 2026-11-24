@@ -295,7 +295,7 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] IR-9: 서버 컴포넌트의 자기 URL fetch 제거 → `public-reads.ts` 직접 읽기
 - [x] IR-10: `proxy.ts` 로 없는 차트·플레이어·코스·리플레이 상세를 404 로
 - [x] IR-14: 순위 번호 정의 통일(공동 순위), 동점 정렬의 마지막 유일 키, `lnmode` 현재 동작 문서화(결정 대기: 테스트 부채 3.35)
-- [x] IR-15: 설정 낙관적 잠금 조건부 쓰기, 폴더 동시 추가 직렬화, 폴더 저장 한 요청, 설정 이름 16개·쓰기 30/min, 리플레이 사용자별 2,000개·512MiB. 마이그레이션 `0003_replay_user_quota`(2026-10-15 운영 적용: 적용 순서는 [architecture.md](./architecture.md) 3-2)
+- [x] IR-15: 설정 낙관적 잠금 조건부 쓰기, 폴더 동시 추가 직렬화, 폴더 저장 한 요청, 설정 이름 16개·쓰기 30/min, 리플레이 사용자별 2,000개·512MiB(2026-11-24 에 20,000개·4GiB 로 올림). 마이그레이션 `0003_replay_user_quota`(2026-10-15 운영 적용: 적용 순서는 [architecture.md](./architecture.md) 3-2)
 - [x] 클라이언트 쪽 짝(Rust, 계정): 로그아웃 때 `DELETE /api/auth/token/current` 호출(`ScoreServer::revoke_current_token`, `app_network::revoke_token_in_background`), 로그인·가입 요청에 쓰던 토큰을 Bearer 로 싣기(`HttpScoreServer` 가 토큰이 있으면 모든 호출에 싣는다. 요청 헤더는 `http::tests` 가 확인)
 - [x] 클라이언트 쪽 짝(Rust, 기록): 413·409 구분 — 기록 동기화(`crates/rbms-ir/src/sync.rs` 의 `failure_of`)가 413(`IrError::PayloadTooLarge`)·409(`IrError::Conflict`)를 서버 거절(`Failure::Refused`)로 다루고 다시 시도하지 않는다. 운영 응답에는 `details.scope` 가 없으므로(프로덕션 `details` 는 `field`·`reason` 만) scope 별 구분은 하지 않는다
 - [x] S19 4차(9e2cc0e): 범위 밖 값 400(`extra` 키 바이트, 관리자 메타·표 길이, 가입 이메일·이름), 쓰기의 잠금 오류 재시도(`withLockRetry`, [../backend/data-model.md](../backend/data-model.md) "잠금 오류 재시도"), 재전송의 최고 기록 복구, 순위 응답 판정 합계. 운영 배포 `51f3a1e`(2026-10-15 `/api/version`)
