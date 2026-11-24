@@ -10,6 +10,13 @@
 > 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 2026-10-23 Discord 병합 뒤 Rust 6,644 통과·0 실패, 웹 1,808 통과·0 실패).
 > Git: Conventional Commits, 설명은 한국어([acknowledge/2026-09-17-commit-language.md](acknowledge/2026-09-17-commit-language.md)), author 사용자 단독, AI 트레일러 금지, 선별 스테이징, force push 금지. 게이트를 통과하면 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 CI 를 확인한다. `Cargo.lock` 은 추적한다(2026-10-11 부터, 결정 D12). `target/` 과 곡 차트는 커밋하지 않는다.
 
+## 상태 (2026-11-24)
+
+- 2026-11-24 리플레이 업로드 413 진단 완료, 수리 방향은 사용자 결정 대기. 2026-11-23 02:19 부터 리플레이 업로드가 전부 413 으로 거절된다(62건). 원인은 본문 크기가 아니라 서버의 사용자별 리플레이 개수 한도 2,000개(`REPLAY_USER_QUOTA.COUNT_MAX`) 도달이다. 점수 제출과 로컬 리플레이 저장은 정상이다. 코드는 바꾸지 않았다. 기록 [bug/2026-11-24-replay-upload-413-user-quota.md](bug/2026-11-24-replay-upload-413-user-quota.md).
+  - [x] 원인 진단(로컬 `ir_sync` 와 purge 기록 대조)
+  - [ ] 한도·보관 정책 결정(사용자): 한도 상향 / 서버 순환 삭제 / 개수 한도만 제거
+  - [ ] 결정에 따른 웹 수리·배포, 거절 62건 재전송 확인
+
 ## 상태 (2026-11-19)
 
 - 2026-11-19 "기능 고도화 12건"(아래 첫 체크리스트)과 추가 요청 "램프 반 쪼개기" 구현·테스트·수리·문서 완료(`df80201`~`c29c407` 과 문서). 클라이언트만 바뀌었고 웹·DB 는 바꾸지 않았다. 클라이언트 v0.1.12 는 사용자가 게시했고(2026-11-19 13:40 UTC, Latest), 그 뒤 사용자 보고로 고친 램프 반 쪼개기 조건을 담은 v0.1.13 이 draft 다(release run 44547568815, 버전 커밋 `cd82edb`, 공증 Accepted, 한글 노트, 게시는 사용자). 남은 것: v0.1.13 게시(사용자), 메인 결정 M1~M21 의 사용자 확인(acknowledge 미확인 39~51), 실기 점검 QA 3.29(G1~G17), 테스트 부채 3.163~3.187.
