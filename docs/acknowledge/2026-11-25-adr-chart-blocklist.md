@@ -33,7 +33,7 @@
 | `iidx-19-lincle` | beatmania IIDX 19 Lincle | 353(`.bme` 342, `.bms` 5, `.bml` 4, `.pms` 2) | `~/Downloads/Beatmania IIDX19 ~Lincle~` (60곡 폴더, `.dtx` 5개는 클라이언트가 읽지 않아 뺌) |
 | `iidx-20-tricoro` | beatmania IIDX 20 Tricoro | 586 | `/Volumes/SSD/iidxbms` 의 `IIDX20 ~Tricoro~ - *` 97곡 폴더(같은 폴더의 18·19 곡은 이미 등록돼 0개 추가) |
 
-세 묶음 사이에 겹치는 해시는 없다(합 1,330). IIDX20 등록 뒤 운영 count(run 45601926550, 목록 1,330): `chart_pattern` 1행, 나머지 0행(IIDX20 차트의 기록 없음).
+세 묶음 사이에 겹치는 해시는 없다(합 1,330). IIDX20 등록 뒤 운영 count(run 45601926550, 목록 1,330): `chart_pattern` 1행, 나머지 0행(IIDX20 차트의 기록 없음). 사용자 `!` `chart-blocklist-purge-delete` run 45602670750 으로 그 1행을 지웠고, 지운 뒤 모든 대상이 0이다.
 
 운영 반영(2026-11-25): 사용자 `!` migrate run 45599298074(0015), 웹 `c24ccd1` 배포, `bun run blocklist:add` 로 391·353개 등록(서버 2 lists 744 charts, 다시 돌리면 0 added). 운영 count(DB 목록, run 45599854472. 파일판 run 45595998606 과 같음): `chart_pattern` 1행, 나머지 대상은 0행. 패턴 행은 관리자 패턴 업로드로 들어온 것이고 플레이 기록은 없다.
 
