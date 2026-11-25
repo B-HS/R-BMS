@@ -23,12 +23,12 @@
   - [x] B7. 운영 배포 확인과 정리. 배포: 운영 `/api/version` 의 `commit` 이 `f5e5795`(2026-11-25 관찰), web run 45595976228 통과. count: web-db run 45595998606(목록 744개) — `chart_pattern` 1행만 있고 `score`·`replay`·`play_trace`·`play_analysis`·`chart_best`·`submission_audit`·`chart`·표·폴더·코스는 0행(사용자 예상대로 플레이 기록 없음). 패턴 1행 삭제는 DB 전환 뒤(C7)
   - 사용자 지적(2026-11-25): "chart-blocklist를 파일로했구나? 나는 DB에 넣는걸 원했는데 이러면 push할때마다 계속 갱신해야해서 불편해". 메인이 묻지 않고 파일 방식을 정한 것이 잘못이었다(메인 메모리에 피드백 저장). 사용자 결정: DB 설계 "이대로 진행", 패턴 1행 "삭제".
   - [x] C1. 마이그레이션 0015 `chart_blocklist`(sha256 PK, md5 유일, 출처 색인)와 파일 시험 → 커밋·푸시(`6d29ed6`). 운영 status run 45598784172: 0015 만 대기
-  - [ ] C2. 운영 적용(사용자 `!` `gh workflow run web-db.yml --ref dev -f action=migrate`)
+  - [x] C2. 운영 적용: 사용자 `!` migrate run 45599298074(0015 `tables=1/1`, up to date)
   - [x] C3. 관리자 API `PUT`·`GET /api/admin/chart-blocklist`(관리자 API 토큰), 서버 거절 검사를 DB 조회로(`compose/chart-blocklist.ts`)
   - [x] C4. `blocklist:add` 를 서버 업로드로(키체인 토큰, 1,000개씩), `blocklist:list`, 정리 스크립트가 DB 목록을 읽게, 저장소 JSON·생성 모듈 제거. 로컬 게이트: typecheck·lint·format·build 통과, `bun test` 2,442 통과·0 실패·250 건너뜀(DB 시험은 CI)
-  - [ ] C5. 시험·게이트·문서·커밋·푸시·CI
-  - [ ] C6. 744개 업로드(IIDX18·19 폴더)와 운영 확인
-  - [ ] C7. 정리 count → 사용자 `!` delete(패턴 1행)
+  - [x] C5. 시험·게이트·문서·커밋·푸시·CI: `c24ccd1`, web run 45599438227 두 잡 통과(DB 시험 9개 MySQL 통과), 운영 `/api/version` 의 `commit` 이 `c24ccd1`
+  - [x] C6. `bun run blocklist:add` 로 운영 등록: `iidx-18-resort-anthem` 391·`iidx-19-lincle` 353 added, 서버 2 lists 744 charts. 다시 돌리면 0 added·353 already listed
+  - [ ] C7. 정리 count(DB 목록) run 45599854472: `chart_pattern` 1, 나머지 0 → 사용자 `!` `gh workflow run web-db.yml --ref dev -f action=chart-blocklist-purge-delete`
 
 ## 상태 (2026-11-24)
 
