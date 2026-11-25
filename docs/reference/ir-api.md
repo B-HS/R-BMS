@@ -268,7 +268,7 @@
 | 409 (settings PUT, 잠금 본문) | `SettingsConflict(server copy)` | — |
 | 413 | `PayloadTooLarge(body)` | `IR_PAYLOAD_TOO_LARGE` |
 | 429 | `RateLimited(body)` | `RATE_LIMITED` |
-| 그 외 4xx/5xx | `Server(status, body)` | `VALIDATION_ERROR` · `IR_API_VERSION_UNSUPPORTED` · `IR_TRACE_MISMATCH`(400, trace 와 점수 행이 다름) · `INTERNAL_ERROR` |
+| 그 외 4xx/5xx | `Server(status, body)` | `VALIDATION_ERROR` · `IR_API_VERSION_UNSUPPORTED` · `IR_TRACE_MISMATCH`(400, trace 와 점수 행이 다름) · `IR_CHART_BLOCKED`(422, 서버가 등록하지 않는 차트. 동기화는 거절로 센다) · `INTERNAL_ERROR` |
 | 전송 실패·타임아웃 | `Network(reason)` | — |
 | 2xx 인데 본문이 계약과 다름 | `Decode(reason)` | — |
 | `--server` 미설정(`NullScoreServer`) | `NotConfigured` | — |

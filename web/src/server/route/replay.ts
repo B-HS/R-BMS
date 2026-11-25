@@ -10,6 +10,7 @@ import { parseBearerToken } from '@server/lib/token'
 import { withApiToken } from '@server/lib/with-api-token'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { RATE_LIMIT, consumeRateLimit } from '@server/lib/with-rate-limit'
+import { rejectBlockedChart } from '@server/route/chart'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
 import { readReplay } from '@server/service/public-reads'
 import { getChartReplaysCached, resolveChartSha256Cached, revalidateOnReplayUpload } from '@server/service/read-cache'
@@ -41,6 +42,7 @@ export const createReplayUploadRoute = () =>
             const { hash } = await authedContext.params
             const input = await parseLimitedJsonBody(authedRequest, replayUploadSchema, maxBytes)
             const chartSha256 = await resolveReplayChartSha256(hash, input)
+            rejectBlockedChart({ sha256: chartSha256, md5: input.chart?.md5 })
             const result = await replayService.upload({ input, chartSha256, userId: user.id })
             if (result.quotaExceeded) throw createAppError(ERROR_CODE.IR_PAYLOAD_TOO_LARGE, result.quotaExceeded)
             if (result.created) revalidateOnReplayUpload({ chartSha256, loginId: user.loginId, scoreId: input.score_id ?? null })

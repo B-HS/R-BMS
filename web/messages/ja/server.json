@@ -8,6 +8,7 @@
         "SERVICE_NOT_CONFIGURED": "この機能はサーバーで設定されていません。",
         "INTERNAL_ERROR": "サーバー内部でエラーが発生しました。",
         "IR_CHART_NOT_FOUND": "譜面が見つかりません。",
+        "IR_CHART_BLOCKED": "この譜面はランキングに登録できません。",
         "IR_PLAYER_NOT_FOUND": "プレーヤーが見つかりません。",
         "IR_SCORE_NOT_FOUND": "スコアが見つかりません。",
         "IR_REPLAY_NOT_FOUND": "リプレイが見つかりません。",

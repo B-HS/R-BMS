@@ -10,6 +10,17 @@
 > 명령: 빌드, 테스트, 게이트는 [development.md](development.md)의 "Build / run / test", 실행 정본은 루트 `README.md`. 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정이고 CI 는 `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 를 통과해야 한다. 테스트 수는 시점 값이라 여기에 적지 않는다(마지막 게이트 기록은 2026-10-23 Discord 병합 뒤 Rust 6,644 통과·0 실패, 웹 1,808 통과·0 실패).
 > Git: Conventional Commits, 설명은 한국어([acknowledge/2026-09-17-commit-language.md](acknowledge/2026-09-17-commit-language.md)), author 사용자 단독, AI 트레일러 금지, 선별 스테이징, force push 금지. 게이트를 통과하면 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 CI 를 확인한다. `Cargo.lock` 은 추적한다(2026-10-11 부터, 결정 D12). `target/` 과 곡 차트는 커밋하지 않는다.
 
+## 상태 (2026-11-25)
+
+- 2026-11-25 차트 차단 목록(서버 등록 거부). 사용자 요청 원문: "서버에 등록안되게하는 기능이필요해 예를들어서 iidx 본가의 곡들은 등록이 되지않아야해 ... 먼저 웹랭킹서버에 등록안되게하는 기능을 추가하고 이 두개폴더에서 모든 곡들을 분석해서 서버에 블랙리스트 곡으로 등록하게해줘". 진행 방식: 메인 단독(workflow 안 씀). 기존 기록은 개수 확인 뒤 삭제(사용자 "1번이야. 근데 아마없을거야 플레이한기록은 없거든").
+  - [x] B1. 차단 목록 생성 스크립트(`web/scripts/chart-blocklist.ts`, 폴더를 읽어 차트 파일의 md5·sha256 을 `web/data/chart-blocklist/<id>.json` 으로)
+  - [x] B2. IIDX18 Resort Anthem·IIDX19 Lincle 목록 생성(391·353개, 겹침 없음, 합 744)
+  - [x] B3. 서버 차단: 점수 제출·차트 upsert·리플레이·판별 기록·차트 패턴 업로드가 목록의 차트를 `IR_CHART_BLOCKED`(422)로 거절([ADR](acknowledge/2026-11-25-adr-chart-blocklist.md))
+  - [x] B4. 운영 기존 기록 정리 스크립트(`chart-blocklist-purge.ts count|delete`)와 `web-db.yml` 액션
+  - [x] B5. 시험·웹 게이트(typecheck·lint·format·build 통과, `bun test` 2,437 통과·0 실패·246 건너뜀. 새 DB 시험 `tests/db/chart-blocklist.test.ts` 는 로컬 MySQL 이 없어 web CI 에서 확인)
+  - [ ] B6. 문서(ADR, API 명세, web 구조)·커밋·푸시·CI
+  - [ ] B7. 운영 배포 확인과 정리 count(사용자 `!`), 행이 있으면 delete(사용자 `!`)
+
 ## 상태 (2026-11-24)
 
 - 2026-11-24 리플레이 업로드 413 진단과 수리. 2026-11-23 02:19 부터 리플레이 업로드가 전부 413 으로 거절됐다(62건). 원인은 본문 크기가 아니라 서버의 사용자별 리플레이 개수 한도 2,000개(`REPLAY_USER_QUOTA.COUNT_MAX`) 도달이다. 점수 제출과 로컬 리플레이 저장은 정상이었다. 사용자 결정으로 한도를 20,000개·4GiB 로 올렸다(웹 상수만, 마이그레이션 없음). 기록 [bug/2026-11-24-replay-upload-413-user-quota.md](bug/2026-11-24-replay-upload-413-user-quota.md), 결정 [acknowledge/2026-11-24-adr-replay-user-quota-raised.md](acknowledge/2026-11-24-adr-replay-user-quota-raised.md).

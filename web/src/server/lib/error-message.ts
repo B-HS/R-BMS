@@ -9,6 +9,7 @@ export const ERROR_MESSAGE: Record<ErrorCode, string> = {
     [ERROR_CODE.SERVICE_NOT_CONFIGURED]: '해당 기능이 서버에 구성되어 있지 않습니다.',
     [ERROR_CODE.INTERNAL_ERROR]: '서버 내부 오류가 발생했습니다.',
     [ERROR_CODE.IR_CHART_NOT_FOUND]: '차트를 찾을 수 없습니다.',
+    [ERROR_CODE.IR_CHART_BLOCKED]: '랭킹에 등록하지 않는 차트입니다.',
     [ERROR_CODE.IR_PLAYER_NOT_FOUND]: '플레이어를 찾을 수 없습니다.',
     [ERROR_CODE.IR_SCORE_NOT_FOUND]: '스코어를 찾을 수 없습니다.',
     [ERROR_CODE.IR_REPLAY_NOT_FOUND]: '리플레이를 찾을 수 없습니다.',

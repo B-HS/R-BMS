@@ -8,6 +8,7 @@
         "SERVICE_NOT_CONFIGURED": "This feature is not set up on the server.",
         "INTERNAL_ERROR": "An internal server error occurred.",
         "IR_CHART_NOT_FOUND": "The chart could not be found.",
+        "IR_CHART_BLOCKED": "This chart is not accepted for the rankings.",
         "IR_PLAYER_NOT_FOUND": "The player could not be found.",
         "IR_SCORE_NOT_FOUND": "The score could not be found.",
         "IR_REPLAY_NOT_FOUND": "The replay could not be found.",

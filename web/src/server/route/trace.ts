@@ -22,6 +22,7 @@ import { withErrorHandling } from '@server/lib/with-error-handling'
 import { enforceUserRateLimit } from '@server/lib/with-rate-limit'
 import { withSession } from '@server/lib/with-session'
 import { withSummarizedErrors } from '@server/lib/with-summarized-errors'
+import { rejectBlockedChart } from '@server/route/chart'
 import type { AuthService } from '@server/service/domain/auth/auth.service'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
 import { TRACE_UPLOAD_OUTCOME, type TraceService } from '@server/service/domain/trace/trace.service'
@@ -91,6 +92,7 @@ export const createTraceRoutes = (resolveDeps: () => TraceRouteDeps = compose, w
             const { hash } = await context.params
             if (classifyChartHash(hash) === 'unknown') throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND, { hash })
             const input = await parseLimitedJsonBody(request, traceUploadSchema, TRACE_MAX_BYTES)
+            rejectBlockedChart(input.chart)
             const result = await deps.traceService.upload({ input, pathHash: hash, userId: user.id })
             if (result.outcome === TRACE_UPLOAD_OUTCOME.SCORE_NOT_FOUND) throw createAppError(ERROR_CODE.IR_SCORE_NOT_FOUND, { field: 'score_id' })
             if (result.outcome === TRACE_UPLOAD_OUTCOME.MISMATCH) {

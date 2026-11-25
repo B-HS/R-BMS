@@ -8,6 +8,7 @@ import { parseLimitedJsonBody, parseSearchParams } from '@server/lib/parse-reque
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { withApiToken } from '@server/lib/with-api-token'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
+import { getChartBlocklist, type ChartHashes } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import {
     getChartBestCached,
     getChartMetaCached,
@@ -21,6 +22,11 @@ type HashContext = { params: Promise<{ hash: string }> }
 export const resolveKnownChart = async (hash: string, resolveSha256 = resolveChartSha256Cached) => {
     if (classifyChartHash(hash) === 'unknown') throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND, { hash })
     return resolveSha256(hash)
+}
+
+/** Refuses a chart of the blocklist (`web/data/chart-blocklist/`) before anything of it is stored. */
+export const rejectBlockedChart = (chart: ChartHashes, blocklist = getChartBlocklist()) => {
+    if (blocklist.isBlocked(chart)) throw createAppError(ERROR_CODE.IR_CHART_BLOCKED)
 }
 
 export const createChartDetailRoute = () =>
@@ -37,6 +43,7 @@ export const createChartUpsertRoute = () =>
         const { authService, chartService } = compose()
         return withApiToken({ resolveApiTokenUser: authService.resolveApiTokenUser })(async (authedRequest) => {
             const body = await parseLimitedJsonBody(authedRequest, chartUpsertSchema, CHART_UPSERT_MAX_BYTES)
+            rejectBlockedChart(body.chart)
             const row = await chartService.upsertFromMeta(body.chart)
             if (!row) throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND)
             revalidateOnChartUpsert({ sha256: row.sha256, md5: row.md5 })

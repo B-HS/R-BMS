@@ -40,6 +40,7 @@
 | 403 | 권한 없음 | `FORBIDDEN` |
 | 404 | 리소스 없음 | `IR_CHART_NOT_FOUND`·`IR_PLAYER_NOT_FOUND`·`IR_SCORE_NOT_FOUND`·`IR_REPLAY_NOT_FOUND`·`IR_SETTING_NOT_FOUND`·`IR_COURSE_NOT_FOUND`·`IR_TABLE_NOT_FOUND`·`IR_FOLDER_NOT_FOUND`(그 밖에 일반 `NOT_FOUND`) |
 | 409 | 충돌 | `IR_ACCOUNT_EXISTS`(중복 계정) · `IR_FOLDER_NAME_TAKEN` · `IR_FOLDER_LIMIT_EXCEEDED` · `IR_FOLDER_CONFLICT`(폴더 통째 저장의 `base_updated_at` 불일치). 설정 blob 의 낙관적 잠금 충돌은 에러 봉투가 아니라 `{ conflict, server }` 본문의 409 다(§9) |
+| 422 | 서버가 등록하지 않는 차트(차단 목록 `web/data/chart-blocklist/`, sha256 이나 md5 하나라도 맞으면). `POST /api/scores`·`POST /api/charts`·`POST /api/charts/[hash]/replays`·`POST /api/charts/[hash]/traces`·`PUT /api/admin/chart-patterns/[md5]` 가 아무것도 저장하기 전에 거절한다([ADR](../acknowledge/2026-11-25-adr-chart-blocklist.md)) | `IR_CHART_BLOCKED` |
 | 413 | 본문 초과(점수·코스·설정·리플레이) 또는 저장 한도(리플레이 개수·총 바이트 §8, 설정 이름 수 §9) | `IR_PAYLOAD_TOO_LARGE` (비프로덕션 응답의 `details.scope` 가 `replay_count`·`replay_bytes`·`setting_names` 면 저장 한도다. 운영 응답은 `field`·`reason` 외의 `details` 를 싣지 않으므로 클라이언트는 413 한 가지로 다룬다) |
 | 429 | rate-limit | `RATE_LIMITED` |
 | 500 | 원인을 알 수 없는 서버 오류. 가입·로그인에서는 DB 끊김, 인증 설정 누락처럼 계정 문제가 아닌 실패가 여기로 온다 | `INTERNAL_ERROR` (원인은 서버 로그에만 남는다) |
