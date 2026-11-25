@@ -3,7 +3,7 @@ import type { ChartBlocklistRow, ChartBlocklistServiceDb } from '@server/service
 /** An in-memory `chart_blocklist`: sha256 is the key and md5 is unique, as migration 0015 makes them. */
 export const createMemoryChartBlocklistDb = (initial: ChartBlocklistRow[] = []) => {
     const rows = new Map(initial.map((row) => [row.sha256, row]))
-    const calls = { isListed: 0 }
+    const calls = { isListed: 0, inserts: 0 }
     const db: ChartBlocklistServiceDb = {
         isListed: async ({ sha256, md5 }) => {
             calls.isListed += 1
@@ -15,6 +15,7 @@ export const createMemoryChartBlocklistDb = (initial: ChartBlocklistRow[] = []) 
             const md5s = new Set([...rows.values()].map((row) => row.md5))
             const fresh = incoming.filter((row) => !rows.has(row.sha256) && !md5s.has(row.md5))
             fresh.forEach((row) => rows.set(row.sha256, row))
+            calls.inserts += 1
             return fresh.length
         },
         listSources: async () =>
@@ -22,6 +23,8 @@ export const createMemoryChartBlocklistDb = (initial: ChartBlocklistRow[] = []) 
                 .toSorted(([a], [b]) => Number(a > b) - Number(a < b))
                 .map(([sourceId, group]) => ({ sourceId, sourceLabel: group[0].sourceLabel, charts: group.length })),
         listHashes: async () => ({ sha256s: [...rows.keys()], md5s: [...rows.values()].map((row) => row.md5) }),
+        listCharts: async () => [...rows.values()].map(({ md5, sourceId, sourceLabel, path }) => ({ md5, sourceId, sourceLabel, path })),
+        version: async () => ({ charts: rows.size, lastAddedAt: calls.inserts }),
     }
     return { db, rows, calls }
 }

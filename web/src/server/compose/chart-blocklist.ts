@@ -46,6 +46,21 @@ export const createChartBlocklistDb = (db: Database) =>
             return rows.map((row) => ({ ...row, sourceLabel: row.sourceLabel ?? '' }))
         },
 
+        listCharts: async () =>
+            db
+                .select({
+                    md5: chartBlocklist.md5,
+                    sourceId: chartBlocklist.sourceId,
+                    sourceLabel: chartBlocklist.sourceLabel,
+                    path: chartBlocklist.path,
+                })
+                .from(chartBlocklist),
+
+        version: async () => {
+            const [row] = await db.select({ charts: count(), lastAddedAt: max(chartBlocklist.createdAt) }).from(chartBlocklist)
+            return { charts: row?.charts ?? 0, lastAddedAt: row?.lastAddedAt?.getTime() ?? 0 }
+        },
+
         listHashes: async () => {
             const rows = await db.select({ sha256: chartBlocklist.sha256, md5: chartBlocklist.md5 }).from(chartBlocklist)
             return { sha256s: rows.map((row) => row.sha256), md5s: rows.map((row) => row.md5) }

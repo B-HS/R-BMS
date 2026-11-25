@@ -5,6 +5,11 @@ export type ChartHashes = { md5?: string | null; sha256?: string | null }
 
 export type ChartBlocklistRow = { sha256: string; md5: string; sourceId: string; sourceLabel: string; path: string; addedBy: string | null }
 
+export type ListedChart = Pick<ChartBlocklistRow, 'md5' | 'sourceId' | 'sourceLabel' | 'path'>
+
+/** What changes whenever a chart is added: the count and the time of the latest addition (ms, 0 for an empty list). */
+export type ChartBlocklistVersion = { charts: number; lastAddedAt: number }
+
 export type ChartBlocklistServiceDb = {
     isListed: (hashes: { sha256: string | null; md5: string | null }) => Promise<boolean>
     findListed: (hashes: { sha256s: string[]; md5s: string[] }) => Promise<{ sha256: string; md5: string }[]>
@@ -12,6 +17,8 @@ export type ChartBlocklistServiceDb = {
     insertNew: (rows: ChartBlocklistRow[]) => Promise<number>
     listSources: () => Promise<{ sourceId: string; sourceLabel: string; charts: number }[]>
     listHashes: () => Promise<{ sha256s: string[]; md5s: string[] }>
+    listCharts: () => Promise<ListedChart[]>
+    version: () => Promise<ChartBlocklistVersion>
 }
 
 /** The charts the server never ranks: a chart is blocked when its sha256 or its md5 is in `chart_blocklist`. */
@@ -36,6 +43,8 @@ export const createChartBlocklistService = (deps: { db: ChartBlocklistServiceDb 
 
     listSources: () => deps.db.listSources(),
     listHashes: () => deps.db.listHashes(),
+    listCharts: () => deps.db.listCharts(),
+    version: () => deps.db.version(),
 })
 
 export type ChartBlocklistService = ReturnType<typeof createChartBlocklistService>

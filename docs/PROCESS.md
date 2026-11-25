@@ -29,6 +29,7 @@
   - [x] C5. 시험·게이트·문서·커밋·푸시·CI: `c24ccd1`, web run 45599438227 두 잡 통과(DB 시험 9개 MySQL 통과), 운영 `/api/version` 의 `commit` 이 `c24ccd1`
   - [x] C6. `bun run blocklist:add` 로 운영 등록: `iidx-18-resort-anthem` 391·`iidx-19-lincle` 353 added, 서버 2 lists 744 charts. 다시 돌리면 0 added·353 already listed
   - [x] C8. 사용자 모음 폴더 `/Volumes/SSD/iidxbms`(IIDX18·19·20 곡 폴더 221개)로 시험 등록. 스크립트가 곡 폴더 이름의 버전으로 묶음을 나누게 고침. 결과: 18·19 는 0 added(391·353 already listed), `iidx-20-tricoro` 586 added, 서버 3 lists 1,330 charts
+  - [ ] D1. 차단 곡 폴더(사용자 요청 "blocked 곡은 따로 폴더로 모아서 볼수있게해줘", 결정: 난이도표·웹만·메인 단독): `/tables/blocked` 표(묶음별 레벨), 시험, 커밋·푸시·CI, 운영 확인
   - [x] C7. 정리 count(DB 목록) run 45599854472·45601926550(1,330개): `chart_pattern` 1, 나머지 0 → 사용자 `!` delete run 45602670750: 지운 뒤 모든 대상 0
 
 ## 상태 (2026-11-24)

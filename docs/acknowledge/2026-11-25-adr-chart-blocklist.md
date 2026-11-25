@@ -53,6 +53,16 @@ bun run blocklist:list                          # 서버의 묶음별 수
 3. 1,000개씩 나눠 보내고, 묶음마다 "찾은 수, 더한 수, 이미 있던 수" 를 찍는다. 같은 폴더를 다시 돌려도 더해지는 것은 없다. 같은 버전의 빠진 곡을 나중에 받아도 같은 명령이면 같은 묶음에 더해진다.
 4. 끝나면 서버의 묶음별 수와 `chart-blocklist-purge-count` 명령을 알린다. 등록 전에 이미 들어온 기록이 있을지 모르면 count → 행이 있으면 사용자 `!` delete.
 
+## 차단 곡을 폴더로 보기(난이도표 `/tables/blocked`)
+
+사용자 요청(2026-11-25 원문): "blocked 곡은 따로 폴더로 모아서 볼수있게해줘". 보이는 곳은 "난이도표로", 클라이언트 기본 표에는 넣지 않고 "웹만, URL 은 직접 추가", 메인 단독(모두 추천안).
+
+- 웹이 `chart_blocklist` 를 표 하나(id `blocked`, 이름 `R-BMS Blocked Charts`, 기호 빈 문자열)로 내보낸다: 표 목록(`/tables`), 페이지 `/tables/blocked`(`bmstable` 메타), 표준 `/tables/blocked/header.json`·`data.json`. 레벨은 묶음마다 하나(묶음 이름, 예 `beatmania IIDX 18 Resort Anthem`), 묶음 id 의 숫자를 수로 비교한 순서, 항목 제목은 차트 파일 이름(확장자 뺌, 표에 제목을 따로 두지 않으므로). 목록이 비면 표가 없다.
+- 기호를 비운 까닭: 클라이언트는 폴더 이름을 `기호 + 레벨` 로 붙인다(`select_tree.rs` `level_title`). 기호가 있으면 `Xbeatmania IIDX 18 …` 이 된다.
+- 등록하면 배포 없이 다음 읽기부터 표에 나온다. 서버 인스턴스는 목록의 (개수, 마지막 등록 시각)이 바뀔 때만 표를 다시 만든다(`createBlockedTableCache`). 표준 파일 응답은 CDN 이 최대 1시간 캐시한다(기존 표와 같음).
+- 클라이언트에서 보기: 표 관리자에 `https://bms.hyuns.uk/tables/blocked` 를 더하면 선곡 화면에 표 폴더로, 묶음별 하위 폴더로 보인다. 라이브러리에 없는 차트는 기존 표처럼 흐리게 나온다.
+- 코드: `web/src/server/service/domain/table-snapshot/blocked-table.ts`, `compose/table-snapshot.ts`(`createTableLoader` 의 셋째 원천), `src/app/(app)/tables/blocked/page.tsx`.
+
 ## 남는 것
 
 - 같은 곡이라도 바이트가 다른 다른 판(다른 배포본, 수정본)은 막지 못한다. 해시가 다르면 다른 차트다. 그런 파일을 받으면 같은 명령으로 더한다.

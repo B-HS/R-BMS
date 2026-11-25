@@ -12,6 +12,8 @@ import {
 import { deriveLevelOrder, parseJsonBytes } from '@server/service/domain/table-refresh/table-refresh.validate'
 import { getSnapshotTables, type SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { createTableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
+import { createBlockedTableCache } from '@server/service/domain/table-snapshot/blocked-table'
+import { createChartBlocklistDb } from '@server/compose/chart-blocklist'
 import { chartBestScope } from '@server/compose/best-scope'
 import { createTableSnapshotStore } from '@server/compose/table-refresh'
 
@@ -103,13 +105,20 @@ export const createRemoteSnapshotCache = (store: Pick<TableSnapshotStoreDb, 'lis
     }
 }
 
-/** Every table the server serves: the bundled ones, then the copies of other sites. */
-export const createTableLoader = (remoteTables: Pick<ReturnType<typeof createRemoteSnapshotCache>, 'load'>) => async () =>
-    new Map([...getSnapshotTables(), ...(await remoteTables.load()).map((table) => [table.id, table] as const)])
+/** Every table the server serves: the bundled ones, the copies of other sites, then the charts the server never ranks. */
+export const createTableLoader =
+    (
+        remoteTables: Pick<ReturnType<typeof createRemoteSnapshotCache>, 'load'>,
+        blockedTable: Pick<ReturnType<typeof createBlockedTableCache>, 'load'> = { load: async () => null },
+    ) =>
+    async () => {
+        const [remote, blocked] = await Promise.all([remoteTables.load(), blockedTable.load()])
+        return new Map([...getSnapshotTables(), ...[...remote, ...(blocked ? [blocked] : [])].map((table) => [table.id, table] as const)])
+    }
 
 export const composeTableSnapshot = (db: Database) => {
     const tableSnapshotService = createTableSnapshotService({
-        loadTables: createTableLoader(createRemoteSnapshotCache(createTableSnapshotStore(db))),
+        loadTables: createTableLoader(createRemoteSnapshotCache(createTableSnapshotStore(db)), createBlockedTableCache(createChartBlocklistDb(db))),
         db: {
             listBestByMd5: async ({ userId, md5s }) => {
                 if (md5s.length === 0) return []
