@@ -161,7 +161,7 @@
 
 | 파일 | 한 줄 요약 | 결정일 | 상태 |
 | --- | --- | --- | --- |
-| [2026-11-25-adr-chart-blocklist.md](2026-11-25-adr-chart-blocklist.md) | 서버가 등록하지 않는 차트 목록(`web/data/chart-blocklist/`, IIDX 18·19 의 744개부터): 점수·차트·리플레이·trace·패턴 쓰기를 `IR_CHART_BLOCKED`(422)로 거절, 기존 행은 `chart-blocklist-purge` 로 세고 지움 | 2026-11-25 | 유효(사용자 요구, 저장 방식·응답 코드는 메인) |
+| [2026-11-25-adr-chart-blocklist.md](2026-11-25-adr-chart-blocklist.md) | 서버가 등록하지 않는 차트 목록(운영 DB `chart_blocklist`, 관리자 API·`bun run blocklist:add <폴더>` 로 배포 없이 등록, IIDX 18·19 의 744개부터. 첫 판의 저장소 파일 방식은 사용자 지적으로 DB 로 옮김): 점수·차트·리플레이·trace·패턴 쓰기를 `IR_CHART_BLOCKED`(422)로 거절, 기존 행은 `chart-blocklist-purge` 로 세고 지움 | 2026-11-25 | 유효(사용자 요구·DB 저장, 응답 코드는 메인) |
 
 ## 그 전의 결정 파일
 

@@ -3,45 +3,85 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { CHART_BLOCKLIST_BATCH_MAX } from '@server/dto/chart-blocklist'
+import type { AuthUser } from '@server/lib/auth-context'
+import { createChartBlocklistRoutes } from '@server/route/chart-blocklist'
+import { createChartBlocklistService } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import { parsePurgeCommand } from '../../scripts/chart-blocklist-purge'
 import {
-    checkBlocklist,
     deriveSourceName,
     isChartFileName,
-    mergeSource,
+    listSources,
     parseBlocklistCommand,
-    renderDataModule,
+    registerCharts,
     scanFolder,
+    type Fetch,
 } from '../../scripts/chart-blocklist'
+import { createMemoryChartBlocklistDb } from '../support/chart-blocklist-memory-db'
 
+const SERVER = 'https://bms.hyuns.uk'
+const ADMIN: AuthUser = { id: 'user-admin', loginId: 'admin', name: 'Admin', role: 'admin' }
+const PLAYER: AuthUser = { id: 'user-player', loginId: 'player', name: 'Player', role: 'user' }
+const TOKENS = new Map([
+    ['rbms_admin_token', ADMIN],
+    ['rbms_player_token', PLAYER],
+])
+const SOURCE = { id: 'iidx-20-tricoro', label: 'beatmania IIDX 20 tricoro' }
 const CHART_TEXT = '#TITLE sample\n#00111:01\n'
 const OTHER_TEXT = '#TITLE other\n'
 const DECOMPOSED_NAME = 'ユミル'.normalize('NFD')
 
-const entry = (seed: string, path: string) => ({ md5: seed.repeat(32), sha256: seed.repeat(64), path })
+const hexOf = (index: number, length: number) => index.toString(16).padStart(length, '0')
+const chartAt = (index: number) => ({ md5: hexOf(index, 32), sha256: hexOf(index, 64), path: `song/${index}.bme` })
+
+/** A `fetch` that hands each request to the real admin route handlers over an in-memory `chart_blocklist`. */
+const createServer = () => {
+    const memory = createMemoryChartBlocklistDb()
+    const routes = createChartBlocklistRoutes(
+        () => ({
+            authService: { resolveApiTokenUser: async (plain) => TOKENS.get(plain) ?? null },
+            chartBlocklistService: createChartBlocklistService({ db: memory.db }),
+        }),
+        async () => undefined,
+    )
+    const requests: string[] = []
+    const fetch: Fetch = async (input, init) => {
+        requests.push(init.method ?? 'GET')
+        const request = new Request(input, init)
+        return init.method === 'PUT' ? routes.put(request, {}) : routes.list(request, {})
+    }
+    return { memory, fetch, requests }
+}
 
 describe('parseBlocklistCommand', () => {
-    test('add 는 폴더 여럿과 --publish 를 받고 bun run 의 -- 를 건너뛴다', () => {
-        expect(parseBlocklistCommand(['add', '--', '/a', '/b', '--publish'])).toEqual({
+    test('add 는 폴더 여럿과 --dry-run 을 받고 bun run 의 -- 를 건너뛰며 서버 기본값은 운영이다', () => {
+        expect(parseBlocklistCommand(['add', '--', '/a', '/b', '--dry-run'])).toEqual({
             kind: 'add',
             folders: ['/a', '/b'],
             id: null,
             label: null,
-            shouldPublish: true,
+            isDryRun: true,
+            server: SERVER,
+            tokenEnv: null,
         })
-        expect(parseBlocklistCommand(['check'])).toEqual({ kind: 'check' })
+        expect(parseBlocklistCommand(['list', '--server', 'http://localhost:3000', '--token-env', 'RBMS_ADMIN_TOKEN'])).toEqual({
+            kind: 'list',
+            server: 'http://localhost:3000',
+            tokenEnv: 'RBMS_ADMIN_TOKEN',
+        })
     })
 
-    test('--id·--label 은 폴더 하나일 때만, id 는 kebab-case 만 받는다', () => {
+    test('--id·--label 은 폴더 하나일 때만, id 는 kebab-case 만, 서버는 https 나 이 컴퓨터만 받는다', () => {
         expect(parseBlocklistCommand(['add', '/a', '--id', 'iidx-20-tricoro', '--label', ' beatmania IIDX 20 tricoro '])).toMatchObject({
             id: 'iidx-20-tricoro',
             label: 'beatmania IIDX 20 tricoro',
         })
         expect(parseBlocklistCommand(['add', '/a', '/b', '--id', 'x'])).toBeNull()
         expect(parseBlocklistCommand(['add', '/a', '--id', 'IIDX 20'])).toBeNull()
+        expect(parseBlocklistCommand(['add', '/a', '--server', 'http://bms.hyuns.uk'])).toBeNull()
         expect(parseBlocklistCommand(['add'])).toBeNull()
         expect(parseBlocklistCommand(['add', '/a', '--force'])).toBeNull()
-        expect(parseBlocklistCommand(['check', 'x'])).toBeNull()
+        expect(parseBlocklistCommand(['list', '/a'])).toBeNull()
         expect(parseBlocklistCommand([])).toBeNull()
     })
 })
@@ -109,58 +149,38 @@ describe('scanFolder', () => {
     })
 })
 
-describe('mergeSource', () => {
-    const other = { id: 'other', label: 'Other', charts: [entry('a', 'x/a.bms')] }
-    const existing = { id: 'pack', label: 'Pack (first)', charts: [entry('b', 'p/b.bms')] }
-
-    test('다른 목록에 있는 차트는 빼고, 같은 id 의 목록에 합치며 그 이름을 지킨다', () => {
-        const scanned = [entry('a', 'p/a.bms'), entry('b', 'p/b.bms'), entry('c', 'p/c.bms')]
-        const merged = mergeSource({ id: 'pack', label: 'Pack (second)', scanned, sources: [other, existing] })
-        expect(merged).toEqual({
-            source: { id: 'pack', label: 'Pack (first)', charts: [entry('b', 'p/b.bms'), entry('c', 'p/c.bms')] },
-            added: 1,
-            alreadyListed: 1,
-        })
+describe('registerCharts·listSources (실제 관리자 라우트, 메모리 DB)', () => {
+    test('한 요청의 상한을 넘는 폴더는 나눠 보내고, 다시 보내면 모두 이미 있는 것으로 센다', async () => {
+        const { fetch, memory, requests } = createServer()
+        const charts = Array.from({ length: CHART_BLOCKLIST_BATCH_MAX + 1 }, (_, index) => chartAt(index + 1))
+        const first = await registerCharts({ fetch, server: SERVER, token: 'rbms_admin_token', source: SOURCE, charts })
+        expect(first).toEqual({ received: charts.length, added: charts.length, alreadyListed: 0 })
+        expect(requests).toEqual(['PUT', 'PUT'])
+        expect(memory.rows.get(charts[0].sha256)).toMatchObject({ sourceId: SOURCE.id, sourceLabel: SOURCE.label, addedBy: ADMIN.id })
+        const again = await registerCharts({ fetch, server: SERVER, token: 'rbms_admin_token', source: SOURCE, charts: charts.slice(0, 2) })
+        expect(again).toEqual({ received: 2, added: 0, alreadyListed: 2 })
+        expect(await listSources({ fetch, server: SERVER, token: 'rbms_admin_token' })).toEqual([{ ...SOURCE, charts: charts.length }])
     })
 
-    test('md5 만 다른 목록에 있어도 이미 있는 차트로 본다', () => {
-        const scanned = [{ ...entry('d', 'p/d.bms'), md5: 'a'.repeat(32) }]
-        expect(mergeSource({ id: 'new', label: 'New', scanned, sources: [other] })).toMatchObject({ added: 0, alreadyListed: 1 })
-    })
-})
-
-describe('renderDataModule·checkBlocklist', () => {
-    let dir = ''
-
-    beforeAll(async () => {
-        dir = await mkdtemp(join(tmpdir(), 'chart-blocklist-module-'))
-        await mkdir(join(dir, 'lists'))
-        await writeFile(
-            join(dir, 'lists', 'iidx-20-tricoro.json'),
-            JSON.stringify({ id: 'iidx-20-tricoro', label: 'T', charts: [entry('a', 'a.bms')] }),
+    test('관리자가 아닌 토큰은 403, 토큰이 틀리면 401 로 멈추고 아무것도 넣지 않는다', async () => {
+        const { fetch, memory } = createServer()
+        const charts = [chartAt(1)]
+        await expect(registerCharts({ fetch, server: SERVER, token: 'rbms_player_token', source: SOURCE, charts })).rejects.toThrow(
+            'server answered 403 FORBIDDEN',
         )
+        await expect(registerCharts({ fetch, server: SERVER, token: 'wrong', source: SOURCE, charts })).rejects.toThrow(
+            'server answered 401 UNAUTHORIZED',
+        )
+        expect(memory.rows.size).toBe(0)
     })
 
-    afterAll(async () => {
-        await rm(dir, { recursive: true, force: true })
-    })
-
-    test('목록마다 import 하나와 배열 한 칸을 id 순으로 쓴다', async () => {
-        const text = await renderDataModule(['iidx-20-tricoro', 'iidx-18-resort-anthem'])
-        expect(text).toContain("import iidx18ResortAnthem from '../../../../../data/chart-blocklist/iidx-18-resort-anthem.json'")
-        expect(text).toContain('CHART_BLOCKLIST_RAW_SOURCES: readonly unknown[] = [iidx18ResortAnthem, iidx20Tricoro]')
-    })
-
-    test('모듈이 파일 목록과 다르면 알리고 같으면 빈 목록이다', async () => {
-        const modulePath = join(dir, 'module.ts')
-        await writeFile(modulePath, await renderDataModule([]))
-        expect(await checkBlocklist(join(dir, 'lists'), modulePath)).toHaveLength(1)
-        await writeFile(modulePath, await renderDataModule(['iidx-20-tricoro']))
-        expect(await checkBlocklist(join(dir, 'lists'), modulePath)).toEqual([])
-    })
-
-    test('저장소의 목록 모듈은 생성기가 쓰는 것과 같다', async () => {
-        expect(await checkBlocklist()).toEqual([])
+    test('형식이 틀린 차트가 섞이면 400 으로 그 요청을 통째로 거절한다', async () => {
+        const { fetch, memory } = createServer()
+        const charts = [chartAt(1), { ...chartAt(2), md5: 'A'.repeat(32) }]
+        await expect(registerCharts({ fetch, server: SERVER, token: 'rbms_admin_token', source: SOURCE, charts })).rejects.toThrow(
+            'server answered 400 VALIDATION_ERROR',
+        )
+        expect(memory.rows.size).toBe(0)
     })
 })
 

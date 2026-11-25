@@ -11,7 +11,6 @@ import { resolveOptionalApiTokenUser } from '@server/lib/with-api-token'
 import { parseBearerToken } from '@server/lib/token'
 import { RATE_LIMIT, consumeRateLimit, getClientIp } from '@server/lib/with-rate-limit'
 import { GUEST_PLAYER_ID, findSubmissionIntegrityFailure, isPlayedAtPlausible } from '@server/service/domain/score/score.service'
-import { getChartBlocklist } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import { getScoreCached, revalidateOnChartUpsert, revalidateOnScoreSubmit } from '@server/service/read-cache'
 
 const SUBMISSION_MAX_BYTES = 256 * 1024
@@ -25,7 +24,7 @@ export const createSubmitScoreRoute = () =>
         const bearer = parseBearerToken(request)
         if (!bearer && !env.ALLOW_GUEST) throw createAppError(ERROR_CODE.UNAUTHORIZED)
 
-        const { authService, chartService, scoreService, resolveBuildTrust } = compose()
+        const { authService, chartService, chartBlocklistService, scoreService, resolveBuildTrust } = compose()
         const user = await resolveOptionalApiTokenUser(request, authService.resolveApiTokenUser)
 
         const rateKey = user ? `user:${user.id}` : `ip:${getClientIp(request)}`
@@ -69,7 +68,7 @@ export const createSubmitScoreRoute = () =>
             await auditRejection('chart-hash')
             throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'chart.sha256' })
         }
-        if (getChartBlocklist().isBlocked(input.chart)) {
+        if (await chartBlocklistService.isBlocked(input.chart)) {
             await auditRejection('chart-blocked')
             throw createAppError(ERROR_CODE.IR_CHART_BLOCKED)
         }

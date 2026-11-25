@@ -20,7 +20,15 @@
   - [x] B5. 시험·웹 게이트(typecheck·lint·format·build 통과, `bun test` 2,437 통과·0 실패·246 건너뜀. 새 DB 시험 `tests/db/chart-blocklist.test.ts` 는 로컬 MySQL 이 없어 web CI 에서 확인)
   - [x] B6. 문서(ADR, API 명세, web 구조)·커밋·푸시·CI(`f1c5f0a`, web run 45593334083 통과, 새 DB 시험 4개가 MySQL 잡에서 통과)
   - [x] B8. 추가 스크립트 정리(사용자 추가 요청 "추후에 블랙리스트 곡을 올리기위한 스크립트도 제대로 잘 정리해놔 수집하는대로 바로 등록해버리게"): `bun run blocklist:add <폴더>... [--publish]`, 폴더 이름에서 id 자동, 중복 제외·같은 id 합치기, 서버 모듈 자동 생성, `blocklist:check`. 출처별 고정 개수 시험을 없애 추가 때 시험을 고치지 않게 함. 임시 묶음으로 추가 경로를 돌려 보고 되돌림
-  - [ ] B7. 운영 배포 확인과 정리 count(사용자 `!`), 행이 있으면 delete(사용자 `!`)
+  - [x] B7. 운영 배포 확인과 정리. 배포: 운영 `/api/version` 의 `commit` 이 `f5e5795`(2026-11-25 관찰), web run 45595976228 통과. count: web-db run 45595998606(목록 744개) — `chart_pattern` 1행만 있고 `score`·`replay`·`play_trace`·`play_analysis`·`chart_best`·`submission_audit`·`chart`·표·폴더·코스는 0행(사용자 예상대로 플레이 기록 없음). 패턴 1행 삭제는 DB 전환 뒤(C7)
+  - 사용자 지적(2026-11-25): "chart-blocklist를 파일로했구나? 나는 DB에 넣는걸 원했는데 이러면 push할때마다 계속 갱신해야해서 불편해". 메인이 묻지 않고 파일 방식을 정한 것이 잘못이었다(메인 메모리에 피드백 저장). 사용자 결정: DB 설계 "이대로 진행", 패턴 1행 "삭제".
+  - [x] C1. 마이그레이션 0015 `chart_blocklist`(sha256 PK, md5 유일, 출처 색인)와 파일 시험 → 커밋·푸시(`6d29ed6`). 운영 status run 45598784172: 0015 만 대기
+  - [ ] C2. 운영 적용(사용자 `!` `gh workflow run web-db.yml --ref dev -f action=migrate`)
+  - [x] C3. 관리자 API `PUT`·`GET /api/admin/chart-blocklist`(관리자 API 토큰), 서버 거절 검사를 DB 조회로(`compose/chart-blocklist.ts`)
+  - [x] C4. `blocklist:add` 를 서버 업로드로(키체인 토큰, 1,000개씩), `blocklist:list`, 정리 스크립트가 DB 목록을 읽게, 저장소 JSON·생성 모듈 제거. 로컬 게이트: typecheck·lint·format·build 통과, `bun test` 2,442 통과·0 실패·250 건너뜀(DB 시험은 CI)
+  - [ ] C5. 시험·게이트·문서·커밋·푸시·CI
+  - [ ] C6. 744개 업로드(IIDX18·19 폴더)와 운영 확인
+  - [ ] C7. 정리 count → 사용자 `!` delete(패턴 1행)
 
 ## 상태 (2026-11-24)
 

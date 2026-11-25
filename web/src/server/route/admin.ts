@@ -23,6 +23,7 @@ import { withErrorHandling } from '@server/lib/with-error-handling'
 import { enforceUserRateLimit } from '@server/lib/with-rate-limit'
 import { rejectBlockedChart } from '@server/route/chart'
 import type { AuthService } from '@server/service/domain/auth/auth.service'
+import type { ChartBlocklistService } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import type { ChartPatternService } from '@server/service/domain/chart-pattern/chart-pattern.service'
 import { readClientBuilds } from '@server/service/public-reads'
 import { revalidateOnBuildUpsert } from '@server/service/read-cache'
@@ -55,6 +56,7 @@ type Md5Context = { params: Promise<{ md5: string }> }
 export type AdminChartPatternRouteDeps = {
     authService: Pick<AuthService, 'resolveApiTokenUser'>
     chartPatternService: Pick<ChartPatternService, 'upload' | 'coverage' | 'recomputeStale'>
+    chartBlocklistService: Pick<ChartBlocklistService, 'isBlocked'>
 }
 
 type AdminTokenHandler<TContext> = (request: Request, context: TContext, user: AuthUser, deps: AdminChartPatternRouteDeps) => Promise<Response>
@@ -91,7 +93,7 @@ export const createAdminChartPatternRoutes = (
             const { md5 } = parseQueryObject(await context.params, chartPatternMd5ParamSchema)
             const document = await parseLimitedJsonBody(request, chartPatternDocumentSchema, CHART_PATTERN_MAX_BYTES)
             if (document.md5 !== md5) throw createAppError(ERROR_CODE.IR_CHART_PATTERN_INVALID, { field: 'md5', reason: 'md5_mismatch' })
-            rejectBlockedChart(document)
+            await rejectBlockedChart(document, deps.chartBlocklistService)
             const result = await deps.chartPatternService.upload({ document, uploadedBy: user.id })
             return adminPrivateJson(successResponse(result), result.outcome === CHART_PATTERN_UPLOAD_OUTCOME.CREATED ? CREATED_STATUS : OK_STATUS)
         }),

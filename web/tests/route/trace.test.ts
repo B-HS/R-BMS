@@ -32,6 +32,7 @@ const createRoutes = (overrides: Partial<TraceRouteDeps['traceService']> = {}) =
                 resolveSessionUser: async (request) => SESSIONS.get(request.headers.get('cookie') ?? '') ?? null,
             },
             traceService: { ...service, ...overrides },
+            chartBlocklistService: { isBlocked: async () => false },
         }),
         async () => undefined,
     )

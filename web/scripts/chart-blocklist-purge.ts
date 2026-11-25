@@ -13,7 +13,8 @@ import {
     tableChart,
     userFolderItem,
 } from '../src/server/db/schema'
-import { getChartBlocklist, type ChartBlocklist } from '../src/server/service/domain/chart-blocklist/chart-blocklist.service'
+import { composeChartBlocklist } from '../src/server/compose/chart-blocklist'
+import type { ChartBlocklistService } from '../src/server/service/domain/chart-blocklist/chart-blocklist.service'
 import { createScriptDb, DATABASE_NOT_SET_MESSAGE } from './lib/script-db'
 
 export const PURGE_COMMAND = { COUNT: 'count', DELETE: 'delete' } as const
@@ -80,11 +81,15 @@ const countTargets = async (executor: Executor, targets: PurgeTarget[]) =>
     )
 
 /**
- * Counts (`count`) or deletes in one transaction (`delete`) every stored row of the blocklisted charts, the way
+ * Counts (`count`) or deletes in one transaction (`delete`) every stored row of the charts of `chart_blocklist`, the way
  * `chart-purge.delete.sql` does for the charts removed at the owner's request. Answers the counts before and, for `delete`, after.
  */
-export const purgeBlockedCharts = async (params: { command: PurgeCommand; db: ScriptDb; hashes?: Pick<ChartBlocklist, 'sha256s' | 'md5s'> }) => {
-    const { command, db, hashes = getChartBlocklist() } = params
+export const purgeBlockedCharts = async (params: {
+    command: PurgeCommand
+    db: ScriptDb
+    hashes: Awaited<ReturnType<ChartBlocklistService['listHashes']>>
+}) => {
+    const { command, db, hashes } = params
     if (command === PURGE_COMMAND.COUNT) {
         const { targets } = await purgeTargets(db, hashes)
         return { before: await countTargets(db, targets), after: null }
@@ -119,8 +124,9 @@ const main = async () => {
         return EXIT_CODE.FAILED
     }
     try {
-        console.log(`blocklist: ${getChartBlocklist().sha256s.length} charts`)
-        const { before, after } = await purgeBlockedCharts({ command, db: scriptDb.db })
+        const hashes = await composeChartBlocklist(scriptDb.db).chartBlocklistService.listHashes()
+        console.log(`blocklist: ${hashes.sha256s.length} charts`)
+        const { before, after } = await purgeBlockedCharts({ command, db: scriptDb.db, hashes })
         console.table(before)
         if (after) {
             console.log('after:')

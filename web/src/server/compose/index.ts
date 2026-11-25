@@ -20,6 +20,7 @@ import { composeAi } from '@server/compose/ai'
 import { composeAiRecordQuery } from '@server/compose/ai-record-query'
 import { composeAiPlayFeatures } from '@server/compose/ai-play-features'
 import { composeAiScoreFeatures } from '@server/compose/ai-score-features'
+import { composeChartBlocklist } from '@server/compose/chart-blocklist'
 import { composeChartPattern } from '@server/compose/chart-pattern'
 import { composeCourse } from '@server/compose/course'
 import { composeCourseCatalog } from '@server/compose/course-catalog'
@@ -417,6 +418,7 @@ const composeAll = () => {
         ...composeAiRecordQuery(db, { aiFeatureRunner: ai.aiFeatureRunner, loadTables: getSnapshotTables }),
         ...patterns,
         ...trace,
+        ...composeChartBlocklist(db),
         ...dashboard,
         ...composeAiScoreFeatures(db, {
             aiFeatureRunner: ai.aiFeatureRunner,

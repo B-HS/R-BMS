@@ -25,11 +25,13 @@ import { withSummarizedErrors } from '@server/lib/with-summarized-errors'
 import { rejectBlockedChart } from '@server/route/chart'
 import type { AuthService } from '@server/service/domain/auth/auth.service'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
+import type { ChartBlocklistService } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import { TRACE_UPLOAD_OUTCOME, type TraceService } from '@server/service/domain/trace/trace.service'
 
 export type TraceRouteDeps = {
     authService: Pick<AuthService, 'resolveApiTokenUser' | 'resolveSessionUser'>
     traceService: Pick<TraceService, 'upload' | 'usageOf' | 'adminUsage' | 'shareSettingOf' | 'putShareSetting' | 'recomputeStale'>
+    chartBlocklistService: Pick<ChartBlocklistService, 'isBlocked'>
 }
 
 type HashContext = { params: Promise<{ hash: string }> }
@@ -92,7 +94,7 @@ export const createTraceRoutes = (resolveDeps: () => TraceRouteDeps = compose, w
             const { hash } = await context.params
             if (classifyChartHash(hash) === 'unknown') throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND, { hash })
             const input = await parseLimitedJsonBody(request, traceUploadSchema, TRACE_MAX_BYTES)
-            rejectBlockedChart(input.chart)
+            await rejectBlockedChart(input.chart, deps.chartBlocklistService)
             const result = await deps.traceService.upload({ input, pathHash: hash, userId: user.id })
             if (result.outcome === TRACE_UPLOAD_OUTCOME.SCORE_NOT_FOUND) throw createAppError(ERROR_CODE.IR_SCORE_NOT_FOUND, { field: 'score_id' })
             if (result.outcome === TRACE_UPLOAD_OUTCOME.MISMATCH) {

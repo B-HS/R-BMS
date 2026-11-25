@@ -27,7 +27,11 @@ const createRoutes = () => {
         listCoverageTables: () => [{ id: 'insane1', name: 'insane', md5s: [FIXTURE_MD5, 'c'.repeat(32)] }],
     })
     const routes = createAdminChartPatternRoutes(
-        () => ({ authService: { resolveApiTokenUser: async (plain) => TOKENS.get(plain) ?? null }, chartPatternService }),
+        () => ({
+            authService: { resolveApiTokenUser: async (plain) => TOKENS.get(plain) ?? null },
+            chartPatternService,
+            chartBlocklistService: { isBlocked: async () => false },
+        }),
         async () => undefined,
     )
     return { routes, memory }

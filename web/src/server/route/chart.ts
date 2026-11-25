@@ -8,7 +8,7 @@ import { parseLimitedJsonBody, parseSearchParams } from '@server/lib/parse-reque
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { withApiToken } from '@server/lib/with-api-token'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
-import { getChartBlocklist, type ChartHashes } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
+import type { ChartBlocklistService, ChartHashes } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import {
     getChartBestCached,
     getChartMetaCached,
@@ -24,9 +24,9 @@ export const resolveKnownChart = async (hash: string, resolveSha256 = resolveCha
     return resolveSha256(hash)
 }
 
-/** Refuses a chart of the blocklist (`web/data/chart-blocklist/`) before anything of it is stored. */
-export const rejectBlockedChart = (chart: ChartHashes, blocklist = getChartBlocklist()) => {
-    if (blocklist.isBlocked(chart)) throw createAppError(ERROR_CODE.IR_CHART_BLOCKED)
+/** Refuses a chart of the blocklist (`chart_blocklist`) before anything of it is stored. */
+export const rejectBlockedChart = async (chart: ChartHashes, blocklist: Pick<ChartBlocklistService, 'isBlocked'>) => {
+    if (await blocklist.isBlocked(chart)) throw createAppError(ERROR_CODE.IR_CHART_BLOCKED)
 }
 
 export const createChartDetailRoute = () =>
@@ -40,10 +40,10 @@ export const createChartDetailRoute = () =>
 
 export const createChartUpsertRoute = () =>
     withErrorHandling(async (request: Request, context: unknown) => {
-        const { authService, chartService } = compose()
+        const { authService, chartService, chartBlocklistService } = compose()
         return withApiToken({ resolveApiTokenUser: authService.resolveApiTokenUser })(async (authedRequest) => {
             const body = await parseLimitedJsonBody(authedRequest, chartUpsertSchema, CHART_UPSERT_MAX_BYTES)
-            rejectBlockedChart(body.chart)
+            await rejectBlockedChart(body.chart, chartBlocklistService)
             const row = await chartService.upsertFromMeta(body.chart)
             if (!row) throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND)
             revalidateOnChartUpsert({ sha256: row.sha256, md5: row.md5 })

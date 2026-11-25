@@ -55,6 +55,7 @@ const createServer = () => {
         () => ({
             authService: { resolveApiTokenUser: async (plain) => USERS.get(plain) ?? null },
             chartPatternService: createChartPatternService({ db: memory.db, now: () => 0, listCoverageTables: () => [] }),
+            chartBlocklistService: { isBlocked: async () => false },
         }),
         async () => undefined,
     )

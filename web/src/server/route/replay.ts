@@ -35,14 +35,14 @@ export const createReplayUploadRoute = () =>
         guardBodySize(request, maxBytes)
         if (!parseBearerToken(request)) throw createAppError(ERROR_CODE.UNAUTHORIZED)
 
-        const { authService, replayService } = compose()
+        const { authService, chartBlocklistService, replayService } = compose()
         return withApiToken({ resolveApiTokenUser: authService.resolveApiTokenUser })(async (authedRequest, authedContext: HashContext, user) => {
             const { allowed } = consumeRateLimit(`replay-upload:${user.id}`, RATE_LIMIT.REPLAY_UPLOAD.limit, RATE_LIMIT.REPLAY_UPLOAD.windowMs)
             if (!allowed) throw createAppError(ERROR_CODE.RATE_LIMITED)
             const { hash } = await authedContext.params
             const input = await parseLimitedJsonBody(authedRequest, replayUploadSchema, maxBytes)
             const chartSha256 = await resolveReplayChartSha256(hash, input)
-            rejectBlockedChart({ sha256: chartSha256, md5: input.chart?.md5 })
+            await rejectBlockedChart({ sha256: chartSha256, md5: input.chart?.md5 }, chartBlocklistService)
             const result = await replayService.upload({ input, chartSha256, userId: user.id })
             if (result.quotaExceeded) throw createAppError(ERROR_CODE.IR_PAYLOAD_TOO_LARGE, result.quotaExceeded)
             if (result.created) revalidateOnReplayUpload({ chartSha256, loginId: user.loginId, scoreId: input.score_id ?? null })

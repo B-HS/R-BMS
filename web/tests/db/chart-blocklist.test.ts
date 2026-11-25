@@ -2,11 +2,11 @@ import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { and, count, eq, inArray, like } from 'drizzle-orm'
 import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
-import { apiToken, chart, chartBest, course, courseChart, score, submissionAudit } from '@server/db/schema'
+import { composeChartBlocklist } from '@server/compose/chart-blocklist'
+import { apiToken, chart, chartBest, chartBlocklist, course, courseChart, score, submissionAudit } from '@server/db/schema'
 import { hashApiToken } from '@server/lib/token'
 import type { createChartUpsertRoute } from '@server/route/chart'
 import type { createSubmitScoreRoute } from '@server/route/score'
-import { getChartBlocklist } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import { purgeBlockedCharts } from '../../scripts/chart-blocklist-purge'
 
 const hasDatabase = Boolean(process.env.RBMS_DB_E2E)
@@ -28,6 +28,8 @@ const COURSE_SHA = 'e2'.repeat(32)
 const UNLISTED_SHA = 'e3'.repeat(32)
 const FAKE_SHAS = [PURGED_SHA, COURSE_SHA, UNLISTED_SHA]
 const COURSE_HASH = `${PREFIX}_course`
+const BLOCKLIST_SOURCE = { id: `${PREFIX}-source`, label: 'blocklist test' }
+const blocked = { sha256: 'e4'.repeat(32), md5: 'e5'.repeat(16), path: 'blocked.bme' }
 const emptyContext = { params: Promise.resolve({}) }
 const headers = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` }
 
@@ -55,8 +57,8 @@ const countByTarget = (rows: { target: string; rows: number }[]) => Object.fromE
 describe.skipIf(!hasDatabase)('차트 차단 목록 (임시 MySQL)', () => {
     let submitScoreRoute: ReturnType<typeof createSubmitScoreRoute>
     let upsertChartRoute: ReturnType<typeof createChartUpsertRoute>
-    const [blocked] = getChartBlocklist().sources[0].charts
     const blockedShas = [blocked.sha256]
+    const blocklistService = () => composeChartBlocklist(getDb()).chartBlocklistService
 
     const post = (path: string, body: unknown) => new Request(`http://localhost:3000${path}`, { method: 'POST', body: JSON.stringify(body), headers })
 
@@ -71,6 +73,7 @@ describe.skipIf(!hasDatabase)('차트 차단 목록 (임시 MySQL)', () => {
         await db.delete(courseChart).where(eq(courseChart.courseHash, COURSE_HASH))
         await db.delete(course).where(eq(course.courseHash, COURSE_HASH))
         await db.delete(chart).where(inArray(chart.sha256, [...FAKE_SHAS, ...blockedShas]))
+        await db.delete(chartBlocklist).where(eq(chartBlocklist.sourceId, BLOCKLIST_SOURCE.id))
         await db.delete(apiToken).where(eq(apiToken.userId, LOGIN))
         await db.delete(user).where(like(user.id, `${PREFIX}_%`))
     }
@@ -83,9 +86,29 @@ describe.skipIf(!hasDatabase)('차트 차단 목록 (임시 MySQL)', () => {
         const db = getDb()
         await db.insert(user).values({ id: LOGIN, name: 'player', email: `${LOGIN}@cbl.invalid`, loginId: LOGIN })
         await db.insert(apiToken).values({ id: `tk_${LOGIN}`, userId: LOGIN, tokenHash: hashApiToken(TOKEN) })
+        await blocklistService().register({ source: BLOCKLIST_SOURCE, charts: [blocked], addedBy: LOGIN })
     })
 
     afterAll(cleanUp)
+
+    test('chart_blocklist 에 같은 차트를 다시 넣거나 md5 만 같은 차트를 넣으면 세기만 하고 넣지 않으며, sha256·md5 로 찾는다', async () => {
+        const again = await blocklistService().register({
+            source: BLOCKLIST_SOURCE,
+            charts: [blocked, { sha256: 'e6'.repeat(32), md5: blocked.md5, path: 'same-md5.bme' }],
+            addedBy: LOGIN,
+        })
+        expect(again).toEqual({ received: 2, added: 0, alreadyListed: 2 })
+        expect(await blocklistService().isBlocked({ sha256: blocked.sha256 })).toBe(true)
+        expect(await blocklistService().isBlocked({ md5: blocked.md5, sha256: UNLISTED_SHA })).toBe(true)
+        expect(await blocklistService().isBlocked({ md5: '', sha256: UNLISTED_SHA })).toBe(false)
+        expect(await blocklistService().listSources()).toContainEqual({
+            sourceId: BLOCKLIST_SOURCE.id,
+            sourceLabel: BLOCKLIST_SOURCE.label,
+            charts: 1,
+        })
+        const { sha256s } = await blocklistService().listHashes()
+        expect(sha256s).toContain(blocked.sha256)
+    })
 
     test('목록의 차트로 낸 점수는 422 IR_CHART_BLOCKED 로 거절하고 감사에 남기며 차트 행을 만들지 않는다', async () => {
         const response = await submitScoreRoute(post('/api/scores', scoreBody({ md5: blocked.md5, sha256: blocked.sha256 }, 0)), emptyContext)

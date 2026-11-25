@@ -36,6 +36,13 @@ const USAGE = `bun scripts/upload-chart-patterns.ts <패턴 폴더> [--server <�
   토큰: 기본은 macOS 키체인(계정 ${KEYCHAIN_ACCOUNT}, 서비스 ${KEYCHAIN_SERVICE}), --token-env 를 주면 그 환경변수
   --dry-run: 서버에 보내지 않고 파일만 검사한다`
 
+/** The origin of `server` when it is https, or http on this machine, so an admin token never crosses the network in clear; else null. */
+export const safeServerOrigin = (server: string) => {
+    const url = URL.parse(server)
+    if (!url || !(url.protocol === 'https:' || (url.protocol === 'http:' && LOCAL_HOSTS.has(url.hostname)))) return null
+    return url.origin
+}
+
 export type UploadArgs = { dir: string; server: string; tokenEnv: string | null; dryRun: boolean }
 
 /** Reads the command line. A server must be https, or http on this machine, so the admin token never crosses the network in clear. */
@@ -53,11 +60,9 @@ export const parseUploadArgs = (argv: readonly string[]) => {
     }
     if (!args.dir) throw new Error('패턴 폴더를 주세요')
     if (args.tokenEnv === '') throw new Error('--token-env 에 환경변수 이름을 주세요')
-    const url = URL.parse(args.server)
-    if (!url || !(url.protocol === 'https:' || (url.protocol === 'http:' && LOCAL_HOSTS.has(url.hostname)))) {
-        throw new Error('--server 는 https 주소(또는 이 컴퓨터의 http 주소)여야 합니다')
-    }
-    return { ...args, server: url.origin }
+    const server = safeServerOrigin(args.server)
+    if (!server) throw new Error('--server 는 https 주소(또는 이 컴퓨터의 http 주소)여야 합니다')
+    return { ...args, server }
 }
 
 export type PatternFile = { md5: string; path: string }
