@@ -14,13 +14,16 @@ const HASH_BATCH_SIZE = 32
 const REQUEST_TIMEOUT_MS = 60_000
 const EXIT_CODE = { OK: 0, FAILED: 1, USAGE: 2 } as const
 const IIDX_FOLDER_PATTERN = /iidx\s*(\d+)(st|nd|rd|th)?\b\s*(.*)$/i
+const VERSION_SUBTITLE_PATTERN = /[~〜]([^~〜]+)[~〜]/
+const SONG_NAME_SEPARATOR = ' - '
 
 const USAGE = `usage:
   bun run blocklist:add <folder>... [--id <id>] [--label <label>] [--dry-run] [--server <url>] [--token-env <NAME>]
       Hashes the chart files (.bms .bme .bml .pms .bmson) of each folder and registers them on the server
-      (PUT ${BLOCKLIST_PATH}, admin API token). The id and label come from the folder name
-      ("Beatmania IIDX20 ~tricoro~" -> iidx-20-tricoro, "beatmania IIDX 20 tricoro"); --id and --label
-      override them for a single folder. Charts the server lists already are counted, not added again.
+      (PUT ${BLOCKLIST_PATH}, admin API token). Each chart goes to the IIDX version its folder or song folder
+      names ("Beatmania IIDX20 ~tricoro~", "IIDX20 ~Tricoro~ - ALBIDA" -> iidx-20-tricoro), so a folder that
+      gathers several versions is split by version; else to the folder's own name. --id and --label put
+      every chart of a single folder in one list. Charts the server lists already are counted, not added again.
       --dry-run only hashes and prints the counts.
   bun run blocklist:list [--server <url>] [--token-env <NAME>]
       Prints each list on the server with its chart count.
@@ -65,13 +68,17 @@ const slugOf = (text: string) =>
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
 
-/** The id and label a pack folder is listed under, or null when its name gives no usable id. */
+/**
+ * The id and label a folder is listed under, or null when its name gives no usable id. An IIDX version folder
+ * ("Beatmania IIDX18 ~Resort Anthem~") and an IIDX song folder ("IIDX20 ~Tricoro~ - ALBIDA") both name their version.
+ */
 export const deriveSourceName = (folderName: string) => {
     const name = folderName.normalize('NFC').trim()
     const iidx = IIDX_FOLDER_PATTERN.exec(name)
     if (iidx) {
         const [, version, ordinal, rest] = iidx
-        const title = rest.replace(/[~〜]/g, ' ').replace(/\s+/g, ' ').trim()
+        const subtitle = VERSION_SUBTITLE_PATTERN.exec(rest)?.[1] ?? rest.split(SONG_NAME_SEPARATOR)[0]
+        const title = subtitle.replace(/\s+/g, ' ').trim()
         const id = slugOf(`iidx ${version} ${title}`)
         return CHART_BLOCKLIST_ID_PATTERN.test(id) ? { id, label: `beatmania IIDX ${version}${ordinal ?? ''} ${title}`.trim() } : null
     }
@@ -80,6 +87,15 @@ export const deriveSourceName = (folderName: string) => {
 }
 
 export const isChartFileName = (name: string) => !name.startsWith(HIDDEN_NAME_PREFIX) && CHART_FILE_EXTENSIONS.has(extname(name).toLowerCase())
+
+/**
+ * The list a chart under the folder `rootName` goes to: the first IIDX version named by the folder or by a folder on the chart's path
+ * (so a folder that gathers songs of several versions is split by version), else the folder itself.
+ */
+export const sourceOfChart = (rootName: string, path: string) => {
+    const folders = [rootName, ...path.split('/').slice(0, -1)]
+    return deriveSourceName(folders.find((folder) => IIDX_FOLDER_PATTERN.test(folder)) ?? rootName)
+}
 
 /** Every chart file under `root`, depth first, without following links. Hidden files and folders (`.DS_Store`, `._x.bms`) are left out. */
 export const findChartFiles = async (root: string): Promise<string[]> => {
@@ -180,27 +196,43 @@ const printSources = (sources: Awaited<ReturnType<typeof listSources>>) => {
     console.log(`blocklist on the server: ${sources.length} lists, ${sources.reduce((sum, source) => sum + source.charts, 0)} charts`)
 }
 
+const planSources = async (command: AddCommand) => {
+    const planned: { folder: string; id: string; label: string; charts: ChartBlocklistEntry[] }[] = []
+    for (const folder of command.folders) {
+        const rootName = basename(resolve(folder))
+        const rootSource = deriveSourceName(rootName)
+        const isOverridden = command.id !== null || command.label !== null
+        const sourced = (await scanFolder(folder)).map((chart) => ({
+            chart,
+            source: isOverridden
+                ? { id: command.id ?? rootSource?.id ?? '', label: command.label ?? rootSource?.label ?? '' }
+                : sourceOfChart(rootName, chart.path),
+        }))
+        if (sourced.some(({ source }) => !source?.id || !source.label)) return { unnamedFolder: folder, planned }
+        Map.groupBy(sourced, ({ source }) => source?.id ?? '').forEach((group, id) =>
+            planned.push({ folder, id, label: group[0].source?.label ?? id, charts: group.map(({ chart }) => chart) }),
+        )
+    }
+    return { unnamedFolder: null, planned }
+}
+
 const add = async (command: AddCommand) => {
-    const named = command.folders.map((folder) => {
-        const derived = deriveSourceName(basename(resolve(folder)))
-        return { folder, id: command.id ?? derived?.id ?? '', label: command.label ?? derived?.label ?? '' }
-    })
-    const unnamed = named.find((entry) => !entry.id || !entry.label)
-    if (unnamed) {
-        console.error(`${unnamed.folder}: no id could be made from the folder name, give --id and --label`)
+    const { unnamedFolder, planned } = await planSources(command)
+    if (unnamedFolder) {
+        console.error(`${unnamedFolder}: no id could be made from the folder names, give --id and --label`)
         return EXIT_CODE.USAGE
     }
-    const token = command.isDryRun ? '' : await readToken(command.tokenEnv)
-    for (const { folder, id, label } of named) {
-        const charts = await scanFolder(folder)
-        if (command.isDryRun || charts.length === 0) {
-            console.log(`${id} (${label}): ${charts.length} charts found, nothing sent`)
+    if (planned.length === 0) console.log('no chart files found')
+    const token = command.isDryRun || planned.length === 0 ? '' : await readToken(command.tokenEnv)
+    for (const { folder, id, label, charts } of planned) {
+        if (command.isDryRun) {
+            console.log(`${id} (${label}): ${charts.length} charts found in ${folder}, nothing sent`)
             continue
         }
         const totals = await registerCharts({ fetch, server: command.server, token, source: { id, label }, charts })
-        console.log(`${id} (${label}): ${charts.length} charts found, ${totals.added} added, ${totals.alreadyListed} already listed`)
+        console.log(`${id} (${label}): ${charts.length} charts found in ${folder}, ${totals.added} added, ${totals.alreadyListed} already listed`)
     }
-    if (command.isDryRun) return EXIT_CODE.OK
+    if (command.isDryRun || planned.length === 0) return EXIT_CODE.OK
     printSources(await listSources({ fetch, server: command.server, token }))
     console.log(
         'the server refuses these charts from now on. Rows left from before: gh workflow run web-db.yml --ref dev -f action=chart-blocklist-purge-count',

@@ -15,6 +15,7 @@ import {
     parseBlocklistCommand,
     registerCharts,
     scanFolder,
+    sourceOfChart,
     type Fetch,
 } from '../../scripts/chart-blocklist'
 import { createMemoryChartBlocklistDb } from '../support/chart-blocklist-memory-db'
@@ -100,9 +101,31 @@ describe('deriveSourceName', () => {
         expect(deriveSourceName('beatmania IIDX 9th style')).toEqual({ id: 'iidx-9-style', label: 'beatmania IIDX 9th style' })
     })
 
+    test('IIDX 곡 폴더 이름에서는 곡명을 빼고 버전만 뽑는다', () => {
+        expect(deriveSourceName('IIDX20 ~Tricoro~ - ALBIDA')).toEqual({ id: 'iidx-20-tricoro', label: 'beatmania IIDX 20 Tricoro' })
+        expect(deriveSourceName('IIDX18 ~Resort Anthem~ - IIDXAegis')).toEqual({
+            id: 'iidx-18-resort-anthem',
+            label: 'beatmania IIDX 18 Resort Anthem',
+        })
+        expect(deriveSourceName('beatmania IIDX 25 CANNON BALLERS - Song')).toEqual({
+            id: 'iidx-25-cannon-ballers',
+            label: 'beatmania IIDX 25 CANNON BALLERS',
+        })
+    })
+
     test('IIDX 가 아닌 이름은 이름 그대로를 kebab-case 로, 만들 수 없으면 null', () => {
         expect(deriveSourceName('Pop n Music 20 fantasia')).toEqual({ id: 'pop-n-music-20-fantasia', label: 'Pop n Music 20 fantasia' })
         expect(deriveSourceName('ユミル')).toBeNull()
+    })
+})
+
+describe('sourceOfChart', () => {
+    test('여러 버전을 모은 폴더는 곡 폴더의 버전으로, 버전 폴더는 그 버전으로, 둘 다 없으면 폴더 이름으로 나눈다', () => {
+        expect(sourceOfChart('iidxbms', 'IIDX20 ~Tricoro~ - ALBIDA/ALBIDA [SPA].bme')?.id).toBe('iidx-20-tricoro')
+        expect(sourceOfChart('iidxbms', 'IIDX19 ~Lincle~ - F/F [SPA].bme')?.id).toBe('iidx-19-lincle')
+        expect(sourceOfChart('Beatmania IIDX18 ~Resort Anthem~', 'IIDX18 ~Resort Anthem~ - ALBIDA/a.bml')?.id).toBe('iidx-18-resort-anthem')
+        expect(sourceOfChart('My Pack', 'song/a.bms')).toEqual({ id: 'my-pack', label: 'My Pack' })
+        expect(sourceOfChart('ユミル', 'a.bms')).toBeNull()
     })
 })
 

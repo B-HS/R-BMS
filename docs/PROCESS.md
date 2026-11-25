@@ -28,7 +28,8 @@
   - [x] C4. `blocklist:add` 를 서버 업로드로(키체인 토큰, 1,000개씩), `blocklist:list`, 정리 스크립트가 DB 목록을 읽게, 저장소 JSON·생성 모듈 제거. 로컬 게이트: typecheck·lint·format·build 통과, `bun test` 2,442 통과·0 실패·250 건너뜀(DB 시험은 CI)
   - [x] C5. 시험·게이트·문서·커밋·푸시·CI: `c24ccd1`, web run 45599438227 두 잡 통과(DB 시험 9개 MySQL 통과), 운영 `/api/version` 의 `commit` 이 `c24ccd1`
   - [x] C6. `bun run blocklist:add` 로 운영 등록: `iidx-18-resort-anthem` 391·`iidx-19-lincle` 353 added, 서버 2 lists 744 charts. 다시 돌리면 0 added·353 already listed
-  - [ ] C7. 정리 count(DB 목록) run 45599854472: `chart_pattern` 1, 나머지 0 → 사용자 `!` `gh workflow run web-db.yml --ref dev -f action=chart-blocklist-purge-delete`
+  - [x] C8. 사용자 모음 폴더 `/Volumes/SSD/iidxbms`(IIDX18·19·20 곡 폴더 221개)로 시험 등록. 스크립트가 곡 폴더 이름의 버전으로 묶음을 나누게 고침. 결과: 18·19 는 0 added(391·353 already listed), `iidx-20-tricoro` 586 added, 서버 3 lists 1,330 charts
+  - [ ] C7. 정리 count(DB 목록) run 45599854472·45601926550(1,330개): `chart_pattern` 1, 나머지 0 → 사용자 `!` `gh workflow run web-db.yml --ref dev -f action=chart-blocklist-purge-delete`
 
 ## 상태 (2026-11-24)
 
