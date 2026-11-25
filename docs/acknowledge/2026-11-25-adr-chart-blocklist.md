@@ -1,6 +1,6 @@
 # ADR: 차트 차단 목록 — 서버가 등록하지 않는 차트(IIDX 본가 곡)
 
-> 최종 갱신 2026-11-25 · 대응 커밋: 이 ADR 과 함께 커밋되는 웹 변경
+> 최종 갱신 2026-11-25 · 대응 커밋 `f1c5f0a`(기능·첫 목록)와 추가 스크립트 정리 커밋
 > 상태: 유효 · 결정일 2026-11-25 · 결정자 사용자(요구·기존 기록 삭제), 메인(저장 방식·응답 코드·거절 지점)
 
 선례: [SABOTHER 삭제 ADR](2026-10-23-adr-chart-removed-at-owner-request.md), [PopCoRian -EX- ADR](2026-11-02-adr-popcorian-ex-removed.md). 그 두 곡은 기록만 지웠고 "다시 치면 판은 다시 서버로 올라간다(서버가 차트를 거르지 않는다)" 가 남은 것이었다. 이번 장치가 그 빈자리를 막는다.
@@ -33,10 +33,30 @@
 
 ## 다음 묶음을 더하는 절차
 
-1. `cd web && bun scripts/chart-blocklist.ts <id> "<label>" "<폴더>"` — 예: `iidx-20-tricoro "beatmania IIDX 20 tricoro" "~/Downloads/Beatmania IIDX20 ~tricoro~"`. `web/data/chart-blocklist/<id>.json` 을 쓰고 차트 수를 출력한다. 같은 id 로 다시 돌리면 같은 파일이 나온다.
-2. `web/src/server/service/domain/chart-blocklist/chart-blocklist.data.ts` 의 `CHART_BLOCKLIST_RAW_SOURCES` 에 그 파일을 더한다(빠뜨리면 `tests/service/chart-blocklist.test.ts` 의 "파일이 모두 서버에 실린다" 시험이 실패한다).
-3. 같은 시험의 출처별 차트 수를 고친다.
-4. 웹 게이트 → 커밋·푸시(배포) → 운영 `/api/version` 확인 → `chart-blocklist-purge-count`, 행이 있으면 사용자 `!` `chart-blocklist-purge-delete`.
+사용자 요청(2026-11-25 원문): "추후에 블랙리스트 곡을 올리기위한 스크립트도 제대로 잘 정리해놔 수집하는대로 바로 등록해버리게". 그래서 폴더만 주면 끝나게 했다.
+
+```sh
+cd web
+bun run blocklist:add "<폴더>" ["<폴더>" ...]            # 목록 파일과 서버 모듈만 고친다
+bun run blocklist:add "<폴더>" ["<폴더>" ...] --publish  # 위 + 시험 + 커밋·푸시(=웹 배포) + 운영 count 실행
+```
+
+`blocklist:add`(`web/scripts/chart-blocklist.ts add`)가 하는 일:
+
+1. 폴더 이름에서 id·label 을 만든다: `Beatmania IIDX20 ~tricoro~` → `iidx-20-tricoro`·`beatmania IIDX 20 tricoro`, `beatmania IIDX 9th style` → `iidx-9-style`. IIDX 가 아닌 이름은 이름을 kebab-case 로. 만들 수 없는 이름(영문·숫자가 없음)이나 다르게 부르고 싶을 때는 폴더 하나에 `--id <id> --label "<이름>"`.
+2. 차트 파일을 해시해, sha256 이나 md5 가 이미 **다른** 목록에 있는 차트는 뺀다(같은 곡이 여러 버전 폴더에 있어도 한 번만 남는다).
+3. 같은 id 의 목록이 있으면 합친다(지우지 않음, 이름은 처음 것). 나중에 같은 버전의 빠진 곡을 받아도 같은 명령이면 된다.
+4. `web/src/server/service/domain/chart-blocklist/chart-blocklist.data.ts` 를 폴더의 파일 목록으로 다시 쓴다(손으로 고치지 않는다). `bun run blocklist:check` 와 시험이 둘이 어긋나면 실패한다.
+5. 목록마다 "찾은 수, 더한 수, 이미 다른 목록에 있던 수, 목록 크기" 한 줄을 찍는다. 새로 더한 것이 없으면 아무 파일도 바꾸지 않는다.
+
+`--publish` 가 더 하는 일(사용자가 직접 돌려도 되고 메인이 돌려도 된다):
+
+1. 이미 스테이징된 다른 변경이 있으면 멈춘다.
+2. 차단 목록 시험(`tests/service/chart-blocklist.test.ts`, `tests/scripts/chart-blocklist.test.ts`)을 돌린다.
+3. 바뀐 목록 파일과 모듈만 스테이징해 `feat(web): 차트 차단 목록에 <id> 추가(<수>개)` 로 커밋하고 지금 브랜치에 푸시한다. `dev` 푸시가 웹 배포다.
+4. `gh workflow run web-db.yml -f action=chart-blocklist-purge-count` 를 띄운다. 이 워크플로는 저장소를 받아 그 목록으로 세므로 배포를 기다리지 않아도 된다. 행이 있으면 `gh workflow run web-db.yml --ref dev -f action=chart-blocklist-purge-delete`(운영 쓰기라 사용자 `!`).
+
+메인이 돌릴 때는 `--publish` 대신 평소처럼 게이트·커밋·CI 확인을 하고 운영 count 를 돌린 뒤 결과를 보고한다.
 
 ## 남는 것
 

@@ -18,7 +18,8 @@
   - [x] B3. 서버 차단: 점수 제출·차트 upsert·리플레이·판별 기록·차트 패턴 업로드가 목록의 차트를 `IR_CHART_BLOCKED`(422)로 거절([ADR](acknowledge/2026-11-25-adr-chart-blocklist.md))
   - [x] B4. 운영 기존 기록 정리 스크립트(`chart-blocklist-purge.ts count|delete`)와 `web-db.yml` 액션
   - [x] B5. 시험·웹 게이트(typecheck·lint·format·build 통과, `bun test` 2,437 통과·0 실패·246 건너뜀. 새 DB 시험 `tests/db/chart-blocklist.test.ts` 는 로컬 MySQL 이 없어 web CI 에서 확인)
-  - [ ] B6. 문서(ADR, API 명세, web 구조)·커밋·푸시·CI
+  - [x] B6. 문서(ADR, API 명세, web 구조)·커밋·푸시·CI(`f1c5f0a`, web run 45593334083 통과, 새 DB 시험 4개가 MySQL 잡에서 통과)
+  - [x] B8. 추가 스크립트 정리(사용자 추가 요청 "추후에 블랙리스트 곡을 올리기위한 스크립트도 제대로 잘 정리해놔 수집하는대로 바로 등록해버리게"): `bun run blocklist:add <폴더>... [--publish]`, 폴더 이름에서 id 자동, 중복 제외·같은 id 합치기, 서버 모듈 자동 생성, `blocklist:check`. 출처별 고정 개수 시험을 없애 추가 때 시험을 고치지 않게 함. 임시 묶음으로 추가 경로를 돌려 보고 되돌림
   - [ ] B7. 운영 배포 확인과 정리 count(사용자 `!`), 행이 있으면 delete(사용자 `!`)
 
 ## 상태 (2026-11-24)

@@ -15,6 +15,8 @@
         "db:generate": "drizzle-kit generate",
         "db:migrate": "drizzle-kit migrate",
         "db:status": "bun scripts/db-migration-status.ts",
+        "blocklist:add": "bun scripts/chart-blocklist.ts add",
+        "blocklist:check": "bun scripts/chart-blocklist.ts check",
         "auth:generate": "bunx @better-auth/cli generate --config src/server/lib/auth.ts --output src/server/db/auth-schema.ts"
     },
     "dependencies": {

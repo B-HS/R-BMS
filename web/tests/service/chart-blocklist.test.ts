@@ -7,8 +7,6 @@ import { rejectBlockedChart } from '@server/route/chart'
 import { createChartBlocklist, getChartBlocklist } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 
 const BLOCKLIST_DIR = join(import.meta.dirname, '..', '..', 'data', 'chart-blocklist')
-const IIDX18_CHARTS = 391
-const IIDX19_CHARTS = 353
 const LISTED = { md5: 'a'.repeat(32), sha256: 'b'.repeat(64), path: 'x/y.bms' }
 const OTHER_MD5 = 'c'.repeat(32)
 const OTHER_SHA256 = 'd'.repeat(64)
@@ -22,12 +20,16 @@ describe('커밋된 차트 차단 목록', () => {
         expect(ids).toEqual(files)
     })
 
-    test('IIDX18 Resort Anthem 391개, IIDX19 Lincle 353개이고 sha256·md5 가 겹치지 않는다', () => {
+    test('IIDX18 Resort Anthem·IIDX19 Lincle 이 들어 있다', () => {
+        const ids = getChartBlocklist().sources.map((source) => source.id)
+        expect(ids).toEqual(expect.arrayContaining(['iidx-18-resort-anthem', 'iidx-19-lincle']))
+    })
+
+    test('한 차트는 목록 전체에서 한 번만 나온다(sha256·md5 모두)', () => {
         const blocklist = getChartBlocklist()
-        const counts = Object.fromEntries(blocklist.sources.map((source) => [source.id, source.charts.length]))
-        expect(counts).toEqual({ 'iidx-18-resort-anthem': IIDX18_CHARTS, 'iidx-19-lincle': IIDX19_CHARTS })
-        expect(blocklist.sha256s).toHaveLength(IIDX18_CHARTS + IIDX19_CHARTS)
-        expect(blocklist.md5s).toHaveLength(IIDX18_CHARTS + IIDX19_CHARTS)
+        const total = blocklist.sources.reduce((sum, source) => sum + source.charts.length, 0)
+        expect(blocklist.sha256s).toHaveLength(total)
+        expect(blocklist.md5s).toHaveLength(total)
     })
 
     test('목록의 차트는 sha256 이나 md5 하나만 맞아도 차단이다', () => {
