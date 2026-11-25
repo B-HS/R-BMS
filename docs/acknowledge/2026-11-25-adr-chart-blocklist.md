@@ -35,6 +35,8 @@
 
 2026-11-26 추가(사용자 "곡 더 추가했어 스크립트 돌려봐", 같은 폴더 `/Volumes/SSD/iidxbms`): `bun run blocklist:add /Volumes/SSD/iidxbms --id iidx-unsorted --label "beatmania IIDX (unsorted)"`. 버전 폴더의 IIDX 1st~16·21·22·Substream·무번호(`iidx`) 6,816개와, 버전 접두어가 없는 곡 폴더의 1,103개(`iidx-unsorted`, 이름은 사용자 선택 "beatmania IIDX (unsorted)")를 새로 넣었다. 18·19·20 은 0개 추가. 서버 24 lists, 8,022 charts. 운영 count run 45720578043: 모든 대상 0행. 운영 `/tables/blocked` 가 24레벨·8,022항목으로 바로 반영됨.
 
+2026-11-26 IIDX 23 추가(사용자 "더 추가했어 23이야. 실행해봐"): 새 곡 폴더 94개가 `아티스트 - 곡명` 꼴이라 버전을 읽을 수 없었다. 운영 `data.json` 의 md5 와 대조해 아직 없는 차트가 든 폴더만 골라(552개) `--id iidx-23-copula --label "beatmania IIDX 23 copula"` 로 넣었다(이를 위해 `--id`·`--label` 을 폴더 여럿에도 쓰게 함). 서버 25 lists, 8,574 charts, 모음 폴더의 미등록 차트 0. 운영 count run 45724180839: 모든 대상 0행.
+
 세 묶음 사이에 겹치는 해시는 없다(합 1,330). IIDX20 등록 뒤 운영 count(run 45601926550, 목록 1,330): `chart_pattern` 1행, 나머지 0행(IIDX20 차트의 기록 없음). 사용자 `!` `chart-blocklist-purge-delete` run 45602670750 으로 그 1행을 지웠고, 지운 뒤 모든 대상이 0이다.
 
 운영 반영(2026-11-25): 사용자 `!` migrate run 45599298074(0015), 웹 `c24ccd1` 배포, `bun run blocklist:add` 로 391·353개 등록(서버 2 lists 744 charts, 다시 돌리면 0 added). 운영 count(DB 목록, run 45599854472. 파일판 run 45595998606 과 같음): `chart_pattern` 1행, 나머지 대상은 0행. 패턴 행은 관리자 패턴 업로드로 들어온 것이고 플레이 기록은 없다.
@@ -52,8 +54,9 @@ bun run blocklist:list                          # 서버의 묶음별 수
 
 1. 차트마다 묶음을 정한다: 준 폴더나 경로의 곡 폴더 중 처음으로 IIDX 버전을 말하는 이름에서 id·label 을 만든다. 버전은 폴더 이름의 첫 ` - ` 앞부분에서만 읽는다(곡명의 `~DIRTY MIX~`·`IIDX9` 를 버전으로 오인하지 않게, 2026-11-26 수정). 예: `Beatmania IIDX18 ~Resort Anthem~`·`IIDX18 ~Resort Anthem~ - ALBIDA` → `iidx-18-resort-anthem`, `IIDX 9th Style - x` → `iidx-9-style`(label `beatmania IIDX 9th Style`), 숫자 없는 `IIDX Substream - x` → `iidx-substream`, `Beatmania IIDX - ~OMAKE~ - x` → `iidx`. 그래서 여러 버전을 한 폴더에 모아 줘도 버전별로 나뉜다. 버전을 말하지 않는 차트는 `--id`·`--label` 로 준 묶음(폴더 하나일 때), 없으면 준 폴더 이름의 묶음으로 간다.
 2. 토큰은 macOS 키체인(계정 `rbms-admin`, 서비스 `rbms-pattern-upload`, 패턴 업로드와 같은 관리자 API 토큰)이나 `--token-env <환경변수>`. 출력하거나 저장하지 않는다. 서버는 기본 `https://bms.hyuns.uk`, `--server` 는 https 나 이 컴퓨터의 http 만.
-3. 1,000개씩 나눠 보내고, 묶음마다 "찾은 수, 더한 수, 이미 있던 수" 를 찍는다. 같은 폴더를 다시 돌려도 더해지는 것은 없다. 같은 버전의 빠진 곡을 나중에 받아도 같은 명령이면 같은 묶음에 더해진다.
-4. 끝나면 서버의 묶음별 수와 `chart-blocklist-purge-count` 명령을 알린다. 등록 전에 이미 들어온 기록이 있을지 모르면 count → 행이 있으면 사용자 `!` delete.
+3. 버전 접두어가 없는 곡 폴더를 어느 버전으로 넣을지 알면, 그 폴더들만 주고 `--id`·`--label` 로 묶음을 정한다(폴더 여럿 가능). 폴더 이름을 `IIDX23 ~copula~ - 곡명` 꼴로 두면 이 단계 없이 자동으로 나뉜다. 모음 폴더에서 새 폴더만 고르려면 운영 `/tables/blocked/data.json` 의 md5 와 대조한다(2026-11-26 IIDX 23 이 이렇게 했다).
+4. 1,000개씩 나눠 보내고, 묶음마다 "찾은 수, 더한 수, 이미 있던 수" 를 찍는다. 같은 폴더를 다시 돌려도 더해지는 것은 없다. 같은 버전의 빠진 곡을 나중에 받아도 같은 명령이면 같은 묶음에 더해진다.
+5. 끝나면 서버의 묶음별 수와 `chart-blocklist-purge-count` 명령을 알린다. 등록 전에 이미 들어온 기록이 있을지 모르면 count → 행이 있으면 사용자 `!` delete.
 
 ## 차단 곡을 폴더로 보기(난이도표 `/tables/blocked`)
 

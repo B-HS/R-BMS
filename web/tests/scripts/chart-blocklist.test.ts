@@ -72,12 +72,12 @@ describe('parseBlocklistCommand', () => {
         })
     })
 
-    test('--id·--label 은 폴더 하나일 때만, id 는 kebab-case 만, 서버는 https 나 이 컴퓨터만 받는다', () => {
+    test('--id·--label 은 폴더 여럿에도 쓰고, id 는 kebab-case 만, 서버는 https 나 이 컴퓨터만 받는다', () => {
         expect(parseBlocklistCommand(['add', '/a', '--id', 'iidx-20-tricoro', '--label', ' beatmania IIDX 20 tricoro '])).toMatchObject({
             id: 'iidx-20-tricoro',
             label: 'beatmania IIDX 20 tricoro',
         })
-        expect(parseBlocklistCommand(['add', '/a', '/b', '--id', 'x'])).toBeNull()
+        expect(parseBlocklistCommand(['add', '/a', '/b', '--id', 'x'])).toMatchObject({ folders: ['/a', '/b'], id: 'x', label: null })
         expect(parseBlocklistCommand(['add', '/a', '--id', 'IIDX 20'])).toBeNull()
         expect(parseBlocklistCommand(['add', '/a', '--server', 'http://bms.hyuns.uk'])).toBeNull()
         expect(parseBlocklistCommand(['add'])).toBeNull()

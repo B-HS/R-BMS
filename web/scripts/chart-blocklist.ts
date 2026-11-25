@@ -24,7 +24,7 @@ const USAGE = `usage:
       (PUT ${BLOCKLIST_PATH}, admin API token). Each chart goes to the IIDX version its folder or song folder
       names ("Beatmania IIDX20 ~tricoro~", "IIDX20 ~Tricoro~ - ALBIDA" -> iidx-20-tricoro), so a folder that
       gathers several versions is split by version; else to the folder's own name, or to --id and --label
-      (for a single folder) when given. Charts the server lists already are counted, not added again.
+      when given (for every folder given). Charts the server lists already are counted, not added again.
       --dry-run only hashes and prints the counts.
   bun run blocklist:list [--server <url>] [--token-env <NAME>]
       Prints each list on the server with its chart count.
@@ -59,7 +59,6 @@ export const parseBlocklistCommand = (argv: readonly string[]): BlocklistCommand
     if (parsed.folders.length === 0) return null
     if (parsed.id !== null && !CHART_BLOCKLIST_ID_PATTERN.test(parsed.id)) return null
     if (parsed.label === '') return null
-    if ((parsed.id !== null || parsed.label !== null) && parsed.folders.length > 1) return null
     return { kind, ...parsed, server }
 }
 

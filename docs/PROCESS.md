@@ -29,6 +29,7 @@
   - [x] C5. 시험·게이트·문서·커밋·푸시·CI: `c24ccd1`, web run 45599438227 두 잡 통과(DB 시험 9개 MySQL 통과), 운영 `/api/version` 의 `commit` 이 `c24ccd1`
   - [x] C6. `bun run blocklist:add` 로 운영 등록: `iidx-18-resort-anthem` 391·`iidx-19-lincle` 353 added, 서버 2 lists 744 charts. 다시 돌리면 0 added·353 already listed
   - [x] C8. 사용자 모음 폴더 `/Volumes/SSD/iidxbms`(IIDX18·19·20 곡 폴더 221개)로 시험 등록. 스크립트가 곡 폴더 이름의 버전으로 묶음을 나누게 고침. 결과: 18·19 는 0 added(391·353 already listed), `iidx-20-tricoro` 586 added, 서버 3 lists 1,330 charts
+  - [x] D3. IIDX 23 추가(2026-11-26, 사용자 "더 추가했어 23이야. 실행해봐"): 접두어 없는 새 곡 폴더 94개(552개)를 운영 표 md5 와 대조해 골라 `iidx-23-copula` 로 등록(`--id` 를 폴더 여럿에 쓰게 함). 서버 25 lists 8,574 charts, 미등록 0, count run 45724180839 모두 0
   - [x] D2. 추가 등록(2026-11-26, 사용자 "곡 더 추가했어 스크립트 돌려봐"): 드라이런에서 곡명의 `~…~` 를 버전으로 읽는 버그(`iidx-1-dirty-mix` 등)와 숫자 없는 `IIDX Substream`·`Beatmania IIDX` 미인식을 고침(버전은 첫 ` - ` 앞에서만, `--id`·`--label` 은 버전 없는 차트의 묶음). 미분류 1,103개는 사용자 선택으로 `iidx-unsorted`. 서버 24 lists 8,022 charts, count run 45720578043 모두 0, 운영 `/tables/blocked` 24레벨 반영
   - [x] D1. 차단 곡 폴더(사용자 요청 "blocked 곡은 따로 폴더로 모아서 볼수있게해줘", 결정: 난이도표·웹만·메인 단독): `/tables/blocked` 표(묶음별 레벨). `42910e7`, web run 45606104664 두 잡 통과, 운영 배포 `42910e7`. 운영 `header.json` 의 레벨 3개, `data.json` 1,330항목(391·353·586), 페이지의 `bmstable` 메타 확인. 클라이언트 실창에서 표를 더해 본 것은 아님(사용자 확인)
   - [x] C7. 정리 count(DB 목록) run 45599854472·45601926550(1,330개): `chart_pattern` 1, 나머지 0 → 사용자 `!` delete run 45602670750: 지운 뒤 모든 대상 0
