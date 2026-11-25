@@ -13,7 +13,8 @@ const HIDDEN_NAME_PREFIX = '.'
 const HASH_BATCH_SIZE = 32
 const REQUEST_TIMEOUT_MS = 60_000
 const EXIT_CODE = { OK: 0, FAILED: 1, USAGE: 2 } as const
-const IIDX_FOLDER_PATTERN = /iidx\s*(\d+)(st|nd|rd|th)?\b\s*(.*)$/i
+const IIDX_NUMBERED_PATTERN = /iidx\s*(\d+)(st|nd|rd|th)?\b\s*(.*)$/i
+const IIDX_UNNUMBERED_PATTERN = /^(?:beatmania\s+)?iidx(?:\s+(.+))?$/i
 const VERSION_SUBTITLE_PATTERN = /[~〜]([^~〜]+)[~〜]/
 const SONG_NAME_SEPARATOR = ' - '
 
@@ -22,8 +23,8 @@ const USAGE = `usage:
       Hashes the chart files (.bms .bme .bml .pms .bmson) of each folder and registers them on the server
       (PUT ${BLOCKLIST_PATH}, admin API token). Each chart goes to the IIDX version its folder or song folder
       names ("Beatmania IIDX20 ~tricoro~", "IIDX20 ~Tricoro~ - ALBIDA" -> iidx-20-tricoro), so a folder that
-      gathers several versions is split by version; else to the folder's own name. --id and --label put
-      every chart of a single folder in one list. Charts the server lists already are counted, not added again.
+      gathers several versions is split by version; else to the folder's own name, or to --id and --label
+      (for a single folder) when given. Charts the server lists already are counted, not added again.
       --dry-run only hashes and prints the counts.
   bun run blocklist:list [--server <url>] [--token-env <NAME>]
       Prints each list on the server with its chart count.
@@ -68,34 +69,44 @@ const slugOf = (text: string) =>
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
 
+const versionTitleOf = (text: string) => (VERSION_SUBTITLE_PATTERN.exec(text)?.[1] ?? text).replace(/[~〜]/g, ' ').replace(/\s+/g, ' ').trim()
+
 /**
- * The id and label a folder is listed under, or null when its name gives no usable id. An IIDX version folder
- * ("Beatmania IIDX18 ~Resort Anthem~") and an IIDX song folder ("IIDX20 ~Tricoro~ - ALBIDA") both name their version.
+ * The IIDX version a folder names, or null. Only the part before the first " - " is read, so the song of a song folder
+ * ("IIDX 1st Style - PARANOIA MAX~DIRTY MIX~") never reads as a version: "Beatmania IIDX18 ~Resort Anthem~",
+ * "IIDX20 ~Tricoro~ - ALBIDA" -> iidx-20-tricoro, "IIDX 9th Style - x" -> iidx-9-style, "IIDX Substream - x" -> iidx-substream.
  */
-export const deriveSourceName = (folderName: string) => {
-    const name = folderName.normalize('NFC').trim()
-    const iidx = IIDX_FOLDER_PATTERN.exec(name)
-    if (iidx) {
-        const [, version, ordinal, rest] = iidx
-        const subtitle = VERSION_SUBTITLE_PATTERN.exec(rest)?.[1] ?? rest.split(SONG_NAME_SEPARATOR)[0]
-        const title = subtitle.replace(/\s+/g, ' ').trim()
-        const id = slugOf(`iidx ${version} ${title}`)
-        return CHART_BLOCKLIST_ID_PATTERN.test(id) ? { id, label: `beatmania IIDX ${version}${ordinal ?? ''} ${title}`.trim() } : null
+export const iidxVersionOf = (folderName: string) => {
+    const versionPart = folderName.normalize('NFC').split(SONG_NAME_SEPARATOR)[0].trim()
+    const numbered = IIDX_NUMBERED_PATTERN.exec(versionPart)
+    if (numbered) {
+        const [, version, ordinal, rest] = numbered
+        const title = versionTitleOf(rest)
+        return { id: slugOf(`iidx ${version} ${title}`), label: `beatmania IIDX ${version}${ordinal ?? ''} ${title}`.trim() }
     }
-    const id = slugOf(name)
-    return CHART_BLOCKLIST_ID_PATTERN.test(id) ? { id, label: name } : null
+    const unnumbered = IIDX_UNNUMBERED_PATTERN.exec(versionPart)
+    if (!unnumbered) return null
+    const title = versionTitleOf(unnumbered[1] ?? '')
+    return { id: slugOf(`iidx ${title}`), label: `beatmania IIDX ${title}`.trim() }
 }
 
-export const isChartFileName = (name: string) => !name.startsWith(HIDDEN_NAME_PREFIX) && CHART_FILE_EXTENSIONS.has(extname(name).toLowerCase())
+/** The id and label a folder is listed under: the IIDX version it names, else its own name; null when that gives no usable id. */
+export const deriveSourceName = (folderName: string) => {
+    const name = folderName.normalize('NFC').trim()
+    const source = iidxVersionOf(name) ?? { id: slugOf(name), label: name }
+    return CHART_BLOCKLIST_ID_PATTERN.test(source.id) ? source : null
+}
 
 /**
  * The list a chart under the folder `rootName` goes to: the first IIDX version named by the folder or by a folder on the chart's path
- * (so a folder that gathers songs of several versions is split by version), else the folder itself.
+ * (so a folder that gathers songs of several versions is split by version), else `fallback` (the folder's own name by default).
  */
-export const sourceOfChart = (rootName: string, path: string) => {
-    const folders = [rootName, ...path.split('/').slice(0, -1)]
-    return deriveSourceName(folders.find((folder) => IIDX_FOLDER_PATTERN.test(folder)) ?? rootName)
+export const sourceOfChart = (rootName: string, path: string, fallback = deriveSourceName(rootName)) => {
+    const versioned = [rootName, ...path.split('/').slice(0, -1)].map(iidxVersionOf).find((version) => version !== null)
+    return versioned && CHART_BLOCKLIST_ID_PATTERN.test(versioned.id) ? versioned : fallback
 }
+
+export const isChartFileName = (name: string) => !name.startsWith(HIDDEN_NAME_PREFIX) && CHART_FILE_EXTENSIONS.has(extname(name).toLowerCase())
 
 /** Every chart file under `root`, depth first, without following links. Hidden files and folders (`.DS_Store`, `._x.bms`) are left out. */
 export const findChartFiles = async (root: string): Promise<string[]> => {
@@ -201,16 +212,12 @@ const planSources = async (command: AddCommand) => {
     for (const folder of command.folders) {
         const rootName = basename(resolve(folder))
         const rootSource = deriveSourceName(rootName)
-        const isOverridden = command.id !== null || command.label !== null
-        const sourced = (await scanFolder(folder)).map((chart) => ({
-            chart,
-            source: isOverridden
-                ? { id: command.id ?? rootSource?.id ?? '', label: command.label ?? rootSource?.label ?? '' }
-                : sourceOfChart(rootName, chart.path),
-        }))
+        const id = command.id ?? rootSource?.id ?? ''
+        const fallback = id ? { id, label: command.label ?? rootSource?.label ?? id } : null
+        const sourced = (await scanFolder(folder)).map((chart) => ({ chart, source: sourceOfChart(rootName, chart.path, fallback) }))
         if (sourced.some(({ source }) => !source?.id || !source.label)) return { unnamedFolder: folder, planned }
-        Map.groupBy(sourced, ({ source }) => source?.id ?? '').forEach((group, id) =>
-            planned.push({ folder, id, label: group[0].source?.label ?? id, charts: group.map(({ chart }) => chart) }),
+        Map.groupBy(sourced, ({ source }) => source?.id ?? '').forEach((group, groupId) =>
+            planned.push({ folder, id: groupId, label: group[0].source?.label ?? groupId, charts: group.map(({ chart }) => chart) }),
         )
     }
     return { unnamedFolder: null, planned }

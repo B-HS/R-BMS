@@ -127,6 +127,26 @@ describe('sourceOfChart', () => {
         expect(sourceOfChart('My Pack', 'song/a.bms')).toEqual({ id: 'my-pack', label: 'My Pack' })
         expect(sourceOfChart('ユミル', 'a.bms')).toBeNull()
     })
+
+    test('버전은 곡 폴더의 " - " 앞에서만 읽어 곡명의 ~…~ 나 IIDX 를 버전으로 보지 않는다', () => {
+        expect(sourceOfChart('iidxbms', 'IIDX 1st Style - PARANOIA MAX~DIRTY MIX~/a.bms')).toEqual({
+            id: 'iidx-1-style',
+            label: 'beatmania IIDX 1st Style',
+        })
+        expect(sourceOfChart('iidxbms', 'IIDX 9th Style - e.o.s ~djTAKA Remix~ - (Genre, Trance ^^ IIDX9)/a.bms')?.id).toBe('iidx-9-style')
+        expect(sourceOfChart('iidxbms', 'Battle Train -IIDX Edition-/a.bms')?.id).toBe('iidxbms')
+    })
+
+    test('숫자 없는 IIDX 이름도 버전으로 읽고, 버전이 없는 곡은 넘겨준 묶음으로 간다', () => {
+        expect(sourceOfChart('iidxbms', 'IIDX Substream - PARANOiA MAX -DIRTY MIX-/a.bms')).toEqual({
+            id: 'iidx-substream',
+            label: 'beatmania IIDX Substream',
+        })
+        expect(sourceOfChart('iidxbms', 'Beatmania IIDX - ~OMAKE~ - Aihana/a.bms')).toEqual({ id: 'iidx', label: 'beatmania IIDX' })
+        const unsorted = { id: 'iidx-unsorted', label: 'beatmania IIDX (unsorted)' }
+        expect(sourceOfChart('iidxbms', '2 tribe 4 K/a.bme', unsorted)).toEqual(unsorted)
+        expect(sourceOfChart('iidxbms', 'IIDX21 ~Spada~ - x/a.bme', unsorted)?.id).toBe('iidx-21-spada')
+    })
 })
 
 describe('isChartFileName', () => {
