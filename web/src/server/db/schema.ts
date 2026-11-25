@@ -637,6 +637,24 @@ export const chartPattern = mysqlTable(
     (table) => [index('chart_pattern_sha256_idx').on(table.sha256)],
 )
 
+/**
+ * The charts the server never ranks (`web/scripts/chart-blocklist.ts add` uploads them through `PUT /api/admin/chart-blocklist`). A
+ * submission whose sha256 or md5 is here is refused before anything of it is stored. `sourceId` groups the charts of one pack.
+ */
+export const chartBlocklist = mysqlTable(
+    'chart_blocklist',
+    {
+        sha256: char('sha256', { length: 64 }).primaryKey(),
+        md5: char('md5', { length: 32 }).notNull(),
+        sourceId: varchar('source_id', { length: 64 }).notNull(),
+        sourceLabel: varchar('source_label', { length: 200 }).notNull(),
+        path: varchar('path', { length: 512 }).notNull(),
+        addedBy: varchar('added_by', { length: 36 }),
+        createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
+    },
+    (table) => [uniqueIndex('chart_blocklist_md5_uniq').on(table.md5), index('chart_blocklist_source_idx').on(table.sourceId)],
+)
+
 export const tableSnapshot = mysqlTable('table_snapshot', {
     tableId: varchar('table_id', { length: 64 }).primaryKey(),
     headerUrl: varchar('header_url', { length: 512 }).notNull(),
