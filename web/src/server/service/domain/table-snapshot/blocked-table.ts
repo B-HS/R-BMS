@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import blockedSp12 from '../../../../../data/chart-blocklist-sp12.json'
+import { blockedExtraLevelSchema, type BlockedExtraLevel } from '@server/dto/chart-blocklist'
 import type { ChartBlocklistVersion, ListedChart } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
 import type { SnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 
@@ -9,6 +11,9 @@ export const BLOCKED_TABLE_SYMBOL = ''
 const ISO_DATE_LENGTH = 10
 const CHART_FILE_EXTENSION = /\.[^./]+$/
 
+/** Folders put before the per-source ones: the SP 12 charts of the list (a snapshot, see the chart blocklist ADR). */
+export const BLOCKED_EXTRA_LEVELS: readonly BlockedExtraLevel[] = [blockedExtraLevelSchema.parse(blockedSp12)]
+
 const byNumberAwareText = (a: string, b: string) => a.localeCompare(b, 'en', { numeric: true })
 
 /** The title a blocked chart is shown under: its file name without the extension (the list keeps no title). */
@@ -16,22 +21,32 @@ export const blockedChartTitle = (path: string) => (path.split('/').at(-1) ?? pa
 
 /**
  * The charts of `chart_blocklist` as a difficulty table with one level per source (its label), in source id order with numbers
- * compared as numbers, so a player can add `/tables/blocked` to see which of their charts the server never ranks. Null when empty.
+ * compared as numbers, so a player can add `/tables/blocked` to see which of their charts the server never ranks. The extra levels come
+ * first and keep only the charts the list still has, so a chart can be in its source's folder and in an extra one. Null when empty.
  */
-export const toBlockedTable = (charts: readonly ListedChart[], version: ChartBlocklistVersion): SnapshotTable | null => {
+export const toBlockedTable = (
+    charts: readonly ListedChart[],
+    version: ChartBlocklistVersion,
+    extraLevels: readonly BlockedExtraLevel[] = BLOCKED_EXTRA_LEVELS,
+): SnapshotTable | null => {
     if (charts.length === 0) return null
-    const sorted = charts.toSorted((a, b) => byNumberAwareText(a.sourceId, b.sourceId) || byNumberAwareText(a.path, b.path))
-    const entries = sorted.map((chart) => ({
-        md5: chart.md5,
-        level: chart.sourceLabel,
-        title: blockedChartTitle(chart.path),
+    const listedMd5s = new Set(charts.map((chart) => chart.md5))
+    const entryOf = (md5: string, level: string, title: string) => ({
+        md5,
+        level,
+        title,
         artist: '',
         url: '',
         url_diff: '',
         name_diff: '',
         comment: '',
         lr2_bmsid: '',
-    }))
+    })
+    const extraEntries = extraLevels.flatMap((extra) =>
+        extra.charts.filter((chart) => listedMd5s.has(chart.md5)).map((chart) => entryOf(chart.md5, extra.label, chart.title)),
+    )
+    const sorted = charts.toSorted((a, b) => byNumberAwareText(a.sourceId, b.sourceId) || byNumberAwareText(a.path, b.path))
+    const entries = [...extraEntries, ...sorted.map((chart) => entryOf(chart.md5, chart.sourceLabel, blockedChartTitle(chart.path)))]
     const levelOrder = [...new Set(entries.map((entry) => entry.level))]
     const text = JSON.stringify(entries)
     const updatedAt = new Date(version.lastAddedAt).toISOString()

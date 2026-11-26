@@ -27,3 +27,12 @@ export const chartBlocklistRegisterSchema = z.object({
 
 export type ChartBlocklistEntry = z.infer<typeof chartBlocklistEntrySchema>
 export type ChartBlocklistRegisterInput = z.infer<typeof chartBlocklistRegisterSchema>
+
+/** A fixed folder of the blocked table (`web/data/chart-blocklist-*.json`): charts of the list picked out once, with the title they show. */
+export const blockedExtraLevelSchema = z.object({
+    label: z.string().min(1),
+    source: z.string(),
+    charts: z.array(z.object({ md5: z.string().refine(isMd5Hash), title: z.string() })).min(1),
+})
+
+export type BlockedExtraLevel = z.infer<typeof blockedExtraLevelSchema>

@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { createRemoteSnapshotCache, createTableLoader } from '@server/compose/table-snapshot'
 import { createChartBlocklistService } from '@server/service/domain/chart-blocklist/chart-blocklist.service'
-import { BLOCKED_TABLE_ID, blockedChartTitle, createBlockedTableCache, toBlockedTable } from '@server/service/domain/table-snapshot/blocked-table'
+import {
+    BLOCKED_EXTRA_LEVELS,
+    BLOCKED_TABLE_ID,
+    blockedChartTitle,
+    createBlockedTableCache,
+    toBlockedTable,
+} from '@server/service/domain/table-snapshot/blocked-table'
 import { createTableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import { createMemoryChartBlocklistDb } from '../support/chart-blocklist-memory-db'
 
@@ -18,7 +24,7 @@ const noRemoteTables = createRemoteSnapshotCache({ listVersions: async () => [],
 
 describe('toBlockedTable', () => {
     test('묶음마다 한 레벨(이름)로, 묶음 id 의 숫자를 수로 비교한 순서로 놓고 제목은 파일 이름이다', () => {
-        const table = toBlockedTable(CHARTS, VERSION)
+        const table = toBlockedTable(CHARTS, VERSION, [])
         expect(table?.id).toBe(BLOCKED_TABLE_ID)
         expect(table?.header.level_order).toEqual(['beatmania IIDX 9th style', 'beatmania IIDX 18 Resort Anthem', 'beatmania IIDX 20 Tricoro'])
         expect(table?.entries.map((entry) => entry.title)).toEqual(['B [SPN]', 'ALBIDA [SP NORMAL]', 'A [SPA]'])
@@ -26,6 +32,31 @@ describe('toBlockedTable', () => {
         expect(table?.header.symbol).toBe('')
         expect(JSON.parse(table?.standardData() ?? '[]')).toHaveLength(CHARTS.length)
         expect(table?.source.snapshot.data_file_sha256).toMatch(/^[0-9a-f]{64}$/)
+    })
+
+    test('추가 레벨(SP 12)은 맨 앞에 오고, 목록에 남은 차트만 담으며, 같은 차트가 묶음 폴더에도 그대로 있다', () => {
+        const extra = {
+            label: 'SP 12',
+            source: 'test',
+            charts: [
+                { md5: 'c'.repeat(32), title: '雪月花 [ANOTHER]' },
+                { md5: 'f'.repeat(32), title: 'not listed' },
+            ],
+        }
+        const table = toBlockedTable(CHARTS, VERSION, [extra])
+        expect(table?.header.level_order[0]).toBe('SP 12')
+        const sp12 = table?.entries.filter((entry) => entry.level === 'SP 12')
+        expect(sp12).toEqual([expect.objectContaining({ md5: 'c'.repeat(32), title: '雪月花 [ANOTHER]' })])
+        expect(table?.entries.filter((entry) => entry.md5 === 'c'.repeat(32)).map((entry) => entry.level)).toEqual([
+            'SP 12',
+            'beatmania IIDX 20 Tricoro',
+        ])
+    })
+
+    test('저장소의 SP 12 목록은 형식이 맞고 md5 가 겹치지 않는다', () => {
+        const [sp12] = BLOCKED_EXTRA_LEVELS
+        expect(sp12.label).toBe('SP 12')
+        expect(new Set(sp12.charts.map((chart) => chart.md5)).size).toBe(sp12.charts.length)
     })
 
     test('목록이 비면 표가 없다', () => {
